@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
@@ -10,16 +11,19 @@
 
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/config/dbt_guest_config.h"
 #include "rocjitsu/config/effective_config.h"
 #include "rocjitsu/config/pci_device_config.h"
+#include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
@@ -32,12 +36,6 @@
 #include "util/diagnostic.h"
 
 #include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -92,6 +90,93 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   return file;
 }
 
+template <typename T>
+[[nodiscard]] testing::AssertionResult
+require_config_value(T &output, util::FailureOr<T> result,
+                     const util::StringDiagnostic &diagnostic) {
+  if (result.failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  output = std::move(result).value();
+  return testing::AssertionSuccess();
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult read_config_file_valid(std::string &output,
+                                                              const std::string &path) {
+  util::StringDiagnostic diagnostic;
+  return require_config_value(output, config::read_config_file(path, diagnostic.emitter()),
+                              diagnostic);
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult load_system_graph_valid(config::SystemGraph &output,
+                                                               const std::string &path,
+                                                               const std::string &schema) {
+  util::StringDiagnostic diagnostic;
+  return require_config_value(output, config::load_system_graph(path, schema, diagnostic.emitter()),
+                              diagnostic);
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult
+load_system_graph_from_string_valid(config::SystemGraph &output, const std::string &json,
+                                    const std::string &schema) {
+  util::StringDiagnostic diagnostic;
+  return require_config_value(
+      output, config::load_system_graph_from_string(json, schema, diagnostic.emitter()),
+      diagnostic);
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult
+load_config_from_string_for_node_valid(config::LoadedConfig &output, const std::string &json,
+                                       const std::string &schema, std::string_view node_id,
+                                       std::optional<uint32_t> host_threads = std::nullopt) {
+  util::StringDiagnostic diagnostic;
+  auto result =
+      host_threads
+          ? config::load_config_from_string_for_node(json, schema, node_id, diagnostic.emitter(),
+                                                     *host_threads)
+          : config::load_config_from_string_for_node(json, schema, node_id, diagnostic.emitter());
+  return require_config_value(output, std::move(result), diagnostic);
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult load_execution_thread_settings_from_string_for_node_valid(
+    config::ExecutionThreadSettings &output, const std::string &json, const std::string &schema,
+    std::string_view node_id) {
+  util::StringDiagnostic diagnostic;
+  return require_config_value(output,
+                              config::load_execution_thread_settings_from_string_for_node(
+                                  json, schema, node_id, diagnostic.emitter()),
+                              diagnostic);
+}
+
+// Call with ASSERT_TRUE so failed setup stops the consuming test.
+[[nodiscard]] testing::AssertionResult validate_config_valid(const std::string &path,
+                                                             const std::string &schema) {
+  util::StringDiagnostic diagnostic;
+  if (config::validate_config(path, schema, diagnostic.emitter()).failed())
+    return testing::AssertionFailure() << diagnostic.message();
+  return testing::AssertionSuccess();
+}
+
+std::string config_load_error(const std::string &path, bool validate_only) {
+  try {
+    util::StringDiagnostic diagnostic;
+    if (validate_only) {
+      if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+        return diagnostic.message();
+    } else {
+      if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+        return diagnostic.message();
+    }
+    return {};
+  } catch (const std::exception &error) {
+    return error.what();
+  }
+}
+
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
@@ -105,6 +190,1061 @@ bool replace_exactly_once(std::string &text, std::string_view from, std::string_
   return true;
 }
 
+std::string system_graph_test_config(std::string_view manifest) {
+  return std::string(R"({"vm":{"arch":"cdna5","gpu":{"device":{
+    "gpu_id":1250,"unique_id":1250,"num_sdma_engines":0}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"}]}},"system":)") +
+         std::string(manifest) + "}";
+}
+
+std::string link_expression_config(std::string_view definition) {
+  return std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"}]},"links":[)json") +
+         std::string(definition) + "]}}";
+}
+
+TEST(ConfigExpressionTest, MalformedLinksReturnDiagnostics) {
+  const struct {
+    const char *definition;
+    const char *message;
+  } cases[] = {
+      {R"json({"pattern":"src -> dst","where_expr":"@"})json", "Bad char in expr: '@'"},
+      {R"json({"pattern":"src -> dst","where_expr":"missing"})json",
+       "Unknown var 'missing' in: missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"(1"})json", "Missing ')' in: (1"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 +"})json", "Unexpected token in: 1 +"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 2"})json", "Extra tokens in: 1 2"},
+      {R"json({"pattern":"src -> dst","where_expr":"1 || missing"})json",
+       "Unknown var 'missing' in: 1 || missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 && missing"})json",
+       "Unknown var 'missing' in: 0 && missing"},
+      {R"json({"pattern":"src -> dst","where_expr":"2147483648"})json",
+       "Integer literal out of range in: 2147483648"},
+      {R"json({"pattern":"src -> dst","where_expr":"999999999999999999999999999999"})json",
+       "Integer literal out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"2147483647 + 1"})json",
+       "Arithmetic result out of range in: 2147483647 + 1"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 - 2147483647 - 2"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"65536 * 65536"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"(0 - 2147483647 - 1) / (0 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"(0 - 2147483647 - 1) % (0 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"-(0 - 2147483647 - 1)"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src -> dst","where_expr":"0 && ((0 - 2147483647 - 1) / (0 - 1))"})json",
+       "Arithmetic result out of range"},
+      {R"json({"pattern":"src[i -> dst"})json", "Unmatched '[' in: src[i"},
+      {R"json({"pattern":"src[missing] -> dst"})json", "Unknown var 'missing'"},
+      {R"json({"pattern":"src -> dst[1 +]"})json", "Unexpected token in: 1 +"},
+      {R"json({"pattern":"src=>dst"})json", "Link pattern missing ' -> ': src=>dst"},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.definition);
+    const std::string json = link_expression_config(test.definition);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+    ASSERT_TRUE(loaded.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr(test.message));
+    auto file = write_temp_config(json);
+    util::StringDiagnostic validation_diagnostic;
+    EXPECT_TRUE(
+        config::validate_config(file.path(), kEmbeddedSchema, validation_diagnostic.emitter())
+            .failed());
+    EXPECT_EQ(validation_diagnostic.message(), diagnostic.message());
+  }
+}
+
+TEST(ConfigExpressionTest, ValidExpressionsExpandLinks) {
+  const auto json = link_expression_config(R"json({
+    "pattern":"src[i*2+1] -> dst[(i+3)/2]",
+    "for_ranges":[{"var_name":"i","start":0,"end":4}],
+    "where_expr":"(i >= 0 && i < 4) && (0 || i % 2 == 0)",
+    "latency":7,"weight":3})json");
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+  const auto &links = loaded.value().build_result.link_specs;
+  ASSERT_EQ(links.size(), 2u);
+  EXPECT_EQ(links[0].src, "src1");
+  EXPECT_EQ(links[0].dst, "dst1");
+  EXPECT_EQ(links[1].src, "src5");
+  EXPECT_EQ(links[1].dst, "dst2");
+  EXPECT_EQ(links[0].latency, 7u);
+  EXPECT_EQ(links[0].weight, 3u);
+
+  const struct {
+    const char *expression;
+    size_t link_count;
+  } cases[] = {
+      {"1 || 0", 4u},
+      {"0 && 1", 0u},
+      {"i == 0 || i == 3", 2u},
+      {"2147483647 + 0 == 2147483647", 4u},
+      {"0 - 2147483647 - 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) * 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) / 1 < 0", 4u},
+      {"(0 - 2147483647 - 1) % 1 == 0", 4u},
+      {"-2147483647 < 0", 4u},
+      {"1 / 0 == 0 && 1 % 0 == 0", 4u},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.expression);
+    const auto filtered_json =
+        link_expression_config(std::string(R"json({"pattern":"src[i] -> dst[i]",
+          "for_ranges":[{"var_name":"i","start":0,"end":4}],"where_expr":")json") +
+                               test.expression + R"json("})json");
+    util::StringDiagnostic filtered_diagnostic;
+    auto filtered = config::load_config_from_string(filtered_json, kEmbeddedSchema,
+                                                    filtered_diagnostic.emitter(), 1);
+    ASSERT_TRUE(filtered.succeeded()) << filtered_diagnostic.message();
+    EXPECT_EQ(filtered.value().build_result.link_specs.size(), test.link_count);
+  }
+}
+
+TEST(ConfigExpressionTest, ComponentRangeOverflowReturnsThroughBothLoaders) {
+  for (const char *range : {"part[18446744073709551616:1]", "part[0:18446744073709551616]"}) {
+    SCOPED_TRACE(range);
+    const auto json = std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+      "root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},{"name":")json") +
+                      range + R"json(","type":"composite"}]}}})json";
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+    EXPECT_TRUE(loaded.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr("Range bound out of unsigned long range"));
+    util::StringDiagnostic settings_diagnostic;
+    auto settings = config::load_execution_thread_settings_from_string(
+        json, kEmbeddedSchema, settings_diagnostic.emitter());
+    EXPECT_TRUE(settings.failed());
+    EXPECT_EQ(settings_diagnostic.message(), diagnostic.message());
+  }
+}
+
+TEST(ConfigLoaderTest, ThreadSettingsRejectInvalidMetadata) {
+  const struct {
+    const char *json;
+    const char *message;
+  } cases[] = {
+      {R"({"topology":{}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{},"topology":{}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{"arch":"cdna3"}})", "Thread allocation requires vm.arch and topology"},
+      {R"({"vm":{"arch":"invalid"},"topology":{}})", "Invalid vm.arch for thread allocation"},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.json);
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings_from_string(test.json, kEmbeddedSchema, emit_error)
+            .failed());
+    EXPECT_EQ(messages, (std::vector<std::string>{test.message}));
+    messages.clear();
+    auto file = write_temp_config(test.json);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings(file.path(), kEmbeddedSchema, emit_error).failed());
+    EXPECT_EQ(messages, (std::vector<std::string>{test.message}));
+  }
+}
+
+TEST(ConfigLoaderTest, ThreadSettingsRejectTopologyCapacityOverflowBeforeConstruction) {
+  const char *children[] = {
+      // Multiplied component copies exceed uint32 before entering the child.
+      R"([{"name":"part[0:65536]","children":[{"name":"cu[0:65536]","type":"compute_unit"}]}])",
+      // Each subtree fits, but their accumulated XCD count overflows.
+      R"([{"name":"part[0:65535]","children":[{"name":"xcd[0:65535]","type":"xcd"}]},
+          {"name":"xcd[0:131071]","type":"xcd"}])",
+      // Shader-engine CU demand must be checked before accumulating it.
+      R"([{"name":"cp","type":"command_processor"},
+          {"name":"se[0:65535]","type":"shader_engine","children":[
+            {"name":"cu[0:65535]","type":"compute_unit"}]},
+          {"name":"se","type":"shader_engine","children":[
+            {"name":"cu[0:131071]","type":"compute_unit"}]}])",
+      // Individual dispatch demands fit, but the shared pool demand overflows.
+      R"([{"name":"a[0:65536]","children":[{"name":"cp","type":"command_processor"},
+            {"name":"cu[0:32769]","type":"compute_unit"}]},
+          {"name":"b[0:65536]","children":[{"name":"cp","type":"command_processor"},
+            {"name":"cu[0:32769]","type":"compute_unit"}]}])",
+  };
+  for (const char *components : children) {
+    SCOPED_TRACE(components);
+    const auto json = std::string(R"({"vm":{"arch":"cdna3"},"topology":{
+      "root":{"name":"soc","type":"soc","children":)") +
+                      components + "}}}";
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    EXPECT_TRUE(
+        config::load_execution_thread_settings_from_string(json, kEmbeddedSchema, emit_error)
+            .failed());
+    const std::vector<std::string> expected{"Topology execution capacity exceeds uint32 range"};
+    EXPECT_EQ(messages, expected);
+    messages.clear();
+    // No resources or simulator components may be built for these dimensions.
+    EXPECT_TRUE(config::load_config_from_string(json, kEmbeddedSchema, emit_error, 1).failed());
+    EXPECT_EQ(messages, expected);
+    messages.clear();
+    auto file = write_temp_config(json);
+    EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, emit_error).failed());
+    EXPECT_EQ(messages, expected);
+  }
+}
+
+TEST(ConfigLoaderTest, ThreadSettingsRejectTotalXcdOverflow) {
+  const char *json = R"({"vm":{"arch":"cdna3","gpu":{"num_gpus":2,"device":{
+    "gpu_id":1250,"unique_id":1250,"num_sdma_engines":0}}},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"part[0:65536]","children":[{"name":"xcd[0:32768]","type":"xcd"}]}]}}})";
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
+  EXPECT_TRUE(config::load_execution_thread_settings_from_string(json, kEmbeddedSchema, emit_error)
+                  .failed());
+  const std::vector<std::string> expected{"Total XCD count exceeds uint32 range"};
+  EXPECT_EQ(messages, expected);
+  messages.clear();
+  EXPECT_TRUE(config::load_config_from_string(json, kEmbeddedSchema, emit_error, 1).failed());
+  EXPECT_EQ(messages, expected);
+}
+
+TEST(ConfigExpressionTest, ComponentRangesPreserveHalfOpenAndEmptySemantics) {
+  const std::string json = R"json({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"part[4294967294:4294967295]","type":"composite"},
+      {"name":"empty[2:1]","type":"composite"},
+      {"name":"wrapped[4294967296:4294967297]","type":"composite"}]}}})json";
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+  const auto &children = loaded.value().build_result.root->children();
+  ASSERT_EQ(children.size(), 3u);
+  EXPECT_EQ(children[1]->name(), "part4294967294");
+  // Preserve the old stoul-to-uint32_t narrowing: 4294967296 becomes component 0.
+  EXPECT_EQ(children.back()->name(), "wrapped0");
+}
+
+constexpr std::string_view kSystemGraphManifest = R"({
+  "nodes":[
+    {"id":"tray0","gpus":[
+      {"id":"g2","gpu_id":202,"unique_id":3002,"location_id":768,"drm_render_minor":128}
+    ]},
+    {"id":"tray7","gpus":[
+      {"id":"g5","gpu_id":505,"unique_id":3005,"location_id":1024,"drm_render_minor":129},
+      {"id":"g9","gpu_id":909,"unique_id":3009,"location_id":1280,"drm_render_minor":130}
+    ]}
+  ],
+  "endpoints":[
+    {"id":"e2","kind":"gpu","gpu":"g2"},
+    {"id":"e5","kind":"gpu","gpu":"g5"},
+    {"id":"e9","kind":"gpu","gpu":"g9"},
+    {"id":"sw","kind":"switch"},
+    {"id":"n0","kind":"network","node":"tray0"},
+    {"id":"n7","kind":"network","node":"tray7"}
+  ],
+  "links":[
+    {"src":"e2","dst":"sw","link_class":"scale_up"},
+    {"src":"e5","dst":"sw","link_class":"scale_up"},
+    {"src":"e9","dst":"sw","link_class":"scale_up"},
+    {"src":"n0","dst":"n7","link_class":"net"}
+  ],
+  "coherence_domains":[{"id":"local7","gpus":["g5","g9"]}]
+})";
+
+std::string local_switch_manifest() {
+  std::string manifest(kSystemGraphManifest);
+  if (!replace_exactly_once(manifest, R"({"src":"e2","dst":"sw","link_class":"scale_up"},)", ""))
+    throw std::logic_error("local switch test route was not isolated");
+  return manifest;
+}
+
+std::string system_graph_thread_test_config() {
+  std::string json = system_graph_test_config(kSystemGraphManifest);
+  const bool topology_replaced =
+      replace_exactly_once(json, R"("topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"}]}})",
+                           R"("topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"xcd0","type":"xcd","children":[
+          {"name":"l2","type":"l2_cache"},
+          {"name":"cp","type":"command_processor"},
+          {"name":"se0","type":"shader_engine","children":[
+            {"name":"cu[0:4]","type":"compute_unit"}]}]}]}})");
+  if (!topology_replaced)
+    throw std::logic_error("system graph test topology was not replaced");
+  const bool budget_replaced = replace_exactly_once(json, R"("system":)",
+                                                    R"("cpu_thread_budget":3,"thread_allocations":[
+        {"num_threads":1,"cpu_dispatch_threads":2,"async_helper_threads":0},
+        {"num_threads":1,"cpu_dispatch_threads":3,"async_helper_threads":0}],"system":)");
+  if (!budget_replaced)
+    throw std::logic_error("system graph test budget was not added");
+  return json;
+}
+
+TEST(SystemGraphTest, ValidatesAndSelectsUnevenNodesWithoutBuilding) {
+  util::StringDiagnostic diagnostic;
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_from_string_valid(
+      graph, system_graph_test_config(kSystemGraphManifest), rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(graph.explicit_manifest);
+  ASSERT_EQ(graph.nodes.size(), 2u);
+  EXPECT_EQ(graph.links.size(), 4u);
+  EXPECT_EQ(graph.coherence_domains.size(), 1u);
+  auto maybe_projection1 = graph.local_gpus(diagnostic.emitter(), "tray0");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto tray0 = maybe_projection1.value();
+  ASSERT_EQ(tray0.size(), 1u);
+  EXPECT_EQ(tray0[0].id, "g2");
+  EXPECT_EQ(tray0[0].device.gpu_id, 202u);
+  auto maybe_projection2 = graph.local_gpus(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  const auto tray7 = maybe_projection2.value();
+  ASSERT_EQ(tray7.size(), 2u);
+  EXPECT_EQ(tray7[0].id, "g5");
+  EXPECT_EQ(tray7[1].id, "g9");
+  EXPECT_EQ(tray7[1].device.location_id, 1280u);
+}
+
+TEST(SystemGraphTest, SelectionAndProjectionsReportOneFailure) {
+  config::SystemGraph graph;
+  graph.nodes.push_back({"tray0", {}});
+  graph.nodes.push_back({"tray7", {}});
+  for (std::string_view node_id : {std::string_view{}, std::string_view{"missing"}}) {
+    const std::string expected =
+        node_id.empty() ? "requires a local node ID" : "unknown local node ID";
+    for (int operation = 0; operation != 3; ++operation) {
+      SCOPED_TRACE(operation);
+      SCOPED_TRACE(node_id);
+      std::vector<std::string> messages;
+      auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+      util::DiagnosticEmitter emit_error(sink);
+      if (operation == 0)
+        EXPECT_TRUE(graph.select_node(emit_error, node_id).failed());
+      else if (operation == 1)
+        EXPECT_TRUE(graph.local_gpus(emit_error, node_id).failed());
+      else
+        EXPECT_TRUE(graph.local_peer_routes(emit_error, node_id).failed());
+      ASSERT_EQ(messages.size(), 1u);
+      EXPECT_THAT(messages.front(), testing::HasSubstr(expected));
+    }
+  }
+  util::StringDiagnostic diagnostic;
+  const auto selected = graph.select_node(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(selected.succeeded()) << diagnostic.message();
+  EXPECT_EQ(selected.value(), &graph.nodes[1]);
+  EXPECT_TRUE(diagnostic.message().empty());
+
+  config::SystemGraph empty;
+  EXPECT_TRUE(empty.select_node(diagnostic.emitter()).failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("requires a local node ID"));
+}
+
+TEST(SystemGraphTest, MissingSimulationConfigReportsOneFailure) {
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto graph = config::system_graph_from_fb(nullptr, util::DiagnosticEmitter(sink));
+  EXPECT_TRUE(graph.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(), testing::HasSubstr("missing simulation config"));
+}
+
+TEST(SystemGraphTest, DeviceIdentityRequiresSelectedManifestNode) {
+  const auto file = write_temp_config(system_graph_test_config(kSystemGraphManifest));
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto identity = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema,
+                                                     util::DiagnosticEmitter(sink));
+  EXPECT_TRUE(identity.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(),
+              testing::HasSubstr("system device identity requires a selected local node"));
+}
+
+TEST(SystemGraphTest, InfinityFabricProjectsOnlyLocalGpuRoutes) {
+  util::StringDiagnostic diagnostic;
+  std::string manifest = local_switch_manifest();
+  for (const char *endpoint : {"e5", "e9"}) {
+    const std::string scale_up =
+        std::string("\"src\":\"") + endpoint + "\",\"dst\":\"sw\",\"link_class\":\"scale_up\"";
+    const std::string infinity_fabric = std::string("\"src\":\"") + endpoint +
+                                        "\",\"dst\":\"sw\",\"link_class\":\"infinity_fabric\"";
+    ASSERT_TRUE(replace_exactly_once(manifest, scale_up, infinity_fabric));
+  }
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_from_string_valid(graph, system_graph_test_config(manifest),
+                                                  rocjitsu::kEmbeddedSchema));
+  EXPECT_EQ(graph.links.size(), 3u);
+  auto maybe_projection1 = graph.local_peer_routes(diagnostic.emitter(), "tray0");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
+  auto maybe_projection2 = graph.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  const auto projection = maybe_projection2.value();
+  ASSERT_EQ(projection.routes().size(), 1u);
+  EXPECT_EQ(projection.routes()[0].hop_classes,
+            (std::vector<config::SystemLinkClass>{config::SystemLinkClass::InfinityFabric,
+                                                  config::SystemLinkClass::InfinityFabric}));
+  EXPECT_EQ(projection.routes()[0].endpoints, (std::vector<std::string>{"e5", "sw", "e9"}));
+
+  std::string mixed_manifest = local_switch_manifest();
+  ASSERT_TRUE(replace_exactly_once(mixed_manifest,
+                                   R"({"src":"e5","dst":"sw","link_class":"scale_up"})",
+                                   R"({"src":"e5","dst":"sw","link_class":"infinity_fabric"})"));
+  config::SystemGraph mixed;
+  ASSERT_TRUE(load_system_graph_from_string_valid(mixed, system_graph_test_config(mixed_manifest),
+                                                  rocjitsu::kEmbeddedSchema));
+  auto maybe_projection3 = mixed.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  const auto mixed_routes = maybe_projection3.value();
+  ASSERT_EQ(mixed_routes.routes().size(), 1u);
+  EXPECT_EQ(mixed_routes.routes()[0].endpoints, (std::vector<std::string>{"e5", "sw", "e9"}));
+  EXPECT_EQ(mixed_routes.routes()[0].hop_classes,
+            (std::vector<config::SystemLinkClass>{config::SystemLinkClass::InfinityFabric,
+                                                  config::SystemLinkClass::ScaleUp}));
+
+  std::string network_as_fabric = manifest;
+  ASSERT_TRUE(replace_exactly_once(network_as_fabric,
+                                   R"({"src":"n0","dst":"n7","link_class":"net"})",
+                                   R"({"src":"n0","dst":"n7","link_class":"infinity_fabric"})"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_system_graph_from_string(system_graph_test_config(network_as_fabric),
+                                                        rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("Infinity Fabric link has a network endpoint"));
+  }
+}
+
+TEST(SystemGraphTest, PeerRouteProjectionRequiresExplicitLocalSwitchPath) {
+  util::StringDiagnostic diagnostic;
+  config::SystemGraph shared;
+  ASSERT_TRUE(load_system_graph_from_string_valid(
+      shared, system_graph_test_config(kSystemGraphManifest), rocjitsu::kEmbeddedSchema));
+  auto maybe_projection1 = shared.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
+
+  std::string remote_branch = local_switch_manifest();
+  ASSERT_TRUE(replace_exactly_once(remote_branch, R"({"id":"sw","kind":"switch"},)",
+                                   R"({"id":"sw","kind":"switch"},
+    {"id":"sw2","kind":"switch"},)"));
+  ASSERT_TRUE(replace_exactly_once(remote_branch,
+                                   R"({"src":"e9","dst":"sw","link_class":"scale_up"},)",
+                                   R"({"src":"e9","dst":"sw","link_class":"scale_up"},
+    {"src":"sw","dst":"sw2","link_class":"scale_up"},
+    {"src":"e2","dst":"sw2","link_class":"scale_up"},)"));
+  config::SystemGraph tainted;
+  ASSERT_TRUE(load_system_graph_from_string_valid(tainted, system_graph_test_config(remote_branch),
+                                                  rocjitsu::kEmbeddedSchema));
+  auto maybe_projection2 = tainted.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
+
+  config::SystemGraph legacy;
+
+  ASSERT_TRUE(load_system_graph_valid(legacy, CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                      rocjitsu::kEmbeddedSchema));
+  ASSERT_EQ(legacy.links.size(), 6u);
+  auto maybe_projection3 = legacy.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection3.value().routes().empty());
+
+  config::SystemPeerRouteProjection projection;
+  {
+    config::SystemGraph graph;
+    ASSERT_TRUE(load_system_graph_from_string_valid(
+        graph, system_graph_test_config(local_switch_manifest()), rocjitsu::kEmbeddedSchema));
+    auto maybe_projection4 = graph.local_peer_routes(diagnostic.emitter(), "tray7");
+    ASSERT_TRUE(maybe_projection4.succeeded()) << diagnostic.message();
+    projection = maybe_projection4.value();
+    auto maybe_projection5 = graph.local_peer_routes(diagnostic.emitter(), "tray0");
+    ASSERT_TRUE(maybe_projection5.succeeded()) << diagnostic.message();
+    EXPECT_TRUE(maybe_projection5.value().routes().empty());
+  }
+  EXPECT_EQ(projection.node_id(), "tray7");
+  ASSERT_EQ(projection.routes().size(), 1u);
+  const auto &route = projection.routes().front();
+  EXPECT_EQ(route.source_gpu, "g5");
+  EXPECT_EQ(route.target_gpu, "g9");
+  EXPECT_EQ(route.source_gpu_id, 505u);
+  EXPECT_EQ(route.target_gpu_id, 909u);
+  EXPECT_EQ(route.endpoints, (std::vector<std::string>{"e5", "sw", "e9"}));
+}
+
+TEST(SystemGraphTest, PeerRouteProjectionOmitsAbsentAndAmbiguousPaths) {
+  util::StringDiagnostic diagnostic;
+  std::string absent = local_switch_manifest();
+  ASSERT_TRUE(
+      replace_exactly_once(absent, R"({"src":"e9","dst":"sw","link_class":"scale_up"},)", ""));
+  config::SystemGraph no_path;
+  ASSERT_TRUE(load_system_graph_from_string_valid(no_path, system_graph_test_config(absent),
+                                                  rocjitsu::kEmbeddedSchema));
+  auto maybe_projection1 = no_path.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
+
+  std::string alternate = local_switch_manifest();
+  ASSERT_TRUE(replace_exactly_once(alternate, R"({"id":"sw","kind":"switch"},)",
+                                   R"({"id":"sw","kind":"switch"},
+    {"id":"sw2","kind":"switch"},
+    {"id":"sw3","kind":"switch"},)"));
+  ASSERT_TRUE(replace_exactly_once(alternate, R"({"src":"e9","dst":"sw","link_class":"scale_up"},)",
+                                   R"({"src":"e9","dst":"sw","link_class":"scale_up"},
+    {"src":"e5","dst":"sw2","link_class":"scale_up"},
+    {"src":"sw2","dst":"sw3","link_class":"scale_up"},
+    {"src":"sw3","dst":"e9","link_class":"scale_up"},)"));
+  config::SystemGraph two_paths;
+  ASSERT_TRUE(load_system_graph_from_string_valid(two_paths, system_graph_test_config(alternate),
+                                                  rocjitsu::kEmbeddedSchema));
+  auto maybe_projection2 = two_paths.local_peer_routes(diagnostic.emitter(), "tray7");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
+}
+
+TEST(SystemGraphTest, PeerRouteProjectionNeverUsesGpuTransit) {
+  util::StringDiagnostic diagnostic;
+  constexpr std::string_view manifest = R"({
+    "nodes":[{"id":"local","gpus":[
+      {"id":"a","gpu_id":101,"unique_id":1001,"location_id":768,"drm_render_minor":128},
+      {"id":"b","gpu_id":102,"unique_id":1002,"location_id":1024,"drm_render_minor":129},
+      {"id":"c","gpu_id":103,"unique_id":1003,"location_id":1280,"drm_render_minor":130}
+    ]}],
+    "endpoints":[
+      {"id":"ea","kind":"gpu","gpu":"a"},
+      {"id":"eb","kind":"gpu","gpu":"b"},
+      {"id":"ec","kind":"gpu","gpu":"c"}
+    ],
+    "links":[
+      {"src":"ea","dst":"eb","link_class":"scale_up"},
+      {"src":"eb","dst":"ec","link_class":"scale_up"}
+    ]
+  })";
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_from_string_valid(graph, system_graph_test_config(manifest),
+                                                  rocjitsu::kEmbeddedSchema));
+  auto maybe_projection1 = graph.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto routes = maybe_projection1.value();
+  ASSERT_EQ(routes.routes().size(), 2u);
+  EXPECT_EQ(routes.routes()[0].endpoints, (std::vector<std::string>{"ea", "eb"}));
+  EXPECT_EQ(routes.routes()[1].endpoints, (std::vector<std::string>{"eb", "ec"}));
+  EXPECT_EQ(routes.routes()[0].source_gpu, "a");
+  EXPECT_EQ(routes.routes()[1].target_gpu, "c");
+}
+
+TEST(SystemGraphTest, PeerRouteProjectionBoundsSynchronousHopDepth) {
+  util::StringDiagnostic diagnostic;
+  const auto switch_chain = [](size_t endpoint_count) {
+    std::string manifest = R"({
+      "nodes":[{"id":"local","gpus":[
+        {"id":"a","gpu_id":101,"unique_id":1001,"location_id":768,"drm_render_minor":128},
+        {"id":"b","gpu_id":102,"unique_id":1002,"location_id":1024,"drm_render_minor":129}
+      ]}],
+      "endpoints":[
+        {"id":"ea","kind":"gpu","gpu":"a"},
+        {"id":"eb","kind":"gpu","gpu":"b"})";
+    std::vector<std::string> path{"ea"};
+    for (size_t i = 0; i < endpoint_count - 2; ++i) {
+      const std::string switch_id = "sw" + std::to_string(i);
+      manifest += R"(,{"id":")" + switch_id + R"(","kind":"switch"})";
+      path.push_back(switch_id);
+    }
+    path.push_back("eb");
+    manifest += R"(],"links":[)";
+    for (size_t i = 1; i < path.size(); ++i) {
+      if (i != 1)
+        manifest += ',';
+      manifest +=
+          R"({"src":")" + path[i - 1] + R"(","dst":")" + path[i] + R"(","link_class":"scale_up"})";
+    }
+    return manifest + "]}";
+  };
+
+  config::SystemGraph at_limit;
+
+  ASSERT_TRUE(load_system_graph_from_string_valid(
+      at_limit, system_graph_test_config(switch_chain(config::kMaxPeerRouteEndpoints)),
+      rocjitsu::kEmbeddedSchema));
+  auto maybe_projection1 = at_limit.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto allowed = maybe_projection1.value();
+  ASSERT_EQ(allowed.routes().size(), 1u);
+  ASSERT_EQ(allowed.routes()[0].endpoints.size(), config::kMaxPeerRouteEndpoints);
+  EXPECT_EQ(allowed.routes()[0].endpoints.front(), "ea");
+  EXPECT_EQ(allowed.routes()[0].endpoints.back(), "eb");
+
+  config::SystemGraph over_limit;
+
+  ASSERT_TRUE(load_system_graph_from_string_valid(
+      over_limit, system_graph_test_config(switch_chain(config::kMaxPeerRouteEndpoints + 1)),
+      rocjitsu::kEmbeddedSchema));
+  auto maybe_projection2 = over_limit.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
+}
+
+TEST(SystemGraphTest, RejectsInvalidIdentityAndReferences) {
+  struct InvalidCase {
+    std::string_view from;
+    std::string_view to;
+    std::string_view diagnostic;
+  };
+  const std::array cases = {
+      InvalidCase{R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)",
+                  "duplicate system node id"},
+      InvalidCase{R"({"id":"tray7","gpus":)", R"({"id":"","gpus":)",
+                  "system.nodes[].id must be nonempty"},
+      InvalidCase{R"({"id":"g9","gpu_id":)", R"({"id":"g5","gpu_id":)",
+                  "duplicate system GPU instance id"},
+      InvalidCase{R"("gpu_id":909)", R"("gpu_id":505)", "missing or duplicate KFD GPU ID"},
+      InvalidCase{R"("gpu_id":909)", R"("gpu_id":0)", "missing or duplicate KFD GPU ID"},
+      InvalidCase{R"("unique_id":3009)", R"("unique_id":3005)", "duplicate system GPU unique ID"},
+      InvalidCase{R"("unique_id":3002)", R"("unique_id":3005)", "duplicate system GPU unique ID"},
+      InvalidCase{R"("unique_id":3009)", R"("unique_id":0)",
+                  "system GPU instance has no unique ID"},
+      InvalidCase{R"("location_id":1280)", R"("location_id":1024)",
+                  "missing or duplicate PCI location"},
+      InvalidCase{R"("location_id":1280)", R"("location_id":0)",
+                  "missing or duplicate PCI location"},
+      InvalidCase{R"("drm_render_minor":130)", R"("drm_render_minor":129)",
+                  "invalid or duplicate DRM render minor"},
+      InvalidCase{R"("drm_render_minor":130)", R"("drm_render_minor":127)",
+                  "invalid or duplicate DRM render minor"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"missing","dst":"sw")",
+                  "invalid system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"e9","dst":"e9")", "invalid system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"e5","dst":"sw")",
+                  "duplicate system link"},
+      InvalidCase{R"({"src":"e9","dst":"sw")", R"({"src":"","dst":"sw")",
+                  "system.links[].src must be nonempty"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","missing"])",
+                  "unknown or repeated coherence-domain GPU"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","g5"])",
+                  "unknown or repeated coherence-domain GPU"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5","g2"])",
+                  "coherence domain spans system nodes"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":[])", "coherence domain has no GPUs"},
+      InvalidCase{R"("gpus":["g5","g9"])", R"("gpus":["g5",""])",
+                  "coherence domain GPU must be nonempty"},
+      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"gpu_id":)",
+                  "system.nodes[].gpus[].id must be nonempty"},
+      InvalidCase{R"({"id":"g2","gpu_id":)", R"({"id":"g2","profile":"other","gpu_id":)",
+                  "unsupported GPU profile"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"e2","kind":"switch"})",
+                  "duplicate system endpoint id"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"","kind":"switch"})",
+                  "system.endpoints[].id must be nonempty"},
+      InvalidCase{R"({"id":"sw","kind":"switch"})", R"({"id":"sw","kind":"switch","node":"tray0"})",
+                  "switch endpoint cannot name a GPU or node"},
+      InvalidCase{R"("kind":"gpu","gpu":"g2")", R"("kind":"gpu","gpu":"missing")",
+                  "invalid GPU endpoint"},
+      InvalidCase{R"("kind":"gpu","gpu":"g2")", R"("kind":"gpu","gpu":"")",
+                  "GPU endpoint gpu must be nonempty"},
+      InvalidCase{R"("kind":"network","node":"tray0")", R"("kind":"network","node":"missing")",
+                  "invalid network endpoint"},
+      InvalidCase{R"("kind":"network","node":"tray0")", R"("kind":"network","node":"")",
+                  "network endpoint node must be nonempty"},
+      InvalidCase{R"("src":"n0","dst":"n7","link_class":"net")",
+                  R"("src":"n0","dst":"n7","link_class":"scale_up")",
+                  "scale-up link has a network endpoint"},
+      InvalidCase{R"("src":"n0","dst":"n7","link_class":"net")",
+                  R"("src":"n0","dst":"sw","link_class":"net")",
+                  "NET link must join different system nodes"},
+      InvalidCase{R"("id":"local7","gpus")", R"("id":"","gpus")",
+                  "system.coherence_domains[].id must be nonempty"},
+  };
+  for (const auto &[from, to, expected] : cases) {
+    SCOPED_TRACE(from);
+    SCOPED_TRACE(to);
+    std::string manifest(kSystemGraphManifest);
+    ASSERT_TRUE(replace_exactly_once(manifest, from, to));
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    const auto result = config::load_system_graph_from_string(system_graph_test_config(manifest),
+                                                              rocjitsu::kEmbeddedSchema,
+                                                              util::DiagnosticEmitter(sink));
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr(expected));
+  }
+}
+
+TEST(SystemGraphTest, RejectsAmbiguousLegacyReplicationAndUnselectedConstruction) {
+  std::string json = system_graph_test_config(kSystemGraphManifest);
+  EXPECT_TRUE(
+      replace_exactly_once(json, R"("gpu":{"device":)", R"("gpu":{"num_gpus":2,"device":)"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result =
+        config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("system cannot be combined with vm.gpu.num_gpus replication"));
+  }
+
+  json = system_graph_test_config(kSystemGraphManifest);
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
+  }
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_execution_thread_settings_from_string(
+        json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
+  }
+
+  json = system_graph_test_config(kSystemGraphManifest);
+  EXPECT_TRUE(
+      replace_exactly_once(json, R"("system":)", R"("dbt_guest":{"enabled":true},"system":)"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result =
+        config::load_system_graph_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("system cannot be combined with dbt_guest mode"));
+  }
+  const auto file = write_temp_config(json);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(config::load_dbt_guest_config_from_file(file.path(), diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "system cannot be combined with dbt_guest mode");
+}
+
+TEST(SystemGraphTest, RejectsManifestWithNonGpuTopologyRoot) {
+  std::string json = system_graph_test_config(kSystemGraphManifest);
+  ASSERT_TRUE(replace_exactly_once(json, R"("type":"soc")", R"("type":"composite")"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string_for_node(json, rocjitsu::kEmbeddedSchema, "tray7",
+                                                           emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("system topology root must be an SoC"));
+  }
+}
+
+TEST(SystemGraphTest, KeepsLegacyUnknownFieldsButRejectsManifestTypos) {
+  config::SystemGraph legacy;
+  ASSERT_TRUE(load_system_graph_from_string_valid(
+      legacy, R"({"future_field":1,"vm":{"arch":"cdna5"}})", rocjitsu::kEmbeddedSchema));
+  EXPECT_FALSE(legacy.explicit_manifest);
+
+  std::string manifest(kSystemGraphManifest);
+  ASSERT_TRUE(replace_exactly_once(manifest, R"({"id":"sw","kind":"switch"})",
+                                   R"({"id":"sw","kind":"switch","typo":1})"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_system_graph_from_string(system_graph_test_config(manifest),
+                                                        rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("unknown field: typo"));
+  }
+}
+
+TEST(SystemGraphTest, ExpandsLegacyFourGpuIdentity) {
+  util::StringDiagnostic diagnostic;
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_valid(graph, CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                      rocjitsu::kEmbeddedSchema));
+  EXPECT_FALSE(graph.explicit_manifest);
+  ASSERT_EQ(graph.nodes.size(), 1u);
+  auto maybe_projection1 = graph.local_gpus(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  const auto gpus = maybe_projection1.value();
+  ASSERT_EQ(gpus.size(), 4u);
+  EXPECT_EQ(gpus.front().device.gpu_id, 1250u);
+  EXPECT_EQ(gpus.back().device.gpu_id, 1253u);
+  EXPECT_EQ(gpus.back().device.location_id, 0x0600u);
+  EXPECT_EQ(gpus.back().device.drm_render_minor, 131u);
+  EXPECT_EQ(graph.links.size(), 6u);
+}
+
+TEST(SystemGraphTest, LegacyAndNetFixturesDoNotProjectLocalPeerRoutes) {
+  util::StringDiagnostic diagnostic;
+  config::SystemGraph legacy;
+  ASSERT_TRUE(load_system_graph_valid(legacy, CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
+                                      rocjitsu::kEmbeddedSchema));
+  EXPECT_FALSE(legacy.explicit_manifest);
+  auto maybe_projection1 = legacy.local_peer_routes(diagnostic.emitter());
+  ASSERT_TRUE(maybe_projection1.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection1.value().routes().empty());
+
+  config::SystemGraph two_node;
+
+  ASSERT_TRUE(load_system_graph_valid(
+      two_node, CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_2node_net.json", rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(two_node.explicit_manifest);
+  ASSERT_EQ(two_node.nodes.size(), 2u);
+  ASSERT_EQ(two_node.links.size(), 1u);
+  EXPECT_EQ(two_node.links[0].link_class, config::SystemLinkClass::Net);
+  auto maybe_projection2 = two_node.local_peer_routes(diagnostic.emitter(), "node0");
+  ASSERT_TRUE(maybe_projection2.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection2.value().routes().empty());
+  auto maybe_projection3 = two_node.local_peer_routes(diagnostic.emitter(), "node1");
+  ASSERT_TRUE(maybe_projection3.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(maybe_projection3.value().routes().empty());
+}
+
+TEST(SystemGraphTest, ProjectsGfx1250TwoNodeNetFixture) {
+  const std::string path = CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_2node_net.json";
+  config::SystemGraph graph;
+  ASSERT_TRUE(load_system_graph_valid(graph, path, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(graph.explicit_manifest);
+  ASSERT_EQ(graph.nodes.size(), 2u);
+  ASSERT_EQ(graph.links.size(), 1u);
+  EXPECT_EQ(graph.links[0].link_class, config::SystemLinkClass::Net);
+
+  config::LoadedConfig first;
+
+  ASSERT_TRUE(test::load_valid_config_for_node(path, first, "node0", 8));
+  config::LoadedConfig second;
+  ASSERT_TRUE(test::load_valid_config_for_node(path, second, "node1", 8));
+  EXPECT_EQ(first.local_node_id, "node0");
+  EXPECT_EQ(second.local_node_id, "node1");
+  ASSERT_EQ(first.devices.size(), 1u);
+  ASSERT_EQ(second.devices.size(), 1u);
+  EXPECT_EQ(first.devices[0].gpu_id, 1250u);
+  EXPECT_EQ(second.devices[0].gpu_id, 1251u);
+  EXPECT_EQ(first.global_to_local_ordinals.at("g0"), 0u);
+  EXPECT_EQ(second.global_to_local_ordinals.at("g1"), 0u);
+  EXPECT_FALSE(first.global_to_local_ordinals.contains("g1"));
+  EXPECT_FALSE(second.global_to_local_ordinals.contains("g0"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config(path, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("multi-node system requires a local node ID"));
+  }
+}
+
+TEST(SystemGraphTest, ProjectsOnlySelectedNodeBeforeThreadAllocation) {
+  const std::string json = system_graph_thread_test_config();
+  config::LoadedConfig first;
+  ASSERT_TRUE(
+      load_config_from_string_for_node_valid(first, json, rocjitsu::kEmbeddedSchema, "tray0", 8));
+  EXPECT_EQ(first.local_node_id, "tray0");
+  EXPECT_EQ(first.num_gpus, 1u);
+  EXPECT_TRUE(first.extra_gpu_builds.empty());
+  ASSERT_EQ(first.devices.size(), 1u);
+  EXPECT_EQ(first.devices[0].gpu_id, 202u);
+  EXPECT_EQ(first.global_to_local_ordinals.at("g2"), 0u);
+  EXPECT_FALSE(first.global_to_local_ordinals.contains("g5"));
+  EXPECT_EQ(first.execution_threads.dispatch, (std::vector<uint32_t>{3}));
+
+  config::LoadedConfig second;
+
+  ASSERT_TRUE(
+      load_config_from_string_for_node_valid(second, json, rocjitsu::kEmbeddedSchema, "tray7", 8));
+  EXPECT_EQ(second.local_node_id, "tray7");
+  EXPECT_EQ(second.num_gpus, 2u);
+  ASSERT_EQ(second.extra_gpu_builds.size(), 1u);
+  ASSERT_EQ(second.devices.size(), 2u);
+  EXPECT_EQ(second.devices[0].gpu_id, 505u);
+  EXPECT_EQ(second.devices[1].gpu_id, 909u);
+  EXPECT_EQ(second.global_to_local_ordinals.at("g5"), 0u);
+  EXPECT_EQ(second.global_to_local_ordinals.at("g9"), 1u);
+  EXPECT_FALSE(second.global_to_local_ordinals.contains("g2"));
+  EXPECT_EQ(second.execution_threads.dispatch, (std::vector<uint32_t>{2, 2}));
+
+  config::ExecutionThreadSettings settings;
+
+  ASSERT_TRUE(load_execution_thread_settings_from_string_for_node_valid(
+      settings, json, rocjitsu::kEmbeddedSchema, "tray7"));
+  config::ExecutionThreadAllocation allocation;
+  ASSERT_TRUE(test::resolve_valid_execution_threads(allocation, settings, 8));
+  EXPECT_EQ(allocation.dispatch, (std::vector<uint32_t>{2, 2}));
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  const auto missing = config::load_config_from_string_for_node(
+      json, rocjitsu::kEmbeddedSchema, "missing", util::DiagnosticEmitter(sink), 8);
+  EXPECT_TRUE(missing.failed());
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_THAT(messages.front(), testing::HasSubstr("unknown local node ID"));
+}
+
+TEST(SystemGraphTest, ValidationUsesSelectedManifestNode) {
+  const auto selected = config::json_with_local_node(system_graph_thread_test_config(), "tray7");
+  ASSERT_TRUE(selected.succeeded());
+  const auto file = write_temp_config(selected.value());
+  EXPECT_EQ(config_load_error(file.path(), /*validate_only=*/true),
+            config_load_error(file.path(), /*validate_only=*/false));
+  ASSERT_TRUE(validate_config_valid(file.path(), rocjitsu::kEmbeddedSchema));
+}
+
+TEST(SystemGraphTest, RequiresArgumentAndConfigSelectorsToAgree) {
+  const auto selected = config::json_with_local_node(system_graph_thread_test_config(), "tray0");
+  ASSERT_TRUE(selected.succeeded());
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(selected.value(), loaded));
+  EXPECT_EQ(loaded.local_node_id, "tray0");
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string_for_node(
+        selected.value(), rocjitsu::kEmbeddedSchema, "tray7", emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(),
+                testing::HasSubstr("local node argument disagrees with config.local_node"));
+  }
+
+  std::string typo = selected.value();
+  ASSERT_TRUE(replace_exactly_once(typo, R"({"id":"e2","kind":"gpu","gpu":"g2"})",
+                                   R"({"id":"e2","kind":"gpu","gpu":"g2","typo":1})"));
+  {
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    util::DiagnosticEmitter emit_error(sink);
+    auto result = config::load_config_from_string(typo, rocjitsu::kEmbeddedSchema, emit_error);
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr("unknown field: typo"));
+  }
+}
+
+TEST(SystemGraphTest, PublishesOnlySelectedLocalKfdNodes) {
+  std::string json = system_graph_thread_test_config();
+  ASSERT_TRUE(replace_exactly_once(json, R"("gpu_id":1250,"unique_id":1250,"num_sdma_engines":0)",
+                                   R"("gpu_id":1250,"unique_id":1250,"gfx_target_version":120500,
+      "num_sdma_engines":0,"num_sdma_xgmi_engines":2,"hive_id":7)"));
+  rj_vm_t *raw = nullptr;
+  EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_LOCAL, &raw),
+            ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(raw, nullptr);
+  ASSERT_EQ(rj_vm_create_from_string_for_node(json.c_str(), "tray7", RJ_VM_MODE_LOCAL, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_NE(vm->vm, nullptr);
+  ASSERT_EQ(vm->vm->num_socs(), 2u);
+  ASSERT_NE(vm->vm->driver(), nullptr);
+  EXPECT_EQ(vm->vm->driver()->num_gpus(), 2u);
+  EXPECT_EQ(vm->vm->driver()->gpu_id_at(0), 505u);
+  EXPECT_EQ(vm->vm->driver()->gpu_id_at(1), 909u);
+  EXPECT_FALSE(vm->vm->driver()->handles_drm_render_minor(128));
+  EXPECT_TRUE(vm->vm->driver()->handles_drm_render_minor(129));
+  EXPECT_TRUE(vm->vm->driver()->handles_drm_render_minor(130));
+  const auto *first_render = vm->vm->driver()->gpu_info_for_render_minor(129);
+  const auto *second_render = vm->vm->driver()->gpu_info_for_render_minor(130);
+  ASSERT_NE(first_render, nullptr);
+  ASSERT_NE(second_render, nullptr);
+  EXPECT_EQ(first_render->gpu_id, 505u);
+  EXPECT_EQ(second_render->gpu_id, 909u);
+  for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
+    const auto *info = vm->vm->driver()->gpu_info_at(ordinal);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->num_shader_engines, 2u);
+    EXPECT_EQ(info->num_shader_arrays_per_engine, 2u);
+    EXPECT_EQ(info->num_cu_per_sh, 8u);
+    EXPECT_EQ(info->wave_front_size, 32u);
+    EXPECT_EQ(info->hive_id, 0u);
+    EXPECT_EQ(info->num_sdma_xgmi_engines, 0u);
+  }
+  const std::filesystem::path nodes =
+      std::filesystem::path(vm->vm->driver()->topology_path()) / "nodes";
+  EXPECT_TRUE(std::filesystem::exists(nodes / "0"));
+  EXPECT_TRUE(std::filesystem::exists(nodes / "1"));
+  EXPECT_TRUE(std::filesystem::exists(nodes / "2"));
+  EXPECT_FALSE(std::filesystem::exists(nodes / "3"));
+  std::string gpu_id;
+  ASSERT_TRUE(read_config_file_valid(gpu_id, (nodes / "1" / "gpu_id").string()));
+  EXPECT_EQ(gpu_id, "505\n");
+  ASSERT_TRUE(read_config_file_valid(gpu_id, (nodes / "2" / "gpu_id").string()));
+  EXPECT_EQ(gpu_id, "909\n");
+  for (const auto gpu_node : {"1", "2"}) {
+    const auto node_path = nodes / gpu_node;
+    std::string properties;
+    ASSERT_TRUE(read_config_file_valid(properties, (node_path / "properties").string()));
+    EXPECT_THAT(properties, testing::HasSubstr("io_links_count 1\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("p2p_links_count 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("array_count 4\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("cu_per_simd_array 8\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("hive_id 0\n"));
+    EXPECT_THAT(properties, testing::HasSubstr("num_sdma_xgmi_engines 0\n"));
+    EXPECT_TRUE(std::filesystem::exists(node_path / "io_links" / "0" / "properties"));
+    EXPECT_FALSE(std::filesystem::exists(node_path / "io_links" / "1"));
+    EXPECT_FALSE(std::filesystem::exists(node_path / "p2p_links"));
+  }
+}
+
+TEST(SystemGraphTest, OneGpuProjectionClaimsOnlyItsConfiguredRenderMinor) {
+  std::string json = system_graph_thread_test_config();
+  ASSERT_TRUE(replace_exactly_once(json, R"("location_id":768,"drm_render_minor":128)",
+                                   R"("location_id":768,"drm_render_minor":200)"));
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string_for_node(json.c_str(), "tray0", RJ_VM_MODE_LOCAL, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_NE(vm->vm->driver(), nullptr);
+  EXPECT_TRUE(vm->vm->driver()->handles_drm_render_minor(200));
+  EXPECT_FALSE(vm->vm->driver()->handles_drm_render_minor(128));
+  EXPECT_EQ(vm->vm->driver()->gpu_info_for_render_minor(128), nullptr);
+  ASSERT_NE(vm->vm->driver()->gpu_info_for_render_minor(200), nullptr);
+  EXPECT_EQ(vm->vm->driver()->gpu_info_for_render_minor(200)->gpu_id, 202u);
+}
+
+TEST(SystemGraphTest, LegacyOneGpuKeepsRenderMinorCompatibility) {
+  rj_vm_t *raw = nullptr;
+  const std::string path = CONFIG_DIR_PATH + "/gfx1100_w7900.json";
+  ASSERT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_LOCAL, &raw), ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_NE(vm->vm->driver(), nullptr);
+  EXPECT_TRUE(vm->vm->driver()->handles_drm_render_minor(128));
+  EXPECT_TRUE(vm->vm->driver()->handles_drm_render_minor(129));
+  const auto *by_legacy_minor = vm->vm->driver()->gpu_info_for_render_minor(128);
+  const auto *by_configured_minor = vm->vm->driver()->gpu_info_for_render_minor(129);
+  ASSERT_NE(by_legacy_minor, nullptr);
+  ASSERT_NE(by_configured_minor, nullptr);
+  EXPECT_EQ(by_legacy_minor->gpu_id, by_configured_minor->gpu_id);
+}
+
+TEST(SystemGraphTest, RejectsMultiGpuCheckpointWithoutWritingFile) {
+  const std::string json = system_graph_thread_test_config();
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string_for_node(json.c_str(), "tray7", RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw, &rj_vm_destroy);
+  ASSERT_EQ(vm->vm->num_socs(), 2u);
+
+  const test::ScopedTempDirectory output("rocjitsu-multi-gpu-checkpoint-");
+  const auto path = std::filesystem::path(output.path()) / "checkpoint.bin";
+  EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), path.c_str(), 0), ROCJITSU_STATUS_UNSUPPORTED);
+  EXPECT_FALSE(std::filesystem::exists(path));
+}
+
 TEST(SoCTest, SelectsSdmaPacketDialect) {
   const std::array cases = {
       std::pair{ROCJITSU_CODE_ARCH_CDNA1, amdgpu::SdmaPacketDialect::Legacy},
@@ -116,7 +1256,7 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
       std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Rdna4},
   };
   for (const auto &[arch, expected] : cases) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -125,9 +1265,56 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
   }
 }
 
+TEST(ConfigLoaderTest, MatchesFullConstructionForRepositoryConfigurations) {
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    EXPECT_EQ(config_load_error(entry.path().string(), /*validate_only=*/true),
+              config_load_error(entry.path().string(), /*validate_only=*/false));
+  }
+}
+
+TEST(ConfigLoaderTest, MatchesConstructorResourceAndTypeErrors) {
+  const std::string prefix = R"({ "vm": { "arch": "cdna3" }, "topology": {
+    "root": { "name": "soc", "type": "soc", "children": [
+      { "name": "mem", "type": "gpu_memory" },
+      { "name": "cu", "type": "compute_unit", "config": [)";
+  for (const auto &setting : {R"({"key":"num_wf_slots","value":"1000000"})",
+                              R"({"key":"vgprs_per_wf","value":"1000000"})",
+                              R"({"key":"memory_wait_diagnostics","value":"invalid"})",
+                              R"({"key":"xcnt_diagnostics","value":"invalid"})",
+                              R"({"key":"functional_quantum","value":"nonnumeric"})",
+                              R"({"key":"num_wf_slots","value":"0"})"}) {
+    SCOPED_TRACE(setting);
+    const auto file = write_temp_config(prefix + setting + "]} ]} }}");
+    EXPECT_EQ(config_load_error(file.path(), /*validate_only=*/true),
+              config_load_error(file.path(), /*validate_only=*/false));
+  }
+}
+
+TEST(ConfigLoaderTest, ValidationReportsParseAndDeviceFailures) {
+  struct Case {
+    const char *json;
+    const char *message;
+  };
+  for (const auto &test_case :
+       {Case{"{", "Failed to parse JSON config:"},
+        Case{R"({"vm":{"arch":"cdna3","gpu":{"device":{"num_sdma_engines":1}}}})",
+             "vm.gpu.device.num_sdma_queues_per_engine"}}) {
+    SCOPED_TRACE(test_case.message);
+    const auto file = write_temp_config(test_case.json);
+    util::StringDiagnostic diagnostic;
+    const util::Result result =
+        config::validate_config(file.path(), kEmbeddedSchema, diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr(test_case.message));
+  }
+}
+
 TEST(ConfigLoaderTest, LoadCdna2Config) {
-  auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", loaded));
   auto *soc = loaded.soc();
 
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
@@ -157,7 +1344,8 @@ TEST(ConfigLoaderTest, LoadCdna2Config) {
                                           loaded.device.num_cu_per_sh * loaded.device.simd_per_cu);
 }
 
-std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
+util::FailureOr<std::pair<uint32_t, uint32_t>>
+run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
     "topology":{
@@ -196,7 +1384,10 @@ std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, emit_error);
+  if (loaded_result.failed())
+    return util::Result::failure();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
 
   simdojo::SimulationEngine engine(loaded.engine_config);
@@ -207,14 +1398,14 @@ std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t KD_ADDR = 0x1000;
   soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
@@ -230,13 +1421,14 @@ std::pair<uint32_t, uint32_t> run_two_spi_dispatch() {
 
   engine.step();
 
-  return {dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
-          dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
+  return std::pair{dispatch_count->for_cu(xcd->shader_engine(0)->compute_unit(0)),
+                   dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
-  auto loaded = config::load_config(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(json, loaded));
   auto *soc = loaded.soc();
 
   // MI350X physical geometry: 8 XCDs, 4 SEs per XCD, 9 CUs per SE, 2 IODs.
@@ -258,16 +1450,36 @@ TEST(ConfigLoaderTest, LoadCdna4Config) {
 // field dropped in the loader, or a wrong default for an omitted section, would
 // leave every test green while a guest saw the wrong device.
 TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
-  const auto identity = config::load_device_identity(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
-                                                     rocjitsu::kEmbeddedSchema);
+  const std::string shipped_path = CONFIG_DIR_PATH + "/gfx1250_mi455x.json";
+  std::string partial_json;
+  ASSERT_TRUE(read_config_file_valid(partial_json, shipped_path));
+  const std::string gpu_marker = "\"gpu\": {";
+  const auto gpu_position = partial_json.find(gpu_marker);
+  ASSERT_NE(gpu_position, std::string::npos);
+  partial_json.insert(gpu_position + gpu_marker.size(),
+                      "\n      \"pci\": {\"vram_aperture_bytes\": 268435456},");
+  const auto partial_file = write_temp_config(partial_json);
+  const std::string &partial_path = partial_file.path();
+  util::StringDiagnostic identity_diagnostic;
+  auto identity_result = config::load_device_identity(partial_path, rocjitsu::kEmbeddedSchema,
+                                                      identity_diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << identity_diagnostic.message();
+  const auto identity = std::move(identity_result).value();
   EXPECT_EQ(identity.pci.vram_aperture_bytes, 268435456u);
   EXPECT_EQ(identity.device.vendor_id, 0x1002u)
       << "the identity must come from the same file as the bus shape";
 
-  const auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(partial_path, loaded));
   EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
       << "the two entry points disagree about the same file";
+
+  auto shipped_result = config::load_device_identity(shipped_path, rocjitsu::kEmbeddedSchema,
+                                                     identity_diagnostic.emitter());
+  ASSERT_TRUE(shipped_result.succeeded()) << identity_diagnostic.message();
+  const auto &shipped = shipped_result.value();
+  EXPECT_EQ(shipped.pci.vram_aperture_bytes, 0u);
+  EXPECT_EQ(gpu_pci_spec_from_config(shipped.device, shipped.pci).vram_aperture_bytes, 268435456u);
 }
 
 TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
@@ -294,12 +1506,18 @@ TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
     }
   })");
 
-  const auto identity = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema);
-  const auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic identity_diagnostic;
+  auto identity_result = config::load_device_identity(file.path(), rocjitsu::kEmbeddedSchema,
+                                                      identity_diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << identity_diagnostic.message();
+  const auto identity = std::move(identity_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(file.path(), loaded));
   const auto identity_spec = gpu_pci_spec_from_config(identity.device, identity.pci);
   const auto loaded_spec = gpu_pci_spec_from_config(loaded.device, loaded.pci);
 
-  for (const auto *device : {&identity.device, &loaded.device}) {
+  for (const auto *device :
+       std::array<const config::KfdDeviceConfig *, 2>{&identity.device, &loaded.device}) {
     EXPECT_EQ(device->num_shader_engines, 2u);
     EXPECT_EQ(device->num_shader_arrays_per_engine, 2u);
     EXPECT_EQ(device->num_cu_per_sh, 8u);
@@ -323,7 +1541,10 @@ TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughDbtGuestFileEntryPoint) 
     }
   })");
 
-  const auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  const auto dbt = std::move(dbt_result).value();
 
   ASSERT_TRUE(dbt.guest_device.present);
   EXPECT_EQ(dbt.guest_device.num_shader_engines, 2u);
@@ -338,8 +1559,11 @@ TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughDbtGuestFileEntryPoint) 
 // A config with no bus section still has to yield a usable one, because most
 // parts do not describe a bus at all.
 TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
-  const auto identity =
-      config::load_device_identity(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic identity_diagnostic;
+  auto identity_result = config::load_device_identity(
+      CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema, identity_diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << identity_diagnostic.message();
+  const auto identity = std::move(identity_result).value();
   const config::PciDeviceConfig fallback;
   EXPECT_EQ(identity.pci.class_code, fallback.class_code);
   EXPECT_EQ(identity.pci.doorbell_aperture_bytes, fallback.doorbell_aperture_bytes);
@@ -348,16 +1572,18 @@ TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
 }
 
 TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
-  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
-                                    rocjitsu::kEmbeddedSchema);
-  auto standalone =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json", loaded));
+  config::LoadedConfig standalone;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", standalone));
 
   EXPECT_EQ(loaded.num_gpus, 4u);
   ASSERT_EQ(loaded.devices.size(), 4u);
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
 
   EXPECT_EQ(loaded.device.revision_id, standalone.device.revision_id);
+  EXPECT_EQ(loaded.device.vendor_id, standalone.device.vendor_id);
+  EXPECT_EQ(loaded.device.device_id, standalone.device.device_id);
   EXPECT_EQ(loaded.device.simd_count, standalone.device.simd_count);
   EXPECT_EQ(loaded.device.num_shader_engines, standalone.device.num_shader_engines);
   EXPECT_EQ(loaded.device.num_shader_arrays_per_engine,
@@ -377,6 +1603,8 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
     EXPECT_EQ(loaded.devices[i].location_id, 0x0300u + (i << 8));
     EXPECT_EQ(loaded.devices[i].drm_render_minor, 128u + i);
     EXPECT_EQ(loaded.devices[i].unique_id, 1250u + i);
+    EXPECT_EQ(loaded.devices[i].vendor_id, standalone.device.vendor_id);
+    EXPECT_EQ(loaded.devices[i].device_id, standalone.device.device_id);
     EXPECT_EQ(loaded.devices[i].revision_id, 1u);
   }
 
@@ -385,8 +1613,8 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 }
 
 TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
-  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
-                                    rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json", loaded));
   ASSERT_EQ(loaded.device.num_cu_per_sh, 8u);
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
   auto check_build = [](const config::TopologyBuildResult &build) {
@@ -417,6 +1645,122 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
     check_build(build);
 }
 
+TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) {
+  for (const char *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna3", "gpu": {"device": {
+        "num_sdma_engines": 0, "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 1
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd[0:2]", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se[0:2]", "type": "shader_engine", "children": [
+            {"name": "cu[0:2]", "type": "compute_unit"}
+          ]}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *soc = source.soc();
+    ASSERT_NE(soc, nullptr);
+    soc->set_dispatch_threads(1);
+    simdojo::SimulationEngine engine(source.engine_config);
+    engine.topology().set_root(source.take_root());
+    source.wire_links(engine.topology());
+    engine.create();
+    constexpr uint32_t kSlot = 7;
+    for (auto *xcd : soc->xcds())
+      for (auto *se : xcd->shader_engines())
+        for (auto *cu : se->compute_units())
+          ASSERT_NE(cu->dispatch_wf_at(kSlot, 0, 0, 32, 8), nullptr);
+
+    auto check_locations = [](SoC *machine) {
+      ASSERT_EQ(machine->num_xcds(), 2u);
+      for (uint32_t xcc_id = 0; xcc_id < 2; ++xcc_id) {
+        auto *xcd = machine->xcd(xcc_id);
+        ASSERT_EQ(xcd->num_shader_engines(), 2u);
+        for (uint32_t se_id = 0; se_id < 2; ++se_id) {
+          auto *se = xcd->shader_engine(se_id);
+          ASSERT_EQ(se->num_compute_units(), 2u);
+          for (uint32_t cu_id = 0; cu_id < 2; ++cu_id) {
+            auto *wf = se->compute_unit(cu_id)->wf(kSlot);
+            ASSERT_NE(wf, nullptr);
+            ASSERT_FALSE(wf->is_halted());
+            // Slot 7 means WAVE_ID 1 and SIMD_ID 3. SH_ID is always zero.
+            for (const auto &[field, expected] : std::array<std::pair<uint16_t, uint32_t>, 3>{
+                     {{4u | (5u << 11), 0x31u},
+                      {4u | (8u << 6) | (7u << 11), cu_id | (se_id << 5)},
+                      {20u | (31u << 11), xcc_id}}}) {
+              uint32_t value = UINT32_MAX;
+              EXPECT_EQ(amdgpu::read_hwreg_field(*wf, field, value),
+                        amdgpu::HwregAccessResult::Success);
+              EXPECT_EQ(value, expected);
+            }
+          }
+        }
+      }
+    };
+    check_locations(soc);
+    test::ScopedTempFile checkpoint("rocjitsu-cdna-location-");
+    ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 0, source.engine_config, 1, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    auto *restored_soc = restored.soc();
+    restored_soc->set_dispatch_threads(1);
+    simdojo::SimulationEngine restored_engine(restored.engine_config);
+    restored_engine.topology().set_root(restored.take_root());
+    restored.wire_links(restored_engine.topology());
+    restored_engine.create();
+    check_locations(restored_soc);
+  }
+}
+
+TEST(ConfigLoaderTest, CdnaMultiArrayGeometryKeepsCuIdUnsupported) {
+  for (const char *arch : {"cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna3", "gpu": {"device": {
+        "num_sdma_engines": 0, "num_cu_per_sh": 2, "num_shader_arrays_per_engine": 2
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "xcd0", "type": "xcd", "children": [
+          {"name": "l2", "type": "l2_cache"},
+          {"name": "cp", "type": "command_processor"},
+          {"name": "se0", "type": "shader_engine", "children": [
+            {"name": "cu[0:4]", "type": "compute_unit"}
+          ]}
+        ]}
+      ]}, "links": []}
+    })";
+    ASSERT_TRUE(replace_exactly_once(json, "cdna3", arch));
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+    for (auto *xcd : loaded.build_result.xcds)
+      for (auto *se : xcd->shader_engines()) {
+        ASSERT_EQ(se->num_compute_units(), 4u);
+        for (auto *cu : se->compute_units()) {
+          auto *wf = cu->dispatch_wf(0, 0, 32, 8);
+          ASSERT_NE(wf, nullptr);
+          uint32_t value = UINT32_MAX;
+          constexpr uint16_t kCuId = 4 | (8 << 6) | (3 << 11);
+          EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kCuId, value),
+                    amdgpu::HwregAccessResult::Unsupported);
+          EXPECT_EQ(value, 0u);
+          wf->halt();
+        }
+      }
+  }
+}
+
 TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
   for (const char *filename : {"gfx1250_mi455x.json", "gfx1250_mi455x_kmd_4gpu.json"}) {
     SCOPED_TRACE(filename);
@@ -430,7 +1774,8 @@ TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
       SCOPED_TRACE(to);
       std::string json = original;
       ASSERT_TRUE(replace_exactly_once(json, from, to));
-      auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+      config::LoadedConfig loaded;
+      ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
       auto check_build = [](const config::TopologyBuildResult &build) {
         for (auto *xcd : build.xcds) {
           for (auto *se : xcd->shader_engines()) {
@@ -483,7 +1828,8 @@ TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths)
     }
 
     testing::internal::CaptureStderr();
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     const std::string warning = testing::internal::GetCapturedStderr();
     EXPECT_THAT(warning,
                 testing::HasSubstr("soc.xcd0.se1 has " + std::to_string(second_engine_cus) +
@@ -520,7 +1866,8 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
     })";
     ASSERT_TRUE(replace_exactly_once(json, "CU_COUNT", std::to_string(num_cus)));
     testing::internal::CaptureStderr();
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     const std::string warning = testing::internal::GetCapturedStderr();
     if (num_cus == 4) {
       EXPECT_TRUE(warning.empty());
@@ -542,8 +1889,8 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
 }
 
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
-  auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -556,8 +1903,8 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 }
 
 TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
-  auto loaded =
-      config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
   const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
@@ -574,8 +1921,8 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
-  auto rdna4 =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig rdna4;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rdna4));
   EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
@@ -620,11 +1967,10 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Rdna4);
 
-  auto rdna3 =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig rdna3;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rdna3));
   EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
@@ -659,7 +2005,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
-  auto rdna35 = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig rdna35;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", rdna35));
   EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
   EXPECT_EQ(rdna35.device.gpu_id, 5510u);
   EXPECT_EQ(rdna35.device.device_id, 0x1586u);
@@ -696,7 +2043,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 }
 
 TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
-  auto loaded = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   // RDNA3.5 ISA section 3.3.1: s0-s105 are general-purpose registers;
@@ -810,7 +2158,8 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
 
   // 1 XCD, 2 SEs, each with 3 CUs.
@@ -837,7 +2186,8 @@ TEST(ConfigLoaderTest, ExecModeClockedStringSelectsClockedMode) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   EXPECT_EQ(loaded.exec_mode, simdojo::ExecMode::CLOCKED);
 }
@@ -871,7 +2221,8 @@ TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->functional_quantum(), 37u);
@@ -908,7 +2259,8 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   // Not specified in JSON: 0 means "auto-compute" (see
   // rocjitsu::default_non_debug_capability()/debug_topology_for()).
@@ -951,7 +2303,8 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   EXPECT_EQ(loaded.device.capability, 268468354u);
   EXPECT_EQ(loaded.device.capability2, 3u);
@@ -986,7 +2339,10 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -1012,6 +2368,7 @@ TEST(ConfigLoaderTest, LoadsDbtOnlyConfigWithoutVmOrTopology) {
 }
 
 TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresent) {
+  util::StringDiagnostic config_diagnostic;
   const auto missing = write_temp_config(R"({
       "dbt_guest": {
         "guest_device": {
@@ -1028,14 +2385,17 @@ TEST(ConfigLoaderTest, RejectsMissingOrZeroSdmaQueuesWhenRegularEnginesArePresen
       }
     })");
 
-  for (const auto &path : {missing.path(), zero.path()})
-    EXPECT_THAT([&] { (void)config::load_dbt_guest_config_from_file(path); },
-                testing::ThrowsMessage<std::runtime_error>(
-                    testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
-                                   testing::HasSubstr("num_sdma_queues_per_engine"))));
+  for (const auto &path : {missing.path(), zero.path()}) {
+    auto result = config::load_dbt_guest_config_from_file(path, config_diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_THAT(config_diagnostic.message(),
+                testing::AllOf(testing::HasSubstr("dbt_guest.guest_device."),
+                               testing::HasSubstr("num_sdma_queues_per_engine")));
+  }
 }
 
 TEST(ConfigLoaderTest, SdmaQueueValidationIdentifiesVmDevicePath) {
+  util::StringDiagnostic config_diagnostic;
   const char *json = R"({
     "max_ticks": 1,
     "num_threads": 1,
@@ -1063,10 +2423,12 @@ TEST(ConfigLoaderTest, SdmaQueueValidationIdentifiesVmDevicePath) {
     }
   })";
 
-  EXPECT_THAT(
-      [&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
-      testing::ThrowsMessage<std::runtime_error>(testing::AllOf(
-          testing::HasSubstr("vm.gpu.device."), testing::HasSubstr("num_sdma_queues_per_engine"))));
+  auto result =
+      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, config_diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(config_diagnostic.message(),
+              testing::AllOf(testing::HasSubstr("vm.gpu.device."),
+                             testing::HasSubstr("num_sdma_queues_per_engine")));
 }
 
 TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
@@ -1079,7 +2441,10 @@ TEST(ConfigLoaderTest, AllowsZeroSdmaQueuesWithoutRegularEngines) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   ASSERT_TRUE(dbt.guest_device.present);
   EXPECT_EQ(dbt.guest_device.num_sdma_engines, 0u);
@@ -1102,12 +2467,21 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
     const std::string name = entry.path().filename().string();
     SCOPED_TRACE(name);
     if (name.rfind("guest_", 0) == 0) {
-      auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+      util::StringDiagnostic dbt_diagnostic;
+      auto dbt_result =
+          config::load_dbt_guest_config_from_file(entry.path().string(), dbt_diagnostic.emitter());
+      ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+      auto dbt = std::move(dbt_result).value();
       ASSERT_TRUE(dbt.guest_device.present);
       ASSERT_NE(dbt.guest_device.num_sdma_engines, 0u);
       EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
     } else {
-      auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+      config::LoadedConfig loaded;
+      if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+        ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
+      } else {
+        ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
+      }
       ASSERT_TRUE(loaded.device.present);
       ASSERT_NE(loaded.device.num_sdma_engines, 0u);
       EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
@@ -1129,7 +2503,8 @@ TEST(ConfigLoaderTest, GeneratedDeviceConfigsDeclareSdmaQueues) {
 
   for (const std::string &path : paths) {
     SCOPED_TRACE(path);
-    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(path, loaded));
     ASSERT_TRUE(loaded.device.present);
     ASSERT_NE(loaded.device.num_sdma_engines, 0u);
     EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
@@ -1144,7 +2519,11 @@ TEST(ConfigLoaderTest, ShippedGfx950GuestsUseCapturedSdmaQueueCount) {
         entry.path().filename().string().rfind("guest_", 0) != 0)
       continue;
 
-    auto dbt = config::load_dbt_guest_config_from_file(entry.path().string());
+    util::StringDiagnostic dbt_diagnostic;
+    auto dbt_result =
+        config::load_dbt_guest_config_from_file(entry.path().string(), dbt_diagnostic.emitter());
+    ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+    auto dbt = std::move(dbt_result).value();
     if (dbt.guest_isa != "gfx950")
       continue;
 
@@ -1176,13 +2555,42 @@ TEST(ConfigLoaderTest, LoadsDbtGuestSiliconRevisions) {
       }
     })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   EXPECT_EQ(dbt.guest_revision, config::DbtSiliconRevision::Gfx1250B0);
   EXPECT_EQ(dbt.host_revision, config::DbtSiliconRevision::Gfx1250A0);
 }
 
+TEST(ConfigLoaderTest, RejectsInvalidDbtGuestFlatBufferEnums) {
+  // JSON parsing rejects unknown enum names before conversion. Build the
+  // tables directly to cover each conversion failure independently.
+  for (unsigned field = 0; field < 3; ++field) {
+    SCOPED_TRACE(field);
+    flatbuffers::FlatBufferBuilder builder;
+    fb::DbtGuestConfigBuilder guest_builder(builder);
+    if (field == 0)
+      guest_builder.add_execution_backend(static_cast<fb::DbtExecutionBackend>(127));
+    else if (field == 1)
+      guest_builder.add_guest_revision(static_cast<fb::DbtSiliconRevision>(127));
+    else
+      guest_builder.add_host_revision(static_cast<fb::DbtSiliconRevision>(127));
+    builder.Finish(guest_builder.Finish());
+
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(config::dbt_guest_from_fb(
+                    flatbuffers::GetRoot<fb::DbtGuestConfig>(builder.GetBufferPointer()),
+                    diagnostic.emitter())
+                    .failed());
+    EXPECT_EQ(diagnostic.message(), field == 0 ? "dbt_guest.execution_backend is invalid"
+                                               : "dbt_guest silicon revision is invalid");
+  }
+}
+
 TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({
       "dbt_guest": {
         "enabled": true,
@@ -1200,7 +2608,10 @@ TEST(ConfigLoaderTest, RejectsDbtGuestDeviceWithInconsistentSimdCount) {
       }
     })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_TRUE(
+      config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter()).failed());
+  EXPECT_THAT(config_diagnostic.message(),
+              testing::HasSubstr("dbt_guest.guest_device simd_count (1024) must equal"));
 }
 
 TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
@@ -1237,7 +2648,8 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
   )");
 
   const auto file = write_temp_config(json);
-  auto loaded = config::load_config(file.path(), rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(file.path(), loaded));
 
   EXPECT_TRUE(loaded.dbt_guest.enabled);
   EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
@@ -1255,7 +2667,10 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
 TEST(ConfigLoaderTest, MissingDbtGuestConfigReturnsDefaults) {
   const auto file = write_temp_config("{}");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   EXPECT_FALSE(dbt.enabled);
   EXPECT_TRUE(dbt.guest_isa.empty());
@@ -1276,7 +2691,10 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   EXPECT_TRUE(dbt.enabled);
   EXPECT_EQ(dbt.guest_isa, "gfx950");
@@ -1284,10 +2702,120 @@ TEST(ConfigLoaderTest, MissingDbtGuestDeviceLeavesDeviceAbsent) {
   EXPECT_FALSE(dbt.guest_device.present);
 }
 
-TEST(ConfigLoaderTest, MalformedDbtGuestConfigThrows) {
+TEST(ConfigHelperTest, MissingFileDiagnosticIncludesPath) {
+  const test::ScopedTempDirectory directory("rocjitsu-config-missing-");
+  const std::string path = directory.path() + "/missing.json";
+  util::StringDiagnostic diagnostic;
+  auto result = config::read_config_file(path, diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot open file: " + path);
+}
+
+TEST(ConfigHelperTest, DirectoryReadFailureDiagnosticIncludesPath) {
+  const test::ScopedTempDirectory directory("rocjitsu-config-read-error-");
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::string> result =
+      config::read_config_file(directory.path(), diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot read file: " + directory.path());
+}
+
+TEST(ConfigHelperTest, EmptyFileReadSucceedsWithoutDiagnostic) {
+  const test::ScopedTempFile file("rocjitsu-config-empty-");
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::string> result = config::read_config_file(file.path(), diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(result.value().empty());
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
+TEST(ConfigHelperTest, ParserFailuresDoNotInvokeCallback) {
+  struct Case {
+    const char *json;
+    const char *schema;
+    const char *message;
+  };
+  for (const auto &test_case : {Case{"{}", "invalid schema", "Failed to parse schema:"},
+                                Case{"{", kEmbeddedSchema, "Failed to parse JSON config:"}}) {
+    SCOPED_TRACE(test_case.message);
+    util::StringDiagnostic diagnostic;
+    unsigned calls = 0;
+    auto result = config::with_parsed_simulation_config_json(
+        test_case.json, test_case.schema, diagnostic.emitter(),
+        [&](const fb::SimulationConfig *) -> util::FailureOr<uint32_t> {
+          ++calls;
+          return 7u;
+        });
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(calls, 0u);
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr(test_case.message));
+  }
+}
+
+TEST(ConfigHelperTest, ParserReturnsCallbackValue) {
+  util::StringDiagnostic diagnostic;
+  unsigned calls = 0;
+  auto result = config::with_parsed_simulation_config_json(
+      "{}", kEmbeddedSchema, diagnostic.emitter(),
+      [&](const fb::SimulationConfig *parsed) -> util::FailureOr<uint32_t> {
+        ++calls;
+        return parsed->cpu_dispatch_threads();
+      });
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  EXPECT_EQ(result.value(), 1u);
+  EXPECT_EQ(calls, 1u);
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
+TEST(ConfigHelperTest, ParserPropagatesCallbackFailureWithoutRepeatingDiagnostic) {
+  std::vector<std::string> messages;
+  auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
+  auto result = config::with_parsed_simulation_config_json(
+      "{}", kEmbeddedSchema, emit_error,
+      [&](const fb::SimulationConfig *) -> util::FailureOr<uint32_t> {
+        return emit_error.emit() << "callback failed";
+      });
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(messages, testing::ElementsAre("callback failed"));
+}
+
+TEST(ConfigHelperTest, NullKfdDeviceSuccessfullyReturnsDefaults) {
+  util::StringDiagnostic diagnostic;
+  auto result = config::kfd_device_from_fb(nullptr, "vm.gpu.device", diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  const config::KfdDeviceConfig defaults;
+  EXPECT_EQ(result.value().present, defaults.present);
+  EXPECT_EQ(result.value().num_sdma_engines, defaults.num_sdma_engines);
+  EXPECT_EQ(result.value().num_sdma_queues_per_engine, defaults.num_sdma_queues_per_engine);
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
+TEST(ConfigLoaderTest, RuntimeConfigDistinguishesAbsentHandoffFromMissingConfig) {
+  const test::ScopedTempDirectory runtime("rocjitsu-runtime-missing-config-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  test::ScopedEnvironmentVariable invocation_dir(kRpcInvocationDirEnv, runtime.path());
+  util::StringDiagnostic diagnostic;
+  auto absent = config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  ASSERT_TRUE(absent.succeeded()) << diagnostic.message();
+  EXPECT_FALSE(absent.value().has_value());
+  const std::string missing_path = runtime.path() + "/missing.json";
+  {
+    std::ofstream handoff(std::filesystem::path(runtime.path()) / "config_path");
+    handoff << missing_path << '\n';
+  }
+  auto missing = config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  EXPECT_TRUE(missing.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr(missing_path));
+}
+
+TEST(ConfigLoaderTest, MalformedDbtGuestConfigReturnsFailure) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({ "dbt_guest": )");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  auto result = config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(config_diagnostic.message(), testing::HasSubstr("Failed to parse JSON config"));
 }
 
 TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
@@ -1309,8 +2837,16 @@ TEST(ConfigLoaderTest, LoadsSimulatorDbtBackendConfig) {
         }
       })");
 
-  auto external = config::load_dbt_guest_config_from_file(external_file.path());
-  auto self_contained = config::load_dbt_guest_config_from_file(self_contained_file.path());
+  util::StringDiagnostic external_diagnostic;
+  auto external_result =
+      config::load_dbt_guest_config_from_file(external_file.path(), external_diagnostic.emitter());
+  ASSERT_TRUE(external_result.succeeded()) << external_diagnostic.message();
+  auto external = std::move(external_result).value();
+  util::StringDiagnostic self_contained_diagnostic;
+  auto self_contained_result = config::load_dbt_guest_config_from_file(
+      self_contained_file.path(), self_contained_diagnostic.emitter());
+  ASSERT_TRUE(self_contained_result.succeeded()) << self_contained_diagnostic.message();
+  auto self_contained = std::move(self_contained_result).value();
 
   EXPECT_EQ(external.host.isa, "gfx942");
   EXPECT_EQ(external.host.backend, config::DbtExecutionBackend::Simulator);
@@ -1327,7 +2863,10 @@ TEST(ConfigLoaderTest, LoadsExplicitHardwareDbtBackendConfig) {
         }
       })");
 
-  auto dbt = config::load_dbt_guest_config_from_file(file.path());
+  util::StringDiagnostic dbt_diagnostic;
+  auto dbt_result = config::load_dbt_guest_config_from_file(file.path(), dbt_diagnostic.emitter());
+  ASSERT_TRUE(dbt_result.succeeded()) << dbt_diagnostic.message();
+  auto dbt = std::move(dbt_result).value();
 
   EXPECT_EQ(dbt.host.backend, config::DbtExecutionBackend::Hardware);
 }
@@ -1341,9 +2880,16 @@ TEST(ConfigLoaderTest, AppliesResolvedDbtHostGpuId) {
   config::DbtGuestConfig simulator = automatic;
   simulator.host.backend = config::DbtExecutionBackend::Simulator;
 
-  config::apply_resolved_dbt_host_gpu_id(automatic, "28851");
-  config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851");
-  config::apply_resolved_dbt_host_gpu_id(simulator, "28851");
+  util::StringDiagnostic diagnostic;
+  ASSERT_TRUE(
+      config::apply_resolved_dbt_host_gpu_id(automatic, "28851", diagnostic.emitter()).succeeded())
+      << diagnostic.message();
+  ASSERT_TRUE(config::apply_resolved_dbt_host_gpu_id(explicit_id, "28851", diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
+  ASSERT_TRUE(
+      config::apply_resolved_dbt_host_gpu_id(simulator, "28851", diagnostic.emitter()).succeeded())
+      << diagnostic.message();
 
   EXPECT_EQ(automatic.host.gpu_id, 28851u);
   EXPECT_EQ(explicit_id.host.gpu_id, 8716u);
@@ -1356,7 +2902,11 @@ TEST(ConfigLoaderTest, RejectsInvalidResolvedDbtHostGpuId) {
   for (std::string_view value : invalid_values) {
     config::DbtGuestConfig dbt;
     dbt.enabled = true;
-    EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, value), std::runtime_error) << value;
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(config::apply_resolved_dbt_host_gpu_id(dbt, value, diagnostic.emitter()).failed())
+        << value;
+    EXPECT_EQ(diagnostic.message(), "runtime config handoff must contain a nonzero KFD gpu_id");
+    EXPECT_EQ(dbt.host.gpu_id, 0u);
   }
 }
 
@@ -1365,7 +2915,10 @@ TEST(ConfigLoaderTest, ExplicitDbtHostGpuIdOverridesResolvedHandoff) {
   dbt.enabled = true;
   dbt.host.gpu_id = 8716;
 
-  EXPECT_NO_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored"));
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      config::apply_resolved_dbt_host_gpu_id(dbt, "invalid-but-ignored", diagnostic.emitter())
+          .succeeded());
   EXPECT_EQ(dbt.host.gpu_id, 8716u);
 }
 
@@ -1508,7 +3061,11 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
   using amdgpu::MemoryWaitDiagnostics;
   using config::WaitChecking;
   for (const auto *name : {"gfx1250_mi455x_kmd_4gpu.json", "gfx1201_r9700.json"}) {
-    std::string source = config::read_config_file(test::config_path(name));
+    util::StringDiagnostic source_diagnostic;
+    auto source_result =
+        config::read_config_file(test::config_path(name), source_diagnostic.emitter());
+    ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
+    auto source = std::move(source_result).value();
     const auto cu_pos = source.find("\"type\": \"compute_unit\"");
     ASSERT_NE(cu_pos, std::string::npos);
     const auto entries = source.find('[', source.find("\"config\"", cu_pos));
@@ -1522,7 +3079,8 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
       SCOPED_TRACE(mode ? static_cast<int>(*mode) : -1);
       auto json = config::json_with_launch_overrides(source, {.wait_checking = mode});
       ASSERT_TRUE(json.succeeded());
-      auto loaded = config::load_config_from_string(json.value(), kEmbeddedSchema);
+      config::LoadedConfig loaded;
+      ASSERT_TRUE(test::load_valid_config_from_string(json.value(), loaded));
       std::vector<simdojo::Component *> components;
       loaded.build_result.root->collect_components(components);
       for (auto &build : loaded.extra_gpu_builds)
@@ -1549,9 +3107,15 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
 }
 
 TEST(ConfigLoaderTest, RejectsInvalidWaitChecking) {
-  std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  util::StringDiagnostic json_diagnostic;
+  auto json_result =
+      config::read_config_file(test::config_path("gfx942_cdna3.json"), json_diagnostic.emitter());
+  ASSERT_TRUE(json_result.succeeded()) << json_diagnostic.message();
+  auto json = std::move(json_result).value();
   json.insert(json.find('{') + 1, R"("wait_checking": "invalid",)");
-  EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+  EXPECT_TRUE(
+      config::load_config_from_string(json, kEmbeddedSchema, json_diagnostic.emitter()).failed());
+  EXPECT_EQ(json_diagnostic.message(), "wait_checking must be on, off, or all");
 }
 
 TEST(ConfigLoaderTest, WaitCheckingStillRejectsInvalidPerCuSettings) {
@@ -1559,14 +3123,20 @@ TEST(ConfigLoaderTest, WaitCheckingStillRejectsInvalidPerCuSettings) {
     for (const char *mode : {"on", "off", "all"}) {
       SCOPED_TRACE(key);
       SCOPED_TRACE(mode);
-      std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+      util::StringDiagnostic json_diagnostic;
+      auto json_result = config::read_config_file(test::config_path("gfx942_cdna3.json"),
+                                                  json_diagnostic.emitter());
+      ASSERT_TRUE(json_result.succeeded()) << json_diagnostic.message();
+      auto json = std::move(json_result).value();
       const auto cu_pos = json.find("\"type\": \"compute_unit\"");
       ASSERT_NE(cu_pos, std::string::npos);
       const auto entries = json.find('[', json.find("\"config\"", cu_pos));
       ASSERT_NE(entries, std::string::npos);
       json.insert(entries + 1, std::format(R"({{"key":"{}","value":"invalid"}},)", key));
       json.insert(json.find('{') + 1, std::format(R"("wait_checking":"{}",)", mode));
-      EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+      EXPECT_TRUE(config::load_config_from_string(json, kEmbeddedSchema, json_diagnostic.emitter())
+                      .failed());
+      EXPECT_EQ(json_diagnostic.message(), std::string(key) + " must be warn or off");
     }
   }
 }
@@ -1580,10 +3150,14 @@ TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
 }
 
 TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
+  util::StringDiagnostic config_diagnostic;
   const test::ScopedTempDirectory runtime("rocjitsu-effective-config-");
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
   const std::string source = test::config_path("gfx942_cdna3.json");
-  const std::string source_before = config::read_config_file(source);
+  util::StringDiagnostic source_before_diagnostic;
+  auto source_before_result = config::read_config_file(source, source_before_diagnostic.emitter());
+  ASSERT_TRUE(source_before_result.succeeded()) << source_before_diagnostic.message();
+  const auto source_before = std::move(source_before_result).value();
 
   FailureOr<std::string> copy =
       config::write_effective_config(source, {.cpu_thread_budget = 12}, getpid());
@@ -1591,10 +3165,90 @@ TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
 
   EXPECT_EQ(copy.value(),
             rocjitsu::rpc_invocation_runtime_dir(getpid()) + "/effective_config.json");
-  EXPECT_EQ(config::read_config_file(source), source_before);
-  EXPECT_EQ(config::load_execution_thread_settings(copy.value(), rocjitsu::kEmbeddedSchema)
-                .request.budget,
-            12u);
+  auto source_after = config::read_config_file(source, config_diagnostic.emitter());
+  ASSERT_TRUE(source_after.succeeded()) << config_diagnostic.message();
+  EXPECT_EQ(source_after.value(), source_before);
+  auto settings = config::load_execution_thread_settings(copy.value(), rocjitsu::kEmbeddedSchema,
+                                                         config_diagnostic.emitter());
+  ASSERT_TRUE(settings.succeeded()) << config_diagnostic.message();
+  EXPECT_EQ(settings.value().request.budget, 12u);
+}
+
+TEST(EffectiveConfigTest, WritesOneNodeAndBudgetCopyWithoutChangingSource) {
+  const test::ScopedTempDirectory runtime("rocjitsu-node-config-");
+  test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+  auto source = write_temp_config(system_graph_thread_test_config());
+  std::string before;
+  ASSERT_TRUE(read_config_file_valid(before, source.path()));
+
+  auto copy =
+      config::write_effective_config(source.path(), std::optional<uint32_t>{4}, "tray7", getpid());
+  ASSERT_TRUE(copy.succeeded());
+  std::string after;
+  ASSERT_TRUE(read_config_file_valid(after, source.path()));
+  EXPECT_EQ(after, before);
+  config::LoadedConfig projected;
+  ASSERT_TRUE(test::load_valid_config(copy.value(), projected, 8));
+  EXPECT_EQ(projected.local_node_id, "tray7");
+  EXPECT_EQ(projected.num_gpus, 2u);
+  EXPECT_EQ(projected.cpu_thread_budget, 4u);
+}
+
+TEST(EffectiveConfigTest, EscapesLocalNodeIdAndRejectsUnknownNode) {
+  const std::string json = system_graph_test_config(R"({"nodes":[{"id":"tray\"7",
+    "gpus":[{"id":"g9","gpu_id":909,"unique_id":3009,
+    "location_id":1280,"drm_render_minor":130}]}]})");
+  auto rewritten = config::json_with_local_node(json, "tray\"7");
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_THAT(rewritten.value(), testing::HasSubstr(R"("local_node": "tray\"7")"));
+  config::LoadedConfig original;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, original));
+  EXPECT_EQ(original.local_node_id, "tray\"7");
+  config::LoadedConfig projected;
+  ASSERT_TRUE(test::load_valid_config_from_string(rewritten.value(), projected));
+  EXPECT_EQ(projected.local_node_id, "tray\"7");
+
+  util::StringDiagnostic diagnostic;
+  auto missing = config::json_with_local_node(json, "missing", diagnostic.emitter());
+  EXPECT_TRUE(missing.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("unknown local node ID"));
+}
+
+TEST(EffectiveConfigTest, GraphFailureDoesNotPublishLaunchCopy) {
+  for (bool invalid_graph : {false, true}) {
+    SCOPED_TRACE(invalid_graph);
+    std::string json = system_graph_test_config(kSystemGraphManifest);
+    if (invalid_graph) {
+      ASSERT_TRUE(
+          replace_exactly_once(json, R"({"id":"tray7","gpus":)", R"({"id":"tray0","gpus":)"));
+    }
+    const auto source = write_temp_config(json);
+    const test::ScopedTempDirectory runtime("rocjitsu-graph-launch-failure-");
+    test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
+    std::vector<std::string> messages;
+    auto sink = [&](std::string_view message) { messages.emplace_back(message); };
+    const auto result = config::write_effective_config(source.path(), {.local_node = "missing"},
+                                                       getpid(), util::DiagnosticEmitter(sink));
+    EXPECT_TRUE(result.failed());
+    ASSERT_EQ(messages.size(), 1u);
+    EXPECT_THAT(messages.front(), testing::HasSubstr(invalid_graph ? "duplicate system node id"
+                                                                   : "unknown local node ID"));
+    EXPECT_TRUE(std::filesystem::is_empty(runtime.path()));
+    util::StringDiagnostic diagnostic;
+    const auto original = config::read_config_file(source.path(), diagnostic.emitter());
+    ASSERT_TRUE(original.succeeded()) << diagnostic.message();
+    EXPECT_EQ(original.value(), json);
+  }
+}
+
+TEST(EffectiveConfigTest, RejectsConflictingNodeSelectorInLaunchCopy) {
+  auto source = config::json_with_local_node(system_graph_thread_test_config(), "tray0");
+  ASSERT_TRUE(source.succeeded());
+  util::StringDiagnostic diagnostic;
+  const auto rewritten =
+      config::json_with_local_node(source.value(), "tray7", diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("disagrees with config.local_node"));
 }
 
 TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
@@ -1614,6 +3268,7 @@ TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
 // This case is registered as a native CLI test because it expects the launcher
 // to have created the invocation handoff before this child process starts.
 TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
+  util::StringDiagnostic config_diagnostic;
   const char *invocation_dir = std::getenv(rocjitsu::kRpcInvocationDirEnv);
   ASSERT_NE(invocation_dir, nullptr);
   ASSERT_NE(*invocation_dir, '\0');
@@ -1632,17 +3287,28 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
   ASSERT_TRUE(std::filesystem::exists(effective_path));
 
   const std::string source_path = test::config_path("gfx942_cdna3.json");
-  const std::string source_before = config::read_config_file(source_path);
-  const auto source_settings =
-      config::load_execution_thread_settings(source_path, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic source_before_diagnostic;
+  auto source_before_result =
+      config::read_config_file(source_path, source_before_diagnostic.emitter());
+  ASSERT_TRUE(source_before_result.succeeded()) << source_before_diagnostic.message();
+  const auto source_before = std::move(source_before_result).value();
+  util::StringDiagnostic source_settings_diagnostic;
+  auto source_settings_result = config::load_execution_thread_settings(
+      source_path, rocjitsu::kEmbeddedSchema, source_settings_diagnostic.emitter());
+  ASSERT_TRUE(source_settings_result.succeeded()) << source_settings_diagnostic.message();
+  const auto source_settings = std::move(source_settings_result).value();
   // Default config json does not specify a budget, so 0 is the pre-launch value.
   EXPECT_EQ(source_settings.request.budget, 0u);
 
-  const auto effective_settings =
-      config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic effective_settings_diagnostic;
+  auto effective_settings_result = config::load_execution_thread_settings(
+      effective_path, rocjitsu::kEmbeddedSchema, effective_settings_diagnostic.emitter());
+  ASSERT_TRUE(effective_settings_result.succeeded()) << effective_settings_diagnostic.message();
+  const auto effective_settings = std::move(effective_settings_result).value();
 
   EXPECT_EQ(effective_settings.request.budget, 4u);
-  auto loaded = config::load_config(effective_path, kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(effective_path, loaded));
   std::vector<simdojo::Component *> components;
   loaded.build_result.root->collect_components(components);
   unsigned cus = 0;
@@ -1652,7 +3318,31 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
       EXPECT_FALSE(cu->config().memory_wait_checks_enabled());
     }
   EXPECT_GT(cus, 0u);
-  EXPECT_EQ(config::read_config_file(source_path), source_before);
+  auto source_after = config::read_config_file(source_path, config_diagnostic.emitter());
+  ASSERT_TRUE(source_after.succeeded()) << config_diagnostic.message();
+  EXPECT_EQ(source_after.value(), source_before);
+}
+
+TEST(EffectiveConfigTest, ReadsSelectedNodeLaunchConfigHandoff) {
+  const char *invocation_dir = std::getenv(rocjitsu::kRpcInvocationDirEnv);
+  ASSERT_NE(invocation_dir, nullptr);
+  ASSERT_NE(*invocation_dir, '\0');
+
+  const std::filesystem::path invocation_path(invocation_dir);
+  std::ifstream handoff(invocation_path / "config_path");
+  ASSERT_TRUE(handoff.is_open());
+  std::string effective_path;
+  ASSERT_TRUE(std::getline(handoff, effective_path));
+  EXPECT_EQ(std::filesystem::path(effective_path), invocation_path / config::kEffectiveConfigName);
+
+  config::LoadedConfig projected;
+
+  ASSERT_TRUE(test::load_valid_config(effective_path, projected, 8));
+  EXPECT_EQ(projected.local_node_id, "tray7");
+  EXPECT_EQ(projected.cpu_thread_budget, 4u);
+  ASSERT_EQ(projected.devices.size(), 2u);
+  EXPECT_EQ(projected.devices[0].gpu_id, 505u);
+  EXPECT_EQ(projected.devices[1].gpu_id, 909u);
 }
 
 TEST(ConfigLoaderTest, RejectsUnresolvedAutomaticDbtHandoffWrite) {
@@ -1684,11 +3374,16 @@ TEST(ConfigLoaderTest, RejectsEmptyResolvedGpuIdLineForEnabledDbt) {
 
   config::DbtGuestConfig dbt;
   dbt.enabled = true;
-  EXPECT_THROW(config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id),
-               std::runtime_error);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      config::apply_resolved_dbt_host_gpu_id(dbt, *handoff->resolved_gpu_id, diagnostic.emitter())
+          .failed());
+  EXPECT_EQ(diagnostic.message(), "runtime config handoff must contain a nonzero KFD gpu_id");
+  EXPECT_EQ(dbt.host.gpu_id, 0u);
 }
 
 TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
+  util::StringDiagnostic config_diagnostic;
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-handoff-");
   const auto config_file = write_temp_config(R"({
         "dbt_guest": {
@@ -1703,8 +3398,10 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
   }
   test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
-  const std::optional<config::DbtGuestConfig> loaded =
-      config::load_dbt_guest_config_from_runtime_config();
+  auto loaded_result =
+      config::load_dbt_guest_config_from_runtime_config(config_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << config_diagnostic.message();
+  const auto loaded = std::move(loaded_result).value();
 
   ASSERT_TRUE(loaded);
   EXPECT_TRUE(loaded->enabled);
@@ -1720,6 +3417,7 @@ TEST(ConfigLoaderTest, LoadsDbtRuntimeConfigHandoffFromInvocationDirectory) {
 // GPU from identical bytes fails here or there instead of silently splitting the two layers
 // onto different GPUs on a multi-GPU host.
 TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
+  util::StringDiagnostic config_diagnostic;
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-oversized-");
 
   // Same treatment as the KFD-side test: a temp directory already deeper than the path being
@@ -1737,8 +3435,10 @@ TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
 
   const test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv,
                                                        runtime.path());
-  const std::optional<config::DbtGuestConfig> loaded =
-      config::load_dbt_guest_config_from_runtime_config();
+  auto loaded_result =
+      config::load_dbt_guest_config_from_runtime_config(config_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << config_diagnostic.message();
+  const auto loaded = std::move(loaded_result).value();
 
   ASSERT_TRUE(loaded);
   EXPECT_TRUE(loaded->enabled);
@@ -1746,6 +3446,7 @@ TEST(ConfigLoaderTest, ReadsRuntimeHandoffLargerThan4095Bytes) {
 }
 
 TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
+  util::StringDiagnostic config_diagnostic;
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-config-automatic-");
   const auto config_file = write_temp_config(R"({
         "dbt_guest": {
@@ -1760,7 +3461,11 @@ TEST(ConfigLoaderTest, RejectsPathOnlyHandoffForAutomaticDbtHost) {
   }
   test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_runtime_config(), std::runtime_error);
+  EXPECT_TRUE(
+      config::load_dbt_guest_config_from_runtime_config(config_diagnostic.emitter()).failed());
+  EXPECT_EQ(config_diagnostic.message(),
+            "runtime config handoff must contain a resolved KFD gpu_id for "
+            "automatic DBT host selection");
 }
 
 TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
@@ -1777,13 +3482,18 @@ TEST(ConfigLoaderTest, AllowsPathOnlyHandoffWithoutAutomaticDbtHost) {
       handoff << config_file.path() << '\n';
     }
 
-    const auto loaded = config::load_dbt_guest_config_from_runtime_config();
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result =
+        config::load_dbt_guest_config_from_runtime_config(loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    const auto loaded = std::move(loaded_result).value();
     ASSERT_TRUE(loaded);
     EXPECT_EQ(loaded->host.gpu_id, dbt_guest.find("28851") == std::string_view::npos ? 0u : 28851u);
   }
 }
 
 TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
@@ -1791,10 +3501,13 @@ TEST(ConfigLoaderTest, RejectsEmptyDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  auto result = config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(config_diagnostic.message(), testing::HasSubstr("Failed to parse JSON config"));
 }
 
 TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
@@ -1802,7 +3515,9 @@ TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  auto result = config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(config_diagnostic.message(), testing::HasSubstr("Failed to parse JSON config"));
 }
 
 TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
@@ -1822,15 +3537,56 @@ TEST(ConfigLoaderTest, ValidatesSimulatorDbtGuestDeviceLimits) {
   simulator.max_waves_per_simd = 8;
   simulator.wave_front_size = 64;
 
-  EXPECT_NO_THROW(config::validate_dbt_simulator_device_limits(guest, simulator));
+  util::StringDiagnostic diagnostic;
+  ASSERT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
   guest.guest_device.lds_size_kb = 65;
-  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "dbt_guest.guest_device.lds_size_kb (65) exceeds simulator device capacity (64)");
   guest.guest_device.lds_size_kb = 64;
   guest.guest_device.max_slots_scratch_cu = 33;
-  EXPECT_THROW(config::validate_dbt_simulator_device_limits(guest, simulator), std::runtime_error);
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(
+      diagnostic.message(),
+      "dbt_guest.guest_device.max_slots_scratch_cu (33) exceeds simulator device capacity (32)");
+  guest.guest_device.max_slots_scratch_cu = 32;
+  guest.guest_device.max_waves_per_simd = 9;
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "dbt_guest.guest_device.max_waves_per_simd (9) exceeds simulator device capacity (8)");
+  guest.guest_device.max_waves_per_simd = 8;
+  guest.guest_device.wave_front_size = 32;
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "dbt_guest.guest_device.wave_front_size (32) must match "
+                                  "simulator device wave_front_size (64)");
+  guest.guest_device.wave_front_size = 64;
+  guest.guest_device.present = false;
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "simulator-backed dbt_guest requires guest and simulator devices");
+  guest.guest_device.present = true;
+  simulator.present = false;
+  diagnostic("");
+  EXPECT_TRUE(config::validate_dbt_simulator_device_limits(guest, simulator, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "simulator-backed dbt_guest requires guest and simulator devices");
 }
 
 TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
+  util::StringDiagnostic config_diagnostic;
   const auto simulator_file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": false,
@@ -1845,8 +3601,14 @@ TEST(ConfigLoaderTest, DisabledDbtBackendSkipsBackendSpecificValidation) {
         }
       })");
 
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(simulator_file.path()));
-  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(hardware_file.path()));
+  EXPECT_TRUE(
+      config::load_dbt_guest_config_from_file(simulator_file.path(), config_diagnostic.emitter())
+          .succeeded())
+      << config_diagnostic.message();
+  EXPECT_TRUE(
+      config::load_dbt_guest_config_from_file(hardware_file.path(), config_diagnostic.emitter())
+          .succeeded())
+      << config_diagnostic.message();
 }
 
 TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
@@ -1859,6 +3621,7 @@ TEST(ConfigLoaderTest, ResolvesDbtHostConfigPath) {
 }
 
 TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
@@ -1866,10 +3629,13 @@ TEST(ConfigLoaderTest, RejectsUnknownDbtExecutionBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  auto result = config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_THAT(config_diagnostic.message(), testing::HasSubstr("Failed to parse JSON config"));
 }
 
 TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
+  util::StringDiagnostic config_diagnostic;
   const auto file = write_temp_config(R"({
         "dbt_guest": {
           "enabled": true,
@@ -1878,7 +3644,10 @@ TEST(ConfigLoaderTest, RejectsSimulatorConfigForHardwareDbtBackend) {
         }
       })");
 
-  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+  EXPECT_TRUE(
+      config::load_dbt_guest_config_from_file(file.path(), config_diagnostic.emitter()).failed());
+  EXPECT_EQ(config_diagnostic.message(),
+            "dbt_guest.simulator_config requires execution_backend=\"simulator\"");
 }
 
 TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
@@ -1901,7 +3670,8 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
     ]}})";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
@@ -1910,34 +3680,63 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
   EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
 }
 
+void expect_config_target_failure(const std::string &json, const char *message) {
+  SCOPED_TRACE(json);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), message);
+
+  const auto file = write_temp_config(json);
+  util::StringDiagnostic validation_diagnostic;
+  EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validation_diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(validation_diagnostic.message(), message);
+}
+
+TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
+  const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
+                                            R"({"vm":{"arch":"invalid"}})"};
+  for (const char *json : configs)
+    expect_config_target_failure(json, "Missing or invalid 'arch' in vm configuration");
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidTarget) {
+  expect_config_target_failure(R"({"vm":{"arch":"cdna4","target":"invalid"}})",
+                               "Missing or invalid 'target' in vm configuration: invalid");
+}
+
 TEST(ConfigLoaderTest, RejectsTargetFromDifferentArchitecture) {
-  const char *json = R"({"vm":{"arch":"cdna4","target":"gfx1250"}})";
-  EXPECT_THROW(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema),
-               std::runtime_error);
+  expect_config_target_failure(R"({"vm":{"arch":"cdna4","target":"gfx1250"}})",
+                               "vm target does not belong to the selected architecture");
 }
 
 TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
+  util::StringDiagnostic config_diagnostic;
   std::ifstream base(test::config_path("gfx1251_synthetic.json"));
   ASSERT_TRUE(base.is_open());
   const std::string gfx1251_config((std::istreambuf_iterator<char>(base)),
                                    std::istreambuf_iterator<char>());
-  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1251_config, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(config::load_config_from_string(gfx1251_config, rocjitsu::kEmbeddedSchema,
+                                              config_diagnostic.emitter())
+                  .succeeded())
+      << config_diagnostic.message();
 
   std::string gfx1250_config = gfx1251_config;
   ASSERT_TRUE(
       replace_exactly_once(gfx1250_config, R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(gfx1250_config, "120501", "120500"));
-  ASSERT_NO_THROW((void)config::load_config_from_string(gfx1250_config, rocjitsu::kEmbeddedSchema));
+  ASSERT_TRUE(config::load_config_from_string(gfx1250_config, rocjitsu::kEmbeddedSchema,
+                                              config_diagnostic.emitter())
+                  .succeeded())
+      << config_diagnostic.message();
 
   std::array<std::string, 2> mismatches{gfx1251_config, gfx1251_config};
   ASSERT_TRUE(
       replace_exactly_once(mismatches[0], R"("target": "gfx1251")", R"("target": "gfx1250")"));
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
-  for (const std::string &json : mismatches) {
-    EXPECT_THAT([&] { (void)config::load_config_from_string(json, rocjitsu::kEmbeddedSchema); },
-                testing::ThrowsMessage<std::runtime_error>(
-                    "vm target does not match device.gfx_target_version"));
-  }
+  for (const std::string &json : mismatches)
+    expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
@@ -1971,7 +3770,8 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
 
   simdojo::SimulationEngine engine(loaded.engine_config);
@@ -1984,15 +3784,15 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   // CDNA3 (GFX940+) uses VGPR granularity 8 (not 4).
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t KD_ADDR = 0x1000;
   soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
@@ -2014,7 +3814,10 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 }
 
 TEST(ConfigLoaderTest, DispatchPlacementDoesNotFollowHostThreadCount) {
-  auto [se0_wfs, se1_wfs] = run_two_spi_dispatch();
+  util::StringDiagnostic diagnostic;
+  auto result = run_two_spi_dispatch(diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto [se0_wfs, se1_wfs] = result.value();
 
   EXPECT_EQ(se0_wfs, 2u);
   EXPECT_EQ(se1_wfs, 0u);
@@ -2038,6 +3841,34 @@ std::string functional_quantum_checkpoint_config(uint32_t first, uint32_t second
         ]}
       ]}
     ]}}})";
+}
+
+TEST(ConfigLoaderTest, ComponentFailuresReturnDiagnosticsWithoutThrowing) {
+  struct Case {
+    std::string_view before, after, diagnostic;
+  };
+  const Case cases[] = {
+      {R"("name":"soc","type":"soc")", R"("name":"soc","type":"unknown")",
+       "Unknown component type for root: unknown"},
+      {R"("name":"cu0","type":"compute_unit")", R"("name":"cu0","type":"unknown")",
+       "Unknown type: unknown"},
+      {R"("name":"vram","type":"gpu_memory")", R"("name":"vram","type":"iod")",
+       "IOD requires gpu_memory"},
+      {R"("name":"vram","type":"gpu_memory")", R"("name":"vram","type":"composite")",
+       "Topology must contain a 'gpu_memory' component"},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.diagnostic);
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, c.before, c.after));
+    util::StringDiagnostic diagnostic;
+    EXPECT_NO_THROW({
+      const auto result =
+          config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
+      EXPECT_TRUE(result.failed());
+    });
+    EXPECT_EQ(diagnostic.message(), c.diagnostic);
+  }
 }
 
 test::ScopedTempFile write_legacy_quantum_checkpoint(uint32_t dispatch_threads = 1,
@@ -2080,6 +3911,69 @@ test::ScopedTempFile write_legacy_quantum_checkpoint(uint32_t dispatch_threads =
   return file;
 }
 
+TEST(CheckpointTest, InvalidExecutionThreadAllocationsReturnFailure) {
+  struct InvalidAllocation {
+    int32_t helpers;
+    std::vector<config::ExecutionThreadChoice> choices;
+    const char *message;
+  };
+  constexpr const char *helper_message = "async_helper_threads must be -1 or between 0 and 128";
+  constexpr const char *choice_message =
+      "thread_allocations require num_threads >= 1, "
+      "cpu_dispatch_threads >= 1 and async_helper_threads <= 128";
+  const InvalidAllocation cases[] = {
+      {-2, {}, helper_message},           {129, {}, helper_message},
+      {0, {{0, 1, 0}}, choice_message},   {0, {{1, 0, 0}}, choice_message},
+      {0, {{1, 1, 129}}, choice_message},
+  };
+
+  const std::string json = functional_quantum_checkpoint_config(7, 37);
+  rj_vm_t *raw_source = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw_source),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_source, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> source(raw_source, &rj_vm_destroy);
+
+  for (const auto &invalid : cases) {
+    SCOPED_TRACE(invalid.helpers);
+    SCOPED_TRACE(invalid.message);
+    flatbuffers::FlatBufferBuilder builder;
+    auto arch = builder.CreateString("cdna3");
+    auto cu_config = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
+    auto se_config = fb::CreateShaderEngineConfig(builder, 1, cu_config);
+    auto xcd_config = fb::CreateXcdConfig(builder, 1, se_config);
+    auto gpu_config = fb::CreateAmdgpuConfig(builder, 1, 0, xcd_config);
+    auto vm_config = fb::CreateVirtualMachineConfig(builder, arch, gpu_config);
+    auto exec_mode = builder.CreateString("functional");
+    std::vector<flatbuffers::Offset<fb::ExecutionThreadChoice>> entries;
+    for (const auto &choice : invalid.choices)
+      entries.push_back(fb::CreateExecutionThreadChoice(builder, choice.engines, choice.dispatch,
+                                                        choice.helpers));
+    auto choices = builder.CreateVector(entries);
+    auto simulation_config = fb::CreateSimulationConfig(builder, 0, 1, exec_mode, vm_config, 0, 0,
+                                                        1, 0, choices, invalid.helpers);
+    auto checkpoint = fb::CreateSimulationCheckpoint(builder, 0, simulation_config);
+    builder.Finish(checkpoint);
+
+    test::ScopedTempFile file("rocjitsu-invalid-allocation-checkpoint-");
+    file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
+                                builder.GetSize()));
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> result =
+        config::restore_checkpoint(file.path(), diagnostic.emitter());
+    ASSERT_TRUE(result.failed());
+    EXPECT_EQ(diagnostic.message(), invalid.message);
+
+    rj_vm_t *restored = source.get();
+    testing::internal::CaptureStderr();
+    const auto status = rj_vm_restore_checkpoint(file.path().c_str(), &restored);
+    const std::string warning = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_THAT(warning, testing::HasSubstr(invalid.message));
+    EXPECT_EQ(restored, source.get());
+  }
+}
+
 TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   auto checkpoint_file = write_legacy_quantum_checkpoint();
   auto bytes = read_binary_file(checkpoint_file.path());
@@ -2101,7 +3995,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_EQ(checkpoint->compute_units()->size(), 1u);
   EXPECT_FALSE(checkpoint->compute_units()->Get(0)->functional_quantum_present());
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
@@ -2113,8 +4008,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
 }
 
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
-  auto source =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema, 48);
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source, 48));
   ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
   ASSERT_EQ(source_cu->num_wf_slots(), 64u);
@@ -2122,10 +4017,11 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   ASSERT_EQ(source_cu->scratch_scoreboard_base(), 480u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-scratch-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads, /*cpu_thread_budget=*/48,
-                          source.thread_allocations, source.legacy_auto_dispatch,
-                          source.async_helper_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                      source.engine_config, source.cpu_dispatch_threads, {},
+                                      /*cpu_thread_budget=*/48, source.thread_allocations,
+                                      source.legacy_auto_dispatch, source.async_helper_threads)
+                  .succeeded());
   auto bytes = read_binary_file(checkpoint_file.path());
   const auto *stored_cu = fb::GetSimulationCheckpoint(bytes.data())
                               ->config()
@@ -2137,7 +4033,8 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
   ASSERT_NE(stored_cu, nullptr);
   EXPECT_EQ(stored_cu->scratch_slots_per_cu(), 32u);
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.execution_threads.dispatch, source.execution_threads.dispatch);
   EXPECT_EQ(restored.execution_threads.helpers, source.execution_threads.helpers);
   restored.apply_cpu_dispatch_threads();
@@ -2158,8 +4055,8 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
 }
 
 TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
-  auto source =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source));
   ASSERT_EQ(source.device.num_cu_per_sh, 8u);
   constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
   constexpr std::array<uint32_t, 6> kCuIndices{0, 5, 7, 8, 13, 15};
@@ -2179,9 +4076,11 @@ TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
   }
 
   test::ScopedTempFile checkpoint_file("rocjitsu-cdna5-wgp-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                      source.engine_config, source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   ASSERT_EQ(restored.soc()->num_xcds(), source.soc()->num_xcds());
   auto *restored_xcd = restored.soc()->xcd(0);
   ASSERT_EQ(restored_xcd->num_shader_engines(), source_xcd->num_shader_engines());
@@ -2226,7 +4125,8 @@ TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResa
   test::ScopedTempFile checkpoint_file("rocjitsu-legacy-wgp-checkpoint-");
   checkpoint_file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
                                          builder.GetSize()));
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(13);
   auto *wf = cu->dispatch_wf(0, 0, 32, 8);
   ASSERT_NE(wf, nullptr);
@@ -2234,9 +4134,11 @@ TEST(CheckpointTest, LegacyAbsentShaderArrayWidthKeepsWgpIdUnsupportedAcrossResa
   uint32_t value = 0xFFFFFFFFu;
   EXPECT_EQ(amdgpu::read_hwreg_field(*wf, kWgpId, value), amdgpu::HwregAccessResult::Unsupported);
   EXPECT_EQ(value, 0u);
-  config::save_checkpoint(checkpoint_file.path(), *restored.soc(), 0, restored.engine_config,
-                          restored.cpu_dispatch_threads);
-  auto resaved = config::restore_checkpoint(checkpoint_file.path());
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *restored.soc(), 0,
+                                      restored.engine_config, restored.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig resaved;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), resaved));
   auto *resaved_wf = resaved.soc()->xcd(0)->shader_engine(0)->compute_unit(13)->wf(0);
   ASSERT_NE(resaved_wf, nullptr);
   ASSERT_FALSE(resaved_wf->is_halted());
@@ -2255,7 +4157,8 @@ TEST(CheckpointTest, LegacyAbsentCpuDispatchThreadsStaysSerial) {
   EXPECT_FALSE(flatbuffers::IsFieldPresent(checkpoint->config(),
                                            fb::SimulationConfig::VT_CPU_DISPATCH_THREADS));
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.cpu_dispatch_threads, 1u);
   EXPECT_EQ(restored.async_helper_threads, 0);
   EXPECT_EQ(restored.execution_threads.helpers, 0u);
@@ -2268,7 +4171,8 @@ TEST(CheckpointTest, LegacyAllocationTableRestoresWithoutHelpers) {
   ASSERT_NE(stored->thread_allocations(), nullptr);
   ASSERT_EQ(stored->thread_allocations()->size(), 1u);
   EXPECT_FALSE(flatbuffers::IsFieldPresent(stored, fb::SimulationConfig::VT_ASYNC_HELPER_THREADS));
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_FALSE(restored.legacy_auto_dispatch);
   EXPECT_EQ(restored.async_helper_threads, 0);
   EXPECT_EQ(restored.thread_allocations, (std::vector<config::ExecutionThreadChoice>{{1, 2, 0}}));
@@ -2285,7 +4189,8 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
   ASSERT_EQ(stored->thread_allocations(), nullptr);
 
   const uint32_t expected = std::min(std::max(amdgpu::available_host_threads(), 1u), 8u);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.cpu_dispatch_threads, 0u);
   restored.apply_cpu_dispatch_threads();
   EXPECT_EQ(restored.soc()->dispatch_threads(), expected);
@@ -2298,7 +4203,8 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
   test::ScopedTempFile resaved_file("rocjitsu-legacy-auto-resaved-");
   ASSERT_EQ(rj_vm_save_checkpoint(vm.get(), resaved_file.path().c_str(), 0),
             ROCJITSU_STATUS_SUCCESS);
-  auto resaved = config::restore_checkpoint(resaved_file.path());
+  config::LoadedConfig resaved;
+  ASSERT_TRUE(test::restore_valid_checkpoint(resaved_file.path(), resaved));
   resaved.apply_cpu_dispatch_threads();
   EXPECT_EQ(resaved.cpu_dispatch_threads, 0u);
   EXPECT_EQ(resaved.soc()->dispatch_threads(), expected);
@@ -2321,7 +4227,8 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
   test::ScopedTempFile checkpoint_file("rocjitsu-helper-policy-");
   ASSERT_EQ(rj_vm_save_checkpoint(source.get(), checkpoint_file.path().c_str(), 0),
             ROCJITSU_STATUS_SUCCESS);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   EXPECT_EQ(restored.async_helper_threads, -1);
   EXPECT_EQ(restored.execution_threads.helpers, 2u);
   EXPECT_EQ(restored.thread_allocations, source->loaded.thread_allocations);
@@ -2330,29 +4237,74 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
 }
 
 TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
-  auto source = config::load_config_from_string(functional_quantum_checkpoint_config(0, 0),
-                                                rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig source;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(0, 0), source));
   test::ScopedTempFile checkpoint_file("rocjitsu-empty-allocations-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          /*cpu_dispatch_threads=*/0);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                      source.engine_config,
+                                      /*cpu_dispatch_threads=*/0, {})
+                  .succeeded());
   auto bytes = read_binary_file(checkpoint_file.path());
   const auto *stored = fb::GetSimulationCheckpoint(bytes.data())->config();
   ASSERT_NE(stored->thread_allocations(), nullptr);
   EXPECT_EQ(stored->thread_allocations()->size(), 0u);
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   restored.apply_cpu_dispatch_threads();
   EXPECT_EQ(restored.soc()->dispatch_threads(), 1u);
 }
 
+TEST(CApiTest, GwsWaitFailureIsReportedByStep) {
+  const auto json = functional_quantum_checkpoint_config(1, 1);
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  cu->set_gws_wait_limit(2);
+  cu->gws_sema_p(*wave, 0);
+  rj_status_t status = ROCJITSU_STATUS_SUCCESS;
+  int active = 123;
+  for (int i = 0; i < 100 && status == ROCJITSU_STATUS_SUCCESS; ++i)
+    status = rj_vm_step(handle.get(), &active);
+  EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+  EXPECT_NE(handle->engine->last_exit().code, 0);
+  EXPECT_FALSE(cu->has_active_wfs());
+}
+
+TEST(CheckpointTest, RoundTripsGwsWaitLimits) {
+  config::LoadedConfig source;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(1, 1), source));
+  auto *se = source.soc()->xcd(0)->shader_engine(0);
+  se->compute_unit(0)->set_gws_wait_limit(0);
+  se->compute_unit(1)->set_gws_wait_limit(17);
+  test::ScopedTempFile checkpoint("rocjitsu-gws-limit-");
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(restored_se->compute_unit(0)->config().gws_wait_limit, 0u);
+  EXPECT_EQ(restored_se->compute_unit(1)->config().gws_wait_limit, 17u);
+}
+
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(0, 0);
-  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   auto *source_se = source.soc()->xcd(0)->shader_engine(0);
   ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 0u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-zero-quantum-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                      source.engine_config, source.cpu_dispatch_threads, {})
+                  .succeeded());
 
   auto bytes = read_binary_file(checkpoint_file.path());
   const auto *checkpoint = fb::GetSimulationCheckpoint(bytes.data());
@@ -2370,7 +4322,8 @@ TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   EXPECT_TRUE(first_state->functional_quantum_present());
   EXPECT_EQ(first_state->functional_quantum(), 0u);
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 0u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 0u);
@@ -2378,16 +4331,19 @@ TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
 
 TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(7, 37);
-  auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   auto *source_se = source.soc()->xcd(0)->shader_engine(0);
   ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 7u);
   ASSERT_EQ(source_se->compute_unit(1)->config().functional_quantum, 37u);
 
   test::ScopedTempFile checkpoint_file("rocjitsu-heterogeneous-quantum-checkpoint-");
-  config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                      source.engine_config, source.cpu_dispatch_threads, {})
+                  .succeeded());
 
-  auto restored = config::restore_checkpoint(checkpoint_file.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 7u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
@@ -2398,17 +4354,22 @@ TEST(CheckpointTest, RoundTripsWaitCheckingModes) {
   for (const auto mode :
        {config::WaitChecking::Off, config::WaitChecking::On, config::WaitChecking::All}) {
     SCOPED_TRACE(static_cast<int>(mode));
-    auto json = config::json_with_launch_overrides(
-        config::read_config_file(test::config_path("gfx1250_mi455x.json")),
-        {.wait_checking = mode});
+    util::StringDiagnostic config_diagnostic;
+    auto source_json = config::read_config_file(test::config_path("gfx1250_mi455x.json"),
+                                                config_diagnostic.emitter());
+    ASSERT_TRUE(source_json.succeeded()) << config_diagnostic.message();
+    auto json = config::json_with_launch_overrides(source_json.value(), {.wait_checking = mode});
     ASSERT_TRUE(json.succeeded());
-    auto source = config::load_config_from_string(json.value(), kEmbeddedSchema);
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json.value(), source));
     auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
     ASSERT_NE(source_cu->dispatch_wf(0, 0, 32, 32), nullptr);
     test::ScopedTempFile checkpoint("rocjitsu-wait-mode-checkpoint-");
-    config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
-                            source.cpu_dispatch_threads);
-    auto restored = config::restore_checkpoint(checkpoint.path());
+    ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
     for (auto *xcd : restored.soc()->xcds()) {
       for (auto *se : xcd->shader_engines()) {
         for (auto *cu : se->compute_units()) {
@@ -2433,11 +4394,14 @@ TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
   ASSERT_TRUE(replace_exactly_once(json, R"({"key":"functional_quantum","value":"7"})",
                                    R"({"key":"memory_wait_diagnostics","value":"off"},
          {"key":"xcnt_diagnostics","value":"warn"})"));
-  auto source = config::load_config_from_string(json, kEmbeddedSchema);
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   test::ScopedTempFile checkpoint("rocjitsu-per-cu-wait-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
-                          source.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                                      source.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(se->compute_unit(0)->config().memory_wait_diagnostics,
             amdgpu::MemoryWaitDiagnostics::Off);
@@ -2445,6 +4409,56 @@ TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
   EXPECT_EQ(se->compute_unit(1)->config().memory_wait_diagnostics,
             amdgpu::MemoryWaitDiagnostics::Warn);
   EXPECT_EQ(se->compute_unit(1)->config().xcnt_diagnostics, amdgpu::MemoryWaitDiagnostics::Off);
+}
+
+TEST(CheckpointTest, PreservesCdnaSimdIdsWithSparseWaveSlots) {
+  for (const char *arch : {"cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = functional_quantum_checkpoint_config(7, 37);
+    json.replace(json.find("cdna3"), 5, arch);
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+    struct Resident {
+      uint32_t cu, slot, simd;
+    };
+    constexpr std::array<Resident, 5> residents{
+        {{0, 1, 1}, {0, 4, 0}, {0, 7, 3}, {1, 2, 2}, {1, 5, 1}}};
+    constexpr uint16_t hw_id_simd = 4u | (4u << 6) | (1u << 11); // HW_ID[5:4].
+    for (const auto &[cu_id, slot, simd] : residents) {
+      auto *cu = source_se->compute_unit(cu_id);
+      auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
+                                    cu->config().vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      uint32_t value = UINT32_MAX;
+      ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
+
+    test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
+    ASSERT_TRUE(config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0,
+                                        source.engine_config, source.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored));
+    auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+    for (const auto &[cu_id, slot, simd] : residents) {
+      SCOPED_TRACE(cu_id);
+      SCOPED_TRACE(slot);
+      auto *wf = restored_se->compute_unit(cu_id)->wf(slot);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_FALSE(wf->is_halted());
+      EXPECT_EQ(wf->wf_id(), slot);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
+    // Restoration must not compact the resident waves into different slots.
+    EXPECT_EQ(restored_se->compute_unit(0)->wf(0), nullptr);
+    EXPECT_EQ(restored_se->compute_unit(1)->wf(0), nullptr);
+  }
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
@@ -2476,7 +4490,8 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
   auto *source_cp = soc->xcd(0)->command_processor();
   ASSERT_NE(source_cp, nullptr);
@@ -2487,11 +4502,13 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
   soc->memory()->write64(0x2000, 0x0123456789ABCDEFULL);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   EXPECT_EQ(restored.memory()->read32(0x1000), 0xDEADBEEFu);
   EXPECT_EQ(restored.memory()->read64(0x2000), 0x0123456789ABCDEFULL);
   EXPECT_EQ(restored.exec_mode, simdojo::ExecMode::CLOCKED);
@@ -2501,8 +4518,9 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
 
 TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   constexpr uint32_t regs_per_wave = 112;
-  auto loaded = config::load_config_from_string(functional_quantum_checkpoint_config(0, 0),
-                                                rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(0, 0), loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_EQ(cu->config().sgprs_per_wf, regs_per_wave);
   ASSERT_EQ(cu->num_wf_slots(), 10u);
@@ -2511,10 +4529,12 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   EXPECT_EQ(cu->sgpr_file().materialized_chunk_count(), 0u);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   EXPECT_EQ(cu->sgpr_file().materialized_chunk_count(), 0u);
-  auto zero_restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig zero_restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), zero_restored));
   auto *zero_cu = zero_restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   EXPECT_EQ(zero_cu->sgpr_file().materialized_chunk_count(), 0u);
   for (uint32_t slot = 0; slot < 10; ++slot) {
@@ -2528,9 +4548,11 @@ TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   ASSERT_EQ(base, 1008u);
   for (uint32_t reg = 0; reg < regs_per_wave; ++reg)
     cu->write_sgpr(base + reg, 0xA5000000u + reg);
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 43, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 43, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   for (uint32_t slot = 0; slot < 10; ++slot) {
     ASSERT_FALSE(restored_cu->wf(slot)->is_halted());
@@ -2569,7 +4591,8 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -2590,8 +4613,9 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   cu->write_vgpr(acc_last, 63, 0xFEEDFACEu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -2610,7 +4634,8 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
@@ -2671,7 +4696,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -2687,8 +4713,9 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   cu->write_vgpr(vgpr_last, 31, 0x9ABC001Fu);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -2707,13 +4734,14 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 64u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
   EXPECT_EQ(restored_soc->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+            amdgpu::SdmaPacketDialect::Rdna4);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
@@ -2760,7 +4788,8 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -2775,8 +4804,9 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   ASSERT_TRUE(wf->fp16_ovfl());
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
-  config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
-                          loaded.cpu_dispatch_threads);
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   ASSERT_TRUE(std::filesystem::exists(checkpoint.path()));
 
   const auto checkpoint_bytes = read_binary_file(checkpoint.path());
@@ -2795,7 +4825,8 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_EQ(saved_wavefront->vgprs()->size(),
             cu->vgpr_allocation_block_size() * 32u * sizeof(uint32_t));
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_soc = restored.soc();
   ASSERT_NE(restored_soc, nullptr);
   auto *restored_wf = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
@@ -2807,6 +4838,62 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
   EXPECT_TRUE(restored_wf->consume_setreg_vgpr_msb_hazard());
   EXPECT_FALSE(restored_wf->consume_setreg_vgpr_msb_hazard());
   EXPECT_TRUE(restored_wf->fp16_ovfl());
+}
+
+TEST(CheckpointTest, SaveAndRestoreCdnaBranchStack) {
+  const char *json = R"({"max_ticks":10000,"num_threads":1,
+    "vm":{"arch":"cdna4"},
+    "topology":{
+      "root":{
+        "name":"soc","type":"soc",
+        "children":[
+          {"name":"vram","type":"gpu_memory"},
+          {"name":"xcd0","type":"xcd","children":[
+            {"name":"l2","type":"l2_cache"},
+            {"name":"cp","type":"command_processor"},
+            {"name":"se0","type":"shader_engine","children":[
+              {"name":"cu[0:1]","type":"compute_unit","config":[
+                {"key":"num_wf_slots","value":"1"},
+                {"key":"sgprs_per_wf","value":"104"},
+                {"key":"vgprs_per_wf","value":"256"},
+                {"key":"lds_size_kb","value":"64"}
+              ]}
+            ]}
+          ]}
+        ]
+      },
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]
+    }
+  })";
+
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+
+  // A wave stopped inside a fork block: two pending entries, the newest in s[4:7].
+  wf->set_cond_stack_ptr(2);
+  for (uint32_t i = 0; i < 4; ++i)
+    cu->write_sgpr(wf->sgpr_alloc().base + 4 + i, 0xC0DE0000u + i);
+
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 42, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+  ASSERT_NE(restored.soc(), nullptr);
+  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *restored_wf = restored_cu->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  EXPECT_EQ(restored_wf->cond_stack_ptr(), 2u);
+  for (uint32_t i = 0; i < 4; ++i)
+    EXPECT_EQ(restored_cu->read_sgpr(restored_wf->sgpr_alloc().base + 4 + i), 0xC0DE0000u + i);
 }
 
 // The checkpoint record carries the architectural registers and the TTMPs but
@@ -2843,33 +4930,46 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
 
   test::ScopedTempFile checkpoint("rocjitsu-checkpoint-");
+  std::vector<std::string> diagnostics;
+  auto sink = [&](std::string_view message) { diagnostics.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
   // A plain running wave still checkpoints.
-  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
-                                          loaded.cpu_dispatch_threads));
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
 
+  const auto original_checkpoint = read_binary_file(checkpoint.path());
   wf->set_in_trap_handler(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config,
-                                       loaded.cpu_dispatch_threads),
-               std::runtime_error);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 2, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
+  EXPECT_NE(diagnostics.back().find("trap handler or stopped for a debugger"), std::string::npos);
   wf->set_in_trap_handler(false);
 
   wf->set_debug_halted(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config,
-                                       loaded.cpu_dispatch_threads),
-               std::runtime_error);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 3, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 2u);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
   wf->set_debug_halted(false);
 
   wf->set_debug_suspended(true);
-  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config,
-                                       loaded.cpu_dispatch_threads),
-               std::runtime_error);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 4, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 3u);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
   wf->set_debug_suspended(false);
 
   // The runtime's own pause is not a debugger stop. A queue throttled to
@@ -2877,9 +4977,79 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   // above exist to protect, so it must stay checkpointable -- this is the one
   // assertion that tells debug_stopped() apart from debug_paused().
   wf->set_runtime_suspended(true);
-  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
-                                          loaded.cpu_dispatch_threads));
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
   wf->set_runtime_suspended(false);
+}
+
+TEST(CheckpointTest, ReportsOpenAndWriteFailures) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(1, 1), loaded));
+  std::vector<std::string> diagnostics;
+  auto sink = [&](std::string_view message) { diagnostics.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-io-");
+  // A regular file cannot be the parent directory of the output path.
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path() + "/checkpoint", *loaded.soc(), 0,
+                                      loaded.engine_config, loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_NE(diagnostics.back().find("Cannot open checkpoint file for writing"), std::string::npos);
+  diagnostics.clear();
+  // Linux's full device opens successfully and rejects buffered writes on flush.
+  EXPECT_TRUE(config::save_checkpoint("/dev/full", *loaded.soc(), 0, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_NE(diagnostics.back().find("Failed to write checkpoint file"), std::string::npos);
+
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(nullptr, rj_vm_destroy);
+  rj_vm_t *handle = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(functional_quantum_checkpoint_config(1, 1).c_str(),
+                                     RJ_VM_MODE_DEFAULT, &handle),
+            ROCJITSU_STATUS_SUCCESS);
+  vm.reset(handle);
+  EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), "/dev/full", 0), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), (checkpoint.path() + "/checkpoint").c_str(), 0),
+            ROCJITSU_STATUS_ERROR);
+}
+
+TEST(CheckpointTest, RefusesToSaveParkedGwsWave) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(1, 1), loaded));
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  wf->set_exec(1);
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-gws-");
+  std::vector<std::string> diagnostics;
+  auto sink = [&](std::string_view message) { diagnostics.emplace_back(message); };
+  util::DiagnosticEmitter emit_error(sink);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
+  const auto original_checkpoint = read_binary_file(checkpoint.path());
+  cu->gws_init(*wf, 0, 1);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 1u);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
+  wf->gws_sema_p(0);
+  wf->gws_sema_p(0);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
+  EXPECT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, emit_error)
+                  .failed());
+  ASSERT_EQ(diagnostics.size(), 2u);
+  EXPECT_EQ(read_binary_file(checkpoint.path()), original_checkpoint);
+  EXPECT_NE(diagnostics.back().find("GWS resource state"), std::string::npos);
+  wf->halt();
 }
 
 // wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the
@@ -2916,7 +5086,8 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
     }
   })";
 
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   // A flat id that is not any of the coordinates, so restoring wg_id into them
@@ -2927,10 +5098,12 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
   wf->set_wg_coord(3, 5, 7);
 
   test::ScopedTempFile checkpoint("rocjitsu-wg-coord-checkpoint-");
-  ASSERT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
-                                          loaded.cpu_dispatch_threads));
+  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                                      loaded.cpu_dispatch_threads, {})
+                  .succeeded());
 
-  auto restored = config::restore_checkpoint(checkpoint.path());
+  config::LoadedConfig restored;
+  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
   auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   ASSERT_EQ(restored_cu->num_wfs(), 1u);
@@ -2991,8 +5164,8 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   // The shared pool must be wider than either individual XCD when requested.
   run_case(/*configured=*/11, /*expected=*/11);
   run_case(/*configured=*/99, /*expected=*/13);
-  const auto loaded = config::load_config_from_string(functional_dispatch_threads_config(0),
-                                                      rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(functional_dispatch_threads_config(0), loaded));
   run_case(/*configured=*/0, /*expected=*/loaded.execution_threads.dispatch.front());
 }
 
@@ -3045,8 +5218,9 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
 
   ASSERT_NE(handle->vm, nullptr);
   ASSERT_EQ(handle->vm->num_socs(), 4u);
-  const auto expected =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema).execution_threads.dispatch;
+  config::LoadedConfig expected_config;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, expected_config));
+  const auto expected = expected_config.execution_threads.dispatch;
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
   for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
@@ -3123,14 +5297,14 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t kKernelAddress = 0x1000;
   constexpr uint32_t kCode[] = {0xBF800000u, 0xBF810000u}; // s_nop; s_endpgm
@@ -3230,14 +5404,16 @@ TEST(CApiTest, CheckpointRoundTripPreservesAutomaticFunctionalDispatch) {
   // source host's effective width. The legacy dispatch-only override must
   // still honor a smaller host or cap independently of the restored table.
   {
-    auto restored_for_host = config::restore_checkpoint(checkpoint_file.path());
+    config::LoadedConfig restored_for_host;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored_for_host));
     ASSERT_EQ(restored_for_host.cpu_dispatch_threads, 0u);
     restored_for_host.override_cpu_dispatch_threads(/*hardware_threads=*/2);
     ASSERT_NE(restored_for_host.soc(), nullptr);
     EXPECT_EQ(restored_for_host.soc()->dispatch_threads(), 2u);
   }
   {
-    auto restored_for_cap = config::restore_checkpoint(checkpoint_file.path());
+    config::LoadedConfig restored_for_cap;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint_file.path(), restored_for_cap));
     ASSERT_EQ(restored_for_cap.cpu_dispatch_threads, 0u);
     restored_for_cap.override_cpu_dispatch_threads(/*hardware_threads=*/128,
                                                    /*automatic_thread_cap=*/5);
@@ -3308,7 +5484,11 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   junk.write(std::string(512, static_cast<char>(0xA5)));
 
   rj_vm_t *restored = nullptr;
-  EXPECT_EQ(rj_vm_restore_checkpoint(junk.path().c_str(), &restored), ROCJITSU_STATUS_INVALID_FILE);
+  testing::internal::CaptureStderr();
+  const auto status = rj_vm_restore_checkpoint(junk.path().c_str(), &restored);
+  const std::string warning = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_THAT(warning, testing::HasSubstr("Invalid checkpoint format: " + junk.path()));
   EXPECT_EQ(restored, nullptr);
 
   rj_vm_t *raw_source = nullptr;
@@ -3332,11 +5512,106 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   EXPECT_EQ(restored, nullptr);
 }
 
+TEST(CApiTest, MissingConfigFileReturnsInvalidFile) {
+  test::ScopedTempDirectory directory("rocjitsu-c-api-missing-config-");
+  const std::string path = directory.path() + "/missing.json";
+  rj_vm_t *handle = nullptr;
+  EXPECT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(handle, nullptr);
+}
+
+TEST(CApiTest, InvalidConfigsReturnEntryPointSpecificStatus) {
+  for (const std::string &json :
+       {std::string("{"), std::string("{}"),
+        link_expression_config(R"json({"pattern":"src -> dst","where_expr":"missing"})json"),
+        std::string(R"json({"vm":{"arch":"cdna3"},"topology":{
+             "root":{"name":"soc","type":"soc","children":[
+               {"name":"part[0:18446744073709551616]","type":"composite"}]}}})json")}) {
+    SCOPED_TRACE(json);
+    const test::ScopedTempFile file("rocjitsu-c-api-invalid-config-");
+    file.write(json);
+    rj_vm_t *file_handle = nullptr;
+    EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &file_handle),
+              ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_EQ(file_handle, nullptr);
+
+    rj_vm_t *string_handle = nullptr;
+    EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &string_handle),
+              ROCJITSU_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(string_handle, nullptr);
+  }
+}
+
 TEST(CApiTest, InvalidArguments) {
   rj_vm_t *handle = nullptr;
   EXPECT_EQ(rj_vm_create_from_string(nullptr, RJ_VM_MODE_DEFAULT, &handle),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(rj_vm_step(nullptr, nullptr), ROCJITSU_STATUS_INVALID_ARGUMENT);
+}
+
+TEST(ConfigTestUtilTest, FileAndStringHelpersPreserveHostWidthSelection) {
+  std::string json = functional_dispatch_threads_config(0);
+  json.insert(json.find('{') + 1, R"(
+    "thread_allocations":[
+      {"num_threads":1,"cpu_dispatch_threads":1},
+      {"num_threads":1,"cpu_dispatch_threads":4}
+    ],)");
+  const auto file = write_temp_config(json);
+  util::StringDiagnostic diagnostic;
+  const auto settings = config::load_execution_thread_settings_from_string(json, kEmbeddedSchema,
+                                                                           diagnostic.emitter());
+  ASSERT_TRUE(settings.succeeded()) << diagnostic.message();
+
+  for (const auto width :
+       {std::optional<uint32_t>{}, std::optional<uint32_t>{0}, std::optional<uint32_t>{4}}) {
+    SCOPED_TRACE(width ? std::to_string(*width) : "automatic");
+    config::ExecutionThreadAllocation expected;
+    ASSERT_TRUE(test::resolve_valid_execution_threads(
+        expected, settings.value(), width.value_or(amdgpu::available_host_threads())));
+    config::LoadedConfig from_file;
+    config::LoadedConfig from_string;
+    ASSERT_TRUE(test::load_valid_config(file.path(), from_file, width));
+    ASSERT_TRUE(test::load_valid_config_from_string(json, from_string, width));
+    for (const auto *loaded : {&from_file, &from_string}) {
+      ASSERT_NE(loaded->build_result.root, nullptr);
+      EXPECT_EQ(loaded->execution_threads.engines, expected.engines);
+      EXPECT_EQ(loaded->execution_threads.dispatch, expected.dispatch);
+      EXPECT_EQ(loaded->execution_threads.helpers, expected.helpers);
+    }
+    if (width) {
+      EXPECT_EQ(from_file.execution_threads.dispatch, std::vector<uint32_t>{*width ? 4u : 1u});
+    }
+  }
+}
+
+TEST(ConfigTestUtilTest, FailurePreservesLoadedOutputAndDiagnostic) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(functional_dispatch_threads_config(7), loaded));
+  const auto *root = loaded.build_result.root.get();
+  const auto threads = loaded.execution_threads.dispatch;
+  const auto engine_threads = loaded.engine_config.num_threads;
+  const auto target = loaded.target;
+  const test::ScopedTempDirectory directory("rocjitsu-test-config-missing-");
+  const std::string missing_path = directory.path() + "/missing.json";
+  const auto malformed_file = write_temp_config("{");
+
+  const auto missing = test::load_valid_config(missing_path, loaded);
+  EXPECT_FALSE(missing);
+  EXPECT_EQ(std::string(missing.message()), "Cannot open file: " + missing_path);
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+
+  const auto malformed_string = test::load_valid_config_from_string("{", loaded);
+  EXPECT_FALSE(malformed_string);
+  EXPECT_THAT(malformed_string.message(), testing::HasSubstr("Failed to parse JSON config:"));
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+
+  const auto malformed_path = test::load_valid_config(malformed_file.path(), loaded);
+  EXPECT_FALSE(malformed_path);
+  EXPECT_EQ(std::string(malformed_path.message()), malformed_string.message());
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+  EXPECT_EQ(loaded.execution_threads.dispatch, threads);
+  EXPECT_EQ(loaded.engine_config.num_threads, engine_threads);
+  EXPECT_EQ(loaded.target, target);
 }
 
 } // namespace

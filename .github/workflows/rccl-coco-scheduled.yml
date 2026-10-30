@@ -1,6 +1,6 @@
 name: RCCL coco scheduled
 
-# Nightly, weekly, and monthly coco launches on Ruby and OCI. The mode comes from
+# Nightly, weekly, and monthly coco launches on Ruby, OCI, TW, and Crusoe. The mode comes from
 # the cron that fired; the coco harness is pinned to one commit for the whole fan-out.
 on:
   schedule:
@@ -15,7 +15,7 @@ on:
         description: 'ROCm/tRCCL ref for the coco harness.'
         type: string
         required: false
-        default: 'main'
+        default: '1.4.x'
       dry_run:
         description: 'Resolve stacks and submissions without building or running anything.'
         type: boolean
@@ -58,7 +58,7 @@ jobs:
         id: resolve
         uses: ./.github/actions/rccl-resolve-coco-run
         with:
-          coco_ref: ${{ inputs.coco_ref || 'main' }}
+          coco_ref: ${{ inputs.coco_ref || '1.4.x' }}
           dry_run: ${{ inputs.dry_run || false }}
           periodic_mode: ${{ inputs.periodic_mode || 'nightly' }}
           schedule: ${{ github.event.schedule }}

@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from conftest import run_rdci, terminate_process
+from conftest import gpu_indexes, run_rdci, terminate_process
 
 
 # ---------------------------------------------------------------------------
@@ -88,12 +88,42 @@ class TestUnsupportedFields:
     """Verify graceful handling of unsupported or invalid fields."""
 
     def test_dmon_invalid_field_id(self, rdci_path, rdcd_server):
-        r = run_rdci(rdci_path, "dmon", "-f", "99999", "-c", "1", "-d", "1000")
+        gpu = gpu_indexes(rdci_path)[0]
+        r = run_rdci(rdci_path, "dmon", "-e", "99999", "-i", gpu, "-c", "1", "-d", "1000")
         assert r.returncode != -11, "rdci segfaulted on invalid field"
+        assert r.returncode != 0, f"dmon accepted field 99999:\n{r.stdout}"
 
     def test_fieldgroup_empty_fields(self, rdci_path, rdcd_server):
         r = run_rdci(rdci_path, "fieldgroup", "-c", "ci_empty_fg", "-f", "")
         assert r.returncode != -11, "rdci segfaulted"
+
+
+# ---------------------------------------------------------------------------
+# GPU groups and field groups that do not exist (requires daemon + GPU)
+# ---------------------------------------------------------------------------
+# Values of rdc_status_t in include/rdc/rdc.h.
+RDC_ST_GROUP_NOT_FOUND = 17
+RDC_ST_FLDGROUP_NOT_FOUND = 18
+MISSING_ID = "4242"
+
+
+class TestMissingGroups:
+    """Verify rdci names the GPU group or field group it cannot find."""
+
+    def test_dmon_missing_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "dmon", "-g", MISSING_ID, "-f", MISSING_ID, "-c", "1")
+        assert r.returncode == RDC_ST_GROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the group {MISSING_ID}" in r.stdout
+
+    def test_dmon_missing_field_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "dmon", "-i", "0", "-f", MISSING_ID, "-c", "1")
+        assert r.returncode == RDC_ST_FLDGROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the field group {MISSING_ID}" in r.stdout
+
+    def test_health_set_missing_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "health", "-g", MISSING_ID, "-s", "pm")
+        assert r.returncode == RDC_ST_GROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the group {MISSING_ID}" in r.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +132,7 @@ class TestUnsupportedFields:
 class TestDaemonResilience:
     """Verify behavior around daemon stop/restart scenarios."""
 
-    def test_rdcd_responds_after_quick_restart(self, rdcd_path, has_gpu):
-        if not has_gpu:
-            pytest.skip("No GPU -- skipping resilience test")
-
+    def test_rdcd_responds_after_quick_restart(self, rdcd_path, rdcd_server):
         import socket
 
         def _port_open(port, timeout=2):
@@ -116,6 +143,8 @@ class TestDaemonResilience:
         port = 50099
         env = os.environ.copy()
 
+        # Only one rdcd can run per host.
+        rdcd_server.stop()
         proc = None
         try:
             proc = subprocess.Popen(
@@ -143,6 +172,8 @@ class TestDaemonResilience:
             assert _port_open(port), "rdcd did not restart successfully"
         finally:
             terminate_process(proc)
+            if not rdcd_server.start():
+                pytest.fail("the session rdcd did not start again")
 
 
 # ---------------------------------------------------------------------------
