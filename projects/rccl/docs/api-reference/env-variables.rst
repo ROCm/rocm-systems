@@ -1153,41 +1153,70 @@ threshold table introduced for gfx1250.
           registration and message size).
 
     * - | ``RCCL_FORCE_CE_ALLREDUCE``
-        | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
-          CE AllReduce, allowing CE to run without symmetric window registration.
-          Does not override the staging buffer size cap (``RCCL_CE_AR_2SHOT_MAX_BYTES``
-          or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
-          When ``-1`` (auto), follows the same gfx1250-default logic as
-          ``RCCL_CE_ALLREDUCE``.
+        | Enables the non-registered (2-shot/staged) CE AllReduce path without
+          requiring ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``). Does not affect
+          the registered-window CE AllReduce path, which is controlled independently
+          by ``RCCL_CE_ALLREDUCE``. Does not override the ``ceNonRegMax[AR]`` staging
+          buffer size cap.
       - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
         | ``0``: Disabled.
-        | ``1``: Force-enabled (CTA_POLICY check bypassed).
+        | ``1``: Force-enabled (``CTA_POLICY_ZERO`` requirement bypassed for non-registered path).
+
+    * - | ``RCCL_CE_REDUCESCATTER``
+        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, subject to the other eligibility checks.
+    * - | ``RCCL_FORCE_CE_COLL``
+        | Bypasses the ``NCCL_CTA_POLICY=2`` (CTA_POLICY_ZERO) requirement for
+          CE AllGather and CE Alltoall registered-window paths.
+          Does not affect AllReduce (use ``RCCL_FORCE_CE_ALLREDUCE`` for that),
+          and does not affect hierarchical CE paths.
+          When ``-1`` (auto), enabled by default on gfx1250 where CE is the
+          preferred collective path; disabled on all other architectures.
+      - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled (CTA_POLICY check bypassed for AG and A2A registered CE).
+
+    * - | ``RCCL_FORCE_SYMMETRIC``
+        | Biases the ``ncclAllReduce`` backend selector to prefer the symmetric
+          kernel path over all other candidates. Hard eligibility checks (buffer
+          registration, op support) are still enforced; if no symmetric path is
+          eligible the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer symmetric kernel for AllReduce.
+
+    * - | ``RCCL_FORCE_DDA``
+        | Biases the ``ncclAllReduce`` backend selector to prefer DDA (Direct Data
+          Access) paths over all other candidates, including symmetric and Copy
+          Engine. If no DDA path is eligible for the given message size and
+          communicator the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer DDA for AllReduce.
 
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
-          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
-          null or unknown-arch table restores the pre-table 256 MiB default. This
-          variable sizes the selector only; it does not affect the staging buffer
-          allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table.
+          A table entry of ``0`` (e.g. gfx1250, where the value is a placeholder)
+          resolves to 256 MiB when ``NCCL_CTA_POLICY=2`` (ZERO CU policy) is active;
+          without ZERO policy it stays ``0`` and 2-shot is disabled. Setting this
+          variable to ``0`` explicitly disables the non-registered 2-shot path but does
+          not suppress the staging buffer reservation, which the registered-window CE AllReduce path also requires.
       - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: Disable 2-shot (does not disable the registered-window CE path).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
-
-    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
-        | Overrides the CE registered-window AllReduce message size cap. When ``-1``
-          (default), the cap is read from ``ceRegMax[AllReduce]`` in the per-arch
-          table. This is the upper bound for the path where both send and receive
-          buffers are in symmetric windows (``-R 2`` mode in rccl-tests).
-      - | ``-1``: Resolved from the per-arch table (default).
-        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
-      - | ``-1``: Use the compile-time default of 256 MiB (default).
+          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
     * - | ``RCCL_TDM_LL128_ENABLE``
