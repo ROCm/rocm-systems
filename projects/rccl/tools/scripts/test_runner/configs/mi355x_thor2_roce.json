@@ -5558,6 +5558,14 @@
           "test_filter": "SymmetricKernelCorruptionTest.MisalignedBuffers_FourBytePackTier"
         },
         {
+          "name": "Symk_AllReduceSubWordSkew",
+          "description": "Forced AllReduce_RSxLD_AGxST at 2 CTAs on fp16 and fp8 inputs skewed 1-4 bytes: per-element head and tail, 4-byte tier, guard bytes",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceSubWord_SkewedHeadAndFourByteTier",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "2"
+          }
+        },
+        {
           "name": "Symk_AllGatherStoreCrossover",
           "description": "AllGather switches from LL to the store kernel at 1 MB on gfx950, skipped on other architectures",
           "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom1MB"
