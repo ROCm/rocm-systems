@@ -6839,6 +6839,16 @@
           "test_filter": "DdaMPI_BroadcastLL128MixedShots.*"
         },
         {
+          "name": "DDA_Fabric_Broadcast_LL128_TwoShotUnroll2",
+          "description": "DDA fabric Broadcast LL128 two-shot at every size with 2 slices per warp task (RCCL_DDA_LL128_BC_UNROLL and RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD=0 set in-process): every root, unaligned and mixed-alignment buffers, back to back",
+          "test_filter": "DdaMPI_BroadcastLL128Unroll2.*"
+        },
+        {
+          "name": "DDA_Fabric_Broadcast_LL128_TwoShotUnroll4",
+          "description": "DDA fabric Broadcast LL128 two-shot at every size with 4 slices per warp task (RCCL_DDA_LL128_BC_UNROLL and RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD=0 set in-process): every root, unaligned and mixed-alignment buffers, back to back",
+          "test_filter": "DdaMPI_BroadcastLL128Unroll4.*"
+        },
+        {
           "name": "DDA_Fabric_Broadcast_Transition",
           "description": "DDA fabric Broadcast LL and LL128 alternated on one comm, synced and back to back",
           "test_filter": "DdaMPI_BroadcastTransition.LLThenLL128ThenLL:DdaMPI_BroadcastTransition.BackToBackNoSync"

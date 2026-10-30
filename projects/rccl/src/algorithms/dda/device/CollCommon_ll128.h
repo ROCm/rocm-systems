@@ -237,12 +237,13 @@ __device__ __forceinline__ void ddaLL128UserStore16B(void* dst, uint64_t lo, uin
 }
 
 // load of slice's payload from `src` into registers
-template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp>
-__device__ __forceinline__ void ddaLL128LoadRegs(
-    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+// kW > 8 covers kW/8 consecutive slices at once (same wire and user layout).
+template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp,
+          int kW = kDdaLL128WordsPerThread>
+__device__ __forceinline__ void ddaLL128LoadRegs(uint64_t (&regs)[kW], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
-  for (int g = 0; g < kDdaLL128Pairs; g++) {
+  for (int g = 0; g < kW / 2; g++) {
     if (!flag || g % 2 == 0) {
       int ix = ddaLL128ChunkIx<kLineElems, kWarp>(g, wid);
       if (ix * EltPer16B < eltN)
@@ -250,25 +251,25 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     }
   }
 #pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
+  for (int g = 1; g < kW / 2; g += 2)  // move flag-lane data out of odd regs
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// Store one slice to the wire with the flag word embedded on the flag lane
-template <int kWarp = kDdaLL128Warp>
-__device__ __forceinline__ void ddaLL128StoreWire(
-  uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag, bool flagLane) {
+// Store kW/8 consecutive slices to the wire with the flag word embedded on the flag lane
+template <int kWarp = kDdaLL128Warp, int kW = kDdaLL128WordsPerThread>
+__device__ __forceinline__ void ddaLL128StoreWire(uint64_t* wire, const uint64_t (&regs)[kW], uint64_t flag,
+                                                  bool flagLane) {
 #pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+  for (int u = 0; u < kW; u += 2)
     ddaLL128StoreAtomic16B(wire + u * kWarp, regs[u], flagLane ? flag : regs[u + 1]);
 }
 
 // Poll until every line this lane reads has landed. With the cooperative load the
 // payload arrives with its flag, so only the 16B fallback reads it again.
 // Returns false if the comm abort flag is set so the kernel can leave the wait.
-template <int kLineElems = kDdaLL128LineElems, int kWarp = kDdaLL128Warp>
-__device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
-                                                 uint64_t flag, int wid, DdaKernelParams params) {
+template <int kLineElems = kDdaLL128LineElems, int kWarp = kDdaLL128Warp, int kW = kDdaLL128WordsPerThread>
+__device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kW], uint64_t flag, int wid,
+                                                 DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane<kLineElems>(wid);
   int spins = 0;
   bool needReload;
@@ -276,36 +277,36 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
     if (params.abortSpinTick(spins)) return false;
     needReload = false;
 #pragma unroll
-    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    for (int u = 0; u < kW; u += 2) {
       ddaLL128LoadAtomic16B(wire + u * kWarp, vr[u], vr[u + 1]);
       needReload |= flagLane && (vr[u + 1] != flag);
     }
   } while (__any(needReload));
 #if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+  for (int u = 0; u < kW; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kWarp, vr[u], vr[u + 1]);
 #endif
   return true;
 }
 
 // Zero this lane's share of a consumed slice (the words ddaLL128PollWire read).
-template <int kWarp = kDdaLL128Warp>
+template <int kWarp = kDdaLL128Warp, int kW = kDdaLL128WordsPerThread>
 __device__ __forceinline__ void ddaLL128ClearWire(uint64_t* wire) {
 #pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) ddaLL128Store16B(wire + u * kWarp, 0, 0);
+  for (int u = 0; u < kW; u += 2) ddaLL128Store16B(wire + u * kWarp, 0, 0);
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`
-template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp>
-__device__ __forceinline__ void ddaLL128StoreRegs(
-    T* dst, uint64_t (&regs)[kDdaLL128WordsPerThread], int eltN, int wid, bool flag) {
+template <typename T, int kLineElems = kDdaLL128LineElems, bool kAligned = true, int kWarp = kDdaLL128Warp,
+          int kW = kDdaLL128WordsPerThread>
+__device__ __forceinline__ void ddaLL128StoreRegs(T* dst, uint64_t (&regs)[kW], int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // reverse the load shuffle
+  for (int g = 1; g < kW / 2; g += 2)  // reverse the load shuffle
     if (flag) regs[2 * g - 1] = regs[2 * g];
 #pragma unroll
-  for (int g = 0; g < kDdaLL128Pairs; g++) {
+  for (int g = 0; g < kW / 2; g++) {
     if (!flag || g % 2 == 0) {
       int ix = ddaLL128ChunkIx<kLineElems, kWarp>(g, wid);
       if (ix * EltPer16B < eltN)

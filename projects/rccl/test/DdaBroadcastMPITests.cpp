@@ -48,6 +48,7 @@
 
 RCCL_PARAM_DECLARE(DdaBc);
 RCCL_PARAM_DECLARE(DdaLL128BcOneShotThreshold);
+RCCL_PARAM_DECLARE(DdaLL128BcUnroll);
 
 using namespace MPITestConstants;
 
@@ -587,6 +588,71 @@ TEST_F(DdaMPI_BroadcastLL128MixedShots, WithLLBackToBackNoSync) {
                                            {kLL128Cap, RCCL_DDA_FABRIC_LL128},
                                            {kLLMultiChunk, RCCL_DDA_FABRIC_LL}};
   backToBackRounds(steps);
+}
+
+// Two-shot at every LL128 size with kU slices per warp task forced; the auto unroll needs chunks past the cap.
+template <int kU>
+class DdaBroadcastLL128UnrollMPITest : public DdaBroadcastLL128PinnedMPITest {
+protected:
+  std::vector<Pinned> pinned() const override {
+    return {{"RCCL_DDA_LL128_BC_UNROLL", kU, rcclParamDdaLL128BcUnroll},
+            {"RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD", 0, rcclParamDdaLL128BcOneShotThreshold}};
+  }
+
+  // Every chunk a whole number of 4-slice tasks, the last slice partial: a short slice inside an unrolled task.
+  size_t partialSliceInFullTask() const {
+    const size_t perRound = 4 * static_cast<size_t>(nRanks_ - 1);
+    const size_t slices = (kLL128PartialSlice / kLL128SliceBytes + perRound) / perRound * perRound;
+    return (slices - 1) * kLL128SliceBytes + 16;
+  }
+
+  void allRootsUnrolled() {
+    allRootsBothPlacements({kLL128PartialSlice, partialSliceInFullTask(), kLL128Mid, kLL128Cap});
+  }
+
+  // Uniform offsets, then odd ranks' recvbuff off by 8 so unrolled and kU=1 non-roots forward to each other.
+  void unalignedUnrolled() {
+    unalignedLL128();
+    for (size_t bytes : {partialSliceInFullTask(), kLL128Mid}) {
+      for (int root = 0; root < nRanks_; ++root) {
+        if (HasFatalFailure() || IsSkipped()) return;
+        broadcastAndCheck({bytes, root, false, 0, rank_ % 2 == 1 ? size_t{8} : size_t{0}}, RCCL_DDA_FABRIC_LL128);
+      }
+    }
+  }
+
+  void backToBackUnrolled() {
+    const size_t mixed = partialSliceInFullTask();
+    const size_t sizes[7] = {kLL128PartialSlice, kLL128Mid, mixed, kLL128Cap, kLL128PartialSlice, mixed, kLL128Mid};
+    backToBackRounds(sizes, RCCL_DDA_FABRIC_LL128);
+  }
+};
+
+class DdaMPI_BroadcastLL128Unroll2 : public DdaBroadcastLL128UnrollMPITest<2> {};
+class DdaMPI_BroadcastLL128Unroll4 : public DdaBroadcastLL128UnrollMPITest<4> {};
+
+TEST_F(DdaMPI_BroadcastLL128Unroll2, AllRoots) {
+  allRootsUnrolled();
+}
+
+TEST_F(DdaMPI_BroadcastLL128Unroll2, UnalignedBuffers) {
+  unalignedUnrolled();
+}
+
+TEST_F(DdaMPI_BroadcastLL128Unroll2, BackToBackNoSync) {
+  backToBackUnrolled();
+}
+
+TEST_F(DdaMPI_BroadcastLL128Unroll4, AllRoots) {
+  allRootsUnrolled();
+}
+
+TEST_F(DdaMPI_BroadcastLL128Unroll4, UnalignedBuffers) {
+  unalignedUnrolled();
+}
+
+TEST_F(DdaMPI_BroadcastLL128Unroll4, BackToBackNoSync) {
+  backToBackUnrolled();
 }
 
 #endif  // MPI_TESTS_ENABLED

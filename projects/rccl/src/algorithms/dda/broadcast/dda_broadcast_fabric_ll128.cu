@@ -28,6 +28,9 @@ RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", 0);
 // One-shot up to this many bytes, scatter-allgather above it (up to the LL128 tier cap).
 RCCL_PARAM(DdaLL128BcOneShotThreshold, "DDA_LL128_BC_ONESHOT_THRESHOLD", (int64_t)256 * 1024);
 
+// Two-shot slices per warp task: 1, 2 or 4; 0 picks it by size, see ddaLL128BcUnroll.
+RCCL_PARAM(DdaLL128BcUnroll, "DDA_LL128_BC_UNROLL", 0);
+
 namespace {
 
 using dda::common::ddaBankSize;
@@ -54,6 +57,11 @@ bool ddaLL128BcTwoShot(size_t bytes) {
   return (int64_t)bytes > rcclParamDdaLL128BcOneShotThreshold();
 }
 
+// Two-shot chunk size in bytes.
+size_t ddaLL128BcChunkBytes(const ncclComm* comm, size_t bytes) {
+  return bytes / (size_t)(comm->nRanks - 1);
+}
+
 // RCCL_DDA_LL128_BC_THREADS when it is a multiple of the arch warp and at most kDdaBcMaxThreads.
 // Otherwise tuned on gfx1250: smaller blocks spread small chunks over more CUs.
 unsigned ddaLL128BcThreads(const ncclComm* comm, size_t bytes) {
@@ -63,8 +71,16 @@ unsigned ddaLL128BcThreads(const ncclComm* comm, size_t bytes) {
     return (unsigned)userInput;
   }
   if (!ddaLL128BcTwoShot(bytes)) return 256;
-  const size_t chunk = bytes / (size_t)(comm->nRanks - 1);
+  const size_t chunk = ddaLL128BcChunkBytes(comm, bytes);
   return chunk <= ((size_t)512 << 10) ? 128 : chunk <= ((size_t)4 << 20) ? 256 : 512;
+}
+
+// Slices per two-shot warp task. Tuned on gfx1250: from 8 MiB chunks 4 up to 4 ranks, 2 above; else 1.
+int ddaLL128BcUnroll(const ncclComm* comm, size_t bytes) {
+  const int64_t u = rcclParamDdaLL128BcUnroll();
+  if (u == 1 || u == 2 || u == 4) return (int)u;
+  if (ddaLL128BcChunkBytes(comm, bytes) < ((size_t)8 << 20)) return 1;
+  return comm->nRanks <= 4 ? 4 : 2;
 }
 
 size_t ddaLL128BcSlices(const ncclComm* comm, size_t bytes) {
@@ -80,15 +96,17 @@ dim3 ddaLL128BcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
   const size_t peers = (size_t)(comm->nRanks - 1);
   const size_t slices = ddaLL128BcSlices(comm, bytes);
   const bool twoShot = ddaLL128BcTwoShot(bytes);
-  const size_t cs = (slices + peers - 1) / peers;
-  const size_t rootSlices = twoShot ? cs : slices;
+  // Unaligned ranks launch kU=1 on this grid (eligibility is rank-uniform); grid-stride loops cover the rest.
+  const size_t ng = dda::common::ddaLL128BcChunkTasks(dda::common::ddaLL128BcChunkSlices(slices, comm->nRanks),
+                                                      ddaLL128BcUnroll(comm, bytes));
+  const size_t rootTasks = twoShot ? ng : slices;
   const size_t budget = ncclBroadcastDdaBlockBudget(comm);
   if (isRoot) {
-    const size_t groups = (rootSlices + warps - 1) / warps;
+    const size_t groups = (rootTasks + warps - 1) / warps;
     const size_t perPeer = budget / peers < 1 ? 1 : budget / peers;
     return dim3((unsigned)peers, (unsigned)(groups < perPeer ? groups : perPeer));
   }
-  const size_t groups = ((twoShot ? peers * cs : slices) + warps - 1) / warps;
+  const size_t groups = ((twoShot ? peers * ng : slices) + warps - 1) / warps;
   return dim3((unsigned)(groups < budget ? groups : budget));
 }
 
@@ -136,32 +154,33 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
   const DdaLL128BcArch arch = ddaLL128BcArch(comm);
   const unsigned threads = ddaLL128BcThreads(comm, bytes);
   const bool twoShot = ddaLL128BcTwoShot(bytes);
+  const int u = twoShot && aligned ? ddaLL128BcUnroll(comm, bytes) : 1;
   INFO(NCCL_COLL,
-       "DDA Broadcast LL128 %s: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u line=%dB warp=%zu aligned=%d",
+       "DDA Broadcast LL128 %s: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u line=%dB warp=%zu aligned=%d "
+       "unroll=%d",
        twoShot ? "two-shot" : "one-shot", comm->nRanks, root, bytes, grid.x, grid.y, threads, arch.lineBytes,
-       arch.warp, (int)aligned);
+       arch.warp, (int)aligned, u);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (twoShot && aligned) {
-    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128TwoShot<true>), grid, dim3(threads), 0,
-                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
-                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
-  } else if (twoShot) {
-    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128TwoShot<false>), grid, dim3(threads), 0,
-                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
-                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
-  } else if (aligned) {
-    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128<true>), grid, dim3(threads), 0,
-                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
-                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+  auto launch = [&](auto kernel) {
+    hipExtLaunchKernelGGL(kernel, grid, dim3(threads), 0, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
+                          static_cast<char*>(recvbuff), static_cast<const char*>(sendbuff), bytes, comm->rank,
+                          comm->nRanks, root, comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+  };
+  if (!twoShot) {
+    if (aligned) {
+      launch(dda::common::ddaBroadcastFabricLL128<true>);
+    } else {
+      launch(dda::common::ddaBroadcastFabricLL128<false>);
+    }
+  } else if (!aligned) {
+    launch(dda::common::ddaBroadcastFabricLL128TwoShot<false, 1>);
+  } else if (u == 4) {
+    launch(dda::common::ddaBroadcastFabricLL128TwoShot<true, 4>);
+  } else if (u == 2) {
+    launch(dda::common::ddaBroadcastFabricLL128TwoShot<true, 2>);
   } else {
-    hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL128<false>), grid, dim3(threads), 0,
-                          stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
-                          static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+    launch(dda::common::ddaBroadcastFabricLL128TwoShot<true, 1>);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
