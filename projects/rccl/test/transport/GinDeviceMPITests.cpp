@@ -8138,4 +8138,49 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
 }
 
+// Four ranks, two per host, NCCL_GIN_TYPE unset (AICOMRCCL-3501). The world
+// comm spans both hosts and drops Anvil SDMA. Splitting it by host gives each
+// host a comm with topo->nHosts == 1, which must keep Anvil SDMA as the default
+// and complete a put/signal between its two local ranks. This fails if the drop
+// is keyed on the job or the world comm instead of the comm's own nHosts.
+TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodePerHostSplitKeepsAnvil) {
+  if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  int ranksPerNode = 0;
+  const bool uniform = uniformNodeLocalRanks(&ranksPerNode);
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/4, /*max_processes=*/4,
+                                     /*require_power_of_two=*/false, /*min_nodes=*/2, /*max_nodes=*/2) ||
+              !uniform || ranksPerNode != 2,
+          "Requires exactly 4 ranks, 2 on each of 2 hosts");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t world = getActiveCommunicator();
+  ASSERT_MPI_EQ(2, world->topo->nHosts);
+  ncclCommProperties_t worldProps = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(world, &worldProps));
+  ASSERT_MPI_EQ(false, worldProps.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+
+  // ncclCommSplit takes splitShare from the parent. A shared child would reuse
+  // the world comm's ginState, which no longer holds Anvil SDMA.
+  ncclComm_t host = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(world, world->topo->hostIdx, getTestMpiRank(), &host, nullptr));
+  ASSERT_MPI_TRUE(host != nullptr);
+  auto hostCleanup = makeScopeGuard([&]() {
+    if (host) (void)ncclCommDestroy(host);
+  });
+  ASSERT_MPI_TRUE(world->sharedRes != host->sharedRes);
+  ASSERT_MPI_EQ(1, host->topo->nHosts);
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(host, &props));
+  ASSERT_MPI_EQ(NCCL_GIN_TYPE_ANVIL_SDMA, props.ginType);
+  ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+  ASSERT_MPI_EQ(NCCL_GIN_CONNECTION_FULL, host->globalGinSupport);
+
+  runPutWaitRoundTrip(host, getActiveStream());
+}
+
 #endif  // MPI_TESTS_ENABLED
