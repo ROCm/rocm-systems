@@ -20,23 +20,46 @@
 
 namespace rocjitsu::arith::test {
 
+// Pin the FP16 FMA boundary where directed rounding precedes output flushing.
+template <int Lanes, typename Call> void check_half_fma_directed_flush(Call call) {
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto cpus = supported_cpu_levels();
+  // Directed rounding can promote a tiny half result before output flushing.
+  for (uint64_t cpu : cpus) {
+    for (bool negative : {false, true}) {
+      Registers<10, Lanes> r{};
+      r.v[0][0] = 0x0800;
+      r.v[2][0] = negative ? 0x0ab1 : 0x8ab1;
+      r.v[4][0] = negative ? 0x8400 : 0x0400;
+      uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                       (negative ? RJ_ARITH_FP_ROUND_DOWN : RJ_ARITH_FP_ROUND_UP);
+      ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0] & 0xffffU, negative ? 0x8400U : 0x0400U);
+    }
+  }
+}
+
 // Differential SIMD regression coverage, supplementing the independent arithmetic
 // references and status fixtures. This checks optimization against the inherited
 // scalar model, not the model's agreement with hardware.
-template <int Width, int Lanes, typename Call>
-void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cases) {
+template <int Width, int Lanes, bool Packed = false, typename Call>
+void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cases,
+                    bool check_register_input_flush = true) {
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   const auto cpus = supported_cpu_levels();
-  // A tiny input times a large finite factor is observably nonzero unless flushed.
-  for (uint64_t cpu : cpus) {
-    Registers<4, Lanes> r;
-    r.v[0][0] = 1;
-    r.v[1][0] = Width == 16 ? 0x7bffU : 0x7f7fffffU;
-    r.v[2][0] = 0;
-    ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, Mask(1), 0,
-                   r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
-              RJ_ARITH_SUCCESS);
-    EXPECT_EQ(r.v[3][0] & (Width == 16 ? 0xffffU : 0xffffffffU), 0U);
+  if (check_register_input_flush) {
+    // A tiny input times a large finite factor is observably nonzero unless flushed.
+    for (uint64_t cpu : cpus) {
+      Registers<4, Lanes> r;
+      r.v[0][0] = 1;
+      r.v[1][0] = Width == 16 ? 0x7bffU : 0x7f7fffffU;
+      r.v[2][0] = r.v[3][0] = 0;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, Mask(1), 0,
+                     r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[3][0] & (Width == 16 ? 0xffffU : 0xffffffffU), 0U);
+    }
   }
   std::minstd_rand rng;
   for (int sample = 0; sample < (Width == 16 ? 16 : 12); ++sample) {
@@ -72,10 +95,13 @@ void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cas
       }
     }
     for (uint64_t instruction_flags : instruction_flag_cases) {
-      for (uint64_t fp : {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN,
-                          RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
-                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, RJ_ARITH_FP16_OVFL,
-                          RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+      for (uint64_t fp :
+           {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO,
+            RJ_ARITH_FP_ROUND_UP | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+            RJ_ARITH_FP16_OVFL,
+            RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
         for (uint64_t semantics :
              {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
@@ -108,14 +134,20 @@ void check_fma_simd(Call call, const std::vector<uint64_t> &instruction_flag_cas
                                std::bit_cast<float>(expected.words[reg][word]), semantics,
                                /*atol=*/1e-5, /*rtol=*/1e-6);
                   } else {
-                    const int shift = instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-                    expect_f32(std::bit_cast<uint32_t>(
-                                   float(half_value(uint16_t(actual.words[reg][word] >> shift)))),
-                               float(half_value(uint16_t(expected.words[reg][word] >> shift))),
-                               semantics, /*atol=*/0x1p-14, /*rtol=*/0x1p-9);
-                    EXPECT_EQ((actual.words[reg][word] ^ expected.words[reg][word]) &
-                                  (shift ? 0xffffU : 0xffff0000U),
-                              0U);
+                    for (int half = 0; half < (Packed ? 2 : 1); ++half) {
+                      const int shift = Packed                                    ? half * 16
+                                        : instruction_flags & RJ_ARITH_ALU_HIGH_D ? 16
+                                                                                  : 0;
+                      expect_f32(std::bit_cast<uint32_t>(
+                                     float(half_value(uint16_t(actual.words[reg][word] >> shift)))),
+                                 float(half_value(uint16_t(expected.words[reg][word] >> shift))),
+                                 semantics, /*atol=*/0x1p-14, /*rtol=*/0x1p-9);
+                      if constexpr (!Packed) {
+                        EXPECT_EQ((actual.words[reg][word] ^ expected.words[reg][word]) &
+                                      (shift ? 0xffffU : 0xffff0000U),
+                                  0U);
+                      }
+                    }
                   }
                 } else {
                   ASSERT_EQ(actual.words[reg][word], expected.words[reg][word])
