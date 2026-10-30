@@ -146,6 +146,8 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
   auto decoder = Decoder::create(GetParam());
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
+  // DMASK=0xa returns two DWORDs; TFE does not add a RESINFO result.
+  ASSERT_EQ(inst->dst_operand(0)->size_bits(), 64);
   ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t lane : {0u, last}) {
     EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 8);

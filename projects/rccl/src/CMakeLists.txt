@@ -63,6 +63,7 @@ set(SRC_FILES
   device/hierarchical_shuffle.h
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
+  device/ll128Layout.h
   device/onerank.cu
   device/op128.h
   device/primitives.h
@@ -87,8 +88,10 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
+  device/tdm/ll128Tdm.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
+  device/tdm/tdmReduce.h
   algorithms/dda/device/device_buffer.cc
   diagnostics.cc
   diagnostics.h
@@ -141,6 +144,7 @@ set(SRC_FILES
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/device/dda_kernel_params.h
   algorithms/dda/all_gather/all_gather_dda.h
   algorithms/dda/all_gather/all_gather_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
@@ -545,6 +549,7 @@ set(SRC_FILES
   ras/ras_param.h
   ras/rasnet.cc
   rccl_arch_thresholds.cc
+  rccl_dev_runtime.cc
   rccl_wrap.cc
   register/coll_reg.cc
   register/register.cc
@@ -574,6 +579,7 @@ set(SRC_FILES
   transport/net_ib/gin.h
   transport/net_ib/init.cc
   transport/net_ib/net_ib_gid_inspect.cc
+  transport/net_ib/net_ib_wqe_lat_inspect.cc
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
@@ -587,6 +593,7 @@ set(SRC_FILES
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
+  transport/net_ib_wqe_lat_inspect.h
   transport/net_socket.cc
   transport/net_socket/common.cc
   transport/net_socket/common.h
@@ -1197,7 +1204,7 @@ if (ENABLE_ROCSHMEM_GIN)
     # SDMA anvil host code: copied into build tree (no sed — host code needs
     # unqualified log.hpp to find the host shim via include path ordering).
     set(_GIN_SDMA_DIR "${PROJECT_BINARY_DIR}/gin/sdma")
-    foreach(_f anvil.cpp anvil.hpp)
+    foreach(_f anvil.cpp anvil.hpp anvil_engine_map.hpp)
       add_custom_command(
         OUTPUT "${_GIN_SDMA_DIR}/${_f}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_SDMA_DIR}"
@@ -1225,6 +1232,9 @@ if (ENABLE_ROCSHMEM_GIN)
     add_custom_target(copy_rocshmem_sdma_sources DEPENDS ${_GIN_SDMA_OUTPUTS})
     add_dependencies(copy_rocshmem_headers copy_rocshmem_sdma_sources)
     target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
+    # Apps that link librocshmem.a carry their own anvil.cpp. Keep this copy private even when
+    # librccl exports its symbols, or both copies destroy the same globals at exit.
+    set_source_files_properties("${_GIN_SDMA_DIR}/anvil.cpp" PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
 
@@ -1339,6 +1349,10 @@ endif()
 if(CUMEM_DMABUF_EXPORT_ENABLED)
   target_compile_definitions(rccl PRIVATE RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
   message(STATUS "RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED compile definition enabled")
+endif()
+if(HIP_MEM_LOCATION_TYPE_HOST)
+  target_compile_definitions(rccl PRIVATE RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+  message(STATUS "RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
@@ -1653,10 +1667,10 @@ if(ENABLE_ROCSHMEM)
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
+  # Full target IDs, not bare names
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
-    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
-    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
   endforeach()
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})

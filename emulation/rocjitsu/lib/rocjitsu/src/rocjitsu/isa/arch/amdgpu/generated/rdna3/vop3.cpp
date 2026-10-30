@@ -1116,6 +1116,7 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   src0.set_register_byte_mask(
       src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
@@ -2546,6 +2547,7 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2605,6 +2607,7 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3785,6 +3788,7 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3844,6 +3848,7 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3897,6 +3902,7 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3954,6 +3960,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6882,6 +6889,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -6948,6 +6956,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8365,6 +8374,9 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8848,6 +8860,9 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -8927,6 +8942,9 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9085,6 +9103,9 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9164,6 +9185,9 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9322,6 +9346,9 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9401,6 +9428,9 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9480,6 +9510,9 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -9878,6 +9911,8 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
 
 namespace detail {
@@ -9946,6 +9981,8 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
 }
 
 namespace detail {
@@ -10086,6 +10123,9 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10753,6 +10793,7 @@ VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::BF16);
 }
 
 namespace detail {
@@ -10822,6 +10863,8 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10891,6 +10934,8 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -10960,6 +11005,8 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11139,6 +11186,8 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11208,6 +11257,8 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11277,6 +11328,8 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11346,6 +11399,8 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11415,6 +11470,8 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -11484,6 +11541,8 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12681,6 +12740,8 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12751,6 +12812,8 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -12821,6 +12884,8 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13080,6 +13145,8 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13149,6 +13216,8 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13218,6 +13287,8 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13287,6 +13358,7 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13350,6 +13422,7 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13413,6 +13486,7 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13476,6 +13550,7 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13539,6 +13614,7 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13602,6 +13678,7 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13665,6 +13742,7 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13728,6 +13806,7 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13791,6 +13870,7 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13854,6 +13934,7 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13917,6 +13998,7 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -13980,6 +14062,7 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14043,6 +14126,7 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14106,6 +14190,7 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14169,6 +14254,7 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14232,6 +14318,7 @@ VCmpTF16Vop3::VCmpTF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14287,6 +14374,7 @@ VCmpFF32Vop3::VCmpFF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14342,6 +14430,7 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14397,6 +14486,7 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14452,6 +14542,7 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14507,6 +14598,7 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14562,6 +14654,7 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14617,6 +14710,7 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14672,6 +14766,7 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14727,6 +14822,7 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14782,6 +14878,7 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14837,6 +14934,7 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14892,6 +14990,7 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -14947,6 +15046,7 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15002,6 +15102,7 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15057,6 +15158,7 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15112,6 +15214,7 @@ VCmpTF32Vop3::VCmpTF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15152,6 +15255,7 @@ VCmpFF64Vop3::VCmpFF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15190,6 +15294,7 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15228,6 +15333,7 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15266,6 +15372,7 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15304,6 +15411,7 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15342,6 +15450,7 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15380,6 +15489,7 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15418,6 +15528,7 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15456,6 +15567,7 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15494,6 +15606,7 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15532,6 +15645,7 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15570,6 +15684,7 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15608,6 +15723,7 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15646,6 +15762,7 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15684,6 +15801,7 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15722,6 +15840,7 @@ VCmpTF64Vop3::VCmpTF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15783,6 +15902,9 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15846,6 +15968,9 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15909,6 +16034,9 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -15972,6 +16100,9 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16035,6 +16166,9 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16098,6 +16232,9 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16161,6 +16298,9 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16224,6 +16364,9 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16287,6 +16430,9 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16350,6 +16496,9 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16413,6 +16562,9 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16476,6 +16628,9 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16531,6 +16686,7 @@ VCmpFI32Vop3::VCmpFI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16586,6 +16742,7 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16641,6 +16798,7 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16696,6 +16854,7 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16751,6 +16910,7 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16806,6 +16966,7 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16861,6 +17022,7 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16916,6 +17078,7 @@ VCmpTI32Vop3::VCmpTI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -16971,6 +17134,7 @@ VCmpFU32Vop3::VCmpFU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17026,6 +17190,7 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17081,6 +17246,7 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17136,6 +17302,7 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17191,6 +17358,7 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17246,6 +17414,7 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17301,6 +17470,7 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17356,6 +17526,7 @@ VCmpTU32Vop3::VCmpTU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17396,6 +17567,7 @@ VCmpFI64Vop3::VCmpFI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17434,6 +17606,7 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17472,6 +17645,7 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17510,6 +17684,7 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17548,6 +17723,7 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17586,6 +17762,7 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17624,6 +17801,7 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17662,6 +17840,7 @@ VCmpTI64Vop3::VCmpTI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17700,6 +17879,7 @@ VCmpFU64Vop3::VCmpFU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17738,6 +17918,7 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17776,6 +17957,7 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17814,6 +17996,7 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17852,6 +18035,7 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17890,6 +18074,7 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17928,6 +18113,7 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -17966,6 +18152,7 @@ VCmpTU64Vop3::VCmpTU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -18027,6 +18214,7 @@ VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
 }
 
 namespace detail {
@@ -18082,6 +18270,7 @@ VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_wave_mask();
 }
 
 namespace detail {
@@ -18121,6 +18310,7 @@ VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  vdst.set_wave_mask();
 }
 
 namespace detail {
@@ -18185,6 +18375,7 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18251,6 +18442,7 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18317,6 +18509,7 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18383,6 +18576,7 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18449,6 +18643,7 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18515,6 +18710,7 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18581,6 +18777,7 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18647,6 +18844,7 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18713,6 +18911,7 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18779,6 +18978,7 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18846,6 +19046,7 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18913,6 +19114,7 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -18980,6 +19182,7 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19047,6 +19250,7 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19114,6 +19318,7 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19181,6 +19386,7 @@ VCmpxTF16Vop3::VCmpxTF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19239,6 +19445,7 @@ VCmpxFF32Vop3::VCmpxFF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19297,6 +19504,7 @@ VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19355,6 +19563,7 @@ VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19413,6 +19622,7 @@ VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19471,6 +19681,7 @@ VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19529,6 +19740,7 @@ VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19587,6 +19799,7 @@ VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19645,6 +19858,7 @@ VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19703,6 +19917,7 @@ VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19761,6 +19976,7 @@ VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19820,6 +20036,7 @@ VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19879,6 +20096,7 @@ VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19938,6 +20156,7 @@ VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -19997,6 +20216,7 @@ VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20056,6 +20276,7 @@ VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20115,6 +20336,7 @@ VCmpxTF32Vop3::VCmpxTF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20158,6 +20380,7 @@ VCmpxFF64Vop3::VCmpxFF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20199,6 +20422,7 @@ VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20240,6 +20464,7 @@ VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20281,6 +20506,7 @@ VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20322,6 +20548,7 @@ VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20363,6 +20590,7 @@ VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20404,6 +20632,7 @@ VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20445,6 +20674,7 @@ VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20486,6 +20716,7 @@ VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20527,6 +20758,7 @@ VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20569,6 +20801,7 @@ VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20611,6 +20844,7 @@ VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20653,6 +20887,7 @@ VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20695,6 +20930,7 @@ VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20737,6 +20973,7 @@ VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20779,6 +21016,7 @@ VCmpxTF64Vop3::VCmpxTF64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -20843,6 +21081,9 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20909,6 +21150,9 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -20975,6 +21219,9 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21041,6 +21288,9 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21107,6 +21357,9 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21173,6 +21426,9 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21239,6 +21495,9 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21305,6 +21564,9 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21371,6 +21633,9 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21437,6 +21702,9 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21503,6 +21771,9 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21569,6 +21840,9 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -21627,6 +21901,7 @@ VCmpxFI32Vop3::VCmpxFI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21685,6 +21960,7 @@ VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21743,6 +22019,7 @@ VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21801,6 +22078,7 @@ VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21859,6 +22137,7 @@ VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21917,6 +22196,7 @@ VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -21975,6 +22255,7 @@ VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22033,6 +22314,7 @@ VCmpxTI32Vop3::VCmpxTI32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22091,6 +22373,7 @@ VCmpxFU32Vop3::VCmpxFU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22149,6 +22432,7 @@ VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22207,6 +22491,7 @@ VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22265,6 +22550,7 @@ VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22323,6 +22609,7 @@ VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22381,6 +22668,7 @@ VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22439,6 +22727,7 @@ VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22497,6 +22786,7 @@ VCmpxTU32Vop3::VCmpxTU32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22540,6 +22830,7 @@ VCmpxFI64Vop3::VCmpxFI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22581,6 +22872,7 @@ VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22622,6 +22914,7 @@ VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22663,6 +22956,7 @@ VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22704,6 +22998,7 @@ VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22745,6 +23040,7 @@ VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22786,6 +23082,7 @@ VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22827,6 +23124,7 @@ VCmpxTI64Vop3::VCmpxTI64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22868,6 +23166,7 @@ VCmpxFU64Vop3::VCmpxFU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22909,6 +23208,7 @@ VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22950,6 +23250,7 @@ VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -22991,6 +23292,7 @@ VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23032,6 +23334,7 @@ VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23073,6 +23376,7 @@ VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23114,6 +23418,7 @@ VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23155,6 +23460,7 @@ VCmpxTU64Vop3::VCmpxTU64Vop3(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23219,6 +23525,7 @@ VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23278,6 +23585,7 @@ VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23321,6 +23629,7 @@ VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   sdst_exec.apply_fieldless_caps(false, false, false);
+  vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
 }
 
@@ -23379,6 +23688,8 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
+  src2.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23447,6 +23758,8 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
+  src2.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23515,6 +23828,8 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
+  src2.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23570,6 +23885,7 @@ VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
     src2 = Operand(32, OperandType::OPR_SIMM32,
                    static_cast<int>(
                        reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32));
+  sdst.set_wave_mask();
 }
 
 namespace detail {
@@ -23621,6 +23937,7 @@ VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
         static_cast<uint32_t>(
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  sdst.set_wave_mask();
 }
 
 namespace detail {
@@ -23668,6 +23985,7 @@ VMadU64U32Vop3SdstEnc::VMadU64U32Vop3SdstEnc(const MachineInst *inst)
         static_cast<uint32_t>(
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  sdst.set_wave_mask();
 }
 
 namespace detail {
@@ -23715,6 +24033,7 @@ VMadI64I32Vop3SdstEnc::VMadI64I32Vop3SdstEnc(const MachineInst *inst)
         static_cast<uint32_t>(
             reinterpret_cast<const Vop3SdstEncInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  sdst.set_wave_mask();
 }
 
 namespace detail {
@@ -23771,6 +24090,7 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23837,6 +24157,7 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -23903,6 +24224,7 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  sdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
