@@ -21,14 +21,11 @@ namespace RcclUnitTesting
   {
   public:
     int                        numDevicesAvailable;   // # of devices detected on node
-    std::vector<TestBedChild*> childList;             // List of child processes
-    std::vector<int>           rankToChildMap;        // Tracks which child process each rank is assigned to
-    std::vector<int>           rankToDeviceMap;       // Tracks which device each rank is assigned to
+    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms)
+    std::vector<int>           rankToChildMap;        // Child process of each active rank
     std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
     std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
     int                        numGroupCalls;         // Total # of group calls to be executed
-    int                        numActiveChildren;     // List of active children (with usable RCCL comms)
-    int                        numActiveRanks;        // Current # of ranks in use
     bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
     MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
     EnvVars                    ev;                    // Environment variables
@@ -46,6 +43,9 @@ namespace RcclUnitTesting
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
+
+    int NumActiveChildren() const { return static_cast<int>(childList.size()); }
+    int NumActiveRanks() const    { return static_cast<int>(rankToChildMap.size()); }
 
     // Prepare TestBed with multiple group call customization
     void InitComms(std::vector<std::vector<int>> const& deviceIdsPerChild,
@@ -245,6 +245,23 @@ namespace RcclUnitTesting
     // children wait on each other, so a failure with acks still owed stops every worker.
     void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr,
                      bool peersInterlocked = false);
+
+    // Forgets the active config's children, ranks and failure flag; owned children
+    // must already be reaped. configUsedPool still reports how that config was served.
+    void ResetActiveConfig();
+
+    // Fill ranks / groups with the selection (-1 = all active). False, with a test
+    // failure, when a specific rank / group is not active, so a mistyped target
+    // cannot turn the command into a silent no-op.
+    bool SelectRanks(int rank, std::vector<int>& ranks) const;
+    bool SelectGroups(int groupId, std::vector<int>& groups) const;
+
+    // ranks grouped by owning child, indexed by child id.
+    std::vector<std::vector<int>> RanksPerChild(std::vector<int> const& ranks) const;
+
+    // Ids of all active children / of the children that own at least one rank, ascending.
+    std::vector<int> AllChildIds() const;
+    static std::vector<int> ChildrenWithRanks(std::vector<std::vector<int>> const& ranksPerChild);
 
     // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
     // compatibility with existing tests, and extend registration for symmetric memory.

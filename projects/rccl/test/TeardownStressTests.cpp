@@ -116,7 +116,7 @@ namespace RcclUnitTesting
   }
 
   // Teardown across a varying number of child processes within one test, so
-  // DestroyComms is exercised with different numActiveChildren values back to
+  // DestroyComms is exercised with different child counts back to
   // back. Catches assumptions that only hold for a fixed child count.
   TEST(Teardown, DestroyCommsVaryingChildCount)
   {
@@ -159,8 +159,7 @@ namespace RcclUnitTesting
     child->childWriteFd = -1;
     child->childReadFd = -1;
     testBed.childList = {child};
-    testBed.numActiveChildren = 1;
-    testBed.numActiveRanks = 1;
+    testBed.rankToChildMap = {0};
 
     // Wait until the worker has exited, but leave it for TestBed to reap.
     siginfo_t childInfo{};
@@ -173,8 +172,7 @@ namespace RcclUnitTesting
     testBed.TeardownOwnedChildList();
 
     EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.numActiveChildren, 0);
-    EXPECT_EQ(testBed.numActiveRanks, 0);
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
@@ -235,8 +233,7 @@ namespace RcclUnitTesting
       TestBedChild* const child = ForkHungChild(0);
       if (child == nullptr) return nullptr;
       testBed.childList = {child};
-      testBed.numActiveChildren = 1;
-      testBed.numActiveRanks = 1;
+      testBed.rankToChildMap = {0};
       return child;
     }
 
@@ -267,7 +264,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(AnyFailureMentions(failures, "stopped responding"));
     EXPECT_LT(elapsed, std::chrono::seconds(30));
     EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
     EXPECT_FALSE(testBed.childFailed);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
@@ -290,7 +287,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(AnyFailureMentions(failures, "teardown deadline"));
     EXPECT_LT(elapsed, std::chrono::seconds(30));
     EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
     errno = 0;
     EXPECT_EQ(waitpid(childPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);
@@ -391,7 +388,7 @@ namespace RcclUnitTesting
     EXPECT_LT(elapsed, std::chrono::microseconds(testBed.ev.timeoutUs))
       << "Waited for rank 1 to time out instead of stopping the workers";
     EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
     testBed.Finalize();
   }
 
@@ -415,7 +412,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(AnyFailureMentions(failures, "Child 1 reported failure"));
     EXPECT_LT(elapsed, std::chrono::seconds(10));
     EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.numActiveChildren, 0);
+    EXPECT_EQ(testBed.NumActiveRanks(), 0);
     testBed.Finalize();
   }
 
@@ -528,6 +525,86 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // A rank, group or collective outside the config must fail the command rather
+  // than select nothing and pass.
+  TEST(TestBedArgs, OutOfRangeTargetsFail)
+  {
+    TestBed testBed;
+    if (testBed.ev.maxGpus < 1) GTEST_SKIP() << "Requires at least 1 GPU";
+    if (!float32Supported(testBed)) GTEST_SKIP() << "Requires ncclFloat32 (excluded by UT_DATATYPES)";
+    testBed.ev.childTimeoutSec = 60;
+
+    testBed.InitComms(1);
+    ASSERT_FALSE(testing::Test::HasFailure());
+    OptionalColArgs options;
+    options.redOp = ncclSum;
+
+    auto expectFailure = [&](char const* what, auto&& command)
+    {
+      ::testing::TestPartResultArray failures;
+      CaptureFailures(failures, command);
+      EXPECT_GT(failures.size(), 0) << what << " passed";
+    };
+    expectFailure("SetCollectiveArgs on rank 1", [&]() {
+      testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options, -1, 0, /*rank*/ 1);
+    });
+    expectFailure("SetCollectiveArgs on group 1", [&]() {
+      testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options, -1, /*groupId*/ 1);
+    });
+    testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, 1024, 1024, options);
+    testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
+    ASSERT_FALSE(testing::Test::HasFailure());
+
+    expectFailure("PrepareData on group 1", [&]() { testBed.PrepareData(/*groupId*/ 1); });
+    expectFailure("PrepareData on collective 1", [&]() { testBed.PrepareData(-1, /*collId*/ 1); });
+    bool isCorrect = true;
+    expectFailure("ValidateResults on rank 1", [&]() { testBed.ValidateResults(isCorrect, -1, -1, /*rank*/ 1); });
+    EXPECT_FALSE(isCorrect);
+    expectFailure("ValidateResults on collective 1", [&]() { testBed.ValidateResults(isCorrect, -1, /*collId*/ 1); });
+    EXPECT_FALSE(isCorrect);
+
+    testBed.DeallocateMem();
+    testBed.DestroyComms();
+    testBed.Finalize();
+  }
+
+  // Targets need not be contiguous: unordered, non-adjacent GPUs per process, a
+  // rank subset that skips a rank, and a group other than the first.
+  TEST(TestBedArgs, NonContiguousTargetsRun)
+  {
+    TestBed testBed;
+    std::string const skipReason = MultiProcessSkipReason(testBed);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
+    int const numGpus = testBed.ev.maxGpus;
+    if (numGpus < 3) GTEST_SKIP() << "Requires at least 3 GPUs (detected " << numGpus << ")";
+    testBed.ev.childTimeoutSec = 60;
+
+    std::vector<int> const& order = testBed.ev.GetGpuPriorityOrder();
+    testBed.InitComms({{order[numGpus - 1]}, {order[0]}, {order[numGpus / 2]}}, {1, 1},
+                      testBed.GetNumStreamsPerGroup(1, 2), /*numGroupCalls*/ 2);
+    ASSERT_FALSE(testing::Test::HasFailure());
+
+    int const groupId = 1, sendRank = 0, recvRank = 2, numElements = 4096;
+    OptionalColArgs options;
+    options.root = recvRank;
+    testBed.SetCollectiveArgs(ncclCollSend, ncclFloat32, numElements, numElements, options, 0, groupId, sendRank);
+    options.root = sendRank;
+    testBed.SetCollectiveArgs(ncclCollRecv, ncclFloat32, numElements, numElements, options, 0, groupId, recvRank);
+    for (int const rank : {sendRank, recvRank})
+    {
+      testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false, groupId, 0, rank);
+      testBed.PrepareData(groupId, 0, rank);
+    }
+    testBed.ExecuteCollectives({sendRank, recvRank}, groupId);
+    bool isCorrect = false;
+    testBed.ValidateResults(isCorrect, groupId, 0, recvRank);
+    EXPECT_TRUE(isCorrect);
+    for (int const rank : {recvRank, sendRank}) testBed.DeallocateMem(groupId, 0, rank);
+    EXPECT_FALSE(testing::Test::HasFailure());
+    testBed.DestroyComms();
+    testBed.Finalize();
+  }
+
   // A worker lost during warm-up fails the test, leaves the pool, and the
   // config still runs on freshly forked workers.
   TEST(Teardown, LostWarmupWorkerFallsBackToFreshWorkers)
@@ -548,7 +625,7 @@ namespace RcclUnitTesting
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up"));
     EXPECT_EQ(testBed.poolChildren[worker], nullptr);
     EXPECT_FALSE(testBed.configUsedPool);
-    EXPECT_EQ(testBed.numActiveChildren, 2);
+    EXPECT_EQ(testBed.NumActiveChildren(), 2);
     errno = 0;
     EXPECT_EQ(waitpid(workerPid, nullptr, WNOHANG), -1);
     EXPECT_EQ(errno, ECHILD);

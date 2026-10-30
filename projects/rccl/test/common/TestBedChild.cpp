@@ -505,13 +505,8 @@ namespace RcclUnitTesting
     PIPE_READ(streamIdx);
     PIPE_READ(options);
 
-    if (!this->IsValidGroupId(groupId, "SetCollectiveArgs")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "SetCollectiveArgs", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -566,13 +561,8 @@ namespace RcclUnitTesting
     PIPE_READ(userRegistered);
     PIPE_READ(groupId);
 
-    if (!this->IsValidGroupId(groupId, "AllocateMem")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "AllocateMem", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -612,14 +602,8 @@ namespace RcclUnitTesting
     PIPE_READ(prepDataFuncOffset);
     CollFuncPtr const prepDataFunc = CollFuncPtrFromOffset(prepDataFuncOffset);
 
-    if (!this->IsValidGroupId(groupId, "PrepareData")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "PrepareData", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -1155,19 +1139,8 @@ namespace RcclUnitTesting
 
     if (this->verbose) TEST_INFO("Child %d begins ValidateResults()", this->childId);
 
-    if (globalRank < this->rankOffset || (this->rankOffset +  static_cast<int>(comms.size()) <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
-    if (!this->IsValidGroupId(groupId, "ValidateResults")) return TEST_FAIL;
-    if (localRank >= static_cast<int>(this->collArgs[groupId].size()))
-    {
-      TEST_ERROR("Child %d Rank %d: localRank %d out of bounds for groupId %d (size: %zu)",
-               this->childId, globalRank, localRank, groupId, this->collArgs[groupId].size());
-      return TEST_FAIL;
-    }
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "ValidateResults", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
     CHECK_HIP(hipDeviceSynchronize());
 
@@ -1267,7 +1240,6 @@ namespace RcclUnitTesting
     // cannot leave rank ids to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
-    if (!this->IsValidGroupId(groupId, "DeregisterMem")) return TEST_FAIL;
 
     if (numRanks > this->totalRanks)
     {
@@ -1275,18 +1247,9 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
 
-    std::vector<int> localRanks;
-    localRanks.reserve(numRanks);
-    for (int globalRank : globalRanks)
-    {
-      if (globalRank < this->rankOffset ||
-          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
-      {
-        TEST_ERROR("Child %d does not contain deregistration rank %d", this->childId, globalRank);
-        return TEST_FAIL;
-      }
-      localRanks.push_back(globalRank - this->rankOffset);
-    }
+    std::vector<int> localRanks(numRanks);
+    for (int i = 0; i < numRanks; ++i)
+      if (!this->ResolveTarget(globalRanks[i], groupId, collId, "DeregisterMem", localRanks[i])) return TEST_FAIL;
 
     // A single child can own multiple communicator ranks. Deregister all of
     // them in one group, mirroring RegisterMem(), before the parent allows any
@@ -1447,14 +1410,8 @@ namespace RcclUnitTesting
     PIPE_READ(groupId);
     PIPE_READ(collId);
 
-    if (!this->IsValidGroupId(groupId, "DeallocateMem")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "DeallocateMem", localRank)) return TEST_FAIL;
     return this->DeallocateMemInternal(groupId, collId, localRank);
   }
 
@@ -1607,6 +1564,27 @@ namespace RcclUnitTesting
     TEST_ERROR("Child %d %s received invalid groupId %d (config has %zu group calls)",
                this->childId, handler, groupId, this->collArgs.size());
     return false;
+  }
+
+  bool TestBedChild::ResolveTarget(int const globalRank, int const groupId, int const collId,
+                                   char const* handler, int& localRank) const
+  {
+    if (!this->IsValidGroupId(groupId, handler)) return false;
+    localRank = globalRank - this->rankOffset;
+    if (globalRank < this->rankOffset || localRank >= static_cast<int>(this->comms.size()) ||
+        localRank >= static_cast<int>(this->collArgs[groupId].size()))
+    {
+      TEST_ERROR("Child %d %s does not contain rank %d", this->childId, handler, globalRank);
+      return false;
+    }
+    int const numColls = static_cast<int>(this->collArgs[groupId][localRank].size());
+    if (collId < -1 || collId >= numColls)
+    {
+      TEST_ERROR("Child %d %s received invalid collId %d (group %d has %d collectives)",
+                 this->childId, handler, collId, groupId, numColls);
+      return false;
+    }
+    return true;
   }
 
   void TestBedChild::AbortComms()
@@ -1764,7 +1742,6 @@ namespace RcclUnitTesting
     // not leave rank ids in the pipe to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
-    if (!this->IsValidGroupId(groupId, "RegisterMem")) return TEST_FAIL;
 
     if (numRanks > this->totalRanks)
     {
@@ -1772,18 +1749,9 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
 
-    std::vector<int> localRanks;
-    localRanks.reserve(numRanks);
-    for (int globalRank : globalRanks)
-    {
-      if (globalRank < this->rankOffset ||
-          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
-      {
-        TEST_ERROR("Child %d does not contain registration rank %d", this->childId, globalRank);
-        return TEST_FAIL;
-      }
-      localRanks.push_back(globalRank - this->rankOffset);
-    }
+    std::vector<int> localRanks(numRanks);
+    for (int i = 0; i < numRanks; ++i)
+      if (!this->ResolveTarget(globalRanks[i], groupId, collId, "RegisterMem", localRanks[i])) return TEST_FAIL;
 
     // Group registration across the selected local ranks managed by this child.
     CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart RegisterMem");

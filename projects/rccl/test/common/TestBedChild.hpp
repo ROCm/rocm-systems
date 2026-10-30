@@ -197,6 +197,11 @@ namespace RcclUnitTesting
     // Rejects a pipe-supplied groupId that does not index the current config.
     bool IsValidGroupId(int groupId, char const* handler) const;
 
+    // Maps a pipe-supplied globalRank onto this child's localRank. Rejects a groupId
+    // or collId (-1 = all) that does not index the current config, or a rank this
+    // child does not own.
+    bool ResolveTarget(int globalRank, int groupId, int collId, char const* handler, int& localRank) const;
+
     // Destroys any live graph / graph-exec handles for groupId after syncing
     // the owning devices.
     ErrCode ReleaseGraphHandles(int groupId);
