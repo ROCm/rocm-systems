@@ -1222,8 +1222,11 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
      */
     info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
                                            : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
     info->hostBaseAddress = addressHandle->os_addr;
+    // SVM is host-backed, so the agent VA is the host VA. The early return in
+    // PtrInfo skips the driver query that would have filled this in. A bare
+    // reservation has no backing, so its agent base stays null.
+    info->agentBaseAddress = addressHandle->svm_attrib ? info->hostBaseAddress : nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
