@@ -387,7 +387,7 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -395,7 +395,6 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 4,
               .num_elems = 1,
-              .is_load = false,
           },
           wf))
     return;
@@ -818,7 +817,7 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -826,7 +825,6 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = false,
           },
           wf))
     return;
@@ -856,7 +854,7 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -864,7 +862,6 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = false,
           },
           wf))
     return;
@@ -1531,8 +1528,8 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
-                                                                         .num_elems = 1}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
+                                                                     .num_elems = 1}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -1540,7 +1537,6 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 4,
               .num_elems = 1,
-              .is_load = true,
           },
           wf))
     return;
@@ -1646,7 +1642,7 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 1, .num_elems = 1, .sign_extend = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -1655,7 +1651,6 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
               .sign_extend = true,
           },
           wf))
@@ -1678,8 +1673,8 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 1,
-                                                                         .num_elems = 1}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 1,
+                                                                     .num_elems = 1}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -1687,7 +1682,6 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
           },
           wf))
     return;
@@ -1708,7 +1702,7 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 2, .num_elems = 1, .sign_extend = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -1717,7 +1711,6 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = true,
               .sign_extend = true,
           },
           wf))
@@ -1740,8 +1733,8 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 2,
-                                                                         .num_elems = 1}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 2,
+                                                                     .num_elems = 1}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -1749,7 +1742,6 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = true,
           },
           wf))
     return;
@@ -2213,7 +2205,7 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -2221,7 +2213,6 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 8,
               .num_elems = 1,
-              .is_load = false,
           },
           wf))
     return;
@@ -3170,8 +3161,8 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 8,
-                                                                         .num_elems = 1}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 8,
+                                                                     .num_elems = 1}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3179,7 +3170,6 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 8,
               .num_elems = 1,
-              .is_load = true,
           },
           wf))
     return;
@@ -3359,7 +3349,7 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3367,7 +3357,6 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = false,
               .d16_hi = true,
           },
           wf))
@@ -3399,7 +3388,7 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3407,7 +3396,6 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = false,
               .d16_hi = true,
           },
           wf))
@@ -3439,7 +3427,7 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 1, .num_elems = 1, .d16_lo = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3448,7 +3436,6 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
               .d16_lo = true,
           },
           wf))
@@ -3471,7 +3458,7 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 1, .num_elems = 1, .d16_hi = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3480,7 +3467,6 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
               .d16_hi = true,
           },
           wf))
@@ -3503,7 +3489,7 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_lo = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3512,7 +3498,6 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
               .sign_extend = true,
               .d16_lo = true,
           },
@@ -3537,7 +3522,7 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_hi = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3546,7 +3531,6 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .is_load = true,
               .sign_extend = true,
               .d16_hi = true,
           },
@@ -3571,7 +3555,7 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 2, .num_elems = 1, .d16_lo = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3580,7 +3564,6 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = true,
               .d16_lo = true,
           },
           wf))
@@ -3603,7 +3586,7 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{
           .elem_size = 2, .num_elems = 1, .d16_hi = true}>(
           *this,
           amdgpu::LdsAccessRequest{
@@ -3612,7 +3595,6 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .is_load = true,
               .d16_hi = true,
           },
           wf))
@@ -3738,7 +3720,7 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3746,7 +3728,6 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 4,
               .num_elems = 3,
-              .is_load = false,
           },
           wf))
     return;
@@ -3790,7 +3771,7 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete(
+  if (amdgpu::LdsInlineAccess::store(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3798,7 +3779,6 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 4,
               .num_elems = 4,
-              .is_load = false,
           },
           wf))
     return;
@@ -3844,8 +3824,8 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
-                                                                         .num_elems = 3}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
+                                                                     .num_elems = 3}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3853,7 +3833,6 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 4,
               .num_elems = 3,
-              .is_load = true,
           },
           wf))
     return;
@@ -3874,8 +3853,8 @@ void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
-  if (amdgpu::LdsInlineAccess::complete<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
-                                                                         .num_elems = 4}>(
+  if (amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
+                                                                     .num_elems = 4}>(
           *this,
           amdgpu::LdsAccessRequest{
               .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
@@ -3883,7 +3862,6 @@ void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 4,
               .num_elems = 4,
-              .is_load = true,
           },
           wf))
     return;
