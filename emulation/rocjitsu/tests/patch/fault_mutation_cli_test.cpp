@@ -13,12 +13,24 @@
 
 #include <algorithm>
 #include <csignal>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <fcntl.h>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <ios>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace {
@@ -279,10 +291,10 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
     expect_rejected(args());
   }
   // Empty inventories and a corrupt final physical member must not become half-drops.
-  for (const std::vector<uint32_t> &words :
-       std::vector<std::vector<uint32_t>>{{0xbfb00000u},
-                                          {0xbe804ec1u, 0xbe800081u, 0xffffffffu, 0xbfb00000u},
-                                          {0xbe804ec1u, 0xbe800081u, 0xbfb00000u}}) {
+  for (const std::vector<uint32_t> &words : std::vector<std::vector<uint32_t>>{
+           {build_s_endpgm(row.arch)},
+           {test::kSignal, test::kMov, 0xffffffffu, build_s_endpgm(row.arch)},
+           {test::kSignal, test::kMov, build_s_endpgm(row.arch)}}) {
     write(input_, test::make_barrier_elf_for_target(row, words));
     expect_rejected(args());
   }
@@ -316,6 +328,7 @@ TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
   expect_rejected(
       {"--input", input_.string(), "--kernel", "missing", "--output", output_.string()});
   EXPECT_NE(stderr_.find("discovery failed: code=BadIdentity"), std::string::npos) << stderr_;
+  EXPECT_EQ(stderr_.find("offset="), std::string::npos) << stderr_;
   image[EI_DATA] = 0;
   write(input_, image);
   expect_rejected(args());
@@ -329,6 +342,7 @@ TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
   write(input_, test::make_barrier_elf_for_target(row, {build_s_endpgm(row.arch)}));
   expect_rejected(args());
   EXPECT_NE(stderr_.find("selection failed: code=NoCandidates"), std::string::npos) << stderr_;
+  EXPECT_EQ(stderr_.find("offset="), std::string::npos) << stderr_;
 }
 
 TEST_F(FaultMutationCli, FailedStdoutReturnsOutputIoError) {
@@ -398,7 +412,8 @@ TEST_F(FaultMutationCli, RejectsIllegalWavesAndForms) {
   }
   const test::DropTargetRow &row = test::kDropRows[4];
   // Named signal/wait cannot be admitted by the CLI as builtin complete Drop.
-  write(input_, test::make_barrier_elf_for_target(row, {0xbe804e80u, 0xbf940000u, 0xbfb00000u}));
+  write(input_, test::make_barrier_elf_for_target(
+                    row, {0xbe804e80u, 0xbf940000u, build_s_endpgm(row.arch)}));
   expect_rejected(args());
 }
 
@@ -412,7 +427,7 @@ TEST_F(FaultMutationCli, RejectsTrapBarriersBeforeSelectingUserBarrier) {
       const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - id);
       const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
       const std::vector<uint8_t> image = test::make_barrier_elf_for_target(
-          row, {signal, wait, 0xbe804ec1u, 0xbf94ffffu, build_s_endpgm(row.arch)});
+          row, {signal, wait, test::kSignal, test::kWait, build_s_endpgm(row.arch)});
       const std::string_view diagnostic = row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4
                                               ? "invalid scalar source selector"
                                               : "trap-only";
