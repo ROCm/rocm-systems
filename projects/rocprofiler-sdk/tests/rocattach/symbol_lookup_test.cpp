@@ -467,7 +467,13 @@ expect_load_bias_handles_mapping_layouts()
 
     constexpr auto page_size = uint64_t{0x1000};
     constexpr auto load_bias = uint64_t{0x100000};
-    const auto     segments  = std::vector<detail::load_segment>{
+    // All addresses in this test are synthetic. load_segment is
+    // {file offset, virtual address, file-backed size}: the first three PT_LOAD
+    // segments start on consecutive 4 KiB pages and contain half a page of file
+    // data. The final segment has no file-backed bytes and must not constrain
+    // the bias. load_bias is an arbitrary page-aligned base kept above every
+    // test offset.
+    const auto segments = std::vector<detail::load_segment>{
         {0x0000, 0x0000, 0x0800},
         {0x1000, 0x1000, 0x0800},
         {0x2000, 0x2000, 0x0800},
@@ -502,6 +508,8 @@ expect_load_bias_handles_mapping_layouts()
         return expect_bias_for(page_size, segments, mappings, expected, description);
     };
 
+    // file_mapping is {mapped start, mapped end, file offset}. This baseline
+    // gives each file-backed segment its own /proc/<pid>/maps entry.
     const auto exact_mappings = std::vector<detail::file_mapping>{
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
         {load_bias + 0x1000, load_bias + 0x2000, 0x1000},
@@ -509,6 +517,7 @@ expect_load_bias_handles_mapping_layouts()
     };
     if(!expect_bias(exact_mappings, load_bias, "one maps entry per PT_LOAD segment")) return false;
 
+    // Model Linux coalescing the second and third segments into one mapping.
     const auto merged_mappings = std::vector<detail::file_mapping>{
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
         {load_bias + 0x1000, load_bias + 0x3000, 0x1000},
@@ -518,6 +527,8 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // A lower-address alias for file page 0x2000 must not be mistaken for the
+    // load image because it does not map every file-backed segment.
     const auto lower_shadow_mapping = std::vector<detail::file_mapping>{
         {load_bias - 0x4000, load_bias - 0x3000, 0x2000},
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
@@ -531,6 +542,7 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // Exercise the lower-address alias and coalesced segments together.
     const auto lower_shadow_with_merged_segments = std::vector<detail::file_mapping>{
         {load_bias - 0x4000, load_bias - 0x3000, 0x2000},
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
@@ -543,6 +555,8 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // The segment's file page is one page into the mapping. Translation must
+    // account for that offset instead of requiring the two starts to match.
     const auto contained_segment = std::vector<detail::load_segment>{
         {0x1000, 0x2000, 0x0800},
     };
@@ -558,6 +572,8 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // The wrong file offset breaks the mapping's linear file-to-address
+    // relationship, so it cannot produce a valid bias.
     const auto wrong_offset = std::vector<detail::file_mapping>{
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
         {load_bias + 0x1000, load_bias + 0x3000, 0x2000},
@@ -567,6 +583,8 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // Mapping ranges are half-open: a mapping ending at file page 0x2000 does
+    // not contain that page.
     const auto ends_at_segment = std::vector<detail::file_mapping>{
         {load_bias + 0x0000, load_bias + 0x2000, 0x0000},
     };
@@ -575,6 +593,8 @@ expect_load_bias_handles_mapping_layouts()
         return false;
     }
 
+    // Two complete images yield two valid biases and must be rejected as
+    // ambiguous.
     constexpr auto second_bias = uint64_t{0x200000};
     const auto     ambiguous   = std::vector<detail::file_mapping>{
         {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
