@@ -7,11 +7,15 @@
 // This test doesn't test the ABI, it tests if the API is alias to the R0000 when HIP_TARGET_API_VERSION is set.
 // HIP Nvidia doesn't support this mechanism, so we can't test this.
 
-#if HT_AMD
-
+// HIP_TARGET_API_VERSION must be set before any HIP header is included, so the
+// HT_AMD check has to come after the HIP headers.
 #undef HIP_ABI_IMPL
 #define HIP_TARGET_API_VERSION 500
 #include <hip/hip_runtime_api.h>
+#include <hip_test_context.hh>
+
+#if HT_AMD
+
 #include <catch2/catch_all.hpp>
 
 #ifdef ENABLE_YAML_TAGS
