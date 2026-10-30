@@ -7,11 +7,16 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
-#include <limits>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 using namespace rocjitsu;
@@ -44,8 +49,9 @@ bool parse_number(std::string_view text, uint64_t &number) {
     text.remove_prefix(2);
     base = 16;
   }
-  const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), number, base);
-  return !text.empty() && error == std::errc{} && end == text.data() + text.size();
+  const std::from_chars_result parsed =
+      std::from_chars(text.data(), text.data() + text.size(), number, base);
+  return !text.empty() && parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
 }
 
 // Exclusive creation also protects aliases and destinations created after argument parsing.
@@ -69,10 +75,51 @@ int reject(std::string_view message) {
   return 2;
 }
 
+std::string_view error_code_name(FaultMutationErrorCode code) {
+  switch (code) {
+  case FaultMutationErrorCode::None:
+    return "None";
+  case FaultMutationErrorCode::BadIdentity:
+    return "BadIdentity";
+  case FaultMutationErrorCode::UnsupportedTarget:
+    return "UnsupportedTarget";
+  case FaultMutationErrorCode::UnsupportedForm:
+    return "UnsupportedForm";
+  case FaultMutationErrorCode::AmbiguousSelection:
+    return "AmbiguousSelection";
+  case FaultMutationErrorCode::IncompleteSelection:
+    return "IncompleteSelection";
+  case FaultMutationErrorCode::InvalidParameters:
+    return "InvalidParameters";
+  case FaultMutationErrorCode::ValidationFailure:
+    return "ValidationFailure";
+  case FaultMutationErrorCode::NoCandidates:
+    return "NoCandidates";
+  case FaultMutationErrorCode::OrdinalOutOfRange:
+    return "OrdinalOutOfRange";
+  }
+  return "Unknown";
+}
+
+int reject(const FaultMutationError &error, std::string_view operation) {
+  std::cerr << "rj_code_mutate: " << operation << " failed: code=" << error_code_name(error.code)
+            << " offset=" << error.offset << ' ' << error.message << '\n';
+  return 2;
+}
+
+int finish_stdout() {
+  std::cout.flush();
+  if (!std::cout) {
+    std::cerr << "rj_code_mutate: cannot write/flush stdout\n";
+    return 3;
+  }
+  return 0;
+}
+
 int run(int argc, char **argv) {
   if (argc == 2 && std::string_view(argv[1]) == "--help") {
     std::cout << kUsage;
-    return 0;
+    return finish_stdout();
   }
   if (argc == 2 && std::string_view(argv[1]) == "--capabilities") {
     for (const FaultMutationCapability &capability : fault_mutation_capabilities()) {
@@ -84,7 +131,7 @@ int run(int argc, char **argv) {
                                                                            : "full-singleton")
                 << " admission=" << capability.admission << '\n';
     }
-    return 0;
+    return finish_stdout();
   }
   const char *input = nullptr;
   const char *output = nullptr;
@@ -146,7 +193,7 @@ int run(int argc, char **argv) {
   FaultMutationError error;
   const FailureOr<FaultBarrierInventory> inventory = discover_drop_barriers(context, kernel, error);
   if (inventory.failed())
-    return reject(error.message);
+    return reject(error, "discovery");
   const IsaGpuTargetDescription *target =
       default_isa_target_registry().find_gpu_target(context.source().target_id());
   if (!target_assertion.empty() && target_assertion != target->code_object_id)
@@ -169,43 +216,47 @@ int run(int argc, char **argv) {
       }
       std::cout << '\n';
     }
-    return 0;
+    return finish_stdout();
   }
-  DropBarrierSelector selector{.exact = std::nullopt, .ordinal = ordinal};
+  DropBarrierSelector selector = {.exact = std::nullopt, .ordinal = ordinal};
   if (exact) {
-    // Resolve a current-input coordinate into a library-owned handle. Policy and
-    // precedence remain in the main selector, including invalid-exact rejection.
+    // Resolve this input's coordinate once. A miss must not select the ordinal
+    // fallback or masquerade as a library handle from another source.
     const std::span<const StaticBarrier> barriers = inventory.value().barriers();
-    const auto found = std::ranges::find_if(barriers, [&](const StaticBarrier &barrier) {
-      return barrier.members.front().offset == *exact;
-    });
-    selector.exact = DropBarrierSelection{};
-    if (found != barriers.end()) {
-      const FailureOr<DropBarrierSelection> handle = select_drop_barrier(
-          inventory.value(),
-          {.exact = std::nullopt, .ordinal = static_cast<size_t>(found - barriers.begin())}, error);
-      if (handle.failed())
-        return reject(error.message);
-      selector.exact = handle.value();
-    }
+    const std::span<const StaticBarrier>::iterator found =
+        std::ranges::find_if(barriers, [&](const StaticBarrier &barrier) {
+          return barrier.members.front().offset == *exact;
+        });
+    if (found == barriers.end())
+      return reject({.code = FaultMutationErrorCode::InvalidParameters,
+                     .offset = *exact,
+                     .message = "no complete barrier starts at .text offset " +
+                                std::to_string(*exact) + " for this entry"},
+                    "selection");
+    selector.ordinal = static_cast<size_t>(found - barriers.begin());
   }
   const FailureOr<DropBarrierSelection> selection =
       select_drop_barrier(inventory.value(), selector, error);
   if (selection.failed())
-    return reject("selection failed: " + error.message);
+    return reject(error, "selection");
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selection.value(), error);
   if (mutant.failed())
-    return reject("mutation failed: " + error.message);
+    return reject(error, "mutation");
   if (!write_new_file(output, mutant.value().edit_result.image)) {
     std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
     return 3;
   }
+  for (const std::string &assumption : mutant.value().assumptions)
+    std::cerr << "rj_code_mutate: assumption: " << assumption << '\n';
+  std::cerr.flush();
+  if (!std::cerr)
+    return 3;
   std::cout << "kind=DropBarrier target=" << target->code_object_id
             << " exact=" << selection.value().barrier().members.front().offset
             << " logical_mutations=" << mutant.value().logical_mutation_count
             << " members=" << selection.value().barrier().members.size()
             << " output_bytes=" << mutant.value().edit_result.image.size() << '\n';
-  return 0;
+  return finish_stdout();
 }
 } // namespace
 
