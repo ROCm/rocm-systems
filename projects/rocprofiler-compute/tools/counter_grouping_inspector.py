@@ -269,6 +269,7 @@ def generate_bucket_metrics(
         metric_idx,
         metric_name,
         expressions,
+        *_,
     ) in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
         hardware_counters, _unused_builtin_vars = extract_counters_and_variables(

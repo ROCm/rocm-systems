@@ -14,18 +14,27 @@ import threading
 import uuid
 from pathlib import Path
 from threading import Thread
-from typing import Set
+from typing import Any, Dict, Set
 from unittest.mock import Mock
 
 import config
 from memory_chart.loader import Layouts, PanelConfigs
-from utils import csv_compression
+from utils import csv_compression, metric_library
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
 SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
+
+# Arch chain of write_metric_library_family().
+METRIC_LIBRARY_FAMILY_PARENTS = {
+    "gfx_base": None,
+    "gfx_c1": "gfx_base",
+    "gfx_c2": "gfx_c1",
+    "gfx_c3": "gfx_c2",
+    "gfx_c4": "gfx_c3",
+}
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -258,3 +267,80 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+def write_text_file(path: Path, text: str) -> Path:
+    """Write a text file, creating its directory, and return its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def write_metric_library_family(root: Path) -> Dict[str, Path]:
+    """Write a synthetic family: a base and a four-deep chain of compute.yaml files.
+
+    gfx_base defines three metrics; each child inherits from its parent in
+    METRIC_LIBRARY_FAMILY_PARENTS and changes one thing: gfx_c1 a description, gfx_c2
+    adds a metric, gfx_c3 removes one, gfx_c4 changes a formula and removes a field.
+
+    Returns:
+        Each arch's file, keyed by arch.
+    """
+    yaml_by_arch = {
+        "gfx_base": """\
+compute.ipc:
+  name: IPC
+  formula: SUM(SQ_INSTS_VALU) / SUM(SQ_BUSY_CYCLES)
+  unit: Instructions per Cycle
+  description: ""
+compute.salu_util:
+  name: SALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: How busy the SALU was.
+compute.valu_util:
+  name: VALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: How busy the VALU was.
+  peak: 100
+""",
+        "gfx_c1": """\
+compute.salu_util:
+  description: How often the SALU was busy.
+""",
+        "gfx_c2": """\
+compute.mfma_flops_f8:
+  name: MFMA FLOPs (F8)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
+  unit: FLOP
+  description: F8 MFMA operations per normUnit.
+""",
+        "gfx_c3": """\
+compute.ipc: !remove
+""",
+        "gfx_c4": """\
+compute.valu_util:
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * 2)
+  peak: !remove
+""",
+    }
+    files = {}
+    for arch, text in yaml_by_arch.items():
+        parent = METRIC_LIBRARY_FAMILY_PARENTS[arch]
+        inherit = f"inherit: ../{parent}/compute.yaml\n" if parent else ""
+        files[arch] = write_text_file(root / arch / "compute.yaml", inherit + text)
+    return files
+
+
+def use_metric_library_family(monkeypatch: Any, root: Path) -> Dict[str, Path]:
+    """Write the synthetic family under root and make it the only metric library chain.
+
+    Returns:
+        Each arch's file, keyed by arch.
+    """
+    monkeypatch.setattr(
+        metric_library, "METRIC_LIBRARY_PARENT_ARCH", METRIC_LIBRARY_FAMILY_PARENTS
+    )
+    monkeypatch.setattr(metric_library.MetricLibrary, "_cache", {})
+    return write_metric_library_family(root)
