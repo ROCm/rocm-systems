@@ -13,7 +13,7 @@ LMCache
 
 `LMCache <https://docs.lmcache.ai/index.html>`_ is a KV cache layer for LLM serving. It offloads KV cache chunks to CPU memory, local disk, or remote storage. Its GDS storage backend reads and writes those chunks directly between GPU memory and storage.
 
-Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>_` for more information.
+Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>`_ for more information.
 
 fastsafetensors
 ===============
