@@ -29,12 +29,14 @@ target_link_libraries(
 )
 rj_configure_target(rj_execution_fuzz_core GENERATED PRIVATE_INCLUDES WARNINGS)
 
-# GCC 14 on ppc64le emits a false-positive -Wfree-nonheap-object inside
-# std::vector<uint8_t>::push_back / _M_realloc_append when inlining
-# random_input() at -O3 (GCC PR 115016).  The warning fires in
-# new_allocator.h on a pointer the compiler loses track of after
-# reserve() + push_back().  Recheck: remove this block and build
-# execution_fuzz_core.cpp on ppc64le at -O3 with the next GCC upgrade.
+# Retain the ppc64le GCC 14+ -Wfree-nonheap-object demotion as a precaution
+# pending verification of the pre-sized random_input() implementation there.
+# The former reserve()/push_back() implementation triggered GCC PR 115016
+# at -O3. The pre-sized implementation was verified on x86-64 Ubuntu 24.04
+# with GCC 14.2.0, Release (-O3 -Werror), and ROCJITSU_ENABLE_VFIO=ON.
+# Review also verified x86-64 GCC 15.2 with Release flags.
+# Recheck: build execution_fuzz_core.cpp with ppc64le GCC 14 at -O3 without
+# this block, and delete the block if the build is warning-free.
 if(
     CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"

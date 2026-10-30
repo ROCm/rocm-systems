@@ -77,6 +77,7 @@ nav:
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
       - Race detection: race-detector.md
+      - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
       - Benchmark runner setup: benchmark-runner-setup.md
@@ -87,6 +88,7 @@ nav:
   - Developer guide:
       - Architecture: architecture.md
       - Arithmetic library: arith-design.md
+      - KFD and GEM backing: memory-backing.md
       - Code style: style.md
       - Simulation engine: simdojo.md
       - GPU hardware model: vm-design.md
