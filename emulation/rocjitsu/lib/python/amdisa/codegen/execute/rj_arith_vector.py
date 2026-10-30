@@ -36,8 +36,6 @@ BINARY32 = {
     'V_MBCNT_LO_U32_B32',
     'V_MBCNT_HI_U32_B32',
 }
-
-
 UNARY32 = {
     'V_MOV_B32',
     'V_NOT_B32',
@@ -46,8 +44,6 @@ UNARY32 = {
     'V_CTZ_I32_B32',
     'V_CLS_I32',
 }
-
-
 TERNARY32 = {
     'V_ADD3_U32',
     'V_LSHL_ADD_U32',
@@ -82,16 +78,12 @@ TERNARY32 = {
     'V_SAD_U32',
     'V_MSAD_U8',
 }
-
-
 WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
-
-
 SATURATE_NAMES = {'V_SAT_PK_U8_I16'}
-
-
 CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
-
+VECTOR32_NAMES = (
+    UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES | CONDITIONAL_NAMES
+)
 
 # These multiplication APIs do not accept CLAMP. The ISA ignores it here;
 # forwarding it would turn an ignored encoding bit into a rj-arith error.
@@ -225,14 +217,8 @@ def gen_carry32(arch, mnemonic, dst, src, is_vop3, result_writer=None):
 
 
 SHIFT64_NAMES = {'V_LSHLREV_B64', 'V_LSHRREV_B64', 'V_ASHRREV_I64'}
-
-
 MAD64_NAMES = {'V_MAD_U64_U32', 'V_MAD_I64_I32', 'V_MAD_CO_U64_U32', 'V_MAD_CO_I64_I32'}
-
-
 QSAD_NAMES = {'V_QSAD_PK_U16_U8', 'V_MQSAD_PK_U16_U8', 'V_MQSAD_U32_U8'}
-
-
 WIDE_INTEGER_NAMES = SHIFT64_NAMES | MAD64_NAMES | QSAD_NAMES
 
 
@@ -270,8 +256,6 @@ def gen_wide_integer(arch, mnemonic, dst, src, is_vop3, result_writer=None):
 
 
 UNARY16 = {'V_MOV_B16', 'V_NOT_B16'}
-
-
 BINARY16 = {
     'V_ADD_NC_I16',
     'V_SUB_NC_I16',
@@ -289,8 +273,6 @@ BINARY16 = {
     'V_OR_B16',
     'V_XOR_B16',
 }
-
-
 TERNARY16 = {
     'V_MAD_U16',
     'V_MAD_I16',
@@ -301,8 +283,6 @@ TERNARY16 = {
     'V_MED3_I16',
     'V_MED3_U16',
 }
-
-
 INTEGER16_NAMES = UNARY16 | BINARY16 | TERNARY16
 
 
@@ -338,11 +318,7 @@ def gen_integer16(arch, mnemonic, dst, src, is_vop3):
 
 
 WIDENING_MAD_NAMES = {'V_MAD_U32_U16', 'V_MAD_I32_I16'}
-
-
 INTEGER_PACK_NAMES = {'V_CVT_PK_U16_U32', 'V_CVT_PK_I16_I32'}
-
-
 WIDENING_INTEGER_NAMES = WIDENING_MAD_NAMES | INTEGER_PACK_NAMES
 
 
@@ -386,11 +362,7 @@ PACKED_INTEGER_BINARY = {
     'V_PK_LSHRREV_B16',
     'V_PK_ASHRREV_I16',
 }
-
-
 PACKED_INTEGER_TERNARY = {'V_PK_MAD_I16', 'V_PK_MAD_U16'}
-
-
 PACKED_INTEGER_NAMES = PACKED_INTEGER_BINARY | PACKED_INTEGER_TERNARY
 
 
@@ -451,8 +423,3 @@ def gen_integer_dot(arch, mnemonic, dst, src, enc_name, opsel_exprs):
         '      wf.cu().arithmetic_flags(),\n'
         f'      modifiers, {dst[0]}, {", ".join(src)});'
     )
-
-
-VECTOR32_NAMES = (
-    UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES | CONDITIONAL_NAMES
-)

@@ -3,11 +3,11 @@
 
 """Keep rj-arith public names and emitted wave suffixes consistent with BuiltinsAMDGPU."""
 
+from rj_arith_headers import public_headers
+
 import re
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_names import wave_api
 
@@ -41,3 +41,16 @@ from amdisa.codegen.execute.rj_arith_names import wave_api
 )
 def test_wave_suffix_precedes_architecture(stem, width, expected):
     assert wave_api(stem, width) == expected
+
+
+def test_all_public_instruction_names_follow_the_convention():
+    header = public_headers()
+    names = re.findall(r'^int (rj_arith_\w+)\(', header, re.M)
+    assert names
+    assert len(names) == len(set(names))
+    for name in names:
+        assert '_rdna' not in name and '_wave' not in name, name
+        if name.startswith(('rj_arith_s_', 'rj_arith_v_s_')):
+            assert not re.search(r'_w(?:32|64)(?:_|$)', name), name
+        else:
+            assert re.search(r'_w(?:32|64)(?:_gfx[0-9]+)?$', name), name

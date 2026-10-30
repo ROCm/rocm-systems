@@ -2954,6 +2954,23 @@ class CodeGenerator:
             .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
         )
 
+        from amdisa.codegen.execute.rj_arith_vopd import gen_vopd_execution
+
+        rj_arith_vopd = gen_vopd_execution(logical_arch, vopd_slot_ops, wave64_guard)
+        if rj_arith_vopd is not None:
+            execution_helpers = ''
+            execution_method = rj_arith_vopd
+            header = header.replace(
+                '  static bool uses_src_neg_modifier(uint16_t op);\n'
+                '  static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);\n'
+                '  static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,\n'
+                '                               uint32_t lane);\n',
+                '',
+            ).replace(
+                '  static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);\n',
+                '',
+            )
+
         vopd_isa_diagnostics = cpp_block('''
             // Evaluate the qualified operand restrictions once, at decode.
             const bool vopd3 = @IS_VOPD3@;
@@ -3330,6 +3347,17 @@ class CodeGenerator:
                 f'}} // namespace {arch}\n'
                 '} // namespace rocjitsu\n'
             )
+            if rj_arith_vopd is not None:
+                execution_file = execution_file.replace(
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n',
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"\n'
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"\n',
+                )
+                for legacy_header in ('gfx11_dot2.h', 'gfx12_dot.h'):
+                    execution_file = execution_file.replace(
+                        f'#include "rocjitsu/isa/arch/amdgpu/shared/{legacy_header}"\n',
+                        '',
+                    )
             with open(os.path.join(out_dir, 'vopd.cpp'), 'w') as f:
                 f.write(str(impl_outputs.model[0]))
             with open(os.path.join(out_dir, 'vopd_exec.cpp'), 'w') as f:
