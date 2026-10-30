@@ -1472,7 +1472,7 @@ TEST_F(RasMicrotest, MsgRecvCompletesLengthThenBodyAndResetsSocketState) {
 void ExpectMsgRecvRejectsPeerLength(int peerLength) {
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int op, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     EXPECT_EQ(NCCL_SOCKET_RECV, op);
     ++calls;
     EXPECT_EQ(1, calls) << "rasMsgRecv proceeded to the body with length " << peerLength;
@@ -1580,7 +1580,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqTooShortToHoldItsCollectiveType) {
     static_cast<int>(offsetof(rasMsg, collReq) + offsetof(rasCollRequest, type) + sizeof(rasCollectiveType)) - 1;
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     if (++calls == 1)
       *static_cast<int*>(ptr) = shortLength;
     else
@@ -1602,7 +1602,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
   const int shortLength = static_cast<int>(rasMsgLength(RAS_MSG_COLLREQ, collType)) - 1;
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     if (++calls == 1) {
       *static_cast<int*>(ptr) = shortLength;
     } else {
@@ -1628,7 +1628,7 @@ TEST_F(RasMicrotest, MsgRecvRejectsCollReqBodyTooShortForItsCollectiveType) {
 ncclResult_t MsgRecvWithBody(int peerLength, const std::function<void(rasMsg*)>& fill) {
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     if (++calls == 1)
       *static_cast<int*>(ptr) = peerLength;
     else
@@ -1766,7 +1766,7 @@ TEST_F(RasMicrotest, MsgRecvAcceptsExactMinimumLengthForItsMessageType) {
   rasSocket sock{};
   const int msgLen = static_cast<int>(rasMsgLength(RAS_MSG_CONNINITACK));
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     if (++calls == 1) {
       *static_cast<int*>(ptr) = msgLen;
     } else {
@@ -1788,7 +1788,7 @@ TEST_F(RasMicrotest, MsgRecvAcceptsLargestPermittedLength) {
   // RAS_MSG_MAXLEN itself is in range; only lengths beyond it are refused.
   rasSocket sock{};
   int calls = 0;
-  g_socketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
+  g_ncclSocketProgress = [&](int, ncclSocket*, void* ptr, int size, int* offset, bool* closed) {
     ++calls;
     if (calls == 1) {
       *static_cast<int*>(ptr) = RAS_MSG_MAXLEN;
