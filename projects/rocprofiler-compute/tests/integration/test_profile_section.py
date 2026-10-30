@@ -3,6 +3,7 @@
 
 """Integration tests for block filtering and metric listing."""
 
+import sys
 from math import isfinite
 from pathlib import Path
 
@@ -46,27 +47,25 @@ def profile_block_selection(binary_handler, workload_dir, blocks):
     return output_files, set(counter_names)
 
 
-def assert_selected_counters(counter_names, expected_counters, selection):
-    unexpected_counters = counter_names - expected_counters
-    assert not unexpected_counters, (
-        f"{selection} collected counters outside the selected block: "
-        f"{sorted(unexpected_counters)}"
-    )
-
-
-def test_block_filter(binary_handler_profile_rocprof_compute):
+def test_block_filter(binary_handler_profile_rocprof_compute, capfd):
     # Memory Chart is block 3 across the supported architecture configurations.
     workload_dir = common.get_output_dir()
     output_files, counter_names = profile_block_selection(
         binary_handler_profile_rocprof_compute, workload_dir, ["3"]
     )
+    captured = capfd.readouterr()
+    # Preserve profiling diagnostics for normal pytest output and saved run logs.
+    print(captured.out, end="")
+    print(captured.err, end="", file=sys.stderr)
     assert counter_names & MEMORY_CHART_COUNTERS, (
         "Block 3 did not collect the expected Memory Chart counter"
     )
     gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
     tables = integration_common.metric_table_counters(gpu_arch, 3)
     expected_counters = set().union(*tables.values())
-    assert_selected_counters(counter_names, expected_counters, "Block 3")
+    integration_common.assert_selected_counters(
+        counter_names, expected_counters, "Block 3", captured.out + "\n" + captured.err
+    )
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 

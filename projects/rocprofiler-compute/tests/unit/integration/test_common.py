@@ -14,9 +14,15 @@ from tests.integration.common import (
     LIVE_ATTACH_SET,
     MEMORY_CHART_COUNTERS,
     SPI_BUSY_COUNTERS,
+    assert_selected_counters,
     metric_table_counters,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
+
+UNSUPPORTED_COUNTER_WARNING = (
+    "[rocprofiler-compute] [create_counter_collection_profile] WARNING: "
+    "Requested counters not available: "
+)
 
 
 @pytest.mark.parametrize("gpu_arch", sorted(mi_gpu_specs.get_gpu_series_dict()))
@@ -90,3 +96,61 @@ def test_block_filters_select_distinct_counters_on_each_architecture(gpu_arch, b
     requested_counters, selected_blocks = soc.detect_counters()
     assert requested_counters == expected_counters
     assert selected_blocks == blocks
+
+
+@pytest.mark.parametrize(
+    ("counter_names", "profiler_output", "failure_message"),
+    [
+        pytest.param({"counter_a", "counter_b", "counter_c"}, "", None, id="complete"),
+        pytest.param(
+            {"counter_a", "counter_c"},
+            "",
+            "did not collect selected counters: .*counter_b",
+            id="missing-supported",
+        ),
+        pytest.param(
+            {"counter_a"},
+            f"\x1b[33m{UNSUPPORTED_COUNTER_WARNING}counter_b, counter_c\x1b[0m\n",
+            None,
+            id="explicitly-unsupported",
+        ),
+        pytest.param(
+            {"counter_a"},
+            f"{UNSUPPORTED_COUNTER_WARNING}counter_b\n"
+            f"{UNSUPPORTED_COUNTER_WARNING}counter_c\n",
+            None,
+            id="unsupported-in-separate-passes",
+        ),
+        pytest.param(
+            {"counter_a"},
+            f"{UNSUPPORTED_COUNTER_WARNING}counter_b\n",
+            "did not collect selected counters: .*counter_c",
+            id="unreported-missing-counter",
+        ),
+        pytest.param(
+            {"counter_a", "counter_c"},
+            "WARNING: Requested counters not available: counter_b\n",
+            "did not collect selected counters: .*counter_b",
+            id="unrelated-warning",
+        ),
+        pytest.param(
+            {"counter_a", "counter_b", "counter_c", "counter_other"},
+            f"{UNSUPPORTED_COUNTER_WARNING}counter_other\n",
+            "counters outside the selected block: .*counter_other",
+            id="unexpected-counter",
+        ),
+    ],
+)
+def test_selected_counter_output_requires_supported_counters(
+    counter_names, profiler_output, failure_message
+):
+    expected_counters = {"counter_a", "counter_b", "counter_c"}
+    if failure_message:
+        with pytest.raises(AssertionError, match=failure_message):
+            assert_selected_counters(
+                counter_names, expected_counters, "Block 3", profiler_output
+            )
+    else:
+        assert_selected_counters(
+            counter_names, expected_counters, "Block 3", profiler_output
+        )
