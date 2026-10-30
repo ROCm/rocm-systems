@@ -875,3 +875,79 @@ def test_post_profiling_roofline_gating(
     soc.post_profiling()
 
     assert mock_benchmark.called is expect_benchmark
+
+
+def test_get_rocprof_supported_counters_merges_installed_config_on_gfx115x(
+    monkeypatch,
+):
+    soc = _make_soc(PERFMON_CONFIG, arch="gfx1151")
+    installed = {"rocprofiler-sdk": {"counters": [{"name": "SDK"}]}}
+    merged = {
+        "rocprofiler-sdk": {"counters": [{"name": "SDK"}, {"name": "EXTRA"}]},
+    }
+    captured = {}
+
+    def fake_limited(sdk_config, agent_arch, installed_config):
+        captured["agent_arch"] = agent_arch
+        captured["installed"] = installed_config
+        return merged
+
+    def fake_metrics_path(sdk_config):
+        captured["metrics_config"] = sdk_config
+        return "/tmp/unused-metrics-path"
+
+    counter = SimpleNamespace(name="SQ_WAVES", block="SQ")
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.installed_sdk_counter_config",
+        lambda _path: installed,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.definitions_limited_to_agent",
+        fake_limited,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.create_temp_rocprofiler_metrics_path",
+        fake_metrics_path,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.rocprofv3_avail_interface.get_counters",
+        lambda _path: {"agent": [counter]},
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.shutil.rmtree",
+        lambda *_args, **_kwargs: None,
+    )
+
+    names = soc.get_rocprof_supported_counters()
+
+    assert captured["agent_arch"] == "gfx1151"
+    assert captured["installed"] is installed
+    assert captured["metrics_config"] is merged
+    assert names == {"SQ_WAVES"}
+
+
+def test_get_rocprof_supported_counters_skips_merge_off_gfx115x(monkeypatch):
+    soc = _make_soc(PERFMON_CONFIG, arch="gfx942")
+    called = []
+    counter = SimpleNamespace(name="SQ_WAVES", block="SQ")
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.definitions_limited_to_agent",
+        lambda *_args, **_kwargs: called.append(True),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.create_temp_rocprofiler_metrics_path",
+        lambda _sdk_config: "/tmp/unused-metrics-path",
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.rocprofv3_avail_interface.get_counters",
+        lambda _path: {"agent": [counter]},
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.shutil.rmtree",
+        lambda *_args, **_kwargs: None,
+    )
+
+    names = soc.get_rocprof_supported_counters()
+
+    assert called == []
+    assert names == {"SQ_WAVES"}

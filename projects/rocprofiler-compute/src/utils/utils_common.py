@@ -997,6 +997,43 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
+def installed_sdk_counter_config(
+    sdk_tool_path: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Counter file shipped with the rocprofiler-sdk install, if present."""
+    config_path = _installed_sdk_counter_config_path(sdk_tool_path)
+    if config_path is None:
+        return None
+    with config_path.open(encoding="utf-8") as handle:
+        loaded = yaml.safe_load(handle)
+    if not isinstance(loaded, dict) or "rocprofiler-sdk" not in loaded:
+        return None
+    return loaded
+
+
+def definitions_limited_to_agent(
+    sdk_config: dict[str, Any],
+    agent_arch: str,
+    installed_config: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Counter file for one GPU.
+
+    Setting ROCPROFILER_METRICS_PATH replaces the install's counter file, so
+    built-in definitions have to travel with local extras. Keep definitions
+    for agent_arch only, omit names the install already provides, drop
+    expressions that still cannot be resolved, and append what remains to
+    installed_config.
+    """
+    builtin_names = _installed_counter_names(installed_config)
+    kept_counters = _counters_for_agent(sdk_config, agent_arch, builtin_names)
+    kept_counters = _without_unresolved_expressions(kept_counters, builtin_names)
+    rocprofiler_sdk = dict(sdk_config["rocprofiler-sdk"])
+    rocprofiler_sdk["counters"] = kept_counters
+    agent_config = dict(sdk_config)
+    agent_config["rocprofiler-sdk"] = rocprofiler_sdk
+    return _merge_installed_counters(installed_config, agent_config)
+
+
 def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
     """
     Create temporary directory with rocprofiler metrics config files.
@@ -1036,6 +1073,163 @@ def create_temp_rocprofiler_metrics_path(sdk_config: dict[str, Any]) -> str:
         yaml.dump(sdk_config, tmpfile, default_flow_style=False, sort_keys=False)
 
     return str(tmpfile_parent)
+
+
+def _counters_for_agent(
+    sdk_config: dict[str, Any],
+    agent_arch: str,
+    builtin_counter_names: set[str],
+) -> list[dict[str, Any]]:
+    kept_counters: list[dict[str, Any]] = []
+    for counter in sdk_config["rocprofiler-sdk"]["counters"]:
+        if counter["name"] in builtin_counter_names:
+            continue
+        kept_definitions = _definitions_for_agent_arch(counter, agent_arch)
+        if not kept_definitions:
+            continue
+        kept_counter = {
+            key: value for key, value in counter.items() if key != "definitions"
+        }
+        kept_counter["definitions"] = kept_definitions
+        kept_counters.append(kept_counter)
+    return kept_counters
+
+
+def _definitions_for_agent_arch(
+    counter: dict[str, Any], agent_arch: str
+) -> list[dict[str, Any]]:
+    kept_definitions: list[dict[str, Any]] = []
+    for definition in counter.get("definitions", []):
+        architectures = definition.get("architectures") or []
+        if agent_arch not in architectures:
+            continue
+        kept_definition = dict(definition)
+        kept_definition["architectures"] = [agent_arch]
+        kept_definitions.append(kept_definition)
+    return kept_definitions
+
+
+def _installed_sdk_counter_config_path(sdk_tool_path: Optional[str]) -> Optional[Path]:
+    candidates: list[Path] = []
+    if sdk_tool_path:
+        tool_path = Path(sdk_tool_path)
+        if tool_path.exists():
+            tool_path = tool_path.resolve()
+        candidates.extend(_sdk_share_config_files(_install_prefix_from_tool(tool_path)))
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    candidates.extend(_sdk_share_config_files(Path(rocm_path)))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _install_prefix_from_tool(tool_path: Path) -> Path:
+    if len(tool_path.parents) > 2:
+        return tool_path.parents[2]
+    return tool_path.parent
+
+
+def _sdk_share_config_files(install_prefix: Path) -> list[Path]:
+    share_path = install_prefix / "share/rocprofiler-sdk"
+    return [share_path / "config.yaml", share_path / "counter_defs.yaml"]
+
+
+def _installed_counter_names(
+    installed_config: Optional[dict[str, Any]],
+) -> set[str]:
+    if not installed_config:
+        return set()
+    counters = installed_config.get("rocprofiler-sdk", {}).get("counters") or []
+    return {
+        counter["name"]
+        for counter in counters
+        if isinstance(counter, dict) and isinstance(counter.get("name"), str)
+    }
+
+
+def _merge_installed_counters(
+    installed_config: Optional[dict[str, Any]],
+    agent_config: dict[str, Any],
+) -> dict[str, Any]:
+    if not installed_config:
+        return agent_config
+    installed_sdk = dict(installed_config["rocprofiler-sdk"])
+    installed_counters = list(installed_sdk.get("counters") or [])
+    installed_names = _installed_counter_names(installed_config)
+    extras = [
+        counter
+        for counter in agent_config["rocprofiler-sdk"]["counters"]
+        if counter["name"] not in installed_names
+    ]
+    installed_sdk["counters"] = installed_counters + extras
+    merged = dict(installed_config)
+    merged["rocprofiler-sdk"] = installed_sdk
+    return merged
+
+
+def _without_unresolved_expressions(
+    counters: list[dict[str, Any]],
+    known_names: set[str],
+) -> list[dict[str, Any]]:
+    remaining = counters
+    dropped = True
+    while dropped:
+        dropped = False
+        visible_names = set(known_names)
+        visible_names.update(counter["name"] for counter in remaining)
+        next_counters: list[dict[str, Any]] = []
+        for counter in remaining:
+            kept_definitions = _definitions_with_known_names(counter, visible_names)
+            if not kept_definitions:
+                dropped = True
+                continue
+            if kept_definitions != counter["definitions"]:
+                dropped = True
+                counter = dict(counter)
+                counter["definitions"] = kept_definitions
+            next_counters.append(counter)
+        remaining = next_counters
+    return remaining
+
+
+def _definitions_with_known_names(
+    counter: dict[str, Any], known_names: set[str]
+) -> list[dict[str, Any]]:
+    kept_definitions: list[dict[str, Any]] = []
+    for definition in counter["definitions"]:
+        expression = definition.get("expression")
+        referenced = (
+            _expression_names(expression) if isinstance(expression, str) else set()
+        )
+        if referenced - known_names:
+            continue
+        kept_definitions.append(definition)
+    return kept_definitions
+
+
+_EXPRESSION_KEYWORDS = frozenset({
+    "DIMENSION_INSTANCE",
+    "DIMENSION_XCC",
+    "accumulate",
+    "avr",
+    "HIGH_RES",
+    "LOW_RES",
+    "max",
+    "min",
+    "reduce",
+    "select",
+    "sum",
+})
+_EXPRESSION_NAME_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+
+
+def _expression_names(expression: str) -> set[str]:
+    return {
+        name
+        for name in _EXPRESSION_NAME_RE.findall(expression)
+        if name not in _EXPRESSION_KEYWORDS
+    }
 
 
 def reconfigure_stdio_utf8() -> None:
