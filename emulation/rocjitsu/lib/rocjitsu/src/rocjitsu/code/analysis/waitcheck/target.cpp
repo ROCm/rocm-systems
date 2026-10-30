@@ -49,7 +49,8 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
       return WaitEventKind::Ds;
     return kind;
   case WaitCounterKind::Store:
-    if (kind == WaitEventKind::GlobalWb)
+    // Generic FLAT and ordinary VMEM stores share the store-completion event.
+    if (kind == WaitEventKind::GlobalWb || kind == WaitEventKind::FlatStore)
       return WaitEventKind::VmemStore;
     return kind;
   case WaitCounterKind::X:
