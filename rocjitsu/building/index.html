@@ -1762,6 +1762,11 @@ configuration. Keep that header tree at a matching revision.</p>
 <td>Enable UndefinedBehaviorSanitizer</td>
 </tr>
 <tr>
+<td><code>RJ_UBSAN_VPTR</code></td>
+<td><code>OFF</code> with GCC; <code>ON</code> otherwise</td>
+<td>Enable UBSan's dynamic-type (vptr) check when <code>RJ_ENABLE_UBSAN</code> is on</td>
+</tr>
+<tr>
 <td><code>RJ_ENABLE_TSAN</code></td>
 <td><code>OFF</code></td>
 <td>Enable ThreadSanitizer</td>
@@ -1822,9 +1827,25 @@ cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </s
 <span class="c1"># UndefinedBehaviorSanitizer</span>
 cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Debug<span class="w"> </span>-DRJ_ENABLE_UBSAN<span class="o">=</span><span class="m">1</span>
 </code></pre></div>
+<p>GCC UBSan builds disable dynamic-type (<code>vptr</code>) checks by default because
+contention in the sanitizer's shared type cache can slow multithreaded emulation.
+Add <code>-DRJ_UBSAN_VPTR=ON</code> to enable those checks. Clang UBSan builds default to
+<code>ON</code> and explicitly enable <code>vptr</code>, which Clang excludes from
+<code>-fsanitize=undefined</code>. Use <code>-DRJ_UBSAN_VPTR=OFF</code> to disable it. The option has
+no effect when <code>RJ_ENABLE_UBSAN</code> is off, and CMake reports the effective <code>vptr</code>
+setting when UBSan is enabled.</p>
 <p><code>AUTO</code> uses shared runtimes for ASan, UBSan, and TSan, and the only
 supported static runtime for MSan. <code>SHARED</code> rejects MSan explicitly because
 Clang does not provide a shared MSan runtime.</p>
+<p>Standalone plugin modules omit <code>vptr</code> checks because they do not link the RTTI
+of every class their code checks. The gfx1250 B0-to-A0 translator library omits
+them only from its CDNA4-to-CDNA3 lowering, for the same reason. When
+<code>RJ_UBSAN_VPTR=ON</code>, the build compiles separate objects for that code, so the
+objects linked into the simulator and unit tests keep those checks.</p>
+<p>With <code>vptr</code> checks on, the UBSan runtime briefly opens pipes on emulator threads,
+so interposer tests that depend on specific file descriptor numbers or exhaust
+the descriptor table are not registered. They run in unsanitized builds and in
+UBSan builds with <code>RJ_UBSAN_VPTR=OFF</code>, including GCC's default.</p>
 <h3 id="static-analysis">Static analysis<a class="headerlink" href="#static-analysis" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DRJ_CLANG_TIDY<span class="o">=</span>ON
 </code></pre></div>
