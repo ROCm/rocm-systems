@@ -12,7 +12,6 @@
 #include "parser/parse_result.hpp"
 #include "parser/precedence.hpp"
 #include "parser/schema.hpp"
-#include "parser/schema_loader.hpp"
 #include "parser/schema_validator.hpp"
 #include "parser/value_provider.hpp"
 
@@ -268,15 +267,6 @@ append_violations(std::vector<std::string>& errors, const schema& config_schema,
     }
 }
 
-schema
-load_requested_schema(std::string_view schema_path)
-{
-    if(schema_path.empty())
-    {
-        return get_default_schema();
-    }
-    return load_schema_file(std::string{ schema_path });
-}
 }  // namespace
 
 void
@@ -298,14 +288,26 @@ configuration_parser::set_preset_lookup(preset_lookup_t lookup)
 }
 
 bool
-configuration_parser::initialize(std::string_view schema_path)
+configuration_parser::initialize()
 {
     try
     {
-        auto loaded    = load_requested_schema(schema_path);
+        return initialize(get_default_schema());
+    } catch(const std::exception& err)
+    {
+        m_failure = err.what();
+        return false;
+    }
+}
+
+bool
+configuration_parser::initialize(schema catalog)
+{
+    try
+    {
         auto providers = std::make_unique<value_provider_registry>();
         providers->add_builtins();
-        m_store     = std::make_unique<config_store>(std::move(loaded));
+        m_store     = std::make_unique<config_store>(std::move(catalog));
         m_providers = std::move(providers);
         m_failure.clear();
         m_errors.clear();

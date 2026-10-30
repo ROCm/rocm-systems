@@ -28,78 +28,8 @@ using namespace rocprofsys::parser;
 namespace
 {
 constexpr std::size_t k_help_param_count = 7;
-
-constexpr std::string_view k_behavior_schema = R"json({
-  "schema_version": "1.0",
-  "params": [
-    {
-      "id": "config_file", "name": "Config file", "description": "Config file",
-      "type": "path", "path_kind": "file",
-      "arg": { "name": "--config", "form": "value" }
-    },
-    {
-      "id": "preset", "name": "Preset", "description": "Preset",
-      "type": "string",
-      "arg": { "name": "--preset", "form": "value" }
-    },
-    {
-      "id": "verbose", "name": "Verbose", "description": "Verbose",
-      "type": "integer", "default_value": 0, "min": 0, "max": 4,
-      "env": { "name": "ROCPROFSYS_VERBOSE" },
-      "arg": { "name": "--verbose", "form": "value" }
-    },
-    {
-      "id": "output_path", "name": "Output path", "description": "Output path",
-      "type": "path", "path_kind": "directory", "default_value": "rocprof-sys-output",
-      "env": { "name": "ROCPROFSYS_OUTPUT_PATH" },
-      "arg": { "name": "--output", "form": "value" }
-    },
-    {
-      "id": "trace", "name": "Trace", "description": "Trace",
-      "type": "bool", "default_value": false,
-      "env": { "name": "ROCPROFSYS_TRACE" },
-      "arg": { "name": "--trace", "form": "flag" }
-    },
-    {
-      "id": "profile", "name": "Profile", "description": "Profile",
-      "type": "bool", "default_value": false,
-      "env": { "name": "ROCPROFSYS_PROFILE" },
-      "arg": { "name": "--profile", "form": "flag" }
-    },
-    {
-      "id": "flat_profile", "name": "Flat profile", "description": "Flat profile",
-      "type": "bool", "default_value": false,
-      "arg": { "name": "--flat-profile", "form": "flag" }
-    },
-    {
-      "id": "sample_cputime", "name": "Sample CPU time", "description": "CPU time",
-      "type": "bool", "default_value": false,
-      "mutually_exclusive_with": [ "sample_realtime" ],
-      "arg": { "name": "--sample-cputime", "form": "flag" }
-    },
-    {
-      "id": "sample_realtime", "name": "Sample real time", "description": "Real time",
-      "type": "bool", "default_value": true,
-      "mutually_exclusive_with": [ "sample_cputime" ],
-      "arg": { "name": "--sample-realtime", "form": "flag" }
-    },
-    {
-      "id": "rocm_domains", "name": "ROCm domains", "description": "ROCm domains",
-      "type": "string",
-      "default_value": "hip_runtime_api,kernel_dispatch,memory_copy",
-      "value_provider": "rocm_domains_sdk",
-      "arg": { "name": "--rocm-domains", "form": "value" }
-    }
-  ],
-  "constraints": [
-    {
-      "kind": "forces",
-      "when": { "param": "flat_profile", "equals": true },
-      "set": { "profile": true },
-      "message": "flat profiles require profiling"
-    }
-  ]
-})json";
+constexpr double      k_verbose_minimum  = 0.0;
+constexpr double      k_verbose_maximum  = 4.0;
 
 bool
 contains_text(const std::vector<std::string>& errors, std::string_view text)
@@ -143,13 +73,143 @@ private:
     std::filesystem::path m_path;
 };
 
+void
+add_checked(schema& catalog, schema_param param)
+{
+    ASSERT_TRUE(catalog.add_param(std::move(param)));
+}
+
+void
+add_behavior_params(schema& catalog)
+{
+    add_checked(catalog,
+                schema_param{
+                    .id          = "config_file",
+                    .name        = "Config file",
+                    .description = "Config file",
+                    .type        = param_type::path,
+                    .path        = path_kind::file,
+                    .arg = arg_spec{ .name = "--config", .form = arg_form::value },
+                });
+    add_checked(catalog,
+                schema_param{
+                    .id          = "preset",
+                    .name        = "Preset",
+                    .description = "Preset",
+                    .type        = param_type::string,
+                    .arg = arg_spec{ .name = "--preset", .form = arg_form::value },
+                });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "verbose",
+                    .name          = "Verbose",
+                    .description   = "Verbose",
+                    .type          = param_type::integer,
+                    .default_value = "0",
+                    .min           = k_verbose_minimum,
+                    .max           = k_verbose_maximum,
+                    .env           = env_spec{ .name = "ROCPROFSYS_VERBOSE" },
+                    .arg = arg_spec{ .name = "--verbose", .form = arg_form::value },
+                });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "output_path",
+                    .name          = "Output path",
+                    .description   = "Output path",
+                    .type          = param_type::path,
+                    .default_value = "rocprof-sys-output",
+                    .path          = path_kind::directory,
+                    .env           = env_spec{ .name = "ROCPROFSYS_OUTPUT_PATH" },
+                    .arg = arg_spec{ .name = "--output", .form = arg_form::value },
+                });
+    add_checked(catalog, schema_param{
+                             .id            = "trace",
+                             .name          = "Trace",
+                             .description   = "Trace",
+                             .type          = param_type::boolean,
+                             .default_value = "false",
+                             .env           = env_spec{ .name = "ROCPROFSYS_TRACE" },
+                             .arg = arg_spec{ .name = "--trace", .form = arg_form::flag },
+                         });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "profile",
+                    .name          = "Profile",
+                    .description   = "Profile",
+                    .type          = param_type::boolean,
+                    .default_value = "false",
+                    .env           = env_spec{ .name = "ROCPROFSYS_PROFILE" },
+                    .arg = arg_spec{ .name = "--profile", .form = arg_form::flag },
+                });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "flat_profile",
+                    .name          = "Flat profile",
+                    .description   = "Flat profile",
+                    .type          = param_type::boolean,
+                    .default_value = "false",
+                    .arg = arg_spec{ .name = "--flat-profile", .form = arg_form::flag },
+                });
+}
+
+void
+add_behavior_sampling(schema& catalog)
+{
+    add_checked(catalog,
+                schema_param{
+                    .id            = "sample_cputime",
+                    .name          = "Sample CPU time",
+                    .description   = "CPU time",
+                    .type          = param_type::boolean,
+                    .default_value = "false",
+                    .arg = arg_spec{ .name = "--sample-cputime", .form = arg_form::flag },
+                    .mutually_exclusive_with = { "sample_realtime" },
+                });
+    add_checked(catalog, schema_param{
+                             .id            = "sample_realtime",
+                             .name          = "Sample real time",
+                             .description   = "Real time",
+                             .type          = param_type::boolean,
+                             .default_value = "true",
+                             .arg           = arg_spec{ .name = "--sample-realtime",
+                                                        .form = arg_form::flag },
+                             .mutually_exclusive_with = { "sample_cputime" },
+                         });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "rocm_domains",
+                    .name          = "ROCm domains",
+                    .description   = "ROCm domains",
+                    .type          = param_type::string,
+                    .default_value = "hip_runtime_api,kernel_dispatch,memory_copy",
+                    .arg = arg_spec{ .name = "--rocm-domains", .form = arg_form::value },
+                    .value_provider = "rocm_domains_sdk",
+                });
+}
+
+schema
+make_behavior_schema()
+{
+    schema catalog{};
+    catalog.set_version("1.0");
+    add_behavior_params(catalog);
+    add_behavior_sampling(catalog);
+    catalog.add_constraint(constraint{
+        .kind          = constraint_kind::forces,
+        .message       = "flat profiles require profiling",
+        .when          = condition{ .terms = { param_condition{ .param  = "flat_profile",
+                                                                .equals = "true" } } },
+        .forced_values = { { "profile", "true" } },
+    });
+    return catalog;
+}
+
 configuration_parser
 make_behavior_parser()
 {
-    const auto           file = scoped_temp_file{ std::string{ k_behavior_schema } };
     configuration_parser parser;
     parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
-    EXPECT_TRUE(parser.initialize(file.path())) << parser.failure();
+    EXPECT_TRUE(parser.initialize(make_behavior_schema())) << parser.failure();
     return parser;
 }
 
@@ -367,7 +427,7 @@ TEST(parser_configuration, exports_environment_and_json)
     restore_environment(previous);
 }
 
-TEST(parser_configuration, reads_argc_and_reports_a_missing_schema)
+TEST(parser_configuration, reads_argc_and_reports_an_uninitialized_parser)
 {
     auto parser       = make_parser();
     auto program      = std::string{ "rocsys" };
@@ -379,8 +439,7 @@ TEST(parser_configuration, reads_argc_and_reports_a_missing_schema)
     EXPECT_EQ(values.at("verbose"), "2");
 
     configuration_parser missing;
-    EXPECT_FALSE(missing.initialize("/no/such/schema.json"));
-    EXPECT_FALSE(missing.failure().empty());
+    EXPECT_TRUE(missing.failure().empty());
     EXPECT_EQ(missing.render_help(), "parser is not initialized\n");
     EXPECT_FALSE(missing.get<std::string>("output_path").has_value());
     EXPECT_TRUE(missing.parse({}).empty());
