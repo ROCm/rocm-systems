@@ -11,7 +11,7 @@ Benchmark hipFile with fio
 
 Before you begin, install hipFile by following the steps in :doc:`/install/install`.
 
-To build the ROCm fio fork with the ``libhipfile`` engine, use the following commands:
+To build fio with the ``libhipfile`` engine, use the following commands:
 
 .. code:: shell
 
