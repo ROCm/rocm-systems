@@ -4,7 +4,7 @@
 // Mapping captured CPUID and XCR0 state to supported x86-64 CPU levels.
 // Keeps this shared policy independent of instruction-specific register layouts.
 
-#include "common/internal.h"
+#include "common/cpu_decode.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>

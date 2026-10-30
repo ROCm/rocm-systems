@@ -219,6 +219,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
+    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322)
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -1045,6 +1046,25 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroP2pResiliency -- src/transport/net_ib_cast/p2p_resiliency*.cc. Own binary: the
+  # net_ib_cast fakes stand in for connect.cc, p2p.cc and common.cc, which other targets do not fake.
+  set(TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES
+    p2p-resiliency-test.cc
+    p2p-resiliency-recovery-test.cc
+    p2p-resiliency-recovery-ainic-test.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc                  # g_malloc / g_free for the recovery context
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_capability_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_qp_sharing_fakes.cc
+    fakes/os_fakes.cc                    # ncclOsGetPageSize for ncclIbMalloc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroNetIbCastInit -- src/transport/net_ib_cast/{init,common,capability,reg,gdr,multiplane,gin,
   # net_ib_cast_gid_inspect}.cc. Own binary: it fakes gdr_probe.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_NET_IB_CAST_INIT_SOURCE_FILES
@@ -1635,6 +1655,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
+    # Per the note above, plugin/rma.cc comes first and so keeps its own name.
+    RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
@@ -2247,6 +2269,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRocmwrap
   SOURCES ${TEST_MICRO_ROCMWRAP_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}
     ROCMWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/rocmwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rocmwrap.yaml")
 
@@ -2369,6 +2392,23 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastDataPath
     NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
     NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_data_path.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroP2pResiliency
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroP2pResiliency
+  SOURCES ${TEST_MICRO_P2P_RESILIENCY_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # The _tmp names: src/CMakeLists.txt lists net_ib/p2p_resiliency*.cc first, so
+    # add_file_unique() renames these. Re-check after any source-list reorder.
+    P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
+    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_p2p_resiliency.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNetIbCastInit

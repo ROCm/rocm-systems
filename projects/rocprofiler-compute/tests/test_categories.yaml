@@ -162,8 +162,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "standard"
       - "pr"
@@ -266,8 +268,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "comprehensive"
       - "nightly"
@@ -370,8 +374,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "full"
       - "weekly"
