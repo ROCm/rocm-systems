@@ -5260,7 +5260,7 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
 }
 
 // ===========================================================================
-// scheduleP2pTasksToPlan (enqueue.cc:1787) -- per-round kernel-argument budget.
+// scheduleP2pTasksToPlan -- per-round kernel-argument budget.
 // A round emits one work item and at most one new batch per channel. Reserving
 // more than that moved the last round of a 4-rank, 64-channel-per-peer AllToAll
 // into a second kernel launch.
@@ -5322,8 +5322,8 @@ struct AllToAllPlanScene {
     c->planner.nTasksP2pRecv = kRanks;
   }
 
-  ncclResult_t schedule(ssize_t inArgsBytes) {
-    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, /*out=*/ssize_t(1) << 30);
+  ncclResult_t schedule(ssize_t inArgsBytes, ssize_t outArgsBytes = ssize_t(1) << 30) {
+    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, outArgsBytes);
     int epoch = 0, round = 0;
     return scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget);
   }
@@ -5355,5 +5355,22 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneBatchPerChannelForTheNext
     ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer) * kBatch));
     EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
     EXPECT_EQ(used + AllToAllPlanScene::kChannelsPerPeer, sc.bp.p()->nWorkBatches);
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneWorkItemForTheNextRound) {
+  const ssize_t inArgs = AllToAllPlanScene::kP2pChannels * kBatch;
+  const ssize_t work = sizeof(struct ncclDevWorkP2p);
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule(inArgs, 4 * work - 1));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the fourth round's send and recv must wait";
+    EXPECT_EQ(3 * work, sc.bp.p()->workBytes);
+  }
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule(inArgs, 4 * work));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(4 * work, sc.bp.p()->workBytes);
   }
 }
