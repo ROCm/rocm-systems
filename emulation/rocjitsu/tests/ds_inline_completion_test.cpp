@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -115,32 +116,39 @@ private:
 TEST(DsInlineCompletion, EveryDsOpcodeMatchesTheRoutedPath) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   unsigned compared = 0, inline_completions = 0;
-  for (uint16_t op = 0; op < 256; ++op) {
-    const auto words = cdna4::build_ds(
-        op, {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 8});
-    DecodeResult decoded = decoder->decode(words.data());
-    if (decoded.failed())
-      continue;
-    const std::string mnemonic(decoded.value()->mnemonic());
-    // GWS operations park and wake waves across the device; both paths route them.
-    if (mnemonic.starts_with("ds_gws"))
-      continue;
-    for (const uint64_t exec : {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0}})
-      for (const Addresses addresses :
-           {Addresses::Permuted, Addresses::Broadcast, Addresses::PastEnd}) {
-        SCOPED_TRACE(testing::Message() << mnemonic << " exec=" << std::hex << exec
-                                        << " addresses=" << static_cast<int>(addresses));
-        DsCu routed(false), inlined(true);
-        routed.run(words, exec, addresses);
-        inlined.run(words, exec, addresses);
-        EXPECT_FALSE(routed.cu().lds_inline_completed_for_test());
-        inline_completions += inlined.cu().lds_inline_completed_for_test();
-        ASSERT_EQ(inlined.snapshot(), routed.snapshot());
-        ++compared;
-      }
-  }
+  // Ordinary operands, then data and destination registers at the end of the
+  // allocation, so multi-register forms reach past it.
+  const std::array<cdna4::DsBuilderFields, 2> operand_sets{{
+      {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 8},
+      {.offset0 = 8, .offset1 = 1, .addr = 0, .data0 = 255, .data1 = 255, .vdst = 255},
+  }};
+  for (uint16_t op = 0; op < 256; ++op)
+    for (const auto &operands : operand_sets) {
+      const auto words = cdna4::build_ds(op, operands);
+      DecodeResult decoded = decoder->decode(words.data());
+      if (decoded.failed())
+        continue;
+      const std::string mnemonic(decoded.value()->mnemonic());
+      // GWS operations park and wake waves across the device; both paths route them.
+      if (mnemonic.starts_with("ds_gws"))
+        continue;
+      for (const uint64_t exec : {~uint64_t{0}, uint64_t{0xA55AA55AA55AA55Aull}, uint64_t{0}})
+        for (const Addresses addresses :
+             {Addresses::Permuted, Addresses::Broadcast, Addresses::PastEnd}) {
+          SCOPED_TRACE(testing::Message()
+                       << mnemonic << " data0=" << unsigned(operands.data0) << " exec=" << std::hex
+                       << exec << " addresses=" << static_cast<int>(addresses));
+          DsCu routed(false), inlined(true);
+          routed.run(words, exec, addresses);
+          inlined.run(words, exec, addresses);
+          EXPECT_FALSE(routed.cu().lds_inline_completed_for_test());
+          inline_completions += inlined.cu().lds_inline_completed_for_test();
+          ASSERT_EQ(inlined.snapshot(), routed.snapshot());
+          ++compared;
+        }
+    }
   // Ordinary DS loads, stores and atomics must actually take the inline path.
-  EXPECT_GT(compared, 300u);
+  EXPECT_GT(compared, 600u);
   EXPECT_GT(inline_completions, compared / 2);
 }
 
@@ -182,6 +190,49 @@ TEST(DsInlineCompletion, ObserversAndDebuggerKeepTheRoutedPath) {
       fixture.run(words, ~uint64_t{0}, Addresses::Permuted);
       EXPECT_EQ(fixture.cu().lds_inline_completed_for_test(), hook == Hook::None && !debugger);
     }
+  }
+}
+
+/// @brief Records VGPR read notifications and nothing else.
+class VgprReadRecorder final : public ExecutionPlugin {
+public:
+  VgprReadRecorder() : ExecutionPlugin("ds_inline_reads") {}
+  bool observes_before_execute_instruction() const override { return false; }
+  bool observes_after_execute_instruction() const override { return false; }
+  bool observes_async_instruction_issued() const override { return false; }
+  bool observes_memory_instruction_routing() const override { return false; }
+  bool observes_vgpr_writes() const override { return false; }
+  bool observes_scalar_register_writes() const override { return false; }
+  bool observes_sgpr_reads() const override { return false; }
+  void onAmdgpuReadVgprLanes(const Wavefront * /*wf*/, uint32_t reg, uint64_t lanes,
+                             uint8_t bytes) override {
+    reads.emplace_back(reg, lanes, bytes);
+  }
+  std::vector<std::tuple<uint32_t, uint64_t, uint8_t>> reads;
+};
+
+TEST(DsInlineCompletion, RegisterReadObserversSeeTheRoutedReads) {
+  // A read observer keeps plain loads and stores off the request path, which
+  // reads raw storage; they complete inline from a VectorMemState instead and
+  // report exactly the reads the routed path reports.
+  for (const uint16_t op : {cdna4::kDsReadB32Ds, cdna4::kDsReadB64Ds, cdna4::kDsWriteB32Ds,
+                            cdna4::kDsWriteB64Ds, cdna4::kDsWriteB16D16HiDs}) {
+    SCOPED_TRACE(op);
+    const auto words = cdna4::build_ds(op, {.addr = 0, .data0 = 1, .vdst = 8});
+    std::vector<std::vector<std::tuple<uint32_t, uint64_t, uint8_t>>> reads;
+    for (const bool lds_inline : {false, true}) {
+      DsCu fixture(lds_inline);
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      auto recorder = std::make_unique<VgprReadRecorder>();
+      auto *recorded = recorder.get();
+      group->add(std::move(recorder));
+      fixture.cu().set_plugin_group(group);
+      fixture.run(words, 0xA55AA55AA55AA55Aull, Addresses::Permuted);
+      EXPECT_EQ(fixture.cu().lds_inline_completed_for_test(), lds_inline);
+      reads.push_back(recorded->reads);
+    }
+    EXPECT_FALSE(reads[1].empty());
+    EXPECT_EQ(reads[1], reads[0]);
   }
 }
 

@@ -9,7 +9,6 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
@@ -25,54 +24,45 @@ namespace {
 /// Largest per-lane footprint of a plain DS access (b128).
 constexpr uint32_t kMaxLaneBytes = 16;
 
-/// Gather a store payload lane-major, with the register reads the generated
-/// ds_write handlers make: one region for whole dwords, per-lane reads for a
-/// region the wave's physical storage splits, and byte-masked per-lane reads
-/// for narrow (and D16_HI) sources.
-void gather_payload(const LdsAccessRequest &req, Wavefront &wf, uint64_t exec, uint32_t stride,
-                    uint8_t *payload) {
-  auto &cu = wf.cu();
-  const uint32_t wave = wf.wf_size();
+/// One VGPR's lanes from raw storage. An unmaterialized register reads as the
+/// shared zero backing, as it does through RegisterAccess.
+const uint32_t *vgpr_lanes(const ComputeUnitCore &cu, uint32_t reg) {
+  return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg));
+}
+
+/// Gather a store payload lane-major from the data VGPRs: whole dwords, or the
+/// low (D16_HI: high) bytes of one register for narrow stores.
+void gather_payload(const LdsAccessRequest &req, const ComputeUnitCore &cu, uint64_t exec,
+                    uint32_t stride, uint8_t *payload) {
   if (req.elem_size >= sizeof(uint32_t)) {
-    const uint32_t dwords = stride / sizeof(uint32_t);
-    if (exec) {
-      auto data = RegisterAccess(wf).read_vgpr_region(req.data_vgpr, dwords, exec);
-      if (data.valid()) {
-        data.copy_dwords_lane_major(std::span<uint8_t>(payload, wave * stride), exec);
-        return;
-      }
-    }
-    for (uint32_t lane = 0; lane < wave; ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      for (uint32_t i = 0; i < dwords; ++i) {
-        const uint32_t value = RegisterAccess(cu).read_vgpr(req.data_vgpr + i, lane);
-        std::memcpy(&payload[lane * stride + i * sizeof(uint32_t)], &value, sizeof(uint32_t));
+    for (uint32_t i = 0; i < stride / sizeof(uint32_t); ++i) {
+      const uint32_t *source = vgpr_lanes(cu, req.data_vgpr + i);
+      for (uint64_t lanes = exec; lanes; lanes &= lanes - 1) {
+        const uint32_t lane = std::countr_zero(lanes);
+        std::memcpy(&payload[lane * stride + i * sizeof(uint32_t)], &source[lane],
+                    sizeof(uint32_t));
       }
     }
     return;
   }
   assert(req.num_elems == 1 && "narrow DS stores carry one element");
-  const uint8_t byte_mask =
-      static_cast<uint8_t>(((1u << req.elem_size) - 1u) << (req.d16_hi ? 2 : 0));
-  for (uint32_t lane = 0; lane < wave; ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t value = RegisterAccess(cu).read_vgpr(req.data_vgpr, lane, byte_mask);
-    if (req.d16_hi)
-      value >>= 16;
+  const uint32_t *source = vgpr_lanes(cu, req.data_vgpr);
+  for (uint64_t lanes = exec; lanes; lanes &= lanes - 1) {
+    const uint32_t lane = std::countr_zero(lanes);
+    const uint32_t value = req.d16_hi ? source[lane] >> 16 : source[lane];
     std::memcpy(&payload[lane * stride], &value, req.elem_size);
   }
 }
 
-/// Write a load's lane-major response to its destination VGPRs: the non-atomic
-/// part of the routed path's vector_complete(). DS lanes are never dropped as
-/// out of bounds, so there is no OOB zeroing.
+/// Destination VGPRs a load writes.
+uint32_t dst_vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3u) / 4u); }
+
+/// Write a load's lane-major response to its destination VGPRs: the
+/// non-atomic part of the routed path's vector_complete(). DS lanes are never
+/// dropped as out of bounds, so there is no OOB zeroing.
 void write_back(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint64_t exec,
                 uint32_t stride, const uint8_t *response) {
-  const uint32_t vgpr_count = std::max(1u, (stride + 3u) / 4u);
-  if (!cu.owns_vgpr_range(wf, req.dst_vgpr, vgpr_count))
-    return;
+  const uint32_t vgpr_count = dst_vgpr_count(stride);
   if (req.elem_size == sizeof(uint32_t) && !req.sign_extend && !req.d16_hi && !req.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
       auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(req.dst_vgpr + i));
@@ -117,37 +107,86 @@ void write_back(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu,
   }
 }
 
+/// 1. Gate: whether @p req may complete here. Nothing has been read or built
+///    yet, so declining costs a few loads and branches, and the handler falls
+///    back to its VectorMemState.
+[[gnu::always_inline]] inline bool can_complete_inline(const LdsAccessRequest &req,
+                                                       const ComputeUnitCore &cu,
+                                                       const Wavefront &wf, uint32_t stride) {
+  // 1a. Decided once per execution by the issue loop (observers of the routed
+  //     order, a debugger, RJ_DS_INLINE).
+  if (!cu.completes_lds_inline())
+    return false;
+  // Source registers are read from raw storage. Each case where RegisterAccess
+  // would do more than read them takes the VectorMemState path.
+  //
+  // 1b. Register-read observers expect the notifications RegisterAccess sends.
+  if (cu.observes_register_access())
+    return false;
+  // 1c. The address register comes from the encoding. Outside the issuing wave's
+  //     allocation, raw storage belongs to another wave or lies past the file.
+  if (!cu.owns_vgpr_range(wf, req.addr_vgpr, 1))
+    return false;
+  // 1d. Same but for stores: they also read their payload registers.
+  if (!req.is_load && !cu.owns_vgpr_range(wf, req.data_vgpr, std::max(1u, stride / 4u)))
+    return false;
+  // 1e. Same but for loads: they write their destination registers. Unowned, the
+  //     VectorMemState path still performs the LDS read and skips the writeback,
+  //     as the routed path does.
+  if (req.is_load && !cu.owns_vgpr_range(wf, req.dst_vgpr, dst_vgpr_count(stride)))
+    return false;
+  return true;
+}
+
 } // namespace
 
 bool LdsInlineAccess::complete(const Instruction &inst, const LdsAccessRequest &req,
                                Wavefront &wf) {
   ComputeUnitCore &cu = wf.raw_cu();
-  if (!cu.completes_lds_inline())
-    return false;
-  const uint32_t wave = wf.wf_size();
-  const uint64_t exec = wf.exec();
   const uint32_t stride = req.num_elems * req.elem_size;
   assert(stride != 0 && stride <= kMaxLaneBytes);
 
-  // Addresses, read as ds_calculate_addresses() reads them. Inactive lanes are
-  // never read by the LDS model, so the array is not initialized.
-  alignas(32) uint64_t addresses[64];
-  {
-    auto region = RegisterAccess(wf.cu()).read_vgpr_region(req.addr_vgpr, 1, exec);
-    addr_calc::ds_lane_addresses(region.lanes(), exec, wave, req.offset + wf.lds_base(), addresses);
-  }
+  // 1. Gate.
+  if (!can_complete_inline(req, cu, wf, stride))
+    return false;
 
-  // Per-lane staging on the stack; only active lanes are written and read.
-  alignas(64) uint8_t lanes[64 * kMaxLaneBytes];
+  const uint32_t wave = wf.wf_size();
+  const uint64_t exec = wf.exec(); // == lane_mask == exec_mask for DS
   Lds &lds = wf.lds();
+
+  // 2. Addresses: one raw read of the address VGPR and a 32-bit sum, zero-extended
+  //    for the LDS model. It never reads inactive lanes, so the array is not
+  //    initialized.
+  alignas(32) uint64_t addresses[64];
+  addr_calc::ds_lane_addresses({vgpr_lanes(cu, req.addr_vgpr), wave}, exec, wave,
+                               req.offset + wf.lds_base(), addresses);
+
+  // 3. Hazards before any write: addresses are captured above, a store reads its
+  //    payload before LDS changes, and a load writes VGPRs only after its LDS
+  //    read, so a destination overlapping the address register is safe.
+
+  // 4. Reader/writer by address pattern (lds_access_patterns.h, later): broadcast,
+  //    contiguous, otherwise run-walk. Every access currently takes the run-walk in
+  //    Lds::vector_load / vector_store, with Lds' bounds and lazy-backing rules:
+  //    past capacity or unmaterialized reads as 0, writes past capacity are dropped.
+
+  // 5. The access itself, through per-lane staging on the stack; only active
+  //    lanes are written and read.
+  alignas(64) uint8_t lanes[64 * kMaxLaneBytes];
   if (req.is_load) {
+    // LDS -> staging -> destination VGPR(s), applying sign_extend / d16.
     lds.vector_load(addresses, exec, req.elem_size, req.num_elems, lanes);
     write_back(req, wf, cu, exec, stride, lanes);
   } else {
-    gather_payload(req, wf, exec, stride, lanes);
+    // Payload VGPR(s) -> staging -> LDS, lanes ascending so the highest lane
+    // wins on overlap.
+    gather_payload(req, cu, exec, stride, lanes);
     lds.vector_store(addresses, exec, req.elem_size, req.num_elems, lanes);
   }
-  cu.note_lds_inline_completion(inst);
+
+  // 6. No wait counters (acquire and release would cancel), no routing, no state.
+  //    Register writes bypass instruction write callbacks, as VM completion does.
+  cu.note_lds_inline_completion(inst); // CU caches the decoded instruction
   return true;
 }
 
