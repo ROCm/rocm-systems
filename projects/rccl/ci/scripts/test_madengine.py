@@ -133,8 +133,7 @@ WORKLOAD_CONFIGS = {
     # TP1 x PP4 x DP4, so pipeline point-to-point traffic is what RCCL carries.
     # Its own key because its numbers are a different baseline. Megatron
     # rejects FSDP2 together with PP > 1, hence the three overrides together
-    # (ROCm/MAD#284; validated there on 2 x 8 MI355X at ~1519 BF16 and
-    # ~1659 FP8 tok/s/GPU, one phase in 62 min).
+    # (ROCm/MAD#284).
     "llama-3.1-70b-pp4-training": {
         "type": "training",
         "model_repo": "primus_pyt_megatron_lm_train_llama-3.1-70b",
