@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
@@ -249,6 +250,9 @@ TEST(Validator, AfterInstRejectsBankSelectionAndMissingHwregOperands) {
 }
 
 TEST(Validator, AfterInstQualifiesSetregByArchitectureHwregAndTargetCapability) {
+  constexpr uint16_t kOtherHwreg = 2;
+  constexpr uint16_t kModeBankBit = amdgpu::MODE_HWREG | (amdgpu::VGPR_MSB_MODE_SHIFT << 6);
+  constexpr uint16_t kModeOutsideBankBit = amdgpu::MODE_HWREG | (25 << 6);
   const InstrumentationPoint point{.kind = InstrumentationKind::AfterInst,
                                    .probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1),
                                    .probe_symbol = "after",
@@ -257,8 +261,7 @@ TEST(Validator, AfterInstQualifiesSetregByArchitectureHwregAndTargetCapability) 
        {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     std::unique_ptr<Decoder> decoder = Decoder::create(arch);
     ASSERT_NE(decoder, nullptr);
-    // Other HWREG, MODE bank bit, and a MODE bit outside the bank fields.
-    for (const uint16_t hwreg : {uint16_t{2}, uint16_t{1 | (12 << 6)}, uint16_t{1 | (25 << 6)}}) {
+    for (const uint16_t hwreg : {kOtherHwreg, kModeBankBit, kModeOutsideBankBit}) {
       for (const bool immediate : {false, true}) {
         std::array<uint32_t, 2> words{0, 1};
         if (arch == ROCJITSU_CODE_ARCH_CDNA4)
@@ -280,8 +283,8 @@ TEST(Validator, AfterInstQualifiesSetregByArchitectureHwregAndTargetCapability) 
         for (const bool fixup : {false, true}) {
           SCOPED_TRACE(::testing::Message() << arch << " hwreg=" << hwreg
                                             << " immediate=" << immediate << " fixup=" << fixup);
-          const bool changes_bank =
-              arch == ROCJITSU_CODE_ARCH_CDNA5 && hwreg != 2 && (fixup || hwreg == (1 | (12 << 6)));
+          const bool changes_bank = arch == ROCJITSU_CODE_ARCH_CDNA5 && hwreg != kOtherHwreg &&
+                                    (fixup || hwreg == kModeBankBit);
           std::string error;
           EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error, fixup).has_value(),
                     !changes_bank)

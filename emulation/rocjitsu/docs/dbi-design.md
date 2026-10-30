@@ -13,9 +13,11 @@ predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
 
 This document describes the DBI subsystem as implemented. The instrumentor can
 insert an inline nop or call a verified, copied probe body. Calls pass explicit
-arguments, preserve guest state, and share one body across sites. Before-placement
-and callable kernel entry/exit observations are supported; after-placement and
-block boundaries remain reserved. Existing scratch spills coexist with an
+arguments, preserve guest state, and share one body across sites. Before-placement,
+callable `AfterInst`, and callable kernel entry/exit observations are supported.
+`AfterInst` requires a callable probe and rejects bank-changing anchors because
+the pre-anchor bank proof does not establish the post-anchor state. Block
+boundaries remain reserved. Existing scratch spills coexist with an
 explicit register-growth policy that uses disjoint register backups. The shared
 code-object layer updates the resource note and descriptor together. General HWREG/MODE preservation, scratch enablement
 from zero, arbitrary composed instrumentation, and streaming transport remain

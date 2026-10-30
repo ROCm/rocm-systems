@@ -164,8 +164,9 @@ CONSAN_KERNEL:
   v_cmp_eq_u32 MASK_VCC, 0, v0
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   s_cbranch_execz .Lpublication
-  // Forward-only delay keeps this fixture inside the acyclic T02 profile.
-  .rept 128
+  // Outlast the completion callback even when the relocated publication wait
+  // is removed. Forward-only delay keeps this inside the acyclic T02 profile.
+  .rept 512
   s_nop 0
   .endr
   DS_STORE v1, v2

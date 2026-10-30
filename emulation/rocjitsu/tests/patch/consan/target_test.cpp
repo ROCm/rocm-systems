@@ -88,7 +88,7 @@ TEST(ConSanBarrierStatic, QualifiedGfx1250PairPreservesOriginalOperations) {
     const FailureOr<PreparedArtifact> artifact =
         prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
-    EXPECT_EQ(static_cast<uint32_t>(artifact.value().manifest.scope), 2u);
+    EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrier);
     EXPECT_EQ(artifact.value().manifest.sites.size(),
               std::string_view(fixture) == "native-24" ? 3u : 2u);
     EXPECT_EQ(artifact.value().manifest.barriers.size(),

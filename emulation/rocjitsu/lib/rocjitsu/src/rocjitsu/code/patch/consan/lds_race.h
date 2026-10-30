@@ -36,7 +36,7 @@ struct NativeLdsAccess {
                                                    std::vector<NativeLdsAccess> &accesses,
                                                    InputError &error);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
-                                                      bool barriers = false);
+                                                      bool barriers);
 
 [[nodiscard]] Result qualify_lds_race_barrier(InputProgram &program,
                                               std::span<BasicBlock *const> blocks,

@@ -474,6 +474,10 @@ that a wait blocked an early consumer. The
 control uses assembly cases 25/26: both initialize LDS to zero and synchronize,
 then only the producer delays before publishing input=7. Without the publication
 barrier the consumer reads zero; both the original and instrumented synchronized
-kernels must read seven. The forward-only delay keeps this control in the
-acyclic profile. Its scheduling-dependent negative case is simulator evidence,
+kernels must read seven. A second negative control replaces only the relocated
+publication wait with `s_nop 0` in the prepared image, leaving the completion
+callback intact. It must also read zero, proving that callback execution does
+not hide the missing wait. The 512-NOP forward-only producer delay keeps this
+control in the acyclic profile; increase it if callback growth causes the
+mutation control to read seven. These scheduling-dependent controls are simulator evidence,
 not a requirement that physical hardware reproduce the same unsynchronized read.

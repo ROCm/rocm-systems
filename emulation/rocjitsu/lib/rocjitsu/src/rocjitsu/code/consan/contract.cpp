@@ -239,6 +239,8 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
 
   if ((manifest.scope == ScopeKind::NativeLdsWorkgroupBarrier) != !manifest.barriers.empty())
     return reject(error, ContractErrorCode::InvalidFacts, "barrier scope and facts disagree");
+  std::vector<std::pair<uint64_t, uint64_t>> prepared_ranges;
+  prepared_ranges.reserve(manifest.sites.size() + 2 * manifest.barriers.size());
   uint64_t previous_barrier_end = 0;
   for (const BarrierFacts &barrier : manifest.barriers) {
     if (barrier.original_drain < previous_barrier_end || manifest.target != 1250 ||
@@ -259,19 +261,18 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
                     "invalid fixed barrier qualification or mapping");
     previous_barrier_end = barrier.original_wait + 4;
     for (const SiteFacts &site : manifest.sites)
-      if ((site.original_offset + site.original_size > barrier.original_drain &&
-           site.original_offset < barrier.original_wait + 4) ||
-          (site.prepared_guest_offset + site.prepared_guest_size > barrier.prepared_signal &&
-           site.prepared_guest_offset < barrier.prepared_signal + 4) ||
-          (site.prepared_guest_offset + site.prepared_guest_size > barrier.prepared_wait &&
-           site.prepared_guest_offset < barrier.completion_probe + barrier.probe_size))
+      if (site.original_offset + site.original_size > barrier.original_drain &&
+          site.original_offset < barrier.original_wait + 4)
         return reject(error, ContractErrorCode::InvalidFacts,
-                      "access overlaps barrier group or probe");
+                      "access overlaps original barrier group");
+    // Distinct source operations cannot share prepared instruction bytes.
+    // Include each wait's completion callback so partial overlaps fail too.
+    prepared_ranges.emplace_back(barrier.prepared_signal, barrier.prepared_signal + 4);
+    prepared_ranges.emplace_back(barrier.prepared_wait,
+                                 barrier.completion_probe + barrier.probe_size);
   }
 
   uint64_t previous_original_end = 0;
-  std::vector<std::pair<uint64_t, uint64_t>> guest_ranges;
-  guest_ranges.reserve(manifest.sites.size());
   for (size_t index = 0; index < manifest.sites.size(); ++index) {
     const SiteFacts &site = manifest.sites[index];
     if (site.id != index || site.owner_entry != entry.id ||
@@ -292,14 +293,14 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
       return reject(error, ContractErrorCode::InvalidFacts,
                     "invalid site identity, mapping or address group");
     previous_original_end = site.original_offset + site.original_size;
-    guest_ranges.emplace_back(site.prepared_guest_offset,
-                              site.prepared_guest_offset + site.prepared_guest_size);
+    prepared_ranges.emplace_back(site.prepared_guest_offset,
+                                 site.prepared_guest_offset + site.prepared_guest_size);
   }
-  std::sort(guest_ranges.begin(), guest_ranges.end());
-  for (size_t index = 1; index < guest_ranges.size(); ++index) {
-    if (guest_ranges[index].first < guest_ranges[index - 1].second)
+  std::sort(prepared_ranges.begin(), prepared_ranges.end());
+  for (size_t index = 1; index < prepared_ranges.size(); ++index) {
+    if (prepared_ranges[index].first < prepared_ranges[index - 1].second)
       return reject(error, ContractErrorCode::InvalidFacts,
-                    "duplicate or overlapping guest mapping");
+                    "duplicate or overlapping prepared mapping");
   }
   return Result::success();
 }
