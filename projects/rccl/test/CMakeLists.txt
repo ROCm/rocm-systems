@@ -411,6 +411,7 @@ if(BUILD_TESTS)
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaVecElementAddTests.cpp
+      device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -422,6 +423,7 @@ if(BUILD_TESTS)
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
+      device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
