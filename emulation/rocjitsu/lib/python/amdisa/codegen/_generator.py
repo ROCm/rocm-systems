@@ -1209,15 +1209,22 @@ class CodeGenerator:
         }.get(opnd.data_format_name, 'NONE')
         return f'amdgpu::sdwa::SourceModifierFormat::{suffix}'
 
-    @staticmethod
     def _dpp_source_sign_bit(
-        sem: InstructionSemantics, source_index: int, opnd: Operand
+        self, sem: InstructionSemantics, source_index: int, opnd: Operand
     ) -> int:
         if source_index == 1 and (
             sem.semantic_class in ('vector_cmp_class', 'vector_cmpx_class')
             or (sem.semantic_class == 'vector_binop' and sem.operation == 'ldexp')
         ):
             return 0
+        if self.isa_spec.arch_name in ('rdna3', 'rdna4'):
+            if sem.name in ('V_MOV_B32', 'V_MOVRELD_B32', 'V_CNDMASK_B32'):
+                return 1 << 31
+            if sem.name == 'V_MOV_B16':
+                return 1 << 15
+            # Relative-source moves apply signs after resolving M0.
+            if sem.semantic_class == 'vector_movrel':
+                return 0
         if sem.name == 'V_PK_FMAC_F16':
             return 0
         bit = {
@@ -6985,12 +6992,25 @@ class CodeGenerator:
             gen_half_dot,
         )
 
+        from amdisa.codegen.execute.rj_arith_ds import gen_ds
+
+        rj_arith_ds = gen_ds(ctx)
+        if rj_arith_ds is not None:
+            return RjArithBody(rj_arith_ds)
+
+        from amdisa.codegen.execute.rj_arith_lane import gen_lane
+
+        rj_arith_lane = gen_lane(ctx)
+        if rj_arith_lane is not None:
+            return RjArithBody(rj_arith_lane)
+
         from amdisa.codegen.execute.rj_arith_vector import (
             gen_vector32,
+            gen_integer16,
             gen_widening_integer,
         )
 
-        for generator in (gen_vector32, gen_widening_integer):
+        for generator in (gen_vector32, gen_integer16, gen_widening_integer):
             body = generator(ctx)
             if body is not None:
                 return RjArithBody(body)
@@ -14138,9 +14158,17 @@ class CodeGenerator:
                             for index, sign in enumerate(_dpp_sign_bits):
                                 if sign:
                                     source = _src_input_ops[index].name
+                                    source_lanes = (
+                                        ', wf.exec() & wf.vcc_mask()'
+                                        if index == 1
+                                        and inst.name == 'V_CNDMASK_B32'
+                                        and self.isa_spec.arch_name
+                                        in ('rdna3', 'rdna4')
+                                        else ''
+                                    )
                                     _dpp_preamble += (
                                         f'  amdgpu::dpp::apply_source_modifiers({source}, dpp_src{index}_, wf,\n'
-                                        f'      {sign}ull, dpp_modifiers_, {index});\n'
+                                        f'      {sign}ull, dpp_modifiers_, {index}{source_lanes});\n'
                                     )
                             if not _semantic_stages_src0:
                                 _dpp_preamble += (
@@ -15102,7 +15130,22 @@ class CodeGenerator:
                             False,
                         )
                     )
+                from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DS_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_lane import LANE_HEADER_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in LANE_HEADER_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h', False)
+                    )
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(

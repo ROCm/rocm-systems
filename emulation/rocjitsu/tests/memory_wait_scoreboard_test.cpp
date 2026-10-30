@@ -2514,45 +2514,49 @@ TEST(MemoryWaitExecutionTest, SccHwregWritesCheckOnlyPermittedOverlappingFields)
 }
 
 TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
-  for (uint64_t lanes : {uint64_t{0}, uint64_t{1}, uint64_t{1} << 32, ~uint64_t{0}}) {
-    SCOPED_TRACE(lanes);
-    GpuMemory memory("vcc_high_memory");
-    L2Cache l2("vcc_high_l2");
-    ComputeUnitCore::Config config{};
-    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-    config.arch = ROCJITSU_CODE_ARCH_CDNA3;
-    config.num_wf_slots = 1;
-    config.sgprs_per_wf = 128;
-    config.vgprs_per_wf = 32;
-    config.lds_size_kb = 64;
-    std::unique_ptr<ComputeUnitCore> cu;
-    ASSERT_NO_FATAL_FAILURE(
-        rocjitsu::test::initialize_compute_unit(cu, "vcc_high_cu", config, &memory, &l2));
-    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 64u);
-    auto &state = wf->ensure_memory_wait_scoreboard();
-    std::vector<MemoryWaitScoreboard::Hazard> hazards;
-    state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
-      static_cast<decltype(hazards) *>(p)->push_back(hazard);
-    });
-    state.add({state.issue(WaitCounterKind::Ds, true),
-               0x100,
-               ~uint64_t{0},
-               {RegClass::VCC, 1, 1},
-               WaitCounterKind::Ds,
-               0xf});
-    {
-      wf->set_exec(lanes);
-      const auto words =
-          cdna3::build_vop2(cdna3::kVCndmaskB32Vop2, {.src0 = 128, .vsrc1 = 0, .vdst = 2});
-      auto decoder = Decoder::create(config.arch);
-      util::StringDiagnostic error;
-      auto decoded = decoder->decode_window(words, 0, error.emitter());
-      ASSERT_TRUE(decoded.succeeded()) << error.message();
-      state.check_instruction(*decoded.value(), *wf);
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (uint64_t lanes : {uint64_t{0}, uint64_t{1}, uint64_t{1} << 32, ~uint64_t{0}}) {
+      SCOPED_TRACE(lanes);
+      GpuMemory memory("vcc_high_memory");
+      L2Cache l2("vcc_high_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      config.lds_size_kb = 64;
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "vcc_high_cu", config, &memory, &l2));
+      auto *wf = cu->dispatch_wf(0, 0x100, 128, 32, 64);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_EQ(wf->wf_size(), 64u);
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      std::vector<MemoryWaitScoreboard::Hazard> hazards;
+      state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
+        static_cast<decltype(hazards) *>(p)->push_back(hazard);
+      });
+      state.add({state.issue(WaitCounterKind::Ds, true),
+                 0x100,
+                 ~uint64_t{0},
+                 {RegClass::VCC, 1, 1},
+                 WaitCounterKind::Ds,
+                 0xf});
+      {
+        wf->set_exec(lanes);
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA3
+                ? cdna3::build_vop2(cdna3::kVCndmaskB32Vop2, {.src0 = 128, .vsrc1 = 0, .vdst = 2})
+                : rdna4::build_vop2(rdna4::kVCndmaskB32Vop2, {.src0 = 128, .vsrc1 = 0, .vdst = 2});
+        auto decoder = Decoder::create(config.arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        state.check_instruction(*decoded.value(), *wf);
+      }
+      EXPECT_EQ(hazards.size(), lanes >> 32 ? 1u : 0u);
     }
-    EXPECT_EQ(hazards.size(), lanes >> 32 ? 1u : 0u);
   }
 }
 
@@ -4243,6 +4247,15 @@ TEST(MemoryWaitFootprintTest, InterpolationReadsQuadCoefficients) {
       cases.emplace_back(words.begin(), words.end());
     }
     check_vector_footprints(arch, 32, 16, cases);
+  }
+}
+
+// NULL is a whole-wave zero condition even when the adjacent M0 register is nonzero.
+TEST(MemoryWaitFootprintTest, Wave64CndmaskNullIgnoresM0) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const auto words = rdna4::build_vop3(rdna4::kVCndmaskB32Vop3,
+                                         {.vdst = 5, .src0 = 257, .src1 = 258, .src2 = 124});
+    check_vector_footprints(arch, 64, 256, {{words.begin(), words.end()}}, /*m0=*/1);
   }
 }
 
@@ -6092,6 +6105,27 @@ TEST(MemoryWaitFootprintTest, DsLanePermutationsUseConsumedSourceLanes) {
                             prepare);
     if (arch == ROCJITSU_CODE_ARCH_RDNA3)
       check_vector_footprints(arch, 32, 16, cases, 0, 0, prepare);
+  }
+}
+
+TEST(MemoryWaitFootprintTest, RdnaExtendedSwizzlesMatchObservedSourceFootprints) {
+  for (bool rdna3 : {false, true}) {
+    std::vector<std::vector<uint32_t>> cases;
+    for (uint16_t offset : {0xc020, 0xc420, 0xc02f, 0xe000, 0xe00f}) {
+      const auto words =
+          rdna3 ? rdna3::build_ds(rdna3::kDsSwizzleB32Ds, {.offset0 = uint8_t(offset),
+                                                           .offset1 = uint8_t(offset >> 8),
+                                                           .addr = 0,
+                                                           .vdst = 1})
+                : rdna4::build_vds(rdna4::kDsSwizzleB32Vds, {.offset0 = uint8_t(offset),
+                                                             .offset1 = uint8_t(offset >> 8),
+                                                             .addr = 0,
+                                                             .vdst = 1});
+      cases.emplace_back(words.begin(), words.end());
+    }
+    for (unsigned lanes : {32U, 64U})
+      check_vector_footprints(rdna3 ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_RDNA4, lanes, 4,
+                              cases);
   }
 }
 

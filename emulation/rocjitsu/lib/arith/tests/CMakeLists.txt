@@ -157,6 +157,16 @@ foreach(family IN ITEMS cube interp mullit)
     rj_arith_add_test(${target} graphics/${family}_test.cpp)
 endforeach()
 
+# Register-only operations share routing and preservation checks.
+foreach(
+    family
+    IN
+    ITEMS move_cndmask swap ds permlane relative lane
+)
+    set(target "rj_arith_register_${family}_test")
+    rj_arith_add_test(${target} register/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
