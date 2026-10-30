@@ -550,7 +550,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
 
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(traced_instruction(*s, access.instruction_pc),
+  rs->registerLdsRangeEvent(traced_instruction(*s, access.pc),
                             access.is_load ? MemoryEventType::GLOBAL_TO_LDS
                                            : MemoryEventType::LDS_TO_GLOBAL,
                             ranges, elementBytes, obligations, memoryOrder);

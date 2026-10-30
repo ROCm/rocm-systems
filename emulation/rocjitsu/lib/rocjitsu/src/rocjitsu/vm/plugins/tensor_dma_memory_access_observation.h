@@ -88,7 +88,9 @@ struct TensorDmaLdsRange {
 struct TensorDmaMemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
-  uint64_t pc = 0;              ///< PC of the issuing wavefront.
+  /// PC of the tensor DMA instruction, also when a deferred transfer completes
+  /// after the issuing wavefront has moved past it.
+  uint64_t pc = 0;
   uint32_t compute_unit_id = 0; ///< Component id of the issuing compute unit.
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
@@ -105,9 +107,6 @@ struct TensorDmaMemoryAccessObservation {
   int64_t tensor_dim0_stride = 0; ///< Descriptor dimension-zero stride in bytes.
   int64_t tensor_dim1_stride = 0; ///< Descriptor dimension-one stride in bytes.
   std::span<const TensorDmaLdsRange> lds_ranges{}; ///< LDS bytes written or read.
-  /// PC of the tensor DMA instruction. Differs from pc when a deferred transfer
-  /// completes after the wavefront has advanced past the instruction.
-  uint64_t instruction_pc = 0;
 };
 
 } // namespace rocjitsu::amdgpu
