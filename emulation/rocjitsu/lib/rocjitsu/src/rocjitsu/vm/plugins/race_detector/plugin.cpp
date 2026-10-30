@@ -539,7 +539,7 @@ void RaceDetectorPlugin::onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf
 
 void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                                           amdgpu::Wavefront &wf) {
-  const auto instruction = capture_instruction(pc, inst);
+  const InstructionSnapshot instruction = capture_instruction(pc, inst);
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
