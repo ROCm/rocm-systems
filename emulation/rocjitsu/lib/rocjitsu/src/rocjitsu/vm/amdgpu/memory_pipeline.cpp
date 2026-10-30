@@ -44,6 +44,7 @@ MemoryPipeline::~MemoryPipeline() {
     delete returned_.front().inst;
     returned_.pop();
   }
+  delete recyclable_;
 }
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
@@ -92,6 +93,16 @@ void MemoryPipeline::release_wait_counters(Wavefront &wf, const WaitCounterToken
 }
 
 void MemoryPipeline::complete_entry(PipelineEntry entry) {
+  if (!may_defer_completion(*entry.inst)) {
+    // complete_access() never defers here, so no std::function closure (a heap
+    // allocation per access) is needed.
+    const MemoryAccessCompletion completion =
+        complete_access(*entry.inst, *entry.wf, MemoryAccessDeferredCompletion{});
+    assert(completion == MemoryAccessCompletion::Complete);
+    (void)completion;
+    finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
+    return;
+  }
   MemoryAccessDeferredCompletion deferred_completion = [this, inst = entry.inst, wf = entry.wf,
                                                         counters = entry.counters,
                                                         wave_generation = entry.wave_generation]() {
@@ -107,8 +118,12 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                            bool retain_unavailable) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
+  // An instruction the previous issuer did not take is destroyed, not leaked.
+  delete std::exchange(recyclable_, nullptr);
+  issuing_ = recycle_sync_completions_ ? inst : nullptr;
   const VmAccessOutcome access = initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
+    issuing_ = nullptr;
     issued_.push({.inst = inst,
                   .wf = &wf,
                   .counters = counters,
@@ -118,12 +133,14 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
+    issuing_ = nullptr;
     release_wait_counters(wf, counters);
     delete inst;
     return access;
   }
   complete_entry(
       {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
+  issuing_ = nullptr;
   return VmAccessOutcome::Complete;
 }
 

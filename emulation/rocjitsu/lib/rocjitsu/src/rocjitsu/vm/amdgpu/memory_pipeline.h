@@ -81,6 +81,12 @@ public:
   /// failures are returned synchronously and leave no retained instruction.
   VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf);
 
+  /// @brief Take the instruction that completed synchronously in the last issue.
+  /// @details Ownership passes to the caller, who must destroy or reuse it. Returns
+  /// nullptr when the access was retained, deferred, failed, or recycling is off.
+  /// An instruction nobody takes is destroyed by the next issue or the destructor.
+  [[nodiscard]] Instruction *take_recyclable() { return std::exchange(recyclable_, nullptr); }
+
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
@@ -102,6 +108,10 @@ protected:
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
+  /// Whether complete_access() may return Deferred for this instruction. Accesses
+  /// that always return Complete skip building the deferred-completion closure.
+  virtual bool may_defer_completion(const Instruction & /*inst*/) const { return true; }
+
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
@@ -117,8 +127,23 @@ protected:
     release_wait_counters(wf, counters);
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
+    // An access that finished inside its own issue_impl() is handed back to the
+    // issuer instead of destroyed, so it can reuse the decode. Later (retried or
+    // deferred) completions never match, and are destroyed here.
+    if (inst == issuing_ && recycle_sync_completions_) {
+      issuing_ = nullptr;
+      recyclable_ = inst;
+      return;
+    }
     delete inst;
   }
+
+  /// Set by pipelines whose issuer can recycle a synchronously completed instruction.
+  bool recycle_sync_completions_ = false;
+  /// Instruction currently inside issue_impl() and, after a synchronous
+  /// completion, the one handed back to the issuer by finish_completed_access().
+  Instruction *issuing_ = nullptr;
+  Instruction *recyclable_ = nullptr;
 
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
@@ -168,12 +193,19 @@ private:
 /// @brief Local memory pipeline (LDS).
 class LocalMemPipeline : public MemoryPipeline {
 public:
-  LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
+  LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {
+    recycle_sync_completions_ = true;
+  }
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                          MemoryAccessDeferredCompletion complete) override;
+  /// Only a load with an LDS destination (FLAT normalized to LDS) can defer, through
+  /// cluster multicast; DS instructions never set lds_dst.
+  bool may_defer_completion(const Instruction &inst) const override {
+    return inst.data_as<VectorMemState>()->lds_dst;
+  }
 };
 
 /// @brief Retry queue for CDNA5 tensor DMA operations prepared by ISA execution.
