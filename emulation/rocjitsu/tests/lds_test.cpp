@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +10,9 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <random>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -429,6 +432,116 @@ TEST(LdsTest, VectorAccessesMatchPerElementSemantics) {
     ASSERT_EQ(loaded, reference_load(expected, addrs, mask, elem_size, num_elems))
         << "load after store iteration " << iteration;
   }
+}
+
+namespace wb = rocjitsu::amdgpu::lds_writeback;
+
+/// The per-lane writeback the typed ones replace: for each active lane and
+/// destination register, the dword it held before the typed writeback.
+template <wb::DstFormat F>
+void reference_write_back(uint32_t *regs, bool sram_ecc, uint64_t exec,
+                          const uint8_t *const *groups) {
+  const uint32_t copy_size = std::min<uint32_t>(F.elem_size, 4);
+  for (uint64_t active = exec; active; active &= active - 1) {
+    const uint32_t lane = static_cast<uint32_t>(std::countr_zero(active));
+    const uint8_t *source = groups[lane / 16] + (lane % 16) * wb::kStride<F>;
+    for (uint32_t r = 0; r < wb::kRegs<F>; ++r) {
+      uint32_t value = 0;
+      std::memcpy(&value, source + 4 * r, copy_size);
+      if (F.sign_extend && F.elem_size == 1)
+        value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)));
+      if (F.sign_extend && F.elem_size == 2)
+        value = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
+      uint32_t &dword = regs[r * 64 + lane];
+      if (F.d16_hi)
+        value = (sram_ecc ? 0 : dword & 0xFFFFu) | value << 16;
+      else if (F.d16_lo)
+        value = (sram_ecc ? 0 : dword & 0xFFFF0000u) | (value & 0xFFFFu);
+      dword = value;
+    }
+  }
+}
+
+/// Both writeback implementations against the reference for one format: whole
+/// destination registers plus a register on either side, wave32 and wave64,
+/// SRAM ECC on and off, groups apart from each other as when read in place.
+template <wb::DstFormat F> void check_write_back_format(std::mt19937_64 &rng) {
+  constexpr uint32_t kRegs = wb::kRegs<F>;
+  for (int iteration = 0; iteration < 3000; ++iteration) {
+    const uint32_t wave = rng() % 2 ? 64 : 32;
+    const bool sram_ecc = rng() % 2;
+    uint64_t exec = rng();
+    switch (rng() % 6) {
+    case 0:
+      exec = ~uint64_t{0};
+      break;
+    case 1:
+      exec = 0;
+      break;
+    case 2:
+      exec = uint64_t{1} << (rng() % 64);
+      break;
+    case 3:
+      exec = 0xFFFF'FFFF'FFFFull;
+      break;
+    case 4:
+      exec &= rng() & rng();
+      break;
+    default:
+      break;
+    }
+    if (wave == 32)
+      exec &= 0xFFFF'FFFFull;
+    std::vector<std::vector<uint8_t>> group_data(4);
+    const uint8_t *groups[4];
+    for (uint32_t g = 0; g < 4; ++g) {
+      group_data[g].resize(16 * wb::kStride<F> + rng() % 64);
+      for (auto &b : group_data[g])
+        b = static_cast<uint8_t>(rng());
+      groups[g] = group_data[g].data() + (group_data[g].size() - 16 * wb::kStride<F>);
+    }
+    // Registers 1..kRegs are the destination; 0 and kRegs + 1 must not change.
+    std::vector<uint32_t> before((kRegs + 2) * 64);
+    for (auto &dword : before)
+      dword = static_cast<uint32_t>(rng());
+    std::vector<uint32_t> expected = before, scalar = before, avx2 = before;
+    reference_write_back<F>(expected.data() + 64, sram_ecc, exec, groups);
+    const auto run = [&](std::vector<uint32_t> &file, auto isa) {
+      uint8_t *dst[kRegs];
+      for (uint32_t r = 0; r < kRegs; ++r)
+        dst[r] = reinterpret_cast<uint8_t *>(file.data() + (r + 1) * 64);
+      wb::write_back_as<F, decltype(isa)::value>(dst, sram_ecc, wave, exec, groups);
+    };
+    run(scalar, std::integral_constant<wb::Isa, wb::Isa::scalar>{});
+    ASSERT_EQ(scalar, expected) << "scalar elem_size " << unsigned(F.elem_size) << " x"
+                                << unsigned(F.num_elems) << " iteration " << iteration;
+#if RJ_HOST_HAS_AVX2
+    run(avx2, std::integral_constant<wb::Isa, wb::Isa::avx2>{});
+    ASSERT_EQ(avx2, expected) << "avx2 elem_size " << unsigned(F.elem_size) << " x"
+                              << unsigned(F.num_elems) << " iteration " << iteration;
+#endif
+  }
+}
+
+// Every DS-load format the generator emits.
+TEST(LdsTest, WritebacksMatchThePerLaneReference) {
+  std::mt19937_64 rng(0x3b17e8a5);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 8, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 3}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 4, .num_elems = 4}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .sign_extend = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .sign_extend = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 1, .num_elems = 1, .d16_hi = true}>(rng);
+  check_write_back_format<wb::DstFormat{
+      .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{
+      .elem_size = 1, .num_elems = 1, .sign_extend = true, .d16_hi = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_lo = true}>(rng);
+  check_write_back_format<wb::DstFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
 }
 
 } // namespace
