@@ -902,8 +902,7 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   }
 }
 
-// RCCL: upstream has no GIN activation rollback; keep these helpers on a sync.
-// Undo a partial GIN activation; any GIN state on existing memories and windows came from it.
+// RCCL: undo a partial GIN activation; any GIN state on existing memories and windows came from it.
 static void symGinActivationRollbackWindows(struct ncclDevrState* devr, cudaStream_t stream) {
   for (int i = 0; i < devr->winSortedCount; i++) {
     struct ncclDevrWindow* win = devr->winSorted[i].win;
