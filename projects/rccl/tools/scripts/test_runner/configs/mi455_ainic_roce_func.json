@@ -2297,6 +2297,11 @@
           "test_filter": "AllGather.SymmetricInPlaceSlices"
         },
         {
+          "name": "AllGather.SymmetricTmaStSkewedHead",
+          "description": "AllGather_TmaST forced on symmetric windows with send and recv skewed by 16-240 B, out of place at all and odd rank counts and in place; checks the logged kernel, block count and every rank window (gfx1250)",
+          "test_filter": "AllGather.SymmetricTmaStSkewedHead"
+        },
+        {
           "name": "AllGather.ManagedMem",
           "description": "AllGather managed memory",
           "test_filter": "AllGather.ManagedMem"
