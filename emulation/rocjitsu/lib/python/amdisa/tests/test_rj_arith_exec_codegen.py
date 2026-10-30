@@ -22,9 +22,7 @@ def context(arch, name, dst, src):
 
 import re
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_scalar import EXEC_UPDATES, gen_scalar
 

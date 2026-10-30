@@ -21,9 +21,7 @@ def context(arch, name, dst, src):
 
 from pathlib import Path
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_ds import DS_NAMES, gen_ds
 

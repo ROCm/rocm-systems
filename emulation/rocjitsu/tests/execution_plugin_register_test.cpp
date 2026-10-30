@@ -2015,9 +2015,8 @@ TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
 }
 
 #if RJ_HOST_ARCH_X86
-// VOPD arithmetic requires host and guest nearest-even, so rounding alone cannot
-// detect a scope opened before operand acquisition. A sticky underflow flag is
-// cleared inside the scope and must remain visible to reads from both slots.
+// Both VOPD slots expose unchanged default host controls to register observers.
+// Migrated RDNA arithmetic may add sticky flags; legacy CDNA retains isolation.
 TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
   struct Case {
     rj_code_arch_t arch;
@@ -2044,6 +2043,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
+    const bool uses_arith =
+        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(
           std::format("arch={} force_scalar={}", static_cast<int>(test.arch), force_scalar));
@@ -2085,8 +2087,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
               fixture.cu->execute_instruction(instruction.get(), *wave).succeeded();
           const uint32_t restored_mxcsr = _mm_getcsr();
           ASSERT_TRUE(succeeded);
-          EXPECT_EQ(restored_mxcsr, host_mxcsr);
-          if (force_scalar || !util::has_stdx_simd)
+          EXPECT_EQ(restored_mxcsr & observed_bits, host_mxcsr & observed_bits);
+          EXPECT_NE(restored_mxcsr & _MM_EXCEPT_UNDERFLOW, 0u);
+          if (uses_arith || force_scalar || !util::has_stdx_simd)
             EXPECT_TRUE(tracker.no_tracked_path_executed());
           else
             EXPECT_TRUE(tracker.only_tracked_path_executed(SimdFastPath::VOPD));
@@ -2096,8 +2099,10 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
           EXPECT_EQ(
               std::set<uint32_t>(observer->read_registers.begin(), observer->read_registers.end()),
               expected_reads);
-          for (uint32_t seen : observer->read_mxcsrs)
-            EXPECT_EQ(seen, host_mxcsr);
+          for (uint32_t seen : observer->read_mxcsrs) {
+            EXPECT_EQ(seen & observed_bits, host_mxcsr & observed_bits);
+            EXPECT_NE(seen & _MM_EXCEPT_UNDERFLOW, 0u);
+          }
           for (int seen : observer->read_roundings)
             EXPECT_EQ(seen, FE_TONEAREST);
         }

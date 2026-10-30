@@ -10,7 +10,6 @@ add_library(
     common/cpu.cpp
     common/cpu_decode.cpp
     fp/scalar_repair.cpp
-    dot/scalar_repair.cpp
     compare/class.cpp
     compare/constant_compare.cpp
     compare/float_compare.cpp
@@ -30,6 +29,7 @@ add_library(
     dot/half_dot.cpp
     dot/integer_dot.cpp
     dot/scalar_repair.cpp
+    dual/dual.cpp
     fp/fma.cpp
     fp/binary.cpp
     fp/div_fixup.cpp

@@ -6,10 +6,15 @@ from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
 import re
 
+from rj_arith_headers import public_headers
+
 import pytest
 
-
 from amdisa.codegen.execute.rj_arith_vector import (
+    BINARY32,
+    UNARY32,
+    TERNARY32,
+    UNMODIFIED_MULTIPLIES,
     CARRY32_NAMES,
     gen_carry32,
     gen_vector32,
@@ -44,6 +49,25 @@ def context(
     )
 
 
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', sorted(BINARY32))
+def test_binary_bindings_have_both_wave_apis_and_clamp(arch, name):
+    body = gen_vector32(context(arch, name, ['dst'], ['a', 'b'], True))
+    api = 'rj_arith_' + name.lower()
+    header = public_headers()
+    for function in (api + '_w32', api + '_w64'):
+        assert function in body
+        assert re.search(r'\bint ' + function + r'\(', header)
+    assert ('inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in body) == (
+        name not in UNMODIFIED_MULTIPLIES and name != 'V_MOV_B32'
+    )
+    assert 'dst, a, b' in body
+    assert 'arithmetic_flags()' in body
+    assert 'inst_.clamp' not in gen_vector32(
+        context(arch, name, ['dst'], ['a', 'b'], False)
+    )
+
+
 def test_unmigrated_architectures_and_operand_shapes_keep_existing_path():
     for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna4', 'cdna5'):
         assert (
@@ -56,6 +80,38 @@ def test_unmigrated_architectures_and_operand_shapes_keep_existing_path():
     assert (
         gen_vector32(context('rdna4', 'V_ADD_F32', ['dst'], ['a', 'b'], False)) is None
     )
+
+
+@pytest.mark.parametrize(
+    'name,count,kind',
+    [(name, 1, 'unary') for name in sorted(UNARY32)]
+    + [(name, 2, 'binary') for name in sorted(BINARY32)]
+    + [(name, 3, 'ternary') for name in sorted(TERNARY32)],
+)
+def test_single_vgpr_integer_bindings_match_public_signatures(name, count, kind):
+    header = public_headers()
+    for suffix, mask in (('_w32', 'uint32_t'), ('_w64', 'uint64_t')):
+        api = 'rj_arith_' + name.lower() + suffix
+        declaration = re.search(r'\bint ' + api + r'\(([^;]+)\);', header)
+        assert declaration is not None
+        parameters = declaration[1].split(',')
+        assert len(parameters) == count + 4
+        assert parameters[1].strip().startswith(mask + ' ')
+        assert 'uint32_t *const *' in parameters[3]
+        for source in parameters[4:]:
+            assert 'const uint32_t *const *' in source
+    sources = [f'src{i}' for i in range(count)]
+    for arch in ('rdna3', 'rdna4'):
+        body = gen_vector32(context(arch, name, ['dst'], sources, True))
+        assert f'arith::execute_{kind}32' in body
+        assert ('inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in body) == (
+            name not in UNMODIFIED_MULTIPLIES and name != 'V_MOV_B32'
+        )
+        assert ', '.join(['dst'] + sources) in body
+        assert (
+            gen_vector32(context(arch, name, ['dst'], sources + ['extra'], True))
+            is None
+        )
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -83,8 +139,13 @@ def test_generated_rj_arith_bodies_cannot_be_bypassed_by_legacy_simd(arch):
             assert 'try_execute_' not in body, match[1]
             assert 'amdgpu::execute_v_' not in body, match[1]
             checked[kind[1]] += 1
-    # Other instruction families add users of these adapters as they migrate.
-    assert all(count > 0 for count in checked.values())
+    # Floating cube and RDNA4 DOT4 also use the full-word ternary adapter.
+    assert checked == {
+        'unary': 104 if arch == 'rdna4' else 96,
+        'binary': 115 if arch == 'rdna4' else 107,
+        'ternary': 90 if arch == 'rdna4' else 82,
+        'carry': 18,
+    }
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -214,7 +275,7 @@ def test_integer16_bindings_own_arithmetic_but_not_dpp_routing(arch):
             assert 'try_execute_' not in body, match[1]
             assert 'amdgpu::execute_v_' not in body, match[1]
             counts[int(count[1])] += 1
-    assert counts == {1: 4 * len(UNARY16), 2: 2 * len(BINARY16), 3: 2 * len(TERNARY16)}
+    assert counts == {1: 8, 2: 2 * len(BINARY16), 3: 2 * len(TERNARY16)}
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -312,7 +373,7 @@ def test_integer_dot_signedness_bits_are_not_negation_or_half_selectors(arch):
 @pytest.mark.parametrize('name', ['V_CVT_I32_I16', 'V_CVT_U32_U16'])
 def test_integer_widening_half_selection_and_ignored_modifiers(arch, name):
     for vop3 in (False, True):
-        body = gen_vector32(arch, name, ['dst'], ['src'], vop3)
+        body = gen_vector32(context(arch, name, ['dst'], ['src'], vop3))
         assert 'rj_arith_' + name.lower() + '_w64' in body
         assert 'execute_unary32' in body
         assert ('vop3_opsel' in body) == vop3
@@ -325,7 +386,7 @@ def test_integer_widening_half_selection_and_ignored_modifiers(arch, name):
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 def test_packed_saturation_reads_word_and_writes_selected_half(arch):
     for vop3 in (False, True):
-        body = gen_vector32(arch, 'V_SAT_PK_U8_I16', ['dst'], ['src'], vop3)
+        body = gen_vector32(context(arch, 'V_SAT_PK_U8_I16', ['dst'], ['src'], vop3))
         assert 'rj_arith_v_sat_pk_u8_i16_w64' in body
         assert 'execute_unary32' in body
         assert ('vop3_opsel(inst_) & 8' in body) == vop3

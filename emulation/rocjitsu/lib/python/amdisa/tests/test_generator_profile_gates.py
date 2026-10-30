@@ -7906,38 +7906,78 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
 
 
 @pytest.mark.parametrize('missing_op', [None, 'VopdAddNcU32', 'VopdLshlrevB32'])
-def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op):
-    class ReducedVopdProfile(Rdna4Profile):
+@pytest.mark.parametrize(
+    'arch,profile', [('rdna4', Rdna4Profile), ('cdna5', Cdna5Profile)]
+)
+def test_vopd_integer_simd_probe_requires_available_opcodes(
+    tmp_path, missing_op, arch, profile
+):
+    class ReducedVopdProfile(profile):
         @property
         def vopd_slot_ops(self):
             return tuple(
                 op for op in super().vopd_slot_ops if op.enum_name != missing_op
             )
 
+        @property
+        def vopd_y_slot_opcodes(self):
+            return super().vopd_y_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
+        @property
+        def vopd3_x_slot_opcodes(self):
+            return super().vopd3_x_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
+        @property
+        def vopd3_y_slot_opcodes(self):
+            return super().vopd3_y_slot_opcodes.intersection(
+                op.opcode for op in self.vopd_slot_ops
+            )
+
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='rdna4',
-        generated_dir_name='rdna4',
-        cpp_namespace='rdna4',
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
         profile=ReducedVopdProfile(),
         operand_types={'OPR_SRC'},
     )
     codegen.out_path = str(tmp_path)
     codegen.config = CodegenConfig()
     codegen.gen_vopd()
-    exec_cpp = (tmp_path / 'rdna4' / 'vopd_exec.cpp').read_text()
-    assert ('try_execute_vopd_integer_pair_simd<' in exec_cpp) == (missing_op is None)
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
     if missing_op is not None:
         assert f'k{missing_op}' not in exec_cpp
 
-    # MOV must observe only src0 while preserving the generated negation policy.
-    execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
-    assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
-    assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+    if arch == 'rdna4':
+        # rj-arith now owns SIMD dispatch. Retain profile gating and the guarantee
+        # that MOV does not observe its unused second source.
+        assert 'try_execute_vopd_integer_pair_simd<' not in exec_cpp
+        assert 'execute_dual_pair' in exec_cpp
+        start = exec_cpp.index('case kVopdMovB32:')
+        mov_case = exec_cpp[start : exec_cpp.index('case kVopdCndmaskB32:', start)]
+        assert '*slot.src0' in mov_case
+        assert '*slot.src1' not in mov_case
+        assert 'rj_arith_v_dual_mov_b32_w32' in mov_case
+    else:
+        # CDNA5 retains the original probe and source-negation contract.
+        assert ('try_execute_vopd_integer_pair_simd<' in exec_cpp) == (
+            missing_op is None
+        )
+        execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
+        assert execute_slot.index('src0 = apply_neg(') < execute_slot.index(
+            'return src0;'
+        )
+        assert execute_slot.index('return src0;') < execute_slot.index(
+            'uint32_t src1 ='
+        )
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
-def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
+def test_vopd_subtraction_delegates_nan_policy_to_arith(tmp_path, arch):
     profile = Rdna3Profile() if arch == 'rdna3' else Rdna4Profile()
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -7957,17 +7997,17 @@ def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
         start = exec_cpp.rindex(f'case {case}:')
         return exec_cpp[start : exec_cpp.index('case ', start + 1)]
 
-    # As VOP2: ADD of the negated subtrahend, in operand order, with the
-    # architectural NaN policy. Host subtraction would keep a NaN subtrahend's sign.
-    sub, subrev = body('kVopdSubF32'), body('kVopdSubrevF32')
-    for text in (sub, subrev):
-        assert 'Arithmetic::ADD>' in text
-        assert 'Arithmetic::SUB>' not in text
-        assert 'wf.cu().arch(), wf.ieee_mode()' in text
-    assert 'std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u)' in sub
-    assert (
-        'std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1)' in subrev
-    )
+    # Arithmetic owns subtrahend negation and NaN selection. Preserve source order
+    # and guest FP controls here; numerical behavior is covered by fp_mode tests.
+    suffix = '_gfx12' if arch == 'rdna4' else ''
+    for opcode, operation in [('kVopdSubF32', 'sub'), ('kVopdSubrevF32', 'subrev')]:
+        text = body(opcode)
+        assert f'rj_arith_v_dual_{operation}_f32_w32{suffix}(' in text
+        assert 'float32_flags(wf, flags)' in text
+        assert 'wf.fp_round_mode_f32()' in text
+        assert 'a(registers, wf, *slot.src0, exec_mask)' in text
+        assert 'b(registers, wf, *slot.src1, exec_mask)' in text
+        assert '&a.data, &b.data, state)' in text
 
 
 def test_rdna4_profile_enables_generated_vopd():

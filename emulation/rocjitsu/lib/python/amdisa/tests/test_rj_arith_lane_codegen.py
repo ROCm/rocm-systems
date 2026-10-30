@@ -21,9 +21,7 @@ def context(arch, name, dst, src):
 
 from pathlib import Path
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES, RELATIVE_NAMES, gen_lane
 

@@ -7594,6 +7594,148 @@ TEST(ArithBridgeTest, VectorMovesAndSelectionsPreservePayloadsHalvesAndMaskedAli
               }
 }
 
+// Wave32 VOPD: X moves old v7 into v6, Y reads old v6 and writes v7.
+// Values are exactly representable; the existing rj-arith dual/dot suites cover
+// numerical boundaries. This table checks every decoded slot and operand role.
+TEST(ArithBridgeTest, DualSlotsMasksAliasesLiteralsAndDots) {
+  for (bool rdna3 : {false, true})
+    for (bool loose : {false, true})
+      for (uint32_t exec_mask : {0U, 0x80000005U, 0xffffffffU})
+        for (unsigned op :
+             {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 16U, 17U, 18U})
+          for (unsigned variant = 0; variant < (op == 12 || op == 13 ? 2U : 1U); ++variant) {
+            SCOPED_TRACE(::testing::Message()
+                         << rdna3 << ":" << loose << ":" << exec_mask << ":" << op);
+            ArithmeticPolicy policy{};
+            if (loose) {
+              policy.semantics = ArithmeticSemantics::Loose;
+            }
+            BridgeFixture fixture(rdna3, 32, policy);
+            fixture.wave->set_mode_raw(0xf0);
+            fixture.wave->set_exec(exec_mask);
+            fixture.wave->set_vcc_mask(0xaaaaaaaa);
+            fixture.wave->set_trapsts(0x20);
+            uint32_t a = 0x40000000, b = 0x40400000, c = 0x40a00000;
+            if (op == 12) {
+              a = 0x40003c00;
+              b = 0x44004200;
+            }
+            if (op == 13) {
+              a = 0x40003f80;
+              b = 0x40804040;
+            }
+            if (op >= 16) {
+              a = 2;
+              b = 3;
+            }
+            for (unsigned lane = 0; lane < 32; ++lane) {
+              fixture.cu->write_vgpr(fixture.base() + 6, lane, a);
+              fixture.cu->write_vgpr(fixture.base() + 3, lane, b);
+              fixture.cu->write_vgpr(fixture.base() + 7, lane, c);
+            }
+            const std::array<uint32_t, 3> words = {
+                (0x32U << 26) | (8U << 22) | (op << 17) | (5U << 9) | 263U,
+                (6U << 24) | (3U << 17) | (3U << 9) | (variant ? 242U : 262U), 0x40800000U};
+            auto instruction = fixture.decoder->decode_window(words);
+            ASSERT_TRUE(instruction.succeeded());
+            fixture.recorder->reads.clear();
+            fixture.recorder->writes.clear();
+            ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
+                            .succeeded());
+            // MOV's unused VSRCX1=5 must not become an observed source read.
+            for (const auto &read : fixture.recorder->reads) {
+              EXPECT_NE(read.reg, fixture.base() + 5);
+              EXPECT_EQ(read.lanes, exec_mask);
+            }
+            EXPECT_EQ(fixture.recorder->writes.size(), exec_mask ? 2U : 0U);
+            for (unsigned lane = 0; lane < 32; ++lane) {
+              uint32_t expected = 0;
+              switch (op) {
+              case 0:
+                expected = 0x41300000;
+                break; // 2*3+5 = 11
+              case 1:
+                expected = 0x41200000;
+                break; // 2*3+4 = 10
+              case 2:
+                expected = 0x41300000;
+                break; // 2*4+3 = 11
+              case 3:
+              case 7:
+                expected = 0x40c00000;
+                break;
+              case 4:
+                expected = 0x40a00000;
+                break;
+              case 5:
+                expected = 0xbf800000;
+                break;
+              case 6:
+                expected = 0x3f800000;
+                break;
+              case 8:
+              case 11:
+                expected = a;
+                break;
+              case 9:
+                expected = lane & 1 ? b : a;
+                break;
+              case 10:
+                expected = b;
+                break;
+              case 12:
+              case 13:
+                expected = variant ? 0x41400000 : 0x41800000;
+                break; // 1*3+2*4+5 = 16
+              case 16:
+                expected = 5;
+                break;
+              case 17:
+                expected = 12;
+                break;
+              case 18:
+                expected = 2;
+                break;
+              }
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, lane),
+                        (exec_mask >> lane) & 1 ? c : a);
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 7, lane),
+                        (exec_mask >> lane) & 1 ? expected : c);
+            }
+            EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+          }
+}
+
+TEST(ArithBridgeTest, DualSecondSlotRejectionCommitsNeitherResultNorState) {
+  for (bool rdna3 : {false, true}) {
+    ArithmeticPolicy policy{};
+    policy.semantics = ArithmeticSemantics::BitExactEmpirical;
+    BridgeFixture fixture(rdna3, 32, policy);
+    fixture.wave->set_mode_raw(0xf0);
+    fixture.wave->set_exec(0xffffffff);
+    fixture.wave->set_trapsts(0x20);
+    // MUL succeeds (and can report overflow); MIN is loose-only and rejects.
+    const std::array<uint32_t, 2> words = {(0x32U << 26) | (3U << 22) | (11U << 17) | (1U << 9) |
+                                               256U,
+                                           (6U << 24) | (3U << 17) | (3U << 9) | 258U};
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      fixture.cu->write_vgpr(fixture.base(), lane, 0x7f7fffff);
+      fixture.cu->write_vgpr(fixture.base() + 1, lane, 0x40000000);
+    }
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    fixture.recorder->writes.clear();
+    EXPECT_FALSE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+    EXPECT_TRUE(fixture.recorder->writes.empty());
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 6, lane), 0x3c003c00U);
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 7, lane), 0x3c003c00U);
+    }
+    EXPECT_EQ(fixture.wave->trapsts(), 0x20U);
+  }
+}
+
 TEST(ArithBridgeTest, MullitPoliciesNanClampAndMaskedAlias) {
   for (bool rdna3 : {false, true})
     for (uint32_t lanes : {32u, 64u})

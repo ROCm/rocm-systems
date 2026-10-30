@@ -16,6 +16,7 @@ files, because a template fix that is never regenerated changes nothing.
 """
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -26,9 +27,11 @@ _TEMPLATE = Path(__file__).resolve().parents[1] / 'codegen/_generator.py'
 
 def _cndmask_condition(text: str) -> str:
     """The complete assignment expression that resolves the cndmask condition."""
-    lines = [ln for ln in text.splitlines() if 'uint64_t condition' in ln]
-    assert len(lines) == 1, f'expected one condition line, found {len(lines)}'
-    return text.split('uint64_t condition', 1)[1].split(';', 1)[0]
+    # rj-arith's RDNA3/RDNA4 VOPD calls take a Wave32 condition; legacy paths
+    # retain a 64-bit local. Both must resolve the source at the wave width.
+    assignments = re.findall(r'uint(?:32|64)_t condition\s*=([^;]+);', text)
+    assert len(assignments) == 1, f'expected one condition, found {len(assignments)}'
+    return assignments[0]
 
 
 def _vopd_exec_files():
@@ -45,9 +48,13 @@ class TestVopdCndmaskWaveMask:
 
     @pytest.mark.parametrize('path', _vopd_exec_files(), ids=lambda p: p.parent.name)
     def test_generated_file_reads_the_mask_at_wave_width(self, path):
-        line = _cndmask_condition(path.read_text())
+        text = path.read_text()
+        line = _cndmask_condition(text)
         assert 'read_wave_mask_scalar' in line
         assert 'read_scalar64' not in line
+        if path.parent.name in ('rdna3', 'rdna4'):
+            assert 'const uint32_t condition' in text
+            assert 'rj_arith_v_dual_cndmask_b32_w32' in text
 
     @pytest.mark.parametrize('path', _vopd_exec_files(), ids=lambda p: p.parent.name)
     def test_generated_file_includes_the_helper(self, path):

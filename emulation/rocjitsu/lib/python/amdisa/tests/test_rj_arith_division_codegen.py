@@ -23,9 +23,7 @@ def context(arch, name, dst, src, is_vop3, result_writer=None):
 
 import re
 
-
 import pytest
-
 
 from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES, gen_division
 

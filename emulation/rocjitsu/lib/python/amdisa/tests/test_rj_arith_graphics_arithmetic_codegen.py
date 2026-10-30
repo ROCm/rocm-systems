@@ -22,13 +22,9 @@ def context(arch, name, dst, src, *, is_vop3=False, enc_name=""):
 
 import re
 
-
 import pytest
 
-
 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES, gen_mullit
-
-
 from amdisa.codegen.execute.rj_arith_interp import INTERP_NAMES, gen_interp
 
 
