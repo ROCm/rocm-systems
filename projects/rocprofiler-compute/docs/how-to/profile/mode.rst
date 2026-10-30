@@ -1080,7 +1080,7 @@ Example:
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
 (``--operator``) accepts shell-style glob patterns, optionally prefixed with
 a framework such as ``torch:`` or ``triton:``. A pattern can match an operator
-name or its call path (for example ``torch:*relu*`` or ``*/aten::addmm``).
+name or its call path (for example ``--operator 'torch:*relu*'`` or ``'*/aten::addmm'``).
 Spaces separate patterns. A piece with no framework stays on the
 preceding one. To select all operators, pass no arguments or ``**``.
 

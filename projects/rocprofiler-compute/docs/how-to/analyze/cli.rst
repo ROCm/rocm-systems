@@ -947,7 +947,7 @@ These options do not change the printed operator tree. Kernel IDs depend on
 .. code-block:: shell-session
 
    # Framework-scoped match
-   $ rocprof-compute analyze --experimental --operator torch:*relu* --path ./workload
+   $ rocprof-compute analyze --experimental --operator 'torch:*relu*' --path ./workload
 
    # Path match before any framework (all collected nodes)
    $ rocprof-compute analyze --experimental --operator "*/aten::addmm" --path ./workload
@@ -961,7 +961,7 @@ starts the next selector:
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --operator torch:*conv* *relu* triton:*matmul* --path ./workload
+       --operator 'torch:*conv*' '*relu*' 'triton:*matmul*' --path ./workload
 
 
 User-defined ROCTx regions
@@ -981,16 +981,16 @@ operators; it does not cut work out of the user-defined ROCTx region.
    $ rocprof-compute analyze --experimental --list-operators user torch --path ./workload
 
    $ rocprof-compute analyze --experimental \
-       --operator user:*UserDefined* --path ./workload
+       --operator 'user:*UserDefined*' --path ./workload
 
    $ rocprof-compute analyze --experimental \
-       --operator user:*UserDefined* torch:*relu* --path ./workload
+       --operator 'user:*UserDefined*' 'torch:*relu*' --path ./workload
 
 
 Triton operator analysis
 ========================
 
 The same ``--list-operators`` and ``--operator`` flags take a ``triton``
-selector: ``--list-operators triton`` and ``--operator triton:*rmsnorm_kernel*``.
+selector: ``--list-operators triton`` and ``--operator 'triton:*rmsnorm_kernel*'``.
 After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), those keep nodes whose backend is ``triton``.
