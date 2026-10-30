@@ -861,7 +861,7 @@ static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
   CUDACHECK(cudaSetDevice(comm->cudaDev));
-  // The first eligible symmetric task can perform bootstrap consensus in ncclPrepareTasks.
+  // Concurrent prepare is needed only while a queued task can still trigger the first symk init consensus.
   // When this process owns multiple ranks, prepare them concurrently so the first rank cannot
   // block before its sibling ranks enter the same consensus.
   bool const needsConcurrentSymmetricPrepare =
