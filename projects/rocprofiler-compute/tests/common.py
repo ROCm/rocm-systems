@@ -247,6 +247,21 @@ def patch_console(monkeypatch, module, *names, **overrides):
     return mocks
 
 
+def record_and_exit_stub():
+    """Return a calls list and a console_error stub that records, then exits.
+
+    The stub raises SystemExit(1), as console_error does, so a test can check
+    both the exit and the message that led to it.
+    """
+    calls = []
+
+    def stub(*args, **_kwargs):
+        calls.append(args)
+        raise SystemExit(1)
+
+    return calls, stub
+
+
 _KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
 
 

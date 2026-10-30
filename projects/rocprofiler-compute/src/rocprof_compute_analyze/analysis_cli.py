@@ -16,6 +16,7 @@ from rocprof_compute_analyze.output_location import (
 )
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
+from utils.filter_validation import validate_kernel_filter_ids
 from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
@@ -179,7 +180,7 @@ def _apply_sliced_kernel_top(
     if not workload.filter_kernel_ids:
         return
 
-    file_io.validate_kernel_filter_ids(
+    validate_kernel_filter_ids(
         workload.filter_kernel_ids,
         len(kernel_top_df["Kernel_Name"]),
     )

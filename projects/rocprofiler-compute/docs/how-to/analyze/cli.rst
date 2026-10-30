@@ -702,6 +702,11 @@ For both the Current Workload and the Baseline Workload, you can independently s
 * Dispatch ID filtering (multi-selection) with ``--kernel-iteration-range``
 * ROCm Compute Profiler panels/blocks (multi-selection) with ``--block``
 
+Analyze checks every ``--gpu-id``, ``-k`` and ``--kernel-iteration-range`` id
+before it creates the run folder. An id that the workload does not contain stops
+the run with an error, even when other ids in the same list match, and no run
+folder is created.
+
 .. code-block:: shell
 
    rocprof-compute analyze -p [path1] [path2] … [pathN]

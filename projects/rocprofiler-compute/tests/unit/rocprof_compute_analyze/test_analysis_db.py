@@ -297,6 +297,35 @@ def cleanup_database() -> None:
 
 
 # =============================================================================
+# Filter validation helpers
+# =============================================================================
+
+
+def make_gpu_split_dispatch_frame():
+    """Frame with two GPUs, where kernel "a" is the longest kernel on GPU 0.
+
+    Every dispatch lasts 100ns. GPU 0 runs a, a, b and a; GPU 1 runs b once.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": ["a", "a", "b", "a", "b"],
+        "GPU_ID": [0, 0, 1, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4, 5],
+        "Start_Timestamp": [0, 200, 400, 600, 800],
+        "End_Timestamp": [100, 300, 500, 700, 900],
+    })
+
+
+@pytest.fixture
+def record_and_exit_filter_errors(monkeypatch):
+    """Record each filter_validation error, then exit like console_error does."""
+    calls, record_and_exit = common.record_and_exit_stub()
+    common.patch_console(
+        monkeypatch, "utils.filter_validation", "error", error=record_and_exit
+    )
+    return calls
+
+
+# =============================================================================
 # db_analysis.evaluate() tests
 # =============================================================================
 
@@ -1010,6 +1039,112 @@ def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
 
     with pytest.raises(SystemExit):
         filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
+
+
+def test_filter_dispatch_frame_rejects_an_unknown_gpu_id(
+    record_and_exit_filter_errors,
+):
+    """A --gpu-id absent from the frame exits before any rows are kept."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_gpu_split_dispatch_frame(), ["7"], None, None)
+
+    assert record_and_exit_filter_errors == [("analysis", "['7'] is an invalid gpu-id")]
+
+
+def test_filter_dispatch_frame_rejects_a_partly_invalid_gpu_list(
+    record_and_exit_filter_errors,
+):
+    """A valid GPU beside an unknown one still exits, naming only the unknown id."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_gpu_split_dispatch_frame(), ["0", "7"], None, None)
+
+    assert record_and_exit_filter_errors == [("analysis", "['7'] is an invalid gpu-id")]
+
+
+def test_filter_dispatch_frame_rejects_an_unknown_dispatch_id(
+    record_and_exit_filter_errors,
+):
+    """A --kernel-iteration-range id absent from the frame exits with the range hint."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_gpu_split_dispatch_frame(), None, None, ["9"])
+
+    assert record_and_exit_filter_errors == [
+        ("analysis", "9 is an invalid dispatch id. Dispatch ids run from 1 to 5.")
+    ]
+
+
+def test_filter_dispatch_frame_checks_gpu_before_kernel_and_dispatch(
+    record_and_exit_filter_errors,
+):
+    """An unknown GPU is reported first, as the cli reports it."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_gpu_split_dispatch_frame(), ["7"], [9], ["9"])
+
+    assert record_and_exit_filter_errors == [("analysis", "['7'] is an invalid gpu-id")]
+
+
+def test_filter_dispatch_frame_keeps_rows_surviving_every_filter():
+    """Only rows that pass the gpu, kernel and dispatch filters remain.
+
+    Kernel id 0 on GPU 0 is kernel a, which dispatches 1, 2 and 4. Dispatch 2
+    then narrows that to one row.
+    """
+    filtered_df = filter_dispatch_frame(
+        make_gpu_split_dispatch_frame(), ["0"], [0], ["2"]
+    )
+
+    assert filtered_df["Dispatch_ID"].tolist() == [2]
+
+
+def test_filter_dispatch_frame_accepts_a_threshold_with_a_leading_space():
+    """A '> n' with a leading space selects the same rows as '> n' without one."""
+    filtered_df = filter_dispatch_frame(
+        make_gpu_split_dispatch_frame(), None, None, [" >2"]
+    )
+
+    assert filtered_df["Dispatch_ID"].tolist() == [3, 4, 5]
+
+
+def test_pc_sampling_dispatch_data_keeps_gpu_and_dispatch_narrowing(monkeypatch):
+    """A PC-sampling-only run keeps the --gpu-id and --kernel-iteration-range narrowing.
+
+    The trace is narrowed the same way as a counter frame, so only dispatch 2 on
+    GPU 0 remains.
+    """
+    trace = make_gpu_split_dispatch_frame().rename(
+        columns={"Dispatch_ID": "Dispatch_Id"}
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.process_pc_sampling_kernel_traces",
+        lambda _tool_data_records: trace,
+    )
+    workload = schema.Workload(filter_gpu_ids=["0"], filter_dispatch_ids=["2"])
+
+    dispatch_df = db_analysis._build_pc_sampling_dispatch_data([], workload)
+
+    assert dispatch_df["dispatch_id"].tolist() == [2]
+    assert dispatch_df["kernel_name"].tolist() == ["a"]
+
+
+def test_calc_dispatch_data_covers_only_rows_surviving_every_filter():
+    """The dispatch rows come from the filtered frame, not the raw counter frame."""
+    workload_path = "workload"
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            filter_gpu_ids=["0"],
+            filter_kernel_ids=[0],
+            filter_dispatch_ids=["2"],
+        )
+    }
+    analyzer._pmc_df_per_workload = {workload_path: make_gpu_split_dispatch_frame()}
+
+    analyzer._pmc_df_per_workload = analyzer.apply_pmc_filters()
+    dispatch_df = analyzer.calc_dispatch_data({})[workload_path]
+
+    assert dispatch_df["dispatch_id"].tolist() == [2]
+    assert dispatch_df["kernel_name"].tolist() == ["a"]
+    assert dispatch_df["gpu_id"].tolist() == [0]
 
 
 # =============================================================================

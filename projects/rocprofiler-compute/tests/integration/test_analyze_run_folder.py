@@ -218,6 +218,34 @@ def test_invalid_dispatch_id_creates_no_run_folder(
 
 
 @pytest.mark.misc
+@pytest.mark.parametrize(
+    "filter_options",
+    [
+        ["--gpu-id", "9"],
+        ["--gpu-id", "0", "9"],
+        ["-k", "999"],
+    ],
+    ids=["unknown-gpu", "partly-invalid-gpu-list", "unknown-kernel"],
+)
+def test_unknown_filter_id_creates_no_run_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path, filter_options
+):
+    """An unknown --gpu-id or -k fails before the run folder exists."""
+    workload_path = copy_workload(tmp_path)
+    run_folder = tmp_path / "runs" / "run1"
+
+    code = run_into(
+        binary_handler_analyze_rocprof_compute,
+        workload_path,
+        run_folder,
+        *filter_options,
+    )
+
+    assert code == 1
+    assert not run_folder.parent.exists()
+
+
+@pytest.mark.misc
 def test_removed_dispatch_option_is_rejected(
     binary_handler_analyze_rocprof_compute, tmp_path
 ):

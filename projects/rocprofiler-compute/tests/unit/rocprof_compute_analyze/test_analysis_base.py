@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils import schema
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -162,3 +163,41 @@ def test_sanitize_errors_when_operator_flag_without_trace(
         ).sanitize()
     assert "was not profiled" in errors[-1][1]
     assert expected_trace in errors[-1][1]
+
+
+# ---------------------------------------------------------------------------
+# pre_processing filter wiring
+# ---------------------------------------------------------------------------
+
+
+def _run_pre_processing(monkeypatch, paths, gpu_id):
+    """Run the base pre_processing over fresh workloads and return them by path."""
+    workloads = {path[0]: schema.Workload() for path in paths}
+    args = argparse.Namespace(
+        path=paths,
+        gpu_kernel=None,
+        gpu_id=gpu_id,
+        gpu_dispatch_id=None,
+    )
+    analyzer = OmniAnalyze_Base(args, {})
+    monkeypatch.setattr(analyzer, "initalize_runs", lambda: workloads)
+
+    OmniAnalyze_Base.pre_processing(analyzer)
+    return workloads
+
+
+def test_single_path_takes_the_whole_gpu_id_list(monkeypatch) -> None:
+    """Every id of --gpu-id reaches a single workload, so the validator sees all."""
+    workloads = _run_pre_processing(monkeypatch, [["workload_0"]], ["0", "9"])
+
+    assert workloads["workload_0"].filter_gpu_ids == ["0", "9"]
+
+
+def test_gpu_id_pairs_with_paths_in_order(monkeypatch) -> None:
+    """With several paths, --gpu-id pairs with them in order, as -k does."""
+    paths = [["workload_0"], ["workload_1"]]
+
+    workloads = _run_pre_processing(monkeypatch, paths, ["0", "1"])
+
+    assert workloads["workload_0"].filter_gpu_ids == "0"
+    assert workloads["workload_1"].filter_gpu_ids == "1"
