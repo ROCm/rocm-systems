@@ -1278,10 +1278,11 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
     arch_config = schema.ArchConfig()
-    # Table 1 has no Metric column and is skipped; table 701 maps to
-    # panel 700 (table_name) and sub-table 701 (sub_table_name).
+    # Table 1 is the in-memory Top Kernels frame: it has no Metric column and is
+    # skipped; table 701 maps to panel 700 (table_name) and sub-table 701
+    # (sub_table_name).
     arch_config.dfs = {
-        1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
+        1: pd.DataFrame({"Kernel_Name": ["kernel_a"]}),
         701: metric_df,
     }
     arch_config.panel_configs = {
@@ -1435,12 +1436,11 @@ def make_repeated_dispatch_frame():
     })
 
 
-def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats():
     """-k selects the same kernel here as it does in the cli top stats table."""
     dispatch_frame = make_repeated_dispatch_frame()
     kernel_top_df, _ = create_df_kernel_top_stats(
         df_in=dispatch_frame,
-        raw_data_dir=str(tmp_path),
         filter_gpu_ids=None,
         filter_dispatch_ids=None,
         time_unit="ns",

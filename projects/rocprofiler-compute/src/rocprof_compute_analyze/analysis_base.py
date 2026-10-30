@@ -32,16 +32,17 @@ from utils.utils_common import (
     validate_roofline_csv,
 )
 
-# the build-in config to list kernel names purpose only
+# the build-in config to list kernel names purpose only. Its tables are not read
+# from disk: create_df_kernel_top_stats fills them in memory, and the sources
+# only name them. The Top Stats tables of the arch configs are replaced the same
+# way before they load.
 TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
     (
         0,
         {
             "id": 0,
             "title": "Top Kernels",
-            "data source": [
-                {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
-            ],
+            "data source": [{"raw_csv_table": {"id": 1, "source": "kernel_top"}}],
         },
     ),
     (
@@ -49,9 +50,7 @@ TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
         {
             "id": 1,
             "title": "Dispatch List",
-            "data source": [
-                {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-            ],
+            "data source": [{"raw_csv_table": {"id": 2, "source": "dispatch_info"}}],
         },
     ),
 ])
@@ -105,7 +104,6 @@ class OmniAnalyze_Base:
         )
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
-            raw_data_dir=str(dir_path),
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,

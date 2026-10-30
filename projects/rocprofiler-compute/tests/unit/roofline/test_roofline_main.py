@@ -541,6 +541,26 @@ def test_save_html_files_returns_the_written_path(
     assert output_path.is_file()
 
 
+def test_construct_plotly_figures_leaves_a_workloads_directory_untouched(
+    benchmarked_roofline, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workload directory named workloads under the cwd is read as given, and
+    building the figures creates nothing beneath it."""
+    monkeypatch.chdir(tmp_path)
+    workloads = tmp_path / "workloads"
+    workloads.mkdir()
+    (workloads / "roofline.csv").write_text(
+        (tmp_path / "roofline.csv").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    before = sorted(tmp_path.rglob("*"))
+
+    benchmarked_roofline(workload_dir=str(workloads)).construct_plotly_figures(
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
+    )
+
+    assert sorted(tmp_path.rglob("*")) == before
+
+
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])
 def test_combined_model_copies_either_source_frame(source_key: str) -> None:
     """The combined model retains the frame from either available figure class."""

@@ -53,6 +53,12 @@ def _tty_view_is_table(args: argparse.Namespace) -> bool:
 KERNEL_NAME_WRAP_WIDTH = 40
 
 PC_SAMPLING_TABLE_ID = "21.1"
+# Top stats tables are identified by id: their frames are built in memory, not
+# read from a CSV named after them.
+TOP_STATS_TABLE_IDS = (
+    parser.PMC_KERNEL_TOP_TABLE_ID,
+    parser.PMC_DISPATCH_INFO_TABLE_ID,
+)
 
 PC_SAMPLING_STALL_REASON_REFERENCE = (
     "Stall reason definitions: https://rocm.docs.amd.com/projects/"
@@ -682,6 +688,11 @@ def _safe_round_value(
         return "N/A"
 
 
+def _is_top_stats_table(table_type: str, table_config: dict[str, Any]) -> bool:
+    """True for the Top Kernels and Dispatch List tables."""
+    return table_type == "raw_csv_table" and table_config["id"] in TOP_STATS_TABLE_IDS
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -714,9 +725,7 @@ def process_table_data(
         if header not in comparable_columns:
             # Process columns that are not comparable across runs.
             if (
-                table_type == "raw_csv_table"
-                and table_config["source"]
-                in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
+                _is_top_stats_table(table_type, table_config)
                 and header == "Kernel_Name"
             ):
                 result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
@@ -812,10 +821,7 @@ def format_table_output(
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
-    if table_type == "raw_csv_table" and table_config["source"] in [
-        "pmc_kernel_top.csv",
-        "pmc_dispatch_info.csv",
-    ]:
+    if _is_top_stats_table(table_type, table_config):
         df = df.head(args.max_stat_num)
 
     # NB:
@@ -1176,7 +1182,7 @@ def show_kernel_stats(
                         continue
                     single_df = data.dfs[table_config["id"]]
                     # NB:
-                    #   For pmc_kernel_top.csv, have to sort here if not
+                    #   For the Top Kernels table, have to sort here if not
                     #   sorted when load_table_data.
                     if table_config["id"] == 1:
                         print(f"\n{'-' * 80}", file=output)

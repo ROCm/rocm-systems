@@ -274,7 +274,6 @@ class cli_analysis(OmniAnalyze_Base):
                     )
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=workload.raw_pmc,
-                    raw_data_dir=path_info[0],
                     filter_gpu_ids=workload.filter_gpu_ids,
                     filter_dispatch_ids=workload.filter_dispatch_ids,
                     time_unit=args.time_unit,
@@ -325,7 +324,6 @@ class cli_analysis(OmniAnalyze_Base):
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
-                raw_data_dir=path_info[0],
                 filter_gpu_ids=workload.filter_gpu_ids,
                 filter_dispatch_ids=workload.filter_dispatch_ids,
                 time_unit=args.time_unit,

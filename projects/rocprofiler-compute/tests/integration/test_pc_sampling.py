@@ -381,21 +381,10 @@ def test_pc_sampling_profile_then_analyze(
     assert "0.1 Top Kernels" in captured.out
     assert "0.2 Dispatch List" in captured.out
 
+    # Top stats are built in memory, so analyze leaves no scratch CSVs behind.
     workload_path = Path(workload_dir)
-
-    kernel_top_csv = workload_path / "pmc_kernel_top.csv"
-    assert kernel_top_csv.exists()
-    kernel_top_header = kernel_top_csv.read_text().splitlines()[0]
-    assert "Kernel_Name" in kernel_top_header
-    assert "Count" in kernel_top_header
-    assert "Percent" in kernel_top_header
-
-    dispatch_info_csv = workload_path / "pmc_dispatch_info.csv"
-    assert dispatch_info_csv.exists()
-    dispatch_info_header = dispatch_info_csv.read_text().splitlines()[0]
-    assert "Dispatch_ID" in dispatch_info_header
-    assert "Kernel_Name" in dispatch_info_header
-    assert "GPU_ID" in dispatch_info_header
+    assert not (workload_path / "pmc_kernel_top.csv").exists()
+    assert not (workload_path / "pmc_dispatch_info.csv").exists()
 
     code = binary_handler_analyze_rocprof_compute(
         [

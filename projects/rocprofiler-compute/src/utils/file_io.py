@@ -140,7 +140,6 @@ def workload_total_duration_ns(
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
-    raw_data_dir: str,
     filter_gpu_ids: Optional[list[str]],
     filter_dispatch_ids: Optional[list[str]],
     time_unit: str,
@@ -148,20 +147,20 @@ def create_df_kernel_top_stats(
     """
     Create top stats info by grouping kernels with user's filters.
 
+    Nothing is written to disk: the workload directory stays read-only.
+
     Returns:
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
     df = filter_gpu_dispatch_frame(df_in.copy(), filter_gpu_ids, filter_dispatch_ids)
 
-    # First, create a dispatches file used to populate global vars
+    # The dispatch list is returned in memory and populates the global vars.
     dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]
     if "PID" in df.columns:
         dispatch_columns.insert(1, "PID")
 
     dispatch_info = df[dispatch_columns]
-    dispatch_output_path = Path(raw_data_dir) / "pmc_dispatch_info.csv"
-    dispatch_info.to_csv(dispatch_output_path, index=False)
 
     # Calculate execution times
     execution_times = df["End_Timestamp"] - df["Start_Timestamp"]
@@ -204,7 +203,6 @@ def create_df_kernel_top_stats(
 
     kernel_order = rank_kernels_by_total_duration(df)
     grouped = grouped.set_index("Kernel_Name").loc[kernel_order].reset_index()
-    grouped.to_csv(str(Path(raw_data_dir) / "pmc_kernel_top.csv"), index=False)
 
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 

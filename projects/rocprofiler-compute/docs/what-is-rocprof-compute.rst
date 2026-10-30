@@ -223,7 +223,8 @@ directory. Every ``analyze`` run creates a new run folder and writes all of the 
      - Standalone Plotly roofline plot, written when a single workload includes roofline data. See :ref:`standalone-roofline`.
 
 Choose the parent directory of the run folder with ``-d``/``--output-directory`` and its name with
-``-o``/``--output-name``. See :ref:`analysis-output-format` for details.
+``-o``/``--output-name``. See :ref:`analysis-output-format` for details. Analyze only reads the
+workload directory, so it can be read-only.
 
 .. _glance-supported-hardware:
 

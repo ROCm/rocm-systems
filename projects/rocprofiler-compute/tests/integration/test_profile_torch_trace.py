@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 
 import common
-import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
@@ -18,7 +17,7 @@ from tests.integration.common import (
     config,
     require_torch,
 )
-from utils import csv_compression
+from utils import csv_compression, file_io
 from utils.utils_analysis import parse_marker_function
 
 MARKER_API_COLUMNS = {
@@ -520,8 +519,7 @@ def test_torch_operator_with_dispatch_filter(
     ])
     assert list_code == 0
     capsys.readouterr()
-    dispatch_csv = Path(torch_trace_profiled_workload) / "pmc_dispatch_info.csv"
-    dispatch_df = pd.read_csv(dispatch_csv)
+    dispatch_df = file_io.create_df_pmc(torch_trace_profiled_workload, 0)
     row_one = dispatch_df[dispatch_df["Dispatch_ID"].astype(int) == 1]
     assert not row_one.empty
     dispatch_one_kernel = str(row_one.iloc[0]["Kernel_Name"])
@@ -538,9 +536,15 @@ def test_torch_operator_with_dispatch_filter(
     assert code == 0
     captured = capsys.readouterr()
     out = captured.out + captured.err
-    kernel_top = pd.read_csv(Path(torch_trace_profiled_workload) / "pmc_kernel_top.csv")
-    assert set(kernel_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
-    assert "operator filter selected" in out
+    assert "operator filter selected 1 dispatch(es)" in out
+    # The analysis builds its top stats from the same dispatch filter.
+    filtered_top, _ = file_io.create_df_kernel_top_stats(
+        df_in=dispatch_df,
+        filter_gpu_ids=None,
+        filter_dispatch_ids=["1"],
+        time_unit="ns",
+    )
+    assert set(filtered_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
 
 
 def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
