@@ -339,7 +339,6 @@ class Command : public Event {
   HostQueue* queue_;               //!< The command queue this command is enqueue into
   Command* next_;                  //!< Next GPU command in the queue list
   Command* batch_head_ = nullptr;  //!< The head of the batch commands
-  bool joins_batch_ = false;       //!< A CL_COMMAND_TASK enqueued as a batch member
   cl_command_type type_;           //!< This command's OpenCL type.
   std::vector<void*> data_;
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
@@ -551,11 +550,6 @@ class Command : public Event {
 
   //! Returns the current batch head
   Command* GetBatchHead() const { return batch_head_; }
-
-  //! A CL_COMMAND_TASK normally closes the submission batch and completes it through its own
-  //! interrupt signal handler. A task that joins the batch completes with it instead, like a
-  //! kernel dispatch: at the next marker, finish(), or the DEBUG_CLR_MAX_BATCH_SIZE flush.
-  void SetJoinsBatch(bool joins_batch) { joins_batch_ = joins_batch; }
 
   const Event* waitingEvent() const { return waitingEvent_; }
 

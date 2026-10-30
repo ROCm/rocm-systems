@@ -2750,12 +2750,6 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
   // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
-  // A launch that borrows no pooled signals has nothing to recycle promptly, so it completes with
-  // the stream's batch instead of paying an interrupt signal and async handler of its own.
-  if (sync_plan_.num_hw_events == 0) {
-    graph_accumulate->SetJoinsBatch(true);
-  }
-
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
     if (hw_event != nullptr) {
