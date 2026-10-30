@@ -1,0 +1,42 @@
+name: lsttstrix smoke test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/lsttstrix-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    runs-on: [self-hosted, lstt-gfx1151]
+    timeout-minutes: 20
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+      options: --device=/dev/kfd --device=/dev/dri --group-add video
+    steps:
+      - name: Host baseline (compare before and after BIOS, firmware and driver updates)
+        run: |
+          {
+            echo "## lsttstrix host baseline"
+            echo "- kernel: $(uname -r)"
+            echo "- amdgpu driver: $(cat /sys/module/amdgpu/version 2>/dev/null || echo n/a)"
+            echo "- BIOS: $(cat /sys/class/dmi/id/bios_version 2>/dev/null) ($(cat /sys/class/dmi/id/bios_date 2>/dev/null))"
+            echo "- product: $(cat /sys/class/dmi/id/product_name 2>/dev/null)"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: GPU is visible in the container
+        run: |
+          ls -l /dev/kfd /dev/dri
+          rocminfo | grep -E "Marketing Name|gfx" | sort -u | tee -a "$GITHUB_STEP_SUMMARY"
+          rocminfo | grep -q gfx1151
+
+      - name: amd-smi (optional)
+        run: amd-smi list || echo "amd-smi not in this image"
