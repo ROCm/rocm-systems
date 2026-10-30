@@ -701,6 +701,7 @@ jobs:
         env:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
+          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
         with:
           script: |
@@ -714,5 +715,6 @@ jobs:
               publishResult: process.env.PUBLICATION_RESULT,
               runNumber: process.env.GITHUB_RUN_NUMBER,
               runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               headSha: process.env.SOURCE_SHA,
             });

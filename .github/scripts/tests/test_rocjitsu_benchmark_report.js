@@ -34,7 +34,7 @@ function fixture() {
     context: { repo: { owner: 'ROCm', repo: 'rocm-systems' },
       payload: { pull_request: { number: 42, head: { ref: 'feature/source' } } },
       serverUrl: 'https://github.com', runId: 123 },
-    runNumber: '10', runAttempt: '1', headSha: 'a'.repeat(40),
+    runNumber: '10', runAttempt: '1', benchmarkAttempt: '1', headSha: 'a'.repeat(40),
     benchmarkResult: 'success', publishResult: 'success',
   };
   return { args, comments, writes };
@@ -54,8 +54,20 @@ test('creates one PR report with direct dashboard and workflow links', async () 
   const dashboardUrl = new URL(dashboardLink);
   assert.equal(dashboardUrl.searchParams.get('view'), 'branch');
   assert.equal(dashboardUrl.searchParams.get('branch'), 'feature/source');
+  assert.equal(dashboardUrl.searchParams.get('run'), 'github-123-attempt-1');
+  assert.equal(dashboardUrl.searchParams.get('detail'), '1');
   assert.match(body, /\[Open the dashboard\]\([^\n]+\)\n\n\[View the workflow run\]/);
   assert.match(body, /https:\/\/github.com\/ROCm\/rocm-systems\/actions\/runs\/123/);
+});
+
+test('report-only reruns link the original published benchmark attempt', async () => {
+  const { args, comments } = fixture();
+  await reportBenchmark({ ...args, runAttempt: '3', benchmarkAttempt: '1' });
+  const body = comments[0].body;
+  const url = new URL(body.match(/\[Open the dashboard\]\(([^)]+)\)/)[1]);
+  assert.equal(url.searchParams.get('run'), 'github-123-attempt-1');
+  assert.equal(url.searchParams.get('detail'), '1');
+  assert.match(body, /actions\/runs\/123\/attempts\/3/);
 });
 
 test('later runs update the same comment instead of adding another', async () => {
@@ -76,6 +88,10 @@ for (const publishResult of ['failure', 'skipped', 'cancelled']) {
     assert.match(comments[0].body, /Benchmark job: \*\*failure\*\*/);
     assert.match(comments[0].body, new RegExp(`Publication job: \\*\\*${publishResult}\\*\\*`));
     assert.doesNotMatch(comments[0].body, /Results published/);
+    const url = new URL(comments[0].body.match(/\[Open the dashboard\]\(([^)]+)\)/)[1]);
+    assert.equal(url.searchParams.get('branch'), 'feature/source');
+    assert.equal(url.searchParams.has('run'), false);
+    assert.equal(url.searchParams.has('detail'), false);
   });
 }
 

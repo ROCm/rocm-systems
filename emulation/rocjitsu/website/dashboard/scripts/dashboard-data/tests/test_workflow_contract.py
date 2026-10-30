@@ -153,10 +153,15 @@ def test_report_only_runs_for_executed_pr_benchmarks(
     assert report['env'] == {
         'BENCHMARK_RESULT': '${{ needs.benchmark.result }}',
         'PUBLICATION_RESULT': '${{ needs.publish.result }}',
+        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
         'SOURCE_SHA': '${{ needs.source-metadata.outputs.source_sha }}',
     }
     assert 'runNumber: process.env.GITHUB_RUN_NUMBER' in report['with']['script']
     assert 'runAttempt: process.env.GITHUB_RUN_ATTEMPT' in report['with']['script']
+    assert (
+        'benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT'
+        in report['with']['script']
+    )
     assert 'headSha: process.env.SOURCE_SHA' in report['with']['script']
     assert 'reportBenchmark' in report['with']['script']
 

@@ -24,7 +24,7 @@ async function previousOrder(github, context, body) {
   return { runNumber: BigInt(data.run_number), runAttempt: BigInt(run[2] || data.run_attempt) };
 }
 
-async function reportBenchmark({ github, context, benchmarkResult, publishResult, runNumber, runAttempt, headSha }) {
+async function reportBenchmark({ github, context, benchmarkResult, publishResult, runNumber, runAttempt, benchmarkAttempt, headSha }) {
   const { owner, repo } = context.repo;
   const number = context.payload.pull_request.number;
   const marker = `<!-- rocjitsu-benchmark-report:${number} -->`;
@@ -47,6 +47,10 @@ async function reportBenchmark({ github, context, benchmarkResult, publishResult
   const dashboardUrl = new URL('https://rocm.github.io/rocm-systems/rocjitsu-dashboard/');
   dashboardUrl.searchParams.set('view', 'branch');
   dashboardUrl.searchParams.set('branch', context.payload.pull_request.head.ref);
+  if (publishResult === 'success') {
+    dashboardUrl.searchParams.set('run', `github-${context.runId}-attempt-${benchmarkAttempt}`);
+    dashboardUrl.searchParams.set('detail', '1');
+  }
   const body = [
     marker,
     `<!-- rocjitsu-benchmark-report-run:${context.runId}:${runNumber}:${runAttempt} -->`,
