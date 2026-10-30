@@ -14,6 +14,9 @@ This script handles:
 Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
   python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
       --artifact-dir ./build \
+      --candidate-sha "$CANDIDATE_SHA" \
+      --artifact-provenance "$WORK_DIR/candidate-artifact-run.json" \
+      --candidate-tuner-config rocm-systems/projects/rccl/tuner/rccl_tuner_gfx950.csv \
       --workload llama-3.1-70b-training \
       --cluster ruby \
       --nodes 2 \
@@ -329,7 +332,9 @@ WORKLOAD_CONFIGS = {
             # communicator's rank 0 prints the version banner, and a server
             # spanning two nodes has it on one of them.
             "NCCL_DEBUG": "INFO",
-            "NCCL_DEBUG_SUBSYS": "INIT,NET",
+            # TUNING records the effective CSV source. The candidate gate
+            # requires its SHA-pinned gfx950 table and rejects a stale stock CSV.
+            "NCCL_DEBUG_SUBSYS": "INIT,NET,TUNING",
             # Thor2 settings the sglang stack runs with, over the cluster's.
             "NCCL_IB_QPS_PER_CONNECTION": "1",
             "NCCL_IB_USE_INLINE": "0",
@@ -601,11 +606,15 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
     """Derive a unique identifier for the RCCL build.
 
-    Checks, in order: RCCL_COMMIT_HASH env, GITHUB_RUN_ID env, sha256 of
-    the librccl.so binary.  Does NOT fall back to ``git rev-parse HEAD``
+    Checks, in order: exact CANDIDATE_SHA, RCCL_COMMIT_HASH, GITHUB_RUN_ID,
+    sha256 of the librccl.so binary. Does NOT fall back to ``git rev-parse HEAD``
     because in CI the checkout is TheRock (not RCCL), which would produce
     a constant tag and cause stale cache hits on persistent runners.
     """
+    commit = os.environ.get("CANDIDATE_SHA", "")
+    if commit:
+        return commit[:12]
+
     commit = os.environ.get("RCCL_COMMIT_HASH", "")
     if commit:
         return commit[:12]
@@ -639,18 +648,46 @@ def _rccl_uses_kpack(rccl_lib: Path) -> bool:
         return False
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def rccl_kpack_files(rccl_lib: Path) -> list[Path]:
+    """The kpack archives belonging to *rccl_lib*, in stable name order."""
+    files = list(rccl_lib.parent.rglob("*.kpack"))
+    if not files:
+        files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
+    return sorted(set(p.resolve() for p in files), key=lambda p: p.name)
+
+
+def rccl_asset_identity(rccl_lib: Path, tuner_config: Path) -> str:
+    """Short identity of every version-coupled candidate overlay asset."""
+    digest = hashlib.sha256()
+    for path in [rccl_lib.resolve(), *rccl_kpack_files(rccl_lib), tuner_config.resolve()]:
+        digest.update(path.name.encode())
+        digest.update(b"\0")
+        digest.update(sha256_file(path).encode())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
 def get_rccl_fingerprint(rccl_lib: Path) -> dict:
     """Extract identifying information from a librccl.so artifact.
 
-    Returns a dict with ``md5``, ``version`` (e.g. ``2.30.4-HEAD:e711c9e``),
-    and ``size`` that can be compared against runtime output.
+    Returns hashes, ``version`` (e.g. ``2.30.4-HEAD:e711c9e``), and ``size``
+    that can be compared against runtime output.
     """
-    fp: dict = {"md5": "", "version": "", "size": 0}
+    fp: dict = {"md5": "", "sha256": "", "version": "", "size": 0}
     if not rccl_lib or not rccl_lib.exists():
         return fp
     resolved = rccl_lib.resolve()
     fp["size"] = resolved.stat().st_size
     fp["md5"] = hashlib.md5(resolved.read_bytes()).hexdigest()
+    fp["sha256"] = sha256_file(resolved)
     try:
         result = subprocess.run(
             ["strings", str(resolved)],
@@ -696,6 +733,86 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
     if not m:
         return version, "", False
     return m.group(1), (m.group(2) or "").lower(), m.group(3) == "+"
+
+
+CANDIDATE_TUNER_PATH = "/opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv"
+FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+CANDIDATE_PROVENANCE = "candidate-provenance.json"
+
+
+def candidate_provenance(
+    candidate_sha: str,
+    artifact_provenance_path: Path,
+    tuner_config: Path,
+    rccl_lib: Path,
+    rccl_fingerprint: dict,
+) -> dict:
+    """Validate all pre-run candidate assets and return their manifest."""
+    candidate_sha = candidate_sha.strip().lower()
+    if not FULL_COMMIT_SHA.fullmatch(candidate_sha):
+        raise RuntimeError(
+            f"candidate SHA must be a full 40-character commit, got {candidate_sha!r}"
+        )
+    try:
+        artifact = json.loads(artifact_provenance_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"cannot read candidate artifact provenance {artifact_provenance_path}: {exc}"
+        ) from exc
+    for key in ("candidate_sha", "artifact_source_sha"):
+        actual = str(artifact.get(key, "")).lower()
+        if actual != candidate_sha:
+            raise RuntimeError(
+                f"candidate artifact provenance mismatch: {key}={actual!r}, "
+                f"expected {candidate_sha}"
+            )
+
+    _, lib_commit, dirty = _split_rccl_version(rccl_fingerprint.get("version", ""))
+    if dirty or not lib_commit or not candidate_sha.startswith(lib_commit):
+        raise RuntimeError(
+            "candidate librccl version does not match the exact source SHA: "
+            f"version={rccl_fingerprint.get('version')!r}, source={candidate_sha}"
+        )
+    if not tuner_config.is_file():
+        raise RuntimeError(f"candidate tuner source is missing: {tuner_config}")
+
+    uses_kpack = _rccl_uses_kpack(rccl_lib)
+    kpack_files = rccl_kpack_files(rccl_lib)
+    if uses_kpack and not kpack_files:
+        raise RuntimeError(
+            f"{rccl_lib} references kpack kernels but its exact artifact has no .kpack files"
+        )
+
+    return {
+        "schema_version": 1,
+        "candidate_sha": candidate_sha,
+        "overlay_asset_id": rccl_asset_identity(rccl_lib, tuner_config),
+        "artifact": artifact,
+        "librccl": {
+            "path": os.fspath(rccl_lib),
+            **rccl_fingerprint,
+        },
+        "kpack": [
+            {"path": os.fspath(path), "sha256": sha256_file(path), "size": path.stat().st_size}
+            for path in kpack_files
+        ],
+        "tuner": {
+            "policy": "remove stock disk overrides and install the exact candidate CSV",
+            "source": "candidate source tree at the verified candidate SHA",
+            "source_path": os.fspath(tuner_config),
+            "source_sha256": sha256_file(tuner_config),
+            "expected_runtime_source": CANDIDATE_TUNER_PATH,
+        },
+    }
+
+
+def write_candidate_provenance(work_dir: Path, manifest: dict) -> None:
+    """Write the live manifest and keep the repro copy in sync when present."""
+    text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    (work_dir / CANDIDATE_PROVENANCE).write_text(text)
+    repro = work_dir / REPRO_DIR / CANDIDATE_PROVENANCE
+    if repro.parent.is_dir():
+        repro.write_text(text)
 
 
 # RCCL prints this on EVERY call of a deprecated API name (src/misc/api_trace.cc),
@@ -775,6 +892,55 @@ def runtime_rccl_versions(work_dir: Path) -> list[str]:
             if v not in versions:
                 versions.append(v)
     return versions
+
+
+def runtime_tuner_sources(work_dir: Path) -> list[str]:
+    """Distinct CSV tuner sources reported by RCCL in this phase."""
+    sources: list[str] = []
+    pattern = re.compile(r"TUNER/CsvTuner: Loaded \d+ tuning configurations from (\S+)")
+    for log_file in rccl_banner_logs(work_dir):
+        for source in pattern.findall(log_file.read_text(errors="replace")):
+            if source not in sources:
+                sources.append(source)
+    return sources
+
+
+def verify_candidate_tuner(
+    work_dir: Path,
+    nodes: int,
+    expected_source: str = CANDIDATE_TUNER_PATH,
+) -> tuple[bool, str]:
+    """Require every candidate node to report only the SHA-pinned candidate CSV."""
+    node_logs = rccl_banner_logs(work_dir)
+    if not node_logs:
+        return False, "No node logs found — cannot verify tuner source"
+    by_node: dict[int, list[str]] = {}
+    pattern = re.compile(r"TUNER/CsvTuner: Loaded \d+ tuning configurations from (\S+)")
+    for log_file in node_logs:
+        match = re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name)
+        if not match:
+            continue
+        node = int(match.group(1))
+        sources = pattern.findall(log_file.read_text(errors="replace"))
+        by_node.setdefault(node, []).extend(sources)
+
+    missing = sorted(node for node in range(nodes) if not by_node.get(node))
+    if missing:
+        return False, (
+            f"no loaded CSV tuner source in node log(s) {missing}; "
+            "NCCL_DEBUG_SUBSYS must include TUNING"
+        )
+    wrong = {
+        node: sorted(set(sources))
+        for node, sources in by_node.items()
+        if any(source != expected_source for source in sources)
+    }
+    if wrong:
+        return False, (
+            f"candidate tuner source mismatch: expected {expected_source}, got {wrong}; "
+            "a stock disk CSV may be shadowing the candidate"
+        )
+    return True, f"tuner verified on {nodes} node(s): source={expected_source}"
 
 
 def verify_rccl_replacement(
@@ -972,7 +1138,15 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
     soname the artifact needs and the base predates (libamd_smi .27 against
     .26) is reconciled rather than tripping the gate it would otherwise fail.
     """
-    kpack_block = ""
+    # A librccl swap is one version-coupled unit: binary, device archives and
+    # tuner policy. Remove archives left by the stock image before optionally
+    # installing the candidate's exact set.
+    kpack_block = (
+        '    for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
+        '               | xargs -r -n1 dirname | sort -u); do \\\n'
+        '      rm -f "$d/.kpack"/rccl*.kpack; \\\n'
+        '    done; \\\n'
+    )
     if kpack:
         # Generalises what the SDK-venv branch does for two known directories:
         # every directory that received a library gets the archives too, since
@@ -987,16 +1161,42 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
         # looks in `rccl_lib.parent.parent`. Writing `$d/.kpack` instead leaves
         # the device code where nothing looks for it, and nothing fails until
         # the library is actually loaded.
-        kpack_block = (
-            '    if ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\\n'
-            '      for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
-            '                 | xargs -r -n1 dirname | sort -u); do \\\n'
-            '        mkdir -p "$d/.kpack" && cp /tmp/rccl_ci/.kpack/*.kpack "$d/.kpack/"; \\\n'
+        kpack_block += (
+            '    ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1 || \\\n'
+            '      { echo "GATE FAIL: candidate librccl requires kpack but none was staged"; exit 1; }; \\\n'
+            '    sha256sum /tmp/rccl_ci/.kpack/*.kpack > /opt/RCCL_KPACK_SHA256S.txt; \\\n'
+            '    for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
+            '               | xargs -r -n1 dirname | sort -u); do \\\n'
+            '      mkdir -p "$d/.kpack"; \\\n'
+            '      for src in /tmp/rccl_ci/.kpack/*.kpack; do \\\n'
+            '        cp "$src" "$d/.kpack/"; cmp -s "$src" "$d/.kpack/$(basename "$src")" || \\\n'
+            '          { echo "GATE FAIL: kpack copy mismatch in $d/.kpack"; exit 1; }; \\\n'
             '      done; \\\n'
-            '      echo "kpack staged into: $(cut -f2 /opt/RCCL_PRESWAP.txt \\\n'
-            '            | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u | tr "\\\\n" " ")"; \\\n'
-            '    fi; \\\n'
+            '    done; \\\n'
+            '    echo "kpack staged atomically into: $(cut -f2 /opt/RCCL_PRESWAP.txt \\\n'
+            '          | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u | tr "\\\\n" " ")"; \\\n'
         )
+    tuner_block = (
+        '    : > /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '    for t in $(cut -f2 /opt/RCCL_PRESWAP.txt); do \\\n'
+        '      d=$(dirname "$t"); \\\n'
+        '      for td in "$d/tuner" "$d/../share/rccl/tuner"; do \\\n'
+        '        [ -d "$td" ] || continue; \\\n'
+        '        find "$td" -maxdepth 1 -name "rccl_tuner*.csv" \\\n'
+        '          -print -delete >> /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '      done; \\\n'
+        '    done; \\\n'
+        '    for td in /opt/rocm*/share/rccl/tuner; do \\\n'
+        '      [ -d "$td" ] || continue; \\\n'
+        '      find "$td" -maxdepth 1 -name "rccl_tuner*.csv" \\\n'
+        '        -print -delete >> /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '    done; \\\n'
+        f'    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv '
+        f'{CANDIDATE_TUNER_PATH}; \\\n'
+        f'    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\\n'
+        '    echo "tuner policy: removed $(sort -u /opt/RCCL_TUNER_REMOVED.txt | wc -l) '
+        f'disk override(s); installed {CANDIDATE_TUNER_PATH}"; \\\n'
+    )
     return f"""\
 RUN set -e; \\
     SRC=/tmp/rccl_ci/librccl.so; \\
@@ -1023,7 +1223,7 @@ RUN set -e; \\
       else patchelf --remove-rpath "$t" || \\
         {{ echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }}; fi; \\
     done < /opt/RCCL_TARGETS.txt; \\
-{kpack_block}{bridge}    ldconfig || true; \\
+{kpack_block}{tuner_block}{bridge}    ldconfig || true; \\
     while IFS="$(printf '\\t')" read -r n t; do \\
       if ldd "$t" > /tmp/rcclswap/ldd.$n 2>/dev/null; then lddok=yes; else lddok=NO; fi; \\
       awk '/not found/ {{print $1}}' /tmp/rcclswap/ldd.$n | sort -u > "/tmp/rcclswap/post.$n"; \\
@@ -1184,16 +1384,15 @@ def resolve_base_digest(base_image: str) -> str:
     `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    Falls back to the tag when the registry cannot tell.
+    Fails closed when the registry cannot tell: silently using a mutable tag
+    would make the candidate image irreproducible and could split the A/B pair.
     """
     digest = registry_digest(base_image)
     if not digest:
-        log.warning(
-            "No digest for %s; both A/B images will use the tag, so a push "
-            "between the two phases' builds would split the pair.",
-            base_image,
+        raise RuntimeError(
+            f"could not resolve immutable registry digest for {base_image}; "
+            "refusing to build either A/B image from a mutable tag"
         )
-        return base_image
     log.info("Base pinned for both A/B images: %s", digest)
     return digest
 
@@ -1301,6 +1500,7 @@ def stage_sglang_baseline(
 
 def stage_rccl_overlay(
     rccl_lib: Path,
+    tuner_config: Path,
     base_image: str,
     gpu_target: str,
     work_dir: Path,
@@ -1318,7 +1518,8 @@ def stage_rccl_overlay(
     has neither Primus nor the SDK venv paths those branches write to.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
-    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
+    asset_id = rccl_asset_identity(rccl_lib, tuner_config)
+    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{asset_id}"
     if family in ("maxtext", "sglang-disagg") and from_ref:
         # Same identity the baseline carries, for the same reason: the run id
         # alone survives a re-run, so without this the candidate could hit the
@@ -1338,6 +1539,9 @@ def stage_rccl_overlay(
         dest = staging_dir / so_file.name
         if not dest.exists():
             subprocess.run(["cp", "-L", str(so_file), str(dest)], check=True)
+    tuner_staging = staging_dir / "tuner" / tuner_config.name
+    tuner_staging.parent.mkdir(exist_ok=True)
+    shutil.copy2(tuner_config, tuner_staging)
 
     # The CI RCCL is built against a newer ROCm than the base image, so it can
     # name a soname the image predates -- `libamd_smi.so.27` against its `.26` --
@@ -1355,9 +1559,7 @@ def stage_rccl_overlay(
     # target it discovers rather than into two known directories.
     has_kpack_files = False
     if uses_kpack:
-        kpack_files = list(rccl_lib_dir.rglob("*.kpack"))
-        if not kpack_files:
-            kpack_files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
+        kpack_files = rccl_kpack_files(rccl_lib)
         has_kpack_files = len(kpack_files) > 0
         if has_kpack_files:
             kpack_staging = staging_dir / ".kpack"
@@ -1369,7 +1571,9 @@ def stage_rccl_overlay(
             log.info("Found %d kpack file(s): %s",
                      len(kpack_files), [f.name for f in kpack_files])
         else:
-            log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+            raise RuntimeError(
+                f"{rccl_lib} has kpack references but its artifact contains no .kpack files"
+            )
 
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
@@ -1392,7 +1596,9 @@ def stage_rccl_overlay(
         # ratio would then be measuring more than RCCL.
         dockerfile.write_text(
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
-            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
+            f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
+            "ENV NCCL_DEBUG=WARN\n"
         )
     elif family == "sglang-disagg":
         # The baseline's recipe plus the swap, as for MaxText: the sgl-dev
@@ -1404,7 +1610,9 @@ def stage_rccl_overlay(
         )
         dockerfile.write_text(
             f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
-            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
+            f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
+            "ENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
         log.info(
@@ -1419,16 +1627,31 @@ COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     SDK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"; \\
     SDK_DEV="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"; \\
-    SDK_KPACK="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"; \\
+    SDK_KPACK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"; \\
+    SDK_KPACK_DEV="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/.kpack"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_LIB/librccl.so.1"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_LIB/librccl.so.1.0" 2>/dev/null || true; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_DEV/librccl.so.1"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_DEV/librccl.so.1.0"; \\
-    if [ -d /tmp/rccl_ci/.kpack ] && ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\
-        mkdir -p "$SDK_KPACK"; \\
-        cp /tmp/rccl_ci/.kpack/*.kpack "$SDK_KPACK/"; \\
-    fi; \\
+    ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1 || \\
+      {{ echo "GATE FAIL: candidate librccl requires kpack but none was staged"; exit 1; }}; \\
+    for d in "$SDK_KPACK_LIB" "$SDK_KPACK_DEV"; do \\
+      mkdir -p "$d"; rm -f "$d"/rccl*.kpack; \\
+      cp /tmp/rccl_ci/.kpack/*.kpack "$d/"; \\
+      for src in /tmp/rccl_ci/.kpack/*.kpack; do \\
+        cmp -s "$src" "$d/$(basename "$src")" || \\
+          {{ echo "GATE FAIL: kpack copy mismatch in $d"; exit 1; }}; \\
+      done; \\
+    done; \\
+    sha256sum /tmp/rccl_ci/.kpack/*.kpack > /opt/RCCL_KPACK_SHA256S.txt; \\
+    find "$SDK_LIB/tuner" "$SDK_DEV/tuner" /opt/rocm*/share/rccl/tuner \\
+      -maxdepth 1 -name 'rccl_tuner*.csv' -print -delete \\
+      2>/dev/null > /opt/RCCL_TUNER_REMOVED.txt || true; \\
+    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv {CANDIDATE_TUNER_PATH}; \\
+    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\
+    echo "tuner policy: disk overrides removed; installed {CANDIDATE_TUNER_PATH}"; \\
 {bridge_sdk}    rm -rf /tmp/rccl_ci
+ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
 """)
     else:
@@ -1444,7 +1667,14 @@ RUN set -e; \\
                 find /opt/rocm*/lib -name 'librccl.so.*.*' -not -type l 2>/dev/null | head -1); \\
     cp /tmp/rccl_ci/librccl.so "$RCCL_REAL"; \\
     DEP_DIR=$(dirname "$RCCL_REAL"); \\
+    find "$DEP_DIR/tuner" "$DEP_DIR/../share/rccl/tuner" /opt/rocm*/share/rccl/tuner \\
+      -maxdepth 1 -name 'rccl_tuner*.csv' -print -delete \\
+      2>/dev/null > /opt/RCCL_TUNER_REMOVED.txt || true; \\
+    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv {CANDIDATE_TUNER_PATH}; \\
+    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\
+    echo "tuner policy: disk overrides removed; installed {CANDIDATE_TUNER_PATH}"; \\
 {bridge_dep}    rm -rf /tmp/rccl_ci
+ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
 """)
 
@@ -1868,6 +2098,7 @@ def repro_env(
         "CI_RUN_ID": run_id,
         "CI_RUN_ATTEMPT": env.get("GITHUB_RUN_ATTEMPT", ""),
         "CI_SHA": env.get("GITHUB_SHA", ""),
+        "CANDIDATE_SHA": env.get("CANDIDATE_SHA", ""),
         "THEROCK_ARTIFACT_RUN_ID": artifact_run_id,
         # Provenance only: the library itself is in overlay_ctx/rccl_libs.
         "RCCL_ARTIFACTS_S3": f"s3://{THEROCK_ARTIFACT_BUCKET}/{s3_prefix}" if s3_prefix else "",
@@ -1875,6 +2106,7 @@ def repro_env(
             f"https://{THEROCK_ARTIFACT_BUCKET}.s3.amazonaws.com/{s3_prefix}" if s3_prefix else ""
         ),
         "RCCL_MD5": rccl_fingerprint.get("md5", ""),
+        "RCCL_SHA256": rccl_fingerprint.get("sha256", ""),
         "RCCL_VERSION": rccl_fingerprint.get("version", ""),
         "CANDIDATE_IMAGE": images.get(CANDIDATE, ""),
         "BASELINE_IMAGE": images.get(BASELINE, ""),
@@ -1960,6 +2192,9 @@ def write_repro_bundle(
         copy_overlay_ctx(ctx, bundle / OVERLAY_CTX)
     if (work_dir / "scripts").is_dir():
         shutil.copytree(work_dir / "scripts", bundle / "scripts", symlinks=True)
+    for name in (CANDIDATE_PROVENANCE, "candidate-artifact-run.json"):
+        if (work_dir / name).is_file():
+            shutil.copy2(work_dir / name, bundle / name)
 
     for phase, run_dir in phase_dirs.items():
         manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -2048,6 +2283,63 @@ done
 exit 0
 """
 
+CANDIDATE_IMAGE_ID = """\
+#!/bin/bash
+image="$1"
+out="$2"
+expected_tuner_sha="$3"
+host=$(hostname -s)
+id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null \\
+  || sudo -n docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || {
+  echo "GATE FAIL: cannot inspect candidate image $image on $host"
+  exit 1
+}
+case "$id" in
+  sha256:[0-9a-f][0-9a-f]*) ;;
+  *) echo "GATE FAIL: invalid candidate image id '$id' on $host"; exit 1 ;;
+esac
+tuner_sha=$(docker run --rm --pull never --entrypoint sha256sum "$image" \\
+  /opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv 2>/dev/null \\
+  || sudo -n docker run --rm --pull never --entrypoint sha256sum "$image" \\
+     /opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv 2>/dev/null) || {
+  echo "GATE FAIL: cannot hash candidate tuner config on $host"
+  exit 1
+}
+tuner_sha=${tuner_sha%% *}
+if [ "$tuner_sha" != "$expected_tuner_sha" ]; then
+  echo "GATE FAIL: candidate tuner hash mismatch on $host: $tuner_sha != $expected_tuner_sha"
+  exit 1
+fi
+printf '%s\\t%s\\t%s\\n' "$host" "$id" "$tuner_sha" > "$out/$host"
+echo "  $host candidate image $id tuner_sha256=$tuner_sha"
+"""
+
+
+def verify_image_identities(
+    identity_dir: Path,
+    nodes: int,
+    expected_tuner_sha: str,
+) -> tuple[bool, str, str]:
+    """Require one identical immutable candidate image ID from every node."""
+    rows = []
+    for path in sorted(identity_dir.glob("*")) if identity_dir.is_dir() else []:
+        try:
+            host, image_id, tuner_sha = path.read_text().strip().split("\t", 2)
+        except (OSError, ValueError):
+            return False, f"unreadable candidate image identity {path}", ""
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            return False, f"invalid candidate image identity from {host}: {image_id!r}", ""
+        if tuner_sha != expected_tuner_sha:
+            return False, f"candidate tuner hash mismatch from {host}: {tuner_sha!r}", ""
+        rows.append((host, image_id))
+    if len(rows) != nodes:
+        return False, f"candidate image identity found on {len(rows)}/{nodes} node(s)", ""
+    ids = {image_id for _, image_id in rows}
+    if len(ids) != 1:
+        return False, f"candidate image mismatch across nodes: {rows}", ""
+    image_id = ids.pop()
+    return True, f"candidate image verified on {nodes} node(s): {image_id}", image_id
+
 
 def _raise_on_term(signum, frame):  # noqa: ARG001 - signal handler signature
     """Make SIGTERM unwind the stack the way SIGINT already does."""
@@ -2063,6 +2355,8 @@ def run_ab_in_one_allocation(
     cluster_config: dict,
     timeout_minutes: int,
     built_images: list[str] | None = None,
+    candidate_image: str = "",
+    candidate_tuner_sha256: str = "",
 ) -> dict:
     """Run every phase back to back inside one SLURM allocation, on the same nodes.
 
@@ -2126,6 +2420,10 @@ def run_ab_in_one_allocation(
         ]
         release_memory = work_dir / "ab" / "release_host_memory.sh"
         release_memory.write_text(RELEASE_HOST_MEMORY)
+    image_id_dir = work_dir / "ab" / "candidate-image-ids"
+    image_id_dir.mkdir(parents=True, exist_ok=True)
+    image_id_script = work_dir / "ab" / "candidate_image_id.sh"
+    image_id_script.write_text(CANDIDATE_IMAGE_ID)
     for phase, run_dir in phases:
         script_lines += ["", f'echo "===== phase: {phase} ====="']
         if workload_config.get("family") == "sglang-disagg":
@@ -2138,6 +2436,15 @@ def run_ab_in_one_allocation(
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
         ]
+        if phase == CANDIDATE and candidate_image:
+            script_lines += [
+                'echo "===== verify: immutable candidate image on every node ====="',
+                'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+                f"--overlap bash {shlex.quote(str(image_id_script))} "
+                f"{shlex.quote(candidate_image)} {shlex.quote(str(image_id_dir))} "
+                f"{shlex.quote(candidate_tuner_sha256)} "
+                "|| echo 1 > " + shlex.quote(str(image_id_dir / "FAILED")),
+            ]
     cleanup = work_dir / "ab" / "cleanup_images.sh"
     cleanup.parent.mkdir(parents=True, exist_ok=True)
     cleanup.write_text(CLEANUP_IMAGES)
@@ -2276,7 +2583,21 @@ def run_ab_in_one_allocation(
     else:
         log.info("Allocation: job=%s nodes=%s", job_id, granted_nodes)
 
-    return {"exit_codes": exit_codes, "job_id": job_id, "nodelist": granted_nodes}
+    if candidate_image:
+        image_ok, image_msg, image_id = verify_image_identities(
+            image_id_dir, nodes, candidate_tuner_sha256
+        )
+    else:
+        image_ok, image_msg, image_id = True, "candidate image verification not requested", ""
+    log.info("Candidate image verification: %s", image_msg)
+    return {
+        "exit_codes": exit_codes,
+        "job_id": job_id,
+        "nodelist": granted_nodes,
+        "candidate_image_ok": image_ok,
+        "candidate_image_message": image_msg,
+        "candidate_image_id": image_id,
+    }
 
 
 def parse_perf_results(work_dir: Path) -> list[dict]:
@@ -2782,6 +3103,23 @@ def main() -> None:
         help="Directory containing CI-built RCCL artifacts",
     )
     parser.add_argument(
+        "--candidate-sha",
+        required=True,
+        help="Exact 40-character source SHA the RCCL artifact was built from",
+    )
+    parser.add_argument(
+        "--artifact-provenance",
+        type=Path,
+        required=True,
+        help="Verified artifact-run provenance JSON",
+    )
+    parser.add_argument(
+        "--candidate-tuner-config",
+        type=Path,
+        required=True,
+        help="gfx950 tuner CSV from the exact candidate source checkout",
+    )
+    parser.add_argument(
         "--workload",
         type=str,
         required=True,
@@ -2881,9 +3219,29 @@ def main() -> None:
     log.info("RCCL commit/tag: %s", rccl_commit)
     rccl_fingerprint = get_rccl_fingerprint(rccl_lib)
     if rccl_fingerprint["md5"]:
-        log.info("RCCL fingerprint: md5=%s version=%s size=%d",
-                 rccl_fingerprint["md5"], rccl_fingerprint["version"],
+        log.info("RCCL fingerprint: sha256=%s md5=%s version=%s size=%d",
+                 rccl_fingerprint["sha256"], rccl_fingerprint["md5"],
+                 rccl_fingerprint["version"],
                  rccl_fingerprint["size"])
+    try:
+        candidate_manifest = candidate_provenance(
+            args.candidate_sha,
+            args.artifact_provenance,
+            args.candidate_tuner_config,
+            rccl_lib,
+            rccl_fingerprint,
+        )
+    except RuntimeError as exc:
+        log.error("Candidate provenance verification FAILED: %s", exc)
+        sys.exit(1)
+    write_candidate_provenance(work_dir, candidate_manifest)
+    log.info(
+        "Candidate provenance verified: source=%s artifact_run=%s tuner=%s sha256=%s",
+        candidate_manifest["candidate_sha"],
+        candidate_manifest["artifact"].get("artifact_run_id"),
+        candidate_manifest["tuner"]["expected_runtime_source"],
+        candidate_manifest["tuner"]["source_sha256"],
+    )
 
     # Step 2: Install madengine
     family = workload_config.get("family", "megatron")
@@ -2908,6 +3266,7 @@ def main() -> None:
     else:
         overlay_image = stage_rccl_overlay(
             rccl_lib,
+            args.candidate_tuner_config,
             workload_config["base_image"],
             cluster_config["gpu_target"],
             work_dir,
@@ -2940,6 +3299,19 @@ def main() -> None:
     else:
         baseline_image = workload_config["base_image"]
         baseline_pull_only = True
+
+    candidate_manifest.update({
+        "candidate_image": {
+            "reference": overlay_image,
+            "base_reference": base_ref or workload_config["base_image"],
+            "digest": "",
+        },
+        "baseline": {
+            "reference": baseline_image,
+            "policy": "stock/previous-good image, independent of candidate develop tip",
+        },
+    })
+    write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 4: Generate one manifest per A/B phase
     phases: list[tuple[str, Path]] = []
@@ -3004,6 +3376,8 @@ def main() -> None:
             ([] if args.skip_overlay_build else [overlay_image])
             + ([] if baseline_pull_only else [baseline_image])
         ),
+        candidate_image=overlay_image,
+        candidate_tuner_sha256=candidate_manifest["tuner"]["source_sha256"],
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
 
@@ -3017,6 +3391,13 @@ def main() -> None:
     # Step 5b: Verify RCCL replacement. Only the candidate is meant to carry the
     # CI library — the baseline runs the image's bundled copy by design.
     rccl_verification_failed = False
+    if not allocation["candidate_image_ok"]:
+        log.error(
+            "Candidate image verification FAILED: %s",
+            allocation["candidate_image_message"],
+        )
+        rccl_verification_failed = True
+        exit_code = max(exit_code, 1)
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
@@ -3027,6 +3408,32 @@ def main() -> None:
             log.error("RCCL verification FAILED: %s", rccl_msg)
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
+
+    tuner_sources = runtime_tuner_sources(phase_dirs[CANDIDATE])
+    if family == "sglang-disagg":
+        tuner_ok, tuner_msg = verify_candidate_tuner(
+            phase_dirs[CANDIDATE], args.nodes,
+        )
+        if tuner_ok:
+            log.info("RCCL tuner verification: %s", tuner_msg)
+        else:
+            log.error("RCCL tuner verification FAILED: %s", tuner_msg)
+            rccl_verification_failed = True
+            exit_code = max(exit_code, 1)
+
+    candidate_manifest["candidate_image"].update({
+        "digest": allocation["candidate_image_id"],
+        "verification": allocation["candidate_image_message"],
+    })
+    candidate_manifest["runtime"] = {
+        "rccl_versions": runtime_rccl_versions(phase_dirs[CANDIDATE]),
+        "baseline_rccl_versions": runtime_rccl_versions(phase_dirs[BASELINE]),
+        "tuner_sources": tuner_sources,
+        "tuner_expected": (
+            CANDIDATE_TUNER_PATH if family == "sglang-disagg" else "not asserted"
+        ),
+    }
+    write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 6: Parse each phase's results and save its artifacts
     metric_key = workload_config["metric_key"]
@@ -3145,7 +3552,16 @@ def main() -> None:
         "slurm_job_id": allocation["job_id"],
         # run_id names this test run; these name the RCCL binary it tested.
         "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
+        "candidate_sha": candidate_manifest["candidate_sha"],
+        "artifact_source_sha": candidate_manifest["artifact"]["artifact_source_sha"],
         "rccl_md5": rccl_fingerprint["md5"],
+        "rccl_sha256": rccl_fingerprint["sha256"],
+        "candidate_image_digest": allocation["candidate_image_id"],
+        "candidate_tuner_source": ",".join(tuner_sources),
+        "candidate_tuner_sha256": candidate_manifest["tuner"]["source_sha256"],
+        "candidate_kpack_sha256": ",".join(
+            item["sha256"] for item in candidate_manifest["kpack"]
+        ),
     }
     # baseline_image, not workload_config["base_image"]: for maxtext the
     # baseline is a locally built Primus image, and recording the stock tag

@@ -71,15 +71,15 @@ class RegistryDigestTest(unittest.TestCase):
         self.assertEqual(tm.registry_digest(f"rocm/primus@{DIGEST}"),
                          f"rocm/primus@{DIGEST}")
 
-    def test_failure_falls_back_to_the_tag(self):
+    def test_failure_refuses_mutable_tag(self):
         def urlopen(req, timeout):
             raise urllib.error.HTTPError("url", 404, "Not Found", {}, None)
 
         with mock.patch.object(tm.urllib.request, "urlopen", urlopen), \
                 mock.patch.object(tm.subprocess, "run") as run:
             self.assertEqual(tm.registry_digest("rocm/primus:gone"), "")
-            self.assertEqual(tm.resolve_base_digest("rocm/primus:gone"),
-                             "rocm/primus:gone")
+            with self.assertRaisesRegex(RuntimeError, "immutable registry digest"):
+                tm.resolve_base_digest("rocm/primus:gone")
         run.assert_not_called()
 
 

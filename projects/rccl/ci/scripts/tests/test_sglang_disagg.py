@@ -77,6 +77,7 @@ class GenerateManifestTest(TempWork):
         for env in (m["context"]["docker_env_vars"], m["deployment_config"]["env_vars"]):
             self.assertEqual(env["MOE_A2A_BACKEND"], "none")
             self.assertEqual(env["NCCL_DEBUG"], "INFO")
+            self.assertEqual(env["NCCL_DEBUG_SUBSYS"], "INIT,NET,TUNING")
             self.assertEqual(env["SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK"], "0")
             self.assertEqual(env["OMP_NUM_THREADS"], "8")
 

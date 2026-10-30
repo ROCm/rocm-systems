@@ -18,6 +18,10 @@ on:
       artifact_run_id:
         type: string
         default: ''
+      candidate_sha:
+        description: 'Immutable rocm-systems source SHA used to build and test RCCL'
+        type: string
+        required: true
       test_scope:
         description: 'Test scope: smoke (22 curated tests) or all'
         type: string
@@ -45,6 +49,7 @@ on:
         required: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -53,12 +58,26 @@ jobs:
     needs: [therock-build-linux]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     outputs:
       suites: ${{ steps.plan.outputs.suites }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          ref: ${{ inputs.candidate_sha }}
           sparse-checkout: projects/rccl/ci/scripts
+      - name: Verify candidate artifact source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id || github.run_id }}
+        run: |
+          python3 projects/rccl/ci/scripts/candidate_provenance.py verify-run \
+            --repository "${GITHUB_REPOSITORY}" \
+            --run-id "${ARTIFACT_RUN_ID}" \
+            --expected-sha "${{ inputs.candidate_sha }}" \
+            --output "${RUNNER_TEMP}/candidate-artifact-run.json"
       - name: Select runnable suites
         id: plan
         env:
@@ -92,6 +111,8 @@ jobs:
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ inputs.candidate_sha }}
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -260,6 +281,7 @@ jobs:
     if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') }}
     needs: [test-plan]
     permissions:
+      actions: read
       contents: read
       id-token: write
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
@@ -269,6 +291,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      candidate_sha: ${{ inputs.candidate_sha }}
       workload: llama-3.1-70b-training
       nodes: ${{ inputs.madengine_nodes || '2' }}
       job_timeout_minutes: '390'
@@ -290,6 +313,7 @@ jobs:
     if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') && (needs.therock-build-linux.result == 'success' || needs.therock-build-linux.result == 'skipped') && inputs.amdgpu_families == 'gfx950-dcgpu' && inputs.test_scope == 'all' && (inputs.event_name == 'schedule' || inputs.event_name == 'workflow_dispatch') }}
     needs: [test-plan, therock-build-linux, therock-test-madengine]
     permissions:
+      actions: read
       contents: read
       id-token: write
     strategy:
@@ -328,6 +352,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      candidate_sha: ${{ inputs.candidate_sha }}
       workload: ${{ matrix.workload }}
       nodes: ${{ matrix.nodes }}
       job_timeout_minutes: ${{ matrix.job_timeout_minutes }}
