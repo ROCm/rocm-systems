@@ -34,6 +34,10 @@ enum class MemoryEventType {
   GLOBAL_TO_TTMP,   ///< Scalar load to a TTMP; the event stores its counter family separately.
   SCALAR_TO_GLOBAL, ///< Scalar store; retained to preserve partial-wait ordering.
 
+  /// Tensor DMA store (`tensor_store_from_lds`): reads LDS and writes global
+  /// memory, with no VGPR registers. A tensor DMA load is GLOBAL_TO_LDS.
+  LDS_TO_GLOBAL,
+
   N
 };
 
@@ -72,10 +76,12 @@ inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 
 inline bool isToScalar(MemoryEventType t) { return isToSgpr(t) || isToTtmp(t); }
 
-/// True if the event touches LDS (read or write).
-inline bool isLdsInvolved(MemoryEventType t) {
-  return isToLds(t) || t == MemoryEventType::LDS_TO_VGPR;
+inline bool isFromLds(MemoryEventType t) {
+  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL;
 }
+
+/// True if the event touches LDS (read or write).
+inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
 inline bool isFromVgpr(MemoryEventType t) {
   return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS;
@@ -98,6 +104,8 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return amdgpu::WaitCounterType::LGKMCNT;
+  case MemoryEventType::LDS_TO_GLOBAL:
+    return amdgpu::WaitCounterType::TENSORCNT;
   case MemoryEventType::N:
     break;
   }
@@ -120,6 +128,8 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
     return MemoryOrderClass::UNORDERED;
+  case MemoryEventType::LDS_TO_GLOBAL:
+    return MemoryOrderClass::TENSOR;
   case MemoryEventType::N:
     break;
   }
