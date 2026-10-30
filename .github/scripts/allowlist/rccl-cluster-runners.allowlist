@@ -9,6 +9,8 @@
 
 ruby-linux-slurm-scale-runner
 oci-linux-slurm-scale-runner
+tw-linux-slurm-scale-runner
+crusoe-linux-slurm-scale-runner
 tw-gfx950-ainic-ROCm-scale-runner
 
 .github/workflows/rccl-coco-pr.yml

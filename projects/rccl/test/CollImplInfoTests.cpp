@@ -292,7 +292,7 @@ namespace RcclUnitTesting
     {
       for (ncclComm_t c : comms)
       {
-        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off on e.g. kernels < 6.8.
+        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off when the cuMem runtime check fails.
         if (!c->symmetricSupport)
         {
           return "no symmetric memory (cuMem unavailable on this host), so CE AllReduce is never selected";

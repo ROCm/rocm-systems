@@ -294,6 +294,7 @@ if(BUILD_TESTS)
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
+    GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
     RasJsonTests.cpp
@@ -421,6 +422,7 @@ if(BUILD_TESTS)
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
+      device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -814,6 +816,7 @@ if(BUILD_TESTS)
       DdaIpcEligibilityTests.cpp
       DdaFabricEligibilityTests.cpp
       CeAllReduceEligibilityTests.cpp
+      CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
@@ -1065,6 +1068,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
+      transport/NetIbMPI/GinProxyErrorPathTests.cpp
       transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
       transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
@@ -1356,8 +1360,10 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda
     )
     target_compile_definitions(rccl-UnitTestsFixtures PRIVATE GDA_QUEUEPAIR_MOCK)
+    # Suite G is relocatable too. Without RDC, a -O0 build rejects the QueuePairMock scoped atomics (invalid addrspacecast).
     set_source_files_properties(
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilIpcDevice_test.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/device/GinRocshmemGdaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilSdmaTemplate_test.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/device/sdma/anvil_stub_quiet_count.cpp
       PROPERTIES COMPILE_OPTIONS "${RCCL_TEST_GPU_RDC_COMPILE_OPTIONS}")
