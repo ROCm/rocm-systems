@@ -1225,6 +1225,71 @@ def check_ab_regression(
     return False, f"No regression — {msg}"
 
 
+def check_ratio_regression(
+    ratio: float,
+    previous: float,
+    workload_type: str,
+) -> tuple[bool, str]:
+    """Score this run's candidate/stock ratio against the previous run's.
+
+    The stock baseline is the same image every night, so it divides out the
+    node pair the scheduler handed each run: the two ratios are comparable
+    where the absolute numbers are not. The vs-stock check above cannot do
+    this job on its own -- a workload whose image ships a much slower RCCL
+    has a ratio far above 1 and passes it whatever the candidate does.
+
+    Returns (is_regression, message).
+    """
+    threshold = (
+        REGRESSION_THRESHOLD_TRAINING
+        if workload_type == "training"
+        else REGRESSION_THRESHOLD_INFERENCE
+    )
+    change = ratio / previous
+    msg = (
+        f"ratio {ratio:.4f} vs {previous:.4f} previously = "
+        f"{change:.4f} ({change - 1:+.1%}), threshold: -{threshold:.0%}"
+    )
+    if change < 1 - threshold:
+        return True, f"REGRESSION DETECTED — {msg}"
+    return False, f"No regression — {msg}"
+
+
+def previous_comparison(
+    results_dir: Path,
+    workload_name: str,
+    scale: str,
+    precision: str,
+) -> dict | None:
+    """The latest earlier candidate row with a usable ratio for this workload.
+
+    Called before this run appends its own rows, so the latest match is the
+    previous run's. Same workload, scale and precision only: a ratio depends
+    on all three.
+    """
+    try:
+        with open(results_dir / PERF_DATASTORE) as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            lines = f.readlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if (
+            row.get("phase") == CANDIDATE
+            and row.get("workload") == workload_name
+            and row.get("scale") == scale
+            and row.get("precision") == precision
+            and isinstance(row.get("ratio"), (int, float))
+            and _usable_metric(float(row["ratio"]))
+        ):
+            return row
+    return None
+
+
 def append_result(
     results_dir: Path,
     workload_name: str,
@@ -1355,11 +1420,17 @@ def generate_summary_report(
             lines.append(f"{c['precision'] or '?':>5}:  ratio {ratio_s}")
             lines.append(f"        baseline  {_format_phase(c[BASELINE])}")
             lines.append(f"        candidate {_format_phase(c[CANDIDATE])}")
+            if c.get("previous_ratio") is not None:
+                lines.append(
+                    f"        previous  ratio {c['previous_ratio']:.4f} "
+                    f"(run {c.get('previous_run_id') or '?'})"
+                )
     else:
         lines.append("Throughput: N/A (workload did not produce metrics)")
 
     lines.append("")
-    lines.append(f"Regression: {regression_msg}")
+    lines.append("Regression:")
+    lines.extend(f"  {line}" for line in regression_msg.splitlines())
     lines.append("")
 
     run_url = os.environ.get("GITHUB_SERVER_URL", "")
@@ -1600,7 +1671,28 @@ def main() -> None:
         reg, msg = check_ab_regression(
             base["metric_value"], cand["metric_value"], workload_config["type"],
         )
-        regression_msgs.append(f"[{prec}] {msg}")
+        regression_msgs.append(f"[{prec}] vs stock:    {msg}")
+        if reg:
+            log.warning(msg)
+            exit_code = max(exit_code, 1)
+        else:
+            log.info(msg)
+
+        # Read before Step 8 appends this run's rows, so it is the previous run.
+        prev = previous_comparison(results_dir, args.workload, scale, c["precision"])
+        if prev is None:
+            regression_msgs.append(
+                f"[{prec}] vs previous: no earlier comparison recorded — not scored"
+            )
+            continue
+        c["previous_ratio"] = float(prev["ratio"])
+        c["previous_run_id"] = prev.get("run_id", "")
+        reg, msg = check_ratio_regression(
+            c["ratio"], c["previous_ratio"], workload_config["type"],
+        )
+        regression_msgs.append(
+            f"[{prec}] vs previous: {msg} (run {c['previous_run_id'] or '?'})"
+        )
         if reg:
             log.warning(msg)
             exit_code = max(exit_code, 1)
@@ -1610,7 +1702,7 @@ def main() -> None:
     if not comparisons:
         regression_msgs.append("no metrics from either phase — nothing to compare")
         exit_code = max(exit_code, 1)
-    regression_msg = "; ".join(regression_msgs)
+    regression_msg = "\n".join(regression_msgs)
 
     # Step 8: Append to datastore — one record per phase per precision, with
     # absolute values kept for trend analysis and the ratio on the candidate.
@@ -1636,6 +1728,9 @@ def main() -> None:
                 phase_extra = {**extra, "phase": phase, "image": phase_images[phase]}
                 if phase == CANDIDATE and c["ratio"] is not None:
                     phase_extra["ratio"] = c["ratio"]
+                    if c.get("previous_ratio") is not None:
+                        phase_extra["previous_ratio"] = c["previous_ratio"]
+                        phase_extra["previous_run_id"] = c["previous_run_id"]
                 append_result(
                     results_dir,
                     args.workload,
