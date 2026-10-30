@@ -1,7 +1,7 @@
 {
   "system_configurations": {
-    "name": "RCCL-Validate-MI455X-Func",
-    "description": "Functional validation for MI455X (AINIC): gtest unit/MPI, transport (SHM/P2P/NET Ethernet), CE, grow/revoke, GIN/Host-API/symmetric/mem-manager/timeout suites, and IR device pytest tests. NET-IB suites stay disabled."
+    "name": "RCCL-Validate-MI455X-AINIC-Func",
+    "description": "Functional validation for MI455X (AINIC): gtest unit/MPI, transport (SHM/P2P/NET Ethernet), CE, grow/revoke, GIN/Host-API/symmetric/mem-manager/timeout suites, and IR device pytest tests. NET-IB plugin suites run against the AINIC ionic NICs; non-AINIC MI455 systems use mi455_roce_func.json."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -163,10 +163,12 @@
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
-      "num_nodes": 1,
-      "num_gpus": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
       "env_variables": {
-        "NCCL_DMABUF_ENABLE": "1"
+        "NCCL_DMABUF_ENABLE": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_GDR_FLUSH_DISABLE": "1"
       }
     },
     "net_ib_multithread_independent": {
@@ -203,6 +205,11 @@
           "name": "NetIB_MultiThread_LongRunningEndurance",
           "description": "Sustained concurrent traffic with the RDMA leak check around the whole run",
           "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
+          "name": "NetIB_MultiThread_ProgressDoesNotSerialize",
+          "description": "Gate: the same transfer loop at one worker and at all of them, so a lock held across a progress call shows up as time that scales with the worker count. Skips below four workers",
+          "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
         }
       ]
     },
@@ -256,6 +263,8 @@
     },
     "net_ib_gdr_flush": {
       "extends": "net_ib_base",
+      "num_nodes": 1,
+      "num_gpus": 2,
       "timeout": 120,
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1"
@@ -286,6 +295,60 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
@@ -370,6 +433,31 @@
           "name": "NetIB_Conn_RapidConnectDisconnect",
           "description": "Rapid repeated connect/disconnect cycles for resource leak detection",
           "test_filter": "NetIbMPITest.RapidConnectDisconnect"
+        },
+        {
+          "name": "NetIB_Conn_ListenAndConnect",
+          "description": "Basic listen/connect/accept handshake over IB",
+          "test_filter": "NetIbMPITest.ListenAndConnect"
+        },
+        {
+          "name": "NetIB_Conn_InvalidHandle",
+          "description": "Connect with invalid handle error handling",
+          "test_filter": "NetIbMPITest.ConnectWithInvalidHandle"
+        },
+        {
+          "name": "NetIB_Conn_CloseWithoutWaiting",
+          "description": "Close connection without waiting for transfer completion",
+          "test_filter": "NetIbMPITest.CloseWithoutWaitingForCompletion"
+        },
+        {
+          "name": "NetIB_Conn_ListenCloseListen",
+          "description": "Close listener mid-handshake and re-listen on same port",
+          "test_filter": "NetIbMPITest.ListenCloseListen"
+        },
+        {
+          "name": "NetIB_Conn_MultipleSimultaneousListens",
+          "description": "Multiple concurrent listeners on different handles",
+          "test_filter": "NetIbMPITest.MultipleSimultaneousListens"
         }
       ]
     },
@@ -386,6 +474,16 @@
           "name": "NetIB_Mem_RegisterGpu",
           "description": "Test InfiniBand registration of GPU device memory buffers",
           "test_filter": "NetIbMPITest.RegisterGpuMemory"
+        },
+        {
+          "name": "NetIB_Mem_RegisterNull",
+          "description": "Register NULL pointer error handling",
+          "test_filter": "NetIbMPITest.RegisterMemoryNullPointer"
+        },
+        {
+          "name": "NetIB_Mem_DeregisterNull",
+          "description": "Deregister NULL handle error handling",
+          "test_filter": "NetIbMPITest.DeregisterNullHandle"
         }
       ]
     },
@@ -418,11 +516,6 @@
           "timeout": 300
         },
         {
-          "name": "NetIB_Xfer_DifferentMemoryTypes",
-          "description": "Send/recv with mixed host and GPU memory buffers",
-          "test_filter": "NetIbMPITest.SendRecvDifferentMemoryTypes"
-        },
-        {
           "name": "NetIB_Xfer_MultipleSizesFusion",
           "description": "Send/recv multiple buffer sizes through fused vNIC",
           "test_filter": "NetIbMPITest.SendRecvMultipleSizesFusion"
@@ -431,10 +524,20 @@
           "name": "NetIB_Xfer_MultipleOutstanding",
           "description": "Multiple outstanding send/recv requests in flight simultaneously",
           "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
+        },
+        {
+          "name": "NetIB_Xfer_ZeroSize",
+          "description": "IB zero-byte send/receive",
+          "test_filter": "NetIbMPITest.SendRecvZeroSize"
+        },
+        {
+          "name": "NetIB_Xfer_Multidirectional",
+          "description": "Concurrent bidirectional transfers across multiple connections",
+          "test_filter": "NetIbMPITest.MultidirectionalTransfer"
         }
       ]
     },
-    "net_ib_coverage_env": {
+    "net_ib_coverage_env_base": {
       "extends": "net_ib_base",
       "timeout": 300,
       "description": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
@@ -442,7 +545,10 @@
         "NCCL_IB_GID_INDEX": "-1",
         "NCCL_IB_PCI_RELAXED_ORDERING": "0",
         "NCCL_IB_ADAPTIVE_ROUTING": "1"
-      },
+      }
+    },
+    "net_ib_coverage_env": {
+      "extends": "net_ib_coverage_env_base",
       "tests": [
         {
           "name": "NetIB_Cov_SimpleSendRecv",
@@ -522,6 +628,16 @@
           "name": "NetIB_VNic_DisjointRailLocal",
           "description": "CheckVProps rail-local mismatch + ndevs-swap on a disjoint asymmetric vNIC merge",
           "test_filter": "NetIbMPITest.DisjointMergeRailLocal_VNic"
+        },
+        {
+          "name": "NetIB_VNic_InvalidProps",
+          "description": "Reject makeVDevice with ndevs=0 (ncclInvalidUsage)",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceInvalidProps"
+        },
+        {
+          "name": "NetIB_VNic_MakeVirtualDevice",
+          "description": "Create virtual device from 2 physical IB NICs via makeVDevice(ndevs=2)",
+          "test_filter": "NetIbMPITest.MakeVirtualDevice"
         }
       ]
     },
@@ -542,11 +658,102 @@
           "name": "NetIB_MultiRecvShuffled",
           "description": "irecv(n=8) batching over host memory, shuffled recv-slot and send-issue order, 255 batches",
           "test_filter": "NetIbMPITest.MultiRecvShuffled"
+        }
+      ]
+    },
+    "net_ib_gpu_vnic_host_hang": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Tests that move GPU memory across fused or multiple NICs. On MI450 (Helios, ionic) they hard-hang the host with no panic or trace, so the suite stays disabled until that is understood.",
+      "tests": [
+        {
+          "name": "NetIB_Xfer_DifferentMemoryTypes",
+          "description": "Send/recv with mixed host and GPU memory buffers",
+          "test_filter": "NetIbMPITest.SendRecvDifferentMemoryTypes"
         },
         {
           "name": "NetIB_MultiRecvGPUShuffled",
           "description": "irecv(n=8) batching over GPU memory (GDR path), shuffled order, 255 batches; skipped if GDR unavailable",
           "test_filter": "NetIbMPITest.MultiRecvGPUShuffled"
+        },
+        {
+          "name": "NetIB_VNic_FlushRepeated",
+          "description": "Repeated GPU-memory flush through a fused vNIC",
+          "test_filter": "NetIbMPITest.FlushRepeated_VNic"
+        }
+      ]
+    },
+    "net_ib_flush": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "description": "iflush after a GPU receive. The flush stays disabled (net_ib_base): its loopback RDMA READ is not supported on Meta RoCE (ionic), so this checks the disabled-flush completion path.",
+      "tests": [
+        {
+          "name": "NetIB_Flush_AfterRecv",
+          "description": "iflush completes after a GPU-memory receive",
+          "test_filter": "NetIbMPITest.FlushAfterRecv"
+        }
+      ]
+    },
+    "net_ib_vnic_host": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "vNIC tests on host buffers with NIC merging on. GPU-memory vNIC tests are in net_ib_gpu_vnic_host_hang.",
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_ConnectAndTransfer",
+          "description": "Connect and transfer over a fused vNIC",
+          "test_filter": "NetIbMPITest.ConnectAndTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_AsymmetricMerge",
+          "description": "Peers fuse different NIC counts",
+          "test_filter": "NetIbMPITest.AsymmetricMerge_VNic"
+        },
+        {
+          "name": "NetIB_VNic_CloseWithoutTransfer",
+          "description": "Close a vNIC connection that never moved data",
+          "test_filter": "NetIbMPITest.CloseWithoutTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_UnalignedSize",
+          "description": "Unaligned transfer sizes over a vNIC",
+          "test_filter": "NetIbMPITest.UnalignedSizeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_LargeTransfer",
+          "description": "Large transfer over a vNIC",
+          "test_filter": "NetIbMPITest.LargeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_VNic_MixedSizes",
+          "description": "Mixed sizes over a vNIC",
+          "test_filter": "NetIbMPITest.MixedSizes_VNic"
+        },
+        {
+          "name": "NetIB_VNic_Bidirectional",
+          "description": "Bidirectional traffic over a vNIC",
+          "test_filter": "NetIbMPITest.Bidirectional_VNic"
+        },
+        {
+          "name": "NetIB_VNic_SequentialTransfers",
+          "description": "Back-to-back transfers over a vNIC",
+          "test_filter": "NetIbMPITest.SequentialTransfers_VNic"
+        },
+        {
+          "name": "NetIB_VNic_Reconnect",
+          "description": "Reconnect a vNIC after close",
+          "test_filter": "NetIbMPITest.Reconnect_VNic"
+        },
+        {
+          "name": "NetIB_VNic_RegDeregCycling",
+          "description": "Register/deregister cycles on a vNIC",
+          "test_filter": "NetIbMPITest.RegDeregCycling_VNic"
         }
       ]
     },
@@ -568,6 +775,32 @@
         }
       ]
     },
+    "net_ib_wqe_lat_unit": {
+      "extends": "net_ib_base",
+      "skip_if_missing": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "NetIB_WqeLatMon_Unit",
+          "description": "AICOMRCCL-2013: CPU-only checks of the WQE post-to-poll latency monitor state machine, Welford/P^2 statistics, slow threshold and stall check rate limiters",
+          "test_filter": "NetIbWqeLatMonUnit.*"
+        }
+      ]
+    },
+    "net_ib_wqe_lat": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "NetIB_WqeLatMon_Functional",
+          "description": "AICOMRCCL-2013: per-QP WQE latency sampling on live net_ib connections (disabled/sync/report-off/delayed-poll/busy-poll stall/pipelined, env knobs)",
+          "test_filter": "NetIbWqeLatMonTest.*"
+        }
+      ]
+    },
     "cast_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
@@ -578,7 +811,8 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
     "cast_wrr_split": {
@@ -763,7 +997,152 @@
         }
       ]
     },
-    "fault_inject_cast": {
+    "cast_shim_leak_guard": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "Runs the shim-leak probe in a plain CAST configuration, where RCCL_IB_FAULT_INJECTION is simply absent. The damage a leak does is process-wide and has nothing to do with threading, so the guard belongs in an ordinary run and not only in the threaded fault suites.",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_FaultShimsAbsentUnlessRequested",
+          "description": "Arming an ops-level fault must be refused while RCCL_IB_FAULT_INJECTION is off, which is only true while the libibverbs shims are absent. If they are present, every poll_cq in the process pays for a global mutex twice",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        }
+      ]
+    },
+    "cast_opt_recv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPTIONAL_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_SimpleSendRecv",
+          "description": "Basic send/recv with optRecvCompletion enabled (no hint from this test)",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSizes",
+          "description": "Multiple buffer sizes with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_OptRecv_LargeTransfer",
+          "description": "Large transfer with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSequential",
+          "description": "Sequential transfers with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "Cast_OptRecv_FlagEnabled",
+          "description": "White-box: commBase.optRecvCompletion is 1 when control=1 and QP sched=0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagEnabled"
+        },
+        {
+          "name": "Cast_OptRecv_SkipWritePath",
+          "description": "1-req send/recv with NCCL_NET_OPTIONAL_RECV_COMPLETION hint; data matches after send CQE",
+          "test_filter": "NetIbMPITest.OptRecvCompletionSkipWritePath"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvNoHint",
+          "description": "n>1 irecv without the optional-recv hint still transfers correctly",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvNoHint"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvWithHint",
+          "description": "n>1 with the optional-recv hint degrades to WRITE_WITH_IMM and completes",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvWithHint"
+        }
+      ]
+    },
+    "cast_opt_recv_disabled_sched": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "QP scheduler on (cast_base): optRecvCompletion must stay off.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_FlagDisabledByQpSched",
+          "description": "White-box: commBase.optRecvCompletion is 0 when QP scheduling is enabled",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagDisabledByQpSched"
+        },
+        {
+          "name": "Cast_OptRecv_DisabledKeepsRecvSize",
+          "description": "1-req hinted send/recv with the gate forced off: receiver reports the posted size, not the skip path's 0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionDisabledKeepsRecvSize"
+        }
+      ]
+    },
+    "cast_multiplane": {
+      "extends": "net_ib_base",
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "Multiplane IB-CAST. Smoke and MultiSize skip unless RCCL_MULTIPLANE_MAP_FILE names a map and the NIC supports PUEC; DisabledNoRegression skips when multiplane is on, so one side always skips.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "Cast_Multiplane_ConnectionSmoke",
+          "description": "Connect and transfer with a multiplane map",
+          "test_filter": "NetIbMPITest.CastMultiplaneConnectionSmoke"
+        },
+        {
+          "name": "Cast_Multiplane_MultiSize",
+          "description": "Multi-size transfer with a multiplane map",
+          "test_filter": "NetIbMPITest.CastMultiplaneMultiSizeTransfer"
+        },
+        {
+          "name": "Cast_Multiplane_DisabledNoRegression",
+          "description": "Multiplane off keeps the single-plane path",
+          "test_filter": "NetIbMPITest.CastMultiplaneDisabledNoRegression"
+        }
+      ]
+    },
+    "cast_udma_pinning": {
+      "extends": "net_ib_base",
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 300,
+      "description": "Reads back the ionic UDMA index of each IB-CAST QP; skips on NICs or drivers without qp_get_udma_idx.",
+      "tests": [
+        {
+          "name": "Cast_UdmaPinning_Verify",
+          "description": "QPs land on the expected UDMA engines",
+          "test_filter": "NetIbMPITest.CastUdmaPinningVerify"
+        },
+        {
+          "name": "Cast_UdmaPinning_SharingVerify",
+          "description": "UDMA pinning holds with QP sharing",
+          "test_filter": "NetIbMPITest.CastUdmaPinningSharingVerify",
+          "env_variables": {
+            "RCCL_IB_QP_SHARING_ENABLE": "1",
+            "RCCL_IB_COMM_NGROUPS": "1"
+          }
+        }
+      ]
+    },
+    "fault_inject_cast_base": {
       "extends": "cast_base",
       "timeout": 300,
       "env_variables": {
@@ -775,7 +1154,25 @@
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
         "RCCL_IB_FAULT_INJECTION": "1"
-      },
+      }
+    },
+    "fault_inject_cast_failover_read": {
+      "extends": "fault_inject_cast_base",
+      "description": "Fault-injection cases whose failover replays the message with an RDMA READ, which Meta RoCE (ionic) does not support.",
+      "tests": [
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
+        }
+      ]
+    },
+    "fault_inject_cast": {
+      "extends": "fault_inject_cast_base",
       "tests": [
         {
           "name": "FaultInj_Cast_QpErrorIsFatal",
@@ -806,15 +1203,6 @@
           "name": "FaultInj_Cast_OpsPostSendErrno",
           "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
           "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
-        },
-        {
-          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
-          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
-          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
-          "env_variables": {
-            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
-            "NCCL_IB_MERGE_NICS": "1"
-          }
         },
         {
           "name": "FaultInj_Cast_OpsPollCqSynthFatal",
@@ -923,8 +1311,14 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
-          "test_filter": "Transport/NetIbGidChangeTest.*"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast). The net_ib_cast port-recovery case is excluded: recovery needs UD QPs, which Meta RoCE (ionic) does not provide.",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIbCast"
+        },
+        {
+          "name": "Resiliency_PostRecoveryPingPongHoldsSync",
+          "description": "Ten blocking messages on a recovered connection must not leave the ranks a message apart; skips without UD QPs",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync",
+          "command_args": "--net_ib_nthreads=2"
         }
       ]
     },
@@ -1028,6 +1422,7 @@
     "net_ib_stress_4rank": {
       "extends": "net_ib_base",
       "num_ranks": 4,
+      "num_gpus": 2,
       "timeout": 600,
       "tests": [
         {
@@ -1096,6 +1491,7 @@
     "net_ib_stress_multi_qp_fanin": {
       "extends": "net_ib_base",
       "num_ranks": 4,
+      "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "1",
@@ -1150,97 +1546,162 @@
     "net_ib_initialization_cast": {
       "extends": "net_ib_initialization",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_properties_cast": {
       "extends": "net_ib_properties",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_connection_cast": {
       "extends": "net_ib_connection",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_memory_cast": {
       "extends": "net_ib_memory",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_transfer_cast": {
       "extends": "net_ib_transfer",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_coverage_env_cast": {
-      "extends": "net_ib_coverage_env",
+      "extends": "net_ib_coverage_env_base",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
-      }
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_SimpleSendRecv",
+          "description": "Send/recv under GID auto-select + relaxed-ordering-off + adaptive routing",
+          "test_filter": "NetIbMPITest.SimpleSendRecv",
+          "timeout": 180
+        },
+        {
+          "name": "NetIB_Cov_RegisterHost",
+          "description": "Host MR registration under relaxed-ordering-disabled path",
+          "test_filter": "NetIbMPITest.RegisterHostMemory",
+          "timeout": 180
+        }
+      ]
+    },
+    "net_ib_coverage_env_cast_ar": {
+      "extends": "net_ib_coverage_env_base",
+      "description": "ib-cast transfers above the adaptive-routing threshold under the coverage env. On MI450 AINIC the receiver completes them with size 0.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_MultipleSizes",
+          "description": "Multi-size transfer under alternate IB env (GID auto-select / RO off / AR on)",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_LargeTransfer",
+          "description": "Large transfer crossing the AR threshold under adaptive routing",
+          "test_filter": "NetIbMPITest.LargeTransfer",
+          "timeout": 300
+        }
+      ]
     },
     "net_ib_multirecv_cast": {
       "extends": "net_ib_multirecv",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_cts_stress_cast": {
       "extends": "net_ib_cts_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_branch_coverage_cast": {
       "extends": "net_ib_branch_coverage",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_cast": {
       "extends": "net_ib_stress",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_4rank_cast": {
       "extends": "net_ib_stress_4rank",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_split_cast": {
       "extends": "net_ib_stress_multi_qp_split",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_nosplit_cast": {
       "extends": "net_ib_stress_multi_qp_nosplit",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_multi_qp_fanin_cast": {
       "extends": "net_ib_stress_multi_qp_fanin",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_ar_cast": {
       "extends": "net_ib_stress_ar",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
       "env_variables": {
-        "NCCL_NET": "ib-cast"
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_multithread_independent_cast": {
+      "extends": "net_ib_multithread_independent",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_merge_disabled_cast": {
+      "extends": "net_ib_merge_disabled",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_vnic_validation_cast": {
+      "extends": "net_ib_vnic_validation",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_vnic_host_cast": {
+      "extends": "net_ib_vnic_host",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
+      }
+    },
+    "net_ib_flush_cast": {
+      "extends": "net_ib_flush",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST"
       }
     },
     "net_ib_transfer_cast_by_order_no_cts": {
@@ -1283,6 +1744,22 @@
         {
           "name": "Fixtures_All",
           "description": "All release fixture tests"
+        }
+      ]
+    },
+    "net_ib_cast_gin_error_path": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "description": "Host-only regression for the net_ib error-path fixes ported into net_ib_cast (AICOMRCCL-2750). No NIC or MPI traffic: exercises the IGet request name, a non-first error completion, the receiver wr_id bound, and the GIN allgather CTS poll via test-only seams.",
+      "tests": [
+        {
+          "name": "NetIbCast_GinErrorPath",
+          "description": "All four ported net_ib_cast error-path checks.",
+          "test_filter": "NetIbCast.CastGinErrorPath"
         }
       ]
     },
@@ -1376,6 +1853,24 @@
           "test_filter": "DdaIpcEligibilityTest.*"
         },
         {
+          "name": "CeAlltoAllEligibilityTest",
+          "description": "CE AlltoAll eligibility gating tests matching taskAppend (CTA_POLICY_ZERO, sysmem, capture, group depth)",
+          "test_filter": "CeAlltoAllEligibilityTest.*"
+        },
+        {
+          "name": "CeAllReduceEligibilityTest",
+          "description": "CE AllReduce eligibility gate tests. RCCL_CE_AR_MAX_MSG_BYTES activates 2-shot on gfx1250 (ceNonRegMax[AllReduce]=0 by table design).",
+          "test_filter": "CeAllReduceEligibilityTest.*:RcclCeAllReduceEligibility.*",
+          "env_variables": {
+            "RCCL_CE_AR_MAX_MSG_BYTES": "268435456"
+          }
+        },
+        {
+          "name": "CeReduceScatterEligibilityTest",
+          "description": "CE ReduceScatter eligibility and staging-layout tests.",
+          "test_filter": "CeReduceScatterEligibilityTest.*:RcclCeReduceScatterEligibility.*"
+        },
+        {
           "name": "DdaFabricEligibilityTest",
           "description": "DDA fabric eligibility tests for AllReduce, AllGather, ReduceScatter, AlltoAll across LL/LL128/VMM tiers on gfx1250",
           "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*"
@@ -1429,9 +1924,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -3607,6 +4102,43 @@
         }
       ]
     },
+    "grow_mpi_tests_netbidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_OOB_NET_ENABLE": "1",
+        "NCCL_BOOTSTRAP_BIDIR_NET": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: ncclCommGrow with NCCL_OOB_NET_ENABLE=1 and NCCL_BOOTSTRAP_BIDIR_NET=1 (4 ranks) must not hang; net bidir reverse ring is disabled during grow",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: two sequential grows with net bidir OOB enabled complete and AllReduce verifies on the grown communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_RankPreservation_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: coordinator-only uniqueId grow with net bidir OOB enabled, exercising inner existing ranks that run with nHandles==0 under NCCL_BOOTSTRAP_BIDIR_NET=1",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
+        }
+      ]
+    },
     "grow_mpi_tests": {
       "extends": "default",
       "is_gtest": true,
@@ -4754,7 +5286,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "timeout": 180,
-      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_CUMEM_ENABLE": "1"
@@ -5151,6 +5683,11 @@
           "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
         },
         {
+          "name": "DDA_Fabric_ReduceScatter_InterleavedUnsynchronised",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator with no stream drain and no MPI barrier at a tier switch, at RCCL_DDA_FABRIC_MAXBLOCKS=2. Both tiers double-buffer on the shared bank stride.",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128InterleavedUnsynchronised"
+        },
+        {
           "name": "DDA_Fabric_ReduceScatter_GridStride",
           "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
@@ -5233,6 +5770,21 @@
           "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
           "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
           "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_BitIdentical",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL one-shot tier folds in rank order, so every rank gets the same bits back",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot_BitIdentical",
+          "description": "DDA fabric AllReduce LL128 one-shot tier folds in rank order, so every rank gets the same bits back; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
         }
       ]
     },
@@ -5274,8 +5826,7 @@
     {
       "name": "NET IB - Multithread Independent Connections (4)",
       "description": "4 worker threads/rank, each on an independent NET/IB context and connection",
-      "config": "net_ib_multithread_independent",
-      "enabled": false
+      "config": "net_ib_multithread_independent"
     },
     {
       "name": "NET IB - CAST Multithread (4)",
@@ -5291,8 +5842,26 @@
     },
     {
       "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
+      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard. Disabled on MI450 AINIC: with the flush off the recv buffer keeps its unsynchronized hipMemset value (AICOMRCCL-2829), and with it on ionic rejects the flush RDMA READ.",
       "config": "net_ib_gdr_flush",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": false
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1. Disabled: gfx1250 cannot use the flag, so every case would skip.",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
       "enabled": false
     },
     {
@@ -5304,290 +5873,335 @@
     {
       "name": "NET IB - Initialization Tests",
       "description": "InfiniBand plugin initialization and device enumeration",
-      "config": "net_ib_initialization",
-      "enabled": false
+      "config": "net_ib_initialization"
     },
     {
       "name": "NET IB - Device Properties",
       "description": "InfiniBand device property queries",
-      "config": "net_ib_properties",
-      "enabled": false
+      "config": "net_ib_properties"
     },
     {
       "name": "NET IB - Connection Setup",
       "description": "InfiniBand connection lifecycle and rapid reconnect tests",
-      "config": "net_ib_connection",
-      "enabled": false
+      "config": "net_ib_connection"
     },
     {
       "name": "NET IB - Memory Registration",
       "description": "InfiniBand memory registration tests",
-      "config": "net_ib_memory",
-      "enabled": false
+      "config": "net_ib_memory"
     },
     {
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand data transfer and stress tests",
-      "config": "net_ib_transfer",
-      "enabled": false
+      "config": "net_ib_transfer"
     },
     {
       "name": "NET IB - Coverage Env (GID auto-select / RO off / AR)",
       "description": "Core transfer tests re-run under alternate IB env to cover GID auto-select, relaxed-ordering-disabled, and adaptive-routing branches",
-      "config": "net_ib_coverage_env",
-      "enabled": false
+      "config": "net_ib_coverage_env"
     },
     {
       "name": "NET IB - vNIC Merge Disabled Guard",
       "description": "Exercises the makeVDevice merge-disabled guard under NCCL_IB_MERGE_NICS=0",
-      "config": "net_ib_merge_disabled",
-      "enabled": false
+      "config": "net_ib_merge_disabled"
     },
     {
       "name": "NET IB - vNIC Validation",
       "description": "makeVDevice/CheckVProps validation and topology error paths (bounds, dedup, cross-NUMA, rail-local)",
-      "config": "net_ib_vnic_validation",
-      "enabled": false
+      "config": "net_ib_vnic_validation"
     },
     {
       "name": "NET IB - MultiRecv",
       "description": "irecv(n>1) multi-slot batching tests",
-      "config": "net_ib_multirecv",
+      "config": "net_ib_multirecv"
+    },
+    {
+      "name": "NET IB - Flush",
+      "description": "InfiniBand GPU flush (iflush) with GDR",
+      "config": "net_ib_flush"
+    },
+    {
+      "name": "NET IB - vNIC Host Buffers",
+      "description": "Virtual NIC functional, edge and stress tests on host buffers",
+      "config": "net_ib_vnic_host"
+    },
+    {
+      "name": "NET IB - GPU-memory vNIC (hangs MI450 host)",
+      "description": "GPU-memory traffic across fused or multiple NICs; hard-hangs MI450 hosts",
+      "config": "net_ib_gpu_vnic_host_hang",
       "enabled": false
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Unit",
+      "description": "AICOMRCCL-2013: WQE post-to-poll latency monitor statistics and state machine (CPU only)",
+      "config": "net_ib_wqe_lat_unit"
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout",
+      "config": "net_ib_wqe_lat"
     },
     {
       "name": "NET IB - CTS Depth Stress",
       "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
-      "config": "net_ib_cts_stress",
-      "enabled": false
+      "config": "net_ib_cts_stress"
     },
     {
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
-      "config": "cast_wrr_split",
-      "enabled": false
+      "config": "cast_wrr_split"
     },
     {
       "name": "NET IB - CAST WRR only (QPS=2, splitData=0)",
       "description": "White-box WRR scheduler tests without split-data: weights distribution, doWrr toggle, splitData toggle, sched parms reflection",
-      "config": "cast_wrr_no_split",
-      "enabled": false
+      "config": "cast_wrr_no_split"
     },
     {
       "name": "NET IB - CAST Single QP (QPS=1)",
       "description": "WRR bypass path: single-QP connection must skip scheduler initialisation",
-      "config": "cast_single_qp",
-      "enabled": false
+      "config": "cast_single_qp"
     },
     {
       "name": "NET IB - CAST GRH on RoCE QP",
-      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
-      "config": "cast_grh",
-      "enabled": false
+      "description": "RoCE QPs use global (GRH/GID) addressing: is_global=1 verified via ibv_query_qp, plus data-integrity send/recv..",
+      "config": "cast_grh"
     },
     {
       "name": "NET IB - CAST Subnet-Aware Routing (same subnet)",
-      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
-      "config": "cast_subnet_routing",
-      "enabled": false
+      "description": "NCCL_IB_SUBNET_AWARE_ROUTING=1 smoke test: default-device-matches-peer-subnet fast path plus data-integrity send/recv..",
+      "config": "cast_subnet_routing"
     },
     {
       "name": "NET IB - CAST Four QPs (QPS=4)",
       "description": "Cursor wrap and monotonic token order with up to 4 QPs",
-      "config": "cast_four_qp",
-      "enabled": false
+      "config": "cast_four_qp"
     },
     {
       "name": "NET IB - CAST Max QPs (QPS=128)",
       "description": "Full round-robin with 1 token per QP at maximum QP count (hardware-capped)",
-      "config": "cast_max_qp",
-      "enabled": false
+      "config": "cast_max_qp"
     },
     {
       "name": "NET IB - CAST Stress (QPS=2)",
       "description": "500 sends on 2 concurrent connections: RTT timer fires mid-run, consistency invariants verified",
-      "config": "cast_stress",
-      "enabled": false
+      "config": "cast_stress"
+    },
+    {
+      "name": "NET IB - CAST shim leak guard",
+      "description": "The libibverbs ops shims must not be installed in a plain run",
+      "config": "cast_shim_leak_guard"
+    },
+    {
+      "name": "NET IB - CAST optional recv completion",
+      "description": "optRecvCompletion enabled (QP sched off): transfer sanity plus skip-CQ WRITE path",
+      "config": "cast_opt_recv"
+    },
+    {
+      "name": "NET IB - CAST optional recv completion disabled by QP sched",
+      "description": "White-box: QP scheduler forces optRecvCompletion off",
+      "config": "cast_opt_recv_disabled_sched"
+    },
+    {
+      "name": "NET IB - CAST Multiplane",
+      "description": "Multiplane IB-CAST connection and transfer; skips without a multiplane map file",
+      "config": "cast_multiplane"
+    },
+    {
+      "name": "NET IB - CAST UDMA Pinning",
+      "description": "ionic UDMA engine pinning of IB-CAST QPs, with and without QP sharing",
+      "config": "cast_udma_pinning"
+    },
+    {
+      "name": "NET IB - CAST GIN Error Path (unit)",
+      "description": "White-box net_ib_cast GIN/RMA error paths, single rank, no NIC traffic",
+      "config": "net_ib_cast_gin_error_path"
     },
     {
       "name": "NET IB - Fault Injection (CAST path, QPS=4, splitData=1)",
       "description": "Per-QP fault injection on CAST multi-QP path: error propagation, RTT rebalancing, data integrity under delay",
-      "config": "fault_inject_cast",
+      "config": "fault_inject_cast"
+    },
+    {
+      "name": "NET IB - Fault Injection (CAST path, failover RDMA READ)",
+      "description": "CAST fault injection whose failover replays with an RDMA READ. Disabled on MI450 AINIC: Meta RoCE (ionic) does not support RDMA READ.",
+      "config": "fault_inject_cast_failover_read",
       "enabled": false
     },
     {
       "name": "NET IB - Resiliency Port Failover",
       "description": "Port failover tests: error classification, CQE recovery, multi-device failover, data integrity under failure",
-      "config": "resiliency_failover",
-      "enabled": false
+      "config": "resiliency_failover"
     },
     {
       "name": "NET IB - Resiliency Port Recovery",
       "description": "Port recovery tests: QP destroy+recreate, UD-based QPN exchange, recovery timeout exhaustion",
-      "config": "resiliency_recovery",
-      "enabled": false
+      "config": "resiliency_recovery"
     },
     {
       "name": "NET IB - Stress (2-rank)",
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
-      "config": "net_ib_stress",
-      "enabled": false
+      "config": "net_ib_stress"
     },
     {
       "name": "NET IB - Branch Coverage",
       "description": "Targeted branch-coverage tests: irecv overflow, MR cache ref-count, send-size clamping, null-comm close, setAttr no-op",
-      "config": "net_ib_branch_coverage",
-      "enabled": false
+      "config": "net_ib_branch_coverage"
     },
     {
       "name": "NET IB - Stress (4-rank)",
       "description": "Fan-in, fan-out, all-to-all, multi-rank endurance",
-      "config": "net_ib_stress_4rank",
-      "enabled": false
+      "config": "net_ib_stress_4rank"
     },
     {
       "name": "NET IB - Stress Multi-QP Split",
       "description": "Multi-QP striping with split alignment boundaries",
-      "config": "net_ib_stress_multi_qp_split",
-      "enabled": false
+      "config": "net_ib_stress_multi_qp_split"
     },
     {
       "name": "NET IB - Stress Multi-QP NoSplit",
       "description": "Multi-QP no-split (nDataQps) path",
-      "config": "net_ib_stress_multi_qp_nosplit",
-      "enabled": false
+      "config": "net_ib_stress_multi_qp_nosplit"
     },
     {
       "name": "NET IB - Stress Multi-QP Fan-In",
       "description": "Multi-QP fan-in 3->1 with 4 ranks",
-      "config": "net_ib_stress_multi_qp_fanin",
-      "enabled": false
+      "config": "net_ib_stress_multi_qp_fanin"
     },
     {
       "name": "NET IB - Stress AR Threshold",
       "description": "Adaptive routing threshold boundary tests",
-      "config": "net_ib_stress_ar",
-      "enabled": false
+      "config": "net_ib_stress_ar"
     },
     {
       "name": "NET IB - Stress Inline CTS",
       "description": "CTS inline send boundary tests",
-      "config": "net_ib_stress_inline",
-      "enabled": false
+      "config": "net_ib_stress_inline"
     },
     {
       "name": "NET IB - Initialization Tests (ib-cast)",
-      "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_initialization_cast",
-      "enabled": false
+      "description": "InfiniBand plugin initialization and device enumeration via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_initialization_cast"
     },
     {
       "name": "NET IB - Device Properties (ib-cast)",
-      "description": "InfiniBand device properties via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_properties_cast",
-      "enabled": false
+      "description": "InfiniBand device properties via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_properties_cast"
     },
     {
       "name": "NET IB - Connection Setup (ib-cast)",
-      "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_connection_cast",
-      "enabled": false
+      "description": "InfiniBand connection setup via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_connection_cast"
     },
     {
       "name": "NET IB - Memory Registration (ib-cast)",
-      "description": "InfiniBand memory registration via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_memory_cast",
-      "enabled": false
+      "description": "InfiniBand memory registration via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_memory_cast"
     },
     {
       "name": "NET IB - Data Transfer (ib-cast)",
-      "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_transfer_cast",
-      "enabled": false
+      "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_transfer_cast"
     },
     {
       "name": "NET IB - Data Transfer (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
-      "config": "net_ib_transfer_cast_by_order_no_cts",
-      "enabled": false
+      "description": "ib-cast SimpleSendRecv / multiple sizes / large / outstanding transfers with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0.",
+      "config": "net_ib_transfer_cast_by_order_no_cts"
     },
     {
       "name": "NET IB - Coverage Env (ib-cast)",
-      "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=ib-cast)",
-      "config": "net_ib_coverage_env_cast",
+      "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=IB-CAST)",
+      "config": "net_ib_coverage_env_cast"
+    },
+    {
+      "name": "NET IB - Coverage Env (ib-cast, above AR threshold)",
+      "description": "ib-cast multi-size and large transfers under the coverage env. Disabled on MI450 AINIC: transfers above 8 KiB complete with size 0.",
+      "config": "net_ib_coverage_env_cast_ar",
       "enabled": false
     },
     {
       "name": "NET IB - MultiRecv (ib-cast)",
-      "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_multirecv_cast",
-      "enabled": false
+      "description": "InfiniBand multi-recv path via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_multirecv_cast"
     },
     {
       "name": "NET IB - MultiRecv (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
-      "config": "net_ib_multirecv_cast_by_order_no_cts",
-      "enabled": false
+      "description": "ib-cast MultiRecv under software BY_ORDER with CTS offload disabled.",
+      "config": "net_ib_multirecv_cast_by_order_no_cts"
     },
     {
       "name": "NET IB - CTS Depth Stress (ib-cast)",
-      "description": "InfiniBand CTS depth stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_cts_stress_cast",
-      "enabled": false
+      "description": "InfiniBand CTS depth stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_cts_stress_cast"
     },
     {
       "name": "NET IB - Branch Coverage (ib-cast)",
-      "description": "InfiniBand branch coverage tests via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_branch_coverage_cast",
-      "enabled": false
+      "description": "InfiniBand branch coverage tests via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_branch_coverage_cast"
     },
     {
       "name": "NET IB - Stress (2-rank) (ib-cast)",
-      "description": "InfiniBand 2-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_cast",
-      "enabled": false
+      "description": "InfiniBand 2-rank stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_cast"
     },
     {
       "name": "NET IB - Stress (4-rank) (ib-cast)",
-      "description": "InfiniBand 4-rank stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_4rank_cast",
-      "enabled": false
+      "description": "InfiniBand 4-rank stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_4rank_cast"
     },
     {
       "name": "NET IB - Stress Multi-QP Split (ib-cast)",
-      "description": "InfiniBand multi-QP split-data stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_multi_qp_split_cast",
-      "enabled": false
+      "description": "InfiniBand multi-QP split-data stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_multi_qp_split_cast"
     },
     {
       "name": "NET IB - Stress Multi-QP NoSplit (ib-cast)",
-      "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_multi_qp_nosplit_cast",
-      "enabled": false
+      "description": "InfiniBand multi-QP no-split stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_multi_qp_nosplit_cast"
     },
     {
       "name": "NET IB - Stress Multi-QP NoSplit (ib-cast, BY_ORDER, CTS offload off)",
-      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
-      "config": "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts",
-      "enabled": false
+      "description": "ib-cast multi-QP no-split stress with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 and RCCL_CTS_OFFLOAD_ENABLED=0..",
+      "config": "net_ib_stress_multi_qp_nosplit_cast_by_order_no_cts"
     },
     {
       "name": "NET IB - Stress Multi-QP Fan-In (ib-cast)",
-      "description": "InfiniBand multi-QP fan-in stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_multi_qp_fanin_cast",
-      "enabled": false
+      "description": "InfiniBand multi-QP fan-in stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_multi_qp_fanin_cast"
     },
     {
       "name": "NET IB - Stress AR Threshold (ib-cast)",
-      "description": "InfiniBand AR threshold stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_ar_cast",
-      "enabled": false
+      "description": "InfiniBand AR threshold stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_ar_cast"
     },
     {
       "name": "NET IB - Stress Inline CTS (ib-cast)",
-      "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
-      "config": "net_ib_stress_inline_cast",
-      "enabled": false
+      "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_stress_inline_cast"
+    },
+    {
+      "name": "NET IB - Multithread Independent Connections (4) (ib-cast)",
+      "description": "4 worker threads/rank, each on an independent context and connection, via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_multithread_independent_cast"
+    },
+    {
+      "name": "NET IB - vNIC Merge Disabled Guard (ib-cast)",
+      "description": "makeVDevice merge-disabled guard via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_merge_disabled_cast"
+    },
+    {
+      "name": "NET IB - vNIC Validation (ib-cast)",
+      "description": "makeVDevice / CheckVProps validation via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_vnic_validation_cast"
+    },
+    {
+      "name": "NET IB - vNIC Host Buffers (ib-cast)",
+      "description": "Virtual NIC tests on host buffers via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_vnic_host_cast"
+    },
+    {
+      "name": "NET IB - Flush (ib-cast)",
+      "description": "GPU flush (iflush) via ib-cast plugin (NCCL_NET=IB-CAST)",
+      "config": "net_ib_flush_cast"
     },
     {
       "name": "Unit Tests - Fixtures (Release)",
@@ -5803,6 +6417,12 @@
       "name": "Grow MPI Tests (2-rank)",
       "description": "ncclCommGrow coverage at 2 ranks on a single node: argument validation, rank preservation, config inheritance, non-blocking grow, parent destroy lifecycle, error recovery regrow, and ncclCommGetUniqueId edge cases",
       "config": "grow_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
+      "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
+      "config": "grow_mpi_tests_netbidir",
       "enabled": true
     },
     {

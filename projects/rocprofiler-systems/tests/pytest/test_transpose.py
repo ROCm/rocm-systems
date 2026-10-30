@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [
     pytest.mark.transpose,
@@ -237,6 +237,41 @@ class TestTranspose(RocprofsysTest):
             result,
             subtest_name="ROCpd TRACE_DELAY GPU context gating validation",
             rules_files=trace_delay_rules,
+        )
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.rocpd("transpose_env")
+    @pytest.mark.parametrize("mode", ["sampling"])
+    def test_trace_periods_open_window(self, mode, transpose_env, validation_rules_dir):
+        """Related to the above `test_trace_delay_gates_gpu_contexts`, but tests the
+        `--trace-periods` flag instead of `TRACE_DELAY`.
+        Same short run that should complete before the 60 second window closes.
+        This test uses the command line argument instead of the environment variable.
+        Assert that the command line argument is resolved to the expected value.
+        """
+        sampling_args = ["--trace-periods", "0:60"]
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
+            sampling_args=sampling_args,
+            run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["transpose_a"],
+            subtest_name="open window recorded transpose_a",
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="open window recorded kernels in rocpd",
+            rules_files=[validation_rules_dir / "default-rules.json"],
         )
 
     @pytest.mark.locks

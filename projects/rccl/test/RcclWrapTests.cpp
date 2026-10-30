@@ -2497,21 +2497,11 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
 }
 
 // ---------------------------------------------------------------------------
-// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA-vs-CE dispatch decision.
+// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA entry gate.
 //
-// The helper returns true when ncclAllReduce_impl should take the DDA path, and
-// false when it should yield (to CE AllReduce, the symmetric kernel, or the
-// generic ring/tree fallback). DDA is taken when the buffers are not
-// symmetric-kernel eligible, CE AllReduce will not service the call, and DDA is
-// enabled for this arch and size.
-//
-// `ceAllReduceAllowed` is passed in directly rather than derived inside the
-// test: the call site computes it once from rcclUseCeAr2Shot() plus whatever
-// additional gating CE AllReduce requires (graph latch, ncclGroupDepth,
-// force/symReg, op/dtype/size/divisibility support, etc). Driving it directly
-// keeps these cases independent of RCCL_CE_ALLREDUCE's default and of CE
-// AllReduce's own eligibility rules -- each case just asserts what the DDA
-// guard does for a given (symEligible, ceAllReduceAllowed) combination.
+// Returns true when DDA should handle the call: symk not eligible and DDA is
+// enabled for this arch and message size. CE vs DDA arbitration at dispatch is
+// handled by rcclCandSearch (preferred-backend mask), not by this function.
 //
 // These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1
 // and ncclGroupDepth to 0, so rcclDdaEnabled() runs its real arch/threshold logic.
@@ -2545,7 +2535,7 @@ TEST(Rcclwrap, Gfx950_SymOff_LargeMsg_TakesDda)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
@@ -2555,51 +2545,7 @@ TEST(Rcclwrap, Gfx950_SymOff_SmallMsg_TakesDda)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// gfx950 with symmetricSupport on and every CE prerequisite met: CE will service
-// the call, so the DDA guard must yield (returns false).
-TEST(Rcclwrap, Gfx950_SymOn_CeEligible_YieldsToCe)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
-}
-
-// CE eligible by size/op/dtype but disabled by the graph latch (folded into the
-// caller's ceAllReduceAllowed=false): CE will not run, so DDA must reclaim the call.
-TEST(Rcclwrap, Gfx950_SymOn_GraphLatched_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// CE declines on an unsupported op (folded into ceAllReduceAllowed=false) even
-// with symmetricSupport on, so DDA reclaims the call.
-TEST(Rcclwrap, Gfx950_SymOn_UnsupportedOp_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
-}
-
-// gfx942 with symmetricSupport off: a 6 MiB call is within the 8 MiB gfx942 DDA
-// cap and, with CE unavailable, takes DDA.
-TEST(Rcclwrap, Gfx942_SymOff_MidMsg_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
@@ -2609,44 +2555,29 @@ TEST(Rcclwrap, Gfx942_SymOff_AboveCap_NoDda)
     InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
-// gfx942 with symmetricSupport on and every CE prerequisite met: CE claims the call
-// and the DDA guard yields, even though 6 MiB is within the 8 MiB gfx942 DDA cap.
-// Mirror of Gfx942_SymOff_MidMsg_TakesDda: ceAllReduceAllowed flips the decision.
-TEST(Rcclwrap, Gfx942_SymOn_CeEligible_YieldsToCe)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32); // divisible by 8 ranks
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
-}
 
-// gfx942 with symmetricSupport on but CE declines on an unsupported op (folded
-// into ceAllReduceAllowed=false): DDA reclaims the call since 6 MiB is within
-// the 8 MiB gfx942 cap.
-TEST(Rcclwrap, Gfx942_SymOn_UnsupportedOp_TakesDda)
+// gfx942 within its 8 MiB DDA cap: DDA takes the call.
+TEST(Rcclwrap, Gfx942_InRange_TakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/true);
+    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
-// gfx1250 forces the DDA fabric path regardless of CE eligibility: the
-// ddaFabricArch1250 short-circuit means CE never claims the call on this arch.
-// ceAllReduceAllowed=true (the call is otherwise fully CE-eligible: 64 MiB, sum,
-// divisible), so the short-circuit is the only reason DDA is chosen here.
+// gfx1250 has DDA enabled at 16 MiB (within the entry threshold); DDA is chosen
+// over CE. CE/DDA arbitration at dispatch is handled by rcclCandSearch, not here.
 TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
     InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
+                                               /*symEligible=*/false, /*query=*/false));
 }
 
 // gfx1250 still requires !symEligible: mixed-registration hangs are handled
@@ -2659,7 +2590,7 @@ TEST(Rcclwrap, Gfx1250_SymEligible_RejectsDda)
     InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
     size_t   count = CountForBytes(256ull * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
-                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/true, /*query=*/false));
 }
 
 // An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
@@ -2669,7 +2600,7 @@ TEST(Rcclwrap, UnsupportedArch_NoDda)
     InitDdaDecisionComm(*comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
 // ---------------------------------------------------------------------------
@@ -2728,7 +2659,7 @@ TEST(Rcclwrap, Gfx950_TooFewRanks_NoDda)
     InitDdaDecisionComm(*comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                /*symEligible=*/false, /*query=*/false));
 }
 
 // Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
@@ -2739,7 +2670,7 @@ TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
     InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
     size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
     EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/true, /*ceAllReduceAllowed=*/true, /*query=*/false));
+                                                /*symEligible=*/true, /*query=*/false));
 }
 
 // ---------------------------------------------------------------------------

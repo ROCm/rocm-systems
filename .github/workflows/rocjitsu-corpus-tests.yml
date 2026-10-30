@@ -339,6 +339,10 @@ jobs:
             # async-event bookkeeping, outside rocjitsu-owned code.
             "HsaTranslateTest\.TranslateAndDispatchVectorAdd"
             "HsaTranslateTest\.TranslateAndDispatchMfma16x16"
+            # Both HSA initialization cases use the same ROCr async-event
+            # handoff. Their assertions pass, but its uninstrumented atomics
+            # can produce a TSan allocation/reclamation report in GetAllEvents.
+            "^HsaTest\.(InitSucceeded|GpuAgentFound)$"
             # HIP test discovery and the daemon HIP clients initialize the
             # instrumented ROCr runtime, which can report a ConcurrentAsyncEvents
             # race during asynchronous-event teardown outside rocjitsu-owned code.
@@ -410,6 +414,15 @@ jobs:
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++")
           fi
 
+          # ConSan has explicit required coverage in the Release and GCC lanes.
+          if [[ "${{ matrix.name }}" == release || "${{ matrix.name }}" == ubsan-gcc ]]; then
+            CMAKE_CONFIG_FLAGS+=(
+              -DRJ_BUILD_CONSAN_COMPILER=ON
+              -DRJ_BUILD_CONSAN_RUNTIME=ON
+              -DRJ_BUILD_CONSAN_ANALYZER=ON
+            )
+          fi
+
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
@@ -443,6 +456,25 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Require ConSan unit, integration, and simulated end-to-end coverage
+        if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
+        run: |
+          python3 "${ROCJITSU_SOURCE_DIR}/tests/code/consan/run_required.py" \
+            --build "${ROCJITSU_BUILD_DIR}" \
+            --output "${ROCJITSU_BUILD_DIR}/Testing/ConSanRequired" \
+            --jobs "${ROCJITSU_CORPUS_WORKERS}"
+
+      - name: Upload ConSan coverage and process evidence
+        if: always() && (matrix.name == 'release' || matrix.name == 'ubsan-gcc')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consan-${{ matrix.name }}
+          path: |
+            ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSanRequired
+            ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSan
+          if-no-files-found: error
+          retention-days: 7
 
       # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and
@@ -532,7 +564,11 @@ jobs:
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          uv pip install -r requirements.txt
+          # Keep the pinned corpus on the compatible pytest/xdist pair.
+          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8.
+          uv pip install -r requirements.txt \
+            "pytest>=5.4.1,<9.2" \
+            "pytest-xdist>=1.32.0,<3.9"
           ROCM_SDK_DEVICE_PACKAGES=()
           for gfx in ${ROCM_SDK_DEVICE_GFX_GROUP}; do
             ROCM_SDK_DEVICE_PACKAGES+=(
@@ -667,8 +703,8 @@ jobs:
           uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
-            "pytest>=5.4.1" \
-            "pytest-xdist>=1.32.0"
+            "pytest>=5.4.1,<9.2" \
+            "pytest-xdist>=1.32.0,<3.9"
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
             --prerelease allow \

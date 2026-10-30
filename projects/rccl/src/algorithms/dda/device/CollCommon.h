@@ -297,11 +297,12 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 
 // Scratch is double buffered under a single epoch counter, so a bank is half of
-// it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
-// bank rather than a fixed constant puts bank 1 at the same byte offset, which
-// is what stops one tier landing on flag words another is still polling.
+// it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
+// tier that derives its slot stride from the bank rather than a fixed constant
+// puts bank 1 at the same byte offset, which is what stops one tier landing on
+// flag words another is still polling.
 constexpr size_t ddaBankSize(size_t bytes) {
-  return (bytes / 2) / 16 * 16;
+  return (bytes / 2) / 128 * 128;
 }
 
 // Per-rank slot carved out of a bank, counted in whatever unit the protocol
@@ -317,6 +318,10 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   const size_t slotUnits = bankSize / div;
   return (slotUnits / align) * align;
 }
+
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {

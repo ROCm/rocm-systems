@@ -32,12 +32,14 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <algorithm>
@@ -136,11 +138,6 @@ inline void record_simd_fast_path(SimdFastPath path) {
 }
 
 } // namespace detail
-
-/// True when a source-selector field names one of the nine inline float
-/// constants (0.5 .. 1/(2*pi)). A 32-bit literal is selector 255, so it never
-/// matches here even when its value lands in the same range.
-inline bool is_inline_float_src(uint32_t selector) { return selector >= 240u && selector <= 248u; }
 
 /// True when a packed 16-bit body has to re-narrow this source itself. An
 /// inline float constant reaches a 32-bit source in single precision, so the
@@ -691,7 +688,7 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
     v = std::bit_cast<util::native<float>>(bits);
   }
   if (clamp) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if constexpr (std::is_same_v<T, double>) {
       v = util::map_native64_scalar<double>(v, [clamp_nan_to_zero](double x) {
         if (std::isnan(x))
@@ -723,7 +720,7 @@ util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t cl
     } else {
       using U = util::native<uint64_t>;
       U bits = std::bit_cast<U>(v);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
       bits = util::map_native64_scalar<uint64_t>(bits, [](uint64_t lane) {
         const bool subnormal =
             (lane & 0x7ff0000000000000ULL) == 0 && (lane & 0x000fffffffffffffULL) != 0;
@@ -1165,7 +1162,7 @@ inline util::native<double> fma_f64_mode_simd(util::native<double> src0, util::n
   const U original2 = std::bit_cast<U>(src2);
   auto flush = [](util::native<double> value) {
     U bits = std::bit_cast<U>(value);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     bits = util::map_native64_scalar<uint64_t>(bits, [](uint64_t lane) {
       const bool denormal =
           (lane & 0x7ff0000000000000ULL) == 0 && (lane & 0x000fffffffffffffULL) != 0;
@@ -1376,7 +1373,8 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     case kLshlOp:
       return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
     default:
-      throw util::UnimplementedInst("unsupported VOPD integer SIMD operation");
+      assert(false && "integer slot was validated before SIMD execution");
+      return decltype(src0)(0);
     }
   };
   constexpr uint32_t kWidth = util::native_width_v<uint32_t>;
@@ -1412,7 +1410,7 @@ inline auto simd_mask_as(const Mask &m) {
 template <typename T, typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_bits64(util::native<T> a, util::native<T> b, CmpOp cmp_op) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) T abuf[W];
   alignas(64) T bbuf[W];
@@ -1440,7 +1438,7 @@ template <typename CmpOp>
   requires(util::has_stdx_simd)
 inline uint64_t cmp_class_f64_bits(util::native<uint64_t> s, util::narrow32<uint32_t> mask,
                                    CmpOp cmp_op) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   constexpr std::size_t W = util::native_width64;
   alignas(64) uint64_t sbuf[W];
   alignas(64) uint32_t mbuf[W];
@@ -3972,7 +3970,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
       !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
 
-#if defined(__FMA__)
+#if RJ_HOST_HAS_FMA
   if constexpr (!Fused && DstMode == FmaMixDst::F32) {
     // Legacy scalar a*b+c and stdx SIMD expressions can contract differently
     // with hardware FMA, including GCC with UBSan. Preserve the scalar path
@@ -4597,7 +4595,7 @@ template <int ElemBits, bool Signed, typename Inst>
       return false;
   }
   const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if (clamp)
     return false;
 #endif
@@ -4626,7 +4624,7 @@ template <int ElemBits, bool Signed, typename Inst>
     }
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
-#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
       if (clamp) {
         using I64 = util::stdx::fixed_size_simd<int64_t, W>;
         I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
@@ -4655,7 +4653,7 @@ template <int ElemBits, bool Signed, typename Inst>
       }
       dst.template store_native<uint32_t>(base, sum, chunk);
     } else {
-#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
       if (clamp) {
         using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
         U64 sum = util::stdx::static_simd_cast<U64>(acc);
@@ -4790,7 +4788,7 @@ template <int ElemBits, typename Inst>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const bool clamp = inst.inst_.clamp && (ElemBits != 8 || dot4_clamp_supported(wf));
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if (clamp)
     return false;
 #endif
@@ -4814,7 +4812,7 @@ template <int ElemBits, typename Inst>
     const U raw1 =
         select_packed_halves(src1.template load_native<uint32_t>(base), opsel, opsel_hi, 1);
     const U acc = src2.template load_native<uint32_t>(base);
-#if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if (clamp) {
       using I64 = util::stdx::fixed_size_simd<int64_t, W>;
       I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
@@ -5074,7 +5072,7 @@ template <bool Vop3, typename Inst>
   return
 
 /// 64-bit-lane MODE-aware VOP2 FMA counterpart (v_fmac_f64).
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP2_FMA_F64() static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP2_FMA_F64()                                                           \
@@ -5085,7 +5083,7 @@ template <bool Vop3, typename Inst>
 /// 64-bit-lane VOP2 binary counterpart (v_add/mul/max_num/min_num_f64). Lane
 /// type fixed to double, read/written through the split lo/hi VGPR-pair path
 /// (vsrc1 as the second source). Variadic in the functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64(...)                                                    \
@@ -5095,7 +5093,7 @@ template <bool Vop3, typename Inst>
 
 /// 64-bit VOP2 binary counterpart on raw floating-point encodings (min/max).
 /// The functor reads `native<uint64_t>` lanes. Variadic in the functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY_RAW_FP64(...)                                                \
@@ -5106,7 +5104,7 @@ template <bool Vop3, typename Inst>
 /// 64-bit-lane VOP1 unary counterpart. `T` is the 64-bit lane type (`double`
 /// for the f64 math ops, `uint64_t` for v_mov_b64). Variadic in the functor so
 /// its commas pass through as one token sequence.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...)                                                   \
@@ -5117,7 +5115,7 @@ template <bool Vop3, typename Inst>
 /// Mixed-width cvt counterpart, f64 source -> 32-bit dst. `Tout` is the 32-bit
 /// result lane type; the functor (`native<double> -> narrow32<Tout>`) is variadic
 /// so its commas pass through as one token sequence.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
@@ -5130,7 +5128,7 @@ template <bool Vop3, typename Inst>
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
 /// source lane type; the functor (`narrow32<Tin> -> native<double>`) is variadic.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
@@ -5142,7 +5140,7 @@ template <bool Vop3, typename Inst>
 #endif
 
 /// Raw-bit conversions from or to F64 (shared/conversion.h stage objects).
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64(...) static_cast<void>(inst)
 #define ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(...) static_cast<void>(inst)
 #else
@@ -5179,7 +5177,7 @@ template <bool Vop3, typename Inst>
 
 /// 64-bit-lane VOPC compare counterpart (f64/i64/u64). `T` is the 64-bit lane
 /// read type; the comparison functor is variadic so its commas pass through.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOPC64(T, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOPC64(T, ...)                                                           \
@@ -5190,7 +5188,7 @@ template <bool Vop3, typename Inst>
 /// Mixed-width v_cmp_class_f64 counterpart (64-bit value, 32-bit mask). No type
 /// argument; the class functor `(native<uint64_t> bits, narrow32<uint32_t> mask)
 /// -> mask` is variadic so its commas pass through as one token sequence.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...)                                                      \
@@ -5228,7 +5226,7 @@ template <bool Vop3, typename Inst>
 
 /// VOP3 v_cmp_class_f64 counterpart (64-bit value). `SM` is the f64 sign-bit mask
 /// (0x8000000000000000); the class functor is variadic.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...) static_cast<void>(inst)
 #define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64_RESULT(WRITE_RESULT, SM, ...) static_cast<void>(inst)
 #else
@@ -5303,7 +5301,7 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<true, uint32_t>(                        \
           inst, wf, ::rocjitsu::amdgpu::vop3_float_operation<Fmt>(inst, wf, __VA_ARGS__)))         \
   return
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP64(Fmt, ...)                                           \
@@ -5336,7 +5334,7 @@ template <bool Vop3, typename Inst>
         ::rocjitsu::amdgpu::SimdFastPath::VOP3_LDEXP_RAW);                                         \
     return;                                                                                        \
   }
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...)                                                 \
@@ -5351,7 +5349,7 @@ template <bool Vop3, typename Inst>
 #endif
 
 /// Binary F64 arithmetic whose rounded result takes the shared output modifiers.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64(...)                                            \
@@ -5363,7 +5361,7 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP32(...)                                             \
   if (::rocjitsu::amdgpu::try_execute_unary_vop3_rounded_simd<float>(inst, wf, __VA_ARGS__))       \
   return
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_ROUNDED_FP64(...)                                             \
@@ -5409,7 +5407,7 @@ template <bool Vop3, typename Inst>
 /// dst). As with the 32-bit macro, f64 callers use it too, with the functor
 /// applying ABS/NEG and MODE input flush via comparison::evaluate. `T` is the
 /// 64-bit raw lane read type; variadic in the functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...) static_cast<void>(inst)
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT_RESULT(WRITE_RESULT, T, ...) static_cast<void>(inst)
 #else
@@ -5492,7 +5490,7 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_fma_vop3_fp16_simd<true>(inst, wf))                          \
   return
 
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_FMA_VOP3_FP64() static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_FMA_VOP3_FP64()                                                          \
@@ -5503,7 +5501,7 @@ template <bool Vop3, typename Inst>
 /// VOP3 f64 ternary counterpart (64-bit RegisterAccess reads, per-source
 /// abs/neg, omod/clamp).
 /// Variadic.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)                                                   \
@@ -5531,7 +5529,7 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp16_mode_simd<true>(inst, wf))                    \
   return
 
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64() static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64()                                                    \
@@ -5544,7 +5542,7 @@ template <bool Vop3, typename Inst>
   if (::rocjitsu::amdgpu::try_execute_div_fmas_f32_simd(inst, wf))                                 \
   return
 
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64() static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64()                                                     \
@@ -5555,7 +5553,7 @@ template <bool Vop3, typename Inst>
 /// VOP3 f64 binary counterpart (64-bit RegisterAccess reads, per-source
 /// abs/neg, omod/clamp on the result). Variadic in the functor so its commas pass through as one
 /// token sequence.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...)                                                    \
@@ -5565,7 +5563,7 @@ template <bool Vop3, typename Inst>
 
 /// VOP3 f64 unary counterpart (64-bit RegisterAccess read, src0 abs/neg,
 /// omod/clamp on the result). Variadic in the functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...)                                                     \
@@ -5600,7 +5598,7 @@ template <bool Vop3, typename Inst>
 /// The functor takes `(narrow32<uint32_t> s0, narrow32<uint32_t> s1,
 /// native<uint64_t> c)` and returns `SimdCarry<native<uint64_t>, mask>`;
 /// variadic so its commas pass through.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3(...) static_cast<void>(inst)
 #define ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3_RESULT(WRITE_RESULT, ...) static_cast<void>(inst)
 #else

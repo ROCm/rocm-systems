@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
@@ -12,6 +13,7 @@ on:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
@@ -26,7 +28,7 @@ concurrency:
 
 jobs:
   dashboard-data:
-    name: Verify dashboard data tools
+    name: Verify benchmark preparation and publication
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -48,15 +50,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bash git jq
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.13.0"
-
       - name: Install Python test dependencies
         run: python -m pip install -r scripts/dashboard-data/requirements-test.txt
 
-      - name: Test dashboard data tools
+      - name: Test benchmark preparation and publication
         run: python -m pytest scripts/dashboard-data/tests
 
   verify:
@@ -77,6 +74,11 @@ jobs:
           cache: npm
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
 
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm ci
 
@@ -85,6 +87,11 @@ jobs:
 
       - name: Verify website
         run: npm run verify
+
+      - name: Smoke test published dashboard data
+        env:
+          PLAYWRIGHT_PUBLISHED_DATA: "1"
+        run: npm run test:e2e:production -- tests/production/published-data.e2e.js
 
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}

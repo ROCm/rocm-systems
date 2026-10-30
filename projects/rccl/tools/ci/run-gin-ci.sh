@@ -203,8 +203,7 @@ run_test() {
   case "${kind}" in
     rocshmem)     bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
     rccl-tests)   bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
-    fixtures)     bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
-    mpi-fixtures) bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
+    fixtures|mpi-fixtures) bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
     pytest)       bench_timeout="${GIN_PYTEST_TIMEOUT}" ;;
     *) echo "  SKIP ${name}: unknown kind '${kind}'"; FAILED_RUNS+=("${name} (unknown kind)"); return ;;
   esac
@@ -260,16 +259,15 @@ run_test() {
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
       env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
         "${bin_path}" ${args}
-  elif [[ "${kind}" == "mpi-fixtures" ]]; then
+  else
+    local ld_flag="LD_LIBRARY_PATH"
     # rccl-UnitTestsMPI links librccl internals, which only the build tree's
     # ENABLE_MPI_TESTS librccl exports; the installed copy hides them.
+    if [[ "${kind}" == "mpi-fixtures" ]]; then
+      ld_flag="LD_LIBRARY_PATH=${RCCL_BUILD_LIB_DIR}:${LD_LIBRARY_PATH}"
+    fi
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
-      mpirun -np "${nranks}" ${MCA} ${env_flags} \
-        -x LD_LIBRARY_PATH="${RCCL_BUILD_LIB_DIR}:${LD_LIBRARY_PATH}" \
-        "${bin_path}" ${args}
-  else
-    timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
-      mpirun -np "${nranks}" ${MCA} ${env_flags} -x LD_LIBRARY_PATH \
+      mpirun -np "${nranks}" ${MCA} ${env_flags} -x "${ld_flag}" \
         "${bin_path}" ${args}
   fi
   local rc=$?
