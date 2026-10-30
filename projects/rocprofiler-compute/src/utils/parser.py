@@ -376,7 +376,7 @@ def _build_pc_sampling_partial_frame(
     return df
 
 
-def _format_pc_sampling_display_frame(
+def format_pc_sampling_display_frame(
     df: pd.DataFrame,
     method: str,
     sorting_type: str,
@@ -517,7 +517,7 @@ def load_pc_sampling_data(
     if not process_frames:
         return pd.DataFrame()
 
-    return _format_pc_sampling_display_frame(
+    return format_pc_sampling_display_frame(
         pd.concat(process_frames, ignore_index=True),
         pc_sampling_method,
         sorting_type,
