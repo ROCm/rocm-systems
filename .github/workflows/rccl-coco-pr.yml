@@ -119,6 +119,9 @@ jobs:
           pr_number: ${{ inputs.pr_number }}
           pr_sha: ${{ inputs.pr_sha }}
           pr_repo: ${{ inputs.pr_repo }}
+          # The harness must declare --baseline-sha (1.4.x and later); rolling
+          # coco_ref back to 1.3.x needs this turned off as well.
+          require_baseline_sha: 'true'
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
