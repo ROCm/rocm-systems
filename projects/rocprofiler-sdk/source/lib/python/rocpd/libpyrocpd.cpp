@@ -241,7 +241,6 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
 
     // demo for creating python bindings to a class
     py::class_<rocpd::types::agent>(pyrocpd, "Agent")
-        .def_readonly("id", &rocpd::types::agent::id)
         .def_readonly("guid", &rocpd::types::agent::guid)
         .def_readonly("node_id", &rocpd::types::agent::node_id)
         .def_readonly("logical_node_id", &rocpd::types::agent::logical_node_id)
