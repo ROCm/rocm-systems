@@ -368,12 +368,16 @@ static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
 }
 
 // Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
-// needs a second loop at full ring latency and loses about a third of its bandwidth. The tuning below was measured
-// with a collective LL128 buffer this many times the default, which lifts that limit; 1 when it does not apply.
-static int rcclRemoteFlushLl128BuffScale(struct ncclComm* comm) {
-  return rcclParamIbGdrFlushFlagTune() != 0 && rcclRemoteFlushTuneNodes(comm) && rcclRemoteFlushTuned(comm)
-           ? kRemoteFlushLl128BuffScale
-           : 1;
+// needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
+// limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
+// peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  if (rcclParamIbGdrFlushFlagTune() == 0 || !rcclRemoteFlushTuneNodes(comm) || !comm->topo->ll128Enabled ||
+      !rcclRemoteFlushTuned(comm))
+    return;
+  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * kRemoteFlushLl128BuffScale;
+  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
+       kRemoteFlushLl128BuffScale, comm->p2pLl128BuffSize);
 }
 
 // Bytes per node that Ring/LL128 all_reduce moves in one loop.
@@ -3050,18 +3054,6 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   defaultBuffSizes[NCCL_PROTO_LL128] =
     rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
   defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
-}
-
-// Scales the collective LL128 buffer when the tuning asks for a larger one. Send/recv keeps the default size
-// (comm->p2pLl128BuffSize), since it allocates one buffer per network peer and channel and would grow with the
-// node count. Not applied when NCCL_LL128_BUFFSIZE is set.
-void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
-  if (!comm->topo->ll128Enabled) return;
-  const int scale = rcclRemoteFlushLl128BuffScale(comm);
-  if (scale == 1) return;
-  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * scale;
-  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128], scale,
-       comm->p2pLl128BuffSize);
 }
 
 ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount) {
