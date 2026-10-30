@@ -81,6 +81,10 @@ Add `-DRJ_UBSAN_VPTR=ON` to enable those checks. Clang UBSan builds default to
 no effect when `RJ_ENABLE_UBSAN` is off, and CMake reports the effective `vptr`
 setting when UBSan is enabled.
 
+`AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
+supported static runtime for MSan. `SHARED` rejects MSan explicitly because
+Clang does not provide a shared MSan runtime.
+
 Standalone plugin modules omit `vptr` checks because they do not link the RTTI
 of every class their code checks. The gfx1250 B0-to-A0 translator library omits
 them only from its CDNA4-to-CDNA3 lowering, for the same reason. When
@@ -91,10 +95,6 @@ With `vptr` checks on, the UBSan runtime briefly opens pipes on emulator threads
 so interposer tests that depend on specific file descriptor numbers or exhaust
 the descriptor table are not registered. They run in unsanitized builds and in
 UBSan builds with `RJ_UBSAN_VPTR=OFF`, including GCC's default.
-
-`AUTO` uses shared runtimes for ASan, UBSan, and TSan, and the only
-supported static runtime for MSan. `SHARED` rejects MSan explicitly because
-Clang does not provide a shared MSan runtime.
 
 ### Static analysis
 
