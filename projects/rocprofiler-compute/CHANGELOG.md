@@ -121,6 +121,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * A non-numeric required `sysinfo.csv` value is treated as missing. The terminal path warns and uses 0; it used to stop with a `ValueError`. The database path stores NULL.
   * `analyze` halts before it writes the database when a counter-backed workload reports zero GPU activity (`GRBM_GUI_ACTIVE == 0`), as the terminal output already did.
 
+* Fixed the roofline benchmark data stored in the analysis database.
+  * The `roofline_bench_extdata` column of `compute_workload` stores the `device` id as an integer; before, it was stored as `0.0`. Its shape is unchanged, so existing queries still work.
+  * The new `compute_workload_benchmark` table stores every `roofline.csv` row of a workload with its `device` id, so a device-0 row is kept even when it is not first. Before, only the first row was stored.
+  * A `roofline.csv` that passes validation but cannot be parsed now warns and stores NULL benchmark data, instead of failing the analysis.
+
 * Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. `--list-stats` now only prints its listing.
 
 * Fixed `--torch-trace` errors in models that use lazy layers such as `nn.LazyLinear`.

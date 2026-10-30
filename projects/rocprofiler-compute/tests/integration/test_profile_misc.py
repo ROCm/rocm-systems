@@ -54,11 +54,13 @@ def test_analyze_rocpd(
         Metadata,
         MetricDefinition,
         Workload,
+        WorkloadBenchmark,
         WorkloadMetricValue,
     )
 
     table_name_map = {
         "compute_workload": Workload,
+        "compute_workload_benchmark": WorkloadBenchmark,
         "compute_metric_definition": MetricDefinition,
         "compute_kernel_roofline_data": KernelRooflineData,
         "compute_dispatch": Dispatch,

@@ -4442,6 +4442,91 @@ def test_peak_absent_from_a_valid_roofline_is_null_without_failure_warning(
     failure_warning_mock.assert_not_called()
 
 
+def test_workload_stores_every_roofline_row_with_its_device_id(db_session, tmp_path):
+    """The workload keeps the first roofline.csv row as its benchmark data. The
+    benchmark table keeps every row with its device id, so a later device-0 row
+    is not lost. The device id stays an integer, and NaN or Inf cells are stored
+    as NULL (FR-13)."""
+    write_roofline_csv(
+        tmp_path,
+        "device,FP32Flops,FP64Flops,HBMBw,WMMAF64Flops\n"
+        "1,2000.0,,inf,512.5\n"
+        "0,9999.0,3.0,4.0,5.0\n",
+    )
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+
+    run_analysis_with_existing_database(analyzer)
+
+    workload = db_session.query(orm.Workload).one()
+    assert workload.roofline_bench_extdata == {
+        "device": 1,
+        "FP32Flops": 2000.0,
+        "FP64Flops": None,
+        "HBMBw": None,
+        "WMMAF64Flops": 512.5,
+    }
+    assert type(workload.roofline_bench_extdata["device"]) is int
+    benchmark_rows = (
+        db_session
+        .query(orm.WorkloadBenchmark)
+        .order_by(orm.WorkloadBenchmark.workload_benchmark_uuid)
+        .all()
+    )
+    assert [row.device_id for row in benchmark_rows] == [1, 0]
+    assert benchmark_rows[1].benchmark_extdata == {
+        "device": 0,
+        "FP32Flops": 9999.0,
+        "FP64Flops": 3.0,
+        "HBMBw": 4.0,
+        "WMMAF64Flops": 5.0,
+    }
+
+
+def test_unparseable_roofline_csv_warns_and_stores_null_benchmark_data(
+    db_session, tmp_path
+):
+    """A roofline.csv that validates but pandas cannot parse warns once and stores
+    NULL benchmark data, without failing the analysis (FR-13)."""
+    # The quote opens a field that never closes, so the csv module reads to EOF.
+    write_roofline_csv(tmp_path, 'device,FP32Flops\n0,"2000\n1,3\n')
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as warning_mock:
+        analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+    run_analysis_with_existing_database(analyzer)
+
+    warning_mock.assert_called_once()
+    assert "Roofline peaks are NULL for" in warning_mock.call_args.args[0]
+    assert db_session.query(orm.Workload).one().roofline_bench_extdata is None
+    assert db_session.query(orm.WorkloadBenchmark).count() == 0
+
+
+@pytest.mark.parametrize(
+    "roofline_text",
+    [None, "device,FP32Flops\n0,2000.0,extra\n1,9999.0\n"],
+    ids=["missing", "invalid"],
+)
+def test_workload_benchmark_data_is_null_without_a_valid_roofline_csv(
+    db_session, tmp_path, roofline_text
+):
+    """A missing or invalid roofline.csv stores NULL benchmark data (FR-13).
+
+    This guards the NULL path of the stored column and the empty benchmark table,
+    so it also passes on the base code.
+    """
+    if roofline_text is not None:
+        write_roofline_csv(tmp_path, roofline_text)
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning"):
+        analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+    run_analysis_with_existing_database(analyzer)
+
+    assert db_session.query(orm.Workload).one().roofline_bench_extdata is None
+    assert db_session.query(orm.WorkloadBenchmark).count() == 0
+
+
 # =============================================================================
 # Stored values: unrounded, base units, independent of display options
 # =============================================================================
