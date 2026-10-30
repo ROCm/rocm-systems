@@ -4,6 +4,14 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm Systems Profiler 1.11.0 for ROCm 10.3 (unreleased)
+
+### Resolved issues
+
+- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
+  validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
+  the four defaults. Whitespace around `,` and `;` separators is now accepted.
+
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
 ### Added
