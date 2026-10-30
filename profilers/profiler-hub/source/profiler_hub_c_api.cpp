@@ -34,7 +34,15 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
 
     try
     {
-        *ctx = new ph_ctx(file_path);
+        if(profiler_hub::detect_trace_format(file_path) == PH_TRACE_FORMAT_PYTORCH_KINETO)
+        {
+            *ctx = new ph_ctx(profiler_hub::pytorch::pytorch_store_t::open(file_path),
+                              file_path);
+        }
+        else
+        {
+            *ctx = new ph_ctx(file_path);
+        }
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
