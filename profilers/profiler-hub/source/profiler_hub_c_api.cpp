@@ -1,6 +1,7 @@
 #include "profiler-hub/c/profiler_hub.h"
 #include "profiler_hub_ctx.hpp"
 #include "profiler_hub_future.hpp"
+#include "trace_format.hpp"
 
 #include <tuple>
 #include <utility>
@@ -33,7 +34,15 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path)
 
     try
     {
-        *ctx = new ph_ctx(file_path);
+        if(profiler_hub::detect_trace_format(file_path) == PH_TRACE_FORMAT_PYTORCH_KINETO)
+        {
+            *ctx = new ph_ctx(profiler_hub::pytorch::pytorch_store_t::open(file_path),
+                              file_path);
+        }
+        else
+        {
+            *ctx = new ph_ctx(file_path);
+        }
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
@@ -266,5 +275,17 @@ ph_future_free(ph_ctx_t ctx, ph_future_t future)
 
     ctx->unregister_future(future);
     delete future;
+    return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_probe_trace_format(const char* file_path, ph_trace_format_t* format)
+{
+    if(file_path == nullptr || format == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *format = profiler_hub::detect_trace_format(file_path);
     return PH_RESULT_SUCCESS;
 }

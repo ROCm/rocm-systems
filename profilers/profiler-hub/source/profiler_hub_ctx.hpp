@@ -4,6 +4,7 @@
 #include "common/thread_pool.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "profiler-hub/cpp/reader.hpp"
+#include "pytorch/pytorch_store.hpp"
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -18,6 +19,8 @@ struct ph_future;
 struct ph_ctx
 {
     explicit ph_ctx(std::string_view trace_path);
+    ph_ctx(std::shared_ptr<const profiler_hub::pytorch::pytorch_store_t> store,
+           std::string_view                                              trace_path);
     ~ph_ctx();
 
     ph_ctx(const ph_ctx&)            = delete;
@@ -66,6 +69,7 @@ private:
     ph_schema_version_t m_schema_version;
 
     static constexpr size_t                         k_connection_count = 5;
+    static constexpr size_t                         k_no_connections   = 0;
     std::shared_ptr<profiler_hub::reader_catalog_t> m_catalog;
     profiler_hub::common::connection_pool           m_connection_pool{ m_file_path,
                                                              k_connection_count,
@@ -93,6 +97,10 @@ private:
     std::mutex                           m_track_results_mutex;
     std::deque<track_events_result_t>    m_track_events_results;
     std::deque<std::vector<ph_sample_t>> m_track_samples_results;
+
+    std::shared_ptr<const profiler_hub::pytorch::pytorch_store_t> m_pytorch_store;
+    std::deque<std::vector<ph_event_t>>                           m_pytorch_event_results;
+    std::uint32_t                                                 m_omit_track = 0;
 
     profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
 

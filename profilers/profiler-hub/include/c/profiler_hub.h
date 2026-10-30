@@ -200,6 +200,18 @@ extern "C"
      */
     ph_result_t ph_future_free(ph_ctx_t ctx, ph_future_t future);
 
+    /**
+     * @brief Cheap trace format probe.
+     * @param file_path Path of the trace file.
+     * @param format Receives the detected format.
+     * @return PH_RESULT_INVALID_ARGUMENT if either pointer is null; otherwise
+     *         PH_RESULT_SUCCESS with @p format set. An unreadable or
+     *         unrecognised file yields PH_TRACE_FORMAT_UNKNOWN.
+     * @note Reads 16 bytes; for other files also up to the first 64 KiB
+     *       (decompressed if gzip).
+     */
+    ph_result_t ph_probe_trace_format(const char* file_path, ph_trace_format_t* format);
+
 #ifdef __cplusplus
 }
 #endif
