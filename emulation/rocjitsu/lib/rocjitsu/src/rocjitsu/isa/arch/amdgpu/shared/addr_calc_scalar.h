@@ -18,11 +18,16 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 #include "util/log.h"
 
 #include <array>
 #include <cstdint>
 #include <optional>
+
+#if RJ_HOST_HAS_AVX2
+#include <immintrin.h>
+#endif
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -128,6 +133,39 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
   return addr;
 }
 
+#if RJ_HOST_HAS_AVX2
+namespace detail {
+
+/// @brief Write addresses[lane] + bias for lanes [0, WF), eight lanes per step.
+///
+/// @details Inactive lanes are written as 0 rather than skipped: an AND with
+/// the EXEC mask replaces masked stores, which cost more than the plain stores
+/// they guard. This matches skipping only because callers pass a freshly
+/// constructed VectorMemState, whose per_lane_addr is value-initialized.
+template <uint32_t WF>
+inline void ds_lane_addresses_avx2(const uint32_t *addresses, uint64_t exec, uint32_t bias,
+                                   uint64_t *per_lane_addr) {
+  static_assert(WF % 8 == 0 && WF <= 64);
+  const __m256i vbias = _mm256_set1_epi32(static_cast<int>(bias));
+  // Moves bit i of an 8-lane EXEC chunk into the sign bit of 32-bit element i.
+  const __m256i bit_to_sign = _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24);
+#pragma GCC unroll 8
+  for (uint32_t lane = 0; lane < WF; lane += 8) {
+    const __m256i chunk = _mm256_set1_epi32(static_cast<int>((exec >> lane) & 0xFF));
+    const __m256i active = _mm256_srai_epi32(_mm256_sllv_epi32(chunk, bit_to_sign), 31);
+    const __m256i lanes = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(addresses + lane));
+    // 32-bit add, then zero-extend: same wraparound as the scalar uint32_t sum.
+    const __m256i sum = _mm256_and_si256(_mm256_add_epi32(lanes, vbias), active);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(per_lane_addr + lane),
+                        _mm256_cvtepu32_epi64(_mm256_castsi256_si128(sum)));
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(per_lane_addr + lane + 4),
+                        _mm256_cvtepu32_epi64(_mm256_extracti128_si256(sum, 1)));
+  }
+}
+
+} // namespace detail
+#endif
+
 /// @brief Compute per-lane addresses for DS encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
@@ -147,11 +185,26 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
   const std::span<const uint32_t> addresses = addr_region.lanes();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+
+  // Inactive lanes of per_lane_addr end up 0, as constructed.
+  uint32_t lane = 0;
+#if RJ_HOST_HAS_AVX2
+  // Constant wave sizes let the AVX2 loop unroll fully.
+  const uint32_t bias = offset + wf.lds_base();
+  if (wf.wf_size() == 64) {
+    detail::ds_lane_addresses_avx2<64>(addresses.data(), exec, bias, d.per_lane_addr.data());
+    lane = 64;
+  } else if (wf.wf_size() == 32) {
+    detail::ds_lane_addresses_avx2<32>(addresses.data(), exec, bias, d.per_lane_addr.data());
+    lane = 32;
+  }
+#endif
+  for (; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     d.per_lane_addr[lane] = addresses[lane] + offset + wf.lds_base();
   }
+
   util::Logger::vm([&](auto &os) {
     static uint64_t ds_addr_count = 0;
     if (++ds_addr_count > 100)
