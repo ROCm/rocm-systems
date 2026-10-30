@@ -122,12 +122,6 @@ static ncclIntruAddressMap<ncclDevrWindow, struct ncclWindow_vidmem*, &ncclDevrW
   ncclWindowMap;
 static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream);
 
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers at the bottom:
 

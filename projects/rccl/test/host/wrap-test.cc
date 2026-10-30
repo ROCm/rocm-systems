@@ -72,14 +72,6 @@
 
 #include "dev_runtime_internal.h"
 
-// Private layout consumed by the real ncclDevrFindWindow implementation in
-// dev_runtime.cc, which is compiled by dev-runtime-test.cc in this binary.
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
-
 namespace {
 
 // Zero-initialized heap ncclComm, mirroring MockComm.hpp's

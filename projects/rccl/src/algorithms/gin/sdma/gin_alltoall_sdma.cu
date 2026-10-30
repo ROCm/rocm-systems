@@ -159,6 +159,8 @@ ncclResult_t ncclGinA2AInitOnce(ncclComm* comm) {
     reqs.ginSignalCount = kGinA2AMaxCtas;
     reqs.barrierCount = kGinA2ASdmaCtas;
     reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+    // The kernel is compiled for SDMA only, so the default backend will not do.
+    reqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &state->devComm, /*isInternal=*/true,
                                          /*deviceCodeVersion=*/NCCL_VERSION_CODE));
     state->initialized = true;
@@ -182,10 +184,8 @@ bool ncclAllToAllGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (!comm->symmetricSupport) return false;
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL) return false;
 
-  // This path runs on the comm's shared GIN backend, so it has to be SDMA.
-  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
-  if (ncclGetGinType(comm, &ginType) != ncclSuccess) return false;
-  if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
+  // The DevComm requests SDMA by type, so SDMA only has to be active, not the default.
+  if (!ncclGinTypeActive(comm, NCCL_GIN_TYPE_ANVIL_SDMA)) return false;
 
   // Every rank must be reachable over LSA.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
