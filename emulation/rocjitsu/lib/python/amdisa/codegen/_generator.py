@@ -8093,15 +8093,17 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'image_load':
-            # Minimal image load: treat as a flat read from the image resource base address.
-            # Full image addressing (texture coordinates, dimensions) not yet implemented.
-            L.append('  // Minimal image load stub — not yet implemented.')
-            L.append('  (void)wf;')
+            L.append(
+                '  wf.report_instruction_execution_error('
+                'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
             return '\n'.join(L)
 
         if cls == 'image_store':
-            L.append('  // Minimal image store stub — not yet implemented.')
-            L.append('  (void)wf;')
+            L.append(
+                '  wf.report_instruction_execution_error('
+                'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
             return '\n'.join(L)
 
         if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':

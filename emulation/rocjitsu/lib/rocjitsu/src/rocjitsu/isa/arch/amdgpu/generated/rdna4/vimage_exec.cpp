@@ -44,28 +44,28 @@ void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageLoadMipPckSgnVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image load stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
@@ -91,18 +91,18 @@ void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStorePckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageStoreMipPckVimage::execute_impl(amdgpu::Wavefront &wf) {
-  // Minimal image store stub — not yet implemented.
-  (void)wf;
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {

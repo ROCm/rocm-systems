@@ -695,6 +695,37 @@ protected:
     return decoder_->decode(words.data());
   }
 
+  DecodeResult decode_mip(bool load) {
+    const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                       .dim = amdgpu::kImageDim2d,
+                                       .unorm = true,
+                                       .dmask = 1,
+                                       .vaddr = 2,
+                                       .vdata = 8,
+                                       .srsrc = 2,
+                                       .nsa_word = 6};
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+      return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+          *decoder_, rdna3::build_mimg, load ? rdna3::kImageLoadMipMimg : rdna3::kImageStoreMipMimg,
+          mimg);
+    }
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+          *decoder_, rdna3_5::build_mimg,
+          load ? rdna3_5::kImageLoadMipMimg : rdna3_5::kImageStoreMipMimg, mimg);
+    }
+    const auto words =
+        rdna4::build_vimage(load ? rdna4::kImageLoadMipVimage : rdna4::kImageStoreMipVimage,
+                            {.dim = amdgpu::kImageDim2d,
+                             .dmask = 1,
+                             .vdata = 8,
+                             .rsrc = kResourceBase,
+                             .vaddr0 = 2,
+                             .vaddr1 = 6,
+                             .vaddr2 = 7});
+    return decoder_->decode(words.data());
+  }
+
   void issue(bool load) { issue(load, Encoding{}); }
 
   void issue(bool load, Encoding encoding) {
@@ -795,6 +826,32 @@ TEST_P(RdnaDecodedImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
     const InstDefUse def_use(*inst);
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 2, test_case.address_words}));
     EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 6, 1}));
+  }
+}
+
+TEST_P(RdnaDecodedImageAccessTest, MipLoadAndStoreReportUnimplemented) {
+  wf_->set_exec(1);
+  const uint32_t vb = wf_->vgpr_alloc().base;
+  cu_->write_vgpr(vb + 2, 0, 1);
+  cu_->write_vgpr(vb + 6, 0, 1);
+  cu_->write_vgpr(vb + 7, 0, 0);
+  constexpr uint64_t kAddress = kBase + (64 + 1) * sizeof(uint32_t);
+
+  for (const bool load : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "load=" << load);
+    memory_.write32(kAddress, 0x12345678u);
+    cu_->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+    auto decoded = decode_mip(load);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+
+    EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wf_).failed());
+    EXPECT_EQ(wf_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(inst->data(), nullptr);
+    EXPECT_EQ(memory_.read32(kAddress), 0x12345678u);
+    EXPECT_EQ(cu_->read_vgpr(vb + 8, 0), 0xdeadbeefu);
   }
 }
 
