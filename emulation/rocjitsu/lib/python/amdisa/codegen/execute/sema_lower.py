@@ -1834,6 +1834,8 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
     'maxmin_f': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax_f': 'std::fmax(std::fmin({0}, {1}), {2})',
+    # Integer results reach registers as raw bits. A floating result would make
+    # a negative value's conversion to unsigned register storage undefined.
     'maxmin_i': 'std::min(std::max({0}, {1}), {2})',
     'minmax_i': 'std::max(std::min({0}, {1}), {2})',
     'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
