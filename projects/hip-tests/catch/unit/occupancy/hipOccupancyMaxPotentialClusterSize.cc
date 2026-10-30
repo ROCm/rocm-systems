@@ -50,10 +50,16 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
 
   HIP_CHECK(
       hipOccupancyMaxPotentialClusterSize(&clusterSize, reinterpret_cast<const void*>(f1), &config));
-  INFO("Max potential cluster size is: " << clusterSize);
-  // at the time of this writing a SPI could be drive up to 15 CUs. The number of CUs per SE
-  // varies per silicon, but any AMD silicon should have at least 8
-  REQUIRE((clusterSize > 8 && clusterSize <= 16));
+
+  // The cluster size is the number of CUs (WGPs in WGP mode) per shader engine. It varies with
+  // SKU harvesting, APU configurations, WGP mode and CU masking, so only check invariants.
+  INFO("Arch: " << props.gcnArchName << ", CUs: " << props.multiProcessorCount
+                << ", max potential cluster size: " << clusterSize);
+  // clusterLaunch is only reported when clusters of more than one block are supported
+  REQUIRE(clusterSize > 1);
+  REQUIRE(clusterSize <= props.multiProcessorCount);
+  // at the time of this writing a cluster spans at most 16 CUs
+  REQUIRE(clusterSize <= 16);
 }
 
 TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters") {
