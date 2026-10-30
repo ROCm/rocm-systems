@@ -164,6 +164,11 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
   uint32_t prior = waiting_++;
   MAKE_SCOPE_GUARD([&]() { waiting_--; });
 
+  // Pairs with the seq_cst fence in StoreReleaseAndNotify: either we see the
+  // stored value below or the notifier sees us in InWaiting() and calls
+  // hsaKmtSetEvent.
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+
   uint64_t event_age = core::Runtime::runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
   if (!event_age && prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
