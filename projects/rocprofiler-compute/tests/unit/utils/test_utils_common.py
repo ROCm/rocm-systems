@@ -993,13 +993,46 @@ def test_library_visibility_in_target(tmp_path, monkeypatch):
 def test_library_visibility_in_target_fails_open(monkeypatch):
     """An indeterminate procfs error is not treated as confirmed absence."""
 
-    def deny_stat(_path):
+    def deny_lstat(_path):
         raise OSError(errno.EACCES, "permission denied")
 
-    monkeypatch.setattr(Path, "stat", deny_stat)
+    monkeypatch.setattr(utils_common.os, "lstat", deny_lstat)
 
     assert not utils_common.is_library_missing_in_target(
         42, "/opt/rocm/librocprofiler-sdk-tool.so"
+    )
+
+
+def test_library_visibility_follows_symlink_inside_target(tmp_path, monkeypatch):
+    """An absolute symlink is resolved from the target root, not the host root."""
+    procfs_root = tmp_path / "proc"
+    target_root = procfs_root / "42/root"
+    inside = target_root / "only-inside/librocprofiler-sdk-tool.so"
+    inside.parent.mkdir(parents=True)
+    inside.touch()
+    link = target_root / "opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to("/only-inside/librocprofiler-sdk-tool.so")
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert not utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+
+
+def test_library_visibility_rejects_symlink_to_host_file(tmp_path, monkeypatch):
+    """A symlink whose absolute target exists only on the host is still missing."""
+    procfs_root = tmp_path / "proc"
+    target_root = procfs_root / "42/root"
+    host_only = tmp_path / "host-only.so"
+    host_only.touch()
+    link = target_root / "opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(host_only)
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.is_library_missing_in_target(
+        42, "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     )
 
 
@@ -1068,7 +1101,7 @@ def test_find_target_library_from_loaded_library(tmp_path, monkeypatch):
 
 
 def test_find_target_library_rejects_path_outside_target_root(tmp_path, monkeypatch):
-    """A resolved candidate cannot escape the target's procfs root."""
+    """A versioned tool symlink cannot resolve to a host-only file."""
     procfs_root = tmp_path / "proc"
     maps_path = procfs_root / "42/maps"
     maps_path.parent.mkdir(parents=True)
@@ -1076,15 +1109,14 @@ def test_find_target_library_rejects_path_outside_target_root(tmp_path, monkeypa
         "7f10-7f20 r-xp 00000000 08:01 1 /opt/rocm/lib/librocprofiler-register.so\n",
         encoding="utf-8",
     )
-    outside_library = tmp_path / "outside/librocprofiler-sdk-tool.so"
-    outside_library.parent.mkdir()
-    outside_library.touch()
-    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
-    monkeypatch.setattr(
-        utils_common,
-        "resolve_rocm_library_path",
-        lambda _path: str(outside_library),
+    host_only = tmp_path / "host-only.so"
+    host_only.touch()
+    link = (
+        procfs_root / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     )
+    link.parent.mkdir(parents=True)
+    link.symlink_to(host_only)
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
 
     assert (
         utils_common.find_target_library_from_loaded_library(
@@ -1094,6 +1126,35 @@ def test_find_target_library_rejects_path_outside_target_root(tmp_path, monkeypa
         )
         is None
     )
+
+
+def test_find_target_library_follows_symlink_inside_target(tmp_path, monkeypatch):
+    """Versioned discovery accepts a symlink that stays inside the target."""
+    procfs_root = tmp_path / "proc"
+    maps_path = procfs_root / "42/maps"
+    maps_path.parent.mkdir(parents=True)
+    maps_path.write_text(
+        "7f10-7f20 r-xp 00000000 08:01 1 /opt/rocm/lib/librocprofiler-register.so\n",
+        encoding="utf-8",
+    )
+    versioned = (
+        procfs_root
+        / "42/root/only-inside/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2"
+    )
+    versioned.parent.mkdir(parents=True)
+    versioned.touch()
+    link = (
+        procfs_root / "42/root/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
+    link.parent.mkdir(parents=True)
+    link.symlink_to("/only-inside/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so.2")
+    monkeypatch.setattr(utils_common, "PROCFS_ROOT", procfs_root)
+
+    assert utils_common.find_target_library_from_loaded_library(
+        42,
+        "librocprofiler-sdk-tool.so",
+        "librocprofiler-register.so",
+    ) == ("/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so")
 
 
 def test_resolve_attach_tool_library_uses_target_install(tmp_path, monkeypatch):

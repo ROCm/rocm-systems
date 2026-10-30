@@ -44,6 +44,7 @@ NATIVE_DISPATCH_PREFIX = "dispatch"
 NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 PROCFS_ROOT = Path("/proc")
+_MAX_TARGET_SYMLINKS = 40
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
@@ -208,18 +209,17 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
 
 def is_library_missing_in_target(pid: Union[int, str], library_path: str) -> bool:
     """Return whether a library is confirmed absent from a target's mount view."""
-    path = Path(library_path)
-    if not path.is_absolute():
+    if not Path(library_path).is_absolute():
         return False
 
-    target_path = _target_root(pid) / path.relative_to(path.anchor)
-    try:
-        target_status = target_path.stat()
-    except OSError as error:
-        # Only reject a path proven absent. Restricted procfs access must not
-        # turn a potentially valid target path into a false negative.
-        return error.errno in (errno.ENOENT, errno.ENOTDIR)
-    return not stat.S_ISREG(target_status.st_mode)
+    # Only reject a path proven absent. Restricted procfs access, or a symlink
+    # walk that cannot be completed, must not hide a library the target can see.
+    status, mode, _resolved = _lookup_in_target_root(_target_root(pid), library_path)
+    if status == "missing":
+        return True
+    if status != "present" or mode is None:
+        return False
+    return not stat.S_ISREG(mode)
 
 
 def find_loaded_library_directories(
@@ -286,17 +286,151 @@ def _target_visible_library(
         target_directory / library_name,
     )
     for candidate_path in candidate_paths:
-        relative_path = candidate_path.relative_to(candidate_path.anchor)
-        host_candidate = target_root / relative_path
-        resolved_candidate = resolve_rocm_library_path(str(host_candidate))
-        if resolved_candidate is None or not Path(resolved_candidate).is_file():
-            continue
-        try:
-            relative_candidate = Path(resolved_candidate).relative_to(target_root)
-        except ValueError:
-            continue
-        return f"/{relative_candidate.as_posix()}"
+        visible_library = _regular_library_in_target(target_root, str(candidate_path))
+        if visible_library is not None:
+            return visible_library
     return None
+
+
+def _regular_library_in_target(target_root: Path, absolute_path: str) -> Optional[str]:
+    """Return a target-visible library path, including a versioned fallback."""
+    status, mode, _resolved = _lookup_in_target_root(target_root, absolute_path)
+    if status == "present" and mode is not None and stat.S_ISREG(mode):
+        return absolute_path
+    if status != "missing":
+        return None
+
+    parent = Path(absolute_path).parent
+    names = _directory_names_in_target(target_root, str(parent))
+    if not names:
+        return None
+    selected = _highest_versioned_name(Path(absolute_path).name, names)
+    if selected is None:
+        return None
+    versioned_path = str(parent / selected)
+    status, mode, _resolved = _lookup_in_target_root(target_root, versioned_path)
+    if status == "present" and mode is not None and stat.S_ISREG(mode):
+        return versioned_path
+    return None
+
+
+def _directory_names_in_target(
+    target_root: Path, absolute_directory: str
+) -> Optional[list[str]]:
+    """List one directory inside the target, or None when the walk is blocked."""
+    status, mode, resolved = _lookup_in_target_root(target_root, absolute_directory)
+    if status == "indeterminate":
+        return None
+    if (
+        status != "present"
+        or mode is None
+        or resolved is None
+        or not stat.S_ISDIR(mode)
+    ):
+        return []
+    try:
+        return [entry.name for entry in resolved.iterdir()]
+    except OSError as error:
+        if error.errno in (errno.ENOENT, errno.ENOTDIR):
+            return []
+        return None
+
+
+def _highest_versioned_name(library_name: str, names: list[str]) -> Optional[str]:
+    """Pick the highest numeric libname.so.N sibling."""
+    prefix = f"{library_name}."
+    version_tuples: list[tuple[list[int], str]] = []
+    for name in names:
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(library_name) :]
+        if not suffix.startswith("."):
+            continue
+        parts = suffix.split(".")[1:]
+        if not parts or not all(part.isdigit() for part in parts):
+            continue
+        version_tuples.append(([int(part) for part in parts], name))
+    if not version_tuples:
+        return None
+
+    max_version_len = max(len(version_parts) for version_parts, _name in version_tuples)
+    best_name = version_tuples[0][1]
+    best_numeric = -1
+    for version_parts, name in version_tuples:
+        numeric = version_to_numeric(version_parts, max_version_len)
+        if numeric > best_numeric:
+            best_numeric = numeric
+            best_name = name
+    return best_name
+
+
+def _lookup_in_target_root(
+    target_root: Path, absolute_path: str
+) -> tuple[str, Optional[int], Optional[Path]]:
+    """Resolve an absolute path without leaving the target root.
+
+    /proc/<pid>/root changes the starting directory, but an absolute symlink
+    is still followed from the host root. This walk restarts those links at
+    the target root, keeps relative links in their directory, and refuses to
+    climb above the target root.
+    """
+    if not absolute_path.startswith("/"):
+        return "indeterminate", None, None
+
+    current = target_root
+    current_mode: Optional[int] = None
+    remaining = _path_components(absolute_path)
+    followed_links = 0
+    while remaining:
+        component = remaining.pop(0)
+        if component in ("", "."):
+            continue
+        if component == "..":
+            if current != target_root:
+                current = current.parent
+                current_mode = None
+            continue
+        candidate = current / component
+        try:
+            info = os.lstat(candidate)
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                return "missing", None, None
+            return "indeterminate", None, None
+        if stat.S_ISLNK(info.st_mode):
+            followed_links += 1
+            if followed_links > _MAX_TARGET_SYMLINKS:
+                return "indeterminate", None, None
+            try:
+                link_text = os.readlink(candidate)
+            except OSError as error:
+                if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                    return "missing", None, None
+                return "indeterminate", None, None
+            if link_text.startswith("/"):
+                current = target_root
+                current_mode = None
+            remaining = _path_components(link_text) + remaining
+            continue
+        if remaining and not stat.S_ISDIR(info.st_mode):
+            return "missing", None, None
+        current = candidate
+        current_mode = info.st_mode
+
+    if current_mode is None:
+        try:
+            current_mode = os.lstat(current).st_mode
+        except OSError as error:
+            if error.errno in (errno.ENOENT, errno.ENOTDIR):
+                return "missing", None, None
+            return "indeterminate", None, None
+        if stat.S_ISLNK(current_mode):
+            return "indeterminate", None, None
+    return "present", current_mode, current
+
+
+def _path_components(path_text: str) -> list[str]:
+    return [part for part in Path(path_text).parts if part not in ("/", "")]
 
 
 def resolve_attach_tool_library(
