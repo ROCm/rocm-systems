@@ -28,11 +28,11 @@
 /// starts at the original entry and skips the prologue. The simulator does not
 /// check the entry's 256-byte alignment, so this cannot catch a misplaced stub.
 ///
-/// Wave size is a place they do **not** agree: the synthesized descriptor never
-/// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
-/// RDNA target dispatches Wave64 however its patched ELF was planned. The
-/// wave_size constructor argument only says how many lanes to read back. A test
-/// whose correctness depends on the executing wave size cannot get it here.
+/// Wave size agrees only when a test asks: the synthesized descriptor sets
+/// ENABLE_WAVEFRONT_SIZE32 only after set_wave32_dispatch(). Otherwise
+/// kernel_wavefront_size() reports 64 and an RDNA target dispatches Wave64
+/// however its patched ELF was planned, and initialize()'s wave_size only says
+/// how many lanes to dispatch and read back.
 
 #pragma once
 
@@ -142,6 +142,13 @@ public:
     mem_->load_image(bytes.data(), bytes.size(), addr);
   }
 
+  /// @brief Dispatch Wave32 on an RDNA target, matching a patched descriptor
+  ///        with the Wave32 bit set. Requires an initialize() wave_size of 32.
+  void set_wave32_dispatch() {
+    EXPECT_EQ(wave_size_, 32u) << "set_wave32_dispatch() needs initialize(arch, 32)";
+    wave32_dispatch_ = true;
+  }
+
   /// @brief Offset into the code passed to run_*() that dispatch enters at, as
   ///        the patched descriptor's .text-relative entry. Defaults to 0.
   void set_entry_offset(uint64_t offset) { entry_offset_ = offset; }
@@ -164,6 +171,9 @@ public:
                        ((104 / 8) - 1));
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
+    if (wave32_dispatch_)
+      RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                         1);
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;
 
@@ -271,6 +281,7 @@ private:
   }
 
   uint32_t wave_size_ = 64;
+  bool wave32_dispatch_ = false;
   uint32_t queue_seq_ = 0;
   uint64_t entry_offset_ = 0;
   uint32_t kernarg_properties_ = 0;
