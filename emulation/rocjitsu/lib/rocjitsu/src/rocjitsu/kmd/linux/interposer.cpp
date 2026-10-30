@@ -4995,10 +4995,8 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
         // other raster/tiling registers remain unmodeled.
         if (info->read_mmr_reg.dword_offset == 0x263e && info->read_mmr_reg.count == 1 &&
             info->return_size >= sizeof(uint32_t)) {
-          *static_cast<uint32_t *>(out) =
-              major == 11
-                  ? rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3)
-                  : rocjitsu::kmd::gb_addr_config_for_gfx_target_version(gpu->gfx_target_version);
+          *static_cast<uint32_t *>(out) = rocjitsu::kmd::image_gb_addr_config(
+              ROCJITSU_CODE_ARCH_INVALID, gpu->gfx_target_version);
         }
         return 0;
       }

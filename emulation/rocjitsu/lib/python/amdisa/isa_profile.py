@@ -604,9 +604,14 @@ class IsaProfile(ABC):
         return False
 
     @property
-    def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+    def image_dimensions_in_resource(self) -> bool:
+        """Whether image dimensions come from T# rather than instruction DIM."""
         return False
+
+    @property
+    def mimg_nsa_address_dwords(self) -> str | None:
+        """C++ word-count expression for a nonzero MIMG NSA extension."""
+        return None
 
     @property
     def split_ds_2addr_offsets(self) -> bool:
@@ -1831,6 +1836,10 @@ class CdnaProfile(_AmdgpuProfileBase):
     scratch_has_vaddr_expr = 'inst_.lds != 0'
 
     @property
+    def image_dimensions_in_resource(self) -> bool:
+        return True
+
+    @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
@@ -2210,6 +2219,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
     """
 
     @property
+    def mimg_nsa_address_dwords(self) -> str | None:
+        return 'inst_.nsa'
+
+    @property
     def valu16_preserves_unwritten_half(self) -> bool:
         return True
 
@@ -2383,8 +2396,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
-    def has_gfx11_image_address_extension(self) -> bool:
-        return True
+    def mimg_nsa_address_dwords(self) -> str | None:
+        return '1u'
 
     @property
     def vmem_writes_use_expcnt(self) -> bool:

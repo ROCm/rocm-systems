@@ -401,7 +401,7 @@ class CodeGenerator:
         'ds_read_tr_b6': 'local',
         # Internal variant selected by the ds_barrier_arrive generator.
         'ds_barrier_arrive_async': 'async_local',
-        # Only the instructions in _GFX9_IMAGE_MEMORY_INSTRUCTIONS issue these.
+        # Only the instructions in _IMAGE_MEMORY_INSTRUCTIONS issue these.
         'image_load': 'vmem_load',
         'image_store': 'vmem_store',
     }
@@ -409,8 +409,10 @@ class CodeGenerator:
 
     # Image instructions whose generated bodies issue a memory access. Every
     # other image instruction keeps its stub, which must not claim a pipeline.
-    _GFX9_IMAGE_MEMORY_INSTRUCTIONS = frozenset(
-        {('cdna2', 'IMAGE_LOAD'), ('cdna2', 'IMAGE_STORE')}
+    _IMAGE_MEMORY_INSTRUCTIONS = frozenset(
+        (arch, name)
+        for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4')
+        for name in ('IMAGE_LOAD', 'IMAGE_STORE')
     )
 
     # Shared scalar execution uses these encoding values without including one
@@ -479,7 +481,17 @@ class CodeGenerator:
         return (
             self.isa_spec.arch_name,
             name.upper(),
-        ) in self._GFX9_IMAGE_MEMORY_INSTRUCTIONS
+        ) in self._IMAGE_MEMORY_INSTRUCTIONS
+
+    def _image_coordinates(self) -> str:
+        if self.isa_spec.profile.image_dimensions_in_resource:
+            return '{inst_.vaddr, inst_.vaddr + 1u, inst_.vaddr + 2u}'
+        if self.isa_spec.profile.mimg_nsa_address_dwords is not None:
+            return (
+                '{inst_.vaddr, inst_.nsa ? raw_words_[2] & 0xffu : inst_.vaddr + 1u, '
+                'inst_.nsa ? (raw_words_[2] >> 8) & 0xffu : inst_.vaddr + 2u}'
+            )
+        return '{inst_.vaddr0, inst_.vaddr1, inst_.vaddr2}'
 
     @property
     def generated_dir_name(self) -> str:
@@ -4404,7 +4416,7 @@ class CodeGenerator:
                                 '}'
                             )
                         )
-            if profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
+            if profile.mimg_nsa_address_dwords is not None and enc_upper == 'ENC_MIMG':
                 public_members.append(
                     cgen.Line(
                         'void capture_nsa_words(const MachineInst *inst, '
@@ -4450,7 +4462,7 @@ class CodeGenerator:
                         'const MachineInst *inst, const Operand *vaddr) {\n'
                         '  if (!inst_.nsa) return;\n'
                         '  nsa_vaddr_operand_ = vaddr;\n'
-                        '  size_ = sizeof(OpEncoding) + sizeof(MachineInst);\n'
+                        f'  size_ = sizeof(OpEncoding) + {profile.mimg_nsa_address_dwords} * sizeof(MachineInst);\n'
                         '  std::memcpy(raw_words_.data(), inst, size_);\n'
                         '  raw_encoding_ = raw_words_.data();\n'
                         '}'
@@ -4737,7 +4749,9 @@ class CodeGenerator:
                         f'std::array<uint32_t, {raw_word_count}> raw_words_{{}}'
                     )
                 )
-            elif profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
+            elif (
+                profile.mimg_nsa_address_dwords is not None and enc_upper == 'ENC_MIMG'
+            ):
                 class_members.append(
                     cgen.Statement('std::array<uint32_t, 5> raw_words_{}')
                 )
@@ -5722,7 +5736,11 @@ class CodeGenerator:
             )
         if enc_name.upper() != 'ENC_MIMG':
             return None
-        if self._issues_image_memory(inst_name) and opnd_name == 'vaddr':
+        if (
+            self._issues_image_memory(inst_name)
+            and opnd_name == 'vaddr'
+            and self.isa_spec.profile.image_dimensions_in_resource
+        ):
             # GFX9 dimensions come from T#, unavailable at decode time.
             # Three coordinates cover every supported load/store shape.
             return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
@@ -8148,12 +8166,38 @@ class CodeGenerator:
             self._append_wait_counter_type(L, sem)
             if is_load:
                 L.append(f'  d->dst_reg_base = {data_base};')
+            image_dimensions_in_resource = (
+                self.isa_spec.profile.image_dimensions_in_resource
+            )
+            vimage_encoding = self.isa_spec.arch_name == 'rdna4'
+            resource = 'inst_.rsrc' if vimage_encoding else 'inst_.srsrc * 4'
+            coordinates = self._image_coordinates()
+            encoding = self.isa_spec.encoding_map[inst.enc_name]
+            fields = {f.name for f in encoding.ucode_fields}
+            unsupported = (
+                ' || '.join(f'inst_.{f}' for f in ('r128', 'tfe') if f in fields)
+                or 'false'
+            )
+            flags = [
+                '.dmask = inst_.dmask',
+                '.a16 = bool(inst_.a16)',
+                '.d16 = bool(inst_.d16)',
+            ]
+            if 'lwe' in fields:
+                flags.append('.lwe = bool(inst_.lwe)')
+            if image_dimensions_in_resource:
+                flags.append('.da = bool(inst_.da)')
+            # VIMAGE has no UNORM bit: its loads/stores use integer texel
+            # coordinates. MIMG must preserve the encoded control.
+            flags.append(
+                '.unorm = bool(inst_.unorm)' if 'unorm' in fields else '.unorm = true'
+            )
+            if not image_dimensions_in_resource:
+                flags.append('.dim = inst_.dim')
+            flags.append(f'.unsupported = {unsupported}')
             L.append(
-                '  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, '
-                'inst_.vaddr, {.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
-                '.d16 = bool(inst_.d16), .lwe = bool(inst_.lwe), '
-                '.da = bool(inst_.da), .unorm = bool(inst_.unorm)})'
-                '.failed()) {'
+                f'  if (amdgpu::prepare_image_access(wf, *d, {resource}, {coordinates}, '
+                '{' + ', '.join(flags) + '}).failed()) {'
             )
             L.append('    return;')
             L.append('  }')
@@ -8163,29 +8207,28 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'image_load':
-            # Minimal image load: treat as a flat read from the image resource base address.
-            # Full image addressing (texture coordinates, dimensions) not yet implemented.
-            L.append('  // Minimal image load stub — not yet implemented.')
-            L.append('  (void)wf;')
+            L.append('  // Other image loads are not implemented.')
+            L.append(
+                '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
             return '\n'.join(L)
 
         if cls == 'image_store':
-            L.append('  // Minimal image store stub — not yet implemented.')
-            L.append('  (void)wf;')
+            L.append('  // Other image stores are not implemented.')
+            L.append(
+                '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
             return '\n'.join(L)
 
         if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':
-            resource = (
-                'inst_.rsrc'
-                if self.isa_spec.arch_name == 'rdna4'
-                else 'inst_.srsrc * 4'
-            )
-            lod = (
-                'inst_.vaddr0' if self.isa_spec.arch_name == 'rdna4' else 'inst_.vaddr'
-            )
-            r128 = (
-                'false' if self.isa_spec.arch_name.startswith('cdna') else 'inst_.r128'
-            )
+            vimage_encoding = self.isa_spec.arch_name == 'rdna4'
+            resource = 'inst_.rsrc' if vimage_encoding else 'inst_.srsrc * 4'
+            lod = 'inst_.vaddr0' if vimage_encoding else 'inst_.vaddr'
+            encoding_fields = {
+                field.name
+                for field in self.isa_spec.encoding_map[inst.enc_name].ucode_fields
+            }
+            r128 = 'inst_.r128' if 'r128' in encoding_fields else 'false'
             return (
                 f'  amdgpu::execute_image_resource_info(wf, {resource}, {lod}, '
                 f"{self._vgpr_base_expr('vdata')}, inst_.dmask, {r128}, inst_.a16);"
@@ -11407,6 +11450,22 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if self._issues_image_memory(inst.name):
+                            access_conditions += [
+                                'modifiers.image_address = &vaddr;',
+                                f'modifiers.image_coordinates = {self._image_coordinates()};',
+                                'modifiers.image_a16 = inst_.a16;',
+                            ]
+                            if self.isa_spec.profile.image_dimensions_in_resource:
+                                access_conditions.append(
+                                    'modifiers.image_coordinate_count = 3;'
+                                )
+                            else:
+                                access_conditions += [
+                                    'constexpr uint8_t kDimCoordinateCounts[] = {1, 2, 3, 3, 2, 3, 3, 4};',
+                                    'modifiers.image_coordinate_count = std::min<uint8_t>(3, kDimCoordinateCounts[inst_.dim]);',
+                                ]
+
                         if inst.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
                             access_conditions.append('modifiers.block_data = &vdst;')
                         elif inst.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
@@ -12850,9 +12909,8 @@ class CodeGenerator:
                                 )
 
                     if (
-                        profile.has_gfx11_image_address_extension
-                        and enc.enc_name.upper() == 'ENC_MIMG'
-                    ):
+                        profile.mimg_nsa_address_dwords is not None
+                    ) and enc.enc_name.upper() == 'ENC_MIMG':
                         ctor_body_parts.append('capture_nsa_words(inst, &vaddr);')
 
                     # Apply the fieldless-operand capability policy once, after
@@ -14501,7 +14559,7 @@ class CodeGenerator:
                     cpp_includes.extend(
                         [
                             (
-                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h',
+                                'rocjitsu/isa/arch/amdgpu/shared/image_access.h',
                                 False,
                             ),
                             ('memory', True),

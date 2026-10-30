@@ -837,6 +837,22 @@ TEST(RegisterAccessTest, Scalar64OperandAndExplicitMaskWritesAreAtomic) {
   EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
 }
 
+TEST(RegisterAccessTest, Gfx10NullDiscardsCarryDestinations) {
+  // CLR's gfx1030 pitched-copy kernel uses V_MAD_U64_U32 with SDST=NULL.
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    Fixture fx(arch);
+    ASSERT_NE(fx.wf, nullptr);
+    fx.wf->set_exec_raw(0x123456789abcdef0ull);
+    fx.wf->set_vcc_raw(0x13579bdf2468ace0ull);
+    resolve_dst_write(*fx.wf, kGfx10NullSelector, ~uint32_t{0}, 124);
+    resolve_dst_write64(*fx.wf, kGfx10NullSelector, ~uint64_t{0});
+    EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+    EXPECT_EQ(fx.wf->exec_raw(), 0x123456789abcdef0ull);
+    EXPECT_EQ(fx.wf->vcc(), 0x13579bdf2468ace0ull);
+    EXPECT_TRUE(fx.plugin->sgpr_writes.empty());
+  }
+}
+
 TEST(RegisterAccessTest, TrapSelectorsUseDedicatedWaveStorage) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);

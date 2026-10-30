@@ -206,6 +206,20 @@ constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_ver
   return 0;
 }
 
+/// @brief Tiling register shared by execution, KFD and DRM projections.
+/// @details A supplied device version, including zero, uses the device projection.
+/// Standalone CUs without device identity use representative architecture defaults.
+constexpr uint32_t image_gb_addr_config(rj_code_arch_t arch,
+                                        std::optional<uint32_t> device_version = std::nullopt) {
+  if (device_version)
+    return gb_addr_config_for_gfx_target_version(*device_version);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA1)
+    return gb_addr_config_for_gfx_target_version(100100);
+  if (arch == ROCJITSU_CODE_ARCH_RDNA2)
+    return gb_addr_config_for_gfx_target_version(100300);
+  return gb_addr_config_for_arch(arch);
+}
+
 constexpr uint32_t drm_shader_engine_count(uint32_t kfd_array_count, uint32_t arrays_per_engine) {
   if (kfd_array_count == 0 || arrays_per_engine <= 1)
     return kfd_array_count;

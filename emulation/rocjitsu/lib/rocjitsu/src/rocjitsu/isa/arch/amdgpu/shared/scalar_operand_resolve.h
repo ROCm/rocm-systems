@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_RESOLVE_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -259,7 +260,7 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     RegisterAccess(wf).write_ttmp(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return; // NULL
   if (ev == m0_ev) {
     wf.set_m0(val);
@@ -299,7 +300,7 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     RegisterAccess(wf).write_ttmp64(static_cast<uint32_t>(ev) - kTtmpSelectorFirst, val);
     return;
   }
-  if (ev == static_cast<int>(kModernNullSelector))
+  if (scalar_selector_is_null(wf.cu().arch(), static_cast<uint32_t>(ev)))
     return;
   if (ev == static_cast<int>(kExecSelectorFirst)) {
     wf.set_exec_raw(val);

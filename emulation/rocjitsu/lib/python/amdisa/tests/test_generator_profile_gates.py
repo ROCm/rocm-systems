@@ -5129,7 +5129,7 @@ def test_gfx11_graphics_sources_use_vgpr_selectors():
         assert (
             profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
         )
-        assert profile.has_gfx11_image_address_extension
+        assert profile.mimg_nsa_address_dwords == '1u'
 
 
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
