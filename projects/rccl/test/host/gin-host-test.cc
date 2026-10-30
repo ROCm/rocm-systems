@@ -1331,8 +1331,8 @@ TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_FirstBackendsSetupFails_Succe
   EXPECT_EQ(2, fake_.createContextCalls);
 }
 
-// The built-in SDMA collectives set reqs.ginType, so their DevComm binds the SDMA
-// slot even when another backend is the default.
+// ncclGinDevCommSetup honors reqs.ginType: an SDMA request binds backendIndex 1 when
+// PROXY is the default; NCCL_GIN_TYPE_NONE still takes backends[0].
 TEST_F(GinHostBackendSelectMicrotest, DevCommSetup_RequestedTypeIsNotTheDefault_BindsThatBackend) {
   auto* gs = gin();
   gs->numActiveBackends = 2;

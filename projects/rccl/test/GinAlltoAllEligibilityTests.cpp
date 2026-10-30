@@ -25,11 +25,7 @@ namespace
 constexpr uintptr_t kSendAddr = 0x1000;
 constexpr uintptr_t kRecvAddr = 0x2000;
 
-// Stand-in ncclComm that passes every ncclAllToAllGinSdmaEligible() gate, so each
-// test below spoils one field and the verdict flips only because of it. bigSize
-// must stay non-zero or ncclTeamLsa() runs real device-runtime init here and
-// crashes. Purpose-built like DdaIpcMockComm: common/MockComm.hpp builds topology
-// and arch state that no eligibility gate reads.
+// Passes every ncclAllToAllGinSdmaEligible() gate; bigSize != 0 keeps ncclTeamLsa() off real devr init.
 struct GinAlltoAllMockComm
 {
     ncclComm             comm{};
@@ -87,9 +83,7 @@ bool paramRejectsAll()
 
 } // namespace
 
-// Baseline is eligible, so each case below fails if the gate it targets is deleted.
-// The 16 B alignment gate stays with the MPI tests in transport/GinDeviceMPITests.cpp,
-// since the size used here sits on the SDMA tier that skips it.
+// Baseline is eligible; each case fails if its gate is deleted. 16 B alignment stays in GinDeviceMPITests.
 class GinAlltoAllEligibilityTest : public ::testing::Test
 {
 protected:
