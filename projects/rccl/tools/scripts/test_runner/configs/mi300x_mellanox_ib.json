@@ -5270,6 +5270,14 @@
           "name": "SymmetricKernel_ReduceScatterLL_PositionDependentData",
           "description": "Forced ReduceScatter_LL symmetric kernel with per-(rank, index) unique data; skips when the kernel is ineligible",
           "test_filter": "SymmetricKernelCorruptionTest.ReduceScatterLL_PositionDependentData"
+        },
+        {
+          "name": "SymmetricKernel_LLA2A_EpochWraparound",
+          "description": "LL A2A header seeded to -4u on one block: two forced ReduceScatter_LL calls cross the -2u/-1u wrap; checks data, header 0 and cleared slots",
+          "test_filter": "SymmetricKernelCorruptionTest.LLA2A_EpochWraparound",
+          "env_variables": {
+            "NCCL_SYM_CTAS": "1"
+          }
         }
       ]
     },
@@ -6176,7 +6184,7 @@
     
     {
       "name": "Device API MPI - LSA Reduce/Copy",
-      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage, plus the ReduceScatter_LL placement test, on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
+      "description": "DeviceApiMPITests memory/LSA pointer, barrier, reduce/copy, and custom RedOp coverage, plus the ReduceScatter_LL placement and LL A2A epoch-wrap tests, on 2 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_lsa",
       "enabled": true
     },
