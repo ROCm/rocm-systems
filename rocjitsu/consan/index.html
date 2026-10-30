@@ -1,0 +1,2303 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User and developer documentation for the ROCm Just-in-Time Suite.">
+      
+      
+      
+        <link rel="canonical" href="https://rocm.github.io/rocm-systems/rocjitsu/consan/">
+      
+      
+        <link rel="prev" href="../race-detector/">
+      
+      
+        <link rel="next" href="../rocgdb-debugging/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="data:,">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Native LDS ConSan - Rocjitsu</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/handbook.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#consan-design-and-use" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Rocjitsu" class="md-header__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Rocjitsu
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Native LDS ConSan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 547 · build snapshot" aria-label="Stars: 547">547</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 475 · build snapshot" aria-label="Forks: 475">475</li>
+      </ul>
+    </div>
+  </a>
+</div>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Rocjitsu" class="md-nav__button md-logo" aria-label="Rocjitsu" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Rocjitsu
+  </label>
+  
+    <div class="md-nav__source">
+      
+
+<div class="source-links">
+  <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" title="View Rocjitsu source on GitHub · Stars and forks are for ROCm/rocm-systems" class="md-source">
+    <div class="md-source__icon md-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </div>
+    <div class="md-source__repository md-source__repository--active">
+      ROCm/rocm-systems
+      <ul class="md-source__facts">
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 547 · build snapshot" aria-label="Stars: 547">547</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 475 · build snapshot" aria-label="Forks: 475">475</li>
+      </ul>
+    </div>
+  </a>
+</div>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 21.5c-1.35-.85-3.8-1.5-5.5-1.5-1.65 0-3.35.3-4.75 1.05-.1.05-.15.05-.25.05-.25 0-.5-.25-.5-.5V6c.6-.45 1.25-.75 2-1 1.11-.35 2.33-.5 3.5-.5 1.95 0 4.05.4 5.5 1.5 1.45-1.1 3.55-1.5 5.5-1.5 1.17 0 2.39.15 3.5.5.75.25 1.4.55 2 1v14.6c0 .25-.25.5-.5.5-.1 0-.15 0-.25-.05-1.4-.75-3.1-1.05-4.75-1.05-1.7 0-4.15.65-5.5 1.5M12 8v11.5c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5V7c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5m1 3.5c1.11-.68 2.6-1 4.5-1 .91 0 1.76.09 2.5.28V9.23c-.87-.15-1.71-.23-2.5-.23q-2.655 0-4.5.84zm4.5.17c-1.71 0-3.21.26-4.5.79v1.69c1.11-.65 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24v-1.5c-.87-.16-1.71-.23-2.5-.23m2.5 2.9c-.87-.16-1.71-.24-2.5-.24-1.83 0-3.33.27-4.5.8v1.69c1.11-.66 2.6-.99 4.5-.99 1.04 0 1.88.08 2.5.24z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command-line interface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rccl-scaleout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Two-node RCCL NET smoke
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../race-detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Race detection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native LDS ConSan
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native LDS ConSan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#offline-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline preparation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution and capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#offline-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#analysis-and-admission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analysis and admission
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-and-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build and setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#1-offline-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Offline preparation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-execution-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Execution and capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-offline-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Offline diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-consan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending ConSan
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocgdb-debugging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmark-runner-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark runner setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../qemu-vfio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    QEMU VFIO-user compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vulkan-compute/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vulkan compute
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-2-2 2 2 0 0 0 2-2V5h2V3m6 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 2-2 2 2 0 0 1-2-2V5h-2V3z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arith-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arithmetic library
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-backing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    KFD and GEM backing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../style/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code style
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simdojo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU hardware model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbt-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary translation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rj_dbt_translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translation tool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rocjitsu_dbt_guest/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DBT guest mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Binary instrumentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dbi-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Instrumentation overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Execution plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../codegen/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA code generation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-target-providers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA target providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../isa-gap-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ISA gap audit
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../npi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../async-instructions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asynchronous MMA execution
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mma-admission/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MMA lookahead admission
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concurrent-dispatch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concurrent dispatch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../memory-wait-counter-coverage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory wait coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 18H4V8h16m0-2h-8l-2-2H4c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+    
+  
+  
+    <li class="md-nav__item">
+      <a href="../blog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Blog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#offline-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline preparation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution and capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#offline-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Offline diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#analysis-and-admission" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analysis and admission
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to use
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to use">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-and-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build and setup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#1-offline-preparation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Offline preparation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-execution-and-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Execution and capture
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-offline-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Offline diagnosis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extending-consan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extending ConSan
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="consan-design-and-use">ConSan: design and use<a class="headerlink" href="#consan-design-and-use" title="Permanent link">&para;</a></h1>
+<p>ConSan investigates memory conflicts in compiled AMD GPU kernels using native
+ISA instrumentation. It inserts probes into a code object and diagnoses the
+accesses observed when that instrumented kernel runs. Working on native
+instructions makes the analysis follow the memory operations and active lanes
+after source compilation, without requiring the kernel's source as input.</p>
+<p>The implementation separates preparation, execution/capture, and diagnosis.
+Prepared code can be inspected before an application loads it; the application
+process supplies execution resources and saves observations; a separate tool
+analyzes that saved evidence after the run.</p>
+<p>The execution/capture runtime is a standalone ROCr HSA tools plugin,
+<code>libhsa_consan.so</code>, loaded into the application through <code>HSA_TOOLS_LIB</code>. It
+intercepts code-object loading and dispatch, supplies runtime bindings and
+storage, and saves observations.</p>
+<p>Currently, ConSan implements one bounded analysis of LDS, the memory shared
+within a workgroup. It does not provide general GPU program coverage.</p>
+<p>The simulator also provides a separate <a href="../race-detector/">race detector</a> that
+tracks in-flight memory events during simulated execution. ConSan obtains
+observations from inserted native ISA probes and diagnoses saved captures.
+Their evidence and supported operation sets differ, including when ConSan's
+instrumented kernel runs through the simulator.</p>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
+<p>The three-stage split has three purposes:</p>
+<ul>
+<li><strong>Offline preparation:</strong> Move program analysis, probe lowering, and rewriting
+  out of application startup, so transformed code and resource requirements can
+  be inspected before the application runs.</li>
+<li><strong>Execution and capture:</strong> Reuse a prepared artifact for matching original
+  inputs. The runtime supplies values known only at launch time and handles
+  execution and capture.</li>
+<li><strong>Offline diagnosis:</strong> Replay saved evidence in an independent analyzer.
+  Diagnosis can evolve separately from application execution, within the saved
+  evidence's contract.</li>
+</ul>
+<div class="highlight"><pre><span></span><code>             Original code object + target/entry
+                              |
+                              v
++------------------------------------------------------------+
+| 1. Offline preparation (compiler)                          |
+|                                                            |
+| Decode/qualify -&gt; probe/resource planning                  |
+|                -&gt; rewrite/relocate/validate                |
++------------------------------------------------------------+
+                              |
+                  prepared.hsaco + facts.bin
+                              |
+                              v
++------------------------------------------------------------+
+| 2. Execution and capture (HSA plugin + GPU)                |
+|                                                            |
+| Application loads original -&gt; match/verify/load prepared   |
+| Application dispatch -&gt; bind wrapper/context/report        |
+| Prepared kernel + probes -&gt; observations/loss/status       |
+| Completion/visibility -&gt; forward application completion    |
+| Owning host snapshot -&gt; writer -&gt; explicit finish          |
++------------------------------------------------------------+
+                              |
+                     Closed capture file
+                              |
+                              v
++------------------------------------------------------------+
+| 3. Offline diagnosis (analyzer)                            |
+|                                                            |
+| Decode/qualify -&gt; analysis checks -&gt; render                |
++------------------------------------------------------------+
+                              |
+                     Findings + coverage
+</code></pre></div>
+<h3 id="offline-preparation">Offline preparation<a class="headerlink" href="#offline-preparation" title="Permanent link">&para;</a></h3>
+<p>The compiler qualifies the exact original image and entry, plans probes and
+resources, and rewrites code while preserving the original operations. Its
+artifact directory contains:</p>
+<ul>
+<li><code>prepared.hsaco</code>: the instrumented code object.</li>
+<li><code>facts.bin</code>: image identities and static instruction facts, including each
+  observation site's read/write kind and width.</li>
+<li><code>ready</code>: a marker published after the artifact files close successfully.</li>
+</ul>
+<p>The preparation tool embeds probe bodies compiled at build time for each
+supported target/wave mode and lowers calls through the shared DBI framework.
+Register counts and kernarg size in the prepared descriptor and AMDHSA note
+are updated together by the shared code-object editor. Missing fields or integer
+encodings too narrow for the requested sizes reject preparation before artifact
+publication. ConSan keeps its own target, argument, and launch admission checks.</p>
+<p>The compiled probes use <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/wave_state.h"><code>DeviceWaveState</code></a>
+for explicit memory-backed sequence and loss counters. Each wave exclusively
+owns its counters in runtime-owned storage retained through dispatch completion.
+<code>probes.hip</code> supplies their locations within the wave's report row; the helper
+is independent of the row and record layouts. <code>prepare.cpp</code> requests full EXEC
+for every probe call, and only lane zero writes the counters. Counter values
+persist in memory across calls rather than in implicit register state.</p>
+<h3 id="execution-and-capture">Execution and capture<a class="headerlink" href="#execution-and-capture" title="Permanent link">&para;</a></h3>
+<p>The plugin matches the application's original object to the artifact and loads
+the prepared replacement. At dispatch, the runtime supplies launch bindings and
+report storage; GPU probes publish site identities, effective LDS addresses,
+widths, and lane masks. An independent host snapshot lets GPU report storage be
+reused while capture writing continues. Explicit finish drains these handoffs
+and closes the capture.</p>
+<p>The runtime neither compiles nor diagnoses races. Its transport completion does
+not synchronize guest LDS accesses.</p>
+<p>Applications integrating the plugin must check completion values and finish
+status. The plugin tracks signals successfully created through the hooked
+<code>hsa_signal_create</code> or, when provided by the runtime, <code>hsa_amd_signal_create</code>
+after plugin installation. Dispatch completions must be fresh, dedicated signals
+initialized to <code>1</code>. Signals created before installation, imported from another
+process, or obtained through other APIs or by bypassing the hooks are untracked.
+They cannot be used as dispatch completions and receive no failure notification.</p>
+<p>When the plugin rejects a dispatch before submission, it records failure and
+stores <code>-1</code> to its tracked application completion signal, unless pending work
+already owns that signal. Rejected batches also notify tracked AND/OR barrier
+completions with <code>-1</code>, preserving signals owned by pending dispatches. Once the
+runtime has failed, it discards later AND/OR barriers with the same notification
+rules. Healthy individual barriers and barrier-only batches pass through. Other
+packet types are discarded without completion notification, even if their
+signals are tracked. Clients must use bounded waits: a discarded barrier with an
+untracked signal can retain its initial value, and a dependency requiring <code>0</code>
+is not satisfied by the failure value <code>-1</code>.</p>
+<p>The failure notification releases a waiter for a value less than <code>1</code>, but does
+not mean that the kernel ran. Accept only exactly <code>0</code> as normal completion, and
+check it before reading kernel output. A timeout or any other completion value
+is an execution failure.
+The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/consan_hsa_runner.cpp">example runner</a> enforces these checks.</p>
+<p>Keep resources alive until their ownership handoffs have drained. The runner
+uses a successful <code>rj_consan_drain()</code> before releasing each completed dispatch's
+signal. Call <code>rj_consan_finish()</code> while HSA and the remaining dispatch resources
+are still alive, and check for return <code>0</code> before tearing them down or calling
+<code>hsa_shut_down</code>. A nonzero finish status means the capture was not successfully
+saved, even if earlier kernels completed normally. The plugin
+refuses HSA shutdown until finish reaches its terminal state. Shutdown acceptance
+does not establish capture success; the application must retain the finish
+status. A failed finish does not promise recovery from work still in flight.
+Unexpected C++ exceptions terminate the process and do not promise recovery,
+cleanup or completion of outstanding work.</p>
+<h3 id="offline-diagnosis">Offline diagnosis<a class="headerlink" href="#offline-diagnosis" title="Permanent link">&para;</a></h3>
+<p>The analyzer validates the closed capture, joins GPU observations to static
+instruction facts, runs the checks, and emits JSON findings and coverage. The
+capture owns the evidence needed for replay; analysis needs neither the
+original code-object files nor live HSA state.</p>
+<h2 id="available-analysis">Available analysis<a class="headerlink" href="#available-analysis" title="Permanent link">&para;</a></h2>
+<p><code>LdsRaceDetection</code> is the only implemented analysis. It checks ordinary native
+32-bit LDS reads/writes at naturally aligned addresses, using the same
+observations for two checks:</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>What it reports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cross-wave conflict</td>
+<td>Address-group records from different waves access the same LDS word, with at least one write. Read/read pairs do not conflict.</td>
+</tr>
+<tr>
+<td>Same-instruction ordinary-store collision</td>
+<td>Multiple lanes of one store observation write the same LDS word.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="analysis-and-admission">Analysis and admission<a class="headerlink" href="#analysis-and-admission" title="Permanent link">&para;</a></h3>
+<p>Preparation accepts a limited instruction/access subset without relevant guest
+synchronization; unsupported forms, barriers, and atomics are rejected. Exact
+conditions are defined by <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp">compiler qualification</a>
+and <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp">runtime admission</a>.</p>
+<p>The input code object must contain exactly one kernel, matching the requested
+entry. Selecting an entry does not exclude sibling kernels from this requirement;
+provide a code object containing only the selected kernel.</p>
+<p>Recording is bounded and does not provide a full execution history. Broader
+access forms, synchronization analysis, and application integration require
+extensions.</p>
+<h2 id="how-to-use">How to use<a class="headerlink" href="#how-to-use" title="Permanent link">&para;</a></h2>
+<p>This example runs a <strong>gfx1250 wave32</strong> assembly fixture with 64 threads in one
+workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
+The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
+simulator configuration. A runner option does not change an image's wave mode.</p>
+<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/consan_hsa_runner.cpp">controlled HSA runner</a> supplies this
+fixture's argument bindings, controlled queue, nonoverlapping one-workgroup
+launch, and explicit finish protocol. It is the example application, not a
+general application launcher; other integrations must meet the runtime
+admission conditions linked above.</p>
+<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/fixtures/native_lds.s">assembly fixture</a> has this logic
+for the selected <code>native-1.hsaco</code>. This is a logical sketch, not compilable HIP
+input:</p>
+<div class="highlight"><pre><span></span><code>one workgroup, two wave32 waves
+wave 0, lane 0: write a 32-bit value to LDS byte offset 0
+wave 1, lane 0: read 32 bits from LDS byte offset 0
+no workgroup synchronization; inter-wave execution order is unspecified
+</code></pre></div>
+<p>The racing read has no required value; the finding is based on the observed
+conflicting accesses.</p>
+<h3 id="build-and-setup">Build and setup<a class="headerlink" href="#build-and-setup" title="Permanent link">&para;</a></h3>
+<p>Follow <a href="../building/">building.md</a> for general prerequisites and build setup.
+Use a configured build from this checkout, with its ROCm SDK environment active.
+This simulator example requires Linux, HSA headers/runtime, and the AMD
+assembler/linker for the original assembly fixture. Preparation additionally
+requires <code>amdclang++</code> and <code>clang-offload-bundler</code> to build its callable probes.
+The phase components are:</p>
+<ul>
+<li><strong>Offline preparation:</strong> <code>rj_consan_prepare</code>, enabled by
+  <code>RJ_BUILD_CONSAN_COMPILER=ON</code>.</li>
+<li><strong>Execution and capture:</strong> <code>libhsa_consan.so</code>, enabled by
+  <code>RJ_BUILD_CONSAN_RUNTIME=ON</code>. The example uses <code>consan_hsa_runner</code> as its
+  application and <code>rocjitsu</code> to launch it in the simulator.</li>
+<li><strong>Offline diagnosis:</strong> <code>rj_consan_analyze</code>, enabled by
+  <code>RJ_BUILD_CONSAN_ANALYZER=ON</code>.</li>
+</ul>
+<p>Enable <code>BUILD_TESTING=ON</code> for the runner and fixtures. Use a full build to also
+obtain the simulator launcher, its <code>librocjitsu.so</code> runtime, and the target
+fixture. Preserve the build's compiler, SDK, and sanitizer settings. Run from
+the repository root, selecting your configured directory for <code>consan_build</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">consan_source</span><span class="o">=</span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/emulation/rocjitsu"</span>
+<span class="nv">consan_build</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_source</span><span class="s2">/build"</span>
+cmake<span class="w"> </span>-S<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_source</span><span class="s2">"</span><span class="w"> </span>-B<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DBUILD_TESTING<span class="o">=</span>ON<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DRJ_BUILD_CONSAN_COMPILER<span class="o">=</span>ON<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DRJ_BUILD_CONSAN_RUNTIME<span class="o">=</span>ON<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DRJ_BUILD_CONSAN_ANALYZER<span class="o">=</span>ON
+cmake<span class="w"> </span>--build<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">"</span><span class="w"> </span>--parallel<span class="w"> </span><span class="m">4</span>
+</code></pre></div>
+<p>Set the paths and plugin environment in the same shell. This selects the
+target-specific assembly image and a new directory for artifacts and capture;
+the launcher passes the plugin settings to the runner.</p>
+<div class="highlight"><pre><span></span><code><span class="nv">consan_prepare</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tools/rj_consan_prepare"</span>
+<span class="nv">consan_analyze</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tools/rj_consan_analyze"</span>
+<span class="nv">consan_launcher</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tools/rocjitsu/rocjitsu"</span>
+<span class="nv">consan_runner</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tests/patch/consan/consan_hsa_runner"</span>
+<span class="nv">consan_plugin</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/lib/rocjitsu/src/rocjitsu/hooks/consan/libhsa_consan.so"</span>
+<span class="nv">consan_original</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_build</span><span class="s2">/tests/patch/consan/fixtures/targets/gfx1250/wave32/native-1.hsaco"</span>
+<span class="nv">consan_config</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_source</span><span class="s2">/configs/gfx1250_mi455x.json"</span>
+<span class="nv">consan_example</span><span class="o">=</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TMPDIR</span><span class="k">:-</span><span class="p">/tmp</span><span class="si">}</span><span class="s2">/consan-example.XXXXXX"</span><span class="k">)</span>
+
+<span class="nb">export</span><span class="w"> </span><span class="nv">HSA_TOOLS_LIB</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_plugin</span><span class="s2">"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_PLUGIN_PATH</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_plugin</span><span class="s2">"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_ARTIFACT_DIR</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/artifact"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RJ_CONSAN_CAPTURE_PATH</span><span class="o">=</span><span class="s2">"</span><span class="nv">$consan_example</span><span class="s2">/capture.bin"</span>
+</code></pre></div>
+<h3 id="1-offline-preparation">1. Offline preparation<a class="headerlink" href="#1-offline-preparation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_prepare</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_original</span><span class="s2">"</span><span class="w"> </span>gfx1250<span class="w"> </span>lds_producer_consumer<span class="w"> </span><span class="s2">"</span><span class="nv">$RJ_CONSAN_ARTIFACT_DIR</span><span class="s2">"</span>
+</code></pre></div>
+<p>The artifact destination must be new. The runtime verifies that this artifact
+matches the exact original image and qualified entry.</p>
+<h3 id="2-execution-and-capture">2. Execution and capture<a class="headerlink" href="#2-execution-and-capture" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_launcher</span><span class="s2">"</span><span class="w"> </span>--config<span class="w"> </span><span class="s2">"</span><span class="nv">$consan_config</span><span class="s2">"</span><span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_runner</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$consan_original</span><span class="s2">"</span><span class="w"> </span>lds_producer_consumer<span class="w"> </span><span class="m">1</span><span class="w"> </span>observe<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target<span class="w"> </span>gfx1250<span class="w"> </span>--wave-size<span class="w"> </span><span class="m">32</span><span class="w"> </span>--threads<span class="w"> </span><span class="m">64</span>
+</code></pre></div>
+<p>The runner loads the <strong>original</strong> image; the plugin supplies the replacement.
+The ConSan plugin produces the capture inside this simulated application run.
+The runner calls <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/hooks/consan/api.h">rj_consan_finish()</a>
+before HSA teardown; no separate finish command is needed. Successful execution
+and capture return runner exit 0 and publish <code>RJ_CONSAN_CAPTURE_PATH</code>. Existing
+capture files are not overwritten.</p>
+<h3 id="3-offline-diagnosis">3. Offline diagnosis<a class="headerlink" href="#3-offline-diagnosis" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="s2">"</span><span class="nv">$consan_analyze</span><span class="s2">"</span><span class="w"> </span><span class="s2">"</span><span class="nv">$RJ_CONSAN_CAPTURE_PATH</span><span class="s2">"</span><span class="w"> </span>--examples<span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+<p>The analyzer writes JSON to stdout. For this race example, exit 1 means a
+conflict was found; exit 0 means no findings were observed. The result includes:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"verdict"</span><span class="p">:</span><span class="w"> </span><span class="s2">"findings"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="mi">1250</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"wave_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">32</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"cross_wave_pairs"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"collision_groups"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"coverage_complete"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Static facts identify the write/read sites; captured observations place them
+in different waves at LDS offset 0, each with lane 0 participating. Joining
+those facts produces one conflicting record pair, <code>cross_wave_pairs: 1</code>, with
+no same-instruction store collision. The example includes original instruction
+positions and lane masks. <code>--examples 1</code> limits displayed examples per check per
+execution without changing counts or coverage.</p>
+<p>Findings describe conflicts among valid observations; coverage describes how
+fully the admitted scope was observed. Findings can coexist with incomplete
+coverage. Zero findings, even with <code>coverage_complete: true</code>, does not prove
+that the application is race-free or that another run has the same result.
+Always inspect coverage independently of the verdict and exit code.</p>
+<p>The closed capture can be analyzed again without images or application state.
+Other normal nonzero analyzer statuses indicate input/output failures. See the
+<a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tools/rj_consan_analyze.cpp">analyzer CLI</a> and
+<a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.h">analysis results</a>
+for option, status, and result details.</p>
+<p>Entry names must be valid UTF-8 for JSON output. Preparation rejects malformed
+names before publishing an artifact. The analyzer checks saved captures and
+rejects malformed names with input-error exit 2 before writing JSON. Binary
+capture retains the original name bytes. ASCII and valid UTF-8 names keep their
+original spelling.</p>
+<h2 id="extending-consan">Extending ConSan<a class="headerlink" href="#extending-consan" title="Permanent link">&para;</a></h2>
+<p>Preparation uses the shared <code>Instrumentor</code> and <code>TrampolineBuilder</code> with
+separately compiled, reusable HIP probe functions.</p>
+<p>DBI owns dispatch entry and terminal placement, operand capture, parallel
+argument copies, call envelopes, state preservation, resource growth, and emitted
+site attribution. The runtime explicitly supplies the
+kernarg wrapper required by the DBI entry prologue. ConSan retains native LDS
+qualification, address grouping, observation fields, and diagnosis. Ordering and
+loss counters use DBI's explicit memory-backed wave state; their locations stay
+in ConSan's existing report rows. No hidden register state carries values from
+one probe invocation to the next.</p>
+<p>ConSan selects DBI's <code>DeclaredRegisters</code> preservation policy. It restores
+originally declared GPRs that the probe or call envelope overwrites, including
+values liveness marks dead. This gives ConSan a stronger transparency contract
+and reduces its dependence on liveness precision. The LDS checks do not
+intrinsically require this policy: <code>LiveRegisters</code> preserves live values and
+can need fewer backups, but changing ConSan's policy would need execution validation of
+that narrower contract. Merely preparing a dense input under <code>LiveRegisters</code>
+does not establish that its instrumented execution is correct.</p>
+<p>The conservative choice can require more registers and save/restore
+instructions, and larger trampolines can exhaust branch reach sooner. ConSan
+currently accepts those costs rather than selecting a different policy when
+an input exceeds the resource or branch-distance limits.</p>
+<p>The callable path uses register backups instead of introducing a private frame.
+It requires one kernel with enumerable register uses, zero VGPR banks at gfx1250
+call sites, a bank-preserving probe body, and enough registers for the combined
+probe and preservation plan. An input exceeding that plan is rejected during
+preparation. Entry stubs and per-site trampolines use SOPP branches, whose
+signed 16-bit dword displacement reaches approximately 128 KiB in either
+direction. Large original text or dense instrumentation can exceed that reach
+even within the input size and instruction budgets; preparation rejects these
+inputs before publishing an artifact. Streaming transport, arbitrary placement,
+and general MODE save/restore remain outside the current implementation.</p>
+<p>Enabling <code>RJ_BUILD_CONSAN_COMPILER</code> requires ROCm's <code>amdclang++</code> and
+<code>clang-offload-bundler</code>, including when <code>BUILD_TESTING=OFF</code>: CMake compiles the
+HIP probe functions and embeds a standalone code object for each supported
+target/wave mode. A missing tool is a configuration error. These are build-time
+dependencies of preparation; the runtime and analyzer neither build that
+catalogue nor require the device compiler.</p>
+<p>A new analysis primarily extends <strong>compiler facts/probes and offline diagnosis</strong>
+together. Define its question, scope, required evidence, and behavior under loss:</p>
+<ul>
+<li><strong>Compiler:</strong> select operations and lower probes while preserving guest state
+  and executing each original operation once. Reuse rocJitsu's code-object
+  parsing, ISA decoders/builders, and ELF rewriting/relocation through the
+  <a href="../dbi-design/">shared DBI machinery</a>.</li>
+<li><strong>Offline analyzer:</strong> qualify the saved evidence and implement checks,
+  results, and rendering. Start from the current
+  <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.cpp">LDS analyzer</a>.</li>
+<li><strong>Runtime/capture:</strong> reuse artifact matching, launch bindings, owning
+  snapshots, and capture writing. Extend these services only when new host
+  facts, storage, or lifetimes require it; diagnosis stays offline.</li>
+</ul>
+<p>When new evidence is needed, evolve the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/code/consan/contract.h">saved contract</a>,
+codecs, and validators with their producers and consumers. Current input,
+contract, and result types are LDS-specific, so a second analysis must adapt
+those boundaries together.</p>
+<p>Use focused producer/transport, runtime, and analyzer checks, plus the
+three-process controls in <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/consan_e2e.py">consan_e2e.py</a>, which cover
+a finding case and a defined-behavior preservation control. Every admitted
+target/wave mode uses the same integration scenarios in the simulator and on
+matching physical hardware. Required simulator cases must execute without skips;
+physical cases skip when the requested HSA agent is unavailable. Runtime-stage
+scenarios remain available without building the analyzer. Keep simulator and
+physical-target evidence distinct.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br> <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu" target="_blank" rel="noopener" title="Rocjitsu on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/ROCm/rocm-systems/issues" target="_blank" rel="noopener" title="Report an issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 8h-2.81c-.45-.8-1.07-1.5-1.82-2L17 4.41 15.59 3l-2.17 2.17a6 6 0 0 0-2.83 0L8.41 3 7 4.41 8.62 6c-.75.5-1.36 1.21-1.81 2H4v2h2.09c-.06.33-.09.66-.09 1v1H4v2h2v1c0 .34.03.67.09 1H4v2h2.81A5.99 5.99 0 0 0 15 20.18c.91-.52 1.67-1.28 2.19-2.18H20v-2h-2.09c.06-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.03-.67-.09-1H20zm-4 7a4 4 0 0 1-4 4 4 4 0 0 1-4-4v-4a4 4 0 0 1 4-4 4 4 0 0 1 4 4zm-2-5v2h-4v-2zm-4 4h4v2h-4z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "navigation.tracking", "toc.follow", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../assets/repository-stats.js"></script>
+      
+    
+  </body>
+</html>
