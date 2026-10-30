@@ -195,10 +195,13 @@ public:
   }
 
   /// Called after one tensor DMA instruction and any descriptor-requested
-  /// atomic-barrier arrival return normally. The observation contains only
-  /// in-bounds global requests attempted, in execution order. It intentionally
-  /// does not filter memory access outcomes, matching the observer boundary.
-  /// Its deferred address view is borrowed and valid only during this callback.
+  /// atomic-barrier arrival return normally, when the transfer made global
+  /// requests or touched LDS. The observation contains the in-bounds global
+  /// requests attempted, in execution order, and the LDS byte ranges the
+  /// transfer wrote or read. A load whose tile lies wholly outside the tensor
+  /// has LDS ranges but no global requests. It intentionally does not filter
+  /// memory access outcomes, matching the observer boundary. Its address view
+  /// and LDS ranges are borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
   virtual void

@@ -1004,6 +1004,76 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
   EXPECT_EQ(diagnostic.find("FFM v13"), std::string::npos);
 }
 
+TEST_F(PerfsimPluginTest, ExecutedTensorLoadWithoutGlobalRequestsKeepsTheDispatch) {
+  // A tensor load whose tile lies wholly outside the tensor zero-fills LDS and
+  // makes no global requests. Its observation has LDS ranges but no addresses,
+  // which perfsim must skip rather than reject. The control is in bounds.
+  struct Case {
+    uint32_t dispatch_id;
+    uint32_t tensor_dim0;
+  };
+  for (const Case test_case : {Case{60, 1}, Case{61, 0}}) {
+    SCOPED_TRACE(test_case.tensor_dim0);
+    const std::string config = plugin_config();
+    WaveFixture fixture;
+    testing::internal::CaptureStderr();
+    {
+      auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+      ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(config.c_str())));
+      fixture.cu->set_plugin_group(group);
+      group->onInit();
+
+      const KernelDispatchInfo info = dispatch_info(test_case.dispatch_id);
+      group->onAmdgpuDispatchPacketProcessed(info);
+      group->onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+      // Process 0 reads the fixture's physical memory directly.
+      Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0, /*queue_id=*/3,
+                                     /*process_id=*/0);
+      wave.set_lds_base(fixture.cu->allocate_lds(256));
+      wave.set_lds_size(256);
+      group->onAmdgpuWavefrontDispatched(wave);
+
+      // One i32 element at LDS offset 0 from a one-element tile.
+      constexpr uint64_t kGlobal = 0x300000;
+      const std::array<uint32_t, 4> group0{1, 0, static_cast<uint32_t>(kGlobal),
+                                           static_cast<uint32_t>(kGlobal >> 32) | 0x80000000u};
+      const std::array<uint32_t, 8> group1{
+          2u << 16, test_case.tensor_dim0 << 16, 0, 1u << 16, 0, 0, 0, 0};
+      const uint32_t sgprs = wave.sgpr_alloc().base;
+      for (uint32_t reg = 0; reg < group0.size(); ++reg)
+        fixture.cu->write_sgpr(sgprs + reg, group0[reg]);
+      for (uint32_t reg = 0; reg < group1.size(); ++reg)
+        fixture.cu->write_sgpr(sgprs + 12 + reg, group1[reg]);
+
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(decoder, nullptr);
+      const std::array<uint32_t, 3> words{0xD0710001, 0x7C000000, 0x7C7C0C00};
+      DecodeResult decoded = decoder->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      std::unique_ptr<Instruction> load = std::move(decoded).value();
+      ASSERT_EQ(load->mnemonic(), "tensor_load_to_lds");
+      group->onAmdgpuBeforeExecuteInstruction(wave.pc, *load, wave);
+      EXPECT_TRUE(fixture.cu->execute_instruction(load.get(), wave).succeeded());
+
+      const std::array<uint32_t, 1> end_words{0xBF810000};
+      SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+      group->onAmdgpuBeforeExecuteInstruction(wave.pc + 12, end, wave);
+      group->onAmdgpuWavefrontHalted(wave);
+      group->onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+      group->onShutdown();
+    }
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(diagnostic.find("tensor-DMA"), std::string::npos) << diagnostic;
+
+    const std::string dispatch = std::to_string(test_case.dispatch_id) + " ";
+    const auto trace = lines(read_file(trace_.path()));
+    EXPECT_NE(line_with_prefix(trace, "begin " + dispatch), trace.size());
+    EXPECT_NE(line_with_prefix(trace, "end " + dispatch), trace.size());
+    EXPECT_EQ(line_with_prefix(trace, "tdm " + dispatch) != trace.size(),
+              test_case.tensor_dim0 != 0);
+  }
+}
+
 TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
   struct MalformedCase {
     std::string_view name;
