@@ -18,12 +18,14 @@
 /// fixed copy each; b64 pairs where lane l + 16 reads 8 bytes after lane l
 /// take one 16-byte column per pair; other dense masks take one bounds check
 /// and a fixed copy per lane. load32() serves the same shapes from native
-/// 32-bit lanes; its section below reads top-down, decision first.
+/// 32-bit lanes, on the shared proofs in lds_lane_shapes.h, and also on hosts
+/// without AVX2; its section below reads top-down, dispatch first.
 
 #ifndef ROCJITSU_VM_AMDGPU_LDS_ACCESS_PATTERNS_H_
 #define ROCJITSU_VM_AMDGPU_LDS_ACCESS_PATTERNS_H_
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/lds_lane_shapes.h"
 #include "util/host_target.h"
 
 #include <bit>
@@ -173,25 +175,36 @@ inline void span_by_mask(Backing backing, const uint64_t *addrs, uint64_t lane_m
                                    : dense<S, 32, false>(backing, addrs, lane_mask, dst, slow);
 }
 
+} // namespace detail
+#endif
+
 // ---------------------------------------------------------------------------
-// load32(): native 32-bit lanes. Read top-down, in three levels:
+// load32(): native 32-bit lanes. The reference, then the rewrites that make it
+// fast. What a load means (Lds::load_lanes, the exact rule):
 //
-//   Level 1  the decision: which Strategy serves this load
-//   Level 2  the strategies: what each one copies, and why that is exact
-//   Level 3  the proofs: the AVX2 checks behind each decision
+//   for each active lane l:
+//     read S bytes at (lanes[l] + offset) mod 2^32 into dst[l],
+//       an element past capacity reading 0, bytes past the backing reading 0
 //
-// Census vector_load calls by the strategy that serves them:
+// Every fast path is that loop rewritten. Each runs only on the plan its proof
+// returned (lds_lane_shapes.h, with the materialized size as the limit), and
+// the comment on it says why the rewrite equals the loop.
 //
-//   Strategy       share  when
-//   Blocks         52.9%  every 16-lane group reads consecutive bytes
-//   CheckedLanes   24.8%  at most 4 active lanes (almost always 1)
-//   LaneCopies     13.7%  dense, scattered, and every lane is backed
-//   ColumnPairs     8.5%  b64 read2: lane i+16 reads the 8 bytes after lane i
-//   (exact rule)    0.1%  b96, and any lane reaching past the backing
+//   Level 1  dispatch: by width, by wave, by address shape
+//   Level 2  the rewrites
+//
+// Census vector_load calls by rewrite:
+//   blocks 52.9%   lane by lane 24.8%   lanes 13.7%   column pairs 8.5%
 // ---------------------------------------------------------------------------
 
-/// One DS load, as every load32 strategy sees it. Everything that takes it is
-/// inlined, so it lives in registers. Two layout rules, both measured:
+namespace detail {
+
+using lds_shapes::BlockPlan;
+using lds_shapes::ColumnPlan;
+using lds_shapes::LanesPlan;
+
+/// One DS load, as every rewrite sees it. Everything that takes it is inlined,
+/// so it lives in registers. Two layout rules, both measured:
 ///   - never pass it to an out-of-line call: once its address escapes, every
 ///     dst store forces its fields to be reloaded (+0.7 ns on runs16);
 ///   - keep the 32-bit offset after the 64-bit fields: in the call's argument
@@ -208,79 +221,65 @@ struct Load32 {
   uint32_t address(uint32_t lane) const { return vgpr[lane] + offset; }
 };
 
-/// How a dense load (more than 4 active lanes) is served.
-enum class Strategy {
-  Blocks,       // one memcpy per 16-lane group
-  ColumnPairs,  // b64: 16-byte columns, unzipped into two output rows
-  LaneCopies,   // one fixed-size copy per lane, no bounds or EXEC checks
-  CheckedLanes, // one bounds-checked copy per active lane
-};
+// The rewrites (level 2), defined below.
+template <uint32_t S, uint32_t Span>
+[[gnu::always_inline]] inline void copy_blocks(const Load32 &r, const uint8_t **view,
+                                               BlockPlan plan);
+[[gnu::always_inline]] inline void copy_column_pairs(const Load32 &r, ColumnPlan plan);
+template <uint32_t S, uint32_t Span>
+[[gnu::always_inline]] inline void copy_lanes(const Load32 &r, LanesPlan plan);
+template <uint32_t S, typename Slow>
+[[gnu::always_inline]] inline void lane_by_lane(const Load32 &r, Slow &slow);
 
-// The strategies (level 2) and proofs (level 3), defined below.
-template <uint32_t S, uint32_t Span> void copy_blocks(const Load32 &r, const uint8_t **view);
-inline void copy_column_pairs(const Load32 &r);
-template <uint32_t S, uint32_t Span> void copy_lanes(const Load32 &r);
-template <uint32_t S, typename Slow> void checked_lanes(const Load32 &r, Slow &slow);
+// Level 1: dispatch by width (load32() below), by wave, by address shape.
 
-template <uint32_t S, uint32_t Span> bool is_blocks(const Load32 &r);
-inline bool is_column_pairs(const Load32 &r);
-template <uint32_t S, uint32_t Span> bool all_backed(const Load32 &r);
-
-// Level 1: the decision.
-
-/// Pick the cheapest strategy that is exact for this load. Order matters only
-/// for speed: each check is cheaper to fail than the next strategy is to run.
-template <uint32_t S, uint32_t Span> [[gnu::always_inline]] Strategy choose(const Load32 &r) {
-  if constexpr (S == 8 && Span == 32)
-    if (is_column_pairs(r))
-      return Strategy::ColumnPairs;
-  if (is_blocks<S, Span>(r))
-    return Strategy::Blocks;
-  if (all_backed<S, Span>(r))
-    return Strategy::LaneCopies;
-  return Strategy::CheckedLanes; // some lane reaches past the backing
-}
-
-/// More than 4 active lanes. Bytes of inactive lanes are unspecified, so the
-/// dense strategies treat every lane of the span as active: EXEC drops out.
+/// By address shape, over a span of more than 4 active lanes. Bytes of
+/// inactive lanes are unspecified, so every lane of the span counts as active:
+/// unlike stores, no EXEC check in any proof or copy.
 template <uint32_t S, uint32_t Span, typename Slow>
-[[gnu::always_inline]] void dense32(const Load32 &r, Slow &slow, const uint8_t **view) {
-  switch (choose<S, Span>(r)) {
-  case Strategy::Blocks:
-    return copy_blocks<S, Span>(r, view);
-  case Strategy::ColumnPairs:
-    return copy_column_pairs(r);
-  case Strategy::LaneCopies:
-    return copy_lanes<S, Span>(r);
-  case Strategy::CheckedLanes:
-    return checked_lanes<S>(r, slow);
-  }
+[[gnu::always_inline]] inline void by_shape(const Load32 &r, Slow &slow, const uint8_t **view) {
+  // The column pattern only occurs in b64 read2 on 32 lanes (8.5% of calls),
+  // so no other instantiation pays for its proof.
+  if constexpr (S == 8 && Span == 32)
+    if (auto plan = lds_shapes::prove_column_pairs(r.vgpr, r.offset, r.backed))
+      return copy_column_pairs(r, *plan);
+  if (auto plan = lds_shapes::prove_blocks<S, Span>(r.vgpr, r.offset, r.backed))
+    return copy_blocks<S, Span>(r, view, *plan);
+  if (auto plan = lds_shapes::prove_lanes<S, Span>(r.vgpr, r.offset, r.backed))
+    return copy_lanes<S, Span>(r, *plan);
+  return lane_by_lane<S>(r, slow); // some lane reaches past the backing
 }
 
+/// By wave: how far the active lanes reach.
 template <uint32_t S, uint32_t Wave, typename Slow>
-[[gnu::always_inline]] void load32(const Load32 &r, Slow &slow, const uint8_t **view) {
-  // A few lanes: plain per-lane copies beat any setup.
+[[gnu::always_inline]] inline void load32(const Load32 &r, Slow &slow, const uint8_t **view) {
+  // A quarter of all calls, nearly all single-lane: plain per-lane copies beat
+  // any setup.
   if (std::popcount(r.exec) <= 4)
-    return checked_lanes<S>(r, slow);
-  // Otherwise the span is the 16-lane groups up to the last active lane.
+    return lane_by_lane<S>(r, slow);
+  // Otherwise the span is the 16-lane groups up to the last active lane; the
+  // census's address runs break at 16 lanes.
   const uint32_t last = 63 - std::countl_zero(r.exec);
   if constexpr (Wave == 64) {
     if (last >= 48)
-      return dense32<S, 64>(r, slow, view);
+      return by_shape<S, 64>(r, slow, view);
     if (last >= 32)
-      return dense32<S, 48>(r, slow, view);
+      return by_shape<S, 48>(r, slow, view);
   }
   if (last >= 16)
-    return dense32<S, 32>(r, slow, view);
-  return dense32<S, 16>(r, slow, view);
+    return by_shape<S, 32>(r, slow, view);
+  return by_shape<S, 16>(r, slow, view);
 }
 
-// Level 2: the strategies. Each runs only after its proof (level 3) passed.
+// Level 2: the rewrites.
 
-/// Group g (lanes g..g+15) is the 16 * S bytes at lane g's address. With a
-/// @p view, point at them in place instead of copying.
+/// Equals the loop because a group's lanes are consecutive, in order, and all
+/// backed: group g (lanes g..g+15) is the 16 * S bytes at lane g's address.
+/// One block per 16-lane group rather than per wave: ds_read_b32 often
+/// restarts its run every 16 lanes. With a @p view, point at the bytes in place
+/// instead of copying them.
 template <uint32_t S, uint32_t Span>
-[[gnu::always_inline]] void copy_blocks(const Load32 &r, const uint8_t **view) {
+[[gnu::always_inline]] inline void copy_blocks(const Load32 &r, const uint8_t **view, BlockPlan) {
 #pragma GCC unroll 4
   for (uint32_t g = 0; g < Span; g += 16) {
     if (view)
@@ -290,11 +289,12 @@ template <uint32_t S, uint32_t Span>
   }
 }
 
-/// The surprise in b64 read2: adjacent lanes look scattered (0, 128, 272, ...),
-/// but lane i+16 always reads the 8 bytes right after lane i. So one 16-byte
-/// load fetches a column [lane i | lane i+16], and two neighbouring columns
-/// unzip into two lanes of each output row.
-[[gnu::always_inline]] inline void copy_column_pairs(const Load32 &r) {
+/// Equals the loop because lane i+16's 8 bytes follow lane i's, so one 16-byte
+/// read covers both. The surprise in b64 read2: adjacent lanes look scattered
+/// (0, 128, 272, ...), but each 16-byte column is [lane i | lane i+16], and
+/// two neighbouring columns unzip into two lanes of each output row.
+[[gnu::always_inline]] inline void copy_column_pairs(const Load32 &r, ColumnPlan) {
+#if RJ_HOST_HAS_AVX2
 #pragma GCC unroll 8
   for (uint32_t i = 0; i < 16; i += 2) {
     const __m128i x = _mm_loadu_si128(reinterpret_cast<const __m128i *>(r.data + r.address(i)));
@@ -303,10 +303,19 @@ template <uint32_t S, uint32_t Span>
     _mm_storeu_si128(reinterpret_cast<__m128i *>(r.dst + i * 8), _mm_unpacklo_epi64(x, y));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(r.dst + (i + 16) * 8), _mm_unpackhi_epi64(x, y));
   }
+#else
+  for (uint32_t i = 0; i < 16; ++i) {
+    const uint8_t *column = r.data + r.address(i);
+    std::memcpy(r.dst + i * 8, column, 8);
+    std::memcpy(r.dst + (i + 16) * 8, column + 8, 8);
+  }
+#endif
 }
 
-/// Every lane of the span is backed, so each is a plain fixed-size copy.
-template <uint32_t S, uint32_t Span> [[gnu::always_inline]] void copy_lanes(const Load32 &r) {
+/// Equals the loop because it is the loop, minus the per-lane bounds check the
+/// plan already settled.
+template <uint32_t S, uint32_t Span>
+[[gnu::always_inline]] inline void copy_lanes(const Load32 &r, LanesPlan) {
 #pragma GCC unroll 64
   for (uint32_t lane = 0; lane < Span; ++lane)
     std::memcpy(r.dst + lane * S, r.data + r.address(lane), S);
@@ -325,9 +334,10 @@ RJ_NOINLINE void exact_rule(const uint32_t *vgpr, uint32_t offset, uint64_t lane
   slow(addrs, lanes);
 }
 
-/// Active lanes only, each bounds-checked; misses take the exact rule.
+/// The loop itself over the active lanes, each checked; lanes past the backing
+/// take the exact rule.
 template <uint32_t S, typename Slow>
-[[gnu::always_inline]] void checked_lanes(const Load32 &r, Slow &slow) {
+[[gnu::always_inline]] inline void lane_by_lane(const Load32 &r, Slow &slow) {
   uint64_t late = 0;
   for (uint64_t lanes = r.exec; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
@@ -341,83 +351,7 @@ template <uint32_t S, typename Slow>
     exact_rule(r.vgpr, r.offset, late, slow);
 }
 
-// Level 3: the proofs. Eight lanes per AVX2 op; all run on 32-bit values.
-//
-// Two tricks keep them cheap:
-//   - the offset is the same for every lane, so it cancels from any shape
-//     check: shapes are proven on the raw VGPR values, with no add per lane;
-//   - a backed range cannot wrap 2^32, so "the shape holds mod 2^32 and the
-//     range is backed" means each lane reads exactly the bytes we copy.
-
-/// Lanes at..at+7 of the address VGPR.
-inline __m256i lanes8(const uint32_t *vgpr) {
-  return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(vgpr));
-}
-
-/// j*S .. (j+7)*S: where lanes j..j+7 of a group sit relative to its first lane.
-template <uint32_t S> inline __m256i steps(uint32_t j) {
-  return _mm256_setr_epi32(j * S, (j + 1) * S, (j + 2) * S, (j + 3) * S, (j + 4) * S, (j + 5) * S,
-                           (j + 6) * S, (j + 7) * S);
-}
-
-/// Nonzero exactly in the lanes where v > limit (unsigned).
-inline __m256i above(__m256i v, uint64_t limit) {
-  const __m256i l = _mm256_set1_epi32(static_cast<int>(limit));
-  return _mm256_xor_si256(_mm256_max_epu32(v, l), l);
-}
-
-inline bool none(__m256i v) { return _mm256_testz_si256(v, v); }
-
-/// Blocks: lane g+j holds vgpr[g] + j*S in every group, and every group's
-/// 16 * S bytes are backed.
-template <uint32_t S, uint32_t Span> [[gnu::always_inline]] bool is_blocks(const Load32 &r) {
-  __m256i mismatch = _mm256_setzero_si256();
-  uint32_t bases = 0;
-#pragma GCC unroll 4
-  for (uint32_t g = 0; g < Span; g += 16) {
-    bases |= r.address(g);
-    const __m256i first = _mm256_set1_epi32(static_cast<int>(r.vgpr[g]));
-    for (uint32_t j = 0; j < 16; j += 8)
-      mismatch = _mm256_or_si256(
-          mismatch, _mm256_xor_si256(_mm256_sub_epi32(lanes8(r.vgpr + g + j), steps<S>(j)), first));
-  }
-  // The OR of the bases is >= every base, so one compare bounds all groups.
-  // It may reject a valid set, never accept one reading past the backing.
-  return uint64_t{bases} + 16 * S <= r.backed && none(mismatch);
-}
-
-/// ColumnPairs: b64 over 32 lanes, lane i+16 holds vgpr[i] + 8 for every
-/// i < 16, and every 16-byte column is backed.
-[[gnu::always_inline]] inline bool is_column_pairs(const Load32 &r) {
-  // Cheap reject first: most b64 loads already fail on lane 0.
-  if (r.backed < 16 || r.vgpr[16] != r.vgpr[0] + 8)
-    return false;
-  const __m256i offset = _mm256_set1_epi32(static_cast<int>(r.offset));
-  const __m256i eight = _mm256_set1_epi32(8);
-  __m256i mismatch = _mm256_setzero_si256(), highest = _mm256_setzero_si256();
-  for (uint32_t i = 0; i < 16; i += 8) {
-    const __m256i first_row = lanes8(r.vgpr + i), second_row = lanes8(r.vgpr + i + 16);
-    mismatch =
-        _mm256_or_si256(mismatch, _mm256_xor_si256(second_row, _mm256_add_epi32(first_row, eight)));
-    highest = _mm256_max_epu32(highest, _mm256_add_epi32(first_row, offset));
-  }
-  return none(_mm256_or_si256(mismatch, above(highest, r.backed - 16)));
-}
-
-/// LaneCopies: every lane of the span (active or not) is backed.
-template <uint32_t S, uint32_t Span> [[gnu::always_inline]] bool all_backed(const Load32 &r) {
-  if (r.backed < S)
-    return false;
-  const __m256i offset = _mm256_set1_epi32(static_cast<int>(r.offset));
-  __m256i highest = _mm256_setzero_si256();
-#pragma GCC unroll 8
-  for (uint32_t lane = 0; lane < Span; lane += 8)
-    highest = _mm256_max_epu32(highest, _mm256_add_epi32(lanes8(r.vgpr + lane), offset));
-  return none(above(highest, r.backed - S));
-}
-
 } // namespace detail
-#endif
 
 /// @brief Load from 64-bit lane addresses.
 /// @details Reads the address of every lane of the span (lanes 0-31, or 0-63
@@ -468,7 +402,6 @@ template <uint32_t Wave = 64, typename Slow>
   if (view)
     for (uint32_t g = 0; g < Wave / 16; ++g)
       view[g] = dst + g * 16 * elem_size * num_elems;
-#if RJ_HOST_HAS_AVX2
   const detail::Load32 r{backing.data, backing.size, lanes, dst, lane_mask, offset};
   switch (elem_size * num_elems) {
   case 1:
@@ -484,15 +417,6 @@ template <uint32_t Wave = 64, typename Slow>
   default: // b96 (0.1% of calls): not worth a fast path
     return detail::exact_rule(lanes, offset, lane_mask, slow);
   }
-#else
-  (void)backing, (void)elem_size, (void)num_elems, (void)dst;
-  uint64_t addrs[64];
-  for (uint64_t bits = lane_mask; bits; bits &= bits - 1) {
-    const uint32_t lane = std::countr_zero(bits);
-    addrs[lane] = static_cast<uint32_t>(lanes[lane] + offset);
-  }
-  slow(addrs, lane_mask);
-#endif
 }
 
 } // namespace lds_patterns
