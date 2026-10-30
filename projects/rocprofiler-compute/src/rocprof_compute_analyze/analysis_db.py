@@ -34,6 +34,11 @@ from membw_analysis.models import (
     MemBwAnalysisResult,
     SupportingMetric,
 )
+from memory_chart.html.report import (
+    memory_chart_html_name,
+    write_mem_chart_report_from_db,
+)
+from memory_chart.html.views import ChartScope
 from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
@@ -65,6 +70,13 @@ from pc_sampling.source_snapshot_analysis import (
     resolve_snapshot_path,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_analyze.output_location import workload_folder_name
+from rocprof_compute_analyze.pc_sampling_section import (
+    build_pc_sampling_section,
+    load_pc_sampling_summary_rows,
+)
+from rocprof_compute_analyze.report_adapter import build_report_runs
+from roofline.roofline_db import write_roofline_html
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import file_io, schema
 from utils.analysis_orm import Database
@@ -116,7 +128,7 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.roofline_calc import Ceiling, device_ceilings
+from utils.roofline_calc import ROOFLINE_DEVICE_ID, Ceiling, device_ceilings
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
@@ -132,6 +144,8 @@ from utils.utils_counter_defs import (
 )
 
 KernelKey = str
+# Table 21.1, the PC-sampling section, as its config table id
+PC_SAMPLING_TABLE_ID = 2101
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
 
@@ -517,6 +531,7 @@ class db_analysis(OmniAnalyze_Base):
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
+        self.report_runs: Dict[str, schema.Workload] = {}
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
         self._roofline_ceiling_rows_per_workload = self.calc_roofline_ceiling_rows()
@@ -727,13 +742,76 @@ class db_analysis(OmniAnalyze_Base):
             )
         )
 
+        Database.create_views()
         Database.commit()
         self._workload_objs = workload_objs
         self._workload_source_snapshots = workload_source_snapshots
 
+    def kernel_rankings(self) -> dict[str, list[str]]:
+        """Kernel names of each workload before the -k filter, in -k id order."""
+        return self._kernel_rankings_per_workload
+
+    @demarcate
+    def build_report_frames(self) -> None:
+        """Rebuild each workload's terminal and report frames from the stored rows.
+
+        Call after build_database. The frames are read from the open session, so
+        every number the terminal and report.txt show is the value the database
+        stores. They are kept in report_runs, keyed by run path.
+        """
+        workload_ids = {
+            workload_path: workload_obj.workload_id
+            for workload_path, workload_obj in zip(self._runs, self._workload_objs)
+        }
+        self.report_runs = build_report_runs(
+            Database.get_session(),
+            workload_ids,
+            self._arch_configs,
+            self.get_args().time_unit,
+        )
+        for workload_path, workload_obj in zip(self._runs, self._workload_objs):
+            run = self.report_runs[workload_path]
+            pc_frame = self._pc_sampling_section(workload_path, workload_obj, run)
+            if pc_frame is not None:
+                run.dfs[PC_SAMPLING_TABLE_ID] = pc_frame
+                run.dfs_type[PC_SAMPLING_TABLE_ID] = "pc_sampling_table"
+            membw_result = self.load_membw_analysis(workload_obj)
+            if membw_result is not None:
+                run.membw_result = membw_result
+
+    def _pc_sampling_section(
+        self,
+        workload_path: str,
+        workload_obj: orm.Workload,
+        run: schema.Workload,
+    ) -> Optional[pd.DataFrame]:
+        """Return the table 21.1 rows of one workload, or None without PC sampling.
+
+        The rows follow the --pc-sampling-* options and are narrowed by -k only.
+        The -k ids index the full kernel ranking, not the run's Top Kernels table,
+        which holds only the kernels that -k selects.
+        """
+        if not self.pc_sampling_collected():
+            return None
+        args = self.get_args()
+        ranking = self._kernel_rankings_per_workload[workload_path]
+        kernel_names = [
+            ranking[kernel_id]
+            for kernel_id in self._runs[workload_path].filter_kernel_ids
+        ]
+        return build_pc_sampling_section(
+            load_pc_sampling_summary_rows(
+                Database.get_session(), workload_obj.workload_id
+            ),
+            gpu_arch=str(run.sys_info.iloc[0]["gpu_arch"]),
+            sorting_type=args.pc_sampling_sorting_type,
+            num_rows=args.pc_sampling_rows,
+            kernel_names=kernel_names or None,
+        )
+
     @demarcate
     def write_outputs(self, run_folder: Path) -> None:
-        """Write analysis.db, the view CSVs and the PC-sampling exports."""
+        """Write analysis.db, the view CSVs, the PC-sampling exports and HTML plots."""
         super().write_outputs(run_folder)
         # The per-kernel exports stream rows from the open session.
         per_kernel_isa_files = export_per_kernel_isa_files(
@@ -747,8 +825,7 @@ class db_analysis(OmniAnalyze_Base):
                 self._build_workload_source_line_exports(self._workload_objs)
             ),
         )
-        Database.create_views()
-        Database.commit()
+        self._write_html_plots(run_folder)
         Database.write()
         Database.write_csv_dir(run_folder)
         Database.close()
@@ -882,6 +959,48 @@ class db_analysis(OmniAnalyze_Base):
                         value.value,
                     ),
                 )
+            )
+
+    def _write_html_plots(self, run_folder: Path) -> None:
+        """Write each workload's roofline and memory-chart HTML from the open session.
+
+        Each workload gets its own run-folder subfolder, named by its -p position.
+        The roofline path is recorded on the report frame so the terminal can print it.
+        """
+        socs = self.get_socs() or {}
+        for position, (workload_path, workload_obj) in enumerate(
+            zip(self._runs, self._workload_objs), start=1
+        ):
+            run = self._runs[workload_path]
+            gpu_arch = str(run.sys_info.iloc[0]["gpu_arch"])
+            workload_folder = run_folder / workload_folder_name(
+                position, Path(workload_path)
+            )
+            workload_folder.mkdir(parents=True, exist_ok=True)
+            roofline_path = workload_folder / f"roofline-gpu-{ROOFLINE_DEVICE_ID}.html"
+            if gpu_arch in socs:
+                written = write_roofline_html(
+                    Database.get_session(),
+                    workload_obj.workload_id,
+                    socs[gpu_arch]._mspec,
+                    roofline_path,
+                )
+                report_run = self.report_runs.get(workload_path)
+                if written is not None and report_run is not None:
+                    report_run.roofline_html_path = str(written)
+
+            if self.pc_sampling_only():
+                continue
+            write_mem_chart_report_from_db(
+                workload_obj,
+                self._arch_configs[gpu_arch],
+                self.get_args(),
+                ChartScope(
+                    gpu_ids=list(run.filter_gpu_ids),
+                    dispatch_ids=list(run.filter_dispatch_ids),
+                    kernel_ids=list(run.filter_kernel_ids),
+                ),
+                workload_folder / memory_chart_html_name(),
             )
 
     @staticmethod

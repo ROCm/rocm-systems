@@ -572,10 +572,12 @@ def _make_rpc_args(
     mode="profile",
     list_stats=False,
     output_format=None,
+    debug=False,
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
         mode=mode,
+        debug=debug,
         list_metrics=None,
         list_blocks=None,
         list_available_metrics=False,
@@ -746,6 +748,18 @@ def test_sanitize_membw_analysis_injects_block_30(
     instance = _make_profiler_with_args(args)
     instance.sanitize()
     assert args.filter_blocks == expected_filter_blocks
+
+
+def test_handle_analyze_args_warns_on_deprecated_debug_flag(monkeypatch):
+    """-g still parses but warns that it no longer has an effect."""
+    mock_warning = common.patch_console(monkeypatch, "rocprof_compute_base", "warning")[
+        "warning"
+    ]
+    args = _make_rpc_args(mode="analyze", list_stats=True, debug=True)
+
+    _make_rpc_with_args(args).handle_analyze_args()
+
+    assert mock_warning.call_args.args[1].startswith("-g is deprecated")
 
 
 @pytest.mark.parametrize(

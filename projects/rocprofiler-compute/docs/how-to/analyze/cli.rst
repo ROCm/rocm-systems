@@ -122,9 +122,9 @@ Analyzing a Memory Chart writes an offline ``memory-chart-gpu-0.html`` into the 
 subfolder of the run folder, ``<n>-<workload>/``. The file name does not change with the
 filters. Open it in a browser to select a kernel or use **Show all** for the aggregate view.
 
-``-k`` sets the initial view when it selects exactly one kernel; all analyzed
-kernels remain available. GPU and dispatch filters restrict the data and are shown
-as the scope of the aggregate view.
+GPU and dispatch filters restrict the data and are shown as the scope of the aggregate view.
+A run with ``-k`` writes no ``memory-chart-gpu-0.html``, because its database keeps only the
+selected kernels' chart rows. Run without ``-k`` for the memory chart page.
 
 Every analyze run writes the report whatever ``--output-format`` is, because that option
 has no effect. Including ``--view table``, a workload with memory chart data gets a report.
@@ -787,10 +787,13 @@ holds:
 * For a PC-sampled workload, each kernel's disassembly and source and the samples per source
   line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and
   :ref:`pc-sampling-per-source-line-csv`.
-* For a single workload with roofline data, ``1-<workload>/roofline-gpu-0.html``, where
-  ``<workload>`` is the name of the workload directory given with ``-p``.
+* For each workload with roofline data, ``<n>-<workload>/roofline-gpu-0.html``, where ``<n>`` is the
+  workload's position among the ``-p`` paths and ``<workload>`` is the name of its directory.
+* For each workload profiled with ``--torch-trace``, ``--triton-trace`` or ``--ml-api-trace``,
+  ``<n>-<workload>/ml-api-trace.csv``, the joined ML API marker and counter rows of the trace.
 * For each workload with memory chart data, ``<n>-<workload>/memory-chart-gpu-0.html``, where ``<n>``
-  is the workload's position among the ``-p`` paths; see :ref:`cli-memory-chart-html`.
+  is the workload's position among the ``-p`` paths; not written for a run with ``-k``.
+  See :ref:`cli-memory-chart-html`.
 
 The terminal shows the top stats, the system information and the System Speed-of-Light section,
 followed by any blocks selected with ``-b``. It also names the roofline HTML file when one is saved.
@@ -823,7 +826,7 @@ Analyze never modifies or deletes the files of an existing run folder. Listing o
 .. note::
 
    ``--output-format`` is deprecated and has no effect. Every run writes ``report.txt``,
-   ``analysis.db`` and the CSV files.
+   ``analysis.db`` and the CSV files. ``-g`` is deprecated and has no effect as well.
 
 .. _analysis-database:
 
@@ -908,10 +911,10 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
-The operator call tree is printed only to the terminal. With an operator filter,
-the run folder holds ``report.txt`` but no ``analysis.db`` or CSV files. If you
-combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
-lists all operators and ignores the filter.
+The operator call tree is printed to the terminal and added to ``report.txt``. Operator
+options never change the calculation: ``analysis.db`` and the CSV files hold every kernel and
+dispatch of the run, whatever the operator filter. If you combine ``--list-torch-operators`` with
+``--torch-operator``, rocprof-compute lists all operators and ignores the filter.
 
 
 List all operators
@@ -992,19 +995,21 @@ A pattern can match an operator's name or its full call path, such as
 * **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
 
-rocprof-compute prints the call tree of the matching operators. The metric
-tables then cover only the kernels that those operators launched. To narrow
-the metric tables further:
+rocprof-compute adds the call tree of the matching operators to the report. Under the
+tree it lists, under a label, the rows of the Top Kernels table for the kernels those
+operators launched. With ``-k``, a launched kernel that ``-k`` leaves out has no row, and the
+report names its id under the labelled rows. The other tables are not narrowed by the operator
+filter, so they keep every kernel of the run.
 
-* ``-k`` keeps only the listed kernels. Use the ``(id N)`` shown next to each
-  kernel in the operator tree.
-* ``--kernel-iteration-range`` keeps only the listed dispatches that the
-  matching operators launched.
-* ``--list-stats`` lists only the kernels that the matching operators
-  launched.
+To narrow the calculation itself, use the filters that apply to every run:
 
-These options do not change the printed operator tree. Kernel IDs depend on
-``--kernel-iteration-range``, so use the same ``--kernel-iteration-range``
+* ``-k`` keeps only the listed kernels. The ``(id N)`` shown next to each kernel in the
+  operator tree is the id to use.
+* ``--kernel-iteration-range`` keeps only the listed dispatches.
+* ``--gpu-id`` keeps only the listed GPUs.
+
+``--list-stats`` lists every kernel; the operator filters do not narrow it. Kernel IDs
+depend on ``--kernel-iteration-range``, so use the same ``--kernel-iteration-range``
 when you look up a kernel ID.
 
 .. code-block:: shell-session
@@ -1039,6 +1044,8 @@ Triton operator analysis
 Triton kernels are analyzed the same way as PyTorch operators.
 ``--list-triton-operators`` and ``--triton-operator`` report only the kernels
 that Triton launched, even when the same run also captured PyTorch operators.
+``--triton-operator`` adds the Triton call tree to the report and does not change
+the calculation, as with ``--torch-operator``.
 
 List all captured Triton kernels
 ---------------------------------

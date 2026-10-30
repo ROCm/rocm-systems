@@ -772,14 +772,6 @@ add_test(
 )
 
 add_test(
-    NAME test_metric_evaluator
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_evaluator.xml
-        ${COV_OPTION} tests/unit/utils/metrics/test_metric_evaluator.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_utils_counter_defs
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_utils_counter_defs.xml
@@ -1133,7 +1125,6 @@ if(${ENABLE_COVERAGE})
         test_aggregation
         test_expression
         test_evaluation_pipeline
-        test_metric_evaluator
         test_utils_counter_defs
         test_parser
         test_argparser

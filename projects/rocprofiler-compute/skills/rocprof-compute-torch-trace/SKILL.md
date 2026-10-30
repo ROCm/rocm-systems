@@ -70,8 +70,8 @@ Profile preserves each pass's raw marker and counter CSVs with the
 
 List when you need the operator names from this run; filtering does not
 require a prior list. Do not pass `--list-*-operators` and `--*-operator`
-on the same command; listing ignores the filter. The operator tree is printed
-only to the terminal:
+on the same command; listing ignores the filter. The listing prints only and
+writes no run folder:
 
 ```bash
 rocprof-compute analyze \
@@ -101,6 +101,15 @@ Quote patterns so the shell does not expand them.
 
 `--triton-operator` works the same way. `*rmsnorm_kernel*` matches the
 rmsnorm nodes on a Triton tree.
+
+The operator filter is a report view. The run still calculates every kernel and
+writes the full `analysis.db`, CSVs and `report.txt`. The report adds the matching
+call tree and, under a label, the rows of the kernels those operators launched.
+Other tables are not narrowed. To narrow the calculation, use `-k`,
+`--kernel-iteration-range` or `--gpu-id`.
+
+A traced profile also writes `<n>-<workload>/ml-api-trace.csv` into the run folder,
+the joined marker and counter rows, on every analyze run.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).

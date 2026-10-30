@@ -8,12 +8,9 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence, SupportsFloat, Union
 
 import numpy as np
-import pandas as pd
 
-from utils import schema
 from utils.logger import console_debug, console_error, console_warning
 from utils.metrics.base_units import SCALED_UNITS
-from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.specs import MachineSpecs
 from utils.utils_common import _workload_base_dir
@@ -58,7 +55,6 @@ PERFORMANCE_METRIC = "Performance (GFLOPs)"
 # Table ids defined in <arch>/0400_roofline.yaml and 0000_top_stats.yaml.
 ROOFLINE_RATES_TABLE_ID = 401
 ROOFLINE_POINTS_TABLE_ID = 402
-_KERNEL_TOP_TABLE_ID = 1
 
 
 ################################################
@@ -323,186 +319,6 @@ def calc_ceilings(
         ])
 
     return graph_points
-
-
-# -------------------------------------------------------------------------------------
-#                              Overlay application performance
-# -------------------------------------------------------------------------------------
-def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
-    """Read per-level AI and performance from a kernel's evaluated plot points.
-
-    Returns one entry per ``CACHE_LEVELS`` field plus ``performance``, defaulting
-    to 0.0 for any row the table does not carry.
-    """
-    metrics = dict.fromkeys(CACHE_LEVELS, 0.0)
-    metrics["performance"] = 0.0
-    if calc_table is None:
-        return metrics
-    for _, row in calc_table.iterrows():
-        metric = row.get("Metric", "")
-        value = row.get("Value", 0)
-        if metric in METRIC_TO_AI_FIELD:
-            metrics[METRIC_TO_AI_FIELD[metric]] = sanitize_ai_value(value)
-        elif metric == PERFORMANCE_METRIC:
-            metrics["performance"] = sanitize_ai_value(value)
-    return metrics
-
-
-def _resolve_kernel_ids(workload: schema.Workload) -> list[int]:
-    """Kernel row ids to plot: an explicit kernel filter, else every top kernel."""
-    if workload.filter_kernel_ids:
-        return workload.filter_kernel_ids
-    if _KERNEL_TOP_TABLE_ID not in workload.dfs:
-        return []
-    return workload.dfs[_KERNEL_TOP_TABLE_ID].index.tolist()
-
-
-def _evaluate_kernel_tables(
-    arch_config: schema.ArchConfig,
-    workload: schema.Workload,
-    kernel_pmc_df: pd.DataFrame,
-) -> dict[int, pd.DataFrame]:
-    """Evaluate the roofline arch-config tables (401/402) for one kernel."""
-    kernel_dfs: dict[int, pd.DataFrame] = {}
-    kernel_dfs_type: dict[int, str] = {}
-    for table_id in (ROOFLINE_RATES_TABLE_ID, ROOFLINE_POINTS_TABLE_ID):
-        if table_id in arch_config.dfs:
-            kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
-            kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
-    # eval_metric keys off kernel_dfs only.
-    eval_metric(
-        kernel_dfs,
-        kernel_dfs_type,
-        arch_config.dfs_expressions,
-        workload.sys_info.iloc[0],
-        workload.roofline_peaks,
-        kernel_pmc_df,
-        debug=False,
-    )
-    return kernel_dfs
-
-
-def _stat_or_none(row: pd.Series, column: Optional[str]) -> Optional[float]:
-    """Read a top-kernels stat as a float, or None when missing or NaN."""
-    if column is None or column not in row.index:
-        return None
-    value = row[column]
-    return float(value) if pd.notna(value) else None
-
-
-def _append_kernel_point(
-    plot_points: PlotPoints,
-    metrics: dict[str, float],
-    kernel_name: str,
-    stat_row: pd.Series,
-    sum_column: Optional[str],
-) -> None:
-    """Append one kernel's AI points plus its joined top-kernel stats."""
-    for ai_field in CACHE_LEVELS:
-        getattr(plot_points, ai_field)[0].append(metrics[ai_field])
-        getattr(plot_points, ai_field)[1].append(metrics["performance"])
-    plot_points.kernelNames.append(kernel_name)
-    plot_points.counts.append(_stat_or_none(stat_row, "Count"))
-    plot_points.kernelTime.append(_stat_or_none(stat_row, sum_column))
-    plot_points.kernelPctRuntime.append(_stat_or_none(stat_row, "Percent"))
-
-
-def calc_ai_analyze(
-    workload: schema.Workload,
-    pmc_df: pd.DataFrame,
-    arch_config: schema.ArchConfig,
-) -> dict[str, Union[list[list[float]], list[str]]]:
-    """
-    Calculate per-kernel metrics and AI points with Roofline yamls using eval_metric.
-
-    Caller must apply filters (e.g. parser.apply_filters) and pass the resulting
-    DataFrame as pmc_df. This function only computes AI data points.
-    """
-    console_debug("calc_ai_analyze", "Starting calc_ai analysis using Roofline yamls")
-    plot_points = PlotPoints.empty()
-
-    workload.roofline_metrics = {}
-
-    # Aggregate-time column name encodes the time unit, e.g. "Sum(ns)".
-    sum_column: Optional[str] = None
-    top_df = workload.dfs.get(_KERNEL_TOP_TABLE_ID)
-    if top_df is not None:
-        sum_column = next(
-            (
-                column
-                for column in top_df.columns
-                if column.startswith("Sum(") and column.endswith(")")
-            ),
-            None,
-        )
-        if sum_column:
-            plot_points.timeUnit = sum_column[len("Sum(") : -1]
-            plot_points.totalAppTime = float(top_df[sum_column].sum())
-            if "Count" in top_df.columns:
-                plot_points.totalAppDispatches = float(top_df["Count"].sum())
-
-    kernel_ids_to_process = _resolve_kernel_ids(workload)
-    console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
-
-    if not kernel_ids_to_process:
-        console_warning("No kernels found to process for roofline")
-        return plot_points.__dict__
-
-    for kernel_id in kernel_ids_to_process:
-        if top_df is None or kernel_id not in top_df.index:
-            continue
-        kernel_name = top_df.loc[kernel_id, "Kernel_Name"]
-
-        console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
-
-        # filter PMC data for specific kernel
-        kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
-
-        if kernel_pmc_df.empty:
-            console_debug("roofline", f"No PMC data for kernel {kernel_id}")
-            continue
-
-        kernel_dfs = _evaluate_kernel_tables(arch_config, workload, kernel_pmc_df)
-
-        metrics = _extract_ai_metrics(kernel_dfs.get(ROOFLINE_POINTS_TABLE_ID))
-        performance = metrics["performance"]
-        console_debug(
-            "roofline",
-            f"Kernel {kernel_id}: "
-            + ", ".join(
-                f"{ai_field}={metrics[ai_field]:.2f}" for ai_field in CACHE_LEVELS
-            )
-            + f", Performance={performance:.2e} GFLOP/s",
-        )
-
-        if performance > 0:
-            _append_kernel_point(
-                plot_points,
-                metrics,
-                kernel_name,
-                top_df.loc[kernel_id],
-                sum_column,
-            )
-            console_debug(
-                "roofline",
-                f"Added kernel {kernel_id}: {kernel_name[:50]} to plot points",
-            )
-        else:
-            console_debug(
-                "roofline",
-                f"Skipping kernel {kernel_id}: {kernel_name[:50]}"
-                f" - no performance data",
-            )
-
-        # store metrics for display
-        workload.roofline_metrics[kernel_id] = {
-            "name": kernel_name,
-            "ai_table": kernel_dfs.get(ROOFLINE_RATES_TABLE_ID, pd.DataFrame()),
-            "calc_table": kernel_dfs.get(ROOFLINE_POINTS_TABLE_ID, pd.DataFrame()),
-        }
-
-    console_debug("roofline", f"Generated {len(plot_points.kernelNames)} plot points")
-    return plot_points.__dict__
 
 
 def machine_ceilings(

@@ -4,7 +4,6 @@
 """Unit tests for rocprof_compute_analyze/analysis_cli.py."""
 
 import argparse
-import functools
 import sys
 from types import SimpleNamespace
 
@@ -12,11 +11,10 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_cli import (
-    _intersect_with_user_dispatch_filter,
     cli_analysis,
     parse_operator_patterns,
 )
-from utils import schema
+from utils import parser, schema
 from utils.terminal_selection import TerminalSelection
 from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
@@ -70,8 +68,8 @@ def apply_torch_operator_glob(pattern):
     args = argparse.Namespace(torch_operator=[pattern])
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
-    pmc_group_keys = cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    return pmc_group_keys, workload
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    return workload
 
 
 def forest_node_names(forest):
@@ -103,78 +101,28 @@ def cli_with_two_operator_workloads(args):
     return inst
 
 
-# -- pre_processing: membw auto-run -------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "membw_collected, expect_called",
-    [
-        pytest.param(True, True, id="collected_runs_analysis"),
-        pytest.param(False, False, id="not_collected_skips_analysis"),
-    ],
-)
-def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypatch):
-    """run_membw_analysis is called iff profiling config recorded membw data."""
-    inst = cli_analysis.__new__(cli_analysis)
-    inst._profiling_config = {"membw_analysis": membw_collected}
-
-    workload = SimpleNamespace(
-        dfs={1: pd.DataFrame()},
-        sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-        raw_pmc=pd.DataFrame(),
-        filter_gpu_ids=None,
-        filter_dispatch_ids=None,
-        membw_result=None,
-    )
-    inst._runs = {"/tmp/test": workload}
-    inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
-
-    args = argparse.Namespace(
-        path=[["/tmp/test"]],
-        verbose=0,
-        time_unit="ns",
-        torch_operator=None,
-        triton_operator=None,
-        ml_api_operator=None,
-        torch_list_ops=False,
-        triton_list_ops=False,
-        ml_api_list_ops=False,
-        list_stats=False,
-        filter_metrics=None,
-    )
-    inst._OmniAnalyze_Base__args = args
-
-    membw_calls: list[tuple] = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis._build_roofline_figures",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.run_membw_analysis",
-        lambda *a, **kw: membw_calls.append(a),
-    )
+def listing_instance(monkeypatch, args):
+    """A cli_analysis whose listing reads no profile data from disk."""
+    inst = cli_with_two_operator_workloads(args)
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
         lambda self: None,
     )
     monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis.pc_sampling_only",
-        lambda self: False,
+        "rocprof_compute_analyze.analysis_cli.cli_analysis._listing_counters",
+        lambda self, _path: pd.DataFrame(),
     )
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
-        lambda self, _path: None,
-    )
-    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
     monkeypatch.setattr(
         "utils.file_io.create_df_kernel_top_stats",
-        lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
+        lambda **_kwargs: (
+            pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]}),
+            pd.DataFrame(),
+        ),
     )
-    monkeypatch.setattr("utils.parser.load_table_data", lambda *a, **kw: None)
+    return inst
 
-    inst.pre_processing()
 
-    assert len(membw_calls) == (1 if expect_called else 0)
+# -- pre_processing: membw auto-run -------------------------------------------
 
 
 # -- parse_operator_patterns (torch_operator) -------------------------------
@@ -242,8 +190,7 @@ def test_parse_patterns_star():
 
 
 def test_operator_glob_relu_returns_relu_keys():
-    pmc_group_keys, workload = apply_torch_operator_glob("*relu*")
-    assert pmc_group_keys == [RELU_PMC_GROUP_KEY]
+    workload = apply_torch_operator_glob("*relu*")
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
         "aten::relu",
@@ -251,8 +198,7 @@ def test_operator_glob_relu_returns_relu_keys():
 
 
 def test_operator_glob_addmm_path_returns_addmm_keys():
-    pmc_group_keys, workload = apply_torch_operator_glob("*/aten::addmm")
-    assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
+    workload = apply_torch_operator_glob("*/aten::addmm")
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
         "nn.Module.Linear.forward",
@@ -261,8 +207,7 @@ def test_operator_glob_addmm_path_returns_addmm_keys():
 
 
 def test_operator_glob_linear_includes_descendant_addmm_keys():
-    pmc_group_keys, workload = apply_torch_operator_glob("*Linear.forward")
-    assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
+    workload = apply_torch_operator_glob("*Linear.forward")
     assert forest_node_names(workload.ml_api_call_trees) == [
         "nn.Module.SimpleModel.forward",
         "nn.Module.Linear.forward",
@@ -284,14 +229,46 @@ def test_list_operators_joint_backend_heading(capsys):
 
 
 def test_handle_operator_prints_matched_subtree(capsys):
-    args = argparse.Namespace(torch_operator=["*addmm*"])
+    args = argparse.Namespace(torch_operator=["*addmm*"], decimal=2)
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
     cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    cli.handle_operator(args, workload, ["torch"])
+    kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
+    cli.handle_operator(
+        args, workload, ["torch"], ["addmm_kernel", "relu_kernel"], kernel_top
+    )
     captured = capsys.readouterr()
     assert "Matched PyTorch Operators: *addmm*" in captured.out
     assert "aten::addmm" in captured.out
+    assert "Kernels launched by the matched PyTorch operators" in captured.out
+    assert "addmm_kernel" in captured.out
+    assert "relu_kernel" not in captured.out
+
+
+def test_handle_operator_ids_follow_the_full_ranking_under_k(capsys):
+    """The ids are the full ranking's, so -k keeps the id of the kernel it selects.
+
+    The report's Top Kernels holds only relu_kernel, the -k 1 selection, so
+    addmm_kernel has no row here and -k 1 is the id the tree shows for relu.
+    """
+    args = argparse.Namespace(torch_operator=["*addmm*"], decimal=2)
+    cli = cli_analysis(args, {})
+    workload = workload_with_operator_forest()
+    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    report_kernels = pd.DataFrame({"Kernel_Name": ["relu_kernel"]})
+    cli.handle_operator(
+        args,
+        workload,
+        ["torch"],
+        ["relu_kernel", "addmm_kernel"],
+        report_kernels,
+    )
+    captured = capsys.readouterr()
+    assert "addmm_kernel (id 1)" in captured.out
+    assert "No kernels launched by the matched operators are in this run." in (
+        captured.out
+    )
+    assert "left out by -k: kernel id(s) 1" in captured.out
 
 
 def test_apply_operator_filter_missed_glob_errors(monkeypatch):
@@ -316,23 +293,6 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         for item in errors
     )
     assert "aten::addmm" in forest_node_names(workload.ml_api_call_trees)
-
-
-def test_dispatch_filter_keeps_only_operator_dispatches():
-    assert _intersect_with_user_dispatch_filter([1, 2, 3], ["2", "9"], "PyTorch") == [2]
-
-
-def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
-    errors = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.console_error",
-        functools.partial(append_args_and_exit, errors),
-    )
-    with pytest.raises(SystemExit):
-        _intersect_with_user_dispatch_filter([1, 2, 3], ["9"], "PyTorch")
-    assert "No PyTorch dispatches matched the --kernel-iteration-range filter" in str(
-        errors[-1]
-    )
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():
@@ -360,35 +320,19 @@ def test_list_operators_omits_other_backend_kernel_lines(capsys):
     assert "torch_gemm_kernel" not in captured.out
 
 
-def test_pre_processing_lists_operators_for_every_path(monkeypatch):
+def test_listing_lists_operators_for_every_path(monkeypatch):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
         verbose=0,
         time_unit="ns",
         torch_operator=None,
         triton_operator=None,
+        list_stats=False,
         list_torch_operators=True,
         list_triton_operators=False,
     )
-    inst = cli_with_two_operator_workloads(args)
+    inst = listing_instance(monkeypatch, args)
     listed_paths = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
-        lambda self: None,
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis.pc_sampling_only",
-        lambda self: False,
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
-        lambda self, _path: None,
-    )
-    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
-    monkeypatch.setattr(
-        "utils.file_io.create_df_kernel_top_stats",
-        lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
-    )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.process_ml_api_trace_output",
         lambda workload, workload_dir: None,
@@ -405,22 +349,100 @@ def test_pre_processing_lists_operators_for_every_path(monkeypatch):
     assert listed_paths == ["/w1", "/w2"]
 
 
+def test_listing_without_operators_builds_no_operator_trees(monkeypatch):
+    """--list-stats reads the kernels only; the ML API trace is not processed."""
+    args = argparse.Namespace(
+        path=[["/w1"]],
+        verbose=0,
+        time_unit="ns",
+        torch_operator=None,
+        triton_operator=None,
+        list_stats=True,
+        list_torch_operators=False,
+        list_triton_operators=False,
+    )
+    inst = listing_instance(monkeypatch, args)
+    traced = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.process_ml_api_trace_output",
+        lambda workload, workload_dir: traced.append(workload_dir),
+    )
+
+    inst.pre_processing()
+
+    assert traced == []
+    assert (
+        "addmm_kernel"
+        in inst._runs["/w1"].dfs[parser.PMC_KERNEL_TOP_TABLE_ID]["Kernel_Name"].tolist()
+    )
+
+
+def test_operator_filter_narrows_only_the_operator_forest(monkeypatch):
+    """The operator filter narrows the forest the report shows and leaves the
+    Top Kernels frame, which the analysis DB stores, as it was."""
+    args = argparse.Namespace(
+        path=[["/w1"]],
+        verbose=0,
+        time_unit="ns",
+        torch_operator=["*addmm*"],
+        triton_operator=None,
+        list_stats=False,
+        list_torch_operators=False,
+        list_triton_operators=False,
+        filter_metrics=None,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    inst._runs = {"/w1": workload_with_operator_forest()}
+    inst._runs["/w1"].sys_info = pd.DataFrame([{"gpu_arch": "gfx950"}])
+    kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
+    inst._runs["/w1"].dfs = {parser.PMC_KERNEL_TOP_TABLE_ID: kernel_top.copy()}
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.pre_processing",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.build_terminal_selection",
+        lambda *_args: TerminalSelection(),
+    )
+
+    inst.pre_processing()
+
+    names = forest_node_names(inst._runs["/w1"].ml_api_call_trees)
+    assert names == [
+        "nn.Module.SimpleModel.forward",
+        "nn.Module.Linear.forward",
+        "aten::addmm",
+    ]
+    pd.testing.assert_frame_equal(
+        inst._runs["/w1"].dfs[parser.PMC_KERNEL_TOP_TABLE_ID], kernel_top
+    )
+
+
 def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path):
     args = argparse.Namespace(
         path=[["/w1"], ["/w2"]],
         torch_operator=["*addmm*"],
         triton_operator=None,
         list_stats=False,
+        decimal=2,
     )
     inst = cli_with_two_operator_workloads(args)
+    kernel_top = pd.DataFrame({"Kernel_Name": ["addmm_kernel", "relu_kernel"]})
+    inst._report_runs = {
+        "/w1": schema.Workload(dfs={1: kernel_top}),
+        "/w2": schema.Workload(dfs={1: kernel_top}),
+    }
+    inst._kernel_rankings = {
+        "/w1": ["addmm_kernel", "relu_kernel"],
+        "/w2": ["addmm_kernel", "relu_kernel"],
+    }
     handled_paths = []
 
-    def capture_handle(self, handle_args, workload, backends):
+    def capture_handle(self, handle_args, workload, backends, ranking, top):
         for workload_path, run in inst._runs.items():
             if run is workload:
                 handled_paths.append(workload_path)
 
-    inst._roofline_figures = None
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
         capture_handle,
@@ -430,7 +452,7 @@ def test_write_outputs_prints_matched_tree_for_every_path(monkeypatch, tmp_path)
         lambda *a, **kw: None,
     )
     inst.write_outputs(tmp_path)
-    assert handled_paths == ["/w1", "/w2"]
+    assert handled_paths == ["/w1", "/w2", "/w1", "/w2"]
 
 
 def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
@@ -445,7 +467,7 @@ def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
         list_stats=False,
     )
     inst = cli_with_two_operator_workloads(args)
-    inst._roofline_figures = None
+    inst._report_runs = {"/w1": schema.Workload(), "/w2": schema.Workload()}
     inst._terminal_selection = TerminalSelection(metric_ids=frozenset({"7"}))
     show_all_calls = []
     path_outputs = []
@@ -470,3 +492,32 @@ def test_write_outputs_writes_full_report_and_prints_the_terminal_selection(
     assert stdout_output is sys.stdout
     assert stdout_selection is inst._terminal_selection
     assert path_outputs == [sys.stdout]
+
+
+def test_write_outputs_saves_each_traced_workloads_ml_api_trace(monkeypatch, tmp_path):
+    """Only a workload with a processed ML API trace gets ml-api-trace.csv."""
+    args = argparse.Namespace(
+        path=[["/w1"], ["/w2"]],
+        torch_operator=None,
+        triton_operator=None,
+        list_stats=False,
+    )
+    inst = cli_with_two_operator_workloads(args)
+    inst._report_runs = {"/w1": schema.Workload(), "/w2": schema.Workload()}
+    trace = pd.DataFrame({"Function": ["aten::addmm"]})
+    inst._runs["/w2"].ml_api_trace_pairs = [object()]
+    inst._runs["/w2"].ml_api_trace_df = trace
+    saved = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.write_ml_api_trace_csv",
+        lambda folder, frame: saved.append((folder, frame)),
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.tty.show_all",
+        lambda *a, **kw: None,
+    )
+
+    inst.write_outputs(tmp_path)
+
+    assert [folder.name for folder, _frame in saved] == ["2-w2"]
+    assert saved[0][1] is trace

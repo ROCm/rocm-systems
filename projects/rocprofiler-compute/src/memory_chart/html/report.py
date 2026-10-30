@@ -8,7 +8,6 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from memory_chart import loader
 from memory_chart.html.db_rows import read_workload_chart_rows
 from memory_chart.html.views import (
     ChartScope,
@@ -16,7 +15,6 @@ from memory_chart.html.views import (
     ChartViewSet,
     MembwDetail,
     SlotValue,
-    build_chart_views,
     build_chart_views_from_db,
     chart_metric_ids,
     stored_chart_tables,
@@ -40,28 +38,6 @@ def memory_chart_html_name() -> str:
     return f"memory-chart-gpu-{MEMORY_CHART_GPU_ID}.html"
 
 
-def write_mem_chart_report(
-    workload: schema.Workload,
-    arch_config: schema.ArchConfig,
-    args: Namespace,
-    output_path: Path,
-) -> Optional[Path]:
-    """Write the report from an in-memory workload, when it has a memory chart.
-
-    This is the CLI input until the cutover moves the caller onto the database.
-    """
-    if not any(300 < table_id < 400 for table_id in workload.dfs):
-        return None
-
-    arch = str(workload.sys_info.iloc[0]["gpu_arch"])
-    if not loader.has_layout(arch):
-        console_log("memory chart", f"Skipping HTML report: no layout for {arch}")
-        return None
-
-    views = build_chart_views(workload, arch_config, args)
-    return _write_report(views, _scope_of(workload), args.normal_unit, output_path)
-
-
 def write_mem_chart_report_from_db(
     workload_row: orm.Workload,
     arch_config: schema.ArchConfig,
@@ -71,11 +47,11 @@ def write_mem_chart_report_from_db(
 ) -> Optional[Path]:
     """Write the report from one workload's stored metric rows.
 
-    The rows come from the analysis database the workload belongs to. The scope
-    is the run's filters; C1 must read it from profiling_config_extdata. Returns
-    None when the rows cannot reproduce the counters' page: a -k run, whose rows
-    keep only the selected kernels; a run with no stored panel 3 table, as the
-    counters path skips it; or no stored memory chart layout.
+    The rows come from the analysis database the workload belongs to, and the
+    scope is the run's filters. Returns None when the rows cannot reproduce the
+    counters' page: a -k run, whose rows keep only the selected kernels; a run
+    with no stored panel 3 table, as the counters path skips it; or no stored
+    memory chart layout.
     """
     if scope.kernel_ids:
         console_log(
@@ -123,15 +99,6 @@ def _write_report(
 
     console_log("memory chart", f"Saved HTML report: {output_path}")
     return output_path
-
-
-def _scope_of(workload: schema.Workload) -> ChartScope:
-    """The filters of an in-memory workload, which scope its chart."""
-    return ChartScope(
-        gpu_ids=list(workload.filter_gpu_ids),
-        dispatch_ids=list(workload.filter_dispatch_ids),
-        kernel_ids=list(workload.filter_kernel_ids),
-    )
 
 
 def build_mem_chart_document(

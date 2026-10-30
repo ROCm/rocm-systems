@@ -11,7 +11,7 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 import config
 from argparser import omniarg_parser
@@ -59,6 +59,9 @@ from utils.utils_common import (
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
 
+if TYPE_CHECKING:
+    from rocprof_compute_analyze.analysis_db import db_analysis
+
 
 class AnalysisWriter(Protocol):
     """An analyzer that writes its artifacts into an existing run folder.
@@ -68,11 +71,6 @@ class AnalysisWriter(Protocol):
     """
 
     def write_outputs(self, run_folder: Path) -> None: ...
-
-
-def _operator_filter_active(args: argparse.Namespace) -> bool:
-    """Return True when --torch-operator or --triton-operator is given."""
-    return args.torch_operator is not None or args.triton_operator is not None
 
 
 def _is_listing_run(args: argparse.Namespace) -> bool:
@@ -343,8 +341,18 @@ class RocProfCompute:
                 "run folder.",
             )
 
+        if args.debug:
+            console_warning(
+                "analysis",
+                "-g is deprecated and has no effect. The single-metric debug "
+                "output went with the CLI calculation.",
+            )
+
         operator_listing = args.list_torch_operators or args.list_triton_operators
-        if _operator_filter_active(args) and operator_listing:
+        operator_filter = (
+            args.torch_operator is not None or args.triton_operator is not None
+        )
+        if operator_filter and operator_listing:
             console_warning(
                 "ml api trace",
                 "Operator filters are ignored when a --list-*-operators "
@@ -729,11 +737,12 @@ class RocProfCompute:
             cli_analyzer.show_listing()
             return
 
-        analyzers: list[AnalysisWriter] = [cli_analyzer]
+        # The calculation and the DB finish in memory before the run folder exists.
         db_analyzer = self._build_analysis_database(run_folder)
-        if db_analyzer is not None:
-            analyzers.insert(0, db_analyzer)
-        _write_run_folder(run_folder, analyzers)
+        cli_analyzer.set_report_runs(
+            db_analyzer.report_runs, db_analyzer.kernel_rankings()
+        )
+        _write_run_folder(run_folder, [db_analyzer, cli_analyzer])
         console_log("analysis", f"Run folder: {run_folder.resolve()}")
 
     def _resolve_run_folder(self) -> Path:
@@ -757,19 +766,8 @@ class RocProfCompute:
             }
             self.load_soc_specs(sys_info_dict)
 
-    def _build_analysis_database(self, run_folder: Path) -> Optional[AnalysisWriter]:
-        """Return the DB analyzer with its database filled in memory.
-
-        Returns None with an operator filter, which the DB analyzer does not apply.
-        """
-        if _operator_filter_active(self.__args):
-            console_warning(
-                "analysis",
-                "analysis.db and the CSV files are not written with "
-                "--torch-operator or --triton-operator.",
-            )
-            return None
-
+    def _build_analysis_database(self, run_folder: Path) -> "db_analysis":
+        """Return the DB analyzer, its database and report frames built in memory."""
         from rocprof_compute_analyze.analysis_db import db_analysis
 
         db_analyzer = db_analysis(self.__args, self.__supported_archs)
@@ -777,4 +775,5 @@ class RocProfCompute:
         db_analyzer.set_soc(self.__soc)
         db_analyzer.pre_processing()
         db_analyzer.build_database(run_folder / ANALYSIS_DB_FILE_NAME)
+        db_analyzer.build_report_frames()
         return db_analyzer

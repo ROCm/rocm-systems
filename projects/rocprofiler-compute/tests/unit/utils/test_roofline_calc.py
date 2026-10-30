@@ -2,28 +2,22 @@
 # SPDX-License-Identifier:  MIT
 
 
-import json
 import math
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
-import numpy as np
-import pandas as pd
 import pytest
 
-from utils import schema
 from utils.roofline_calc import (
     XMAX_DEFAULT,
     Ceiling,
     GraphPoints,
     benchmark_from_ceilings,
-    calc_ai_analyze,
     calc_ceilings,
     construct_roof,
     device_ceilings,
     machine_ceilings,
     roofline_mem_levels,
-    sanitize_ai_value,
 )
 
 MI200_FIXTURE = Path(__file__).resolve().parents[2] / "workloads/mem_levels_HBM/MI200"
@@ -43,94 +37,6 @@ def assert_graph_points_positive_finite(
                 assert value > 0 and math.isfinite(value)
 
 
-def run_calc_ai_analyze_with_values(
-    monkeypatch: pytest.MonkeyPatch,
-    metric_values: dict[str, object],
-    top_stats: dict[str, object] | None = None,
-) -> dict:
-    """
-    Build mocks and invoke calc_ai_analyze with controlled metric values.
-
-    metric_values is a dict with keys ai_hbm, ai_l2, ai_l1,
-    ai_lds, performance whose values are injected into the table-402
-    DataFrame that eval_metric would normally populate.
-
-    top_stats adds columns to the top-kernels table, which is where the
-    per-kernel dispatch count, aggregate time, and percent runtime are joined
-    from. Omit it to exercise the missing-stats path.
-
-    Returns the plot-points dict produced by calc_ai_analyze.
-
-    Note: this mock simulates MI350 AI metric values based on the architecture's cache
-    levels available on the hardware. Cache levels will vary for other architectures.
-    """
-    kernel_name = "test_kernel"
-    kernel_id = 0
-
-    top_columns: dict[str, list[object]] = {"Kernel_Name": [kernel_name]}
-    for column, value in (top_stats or {}).items():
-        top_columns[column] = [value]
-
-    workload = schema.Workload()
-    workload.dfs = {1: pd.DataFrame(top_columns, index=[kernel_id])}
-    workload.sys_info = pd.DataFrame([{"gpu_arch": "gfx90a"}])
-    workload.roofline_peaks = pd.DataFrame()
-    workload.filter_kernel_ids = []
-    workload.path = "/mock/path"
-
-    arch_config = schema.ArchConfig()
-    arch_config.dfs = {
-        401: pd.DataFrame(),
-        402: pd.DataFrame({
-            "Metric": pd.Series(dtype="str"),
-            "Value": pd.Series(dtype="object"),
-        }),
-    }
-    arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
-
-    pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
-
-    def mock_eval_metric(
-        dfs: dict,
-        dfs_type: dict,
-        dfs_expressions: object,
-        sys_info_row: object,
-        roofline_peaks: object,
-        pmc_data: object,
-        debug: object,
-    ) -> None:
-        dfs[402] = pd.DataFrame({
-            "Metric": [
-                "AI HBM",
-                "AI L2",
-                "AI L1",
-                "AI LDS",
-                "Performance (GFLOPs)",
-            ],
-            "Value": pd.array(
-                [
-                    metric_values["ai_hbm"],
-                    metric_values["ai_l2"],
-                    metric_values["ai_l1"],
-                    metric_values["ai_lds"],
-                    metric_values["performance"],
-                ],
-                dtype=object,
-            ),
-        })
-
-    monkeypatch.setattr("utils.roofline_calc.eval_metric", mock_eval_metric)
-
-    monkeypatch.setattr("utils.roofline_calc.console_debug", lambda *a, **kw: None)
-    monkeypatch.setattr("utils.roofline_calc.console_warning", lambda *a, **kw: None)
-
-    return calc_ai_analyze(
-        workload=workload,
-        pmc_df=pmc_df,
-        arch_config=arch_config,
-    )
-
-
 def ceilings_by_roof(
     ceilings: List,
 ) -> Dict[Tuple[str, object, object, object], Tuple[str, float]]:
@@ -139,132 +45,6 @@ def ceilings_by_roof(
         (c.kind, c.memory_level, c.data_type, c.pipe): (c.unit, c.value)
         for c in ceilings
     }
-
-
-def test_calc_ai_analyze_replaces_inf_with_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """np.inf / -np.inf metric values are replaced with 0."""
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": np.inf,
-            "ai_l2": -np.inf,
-            "ai_l1": 1.5,
-            "ai_lds": np.inf,
-            "performance": 100.0,
-        },
-    )
-
-    assert result["kernelNames"] == ["test_kernel"]
-    assert result["ai_hbm"][0] == [0], "np.inf should be replaced with 0"
-    assert result["ai_hbm"][1] == [100.0]
-    assert result["ai_l2"][0] == [0], "-np.inf should be replaced with 0"
-    assert result["ai_l2"][1] == [100.0]
-    assert result["ai_l1"][0] == [1.5], "valid float should pass through"
-    assert result["ai_l1"][1] == [100.0]
-    assert result["ai_lds"][0] == [0], "np.inf should be replaced with 0"
-    assert result["ai_lds"][1] == [100.0]
-
-
-@pytest.mark.parametrize(
-    "unusable",
-    [None, "N/A", "", np.nan, np.inf, -np.inf],
-    ids=["none", "na", "empty", "nan", "inf", "-inf"],
-)
-def test_calc_ai_analyze_reports_an_unusable_ai_as_zero(
-    monkeypatch: pytest.MonkeyPatch, unusable: object
-) -> None:
-    """An AI that cannot be plotted is reported as 0 rather than dropped, so
-    every level's AI and performance list stays parallel with kernelNames. The
-    result also has to stay JSON-safe: the browser's JSON.parse rejects a bare
-    NaN outright, taking the whole page with it.
-    """
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": unusable,
-            "ai_l2": unusable,
-            "ai_l1": 2.0,
-            "ai_lds": unusable,
-            "performance": 100.0,
-        },
-    )
-
-    assert result["kernelNames"] == ["test_kernel"]
-    for level in ("ai_hbm", "ai_l2", "ai_lds"):
-        assert result[level][0] == [0], f"{level} should report an unusable AI as 0"
-        assert result[level][1] == [100.0], f"{level} performance list desynced"
-    assert result["ai_l1"][0] == [2.0], "a usable AI alongside must pass through"
-    json.dumps(result, allow_nan=False)
-
-
-def test_calc_ai_analyze_valid_values_pass_through(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Normal positive floats pass through unchanged."""
-    result = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        {
-            "ai_hbm": 2.5,
-            "ai_l2": 3.0,
-            "ai_l1": 1.5,
-            "ai_lds": 4.0,
-            "performance": 100.0,
-        },
-    )
-
-    assert result["kernelNames"] == ["test_kernel"]
-    assert result["ai_hbm"][0] == [2.5]
-    assert result["ai_hbm"][1] == [100.0]
-    assert result["ai_l2"][0] == [3.0]
-    assert result["ai_l2"][1] == [100.0]
-    assert result["ai_l1"][0] == [1.5]
-    assert result["ai_l1"][1] == [100.0]
-    assert result["ai_lds"][0] == [4.0]
-    assert result["ai_lds"][1] == [100.0]
-
-
-def test_calc_ai_analyze_joins_per_kernel_stats(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Dispatch count, aggregate time, and percent runtime join onto each kernel
-    when the top-kernels table carries them, and read None when it does not,
-    which the tooltip renders as N/A."""
-    ai_values: dict[str, object] = {
-        "ai_hbm": 2.0,
-        "ai_l2": 2.0,
-        "ai_l1": 2.0,
-        "ai_lds": 2.0,
-        "performance": 100.0,
-    }
-
-    joined = run_calc_ai_analyze_with_values(
-        monkeypatch,
-        ai_values,
-        top_stats={"Count": 128, "Sum(ns)": 154000.0, "Percent": 12.4},
-    )
-    assert joined["counts"] == [128]
-    assert joined["kernelTime"] == [154000.0]
-    assert joined["kernelPctRuntime"] == [12.4]
-    assert joined["timeUnit"] == "ns", "the unit is only recoverable from the column"
-
-    missing = run_calc_ai_analyze_with_values(monkeypatch, ai_values)
-    assert missing["counts"] == [None]
-    assert missing["kernelTime"] == [None]
-    assert missing["kernelPctRuntime"] == [None]
-    assert missing["timeUnit"] == ""
-
-
-def test_sanitize_ai_value_replaces_invalid_values_with_zero() -> None:
-    """Invalid values are replaced with 0."""
-    assert sanitize_ai_value(np.inf) == 0
-    assert sanitize_ai_value(-np.inf) == 0
-    assert sanitize_ai_value(np.nan) == 0
-    assert sanitize_ai_value("N/A") == 0
-    assert sanitize_ai_value("") == 0
-    assert sanitize_ai_value(None) == 0
-    assert sanitize_ai_value(1.5) == 1.5
 
 
 ##############################################################################

@@ -676,8 +676,7 @@ Examples:
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
             "\t\tPrints only; creates no run folder.\n"
-            "\t\tWith --torch-operator or --triton-operator, lists only the\n"
-            "\t\tkernels and dispatches of the matching operators."
+            "\t\tOperator filters do not narrow the listing."
         ),
     )
     analyze_group.add_argument(
@@ -715,7 +714,7 @@ Examples:
         feature_label="Torch operator filter",
         help=(
             "\t\tFilter operators using shell-style glob patterns (fnmatch)\n"
-            "\t\t\tand display metrics for the kernels they launched.\n"
+            "\t\t\tand show them in the report with the kernels they launched.\n"
             "\t\t\tWith no arguments, matches all operators.\n"
             "\t\t\tA pattern matches an operator name or its call path,\n"
             "\t\t\tsuch as nn.Module.Net.forward/aten::addmm.\n"
@@ -725,8 +724,9 @@ Examples:
             "\t\t\t  all  or  '*'        match every operator\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
-            "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tThe run writes report.txt but no analysis.db or CSV files.\n"
+            "\t\t\tThe report adds the matching operator tree and the rows of\n"
+            "\t\t\tthe kernels it launched. The calculation and every other\n"
+            "\t\t\toutput are unchanged.\n"
             "\t\t\t(Default: **)"
         ),
     )
@@ -759,7 +759,7 @@ Examples:
         feature_label="Triton operator filter",
         help=(
             "\t\tFilter Triton kernels using shell-style glob patterns\n"
-            "\t\t\t(fnmatch) and display metrics for the matching kernels.\n"
+            "\t\t\t(fnmatch) and show them in the report with their kernels.\n"
             "\t\t\tWith no arguments, matches all kernels.\n"
             "\t\t\tExamples:\n"
             "\t\t\t  *rmsnorm_kernel*    contains rmsnorm_kernel\n"
@@ -767,8 +767,9 @@ Examples:
             "\t\t\t  all  or  '*'        match every kernel\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --triton-operator *matmul*,*rmsnorm_kernel*\n"
-            "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tThe run writes report.txt but no analysis.db or CSV files.\n"
+            "\t\t\tThe report adds the matching operator tree and the rows of\n"
+            "\t\t\tthe kernels it launched. The calculation and every other\n"
+            "\t\t\toutput are unchanged.\n"
             "\t\t\t(Default: **)"
         ),
     )
@@ -782,8 +783,7 @@ Examples:
         action="append",
         help=(
             "\t\tSpecify kernel id(s) from --list-stats for filtering.\n"
-            "\t\tWith an operator filter, use the kernel ids shown in the\n"
-            "\t\toperator tree."
+            "\t\tThe operator tree shows the same ids."
         ),
     )
     analyze_group.add_argument(
@@ -940,7 +940,13 @@ Examples:
         ),
     )
     analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+        "-g",
+        dest="debug",
+        action="store_true",
+        help=(
+            "\t\t(DEPRECATED) Has no effect. The single-metric debug output\n"
+            "\t\twent with the CLI calculation."
+        ),
     )
     analyze_advanced_group.add_argument(
         "--view",

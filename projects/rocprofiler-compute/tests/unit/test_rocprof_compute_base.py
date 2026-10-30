@@ -38,6 +38,16 @@ class RecordingAnalyzer:
     def build_database(self, db_path):
         self.calls.append((self.name, "build_database", db_path))
 
+    def build_report_frames(self):
+        self.calls.append((self.name, "build_report_frames"))
+        self.report_runs = {}
+
+    def kernel_rankings(self):
+        return {}
+
+    def set_report_runs(self, report_runs, kernel_rankings):
+        self.calls.append((self.name, "set_report_runs"))
+
     def show_listing(self):
         self.calls.append((self.name, "show_listing"))
 
@@ -215,11 +225,11 @@ def test_run_analysis_write_failure_names_the_partial_run_folder(
 
 
 @pytest.mark.parametrize("operator_option", ["torch_operator", "triton_operator"])
-def test_run_analysis_operator_filter_skips_the_database(
+def test_run_analysis_operator_filter_keeps_the_database(
     operator_option, tmp_path, monkeypatch
 ):
-    """With an operator filter only the CLI analyzer runs, with a warning."""
-    mocks = common.patch_console(monkeypatch, MODULE, "log", "warning")
+    """An operator filter changes no calculation, so the DB is still built."""
+    common.patch_console(monkeypatch, MODULE, "log", "warning")
     calls = []
     args = make_analyze_args(
         output_directory=str(tmp_path), output_name="r1", **{operator_option: ["*"]}
@@ -227,6 +237,11 @@ def test_run_analysis_operator_filter_skips_the_database(
 
     make_rocprof_compute(args, monkeypatch, calls).run_analysis()
 
-    assert all(call[0] == "cli" for call in calls)
-    assert ("cli", "write_outputs", True) in calls
-    assert "analysis.db" in mocks["warning"].call_args.args[1]
+    assert ("db", "build_database", tmp_path / "r1" / "analysis.db") in calls
+    assert ("db", "build_report_frames") in calls
+    assert ("cli", "set_report_runs") in calls
+    write_calls = [call for call in calls if call[1] == "write_outputs"]
+    assert write_calls == [
+        ("db", "write_outputs", True),
+        ("cli", "write_outputs", True),
+    ]

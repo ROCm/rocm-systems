@@ -205,7 +205,8 @@ Output formats
 ================
 
 ``profile`` writes a ``rocpd`` database of raw counters per dispatch into the workload
-directory. Every ``analyze`` run creates a new run folder and writes all of the following into it:
+directory. Every ``analyze`` run creates a new run folder, calculates every metric in memory once,
+and writes all of the following into it:
 
 .. list-table::
    :header-rows: 1
@@ -219,12 +220,14 @@ directory. Every ``analyze`` run creates a new run folder and writes all of the 
      - SQLite analysis database with all the data in the analysis report.
    * - ``*.csv``
      - One CSV file per analysis database view.
-   * - ``1-<workload>/roofline-gpu-<id>.html``
-     - Standalone Plotly roofline plot, written when a single workload includes roofline data. See :ref:`standalone-roofline`.
+   * - ``<n>-<workload>/roofline-gpu-<id>.html``
+     - Standalone Plotly roofline plot, written for each workload that includes roofline data. See :ref:`standalone-roofline`.
+   * - ``<n>-<workload>/ml-api-trace.csv``
+     - Joined ML API marker and counter rows, written for each workload profiled with ``--torch-trace``, ``--triton-trace`` or ``--ml-api-trace``.
 
 Choose the parent directory of the run folder with ``-d``/``--output-directory`` and its name with
 ``-o``/``--output-name``. See :ref:`analysis-output-format` for details. Analyze only reads the
-workload directory, so it can be read-only.
+workload directory, so it can be read-only. ``--output-format`` is deprecated and has no effect.
 
 .. _glance-supported-hardware:
 

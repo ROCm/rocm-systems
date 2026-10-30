@@ -1,11 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Evaluate aggregate and per-kernel data for the HTML memory chart.
+"""Build aggregate and per-kernel views for the HTML memory chart.
 
-Two inputs feed the same views. build_chart_views evaluates the counters of
-an in-memory workload. build_chart_views_from_db fills the same tables from
-the workload's stored metric rows.
+The views are filled from the workload's stored metric rows in the analysis
+database, through build_chart_views_from_db.
 """
 
 import copy
@@ -37,12 +36,11 @@ from membw_analysis.summary import (
 )
 from memory_chart.html.db_rows import MetricValues, WorkloadChartRows
 from memory_chart.html.diagram import SlotSpec, diagram_payload, slot_specs
-from memory_chart.loader import Layout, Layouts, layout_from_stored
+from memory_chart.loader import Layout, layout_from_stored
 from memory_chart.render import progress_bar
 from memory_chart.units import display_unit, format_value, numeric, panel_units
 from utils import parser, schema, tty
 from utils.metrics.base_units import from_base_unit_value
-from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import top_level_round_digits
 from utils.utils_common import SUPPORTED_FIELD
 
@@ -146,40 +144,8 @@ class _ViewContext:
 # Gives the evaluated tables of one view: None for the aggregate, else a kernel index
 ViewTables = Callable[[Optional[int]], Dict[int, pd.DataFrame]]
 
-# Columns eval_metric evaluates as expressions; Percent of Peak is derived instead
+# Columns the stored rows fill as values; Percent of Peak is stored separately
 _EXPRESSION_COLUMNS = frozenset(SUPPORTED_FIELD) - {"Percent of Peak"}
-
-
-def build_chart_views(
-    workload: schema.Workload,
-    arch_config: schema.ArchConfig,
-    args: Namespace,
-) -> ChartViewSet:
-    """Evaluate chart templates once for all dispatches and once per kernel."""
-    arch = str(workload.sys_info.iloc[0]["gpu_arch"])
-    layout = Layouts.for_arch(arch)
-
-    if layout is None:
-        raise ValueError(f"No memory chart layout for {arch!r}")
-
-    filtered_pmc = parser.apply_non_kernel_filters(workload)
-    kernels = _kernel_entries(
-        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]["Kernel_Name"]
-    )
-    context = _make_context(arch, layout, arch_config, args, set(workload.dfs))
-    debug = bool(getattr(args, "debug", False))
-
-    def view_tables(index: Optional[int]) -> Dict[int, pd.DataFrame]:
-        pmc = (
-            filtered_pmc
-            if index is None
-            else filtered_pmc.loc[filtered_pmc["Kernel_Name"] == kernels[index].name]
-        )
-        return _evaluated_tables(context, workload, pmc, debug)
-
-    return _assemble_view_set(
-        context, kernels, list(workload.filter_kernel_ids), view_tables
-    )
 
 
 def build_chart_views_from_db(
@@ -295,35 +261,14 @@ def _assemble_view_set(
     )
 
 
-def _evaluated_tables(
-    context: _ViewContext,
-    workload: schema.Workload,
-    pmc: pd.DataFrame,
-    debug: bool,
-) -> Dict[int, pd.DataFrame]:
-    """Evaluate the chart templates on one view's counter frame."""
-    dfs = copy.deepcopy(context.templates)
-    if dfs:
-        eval_metric(
-            dfs,
-            context.table_types,
-            context.expressions,
-            workload.sys_info.iloc[0],
-            workload.roofline_peaks,
-            pmc,
-            debug,
-        )
-    return dfs
-
-
 def _tables_from_rows(
     context: _ViewContext,
     values: MetricValues,
 ) -> Dict[int, pd.DataFrame]:
     """Fill copies of the chart templates with one view's stored values.
 
-    Each cell gets what eval_metric would have written: an empty string where
-    the template has no expression, and otherwise the stored value converted
+    Each cell gets what the terminal shows: an empty string where the template
+    has no expression, and otherwise the stored value converted
     to its config unit and rounded to the digits of its to_round expression.
     """
     dfs = copy.deepcopy(context.templates)

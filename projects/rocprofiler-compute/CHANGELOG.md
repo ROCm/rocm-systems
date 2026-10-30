@@ -114,12 +114,36 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `compute_kernel_roofline_data` keeps its GFLOP/s and FLOPs/Byte units.
   * The terminal output and the configs keep their units and rounding.
 
+* **Breaking:** `rocprof-compute analyze` calculates every metric once, in the analysis database, and renders the terminal output, `report.txt`, and the HTML plots from it. The terminal and `report.txt` therefore show the database values, and the CLI-only evaluation path is gone.
+  * `--torch-operator` and `--triton-operator` no longer skip the analysis database or narrow the calculation. They are a report view: `report.txt` and the terminal add the matching operator tree and, under a label, the rows of the kernels those operators launched. The workload tables are not narrowed by operator.
+  * A profile recorded with `--torch-trace`, `--triton-trace` or `--ml-api-trace` writes `<n>-<workload>/ml-api-trace.csv` on every analyze run, with the joined marker and counter rows.
+  * `--list-stats` lists every kernel. Operator filters do not narrow the listing. `--list-torch-operators` and `--list-triton-operators` still print the operator trees and write nothing.
+  * `-g` is deprecated and has no effect, like `--output-format`.
+  * `-k` and `--kernel-iteration-range` keep their meaning on every run. With an operator filter, `-k` takes the kernel ids of the operator tree, which are the same ids as `--list-stats`.
+  * `memory-chart-gpu-0.html` is not written for a run with `-k`, because the database keeps only the selected kernels' chart rows.
+  * The roofline HTML is written for every `-p` workload, in its own `<n>-<workload>` subfolder.
+  * PC-sampling-only profiles show the Dispatch List without its `PID` column, which the database does not store.
+  * To migrate existing commands:
+
+    | Before | Now |
+    |---|---|
+    | `analyze -p wl --torch-operator X` writes `report.txt` only | Writes `report.txt`, `analysis.db`, the CSV files and the HTML plots. The report adds the operator tree and the labelled kernel rows |
+    | `analyze -p wl --torch-operator X -k N` narrows the tables to kernel `N` of the operator | `-k N` selects kernel `N` of the whole run. The operator tree shows the same ids |
+    | `analyze -p wl -k N` lists every kernel in the Top Kernels table and marks kernel `N` with `*` | The Top Kernels table lists only the kernels `-k` selects, and the `*` marker is gone. `--list-stats` still lists every kernel |
+    | `analyze -p wl --list-stats --torch-operator X` lists only the operator's kernels | `--list-stats` lists every kernel. Drop the operator filter to list the kernels |
+    | `analyze -p wl -k N` writes `memory-chart-gpu-0.html` | Not written. Run without `-k` for the memory chart HTML |
+    | `analyze -p wl -g` prints single-metric debug output | `-g` has no effect and warns |
+    | `analyze -p wl` on a profile recorded with `--torch-trace` writes no trace file | `<n>-<workload>/ml-api-trace.csv` is written on every analyze run |
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or the `analysis.db` that every analyze run writes to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
 
 * Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the CLI analyze calculation: the in-memory evaluation of the metric tables, the roofline AI calculation used only by the terminal roofline, and the `-g` single-metric debug tracker.
+  * The terminal and `report.txt` no longer print the CLI path's per-metric evaluation warnings, such as missing empirical peak warnings.
 
 * Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
 

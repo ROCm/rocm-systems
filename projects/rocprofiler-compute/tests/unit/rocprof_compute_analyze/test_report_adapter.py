@@ -27,12 +27,10 @@ from rocprof_compute_analyze.analysis_db import db_analysis
 from rocprof_compute_analyze.report_adapter import (
     NULL_TEXT,
     SYS_INFO_TABLE_ID,
-    build_report_runs,
     build_report_workload,
 )
 from utils import analysis_orm as orm
-from utils import parser, schema, tty
-from utils.roofline_calc import calc_ai_analyze
+from utils import schema, tty
 
 WORKLOADS_DIR = Path(__file__).resolve().parents[2] / "workloads"
 VCOPY_WORKLOAD = WORKLOADS_DIR / "vcopy/MI300X_A1"
@@ -82,54 +80,6 @@ def seal_database() -> None:
     """Commit the synthetic rows and create the views, as the DB pipeline does."""
     orm.Database.commit()
     orm.Database.create_views()
-
-
-def run_both_pipelines(workload_path: Path) -> PipelineRuns:
-    """Run the CLI pipeline and the DB pipeline, then build the adapter's runs."""
-    args = parse_analyze_args(workload_path)
-
-    cli = cli_analysis(args, common.SUPPORTED_ARCHS)
-    cli.sanitize()
-    cli.pre_processing()
-
-    db = db_analysis(args, common.SUPPORTED_ARCHS)
-    db.sanitize()
-    db.pre_processing()
-    db.build_database(Path("analysis.db"))
-    # write_outputs creates the views before it writes them, so the adapter sees
-    # the same views here.
-    seal_database()
-    workload_ids = {
-        run_path: workload_obj.workload_id
-        for run_path, workload_obj in zip(db._runs.keys(), db._workload_objs)
-    }
-    runs = build_report_runs(
-        orm.Database.get_session(),
-        workload_ids,
-        db._arch_configs,
-        args.time_unit,
-    )
-    return PipelineRuns(cli=cli, db=db, runs=runs)
-
-
-@pytest.fixture(scope="module")
-def vcopy_pipelines():
-    pipelines = run_both_pipelines(VCOPY_WORKLOAD)
-    yield pipelines
-    cleanup_database()
-
-
-@pytest.fixture(scope="module")
-def roofline_pipelines():
-    pipelines = run_both_pipelines(ROOFLINE_WORKLOAD)
-    yield pipelines
-    cleanup_database()
-
-
-@pytest.fixture(params=["vcopy_pipelines", "roofline_pipelines"])
-def parity_pipelines(request):
-    """Each workload whose CLI and adapter frames are compared."""
-    return request.getfixturevalue(request.param)
 
 
 def only_workload(runs: Dict[str, schema.Workload]) -> schema.Workload:
@@ -273,113 +223,6 @@ def add_synthetic_metric(
             value=value,
         )
     )
-
-
-def test_dispatch_and_sys_info_match_the_cli_frames(
-    parity_pipelines,
-):
-    """Dispatch List and System Info match the CLI frames exactly."""
-    cli_workload = only_workload(parity_pipelines.cli._runs)
-    adapter_workload = only_workload(parity_pipelines.runs)
-
-    for table_id in (DISPATCH_TABLE_ID, SYS_INFO_TABLE_ID):
-        pd.testing.assert_frame_equal(
-            adapter_workload.dfs[table_id],
-            cli_workload.dfs[table_id],
-            check_dtype=False,
-        )
-
-
-def test_top_kernels_match_the_cli_frame_except_an_unknown_percent(
-    parity_pipelines,
-):
-    """Top Kernels match the CLI, except a Percent the CLI shows as NaN is N/A.
-
-    The CLI shows NaN where the filtered total is zero (FR-15). Every other
-    cell, including the times, is the CLI's value.
-    """
-    cli_frame = only_workload(parity_pipelines.cli._runs).dfs[KERNEL_TOP_TABLE_ID]
-    adapter_frame = only_workload(parity_pipelines.runs).dfs[KERNEL_TOP_TABLE_ID]
-    expected = cli_frame.astype({"Percent": object})
-    expected.loc[cli_frame["Percent"].isna(), "Percent"] = NULL_TEXT
-
-    pd.testing.assert_frame_equal(adapter_frame, expected, check_dtype=False)
-
-
-def test_metric_tables_match_the_cli_frames_except_null_percent_of_peak(
-    parity_pipelines,
-):
-    """Every metric table has the CLI's rows, columns and values.
-
-    The one allowed difference is a NULL DB value of Percent of Peak: the CLI
-    leaves that cell blank, and the adapter shows N/A (FR-15).
-    """
-    cli_workload = only_workload(parity_pipelines.cli._runs)
-    adapter_workload = only_workload(parity_pipelines.runs)
-    metric_table_ids = [
-        table_id
-        for table_id in adapter_workload.dfs
-        if table_id not in STANDARD_TABLE_IDS
-    ]
-    assert metric_table_ids
-
-    for table_id in metric_table_ids:
-        cli_frame = cli_workload.dfs[table_id]
-        adapter_frame = adapter_workload.dfs[table_id]
-        assert list(adapter_frame.columns) == list(cli_frame.columns), table_id
-        assert list(adapter_frame.index) == list(cli_frame.index), table_id
-        for column in cli_frame.columns:
-            for metric_id, cli_value, adapter_value in zip(
-                cli_frame.index, cli_frame[column], adapter_frame[column]
-            ):
-                where = (table_id, metric_id, column)
-                if cli_value == "" and adapter_value == NULL_TEXT:
-                    assert column == PERCENT_OF_PEAK, where
-                    continue
-                assert cell_matches(cli_value, adapter_value), (
-                    where,
-                    cli_value,
-                    adapter_value,
-                )
-
-
-def test_roofline_is_not_valid_for_a_workload_without_roofline_csv(vcopy_pipelines):
-    """No valid roofline.csv means no peaks and no per-kernel roofline tables."""
-    adapter_workload = only_workload(vcopy_pipelines.runs)
-
-    assert adapter_workload.roofline_peaks.empty
-    assert adapter_workload.roofline_metrics == {}
-
-
-def test_roofline_peaks_and_per_kernel_tables_match_the_cli(roofline_pipelines):
-    """The peaks and each kernel's rate and plot-point tables match the CLI's."""
-    cli_workload = only_workload(roofline_pipelines.cli._runs)
-    adapter_workload = only_workload(roofline_pipelines.runs)
-    cli_arch_config = roofline_pipelines.cli._arch_configs[
-        cli_workload.sys_info.iloc[0]["gpu_arch"]
-    ]
-    pmc_df = parser.apply_filters(cli_workload, debug=False)
-    calc_ai_analyze(workload=cli_workload, pmc_df=pmc_df, arch_config=cli_arch_config)
-
-    pd.testing.assert_frame_equal(
-        adapter_workload.roofline_peaks,
-        cli_workload.roofline_peaks,
-        check_dtype=False,
-    )
-    assert adapter_workload.roofline_metrics
-    assert list(adapter_workload.roofline_metrics) == list(
-        cli_workload.roofline_metrics
-    )
-    for kernel_id, cli_metrics in cli_workload.roofline_metrics.items():
-        adapter_metrics = adapter_workload.roofline_metrics[kernel_id]
-        assert adapter_metrics["name"] == cli_metrics["name"]
-        for table_key in ("ai_table", "calc_table"):
-            pd.testing.assert_frame_equal(
-                adapter_metrics[table_key],
-                cli_metrics[table_key],
-                check_dtype=False,
-                rtol=1e-9,
-            )
 
 
 def test_top_stats_percent_is_each_kernel_share_of_the_stored_total(db_session):

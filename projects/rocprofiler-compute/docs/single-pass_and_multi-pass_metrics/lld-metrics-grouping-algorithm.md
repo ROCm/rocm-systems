@@ -96,7 +96,7 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 
 ## 3. Reading each metric from one pass
 
-Analyze reads all of a metric's counters from the same pass. Code: `src/utils/metrics/pass_provenance.py`, the per-pass columns in file I/O, and both analyze entry points — CLI (`eval_metric`) and DB (`calc_expressions` / `bind_expression_dataframe`).
+Analyze reads all of a metric's counters from the same pass. Code: `src/utils/metrics/pass_provenance.py`, the per-pass columns in file I/O, and the analyze DB path, which is the only evaluator (`calc_expressions` / `bind_expression_dataframe`).
 
 - **Which pass.** In an ordinary profile, the name in `{counter}@pass:{key}` is the result file name without its prefix and suffix (`_pass_key_from_result_file`): `results_pmc_perf_3.csv.gz` becomes `pmc_perf_3`. `--iteration-multiplexing` writes one result file for the whole run, so that file name is not a pass label and the rows do not carry a pass field. Analyze does not build per-pass columns in that mode. It fills empty counter cells from other launches of the same kernel, and same-pass bind does not run.
 - **Per-pass columns.** Only a counter that appears in more than one pass is suffixed (`PassLayout.duplicated` in `process_rocpd_csv`). A counter that appears in one pass keeps its bare name, and that column is the value from that pass. This applies when each pass has its own result file.

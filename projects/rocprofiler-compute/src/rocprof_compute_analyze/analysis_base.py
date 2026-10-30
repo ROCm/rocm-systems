@@ -84,37 +84,6 @@ class OmniAnalyze_Base:
         config = getattr(self, "_profiling_config", {})
         return is_only_pc_sampling(config.get("filter_blocks", []))
 
-    def load_pc_sampling_tool_data(self, workload_path: str) -> list[dict[str, Any]]:
-        """Return parsed PC sampling tool records, or an empty list."""
-        if not self.pc_sampling_collected():
-            return []
-        return file_io.load_pc_sampling_results(str(workload_path))
-
-    def build_pc_sampling_only_workload(
-        self,
-        workload: schema.Workload,
-        dir_path: str,
-        args: argparse.Namespace,
-        tool_data: list[dict[str, Any]],
-    ) -> None:
-        """Build dispatch scaffolding and tables for a run without counters."""
-        workload.raw_pmc = file_io.process_pc_sampling_kernel_traces(tool_data)
-        workload.raw_pmc = workload.raw_pmc.rename(
-            columns={"Dispatch_Id": "Dispatch_ID"}
-        )
-        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
-            df_in=workload.raw_pmc,
-            filter_gpu_ids=workload.filter_gpu_ids,
-            filter_dispatch_ids=workload.filter_dispatch_ids,
-            time_unit=args.time_unit,
-        )
-        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
-        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-        parser.load_non_mertrics_table(
-            workload, dir_path, args, pc_sampling_tool_data=tool_data
-        )
-        parser.nullify_unevaluated_metric_values(workload)
-
     def membw_analysis_collected(self) -> bool:
         """True when block 30 data was collected during profiling."""
         config = getattr(self, "_profiling_config", {})

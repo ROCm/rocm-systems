@@ -5,6 +5,7 @@
 
 import csv
 import re
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,8 @@ TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
 
 
 ADDMM_MARKER = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
+# The "Run folder: <path>" line analyze prints last
+RUN_FOLDER_PATTERN = re.compile(r"Run folder: (\S+)")
 
 
 def check_torch_trace_markers(marker_rows):
@@ -484,7 +487,14 @@ def test_torch_operator_addmm_selects_kernels(
     assert "Matched PyTorch Operators:" in out
     assert ADDMM_MARKER.search(out)
     assert "nn.Module.Linear.forward" in out
-    assert "operator filter selected" in out
+    # The operator filter is a report view: the run still writes every artifact.
+    run_folder = Path(RUN_FOLDER_PATTERN.search(out).group(1))
+    assert (run_folder / "analysis.db").is_file()
+    assert (run_folder / "report.txt").is_file()
+    assert list(run_folder.glob("*/ml-api-trace.csv"))
+    assert "Matched PyTorch Operators:" in (run_folder / "report.txt").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_list_torch_operators_wins_over_filter(
@@ -536,15 +546,17 @@ def test_torch_operator_with_dispatch_filter(
     assert code == 0
     captured = capsys.readouterr()
     out = captured.out + captured.err
-    assert "operator filter selected 1 dispatch(es)" in out
-    # The analysis builds its top stats from the same dispatch filter.
-    filtered_top, _ = file_io.create_df_kernel_top_stats(
-        df_in=dispatch_df,
-        filter_gpu_ids=None,
-        filter_dispatch_ids=["1"],
-        time_unit="ns",
-    )
-    assert set(filtered_top["Kernel_Name"].astype(str)) == {dispatch_one_kernel}
+    run_folder = Path(RUN_FOLDER_PATTERN.search(out).group(1))
+    # --kernel-iteration-range narrows the calculation, so the DB keeps only the
+    # kernel of dispatch 1, while the operator filter selects the report rows.
+    with sqlite3.connect(run_folder / "analysis.db") as connection:
+        stored_kernels = {
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT kernel_name FROM compute_kernel"
+            )
+        }
+    assert stored_kernels == {dispatch_one_kernel}
 
 
 def test_torch_trace_user_range_and_backward_thread_in_marker_csv(

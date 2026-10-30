@@ -1183,7 +1183,7 @@ def show_kernel_stats(
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For the Top Kernels table, have to sort here if not
-                    #   sorted when load_table_data.
+                    #   sorted when the table is loaded.
                     if table_config["id"] == 1:
                         print(f"\n{'-' * 80}", file=output)
                         print(

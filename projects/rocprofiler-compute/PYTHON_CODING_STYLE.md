@@ -571,7 +571,6 @@ def pre_processing(self) -> None:
             )
 
         file_io.create_df_kernel_top_stats(...)
-        parser.load_table_data(...)
 ```
 
 **Bad:** Doing everything inline
@@ -768,7 +767,7 @@ def create_filtered_stats(
         df = df.loc[df["GPU_ID"].astype(str).isin(filter_gpu_ids)]
 
     if filter_dispatch_ids:
-        df = apply_dispatch_filter(df, filter_dispatch_ids)
+        df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
 ```
 
 **Bad:** Everything nested inline (exceeds 2-3 level recommendation)

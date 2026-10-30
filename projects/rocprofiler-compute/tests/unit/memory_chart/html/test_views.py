@@ -6,7 +6,7 @@
 import json
 from argparse import Namespace
 from collections import OrderedDict
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 from typing import List, Optional, Tuple, Union
 
 import pandas as pd
@@ -21,7 +21,6 @@ from memory_chart.html import views
 from memory_chart.html.db_rows import KernelRows, WorkloadChartRows
 from memory_chart.html.diagram import SlotSpec
 from memory_chart.loader import Layouts
-from memory_chart.render import progress_bar
 from memory_chart.units import PLAIN, DisplayUnit, display_unit, format_value
 from utils.metrics.expression import build_eval_string
 from utils.schema import ArchConfig, Workload
@@ -192,93 +191,6 @@ def make_bottleneck(value: float, active: bool) -> MemBwAnalysisResult:
     )
 
 
-def test_filtered_rows_drive_aggregate_and_per_kernel_values() -> None:
-    """Build aggregate and per-kernel values from filtered counter rows."""
-    workload, config, args = make_inputs(kernel_filter=[1])
-    result = views.build_chart_views(workload, config, args)
-
-    assert slot(result.aggregate, "Wavefront Occupancy").text == "16.7"
-    assert [slot(view, "Wavefront Occupancy").text for view in result.kernel_views] == [
-        "6.5",
-        "1.2",
-        "9.0",
-    ]
-
-
-def test_kernel_views_follow_workload_kernel_order() -> None:
-    """Keep per-kernel views in the workload's kernel order."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-
-    assert [(entry.index, entry.name) for entry in result.kernels] == [
-        (0, "beta"),
-        (1, "alpha"),
-        (2, "gamma"),
-    ]
-
-    assert [view.key for view in result.kernel_views] == [
-        "kernel-0",
-        "kernel-1",
-        "kernel-2",
-    ]
-
-
-def test_chart_views_report_workload_architecture() -> None:
-    """Expose the workload architecture in chart and diagram data."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-
-    assert result.arch == "gfx950"
-    assert result.diagram["arch"] == "gfx950"
-
-
-def test_chart_view_is_immutable() -> None:
-    """Prevent callers from mutating a constructed chart view."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-
-    with pytest.raises(FrozenInstanceError):
-        result.aggregate.key = "changed"
-
-
-def test_build_chart_views_preserves_metric_template() -> None:
-    """Leave configured metric expressions unchanged during evaluation."""
-    workload, config, args = make_inputs()
-    views.build_chart_views(workload, config, args)
-
-    assert workload.dfs[301]["Value"].iloc[0] == build_eval_string("SUM(Counter)")
-
-
-def test_views_without_membw_have_no_membw_details() -> None:
-    """Omit bandwidth details when no bandwidth table is configured."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-
-    assert all(view.membw is None for view in (result.aggregate, *result.kernel_views))
-
-
-def test_processed_table_contains_evaluated_metric_rows() -> None:
-    """Preserve the evaluated metric table's identity, columns, and rows."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-    table = result.aggregate.tables[0]
-
-    assert table.table_id == 301
-    assert table.columns == ("Metric", "Value")
-    assert table.rows[0] == ("Wavefront Occupancy", "16.7")
-
-
-def test_repeated_table_metrics_match_diagram_units_and_precision() -> None:
-    """Format chart metric table values exactly like their diagram slots."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-    table = result.aggregate.tables[0]
-    values = {row[0]: row[1] for row in table.rows}
-
-    assert values["VL1_L2 Read BW"] == slot(result.aggregate, "VL1_L2 Read BW").text
-    assert values["VL1 Hit"] == slot(result.aggregate, "VL1 Hit").text
-
-
 def test_chart_metric_table_formats_missing_values_as_unavailable() -> None:
     """Keep a missing table value consistent with its diagram slot."""
     table = pd.DataFrame({
@@ -398,164 +310,6 @@ def test_chart_metric_table_retains_units_for_unavailable_values(
     rows, _ = views._format_chart_metric_rows(table, {spec.metric: spec})
 
     assert rows == (("Synthetic metric", "N/A", expected_unit),)
-
-
-def test_aggregate_and_kernel_tables_retain_original_and_converted_units() -> None:
-    """Keep table units across aggregate and individually selected kernels."""
-    workload, config, args = make_inputs()
-    config.dfs[301]["Unit"] = [
-        "Workgroups per CU",
-        "Percent",
-        "Bytes/s",
-        "Bytes per Workgroup",
-        "Requests per kernel",
-    ]
-    result = views.build_chart_views(workload, config, args)
-
-    for view in (result.aggregate, *result.kernel_views):
-        table = view.tables[0]
-        assert table.columns == ("Metric", "Value", "Unit")
-        assert [row[2] for row in table.rows] == [
-            "Workgroups per CU",
-            "%",
-            "GB/s",
-            "KB",
-            "Requests per kernel",
-        ]
-
-    assert [
-        view.tables[0].rows[0][1] for view in (result.aggregate, *result.kernel_views)
-    ] == ["16.7", "6.5", "1.2", "9.0"]
-
-
-def test_slots_use_terminal_metric_formatting() -> None:
-    """Format slot values, units, and bars like the terminal chart."""
-    workload, config, args = make_inputs()
-    result = views.build_chart_views(workload, config, args)
-    aggregate = result.aggregate
-
-    assert slot(aggregate, "VL1_L2 Read BW").text == format_value(
-        2.7e9, display_unit("Bytes/s")
-    )
-
-    assert slot(aggregate, "VL1 Hit").text == format_value(100, display_unit("Percent"))
-    assert slot(aggregate, "VL1 Hit").bar == progress_bar(100)
-
-    assert slot(aggregate, "LDS Allocation").text == format_value(
-        20480, display_unit("Bytes per Workgroup")
-    )
-
-    assert slot(aggregate, "Wavefront Occupancy").unit_label == ""
-
-    assert slot(aggregate, "Flat Read").text == format_value(
-        16.7, display_unit("(Requests + $normUnit)")
-    )
-
-    assert slot(aggregate, "VL1_L2 Write BW").text == "N/A"
-    assert slot(aggregate, "L2 Hit").bar == progress_bar(None)
-
-
-def test_column_selection_limits_processed_table_and_slots() -> None:
-    """Show only selected columns and mark omitted slot values unavailable."""
-    workload, config, args = make_inputs()
-    args.cols = [0]
-    selected = views.build_chart_views(workload, config, args)
-
-    assert selected.aggregate.tables[0].columns == ("Metric",)
-    assert slot(selected.aggregate, "VL1 Hit").text == "N/A"
-
-
-def test_missing_table_produces_unavailable_slots() -> None:
-    """Show unavailable slots when a configured metric table is missing."""
-    workload, config, args = make_inputs()
-    del workload.dfs[301]
-    missing = views.build_chart_views(workload, config, args)
-
-    assert missing.aggregate.tables == ()
-    assert all(item.text == "N/A" for item in missing.aggregate.slots)
-
-
-@pytest.mark.parametrize(
-    "filter_ids,expected",
-    [
-        ([], None),
-        ([0], 0),
-        ([1], 1),
-        ([0, 1], None),
-        ([0, 0], 0),
-        ([99], None),
-    ],
-)
-def test_initial_kernel_requires_one_effective_match(filter_ids, expected) -> None:
-    """Select an initial kernel only when filters resolve to one kernel."""
-    workload, config, args = make_inputs(kernel_filter=filter_ids)
-    result = views.build_chart_views(workload, config, args)
-
-    assert result.initial_kernel == expected
-
-
-def test_membw_spec_is_loaded_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Load one bandwidth tree spec for all views in a chart build."""
-    workload, config, args = make_inputs(with_membw=True)
-    loaded: List[str] = []
-
-    def load_spec(arch: str) -> object:
-        """Record the architecture and return a stand-in tree spec."""
-        loaded.append(arch)
-        return object()
-
-    def evaluate_membw(dfs: dict, _spec: object, _arch: str) -> MemBwAnalysisResult:
-        """Build a synthetic bottleneck result from the evaluated table value."""
-        value = float(dfs[3001]["Avg"].iloc[0])
-        return make_bottleneck(value, value > 5)
-
-    monkeypatch.setattr(views, "load_membw_spec", load_spec)
-    monkeypatch.setattr(views, "evaluate_membw_dfs", evaluate_membw)
-
-    views.build_chart_views(workload, config, args)
-
-    assert loaded == ["gfx950"]
-
-
-def test_each_view_has_its_own_membw_annotations_and_guidance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep bandwidth annotations and guidance specific to each chart view."""
-    workload, config, args = make_inputs(with_membw=True)
-
-    def load_spec(arch: str) -> object:
-        """Return a stand-in tree spec for the requested architecture."""
-        return object()
-
-    def evaluate_membw(dfs: dict, _spec: object, _arch: str) -> MemBwAnalysisResult:
-        """Build a synthetic bottleneck result from the evaluated table value."""
-        value = float(dfs[3001]["Avg"].iloc[0])
-        return make_bottleneck(value, value > 5)
-
-    monkeypatch.setattr(views, "load_membw_spec", load_spec)
-    monkeypatch.setattr(views, "evaluate_membw_dfs", evaluate_membw)
-
-    result = views.build_chart_views(workload, config, args)
-
-    assert [
-        view.membw.availability for view in (result.aggregate, *result.kernel_views)
-    ] == ["full"] * 4
-
-    assert result.aggregate.membw.annotations[0].block_id == "vl1d"
-    assert result.aggregate.membw.annotations[0].label == "TCP stall"
-
-    assert result.aggregate.membw.annotations[0].value == format_value(
-        16.702, display_unit("Percent")
-    )
-    assert result.aggregate.membw.guidance_blocks == ("TCP stall\n  Measured: 16.7%",)
-    assert result.kernel_views[0].membw.annotations[0].value == format_value(
-        6.468, display_unit("Percent")
-    )
-
-    assert result.kernel_views[1].membw.annotations == ()
-    assert result.kernel_views[1].membw.status == (
-        "Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA)."
-    )
 
 
 @pytest.mark.parametrize(

@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-import pytest
 from sqlalchemy.orm import Session
 
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING
@@ -22,10 +21,8 @@ from rocprof_compute_analyze.pc_sampling_section import (
     normalize_summary_rows,
 )
 from utils import analysis_orm as orm
-from utils import schema
 from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results
-from utils.parser import PMC_KERNEL_TOP_TABLE_ID, load_pc_sampling_data
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
 DISPLAY_COLUMNS = [
@@ -100,24 +97,6 @@ def store_fixture_samples(session: Session) -> Dict[str, Any]:
     }
 
 
-def parsed_records_frame(
-    tool_records: List[Dict[str, Any]],
-    sys_info: Dict[str, Any],
-    kernel_name: str,
-    sorting_type: str,
-    num_rows: Optional[int],
-) -> pd.DataFrame:
-    """Return today's terminal frame for a single -k kernel."""
-    workload = schema.Workload(
-        sys_info=pd.DataFrame([sys_info]),
-        filter_kernel_ids=[0],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": [kernel_name]})},
-    )
-    return load_pc_sampling_data(
-        workload, sorting_type, tool_records, num_rows=num_rows
-    )
-
-
 def summary_row(
     kernel_name: str,
     offset: int,
@@ -158,42 +137,6 @@ def test_filter_note_names_the_options_pc_sampling_ignores() -> None:
     assert "--gpu-id" in PC_SAMPLING_FILTER_NOTE
     assert "--kernel-iteration-range" in PC_SAMPLING_FILTER_NOTE
     assert "narrowed by -k only" in PC_SAMPLING_FILTER_NOTE
-
-
-@pytest.mark.parametrize("sorting_type", ["offset", "count"])
-@pytest.mark.parametrize("num_rows", [0, 3, 10])
-def test_section_matches_parsed_frame_for_each_kernel(
-    db_session: Session, sorting_type: str, num_rows: int
-) -> None:
-    """For one -k kernel, the database section equals today's terminal frame."""
-    stored = store_fixture_samples(db_session)
-    summary_rows = load_pc_sampling_summary_rows(
-        db_session, stored["workload"].workload_id
-    )
-    kernel_names = sorted(summary_rows["Kernel_Name"].unique())
-    assert kernel_names
-
-    for kernel_name in kernel_names:
-        section = build_pc_sampling_section(
-            summary_rows,
-            gpu_arch=GPU_ARCH,
-            sorting_type=sorting_type,
-            num_rows=num_rows,
-            kernel_names=[kernel_name],
-        )
-        parsed = parsed_records_frame(
-            stored["tool_records"],
-            stored["sys_info"],
-            kernel_name,
-            sorting_type,
-            num_rows,
-        )
-        assert not section.empty
-        assert list(section.columns) == list(parsed.columns)
-        # The parsed frame keeps these float columns as nullable Float64.
-        for column in ["active_thread_percent", "wave_occupancy_percent"]:
-            parsed[column] = parsed[column].astype("float64")
-        pd.testing.assert_frame_equal(section, parsed)
 
 
 def test_section_has_the_stochastic_columns_for_the_fixture(

@@ -1010,8 +1010,9 @@ Performance counter data
 
 The ``ml_api_trace_*_counter_collection.csv.gz`` files hold the same
 performance counters as a profile without Torch trace. In analyze mode,
-``--torch-operator`` and ``--triton-operator`` show the usual metric tables
-for the kernels that the matching operators launched.
+``--torch-operator`` and ``--triton-operator`` add the matching operator call tree to the
+analyze report, with the kernels those operators launched under a label. They do not narrow
+the metric tables, which keep every kernel. See :ref:`operator-filtering`.
 
 .. _torch-trace-limitations:
 

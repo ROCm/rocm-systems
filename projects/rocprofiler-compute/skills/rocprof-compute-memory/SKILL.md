@@ -103,7 +103,7 @@ They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
 when you need to explain a verdict, and report the guidance the tool produced
 rather than substituting your own numbers.
 
-With `--output-format db`, the result is also stored in the analysis database (the `compute_membw_*` tables and the `compute_membw_node_view` view).
+Every analyze run stores the result in the run's `analysis.db` (the `compute_membw_*` tables and the `compute_membw_node_view` view) and writes `membw_node.csv`. No `--output-format` is needed; that option is a deprecated no-op.
 
 On any other architecture, use the Memory Chart path above.
 

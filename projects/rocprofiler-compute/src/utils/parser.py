@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import argparse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -10,20 +9,9 @@ import pandas as pd
 from pc_sampling.code_object_analysis import InstructionPipelines
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
-    aggregate_pc_sample_records,
-    detect_pc_sampling_method,
-    enrich_with_metadata,
-    load_pc_sample_records,
 )
 from utils import schema
-from utils.filter_validation import (
-    dispatch_threshold,
-    validate_dispatch_filter_ids,
-    validate_gpu_filter_ids,
-    validate_kernel_filter_ids,
-)
-from utils.logger import console_error, console_warning, demarcate
-from utils.metrics.evaluation_pipeline import eval_metric
+from utils.logger import console_error, demarcate
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -32,7 +20,6 @@ from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
-    normalize_filter_to_str_list,
 )
 from utils.utils_counter_defs import metric_expressions, metric_value_keys
 
@@ -226,166 +213,6 @@ def _build_metric_table_df(
     return df, expressions
 
 
-@demarcate
-def apply_filters(workload: schema.Workload, debug: bool) -> pd.DataFrame:
-    """
-    Apply user's filters to the raw_pmc df.
-    """
-
-    filtered_df = _apply_gpu_filter(workload)
-
-    # Apply kernel filter
-    # NB:
-    # Kernel id is unique!
-    # We pick up kernel names from kerne ids first.
-    # Then filter valid entries with kernel names.
-    if workload.filter_kernel_ids:
-        filtered_df = apply_kernel_filter(filtered_df, workload)
-
-    # Apply dispatch filter
-    if workload.filter_dispatch_ids:
-        filtered_df = apply_dispatch_filter(filtered_df, workload)
-
-    if debug:
-        print("~" * 40, "\nraw pmc df info:\n")
-        print(workload.raw_pmc.info())
-        print("~" * 40, "\nfiltered pmc df info:")
-        print(filtered_df.info())
-
-    return filtered_df
-
-
-def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply kernel ID filters, marking the selected rows in the top stats table."""
-    kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
-    if kernel_top_dataframe is None:
-        console_error(
-            "Kernel top stats table not loaded. "
-            "Ensure create_df_kernel_top_stats() "
-            "is called before applying kernel filters."
-        )
-
-    validate_kernel_filter_ids(
-        workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
-    )
-
-    # Extract kernel names and mark selected kernels with "*"
-    # TODO: fix it for unaligned comparison
-    selected_kernels = []
-    kernel_top_dataframe["Selected"] = ""
-
-    for kernel_id in workload.filter_kernel_ids:
-        selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-        kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
-
-    if selected_kernels:
-        df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
-
-    return df
-
-
-def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply dispatch ID filters."""
-    validate_dispatch_filter_ids(
-        workload.filter_dispatch_ids,
-        df["Dispatch_ID"].unique(),
-    )
-
-    # '> n' keeps the dispatches whose id is greater than n.
-    threshold = dispatch_threshold(workload.filter_dispatch_ids[0])
-    if threshold is not None:
-        df = df[df["Dispatch_ID"] > threshold]
-    else:
-        selected_dispatches = [
-            int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
-        ]
-        df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
-
-    return df
-
-
-def apply_non_kernel_filters(workload: schema.Workload) -> pd.DataFrame:
-    """Apply GPU and dispatch filters while retaining every kernel."""
-    filtered_df = _apply_gpu_filter(workload)
-
-    if workload.filter_dispatch_ids:
-        filtered_df = apply_dispatch_filter(filtered_df, workload)
-
-    return filtered_df
-
-
-def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
-    """Apply the requested GPU IDs before other row filters."""
-    filtered_df = workload.raw_pmc
-
-    if workload.filter_gpu_ids:
-        validate_gpu_filter_ids(
-            workload.filter_gpu_ids,
-            filtered_df["GPU_ID"].unique(),
-        )
-        filtered_df = filtered_df.loc[
-            filtered_df["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
-        ]
-
-    return filtered_df
-
-
-def _build_pc_sampling_partial_frame(
-    method: str,
-    tool_data: dict[str, Any],
-    sys_info: dict[str, Any],
-    kernel_name: Optional[str] = None,
-) -> pd.DataFrame:
-    """Build one process's enriched sampling frame for an optional kernel."""
-    kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
-    pc_samples = tool_data["buffer_records"][
-        "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
-    ]
-    if not pc_samples:
-        console_warning(f"PC sampling: no pc samples found for {kernel_context}.")
-        return pd.DataFrame()
-
-    instructions = tool_data["strings"]["pc_sample_instructions"]
-    comments = tool_data["strings"]["pc_sample_comments"]
-    if not instructions or not comments:
-        console_warning(
-            "PC sampling: instruction or comment string table is empty for "
-            f"{kernel_context}."
-        )
-        return pd.DataFrame()
-
-    records_df = load_pc_sample_records(tool_data)
-    aggregated_df = aggregate_pc_sample_records(
-        records_df,
-        group_by=["code_object_id", "code_object_offset", "kernel_id"],
-        sys_info=sys_info,
-    )
-    df = enrich_with_metadata(
-        aggregated_df,
-        tool_data,
-        attach={"instruction", "source_line", "kernel_name"},
-    )
-    if df.empty:
-        console_warning("PC sampling: no records found in PC sampling data.")
-        return df
-
-    df = df.rename(
-        columns={"code_object_offset": "offset", "kernel_name": "Kernel_Name"}
-    )
-    # Row identity is process-scoped, so every row carries its own process.
-    df["pid"] = tool_data["metadata"]["pid"]
-
-    if kernel_name is not None:
-        df = df[df["Kernel_Name"] == kernel_name]
-        if df.empty:
-            console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
-            return df
-
-    return df
-
-
 def format_pc_sampling_display_frame(
     df: pd.DataFrame,
     method: str,
@@ -450,92 +277,6 @@ def format_pc_sampling_display_frame(
     return df_sorted[columns_to_return].reset_index(drop=True)
 
 
-@demarcate
-def load_pc_sampling_data(
-    workload: schema.Workload,
-    sorting_type: str,
-    tool_data_records: Optional[list[dict[str, Any]]] = None,
-    num_rows: Optional[int] = None,
-) -> pd.DataFrame:
-    """Return the detailed per-instruction table for a single kernel or all.
-
-    Detects the method, builds one frame per tool record, then formats the
-    concatenation for all kernels (no ``-k``) or a single kernel (one ``-k``).
-    The output schema is identical either way. Rows are process-scoped: the
-    same offset in two processes can be different code, so frames are never
-    merged across records. Callers pass the already-parsed *tool_data_records*.
-    """
-    if not tool_data_records:
-        return pd.DataFrame()
-
-    # One invocation configures one sampling method, so every record is assumed
-    # to share it. Zero-sample processes still produce valid result records when
-    # another enabled domain, such as kernel tracing, contains data, so infer the
-    # method from every process that captured at least one PC sample.
-    detected_pc_sampling_methods = {
-        method
-        for tool_data in tool_data_records
-        if (method := detect_pc_sampling_method(tool_data)) is not None
-    }
-    if len(detected_pc_sampling_methods) > 1:
-        conflicting_methods = ", ".join(sorted(detected_pc_sampling_methods))
-        console_error(
-            f"PC sampling: conflicting sampling methods ({conflicting_methods}) "
-            "found across result files",
-            exit=False,
-        )
-        return pd.DataFrame()
-
-    pc_sampling_method = next(iter(detected_pc_sampling_methods), None)
-    if pc_sampling_method is None:
-        console_warning("PC sampling: can not detect pc sampling method.")
-        return pd.DataFrame()
-
-    # No kernel filter means every kernel's rows.
-    kernel_name = None
-    if workload.filter_kernel_ids:
-        if len(workload.filter_kernel_ids) > 1:
-            console_error(
-                "PC sampling supports single kernel only! Please specify -k with "
-                "single kernel.",
-                exit=False,
-            )
-            return pd.DataFrame()
-
-        kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-        kernel_index = workload.filter_kernel_ids[0]
-        if not 0 <= kernel_index < len(kernel_top_df):
-            console_warning(
-                f"Kernel index {kernel_index} is out of bounds. "
-                f"kernel_top table has only {len(kernel_top_df)} rows."
-            )
-            return pd.DataFrame()
-
-        kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-
-    sys_info = (
-        workload.sys_info.iloc[0].to_dict() if not workload.sys_info.empty else {}
-    )
-    process_frames = []
-    for tool_data in tool_data_records:
-        frame = _build_pc_sampling_partial_frame(
-            pc_sampling_method, tool_data, sys_info, kernel_name
-        )
-        if not frame.empty:
-            process_frames.append(frame)
-
-    if not process_frames:
-        return pd.DataFrame()
-
-    return format_pc_sampling_display_frame(
-        pd.concat(process_frames, ignore_index=True),
-        pc_sampling_method,
-        sorting_type,
-        num_rows=num_rows,
-        gpu_arch=sys_info.get("gpu_arch"),
-    )
-
-
 def _stall_reason_dict_to_list(
     stall_reason: Optional[dict[str, int]],
 ) -> list[tuple[str, int]]:
@@ -552,115 +293,9 @@ def _trim_source_line(source_line: str) -> str:
     return f".../{Path(source_line).name}"
 
 
-def nullify_unevaluated_metric_values(
-    workload: schema.Workload,
-) -> None:
-    """Replace unevaluated formula strings with "N/A" in all metric tables.
-
-    In PC-sampling-only mode ``eval_metric`` is never called, so metric
-    table cells still contain raw formula strings produced by
-    ``build_metric_value_string``.  This helper walks every
-    ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
-    column to ``"N/A"`` so that downstream display code can safely
-    format the values.
-    """
-    for df_id, df_type in workload.dfs_type.items():
-        if df_type != "metric_table":
-            continue
-        df = workload.dfs.get(df_id)
-        if df is None or df.empty:
-            continue
-        for col in df.columns:
-            if col in SUPPORTED_FIELD and col.lower() != "alias":
-                df[col] = "N/A"
-
-
-@demarcate
-def load_non_mertrics_table(
-    workload: schema.Workload,
-    dir_path: str,
-    args: argparse.Namespace,
-    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
-) -> None:
-    # NB:
-    #   - The Top Kernels table is set by the caller before eval_metric because
-    #     we need the kernel names.
-    #   - Callers replace the from_csv entries of PMC_KERNEL_TOP_TABLE_ID and
-    #     PMC_DISPATCH_INFO_TABLE_ID with in-memory frames before this runs, so
-    #     no top-stats CSV is read.
-    #   - There might be a better way/timing to load raw_csv_table.
-
-    # NB:
-    #   "from_csv", "from_csv_columnwise", and "from_pc_sampling"
-    #   are 3 internal symbols converted in build_dfs() for non-metrics table.
-    #   There might be better way to store these info without the orginal entry.
-    tmp = {}
-    for df_id, df in workload.dfs.items():
-        if "from_csv" in df.columns:
-            csv_file = Path(dir_path) / str(df.loc[0, "from_csv"])
-            if csv_file.exists():
-                tmp[df_id] = pd.read_csv(csv_file)
-            else:
-                console_warning(
-                    f"Couldn't load {csv_file.name}. "
-                    "This may result in missing analysis data."
-                )
-        elif "from_csv_columnwise" in df.columns:
-            # NB:
-            #   Another way might be doing transpose in tty like metric_table.
-            #   But we need to figure out headers and comparison properly.
-            csv_file = Path(dir_path) / str(df.loc[0, "from_csv_columnwise"])
-            if csv_file.exists():
-                tmp[df_id] = pd.read_csv(csv_file).transpose()
-                # NB:
-                #   All transposed columns should be marked with a general header,
-                #   so tty could detect them and show them correctly in comparison.
-                tmp[df_id].columns = ["Info"]
-            else:
-                console_warning(
-                    f"Couldn't load {csv_file.name}. "
-                    "This may result in missing analysis data."
-                )
-        elif "from_pc_sampling" in df.columns:
-            tmp[df_id] = load_pc_sampling_data(
-                workload,
-                args.pc_sampling_sorting_type,
-                pc_sampling_tool_data,
-                num_rows=args.pc_sampling_rows,
-            )
-
-    workload.dfs.update(tmp)
-
-
 def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
     """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
     return fnmatch_glob_matches(pattern, operator_name)
-
-
-@demarcate
-def load_table_data(
-    workload: schema.Workload,
-    dir_path: str,
-    args: argparse.Namespace,
-    dfs_expressions: dict[int, list[str]],
-    pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
-) -> None:
-    """
-    - Load data for all "raw_csv_table"
-    - Load data for "pc_sampling_table"
-    - Calculate mertric value for all "metric_table"
-    """
-    load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
-
-    eval_metric(
-        workload.dfs,
-        workload.dfs_type,
-        dfs_expressions,
-        workload.sys_info.iloc[0],
-        workload.roofline_peaks,
-        apply_filters(workload, args.debug),
-        args.debug,
-    )
 
 
 def build_comparable_columns(time_unit: str) -> list[str]:

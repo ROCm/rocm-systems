@@ -63,7 +63,8 @@ Analysis options
 ================
 The PC sampling table is section 21 of ``report.txt`` in the run folder. To
 also print it on the terminal, add ``-b 21``. The sample outputs below show
-section 21.
+section 21. The table is built from the analysis database. ``-k`` narrows it to the
+selected kernels; the operator options do not.
 
 For using analysis options for PC sampling the configuration needed are:
 

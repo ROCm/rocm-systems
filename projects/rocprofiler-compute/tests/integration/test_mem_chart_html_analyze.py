@@ -8,24 +8,17 @@ import json
 import re
 from itertools import count
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import common
 import pandas as pd
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 from memory_chart.html.report import (
     MODEL_ID,
     memory_chart_html_name,
-    write_mem_chart_report_from_db,
 )
-from memory_chart.html.views import ChartScope
-from rocprof_compute_analyze import analysis_cli
-from rocprof_compute_analyze.output_location import ANALYSIS_DB_FILE_NAME
 from tests.integration import common as integration_common
-from utils import analysis_orm as orm
 
 WORKLOADS = Path(common.ROOT).resolve() / "tests" / "workloads"
 
@@ -153,37 +146,6 @@ def test_report_keeps_kernel_statistics_order(
         aggregate_slots[slot]["text"] != first_kernel_slots[slot]["text"]
         for slot in aggregate_slots
     )
-
-
-@pytest.mark.parametrize(
-    ("ids", "initial"),
-    [
-        pytest.param(["0"], 0, id="single-kernel-selected"),
-        pytest.param(["0", "1"], None, id="multiple-kernels-show-aggregate"),
-    ],
-)
-def test_kernel_filter_sets_initial_selection_without_shortening_list(
-    binary_handler_analyze_rocprof_compute,
-    multi_kernel_workload,
-    ids: List[str],
-    initial: Optional[int],
-) -> None:
-    """Set the initial kernel selection without removing other kernels."""
-    workload = multi_kernel_workload
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "-p",
-        str(workload),
-        "-b",
-        "3",
-        "-k",
-        *ids,
-    ])
-    assert code == 0
-
-    model = model_at(report_at(workload))
-    assert model["initialKernel"] == initial
-    assert len(model["kernels"]) == 3
 
 
 def test_dispatch_filter_limits_report(
@@ -374,102 +336,19 @@ def test_terminal_output_coexists_with_html_generation(
     assert report_at(workload).exists()
 
 
-def render_both_inputs(
+def test_kernel_filtered_run_writes_no_memory_chart_page(
     binary_handler_analyze_rocprof_compute,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    workload: Path,
-    extra: List[str],
-) -> dict:
-    """Run analyze and render each run's page from the counters and from the rows."""
-    rendered: dict = {}
-    write_from_counters = analysis_cli.write_mem_chart_report
-
-    def write_both_inputs(run, arch_config, args, output_path):
-        path = write_from_counters(run, arch_config, args, output_path)
-        engine = create_engine(
-            f"sqlite:///{output_path.parent.parent / ANALYSIS_DB_FILE_NAME}"
-        )
-        database = Session(engine)
-        try:
-            workload_row = database.query(orm.Workload).one()
-            scope = ChartScope(
-                gpu_ids=run.filter_gpu_ids,
-                dispatch_ids=run.filter_dispatch_ids,
-                kernel_ids=run.filter_kernel_ids,
-            )
-            rows_path = write_mem_chart_report_from_db(
-                workload_row,
-                arch_config,
-                args,
-                scope,
-                tmp_path / f"from-rows-{output_path.parent.name}.html",
-            )
-        finally:
-            database.close()
-            engine.dispose()
-        rendered["counters"] = path
-        rendered["rows"] = rows_path
-        return path
-
-    monkeypatch.setattr(analysis_cli, "write_mem_chart_report", write_both_inputs)
-
+    multi_kernel_workload,
+) -> None:
+    """A -k run writes no memory chart page: its rows keep only the selected kernels."""
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "-p",
-        str(workload),
+        str(multi_kernel_workload),
         "-b",
         "3",
-        *extra,
+        "-k",
+        "1",
     ])
     assert code == 0
-
-    return rendered
-
-
-@pytest.mark.parametrize(
-    "extra",
-    [
-        pytest.param([], id="unfiltered"),
-        pytest.param(["--gpu-id", "0"], id="gpu-filter"),
-        pytest.param(["--kernel-iteration-range", "1", "2"], id="dispatch-filter"),
-    ],
-)
-def test_database_rows_render_the_same_page_as_the_counters(
-    binary_handler_analyze_rocprof_compute,
-    multi_kernel_workload,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    extra: List[str],
-) -> None:
-    """Rendering from the analysis database rows gives the page of today's input."""
-    rendered = render_both_inputs(
-        binary_handler_analyze_rocprof_compute,
-        monkeypatch,
-        tmp_path,
-        multi_kernel_workload,
-        extra,
-    )
-
-    counters_page = rendered["counters"].read_text(encoding="utf-8")
-    rows_page = rendered["rows"].read_text(encoding="utf-8")
-    assert rows_page == counters_page
-
-
-def test_database_rows_skip_kernel_filtered_runs(
-    binary_handler_analyze_rocprof_compute,
-    multi_kernel_workload,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Skip the database page of a -k run, whose rows keep only the selected kernels."""
-    rendered = render_both_inputs(
-        binary_handler_analyze_rocprof_compute,
-        monkeypatch,
-        tmp_path,
-        multi_kernel_workload,
-        ["-k", "1"],
-    )
-
-    assert rendered["rows"] is None
-    assert len(model_at(rendered["counters"])["kernels"]) == 3
+    assert not report_at(multi_kernel_workload).exists()

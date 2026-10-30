@@ -19,6 +19,18 @@ RELU_MARKER_PATTERN = re.compile(
 )
 
 
+# The "Run folder: <path>" line analyze prints last
+RUN_FOLDER_PATTERN = re.compile(r"Run folder: (\S+)")
+
+
+def assert_operator_view_run_folder(out: str) -> None:
+    """The operator filter is a report view: the run folder keeps every artifact."""
+    run_folder = Path(RUN_FOLDER_PATTERN.search(out).group(1))
+    assert (run_folder / "analysis.db").is_file()
+    assert (run_folder / "report.txt").is_file()
+    assert "Matched" in (run_folder / "report.txt").read_text(encoding="utf-8")
+
+
 def output_has_relu_marker(output: str) -> bool:
     """Return True for a relu marker. relu_backward does not count."""
     return RELU_MARKER_PATTERN.search(output) is not None
@@ -152,8 +164,8 @@ def test_filter_triton_selects_listed_kernel_ids(
     assert code == 0
     captured = capsys.readouterr()
     out = captured.out + captured.err
-    assert "Triton operator filter selected" in out
-    assert "dispatch(es)" in out
+    assert "Matched Triton Operators:" in out
+    assert_operator_view_run_folder(out)
 
 
 def test_filter_torch_selects_listed_kernel_ids(
@@ -170,8 +182,8 @@ def test_filter_torch_selects_listed_kernel_ids(
     assert code == 0
     captured = capsys.readouterr()
     out = captured.out + captured.err
-    assert "PyTorch operator filter selected" in out
-    assert "dispatch(es)" in out
+    assert "Matched PyTorch Operators:" in out
+    assert_operator_view_run_folder(out)
 
 
 def test_filter_torch_and_triton_together(

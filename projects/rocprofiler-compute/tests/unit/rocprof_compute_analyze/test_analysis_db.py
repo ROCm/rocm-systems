@@ -247,6 +247,9 @@ def make_analyze_args(**options):
         "gpu_kernel": None,
         "gpu_dispatch_id": None,
         "gpu_id": None,
+        "time_unit": "ns",
+        "pc_sampling_sorting_type": "count",
+        "pc_sampling_rows": 10,
     }
     return SimpleNamespace(**{**defaults, **options})
 
@@ -411,8 +414,6 @@ def run_analysis_with_materialized_views(analyzer):
             )
         )
         analyzer.build_database(Path("analysis.db"))
-    orm.Database.create_views()
-    orm.Database.commit()
 
 
 def cleanup_database() -> None:
@@ -5379,6 +5380,57 @@ def test_run_analysis_stores_membw_analysis_only_for_profiled_workloads(
         text("SELECT COUNT(*) FROM compute_membw_node_view")
     ).scalar()
     assert view_row_count == expected_view_row_count
+
+
+@pytest.mark.parametrize("membw_analysis", [True, False], ids=["membw", "no_membw"])
+def test_report_frames_carry_the_stored_membw_result(
+    db_session, tmp_path, membw_analysis
+):
+    """The report frames hold the membw result the DB stored, or none without one."""
+    analyzer = make_membw_analyzer(str(tmp_path), "gfx950", membw_analysis)
+    run_analysis_with_materialized_views(analyzer)
+
+    analyzer.build_report_frames()
+
+    report_run = analyzer.report_runs[str(tmp_path)]
+    stored = db_session.query(orm.MembwAnalysis).one_or_none()
+    if not membw_analysis:
+        assert stored is None
+        assert report_run.membw_result is None
+        return
+    assert report_run.membw_result is not None
+    assert report_run.membw_result.arch == stored.arch == "gfx950"
+    assert report_run.membw_result.guidance_blocks == tuple(
+        block.text for block in stored.guidance_blocks
+    )
+
+
+@pytest.mark.parametrize("kernel_id", [0, 1], ids=["first_kernel", "second_kernel"])
+def test_pc_sampling_section_maps_k_ids_through_the_full_ranking(
+    db_session, tmp_path, kernel_id
+):
+    """-k N names the Nth kernel of the full ranking, not of the report's Top Kernels.
+
+    With -k 1 the report keeps one kernel, so a lookup in its Top Kernels fails.
+    """
+    workload_path = str(tmp_path)
+    analyzer = make_pc_sampling_database_analyzer(
+        {workload_path: [make_pc_sampling_tool_data()]},
+        filter_kernel_ids=[kernel_id],
+    )
+    traces = {workload_path: pc_sampling_dispatch_trace([make_pc_sampling_tool_data()])}
+    analyzer._kernel_rankings_per_workload = analyzer.calc_kernel_rankings(traces)
+    run_analysis_with_materialized_views(analyzer)
+    workload_obj = db_session.query(orm.Workload).one()
+    selected = analyzer._kernel_rankings_per_workload[workload_path][kernel_id]
+    report_run = schema.Workload(
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+        dfs={1: pd.DataFrame({"Kernel_Name": [selected]})},
+    )
+
+    section = analyzer._pc_sampling_section(workload_path, workload_obj, report_run)
+
+    assert set(section["Kernel_Name"]) == {selected}
 
 
 def test_schema_version_is_2_6_0():
