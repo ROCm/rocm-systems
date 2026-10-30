@@ -190,10 +190,7 @@ protected:
         return static_cast<int>(owners.size());
     }
 
-    // ep_create on a fresh unique id, run on a helper thread and bounded by a timeout.
-    // A guard that stopped rejecting num_ranks > kMaxRanks would reach ncclCommInitRank
-    // waiting for ranks that never join; that must turn red, not hang the job. On a
-    // timeout the thread is detached and left alone -- it is still inside the library.
+    // Bounded ep_create: a missed num_ranks rejection would wait in init for ranks that never join.
     void CreateBounded(int numRanks, int maxTokens, int hidden, void** out, bool* finished)
     {
         *out      = nullptr;
@@ -418,14 +415,7 @@ TEST_F(RcclEpDispatchCombineTest, ReconfigureBetweenShapes)
     ASSERT_EP_STEP(RoundTrip());
 }
 
-// ep_create validates hidden, num_ranks and max_tokens_per_rank before it builds a
-// communicator, and returns null for any of them out of range. Each case below breaks
-// exactly ONE argument and keeps the rest at a configuration every rank agrees on, so
-// a guard that stopped rejecting would carry the call into a collective init that
-// succeeds (or, for num_ranks past kMaxRanks, waits on ranks that never come) -- a
-// non-null handle or a timeout, either one red. The last call is the in-range side of
-// the hidden and max_tokens boundaries, so the rejections are about the argument and
-// not a create that cannot succeed here at all.
+// Each case breaks one ep_create argument. A missed rejection shows as a non-null handle or a timeout.
 TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
 {
     if (!EnvReady()) {
