@@ -142,7 +142,11 @@ __device__ __forceinline__ void staging_pipe_sync_timeout(StagingKernelParams* p
          "observed=%llu elapsed_cycles=%llu\n",
          params->myRank, params->myLocalRank, (unsigned long long)epoch, channel_id, label, peer,
          (unsigned long long)progress, (unsigned long long)expected, (unsigned long long)observed, elapsed);
+#if defined(__HIP_PLATFORM_AMD__)
+  __builtin_trap();
+#else
   asm volatile("trap;");
+#endif
 }
 
 __device__ __forceinline__ void staging_pipe_check_timeout(StagingKernelParams* params, uint64_t epoch,
