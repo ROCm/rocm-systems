@@ -50,6 +50,7 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_directed_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v4.cpp
