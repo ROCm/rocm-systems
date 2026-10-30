@@ -476,6 +476,13 @@ TEST_F(TensorDmaRaceTest, StoreIsAnLdsReadRetiredByTensorcntAndBarrier) {
   EXPECT_FALSE(ds_write(1, 44));
 }
 
+TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
+  // Probe the gap and the second range; a race is reported once per producer.
+  tensor_load(0, {{.address = 0, .bytes = 8}, {.address = 12, .bytes = 8}});
+  EXPECT_FALSE(ds_read(1, 8));
+  EXPECT_TRUE(ds_read(1, 16));
+}
+
 TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_FALSE(ds_read(1, 4));
   const size_t previous = sink->str().size();
