@@ -1327,6 +1327,15 @@ function(rccl_standalone_setup)
       return 0;
     }
   " HIP_FABRIC_HANDLE_TYPE)
+  # Mirrors the top-level probe: stock ROCm 7.0.2 has the backport HIP_VERSION but no host location types.
+  check_cxx_source_compiles("
+    #include <hip/hip_runtime_api.h>
+    int main() {
+      hipMemLocationType t = hipMemLocationTypeHost;
+      (void)t;
+      return 0;
+    }
+  " HIP_MEM_LOCATION_TYPE_HOST)
   set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
   if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
     set(HIP_FABRIC_API ON)
@@ -1412,6 +1421,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
     RomeTopoConsensusLogTests.cpp
     ${RCCL_TEST_DIR}/MiscTests.cpp
+    ${RCCL_TEST_DIR}/RmaSegmentMathTests.cpp
     ${RCCL_TEST_DIR}/VersionGateTests.cpp
     ${RCCL_TEST_DIR}/TimeoutTests.cpp
     ${RCCL_TEST_DIR}/EnqueueCountTests.cpp
@@ -1471,6 +1481,7 @@ function(rccl_standalone_setup)
     $<$<BOOL:${AMDSMI_FABRIC_API}>:AMDSMI_FABRIC_DIRECT>
     $<$<BOOL:${AMDSMI_HEADER_HAS_FABRIC_TELEMETRY}>:AMDSMI_HEADER_HAS_FABRIC_TELEMETRY>
     $<$<BOOL:${HIP_FABRIC_API}>:HIP_FABRIC_API>
+    $<$<BOOL:${HIP_MEM_LOCATION_TYPE_HOST}>:RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED>
     PARENT_SCOPE)
   set(_MICRO_AMDSMI_DEF USE_AMDSMI PARENT_SCOPE)
   set(_MICRO_LINK_NO_PIE "${_micro_link_no_pie}" PARENT_SCOPE)

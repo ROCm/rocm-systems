@@ -1771,6 +1771,10 @@ Register one DMA-BUF memory region per physical segment. When this is off, a buf
 
 NET registration counts segments over the whole registered buffer. With this variable set to 0, a collective on any part of a buffer whose registration spans several segments skips NET registration and stages through the internal buffers.
 
+On HIP, GIN registration of a window that spans more than one device-memory segment requires this variable set to 1, the proxy GIN backend over InfiniBand, the same segment count on every rank, and at most 16 segments. Otherwise registration fails with ``ncclInvalidUsage`` instead of registering only the first segment.
+
+RMA registration of such a window, including a hybrid window with host segments, has the same requirements; otherwise the window is registered without RMA.
+
 Value accepted
 ^^^^^^^^^^^^^^
 0 or 1. Default is 0 on HIP, so multi-segment registration stays off until a

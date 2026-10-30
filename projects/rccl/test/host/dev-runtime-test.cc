@@ -1271,8 +1271,18 @@ protected:
   }
 
   void TearDown() override {
+    symMemoryCloseHostOwnerFds(&mem);
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
+  }
+
+  void SetTeam(const int* ranks, int n, int self) {
+    lsaRankList.assign(ranks, ranks + n);
+    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->devrState.lsaSize = n;
+    comm->devrState.lsaSelf = self;
+    lsaNumSegments.assign(n, 1);
+    mem.lsaNumSegments = lsaNumSegments.data();
   }
 };
 
@@ -1394,9 +1404,49 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
+// Publish walks this rank's segment sizes from primaryAddr. A lookup has to
+// land inside one segment: the RMA export rounds to a page but still asks for
+// one segment, and a range that crosses two entries misses.
+TEST_F(SymMemoryMapLsaTeamTest, Publish_IndexesOwnerFdsBySegmentVa) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int* fds = static_cast<int*>(calloc(2, sizeof(int)));
+  ASSERT_NE(fds, nullptr);
+  fds[0] = -1;
+  fds[1] = dup(pipefd[1]);
+  segmentSizes.assign({4096, 8192});
+  mem.segmentSizes = segmentSizes.data();
+  mem.numSegments = 2;
+  mem.primaryAddr = reinterpret_cast<void*>(0x200000);
+  mem.hostOwnerFds = fds;
+  ASSERT_GE(fds[1], 0);
+
+  symMemoryPublishHostOwnerFds(&mem);
+
+  uint64_t off = 7;
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000, 4096, &off), -1);
+  int got = rcclHostSegmentFdLookup(0x200000 + 4096, 8192, &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 0u);
+  if (got >= 0) close(got);
+  got = rcclHostSegmentFdLookup(0x200000 + 4096 + 100, 50, &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 100u);
+  if (got >= 0) close(got);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000 + 4096 - 16, 32, &off), -1);
+
+  int owned = fds[1];
+  symMemoryCloseHostOwnerFds(&mem);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000 + 4096, 8192, &off), -1);
+  EXPECT_EQ(fcntl(owned, F_GETFD), -1);
+}
+
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
-// ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
-// beside device peers is the owner's segment imported everywhere else; it maps.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
 TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
@@ -1484,6 +1534,422 @@ TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
 
   EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
+}
+
+// This rank exported the host segment, so NIC registration can still export it.
+// The owner fd is only for the ranks that imported it.
+TEST_F(SymMemoryMapLsaTeamTest, HostOwner_DoesNotFetchFd) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Reuse is off, so the peer segment is imported with a POSIX fd and that fd is closed.
+// The owner-fd table stays empty.
+TEST_F(SymMemoryMapLsaTeamTest, ReuseOff_DoesNotFetchOwnerFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Fabric and other shareable handles are not POSIX fds. Nothing is published.
+TEST_F(SymMemoryMapLsaTeamTest, NonPosixHandle_DoesNotFetchOwnerFd) {
+  hipMemAllocationHandleType saved = ncclCuMemHandleType;
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  ncclCuMemHandleType = saved;
+}
+
+// The importer cannot re-export the host segment, so the map keeps the owner's
+// POSIX fd and publishes it at this rank's segment VA for RMA registration.
+TEST_F(SymMemoryMapLsaTeamTest, ImportedHostSegment_PublishesOwnerFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(barrier.calls, 1);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+
+  mem.primaryAddr = reinterpret_cast<void*>(0x200000);
+  symMemoryPublishHostOwnerFds(&mem);
+  uint64_t off = 1;
+  int got = rcclHostSegmentFdLookup(0x200000, mem.segmentSizes[0], &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 0u);
+  if (got >= 0) close(got);
+
+  int owned = mem.hostOwnerFds[0];
+  symMemoryCloseHostOwnerFds(&mem);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000, 4096, &off), -1);
+  EXPECT_EQ(fcntl(owned, F_GETFD), -1);
+}
+
+// A failed fetch must not leave a live fd. The map still joins the barrier its
+// peers wait in, then fails.
+TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(barrier.calls, 1);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], -1);
+}
+
+// This rank created the host segment, so the map keeps that fd and does not
+// import anyone else's.
+TEST_F(SymMemoryMapLsaTeamTest, LocalExport_KeepsOwnFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int exported = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [&](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                          unsigned long long) {
+                        int fd = dup(pipefd[1]);
+                        if (shareable) *static_cast<int*>(shareable) = fd;
+                        exported = fd;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], exported);
+  EXPECT_GE(exported, 0);
+  EXPECT_NE(fcntl(exported, F_GETFD), -1);
+}
+
+// Two ranks each exported. This rank is not the first, so keeping the first
+// exporter's fd would register the wrong buffer and close this rank's fd.
+TEST_F(SymMemoryMapLsaTeamTest, SecondExporter_KeepsOwnFd) {
+  const int ranks[] = {4, 7};
+  SetTeam(ranks, 2, /*self=*/1);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int exported = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [&](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                          unsigned long long) {
+                        int fd = dup(pipefd[1]);
+                        if (shareable) *static_cast<int*>(shareable) = fd;
+                        exported = fd;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[0].type = kLocHost;
+                      msgs[0].hostExportable = 1;
+                      msgs[0].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], exported);
+  EXPECT_NE(fcntl(exported, F_GETFD), -1);
+}
+
+// The host owner could not export, so no rank can supply an fd. Its proxy would
+// repeat the failed export and never reply, so the importer must not ask it.
+TEST_F(SymMemoryMapLsaTeamTest, Importer_NoExporterSkipsProxy) {
+  const int ranks[] = {11, 22, 33};
+  SetTeam(ranks, 3, /*self=*/0);
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 0;
+                      msgs[1].segmentSize = 4096;
+                      msgs[2].type = hipMemLocationTypeDevice;
+                      msgs[2].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Export reported success but handed back -1. That is not a usable fd, so this
+// rank imports the peer that did export.
+TEST_F(SymMemoryMapLsaTeamTest, NegativeExportFd_ImportsPeer) {
+  const int ranks[] = {8, 9};
+  SetTeam(ranks, 2, /*self=*/0);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int asked = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [](void* shareable, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                         unsigned long long) {
+                        if (shareable) *static_cast<int*>(shareable) = -1;
+                        return hipSuccess;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int rank, void*, int* fd) {
+    asked = rank;
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(exportFd.calls, 1);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 9);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+  EXPECT_NE(mem.hostOwnerFds[0], -1);
+}
+
+// This rank failed to export. The other two did, so the import uses the first
+// exporter, not the later one.
+TEST_F(SymMemoryMapLsaTeamTest, ExportFails_ImportsFirstExporter) {
+  const int ranks[] = {5, 6, 7};
+  SetTeam(ranks, 3, /*self=*/2);
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int asked = -1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long) {
+                        return hipErrorInvalidValue;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[0].type = kLocHost;
+                      msgs[0].hostExportable = 1;
+                      msgs[0].segmentSize = 4096;
+                      msgs[1].type = kLocHost;
+                      msgs[1].hostExportable = 1;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int rank, void*, int* fd) {
+    asked = rank;
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(exportFd.calls, 1);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 5);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
 }
 #endif
 
@@ -1874,6 +2340,16 @@ protected:
       return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
     };
   }
+
+  // One active GIN backend of this type, over the IB RMA proxy.
+  std::unique_ptr<ncclSharedResources> sharedRes;
+  void UseGinBackend(ncclGinType_t ginType) {
+    sharedRes = std::make_unique<ncclSharedResources>();
+    comm->sharedRes = sharedRes.get();
+    sharedRes->ginState.numActiveBackends = 1;
+    sharedRes->ginState.backends[0].ginType = ginType;
+    comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
+  }
 };
 
 // Branch: no sysmem segment anywhere, so one device window covers the whole
@@ -1902,9 +2378,49 @@ TEST_F(SymMemoryRegisterGinTest, NoSysmemSegment_RegistersOneDeviceWindow) {
   EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
 }
 
-// A device-only multi-segment window is rejected before any GIN registration
-// whatever NCCL_MULTI_SEGMENT_REGISTER says; a single-segment window still registers.
-TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegistering) {
+// The multiSegment flag passed to GIN comes from the communicator-wide segment
+// count, not this rank's.
+TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSegment) {
+  mem.minGlobalNumSegments = 2;
+  mem.maxGlobalNumSegments = 2;
+  UseGinBackend(NCCL_GIN_TYPE_PROXY);
+  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+  bool registeredMultiSegment = false;
+  ScopedHook reg(g_devrGinRegister,
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool multi, int) {
+                   registeredMultiSegment = multi;
+                   return ncclSuccess;
+                 });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_TRUE(registeredMultiSegment);
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=1 does not help a GIN backend that registers the window as
+// one MR, so a device-only multi-segment window is still rejected before registering.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOn_NonProxyGinBackend_RejectsMultiSegmentWindow) {
+  mem.minGlobalNumSegments = 2;
+  mem.maxGlobalNumSegments = 2;
+  UseGinBackend(NCCL_GIN_TYPE_ROCSHMEM_GDA);
+  ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister,
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
+
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
+  EXPECT_EQ(reg.calls, 0);
+  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+
+  sharedRes->ginState.backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=0: a device-only multi-segment window is rejected
+// before any GIN registration; a single-segment window still registers.
+TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOff_RejectsMultiSegmentWindow) {
   // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
@@ -1913,10 +2429,6 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegmentDeviceWindow_RejectedBeforeRegister
 
   mem.maxGlobalNumSegments = 2;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
-  {
-    ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());
-    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
-  }
   EXPECT_EQ(reg.calls, 0);
   EXPECT_EQ(mem.ginSegmentInfos, nullptr);
 
@@ -2061,6 +2573,42 @@ TEST_F(SymMemoryRegisterGinElasticTest, DeviceSegment_RegistersAsCudaPointer) {
   ASSERT_EQ(types.size(), 2u);
   EXPECT_EQ(types[0], NCCL_PTR_CUDA);
 }
+
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps develop behaviour here: one window per segment.
+TEST_F(SymMemoryRegisterGinElasticTest, MultiSegmentRegisterOff_RegistersOneWindowPerSegment) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 0 : deftVal;
+  });
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  std::vector<size_t> sizes;
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void*, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+    sizes.push_back(size);
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+  ASSERT_EQ(reg.calls, 2);
+  EXPECT_EQ(sizes[0], 4096u);
+  EXPECT_EQ(sizes[1], 8192u);
+  EXPECT_EQ(mem.numGinSegments, 2);
+}
+
+#if !defined(__HIP_PLATFORM_AMD__) || NCCL_CUMEM_HOST_GATE
+// An imported host segment reads as device here; with the owner's fd it must still
+// register as HOST_NUMA and hand that fd to GIN. Segments without one pass -1.
+TEST_F(SymMemoryRegisterGinElasticTest, HostOwnerFd_ForwardedWithHostNumaType) {
+  ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
+  int ownerFds[2] = {-1, 42};
+  mem.hostOwnerFds = ownerFds;
+
+  ASSERT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);  // props fake reports device
+  mem.hostOwnerFds = nullptr;
+  EXPECT_EQ(g_devrGinRegisterDmabufFds, (std::vector<int>{-1, 42}));
+  EXPECT_EQ(mem.ginSegmentInfos[0].memType, hipMemLocationTypeDevice);
+  EXPECT_EQ(mem.ginSegmentInfos[1].memType, kLocHostNuma);
+}
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // One host segment is not maxGlobalNumSegments > 1. needDmabuf still has to
@@ -2275,6 +2823,7 @@ protected:
     // 2.31 registers with the proxy only for a communicator-wide single-segment
     // layout, so the register step is unreachable without this.
     mem.maxGlobalNumSegments = 1;
+    mem.minGlobalNumSegments = 1;
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
@@ -2306,9 +2855,9 @@ TEST_F(SymMemoryRegisterRmaTest, Succeeds_ConnectsThenRegisters) {
   EXPECT_EQ(registeredWins, mem.rmaHostWins);
 }
 
-// Branch: a multi-segment layout still brings the proxy up -- other windows on
-// this communicator need it -- but has nothing RMA can register.
-TEST_F(SymMemoryRegisterRmaTest, MultiSegment_ConnectsWithoutRegistering) {
+// Branch: with NCCL_MULTI_SEGMENT_REGISTER=0 (the host fake's default) a
+// multi-segment layout still brings the proxy up but registers nothing.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOff_ConnectsWithoutRegistering) {
   mem.maxGlobalNumSegments = 2;
   ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
@@ -2316,6 +2865,92 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegment_ConnectsWithoutRegistering) {
   EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
   EXPECT_EQ(connect.calls, 1);
   EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: with the production default (=1) a multi-segment window registers its
+// whole range, so hierarchical CE puts have an RMA handle.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
+  mem.maxGlobalNumSegments = 2;
+  mem.minGlobalNumSegments = 2;
+  comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  void* registeredAddr = nullptr;
+  size_t registeredSize = 0;
+  ScopedHook reg(g_devrRmaProxyRegister, [&](ncclComm*, void* addr, size_t size, void*[]) {
+    registeredAddr = addr;
+    registeredSize = size;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1);
+  EXPECT_EQ(registeredAddr, mem.primaryAddr);
+  EXPECT_EQ(registeredSize, mem.size);
+}
+
+// Branch: with =1 but an RMA backend without per-segment MRs, a multi-segment
+// window connects and skips registration instead of failing it.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_BackendWithoutPerSegmentMrs_SkipsRegister) {
+  mem.maxGlobalNumSegments = 2;
+  ncclRma_t otherBackend{};
+  comm->rmaState.rmaProxyState.ncclRma = &otherBackend;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(connect.calls, 1);
+  EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: layouts the IB proxy would reject (unequal per-rank counts, or more
+// segments than its MR table) skip RMA on every rank instead of failing the window.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_UnsupportedLayout_SkipsRegister) {
+  comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+  const int layouts[][2] = {{1, 2}, {2, 3}, {NCCL_RMA_MAX_SEGMENTS + 1, NCCL_RMA_MAX_SEGMENTS + 1}};
+  for (const auto& layout : layouts) {
+    mem.minGlobalNumSegments = layout[0];
+    mem.maxGlobalNumSegments = layout[1];
+    EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess) << layout[0] << ".." << layout[1];
+  }
+  EXPECT_EQ(connect.calls, 3);
+  EXPECT_EQ(reg.calls, 0);
+
+  mem.minGlobalNumSegments = mem.maxGlobalNumSegments = NCCL_RMA_MAX_SEGMENTS;
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1) << "the cap itself still registers";
+}
+
+// Branch: teardown releases a multi-segment window's RMA MR; rmaHostWins[0] is
+// the witness that registration completed.
+TEST_F(SymMemoryRegisterRmaTest, Unregister_MultiSegmentRegistered_DeregistersMr) {
+  mem.maxGlobalNumSegments = 2;
+  mem.rmaHostWins[0] = reinterpret_cast<void*>(0x1);
+  comm->devrState.rmaProxyEnabled = true;
+  ScopedHook dereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  symMemoryUnregister(comm, &mem);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
+// Branch: nothing was registered (=0 skip or a failed register), so teardown
+// does not walk the proxy.
+TEST_F(SymMemoryRegisterRmaTest, Unregister_NotRegistered_SkipsMrDeregister) {
+  mem.maxGlobalNumSegments = 2;
+  comm->devrState.rmaProxyEnabled = true;
+  ScopedHook dereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  symMemoryUnregister(comm, &mem);
+  EXPECT_EQ(dereg.calls, 0);
 }
 
 // Branch: the proxy is unreachable, so nothing is registered against it.
@@ -2438,6 +3073,7 @@ TEST_F(SymMemoryObtainSetupTest, AggregatesMaxSegmentsAcrossRanks) {
 
   ASSERT_EQ(Obtain(/*numSegments=*/1), ncclSuccess);
   EXPECT_EQ(obtained->maxGlobalNumSegments, 3);
+  EXPECT_EQ(obtained->minGlobalNumSegments, 1);
   EXPECT_EQ(obtained->numSegments, 1);  // our own count is unchanged
 }
 
