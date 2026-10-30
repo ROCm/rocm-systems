@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -1076,7 +1077,8 @@ void VNotB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_not_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
 }
 
 RJ_NOINLINE void VNotB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1095,8 +1097,11 @@ RJ_NOINLINE void VNotB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_not_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_not_b32_w32, rj_arith_v_not_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VBfrevB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1104,7 +1109,8 @@ void VBfrevB32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_bfrev_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_bfrev_b32_w32, rj_arith_v_bfrev_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
 }
 
 RJ_NOINLINE void VBfrevB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1123,8 +1129,11 @@ RJ_NOINLINE void VBfrevB32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_bfrev_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_bfrev_b32_w32, rj_arith_v_bfrev_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VClzI32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1132,7 +1141,8 @@ void VClzI32U32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_clz_i32_u32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_clz_i32_u32_w32, rj_arith_v_clz_i32_u32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
 }
 
 RJ_NOINLINE void VClzI32U32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1151,8 +1161,11 @@ RJ_NOINLINE void VClzI32U32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_clz_i32_u32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_clz_i32_u32_w32, rj_arith_v_clz_i32_u32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VCtzI32B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1160,7 +1173,8 @@ void VCtzI32B32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_ctz_i32_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_ctz_i32_b32_w32, rj_arith_v_ctz_i32_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
 }
 
 RJ_NOINLINE void VCtzI32B32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1179,8 +1193,11 @@ RJ_NOINLINE void VCtzI32B32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_ctz_i32_b32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_ctz_i32_b32_w32, rj_arith_v_ctz_i32_b32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VClsI32Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -1188,7 +1205,8 @@ void VClsI32Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  amdgpu::execute_v_cls_i32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cls_i32_w32, rj_arith_v_cls_i32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
 }
 
 RJ_NOINLINE void VClsI32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1207,8 +1225,11 @@ RJ_NOINLINE void VClsI32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  amdgpu::execute_v_cls_i32_vop1(*this, wf);
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cls_i32_w32, rj_arith_v_cls_i32_w64,
+                                 wf.cu().arithmetic_flags(), 0u, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VFrexpExpI32F64Vop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -2610,21 +2631,9 @@ void VNotB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(
-            ([](auto a) { return (~a) & 0xFFFFu; })(std::bit_cast<util::native<uint32_t>>(a)));
-      }))
-    return;
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        static_cast<uint32_t>(
-            static_cast<uint16_t>((~amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
-  }
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_not_b16_w32, rj_arith_v_not_b16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
 }
 
 RJ_NOINLINE void VNotB16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -2643,22 +2652,12 @@ RJ_NOINLINE void VNotB16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  auto &inst = *this;
-  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(
-            ([](auto a) { return (~a) & 0xFFFFu; })(std::bit_cast<util::native<uint32_t>>(a)));
-      }))
-    return;
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        static_cast<uint32_t>(
-            static_cast<uint16_t>((~amdgpu::RegisterAccess(wf).read_lane(src0, lane)))));
-  }
+  const uint64_t modifiers = 0;
+  amdgpu::arith::execute_integer16<1>(wf, rj_arith_v_not_b16_w32, rj_arith_v_not_b16_w64,
+                                      wf.cu().arithmetic_flags(), modifiers, vdst, src0);
   dpp_write_mask_scope_.restore();
+  if (wf.instruction_execution_failed())
+    return;
 }
 
 void VCvtI32I16Vop1::execute_impl(amdgpu::Wavefront &wf) {
