@@ -12,6 +12,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Values are in base units: Bytes/s for bandwidth, FLOP/s for floating-point compute, and IOP/s for integer compute.
   * A workload with no valid `roofline.csv` has no ceiling rows.
 
+* The roofline HTML can be rendered from a workload's analysis database rows. It uses the same Plotly builder, ceilings and limiter rule as the CLI roofline, so each kernel's limiter and percent of roofline match. A kernel whose performance or arithmetic intensity is NULL is left off the plot, and a warning names it.
+
 * Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
 
 * Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.

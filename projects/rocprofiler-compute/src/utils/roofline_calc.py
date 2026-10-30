@@ -5,7 +5,7 @@ import csv
 from dataclasses import dataclass
 from enum import Flag
 from pathlib import Path
-from typing import Any, List, Optional, SupportsFloat, Union
+from typing import Any, List, Optional, Sequence, SupportsFloat, Union
 
 import numpy as np
 import pandas as pd
@@ -46,13 +46,14 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
 
 
 # Metric labels of the "Roofline Plot Points" table, mapped to PlotPoints fields.
-_METRIC_TO_AI_FIELD = {
+METRIC_TO_AI_FIELD = {
     "AI L0": "ai_l0",
     "AI L1": "ai_l1",
     "AI L2": "ai_l2",
     "AI HBM": "ai_hbm",
     "AI LDS": "ai_lds",
 }
+PERFORMANCE_METRIC = "Performance (GFLOPs)"
 
 # Table ids defined in <arch>/0400_roofline.yaml and 0000_top_stats.yaml.
 _ROOFLINE_RATES_TABLE_ID = 401
@@ -340,9 +341,9 @@ def _extract_ai_metrics(calc_table: Optional[pd.DataFrame]) -> dict[str, float]:
     for _, row in calc_table.iterrows():
         metric = row.get("Metric", "")
         value = row.get("Value", 0)
-        if metric in _METRIC_TO_AI_FIELD:
-            metrics[_METRIC_TO_AI_FIELD[metric]] = sanitize_ai_value(value)
-        elif metric == "Performance (GFLOPs)":
+        if metric in METRIC_TO_AI_FIELD:
+            metrics[METRIC_TO_AI_FIELD[metric]] = sanitize_ai_value(value)
+        elif metric == PERFORMANCE_METRIC:
             metrics["performance"] = sanitize_ai_value(value)
     return metrics
 
@@ -507,18 +508,28 @@ def calc_ai_analyze(
 def machine_ceilings(
     roofline_parameters: dict[str, Any],
     mspec: MachineSpecs,
+    benchmark: Optional[RooflineCsvData] = None,
 ) -> tuple[list[float], list[float]]:
-    """Return positive bandwidth and compute ceilings for one device."""
-    base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
-    if base_dir is None:
-        console_warning(
-            "roofline",
-            "Unable to read machine ceilings: workload path is absent",
-        )
-        return [], []
-    roofline_csv = Path(base_dir) / "roofline.csv"
+    """Return positive bandwidth and compute ceilings for one device.
+
+    The device row is read from the parsed roofline.csv given as benchmark, or
+    else from roofline.csv in the workload directory.
+    """
+    roofline_csv: Optional[Path] = None
+    if benchmark is None:
+        base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
+        if base_dir is None:
+            console_warning(
+                "roofline",
+                "Unable to read machine ceilings: workload path is absent",
+            )
+            return [], []
+        roofline_csv = Path(base_dir) / "roofline.csv"
+    source = "the given benchmark" if benchmark is not None else roofline_csv
     try:
-        csv_data = _parse_roofline_csv(roofline_csv)
+        csv_data = (
+            benchmark if benchmark is not None else _parse_roofline_csv(roofline_csv)
+        )
         row_index = _resolve_device_row_index(
             csv_data, roofline_parameters["device_id"]
         )
@@ -539,7 +550,7 @@ def machine_ceilings(
     ) as error:
         console_warning(
             "roofline",
-            f"Unable to read machine ceilings from {roofline_csv}: {error}",
+            f"Unable to read machine ceilings from {source}: {error}",
         )
         return [], []
     console_debug(
@@ -554,13 +565,22 @@ def construct_roof(
     roofline_parameters: dict[str, Any],
     dtype: str,
     mspec: MachineSpecs,
+    benchmark: Optional[RooflineCsvData] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
-    """Load benchmark results from disk and compute the empirical roofline."""
+    """Compute the empirical roofline from benchmark results.
+
+    The results are the parsed roofline.csv given as benchmark, or else are read
+    from disk in the workload directory.
+    """
     base_dir = _workload_base_dir(roofline_parameters.get("workload_dir"))
+    source = "the given benchmark" if benchmark is not None else base_dir
 
     try:
-        benchmark_results = Path(base_dir) / "roofline.csv"
-        csv_data = _parse_roofline_csv(benchmark_results)
+        csv_data = (
+            benchmark
+            if benchmark is not None
+            else _parse_roofline_csv(Path(base_dir) / "roofline.csv")
+        )
         device_row_index = _resolve_device_row_index(
             csv_data, roofline_parameters["device_id"]
         )
@@ -575,7 +595,7 @@ def construct_roof(
     ) as error:
         console_error(
             "roofline",
-            f"Failed to read benchmark results from {base_dir}: {error}",
+            f"Failed to read benchmark results from {source}: {error}",
             exit=False,
         )
         return GraphPoints.empty().__dict__
@@ -828,3 +848,29 @@ def device_ceilings(benchmark_results: Path, gpu_arch: str) -> list[Ceiling]:
             )
         )
     return ceilings
+
+
+def benchmark_from_ceilings(
+    ceilings: Sequence[Ceiling],
+    gpu_arch: str,
+) -> RooflineCsvData:
+    """Rebuild the device-0 roofline.csv row the device_ceilings ceilings came from.
+
+    The cells are in the CSV's own units, so the ceiling math reads them as it reads
+    the file. A benchmark column with no ceiling row is left out, as a roofline.csv
+    without that column would leave it.
+    """
+    layout = _ceiling_columns(gpu_arch)
+    column_by_roof = {
+        (column.kind, column.memory_level, column.data_type, column.pipe): name
+        for name, column in layout.items()
+    }
+    columns: dict[str, list[str]] = {}
+    for ceiling in ceilings:
+        roof = (ceiling.kind, ceiling.memory_level, ceiling.data_type, ceiling.pipe)
+        if roof not in column_by_roof:
+            raise ValueError(f"no roofline.csv column for ceiling {roof}")
+        column = column_by_roof[roof]
+        value = ceiling.value / SCALED_UNITS[layout[column].config_unit][1]
+        columns[column] = [str(value)]
+    return RooflineCsvData(device_ids=[ROOFLINE_DEVICE_ID], columns=columns)

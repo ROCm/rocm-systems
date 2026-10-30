@@ -47,6 +47,7 @@ from utils.roofline_calc import (
     XMAX_DEFAULT,
     XMIN,
     OpsSupport,
+    RooflineCsvData,
     construct_roof,
     machine_ceilings,
     roofline_mem_levels,
@@ -160,10 +161,14 @@ class Roofline:
         args: argparse.Namespace,
         mspec: MachineSpecs,
         run_parameters: dict[str, Any],
+        benchmark: Optional[RooflineCsvData] = None,
     ) -> None:
+        """benchmark is the parsed device roofline.csv. Without it, the roofline
+        is read from the workload directory in run_parameters."""
         self.__args = args
         self.__mspec = mspec
         self.__run_parameters = run_parameters
+        self.__benchmark = benchmark
         self.__ai_data: Optional[dict[str, Any]] = None
         self.__ceiling_data: Optional[dict[str, Any]] = None
         self.__view_models: dict[str, RooflineViewModel] = {}
@@ -178,6 +183,7 @@ class Roofline:
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype,
                 mspec=self.__mspec,
+                benchmark=self.__benchmark,
             )
         return self.__ceiling_by_dtype[dtype]
 
@@ -185,16 +191,16 @@ class Roofline:
         """Return this machine's shared frame, computing it only once."""
         if self.__frame_bounds is None:
             machine_frame = canonical_frame(
-                *machine_ceilings(self.__run_parameters, self.__mspec)
+                *machine_ceilings(self.__run_parameters, self.__mspec, self.__benchmark)
             )
             self.__frame_from_machine_ceilings = machine_frame is not None
             self.__frame_bounds = machine_frame or DEFAULT_AXIS_BOUNDS
         return self.__frame_bounds
 
     def roof_setup(self) -> None:
-        """Check the workload directory is set. Nothing is created in it, so an
-        analyzed workload directory stays read-only."""
-        if not self.__run_parameters.get("workload_dir"):
+        """Check the workload directory is set when the roofline is read from it.
+        Nothing is created in it, so an analyzed workload directory stays read-only."""
+        if self.__benchmark is None and not self.__run_parameters.get("workload_dir"):
             console_error(
                 "Workload directory is not set. Cannot perform setup.", exit=False
             )

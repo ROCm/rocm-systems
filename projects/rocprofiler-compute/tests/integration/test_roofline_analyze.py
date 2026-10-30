@@ -13,16 +13,25 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import common
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from roofline.roofline_db import write_roofline_html
 from tests.integration import common as integration_common
+from utils import analysis_orm as orm
 
 config = {}
 config["cleanup"] = True
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
+# The MI210 (gfx90a) the MI200 mem_levels fixtures were profiled on.
+FIXTURE_MSPEC = SimpleNamespace(
+    gpu_model="MI210", gpu_series="mi200", gpu_arch="gfx90a"
+)
 
 
 def embedded_roofline_model(document: str) -> dict:
@@ -205,3 +214,46 @@ def test_analyze_roofline_datatype_html_legend(
         assert legend not in html_text, f"{dtype} HTML should not contain '{legend}'"
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+def test_analyze_roofline_html_matches_the_roofline_from_the_run_database(
+    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
+    tmp_path: Path,
+) -> None:
+    """The roofline HTML analyze writes equals the one rendered from the run's DB.
+
+    The MI200 fixture plots no kernels: its only kernel has zero performance. So this
+    compares the ceilings, frame, precisions and roofs from real data, and the
+    limiter and percent of roofline are checked by the unit tests.
+    """
+    workload_dir = integration_common.setup_workload_dir(roofline_dir)
+    try:
+        run_folder = tmp_path / "run"
+        code = analyze_into_run_folder(
+            binary_handler_analyze_rocprof_compute, workload_dir, run_folder
+        )
+        assert code == 0
+        analyze_model = embedded_roofline_model(
+            roofline_html_path(run_folder, workload_dir).read_text(encoding="utf-8")
+        )
+
+        engine = create_engine(f"sqlite:///{run_folder / 'analysis.db'}")
+        session = sessionmaker(bind=engine)()
+        try:
+            workload = session.query(orm.Workload).one()
+            db_path = write_roofline_html(
+                session,
+                workload.workload_id,
+                FIXTURE_MSPEC,
+                tmp_path / "roofline-db.html",
+            )
+        finally:
+            session.close()
+            engine.dispose()
+
+        assert db_path is not None
+        db_model = embedded_roofline_model(db_path.read_text(encoding="utf-8"))
+        assert analyze_model["kernels"] == []
+        assert db_model == analyze_model
+    finally:
+        common.clean_output_dir(config["cleanup"], workload_dir)
