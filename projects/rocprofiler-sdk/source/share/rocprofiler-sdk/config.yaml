@@ -1026,8 +1026,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 132
     - name: GL2C_EA_RDREQ
-      description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all 
-        clients.
+      description: Number of GL2C/EA read requests (either 32-byte, 64-byte, 128-byte or 256-byte) 
+        for all clients.
       properties: []
       definitions:
         - architectures:
@@ -1041,14 +1041,15 @@ rocprofiler-sdk:
           block: GL2C
           event: 117
     - name: GL2C_EA_RDREQ_sum
-      description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over
-        GL2C instances.
+      description: Number of GL2C/EA read requests (either 32-byte, 64-byte, 128-byte or 256-byte). 
+        Sum over GL2C instances.
       properties: []
       definitions:
         - architectures:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ,sum)
     - name: GL2C_EA_RDREQ_128B
       description: Number of 128-byte GL2C/EA read requests
@@ -1312,14 +1313,15 @@ rocprofiler-sdk:
           block: GL2C
           event: 105
     - name: GL2C_EA_WRREQ_sum
-      description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_WRREQ 
-        interface. Sum over GL2C instances.
+      description: Number of transactions (all sizes) going over the GL2C_EA_WRREQ interface. Sum 
+        over GL2C instances.
       properties: []
       definitions:
         - architectures:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_WRREQ,sum)
     - name: GL2C_EA_WRREQ_STALL
       description: Number of cycles a write request was stalled.
@@ -15337,7 +15339,8 @@ rocprofiler-sdk:
     - name: GL2C_EA_RDREQ_DRAM
       description: >-
         Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte or 128-byte or 256-byte) destined
-        for DRAM (MC).
+        for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not requests: a 64-byte request is counted
+        as 2, 128-byte as 4 and 256-byte as 8, so bytes read from DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
@@ -15355,7 +15358,9 @@ rocprofiler-sdk:
     - name: GL2C_EA_RDREQ_DRAM_sum
       description: >-
         Sum across all GL2C instances: Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte
-        or 128-byte or 256-byte) destined for DRAM (MC).
+        or 128-byte or 256-byte) destined for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not
+        requests: a 64-byte request is counted as 2, 128-byte as 4 and 256-byte as 8, so bytes read from
+        DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
@@ -15364,11 +15369,13 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1170
             - gfx1171
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ_DRAM,sum)
     - name: GL2C_EA_WRREQ_DRAM
       description: >-
         Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte or 128-byte) destined for DRAM
-        (MC).
+        (MC). On gfx1250 the unit is 32-byte sectors, not requests: a 64-byte request is counted as 2,
+        128-byte as 4 and 256-byte as 8, so bytes written to DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
@@ -15386,7 +15393,9 @@ rocprofiler-sdk:
     - name: GL2C_EA_WRREQ_DRAM_sum
       description: >-
         Sum across all GL2C instances: Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte
-        or 128-byte) destined for DRAM (MC).
+        or 128-byte) destined for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not requests: a
+        64-byte request is counted as 2, 128-byte as 4 and 256-byte as 8, so bytes written to DRAM = 32 x
+        value.
       properties: []
       definitions:
         - architectures:
@@ -15395,7 +15404,25 @@ rocprofiler-sdk:
             - gfx1152
             - gfx1170
             - gfx1171
+            - gfx1250
           expression: reduce(GL2C_EA_WRREQ_DRAM,sum)
+    - name: HBM_READ_BYTES
+      description: >-
+        Bytes read from DRAM (HBM) by all GL2C instances (32 x GL2C_EA_RDREQ_DRAM_sum). GL2C_READ_SECTORS
+        is not a substitute; it can differ from DRAM traffic, for example on sparse accesses.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: GL2C_EA_RDREQ_DRAM_sum*32
+    - name: HBM_WRITE_BYTES
+      description: >-
+        Bytes written to DRAM (HBM) by all GL2C instances (32 x GL2C_EA_WRREQ_DRAM_sum).
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: GL2C_EA_WRREQ_DRAM_sum*32
     - name: GL2C_READ
       description: >-
         Number of read requests, including compressed reads and metadata reads. This is measured at output_fifos
