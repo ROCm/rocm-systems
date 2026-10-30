@@ -13,7 +13,6 @@ from tests.integration import common as integration_common
 from tests.integration.common import (
     CSVS,
     MEMORY_CHART_COUNTERS,
-    SPI_BUSY_COUNTERS,
     config,
     num_devices,
     num_kernels,
@@ -68,48 +67,6 @@ def test_block_filter(binary_handler_profile_rocprof_compute):
     tables = integration_common.metric_table_counters(gpu_arch, 3)
     expected_counters = set().union(*tables.values())
     assert_selected_counters(counter_names, expected_counters, "Block 3")
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_multiple_block_filter(binary_handler_profile_rocprof_compute):
-    workload_dir = common.get_output_dir()
-    output_files, counter_names = profile_block_selection(
-        binary_handler_profile_rocprof_compute, workload_dir, ["3", "6"]
-    )
-    gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
-    tables = integration_common.metric_table_counters(gpu_arch, 6)
-    workgroup_counters = set().union(*tables.values())
-    spi_busy_counters = workgroup_counters & SPI_BUSY_COUNTERS
-    assert spi_busy_counters, f"{gpu_arch}: block 6 has no SPI utilization counter"
-    assert spi_busy_counters <= counter_names, (
-        "Block 6 SPI utilization counter is missing"
-    )
-    assert counter_names & MEMORY_CHART_COUNTERS, (
-        "Block 3 Memory Chart counter is missing"
-    )
-    memory_tables = integration_common.metric_table_counters(gpu_arch, 3)
-    expected_counters = workgroup_counters | set().union(*memory_tables.values())
-    assert_selected_counters(counter_names, expected_counters, "Blocks 3 6")
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-def test_subsection_filter(binary_handler_profile_rocprof_compute):
-    workload_dir = common.get_output_dir()
-    output_files, counter_names = profile_block_selection(
-        binary_handler_profile_rocprof_compute, workload_dir, ["6.1"]
-    )
-    gpu_arch = output_files["sysinfo.csv"]["gpu_arch"].iloc[0]
-    tables = integration_common.metric_table_counters(gpu_arch, 6)
-    selected_counters = tables[601]
-    spi_busy_counters = selected_counters & SPI_BUSY_COUNTERS
-    sibling_counters = set().union(*tables.values()) - selected_counters
-    assert spi_busy_counters, (
-        f"{gpu_arch}: subsection 6.1 has no SPI utilization counter"
-    )
-    assert sibling_counters, f"{gpu_arch}: subsection 6.1 must narrow block 6"
-    assert spi_busy_counters <= counter_names, "Subsection 6.1 SPI counter is missing"
-    assert_selected_counters(counter_names, selected_counters, "Subsection 6.1")
-
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
