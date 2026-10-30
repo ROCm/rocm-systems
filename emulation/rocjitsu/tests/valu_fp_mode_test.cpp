@@ -3378,11 +3378,9 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
   // OP_SEL selects the source's high half and writes the destination's high half.
   add("F16I16HighHalves", vop3(rdna4::kVCvtF16I16Vop3, {.opsel = 9}), 0xb38b8000u, 0xf4c7a5a5u,
       0xffu, true);
-  // Host-environment independence: conversion result must not depend on host
-  // FE_TONEAREST/DAZ/FTZ. Verify integer conversion and float narrowing ignore
-  // conflicting host rounding and denormal settings.
-  const auto add_host_indep = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
-                                  uint32_t result, uint32_t mode, bool half) {
+  // Guest-rounding witnesses use the default host environment required by rj-arith.
+  const auto add_guest_rounding = [&](const char *name, std::array<uint32_t, 2> words,
+                                      uint32_t input, uint32_t result, uint32_t mode, bool half) {
     std::vector<std::pair<uint32_t, uint32_t>> sources{{0, input}};
     if (half)
       sources.emplace_back(6, 0xa5a5a5a5u);
@@ -3392,19 +3390,19 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
                      std::move(sources),
                      {{6, result}},
                      mode,
-                     FE_DOWNWARD,
-                     0x8000 | (1u << 6), // Mask DAZ and FTZ; set both bits.
-                     0x8000 | (1u << 6), // Force DAZ and FTZ on.
+                     FE_TONEAREST,
+                     0x8000 | (1u << 6),
+                     (0x1f80u & (0x8000 | (1u << 6))),
                      expect_simd_path(half ? amdgpu::SimdFastPath::VOP_WORDS
                                            : amdgpu::SimdFastPath::VOP1_UNARY)});
   };
   // I32 0x01000003 sits midway between two F32 values, so the guest's
   // nearest-even field gives 0x4b800002 where the host's FE_DOWNWARD would give
   // 0x4b800001. 0x00ffffff is exact and would pass under either.
-  add_host_indep("F32I32HostDownwardDazFtz", f32_i32, 0x01000003u, 0x4b800002u, 0xfcu, false);
+  add_guest_rounding("F32I32GuestNearest", f32_i32, 0x01000003u, 0x4b800002u, 0xfcu, false);
   // U16 0xffff: converts to F16 infinity, but MODE 0xf6 (F16 rounds toward +inf)
   // rounds 65535 to +infinity (0x7c00), not the value before rounding (0x7bff).
-  add_host_indep("F16U16HostDownwardDazFtz", f16_u16, 0x0000ffffu, kHigh | 0x7c00u, 0xf6u, true);
+  add_guest_rounding("F16U16GuestRoundUp", f16_u16, 0x0000ffffu, kHigh | 0x7c00u, 0xf6u, true);
   // Explicit sources and SIMD expectation, for the packed three-source form.
   const auto add_packed = [&](const char *name, std::array<uint32_t, 2> words,
                               std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result,
@@ -6062,7 +6060,8 @@ TEST_P(ValuConversionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
