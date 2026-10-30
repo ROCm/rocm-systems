@@ -10,7 +10,7 @@
 
 namespace rocjitsu::arith {
 
-enum class Fp64 { Fma, Trunc, Ceil, Rndne, Floor, Fract, Sqrt, Rcp, Rsq };
+enum class Fp64 { Add, Mul, Fma, Trunc, Ceil, Rndne, Floor, Fract, Sqrt, Rcp, FrexpMant, Rsq };
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // Evaluate FP64 arithmetic. Preserve destination lanes outside exec_mask.
