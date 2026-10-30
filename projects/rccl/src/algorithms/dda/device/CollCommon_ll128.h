@@ -138,8 +138,8 @@ __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& l
   hi = u.w[1];
 }
 
-// 16B wire access. The cooperative form gives a tear-free 16B transaction on
-// hardware that has the builtin; otherwise it degrades to the plain access.
+// 16B wire access. With the builtin, 8 lanes move one aligned 128B line, flag
+// included, in a single access; without it, each lane is a plain 16B access.
 __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t lo, uint64_t hi) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
   union {
@@ -199,7 +199,8 @@ __device__ __forceinline__ void ddaLL128StoreWire(
     ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
 }
 
-// Poll until every line this lane reads has landed, then read the payload once.
+// Poll until every line this lane reads has landed. With the cooperative load the
+// payload arrives with its flag, so only the 16B fallback reads it again.
 __device__ __forceinline__ void ddaLL128PollWire(
   const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread], uint64_t flag, int wid) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
@@ -212,9 +213,11 @@ __device__ __forceinline__ void ddaLL128PollWire(
       needReload |= flagLane && (vr[u + 1] != flag);
     }
   } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+#endif
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`
