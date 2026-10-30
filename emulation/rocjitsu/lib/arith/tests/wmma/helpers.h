@@ -207,6 +207,36 @@ template <int Lanes, typename Call> void expect_bf16_tiny_accumulator(Call call)
   }
 }
 
+// A subnormal BF16 factor times a large factor produces a normal FP32 result.
+// Loose must decline native BF16 arithmetic that would flush the factor to zero.
+template <int Lanes, bool Gfx11, typename Call> void expect_bf16_loose_subnormal(Call call) {
+  constexpr int factors = Gfx11 ? 8 : 4;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    Registers<32, Lanes> r;
+    for (auto *reg : r.v) {
+      std::fill_n(reg, Lanes, 0U);
+    }
+    for (int coordinate = 0; coordinate < 16; ++coordinate) {
+      if constexpr (Gfx11) {
+        set_wmma_gfx11<16, Lanes>(r.v, coordinate, 0, 0x0001);
+        set_wmma_gfx11<16, Lanes>(r.v + factors, coordinate, 0, 0x7f00);
+      } else {
+        set_wmma_gfx12_half<Lanes>(r.v, coordinate, 0, 0x0001);
+        set_wmma_gfx12_half<Lanes>(r.v + factors, coordinate, 0, 0x7f00);
+      }
+    }
+    ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, r.v + 24, r.v, r.v + factors, r.v + 16),
+              RJ_ARITH_SUCCESS);
+    for (int row = 0; row < 16; ++row) {
+      for (int col = 0; col < 16; ++col) {
+        uint32_t actual = Gfx11 ? wmma_gfx11_acc<Lanes>(r.v + 24, row, col)
+                                : wmma_gfx12_acc<Lanes>(r.v + 24, row, col);
+        expect_f32(actual, 0x1p-6f, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5, /*rtol=*/1e-5);
+      }
+    }
+  }
+}
+
 // Check mandatory gfx11 flushing of BF16 factors, FP32 accumulators, and tiny results.
 template <int Lanes, typename Call> void expect_gfx11_bf16_denormal(Call call) {
   struct Case {
