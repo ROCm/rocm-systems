@@ -5,6 +5,7 @@
 
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -150,8 +151,7 @@ class CoverageWorkflowTest(unittest.TestCase):
         for line in HOST_TESTS_CHANGES_LINES:
             self.assertIn(line, jobs["changes"])
 
-        # The gate must always run, wait on every other job, and fail when
-        # detection fails or did not say "false".
+        # The gate must always run and wait on every other job.
         gate = jobs["host-gate"]
         self.assertEqual([l for l in gate if l.startswith("if:")], ["if: always()"])
         needs = next((l for l in gate if l.startswith("needs: [")), None)
@@ -161,11 +161,38 @@ class CoverageWorkflowTest(unittest.TestCase):
             set(jobs) - {"host-gate"},
         )
         for line in [
-            'if [[ "${CHANGES_RESULT}" != "success" ]]; then',
-            'if [[ "${RCCL_CHANGED}" == "false" ]]; then',
+            "CHANGES_RESULT: ${{ needs.changes.result }}",
+            "RCCL_CHANGED: ${{ needs.changes.outputs.rccl }}",
             "RESULTS: ${{ join(needs.*.result, ' ') }}",
         ]:
             self.assertIn(line, gate)
+
+    def test_host_gate_verdicts(self):
+        gate = job_lines(REPO_ROOT / HOST_TESTS_WORKFLOW)["host-gate"]
+        script = "\n".join(gate[gate.index("run: |") + 1 :])
+        # (changes result, rccl output, results of every needed job, passes)
+        cases = [
+            ("success", "false", "success skipped skipped", True),
+            ("success", "true", "success success success", True),
+            ("success", "true", "success failure success", False),
+            ("success", "true", "success success cancelled", False),
+            ("success", "true", "success skipped skipped", False),
+            ("success", "", "success skipped skipped", False),
+            ("failure", "", "failure skipped skipped", False),
+            ("cancelled", "", "cancelled skipped skipped", False),
+        ]
+        for changes, rccl, results, passes in cases:
+            with self.subTest(changes=changes, rccl=rccl, results=results):
+                env = {
+                    "PATH": os.environ["PATH"],
+                    "CHANGES_RESULT": changes,
+                    "RCCL_CHANGED": rccl,
+                    "RESULTS": results,
+                }
+                run = subprocess.run(
+                    ["bash", "-c", script], env=env, capture_output=True, text=True
+                )
+                self.assertEqual(run.returncode == 0, passes, run.stdout)
 
     def test_workflow_paths_include_rule_patterns(self):
         for rule in sets.COVERAGE_RULES:
