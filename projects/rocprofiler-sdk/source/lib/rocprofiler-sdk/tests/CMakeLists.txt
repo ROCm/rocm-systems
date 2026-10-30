@@ -32,6 +32,7 @@ set(rocprofiler_lib_sources
     hsa.cpp
     late_start.cpp
     naming.cpp
+    pending_batches.cpp
     queue_controller.cpp
     queue_interposition.cpp
     signal_pool.cpp

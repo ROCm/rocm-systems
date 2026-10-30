@@ -319,6 +319,19 @@ void
 interposition_sync();
 
 /**
+ * @brief Before a buffer flush, wait for in-flight kernel dispatch records
+ *
+ * Tools flush right after synchronizing with the device and expect the records of the dispatches
+ * that finished, which reach the buffer a little later. Waits for exactly the batches registered
+ * before the call, whatever order they complete in. Gives up after 1 ms without progress while
+ * they are all still on the device (a dispatch may still be running), or 100 ms while records are
+ * being emitted. Only when device-memory completion signals are in use, and never on a
+ * record-emitter thread, i.e. from a tool callback for these records.
+ */
+void
+flush_sync();
+
+/**
  * @brief Create the wake signal and launch the completion-monitor thread
  *
  * Does nothing if the monitor is already running, if interception was never installed, or once
