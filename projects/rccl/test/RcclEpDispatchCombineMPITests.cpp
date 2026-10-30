@@ -40,8 +40,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -93,6 +95,12 @@ constexpr int kIters         = 20;   // each timed separately; the minimum is re
 float TokenValue(int rank, int token)
 {
     return 1.0f + static_cast<float>((rank * 16 + (token % 16)) % 128) / 128.0f;
+}
+
+// Unique per (rank, token, k) and exact in float, so a misplaced weight is visible.
+float WeightFor(int rank, int token, int k, int numTopk)
+{
+    return static_cast<float>((rank * kTokens + token) * numTopk + k);
 }
 
 // Experts are chosen by OWNER rather than by index, so the number of distinct ranks a
@@ -191,6 +199,11 @@ protected:
     // header for why that value is computable on the host. Reads numExperts_ and topk_,
     // so it can be re-run after a reconfigure at a different shape.
     void RoundTrip();
+
+    // One dispatch, then every output row checked against the routing computed on the host:
+    // nRecv, row order (source rank, then token), outSrc, rebased outTopk, outTw, and for bf16
+    // the payload. Rows past nRecv must keep the sentinel.
+    void CheckDispatchOutputs(int useFp8);
 };
 
 // CreateEp and RoundTrip have to be void to use the ASSERT_MPI_* macros, and an
@@ -344,6 +357,142 @@ void RcclEpDispatchCombineTest::RoundTrip()
     }
 }
 
+
+void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
+{
+    constexpr int     kGuardRows = 64;
+    constexpr uint8_t kPoison    = 0x7B;
+    const int         cap        = nRanks_ * kTokens;
+    const size_t      hiddenSf   = (kHidden + 127) / 128;
+    const int         myLo       = rank_ * (numExperts_ / nRanks_);
+    const int         myHi       = myLo + numExperts_ / nRanks_;
+    hipStream_t       stream     = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream));
+    SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
+
+    std::vector<std::vector<int32_t>> allTopk(nRanks_, std::vector<int32_t>(static_cast<size_t>(kTokens) * topk_));
+    for (int s = 0; s < nRanks_; ++s) {
+        for (int t = 0; t < kTokens; ++t) {
+            for (int k = 0; k < topk_; ++k) {
+                allTopk[s][static_cast<size_t>(t) * topk_ + k] = ExpertFor(s, t, k, numExperts_, nRanks_);
+            }
+        }
+    }
+    const std::vector<int32_t>& hTopk = allTopk[rank_];
+
+    std::vector<__hip_bfloat16> hX(static_cast<size_t>(kTokens) * kHidden);
+    std::vector<float>          hTopkW(static_cast<size_t>(kTokens) * topk_);
+    for (int t = 0; t < kTokens; ++t) {
+        std::fill_n(hX.begin() + static_cast<size_t>(t) * kHidden, kHidden, __float2bfloat16(TokenValue(rank_, t)));
+        for (int k = 0; k < topk_; ++k) {
+            hTopkW[static_cast<size_t>(t) * topk_ + k] = WeightFor(rank_, t, k, topk_);
+        }
+    }
+    const std::vector<float> hXsf(static_cast<size_t>(kTokens) * hiddenSf, 1.0f);
+
+    EpBuffers b;
+    SCOPE_EXIT(b.Free());
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.x,        hX.size() * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.xSf,      hXsf.size() * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.topkIdx,  hTopk.size() * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.topkW,    hTopkW.size() * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.slot,     static_cast<size_t>(nRanks_) * kTokens * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.sendList, static_cast<size_t>(nRanks_) * kTokens * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.sendc,    static_cast<size_t>(nRanks_) * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outX,     static_cast<size_t>(cap) * kHidden * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSf,    static_cast<size_t>(cap) * hiddenSf * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTopk,  static_cast<size_t>(cap) * topk_ * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTw,    static_cast<size_t>(cap) * topk_ * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSrc,   static_cast<size_t>(cap) * sizeof(int32_t)));
+
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.x, hX.data(), hX.size() * sizeof(__hip_bfloat16), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.xSf, hXsf.data(), hXsf.size() * sizeof(float), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemcpy(b.topkIdx, hTopk.data(), hTopk.size() * sizeof(int32_t), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.topkW, hTopkW.data(), hTopkW.size() * sizeof(float), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outTopk, kPoison, static_cast<size_t>(cap) * topk_ * sizeof(int32_t)));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outTw, kPoison, static_cast<size_t>(cap) * topk_ * sizeof(float)));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outSrc, kPoison, static_cast<size_t>(cap) * sizeof(int32_t)));
+
+    ASSERT_MPI_EQ(0, ep_plan(handle_, (uintptr_t)b.topkIdx, kTokens, (uintptr_t)b.slot,
+                             (uintptr_t)b.sendList, (uintptr_t)b.sendc, (uintptr_t)stream));
+    const int nRecv = ep_dispatch(handle_, (uintptr_t)b.x, useFp8 ? (uintptr_t)b.xSf : 0, (uintptr_t)b.topkIdx,
+                                  (uintptr_t)b.topkW, kTokens, (uintptr_t)b.sendList, (uintptr_t)b.sendc, useFp8,
+                                  kNumSms, (uintptr_t)b.outX, useFp8 ? (uintptr_t)b.outSf : 0,
+                                  (uintptr_t)b.outTopk, (uintptr_t)b.outTw, (uintptr_t)b.outSrc,
+                                  (uintptr_t)stream);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    // Rows this rank receives: every source's tokens with an expert in [myLo, myHi), in order.
+    std::vector<std::pair<int, int>> want;
+    for (int s = 0; s < nRanks_; ++s) {
+        for (int t = 0; t < kTokens; ++t) {
+            const int32_t* row = allTopk[s].data() + static_cast<size_t>(t) * topk_;
+            if (std::any_of(row, row + topk_, [&](int32_t e) { return e >= myLo && e < myHi; })) {
+                want.emplace_back(s, t);
+            }
+        }
+    }
+    EXPECT_EQ(static_cast<int>(want.size()), nRecv) << "rank " << rank_;
+    ASSERT_MPI_EQ(static_cast<int>(want.size()), nRecv);
+
+    const int rows = std::min(cap, nRecv + kGuardRows);
+    std::vector<int32_t> gotTopk(static_cast<size_t>(rows) * topk_);
+    std::vector<float>   gotTw(static_cast<size_t>(rows) * topk_);
+    std::vector<int32_t> gotSrc(static_cast<size_t>(rows));
+    std::vector<__hip_bfloat16> gotX0(static_cast<size_t>(nRecv));
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemcpy(gotTopk.data(), b.outTopk, gotTopk.size() * sizeof(int32_t), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(gotTw.data(), b.outTw, gotTw.size() * sizeof(float), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(hipSuccess,
+                  hipMemcpy(gotSrc.data(), b.outSrc, gotSrc.size() * sizeof(int32_t), hipMemcpyDeviceToHost));
+    // First element of each bf16 row; every element of a row is identical.
+    if (!useFp8) {
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy2D(gotX0.data(), sizeof(__hip_bfloat16), b.outX,
+                                              kHidden * sizeof(__hip_bfloat16), sizeof(__hip_bfloat16),
+                                              static_cast<size_t>(nRecv), hipMemcpyDeviceToHost));
+    }
+
+    int32_t poisonI;
+    float   poisonF;
+    std::memset(&poisonI, kPoison, sizeof(poisonI));
+    std::memset(&poisonF, kPoison, sizeof(poisonF));
+
+    int bad = 0;
+    auto report = [&](int row, const char* what, double got, double expected) {
+        if (bad++ < 8) {
+            ADD_FAILURE() << (useFp8 ? "fp8" : "bf16") << " rank " << rank_ << " row " << row << " " << what
+                          << ": got " << got << ", expected " << expected;
+        }
+    };
+    for (int i = 0; i < nRecv; ++i) {
+        const int s = want[i].first, t = want[i].second;
+        if (gotSrc[i] != s * kTokens + t) report(i, "outSrc", gotSrc[i], s * kTokens + t);
+        for (int k = 0; k < topk_; ++k) {
+            const int32_t e        = allTopk[s][static_cast<size_t>(t) * topk_ + k];
+            const int32_t expTopk  = (e >= myLo && e < myHi) ? e - myLo : -1;
+            const size_t  idx      = static_cast<size_t>(i) * topk_ + k;
+            if (gotTopk[idx] != expTopk) report(i, "outTopk", gotTopk[idx], expTopk);
+            if (gotTw[idx] != WeightFor(s, t, k, topk_)) report(i, "outTw", gotTw[idx], WeightFor(s, t, k, topk_));
+        }
+        if (!useFp8) {
+            const float expX = __bfloat162float(__float2bfloat16(TokenValue(s, t)));
+            if (__bfloat162float(gotX0[i]) != expX) report(i, "outX", __bfloat162float(gotX0[i]), expX);
+        }
+    }
+    for (int i = nRecv; i < rows; ++i) {
+        if (gotSrc[i] != poisonI) report(i, "outSrc past nRecv", gotSrc[i], poisonI);
+        for (int k = 0; k < topk_; ++k) {
+            const size_t idx = static_cast<size_t>(i) * topk_ + k;
+            if (gotTopk[idx] != poisonI) report(i, "outTopk past nRecv", gotTopk[idx], poisonI);
+            if (std::memcmp(&gotTw[idx], &poisonF, sizeof(float)) != 0) {
+                report(i, "outTw past nRecv", gotTw[idx], poisonF);
+            }
+        }
+    }
+    ASSERT_MPI_EQ(0, bad);
+}
+
 } // namespace
 
 TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
@@ -353,6 +502,18 @@ TEST_F(RcclEpDispatchCombineTest, DispatchCombineRoundTrip)
     }
     ASSERT_EP_STEP(CreateEp(nRanks_ * kExpertsPerRank, kTopk));
     ASSERT_EP_STEP(RoundTrip());
+}
+
+// The round trip reads dispatch's outputs only through the combined sum, and combine uses
+// recv_topk only by sign, so check the epilogue's rebase, placement and carried fields directly.
+TEST_F(RcclEpDispatchCombineTest, DispatchOutputsMatchHostRouting)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+    ASSERT_EP_STEP(CreateEp(nRanks_ * kExpertsPerRank, kTopk));
+    ASSERT_EP_STEP(CheckDispatchOutputs(/*useFp8=*/0));
+    ASSERT_EP_STEP(CheckDispatchOutputs(/*useFp8=*/1));
 }
 
 // ep_configure is re-enterable: called again at a different shape it tears the window
