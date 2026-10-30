@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// FP32 add/subtract/multiply and DX9-zero multiplication.
+// FP32 add/subtract/multiply and DX9-zero multiplication and min/max selection.
 // Owns public entry points and their validation/dispatch policy.
 
 #include "fp/binary.h"
 #include "common/alu.h"
 #include "common/internal.h"
+#include "fp/binary_impl.h"
+#include "fp/minmax_impl.h"
 #include "fp/mul_exceptions.h"
 #include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
@@ -131,8 +133,13 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
   constexpr uint64_t fp_flags = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
                                 RJ_ARITH_FP_ROUND_MASK | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+  constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags)) {
     return error;
+  }
+  if (!(arithmetic) &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) > RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
 
   // RDNA3 ignores output scaling when denormal outputs are preserved or IEEE
@@ -211,7 +218,23 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
     if constexpr (Op == rocjitsu::arith::Binary::Mul) {
       value = x * y;
     }
-
+    if constexpr (Op == rocjitsu::arith::Binary::MinNum) {
+      value = rocjitsu::arith::minmax<false, false>(x, y);
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::MaxNum) {
+      value = rocjitsu::arith::minmax<true, false>(x, y);
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::Minimum) {
+      value = rocjitsu::arith::minmax<false, true>(x, y);
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::Maximum) {
+      value = rocjitsu::arith::minmax<true, true>(x, y);
+    }
+    if constexpr (Op == rocjitsu::arith::Binary::MinLegacy ||
+                  Op == rocjitsu::arith::Binary::MaxLegacy) {
+      value = rocjitsu::arith::minmax_rdna3<Op == rocjitsu::arith::Binary::MaxLegacy>(
+          x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    }
     value = rocjitsu::arith::as_float(rocjitsu::arith::scale_omod_f32_bits(
         rocjitsu::arith::as_bits(value), (instruction_flags >> 6) & 3,
         unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24)));
@@ -220,7 +243,7 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
     value = rocjitsu::arith::alu_output(
         value,
         instruction_flags & ~(RJ_ARITH_ALU_OMOD_HALF | (preserve_nan ? RJ_ARITH_ALU_CLAMP : 0)));
-    if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+    if (arithmetic && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = rocjitsu::arith::flush_denorm_f32(value);
     }
     result[lane] = rocjitsu::arith::as_bits(value);
@@ -397,6 +420,78 @@ int rj_arith_v_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
                                               excp_flag_user);
 }
 
+// Select the minimum with numeric-preferred NaN selection for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_min_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MinNum>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Select the maximum with numeric-preferred NaN selection for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_max_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MaxNum>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Select the NaN-propagating minimum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_minimum_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Minimum>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Select the NaN-propagating maximum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_maximum_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::Maximum>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
 // Multiply the operands with DX9 zero-product rules for selected lanes.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
@@ -431,6 +526,42 @@ int rj_arith_v_mul_dx9_zero_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   return binary<rocjitsu::arith::Binary::MulDx9Zero>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Select the minimum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_min_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Select the maximum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_max_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
 }
 
 // Add the operands for selected lanes.
@@ -572,6 +703,82 @@ int rj_arith_v_mul_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                                      excp_flag_user);
 }
 
+// Select the minimum with numeric-preferred NaN selection for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_min_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MinNum>(flags, exec_mask, instruction_flags, d, a,
+                                                        b);
+}
+
+// Select the maximum with numeric-preferred NaN selection for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_max_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MaxNum>(flags, exec_mask, instruction_flags, d, a,
+                                                        b);
+}
+
+// Select the NaN-propagating minimum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_minimum_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Minimum>(flags, exec_mask, instruction_flags, d, a,
+                                                         b);
+}
+
+// Select the NaN-propagating maximum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_maximum_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b,
+                               [[maybe_unused]] uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::Maximum>(flags, exec_mask, instruction_flags, d, a,
+                                                         b);
+}
+
 // Multiply the operands with DX9 zero-product rules for selected lanes.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
@@ -607,4 +814,40 @@ int rj_arith_v_mul_dx9_zero_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
   }
   return binary_wave64<rocjitsu::arith::Binary::MulDx9Zero>(flags, exec_mask, instruction_flags, d,
                                                             a, b);
+}
+
+// Select the minimum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_min_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask,
+                                                                 instruction_flags, d, a, b);
+}
+
+// Select the maximum for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_max_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return binary_wave64<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask,
+                                                                 instruction_flags, d, a, b);
 }

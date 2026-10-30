@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Shared FP16/FP32 operation selector for add/subtract/multiply and DX9-zero MUL.
+// Shared FP16/FP32 arithmetic and min/max operation selector.
 // Declares FP32 backends; FP16 backends are declared in half_binary.h.
 
 #pragma once
@@ -16,10 +16,16 @@ enum class Binary {
   Subrev,
   Mul,
   MulDx9Zero,
+  MinNum,
+  MaxNum,
+  Minimum,
+  Maximum,
+  MinLegacy,
+  MaxLegacy
 };
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-// Evaluate FP32 binary arithmetic. Preserve destination lanes outside exec_mask.
+// Evaluate FP32 binary arithmetic or selection. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 void binary_x86_64_v3(Binary op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                       uint32_t *d, const uint32_t *a, const uint32_t *b);

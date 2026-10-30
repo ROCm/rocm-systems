@@ -284,7 +284,8 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // for A/B, plus RJ_ARITH_PK_CLAMP and RJ_ARITH_FP16_OVFL. Flags for C are invalid. Each
 // result rounds to FP16; the two results use original inputs even with aliases.
 // Packed ADD/MUL do not support DPP.
-// Loose semantics require host nearest-even with denormals enabled.
+// Number min/max ignore a lone NaN; minimum/maximum propagate NaNs. NaN encoding
+// and zero-sign ties are unspecified. Host nearest-even with denormals is required.
 // ADD/MUL accept guest IEEE and input/output denormal flags. Flushing applies
 // to each selected input half and each rounded output half. In the RDNA3 scalar
 // guest-mode path, IEEE controls NaN quieting. Directed guest rounding uses
@@ -293,6 +294,9 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // supported; mode 1 may fall back to Loose. Explicit exact modes are unsupported.
 // Compatibility preserves selected gfx11 input NaN bits with IEEE clear in both
 // scalar and SIMD paths; IEEE set quiets them. Loose permits approximate NaN results.
+// Packed selection honors guest input/output denormal flags and IEEE mode;
+// rounding flags have no effect on selection. RDNA3 MIN/MAX support
+// RJ_ARITH_FP_DX10_CLAMP_OFF, preserving NaNs under CLAMP without leaving SIMD.
 // ADD/MUL without _gfx12 take RDNA3 trapsts; RDNA4 variants
 // take excp_flag_user. Both reject mode 3 FP status reporting and skip loose state.
 int rj_arith_v_pk_add_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
@@ -907,6 +911,541 @@ int rj_arith_v_fma_mixhi_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// Floating-point selection. Family contracts apply to all wave variants below.
+
+// RDNA3 FP16/FP32/FP64 MIN/MAX return NaN for a signaling NaN with guest IEEE set;
+// otherwise a lone NaN is ignored. Two NaNs produce NaN. OMOD is ignored
+// when IEEE is set or output denormals are preserved. Input flushing precedes
+// selection; output flushing otherwise has no effect. Both widths use SIMD.
+//
+// Packed FP16 MIN/MAX apply the same NaN and input-denormal selection rules to
+// both halves, with their independent selectors/negations. Packed forms have no
+// OMOD; selection preserves denormal results regardless of output flushing.
+// Selection honors guest rounding for OMOD overflow, including in SIMD paths.
+// RDNA3 binary FP16 also accepts
+// RJ_ARITH_FP_DX10_CLAMP_OFF to preserve NaNs under CLAMP.
+//
+// RDNA3 FP16/FP32 MIN3/MAX3/MINMAX/MAXMIN compose the binary rules above. MED3
+// uses MIN3 for any NaN, otherwise selects the median numeric value. Input flushing
+// and conditional OMOD apply in both widths, including the eight-lane SIMD path.
+// Ternary selection honors guest rounding for OMOD overflow.
+// RDNA3 accepts RJ_ARITH_FP_DX10_CLAMP_OFF
+// to preserve NaNs under CLAMP, including in SIMD paths.
+//
+// These selection APIs support bit-exact numeric results (mode 2). Compatibility
+// resolves to mode 2. Loose does not promise NaN payload, quieting, operand priority
+// or zero-sign ties. The exact selection model preserves guest-rounded output scaling:
+// propagating forms
+// quiet the first NaN in source order; number forms prefer numbers and otherwise
+// quiet the first NaN. Legacy IEEE mode gives signaling NaNs priority; with IEEE
+// clear, two NaNs preserve A. Median composes those binary choices and orders -0
+// below +0. FP16 conversions retain the selected payload.
+// Packed MINIMUM/MAXIMUM deliberately preserve first-NaN payloads and denormal
+// results, matching gfx1201 observations rather than the old interpreter's
+// canonicalization/output flushing. This evidence is specific to gfx1201.
+// Mode 3 returns UNSUPPORTED_FP_STATUS. Modes 0–2 leave FP status unchanged. Binary F64 and
+// packed forms reject DPP; the other forms route A with DPP8/DPP16.
+int rj_arith_v_min_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_min_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_min_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+// Binary FP16 selection honors guest rounding for OMOD overflow.
+// Input flushing precedes selection; output-denormal mode alone has no effect.
+// Modifiers, rounding flags and masks retain SIMD dispatch in loose semantics.
+int rj_arith_v_min_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_min3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_max3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_minmax_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_maxmin_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_med3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+// Wave64 three-input F16 min/max forms retain Wave32 operand ordering,
+// modifiers, DPP routing, loose semantics and FP status contracts.
+int rj_arith_v_min3_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_max3_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minmax_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_maxmin_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minimummaximum_f16_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximumminimum_f16_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_med3_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_min3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_max3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_minmax_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_maxmin_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_med3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+// Three-input FP16 min/max and median: independently selected halves of A/B/C/D,
+// with all source ABS/NEG, OMOD, CLAMP and RJ_ARITH_FP16_OVFL. Output modifiers apply
+// after the final selection. Preserves the other D half and inactive lanes;
+// any whole-VGPR aliases are allowed. MINMAX/MAXMIN select A/B first, then C.
+// Number variants ignore lone NaNs; MINIMUM/MAXIMUM propagate NaNs. MED3 uses
+// minimumNumber(A,B,C) if any input is NaN. Loose semantics require host
+// nearest-even arithmetic with denormals enabled.
+int rj_arith_v_min3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_max3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minmax_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_maxmin_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minimummaximum_f16_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximumminimum_f16_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_med3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_min_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_max_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_minimum_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_maximum_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_min_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_pk_max_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_pk_min_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_max_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_minimum_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_maximum_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_pk_min_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_pk_max_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, uint32_t *trapsts);
+
+// FP32 min/max: one VGPR per operand; supports A/B ABS/NEG, OMOD and CLAMP.
+// Loose semantics only. Number variants prefer numeric operands over NaNs;
+// minimum/maximum propagate NaNs. Loose semantics do not guarantee NaN operand
+// priority, payload/quieting, or the sign of zero.
+// Guest input flushing applies before selection;
+// output flushing is ignored except as required by OMOD. RJ_ARITH_FP_IEEE_MODE is
+// accepted without changing RDNA4's selection or OMOD rules.
+int rj_arith_v_min_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_min_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_min_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_min_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_min3_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_max3_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_minmax_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_maxmin_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_med3_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+// Wave64 three-input F32 min/max forms retain Wave32 operand ordering,
+// modifiers, DPP routing, loose semantics and FP status contracts.
+int rj_arith_v_min3_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_max3_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minmax_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_maxmin_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minimummaximum_f32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximumminimum_f32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_med3_num_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_min3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_max3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_minmax_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_maxmin_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                              uint32_t *const *d, const uint32_t *const *a,
+                              const uint32_t *const *b, const uint32_t *const *c,
+                              uint32_t *trapsts);
+
+int rj_arith_v_med3_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c, uint32_t *trapsts);
+
+// Three-input FP32 min/max: one VGPR per operand; supports all A/B/C ABS/NEG,
+// OMOD and CLAMP, with loose semantics. First select between A/B, then between
+// that result and C; output modifiers apply only after both selections.
+// MIN3/MAX3 repeat the same selection; MINMAX/MAXMIN apply opposite selections.
+// Number/propagating variants follow the binary NaN classification rules above.
+// Guest input flushing precedes selection; output denormals survive selection.
+// RDNA4 OMOD applies independently of guest IEEE/output-denormal mode.
+int rj_arith_v_min3_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_max3_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minmax_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_maxmin_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum3_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum3_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+int rj_arith_v_minimummaximum_f32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximumminimum_f32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// FP32 median: one VGPR per operand; all A/B/C ABS/NEG, OMOD and CLAMP, loose
+// semantics. Any NaN selects minimumNumber across all three inputs; otherwise
+// select the median numeric value. Zero-sign ties are unspecified in loose semantics.
+int rj_arith_v_med3_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *c,
+                                uint32_t *excp_flag_user);
+
+// RDNA3 FP64 MIN/MAX accept DX10_CLAMP_OFF, preserving a NaN result under CLAMP.
+int rj_arith_v_min_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_min_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_min_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+int rj_arith_v_max_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           uint32_t *trapsts);
+
+// FP64 min/max uses two VGPRs per operand, with A/B ABS/NEG, OMOD and CLAMP.
+// Number variants prefer numeric operands over NaNs; minimum/maximum propagate
+// NaNs. NaN payload/priority and the sign of zero are not guaranteed in loose semantics.
+// Loose semantics and the same FP64 alias/host-FP-state contract apply.
+// FP64 min/max accept guest rounding for OMOD and guest input flushing;
+// output flushing is ignored except
+// through OMOD. RDNA4 number/propagating variants accept IEEE mode without effect.
+// RDNA3 MIN/MAX return NaN for a signaling NaN in IEEE mode, otherwise prefer
+// a lone number over NaN; OMOD is conditional, as in FP32.
+int rj_arith_v_min_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_max_num_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_minimum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
+
+int rj_arith_v_maximum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t *excp_flag_user);
 
 #ifdef __cplusplus
 } // extern "C"
