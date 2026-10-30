@@ -63,7 +63,7 @@ UNITS = [
     (re.compile(r"\bmillidegrees?\b"), lambda m: "mC"),
     (re.compile(r"(?:\d\s?|\bin )(ms|us|µs|ns|s)\b"), lambda m: m.group(1).replace("µ", "u")),
     (
-        re.compile(r"\b(milli|micro|nano)?seconds?\b", re.IGNORECASE),
+        re.compile(r"\b(?:(milli|micro|nano)seconds?|seconds)\b", re.IGNORECASE),
         lambda m: {"milli": "ms", "micro": "us", "nano": "ns"}.get((m.group(1) or "").lower(), "s"),
     ),
     (re.compile(r"%|\bpercent(?:age)?\b", re.IGNORECASE), lambda m: "%"),
@@ -84,10 +84,9 @@ SENTINELS = [
         lambda m: hex((1 << (int(m.group(2)) - (not m.group(1)))) - 1),
     ),
     (
-        re.compile(r"\(\s*u?int(8|16|32|64)_t\s*\)\s*-1\b"),
-        lambda m: hex((1 << int(m.group(1))) - 1),
+        re.compile(r"\(\s*u?int(8|16|32|64)_t\s*\)\s*-1\b|(?<![\w.)])-1\b"),
+        lambda m: hex((1 << int(m.group(1))) - 1) if m.group(1) else "-1",
     ),
-    (re.compile(r"(?<![\w.)])-1\b"), lambda m: "-1"),
 ]
 ENCODINGS = [
     (re.compile(r"\bbit[- ]?(?:mask|map|field)s?\b|\bbit [A-Z0-9]\b", re.IGNORECASE), "bitmask"),
@@ -286,6 +285,7 @@ class _Walker:
             "kind": "typedef",
             "type": self.norm(canon.spelling),
             "size": c.type.get_size(),
+            "align": c.type.get_align(),
         }
 
     def record(self, decl, key):
@@ -494,6 +494,7 @@ def semantic_annotations(snap, records, record_params=()):
 
 def check_header_text(header_text):
     """Refuse what the parse cannot see: other headers, and #if on unknown macros."""
+    header_text = re.sub(r"\\\r?\n", " ", header_text)
     for quote, inc in INCLUDE.findall(header_text):
         if quote != "<" or inc not in SHIMS:
             raise GateError(
@@ -518,10 +519,10 @@ def _parse(cindex, tmp, header_text, defines, lang, target=TARGET):
     if not os.path.isdir(sysdir):
         os.mkdir(sysdir)
         for name, text in shims.items():
-            with open(os.path.join(sysdir, name), "w") as f:
+            with open(os.path.join(sysdir, name), "w", encoding="utf-8") as f:
                 f.write(text)
     header = os.path.join(tmp, "amdsmi.h")
-    with open(header, "w") as f:
+    with open(header, "w", encoding="utf-8") as f:
         f.write(header_text)
     std = "-std=c11" if lang == "c" else "-std=c++17"
     args = ["-x", lang, std, "-nostdinc", "-nostdinc++", "-isystem", sysdir]
@@ -549,7 +550,7 @@ def snapshot_text(header_text, defines=DEFINES):
 
         probe = os.path.join(tmp, "probe.c")
         names = sorted(n for n, v in macros.items() if '"' not in v)
-        with open(probe, "w") as f:
+        with open(probe, "w", encoding="utf-8") as f:
             f.write('#include "amdsmi.h"\n')
             for i, name in enumerate(names):
                 f.write(f"enum {{ abi_gate_probe_{i} = ({name}) }};\n")
@@ -589,14 +590,20 @@ def _lang_neutral(spelling):
 
 def _layout_view(snap, types=False):
     """Size, alignment and field placement keyed without the C tag keyword, for comparing parses;
-    with types, also each field's type."""
+    with types, also each field's type. C++ scopes a nested tag in its parent, so A::inner is
+    keyed as inner unless another record has that name."""
+    names = {key: re.sub(r"\b(struct|union|enum) ", "", key) for key in snap["types"]}
+    short = {k: k.rsplit("::", 1)[1] for k in names.values() if "::" in k}
+    short = {k: v for k, v in short.items() if not v.startswith("(")}
+    taken = [v for v in names.values() if "::" not in v] + list(short.values())
     view = {}
     for key, t in snap["types"].items():
+        k = names[key]
+        if k in short and taken.count(short[k]) == 1:
+            k = short[k]
         if t["kind"] == "typedef":
+            view[k] = (t["size"], t.get("align"), (), ())
             continue
-        k = re.sub(r"\b(struct|union|enum) ", "", key)
-        if "::" in k and not k.rsplit("::", 1)[1].startswith("("):
-            k = k.rsplit("::", 1)[1]
         view[k] = (
             t["size"],
             t["align"],
@@ -617,14 +624,16 @@ def consistency_errors(header_text):
     check_header_text(header_text)
     errors = []
     with tempfile.TemporaryDirectory(prefix="abi_gate_") as tmp:
-        c = _parse(cindex, tmp, header_text, DEFINES, "c")[2].snap
+        _, ctu, cwalker, _ = _parse(cindex, tmp, header_text, DEFINES, "c")
+        c = cwalker.snap
+        cmacros = _macro_candidates(cindex, ctu, cwalker)
         for label, defines, lang, target in (
             ("C++17", DEFINES, "c++", TARGET),
             ("C11 without ENABLE_ESMI_LIB", [], "c", TARGET),
             ("C11 on LLP64 (Windows)", DEFINES, "c", LLP64_TARGET),
         ):
             try:
-                walker = _parse(cindex, tmp, header_text, defines, lang, target)[2]
+                _, tu, walker, _ = _parse(cindex, tmp, header_text, defines, lang, target)
             except GateError as exc:
                 errors.append(str(exc))
                 continue
@@ -640,6 +649,14 @@ def consistency_errors(header_text):
                 continue
             for key in sorted(set(ref) ^ set(other)):
                 errors.append(f"{key} is declared only in {'C11' if key in ref else label}")
+            xmacros = _macro_candidates(cindex, tu, walker)
+            for cm, xm in zip(cmacros, xmacros):
+                for name in sorted(set(cm) | set(xm)):
+                    if cm.get(name) != xm.get(name):
+                        errors.append(
+                            f"macro {name} is {cm.get(name, '(nothing)')} in C11 "
+                            f"but {xm.get(name, '(nothing)')} in {label}"
+                        )
             cfuncs, xfuncs = c["functions"], walker.snap["functions"]
             for name in sorted(set(cfuncs) | set(xfuncs)):
                 csig, xsig = cfuncs.get(name, "(nothing)"), xfuncs.get(name, "(nothing)")
@@ -1105,8 +1122,8 @@ def _git_show(repo, ref, path):
             return f.read()
     try:
         return subprocess.run(
-            ["git", "-C", repo, "show", f"{ref}:{path}"], check=True, capture_output=True, text=True
-        ).stdout
+            ["git", "-C", repo, "show", f"{ref}:{path}"], check=True, capture_output=True
+        ).stdout.decode("utf-8")
     except subprocess.CalledProcessError:
         return None
 
@@ -1212,14 +1229,14 @@ def compile_asserts(header_text, asserts_text):
     failures = []
     with tempfile.TemporaryDirectory(prefix="abi_gate_cc_") as tmp:
         src = os.path.join(tmp, "asserts.c")
-        with open(src, "w") as f:
+        with open(src, "w", encoding="utf-8") as f:
             f.write(header_text + "\n" + asserts_text)
         for cc, lang in (("gcc", ["-x", "c", "-std=c11"]), ("g++", ["-x", "c++", "-std=c++17"])):
             if shutil.which(cc) is None:
                 failures.append(f"{cc} not found")
                 continue
             cmd = [cc, *lang, "-fsyntax-only", "-w", *[f"-D{d}" for d in DEFINES], src]
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
             if res.returncode:
                 failures.append(f"{cc}:\n{res.stderr.strip()}")
     return failures
@@ -1303,13 +1320,19 @@ def gate(repo, old_ref, new_ref, release_ref=None, compile_check=True):
                 asserts = render_asserts(old, old_policy["append_only"], base_acked)
                 result["errors"] += compile_asserts(_git_show(repo, new_ref, HEADER), asserts)
 
-    newly_acked = [Break(e["path"].split("/"), e["old"], e["new"], []) for e in added]
+    # A base without the file, such as an older release branch, may take entries for the
+    # differences it already shipped; an entry for a break against the base still needs a line.
+    newly_acked = [
+        Break(e["path"].split("/"), e["old"], e["new"], [])
+        for e in added
+        if old_exc_text is not None or e["path"] in base_acked
+    ]
     for section, kind in (("append_only", "policy"), ("notes", "semantics")):
         for key in sorted(set(exc[section]) | set(old_exc[section])):
             if exc[section].get(key) != old_exc[section].get(key):
                 newly_acked.append(Break((kind, key), None, exc[section].get(key), []))
 
-    if newly_acked and old_exc_text is not None:
+    if newly_acked:
         added_lines = _changelog_added(
             _git_show(repo, old_ref, CHANGELOG), _git_show(repo, new_ref, CHANGELOG)
         )
@@ -1428,7 +1451,7 @@ def acknowledge(repo, base_ref, release_ref, why):
                 added.append({**brk.entry(), "why": why})
                 exc["breaks"].append(added[-1])
     os.makedirs(os.path.dirname(os.path.join(repo, EXCEPTIONS)), exist_ok=True)
-    with open(os.path.join(repo, EXCEPTIONS), "w") as f:
+    with open(os.path.join(repo, EXCEPTIONS), "w", encoding="utf-8") as f:
         f.write(render_exceptions(exc))
     return added
 

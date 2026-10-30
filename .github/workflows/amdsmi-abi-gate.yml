@@ -114,8 +114,10 @@ jobs:
             echo "::warning::Neither the base nor develop has abi_gate.py; running this PR's copy."
             cp "$dir/abi_gate.py" "$dir/requirements.txt" "$RUNNER_TEMP/abi_gate/"
           fi
-          python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install -q -r "$RUNNER_TEMP/abi_gate/requirements.txt"
+          # -I: a venv.py or pip.py at the root of the PR's checkout must not
+          # shadow the standard library and rewrite the vendored checker.
+          python3 -I -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -I -m pip install -q -r "$RUNNER_TEMP/abi_gate/requirements.txt"
 
       - name: Check ABI
         if: steps.refs.outputs.skip == 'false'
@@ -128,4 +130,4 @@ jobs:
           if [[ -n "$RELEASE" ]]; then
             args+=(--release "$RELEASE")
           fi
-          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/abi_gate/abi_gate.py" "${args[@]}"
+          "$RUNNER_TEMP/venv/bin/python" -I "$RUNNER_TEMP/abi_gate/abi_gate.py" "${args[@]}"

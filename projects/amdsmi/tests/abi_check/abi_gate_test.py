@@ -103,6 +103,11 @@ class DiffTest(unittest.TestCase):
         grown = edit(old, "a : 4; uint32_t reserved : 28;", "a : 5; uint32_t reserved : 27;")
         self.assertEqual(self.paths(grown, old_text=old), ["types/amdsmi_f_t/fields/a"])
 
+    def test_typedef_alignment_change_is_a_break(self):
+        old = PRELUDE + "typedef uint64_t amdsmi_h_t;\n"
+        new = edit(old, "uint64_t amdsmi_h_t", "uint64_t __attribute__((aligned(16))) amdsmi_h_t")
+        self.assertEqual(self.paths(new, old_text=old), ["types/amdsmi_h_t/align"])
+
     def test_carving_a_bitfield_from_a_reserved_array_passes(self):
         new = edit(
             BASE, "uint32_t reserved[8];", "uint32_t f : 1; uint32_t r : 31; uint32_t reserved[7];"
@@ -195,6 +200,12 @@ class DiffTest(unittest.TestCase):
             abi_gate.snapshot_text(BASE + "#ifdef _WIN32\ntypedef int amdsmi_w_t;\n#endif\n")
         guarded = "#ifndef MY_GUARD_H_\n#define MY_GUARD_H_\n" + BASE + "#endif\n"
         self.assertIn("amdsmi_info_t", abi_gate.snapshot_text(guarded)["types"])
+
+    def test_continued_conditional_is_checked_whole(self):
+        with self.assertRaisesRegex(abi_gate.GateError, "__aarch64__"):
+            abi_gate.snapshot_text(
+                BASE + "#if defined(__cplusplus) || \\\n defined(__aarch64__)\n#endif\n"
+            )
 
     def test_attribute_before_brace_still_records_fields(self):
         text = (
@@ -393,6 +404,16 @@ class SemanticTest(unittest.TestCase):
             ["semantics/field:amdsmi_pwr_t.clk"],
         )
 
+    def test_ordinal_second_is_not_a_unit(self):
+        self.assertEqual(abi_gate._annotate("Second preferred data format"), {})
+        self.assertEqual(abi_gate._annotate("Timeout in seconds")["unit"], ["s"])
+        self.assertEqual(abi_gate._annotate("one microsecond")["unit"], ["us"])
+
+    def test_cast_minus_one_counts_once(self):
+        for text in ("(uint32_t)-1 if unsupported", "(uint32_t) -1 if unsupported"):
+            self.assertEqual(abi_gate._annotate(text)["sentinel"], ["0xffffffff"], text)
+        self.assertEqual(abi_gate._annotate("is -1 if unsupported")["sentinel"], ["-1"])
+
     def test_signed_and_unsigned_maxima_differ(self):
         unsigned = edit(SEM, "Clock in MHz", "Clock in MHz, UINT32_MAX when unavailable")
         signed = edit(SEM, "Clock in MHz", "Clock in MHz, INT32_MAX when unavailable")
@@ -483,6 +504,30 @@ class ConsistencyTest(unittest.TestCase):
         )
         errors = abi_gate.consistency_errors(text)
         self.assertTrue(any("without ENABLE_ESMI_LIB" in e for e in errors), errors)
+
+    def test_typedef_size_differs_on_llp64(self):
+        errors = abi_gate.consistency_errors(PRELUDE + "typedef unsigned long amdsmi_h_t;\n")
+        self.assertTrue(any("amdsmi_h_t" in e and "LLP64" in e for e in errors), errors)
+
+    def test_nested_records_with_one_tag_are_not_merged(self):
+        text = PRELUDE + (
+            "typedef struct amdsmi_a { struct inner { uint32_t x; } i; } amdsmi_a_t;\n"
+            "#ifdef __cplusplus\n"
+            "typedef struct amdsmi_b { struct inner { float x; } i; } amdsmi_b_t;\n"
+            "#endif\n"
+        )
+        errors = abi_gate.consistency_errors(text)
+        self.assertTrue(any("amdsmi_a::inner" in e for e in errors), errors)
+
+    def test_cplusplus_only_macro(self):
+        text = BASE + (
+            "#ifdef __cplusplus\n#define AMDSMI_MASK(i) (1ULL << (i))\n"
+            "#else\n#define AMDSMI_MASK(i) (1ULL << ((i) - 1))\n#endif\n"
+            "#ifdef __cplusplus\n#define AMDSMI_N 2\n#else\n#define AMDSMI_N 1\n#endif\n"
+        )
+        errors = abi_gate.consistency_errors(text)
+        self.assertTrue(any("AMDSMI_MASK" in e for e in errors), errors)
+        self.assertTrue(any("AMDSMI_N " in e for e in errors), errors)
 
     def test_long_differs_on_llp64(self):
         errors = abi_gate.consistency_errors(
@@ -761,6 +806,24 @@ class GateTest(unittest.TestCase):
         )
         self.commit("changelog")
         self.assertFalse(self.run_gate()["blocking"])
+
+    def test_first_exceptions_file_still_needs_a_changelog_line_for_a_break(self):
+        self.git("rm", "-q", abi_gate.EXCEPTIONS)
+        self.commit("a branch from before the gate")
+        self.base = self.rev()
+        seed = abi_gate.load_exceptions(None)
+        seed["breaks"].append(
+            {"path": "types/amdsmi_old_t/size", "old": 4, "new": 8, "why": "#0 shipped"}
+        )
+        self.write_exceptions(seed)
+        self.commit("seed")
+        self.assertFalse(self.run_gate()["blocking"])
+        self.grow()
+        self.acknowledge()
+        self.commit("grow, no changelog")
+        errors = self.run_gate()["errors"]
+        self.assertTrue(any("CHANGELOG" in e for e in errors), errors)
+        self.assertFalse(any("amdsmi_old_t" in e for e in errors), errors)
 
     def test_retired_enumerator_value_cannot_be_reused_later(self):
         self.write(abi_gate.HEADER, edit(BASE, "AMDSMI_STATUS_INVAL = 1,", ""))

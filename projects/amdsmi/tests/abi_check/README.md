@@ -30,8 +30,8 @@ branch, both read from git. Nothing about the header is checked in. It fails on:
   encoding, or a direction that now includes `IN`
 - a header the gate cannot fully see: a non-standard `#include`, an `#if` on an
   unknown macro, or a layout that differs in C++17, without `ENABLE_ESMI_LIB`, or
-  on LLP64 Windows; in C++17 also a field type or function that differs, or a
-  function without C linkage
+  on LLP64 Windows (typedefs included); in C++17 also a field type, function or
+  macro that differs, or a function without C linkage
 
 Additions pass: new functions, types, enumerators and macros, and fields carved
 from a `reserved*`/`rsvd*`/`pad*`/`unused*` array or bitfield when the struct
