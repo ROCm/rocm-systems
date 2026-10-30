@@ -22,13 +22,18 @@ foreach(line IN LISTS lines)
         )
     endif()
     set(domain baseline)
+    set(entry_suffix "")
     if(line MATCHES "_(x86_64_v[34](_bf16)?)[.]cpp[.]o:")
         set(domain ${CMAKE_MATCH_1})
+        set(entry_suffix ${domain})
+    elseif(line MATCHES "_avx512vnni[.]cpp[.]o:")
+        set(domain x86_64_v4_vnni)
+        set(entry_suffix avx512vnni)
     endif()
     if(NOT domain STREQUAL "baseline")
         if(
             NOT symbol MATCHES "rocjitsu::arith::${domain}::"
-            AND NOT symbol MATCHES "rocjitsu::arith::[A-Za-z0-9_]+_${domain}[(<]"
+            AND NOT symbol MATCHES "rocjitsu::arith::[A-Za-z0-9_]+_${entry_suffix}[(<]"
         )
             message(
                 FATAL_ERROR

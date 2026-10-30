@@ -25,6 +25,14 @@ inline __m512 clamp_f32(__m512 value, bool preserve_nan) {
   return _mm512_min_ps(_mm512_max_ps(value, _mm512_setzero_ps()), _mm512_set1_ps(1));
 }
 
+// Clamp the wrapped sum of signed 32-bit lanes to the signed range.
+inline __m512i saturate_signed_sum(__m512i x, __m512i y, __m512i sum) {
+  auto overflow = _mm512_and_si512(_mm512_xor_si512(x, sum), _mm512_xor_si512(y, sum));
+  auto limit = _mm512_xor_si512(_mm512_srai_epi32(x, 31), _mm512_set1_epi32(0x7fffffff));
+  return _mm512_mask_mov_epi32(
+      sum, _mm512_cmp_epi32_mask(overflow, _mm512_setzero_si512(), _MM_CMPINT_LT), limit);
+}
+
 // Replace FP32 subnormals with zero of the same sign.
 inline __m512 flush_denorm_f32(__m512 value) {
   auto bits = _mm512_castps_si512(value);
@@ -45,6 +53,21 @@ inline __m512 prepare_omod_f32(__m512 value, uint32_t instruction_flags) {
     auto sign = _mm512_castsi512_ps(
         _mm512_and_si512(_mm512_castps_si512(value), _mm512_set1_epi32(INT32_MIN)));
     value = _mm512_mask_mov_ps(value, underflow, sign);
+  }
+  return value;
+}
+
+// Prepare FP64 results for a nonzero OMOD.
+inline __m512d prepare_omod_f64(__m512d value, uint32_t instruction_flags) {
+  auto magnitude = _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MAX));
+  auto tiny = _mm512_cmplt_epi64_mask(magnitude, _mm512_set1_epi64(INT64_C(0x0010000000000000)));
+  value = _mm512_mask_mov_pd(value, tiny, _mm512_setzero_pd());
+  if ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF) {
+    auto underflow =
+        _mm512_cmplt_epi64_mask(magnitude, _mm512_set1_epi64(INT64_C(0x0020000000000000)));
+    auto sign = _mm512_castsi512_pd(
+        _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MIN)));
+    value = _mm512_mask_mov_pd(value, underflow, sign);
   }
   return value;
 }

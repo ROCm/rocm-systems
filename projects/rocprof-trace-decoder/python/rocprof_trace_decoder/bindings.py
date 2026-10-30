@@ -178,6 +178,7 @@ class _Dispatch(ctypes.Structure):
         ("dispatch_pkt_addr", ctypes.c_uint64),
         ("byte_offset", ctypes.c_uint64),
         ("entry_point", _PcInfo),
+        ("dispatch_id", ctypes.c_uint64),
     ]
 
 
@@ -680,6 +681,7 @@ def _convert_occupancy(c: _Occupancy) -> Occupancy:
         is_ext=(bits >> 8) & 0x1,
         workgroup_id=(bits >> 9) & 0x7F,
         cluster_id=(bits >> 16) & 0x1F,
+        dispatch_id=(bits >> 21) & 0x3FF,
     )
 
 
@@ -794,6 +796,7 @@ def _convert_dispatch(c: _Dispatch) -> Dispatch:
         dispatch_pkt_addr=int(c.dispatch_pkt_addr),
         byte_offset=int(c.byte_offset),
         entry_point=_pc(c.entry_point),
+        dispatch_id=int(c.dispatch_id),
     )
 
 
