@@ -50,6 +50,9 @@ extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapS
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                  uint32_t)>
+    g_devrGinDevCommSetup;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>

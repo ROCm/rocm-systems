@@ -11,6 +11,18 @@ const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
 /// Cached system clock frequency in hertz for timeout conversion.
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+thread_local! {
+    /// Notifies a wait test after this thread has observed an unsatisfied poll.
+    static FIRST_UNSATISFIED_POLL: std::cell::RefCell<Option<Sender<()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn notify_first_unsatisfied_poll(sender: Sender<()>) {
+    FIRST_UNSATISFIED_POLL.with(|slot| *slot.borrow_mut() = Some(sender));
+}
+
 /// Caches the frequency reported by native system clock discovery.
 pub(crate) fn set_system_frequency(frequency: u64) {
     SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
@@ -68,6 +80,13 @@ pub(crate) unsafe fn signal_wait(
     wait_state_hint: u32,
     order: Ordering,
 ) -> SignalValue {
+    // Keep the generation alive for the complete wait. The blocking path
+    // observes stop_workers and releases its retained slot before this drops.
+    // Publish the lease so nested slot reads still enter after final closure.
+    let Some(call) = crate::runtime::enter_public_raw_handle() else {
+        return 0;
+    };
+    let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
     let (generation, observed) = {
         let handles = WAIT_SIGNAL_HANDLES
             .read()
@@ -130,23 +149,56 @@ pub(crate) unsafe fn signal_wait(
     let Some(pointer) = entry.signal else {
         return observed;
     };
+    // SAFETY: The registration retains this slot through signal_wait_open.
+    signal_wait_open(
+        unsafe { pointer.as_ref() },
+        entry.retired.as_deref(),
+        &registration.stop,
+        SignalWaitConfig {
+            condition,
+            compare_value,
+            timeout_hint,
+            wait_state_hint,
+            order,
+        },
+    )
+}
+
+/// Inputs that stay fixed while one signal wait polls a retained slot.
+#[derive(Clone, Copy)]
+pub(crate) struct SignalWaitConfig {
+    /// Comparison applied to each observed value.
+    pub(crate) condition: u32,
+    /// Value compared with each observation.
+    pub(crate) compare_value: SignalValue,
+    /// Timeout in system timestamp ticks.
+    pub(crate) timeout_hint: u64,
+    /// Active or blocked pause policy.
+    pub(crate) wait_state_hint: u32,
+    /// Ordering of the signal value load.
+    pub(crate) order: Ordering,
+}
+
+/// Waits on a retained slot until completion, retirement, or shutdown.
+pub(crate) fn signal_wait_open(
+    signal: &AmdSignal,
+    retired: Option<&AtomicBool>,
+    stop: &AtomicBool,
+    config: SignalWaitConfig,
+) -> SignalValue {
     let start = Instant::now();
     let frequency = system_frequency();
     loop {
-        // SAFETY: The registration retains the slot until the wait exits.
-        let observed = unsafe { pointer.as_ref().value.load(order) };
-        if registration.stop.load(Ordering::Acquire)
-            || entry
-                .retired
-                .as_ref()
-                .is_some_and(|retired| retired.load(Ordering::Acquire))
-            || condition_met(condition, observed, compare_value)
-            || (timeout_hint != u64::MAX
-                && timeout_elapsed(start.elapsed(), timeout_hint, frequency))
+        let observed = signal.value.load(config.order);
+        if stop.load(Ordering::Acquire)
+            || retired.is_some_and(|retired| retired.load(Ordering::Acquire))
+            || condition_met(config.condition, observed, config.compare_value)
+            || (config.timeout_hint != u64::MAX
+                && timeout_elapsed(start.elapsed(), config.timeout_hint, frequency))
         {
             return observed;
         }
-        wait_pause(wait_state_hint, &start);
+        wait_pause(config.wait_state_hint, &start);
     }
 }
 
@@ -245,6 +297,12 @@ pub(crate) unsafe fn signal_wait_inputs(
 
 /// Waits for pause to complete.
 fn wait_pause(wait_state_hint: u32, start: &Instant) {
+    #[cfg(test)]
+    FIRST_UNSATISFIED_POLL.with(|slot| {
+        if let Some(sender) = slot.borrow_mut().take() {
+            let _ = sender.send(());
+        }
+    });
     // A brief active phase avoids scheduler latency for short GPU completions
     // even when the caller allows a blocked wait. Longer blocked waits yield.
     if wait_state_hint == WAIT_STATE_ACTIVE

@@ -4,12 +4,14 @@
 #pragma once
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -146,18 +148,15 @@ public:
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
                                              std::span<const uint8_t> descriptor);
 
-  /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
-  ///
-  /// @details Used by the DBI spill path to grow a kernel's per-lane scratch to
-  /// cover the appended spill zone. Reads the descriptor at @p
-  /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
-  /// it back. Returns false if the descriptor does not fit in the image.
-  ///
-  /// Deliberately narrower than DBT's apply_kernel_descriptor_translation: a
-  /// same-arch instrument-only pass must re-encode no other descriptor field
-  /// (VGPR/SGPR granules, mode bits, USER_SGPR_COUNT, kernarg size).
-  [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                    uint32_t bytes);
+  /// @brief Patch a planned descriptor and its matching numeric metadata together.
+  /// @details The caller encodes architecture-specific allocation fields in the
+  /// descriptor. Missing metadata or insufficient integer widths reject before
+  /// either representation changes. Absent register counts retain their fields.
+  [[nodiscard]] bool patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                            const amdhsa::kernel_descriptor_t &descriptor,
+                                            std::optional<uint32_t> sgprs,
+                                            std::optional<uint32_t> vgprs,
+                                            std::string *error = nullptr);
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
