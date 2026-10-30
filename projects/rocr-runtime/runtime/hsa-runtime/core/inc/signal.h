@@ -147,6 +147,9 @@ inline bool CheckSignalCondition(int64_t value, hsa_signal_condition_t condition
 }
 
 namespace core {
+// The same global as in runtime.h, which includes this header and so can't be included here
+extern bool g_use_mwaitx;
+
 class Agent;
 class Signal;
 
@@ -256,13 +259,14 @@ void FlushDeviceStores(volatile int64_t* stored, int64_t value);
 class SignalBatch {
  public:
   /// @p access_agents are granted access to the arena; empty when @p region is
-  /// already mapped for every agent. @p shadow_members keeps a host-side copy of each member's
-  /// Signal*, for an arena the host reaches across a link.
+  /// already mapped for every agent. @p host_access_across_link states that the host reaches the
+  /// arena uncached across PCIe or XGMI; the batch then keeps a host-side copy of each member's
+  /// Signal*, since reading it from the slot would cost link round trips.
   static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
                              bool use_interrupt, const MemoryRegion* region,
                              const std::vector<hsa_agent_t>& access_agents,
-                             bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
-                             hsa_signal_t* signals);
+                             bool host_access_via_hdp, bool host_access_across_link,
+                             SignalBatch** batch, hsa_signal_t* signals);
 
   static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
     const hsa_amd_signal_batch_t handle = {
@@ -277,6 +281,9 @@ class SignalBatch {
   bool IsValid() const { return id_.IsValid() && !destroyed_; }
 
   bool host_access_via_hdp() const { return host_access_via_hdp_; }
+
+  /// @brief The arena is in device memory the host reaches across PCIe or XGMI, uncached.
+  bool host_access_across_link() const { return host_access_across_link_; }
 
   /// @brief Releases the batch handle. Members stay valid until each is destroyed.
   void ReleaseHandle();
@@ -296,10 +303,11 @@ class SignalBatch {
   static bool FindShadowedMember(uint64_t handle, Signal** member);
 
  private:
-  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp)
+  SignalBatch(void* arena, uint32_t count, bool host_access_via_hdp, bool host_access_across_link)
       : arena_(arena),
         count_(count),
         host_access_via_hdp_(host_access_via_hdp),
+        host_access_across_link_(host_access_across_link),
         references_(1),
         destroyed_(false) {}
   ~SignalBatch();
@@ -319,9 +327,10 @@ class SignalBatch {
   void* const arena_;
   const uint32_t count_;
   const bool host_access_via_hdp_;
+  const bool host_access_across_link_;
 
   /// Host copy of each slot's core_signal, cleared when the member is destroyed. Only
-  /// allocated for arenas in device memory.
+  /// allocated when host_access_across_link_.
   std::unique_ptr<std::atomic<Signal*>[]> shadow_members_;
 
   /// One for the batch handle plus one per live member object.
@@ -661,6 +670,24 @@ class Signal {
   /// atomics don't reach it and host stores need a flush. Cached so host operations
   /// never read the signal's properties across the bus.
   bool host_access_via_hdp_ = false;
+
+  /// @variable The host caches the value, so MONITORX sees an agent's store to it. A value in
+  /// device memory the host reaches across a link is uncached: the agent's store never reaches
+  /// the monitor, and MWAITX would sleep out its whole timeout.
+  bool host_can_monitor_ = true;
+
+  /// @brief One pause of a polling wait on the value. Where the host can monitor the value,
+  /// MWAITX returns once it changes from @p value_on_last_check or after @p timeout MWAITX
+  /// timer clocks. Otherwise each poll is a read across the link, and the pause only yields
+  /// the core to its SMT sibling.
+  __forceinline void WaitForValueChange(int64_t value_on_last_check, uint32_t timeout) {
+    if (!g_use_mwaitx) return;
+    if (host_can_monitor_) {
+      timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value_on_last_check, timeout, true);
+    } else {
+      cpu_relax();
+    }
+  }
 
  private:
   static std::mutex ipcLock_;
