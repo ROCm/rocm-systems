@@ -197,6 +197,16 @@ public:
     recycle_sync_completions_ = true;
   }
 
+  /// @brief Perform the LDS reads, writes or atomics of @p d for @p request_lanes.
+  /// @details initiate_access() after its FLAT DDS check. Loads leave their data
+  /// in the response buffers for complete_lds_access().
+  static void initiate_lds_access(VectorMemState &d, Wavefront &wf, uint64_t request_lanes);
+
+  /// @brief Write the results of initiate_lds_access() back to VGPRs, or to LDS
+  /// for an LDS-destination load, which alone may return Deferred.
+  static MemoryAccessCompletion complete_lds_access(VectorMemState &d, Wavefront &wf,
+                                                    MemoryAccessDeferredCompletion complete);
+
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,

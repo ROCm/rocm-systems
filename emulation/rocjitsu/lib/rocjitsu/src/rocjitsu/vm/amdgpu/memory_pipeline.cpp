@@ -1286,17 +1286,23 @@ MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wav
 
 VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
+  initiate_lds_access(d, wf, request_lanes);
+  return VmAccessOutcome::Complete;
+}
+
+void LocalMemPipeline::initiate_lds_access(VectorMemState &d, Wavefront &wf,
+                                           uint64_t request_lanes) {
+  auto &lds = wf.lds();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {
     execute_lds_stack(wf, d);
-    return VmAccessOutcome::Complete;
+    return;
   }
   const bool plain_load = d.is_load && d.atomic_op == AtomicOp::NONE;
   if (plain_load) {
@@ -1309,7 +1315,7 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
                        d.ds2_response_data);
   if (d.atomic_op != AtomicOp::NONE)
-    return VmAccessOutcome::Complete;
+    return;
 
   if (d.is_load) {
     // Per-lane LDS load trace: log addresses and loaded values for first 4 lanes.
@@ -1374,12 +1380,16 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
       }
     });
   }
-  return VmAccessOutcome::Complete;
 }
 
 MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                                          MemoryAccessDeferredCompletion complete) {
-  auto &d = *inst.data_as<VectorMemState>();
+  return complete_lds_access(*inst.data_as<VectorMemState>(), wf, std::move(complete));
+}
+
+MemoryAccessCompletion
+LocalMemPipeline::complete_lds_access(VectorMemState &d, Wavefront &wf,
+                                      MemoryAccessDeferredCompletion complete) {
   if (d.ds2_active && d.is_load) {
     const uint32_t vgpr_count = d.destination_vgpr_count();
     auto &cu = wf.raw_cu();
