@@ -215,6 +215,37 @@ TEST_F(Cdna2ImageAccessTest, StoreThenLoadRoundTripsActiveLanesOfAnR32Image) {
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeef);
 }
 
+TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreReportUnimplemented) {
+  Image image;
+  image.width = 64;
+  bind(image);
+  wf->set_exec(1);
+  write_coordinates(0, {1, 1, 0});
+  constexpr uint64_t kAddress = kBase + (64 + 1) * sizeof(uint32_t);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  for (const bool load : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "load=" << load);
+    memory.write32(kAddress, 0x12345678u);
+    cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+    const auto words =
+        cdna2::build_mimg(load ? cdna2::kImageLoadMipMimg : cdna2::kImageStoreMipMimg,
+                          {.dmask = 1, .unorm = 1, .da = 1, .vaddr = 0, .vdata = 8, .srsrc = 0});
+    auto decoded = decoder->decode(words.data());
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+
+    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(inst->data(), nullptr);
+    EXPECT_EQ(memory.read32(kAddress), 0x12345678u);
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+  }
+}
+
 TEST_F(Cdna2ImageAccessTest, ArrayLayersFollowRowsOfPitchElements) {
   Image image;
   image.type = amdgpu::kImage2dArray;
