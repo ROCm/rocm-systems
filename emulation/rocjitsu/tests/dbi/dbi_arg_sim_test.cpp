@@ -27,6 +27,7 @@
 /// Read back per lane: v3 must be the argument the site passed, and v1 must be
 /// K0, the value the guest put in v0 before the anchor.
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
 
@@ -40,7 +41,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -99,9 +102,11 @@ protected:
     ASSERT_TRUE(maybe_s_setpc_b64_2.succeeded());
     const uint32_t setpc = maybe_s_setpc_b64_2.value();
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
-    auto target = test::make_amdgpu_kernel_elf(
-        {test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+    const std::vector<uint8_t> target = test::with_descriptor_metadata(
+        test::make_amdgpu_kernel_elf({test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm},
+                                     /*private_bytes=*/64,
+                                     /*granulated_sgpr_count=*/3, a_.e_flags),
+        a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_arg_probe", {kMovV3V0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -216,6 +221,78 @@ TEST_F(DbiRdna4ArgSimFixture, ArgumentArrivesAndGuestRegisterSurvives) {
 TEST_F(DbiRdna4ArgSimFixture, WithoutTheArgumentWriteProbeReadsTheGuestValue) {
   expect_without_the_argument_write_probe_reads_the_guest_value();
 }
+
+class DbiGuestArgumentSim : public ::testing::TestWithParam<ArgSimArch> {};
+
+TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwritingThem) {
+  const ArgSimArch &target = GetParam();
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(target.arch);
+  const util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, target.arch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  ASSERT_TRUE(endpgm.succeeded());
+  ASSERT_TRUE(setpc.succeeded());
+  ASSERT_TRUE(nop.succeeded());
+  const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 256, target.arch);
+  const util::FailureOr<uint32_t> probe_first = build_v_mov_b32_src(3, 256, target.arch);
+  const util::FailureOr<uint32_t> probe_second = build_v_mov_b32_src(4, 257, target.arch);
+  ASSERT_TRUE(guest_move.succeeded());
+  ASSERT_TRUE(probe_first.succeeded());
+  ASSERT_TRUE(probe_second.succeeded());
+  const std::vector<uint8_t> image = test::with_descriptor_metadata(
+      test::make_amdgpu_kernel_elf(
+          {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13), guest_move.value(),
+           endpgm.value()},
+          /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
+          /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
+      target.arch);
+  const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
+      "guest_arguments", {probe_first.value(), probe_second.value(), setpc.value()},
+      target.e_flags);
+  AmdGpuCodeObject object(image.data(), image.size());
+  AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, target.arch);
+  InstrumentationPoint point;
+  point.anchor_offset = 8;
+  point.probe_obj = &probe;
+  point.probe_symbol = "guest_arguments";
+  point.probe_args = {probe_arg_vgpr(1), probe_arg_vgpr(0), probe_arg_imm(99)};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> text = test::section_words(patched, ".text");
+  const uint32_t scratch = test::patched_private_segment_size(patched);
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize(target.sim_arch, target.wave_size));
+  const std::vector<std::vector<uint32_t>> registers =
+      sim.run_and_read_vgprs(text, scratch, {3, 4, 0, 1, 2});
+  const std::array<uint32_t, 5> expected{13, 7, 7, 13, 7};
+  for (size_t index = 0; index < expected.size(); ++index) {
+    ASSERT_EQ(registers[index].size(), target.wave_size);
+    for (uint32_t lane = 0; lane < target.wave_size; ++lane)
+      EXPECT_EQ(registers[index][lane], expected[index])
+          << "register " << index << " lane " << lane;
+  }
+  // Removing the cycle's source capture must corrupt the observed argument.
+  std::vector<uint32_t> broken = text;
+  const util::FailureOr<uint32_t> capture_word = build_v_mov_b32_src(3, 257, target.arch);
+  ASSERT_TRUE(capture_word.succeeded());
+  const uint32_t capture = capture_word.value();
+  const std::vector<uint32_t>::iterator found = std::find(broken.begin(), broken.end(), capture);
+  ASSERT_NE(found, broken.end());
+  *found = nop.value();
+  test::DbiSim control;
+  ASSERT_NO_FATAL_FAILURE(control.initialize(target.sim_arch, target.wave_size));
+  const std::vector<uint32_t> observed = control.run_and_read_vgpr(broken, scratch, 3);
+  ASSERT_EQ(observed.size(), target.wave_size);
+  EXPECT_NE(observed.front(), 13u);
+}
+
+INSTANTIATE_TEST_SUITE_P(Targets, DbiGuestArgumentSim,
+                         ::testing::Values(kCdna3ArgArch, kCdna4ArgArch, kRdna4ArgArch),
+                         [](const ::testing::TestParamInfo<ArgSimArch> &info) {
+                           return std::string(info.param.sim_arch);
+                         });
 
 TEST(DbiFixtureSetupTest, MalformedConfigRecordsFatalFailure) {
   EXPECT_FATAL_FAILURE(

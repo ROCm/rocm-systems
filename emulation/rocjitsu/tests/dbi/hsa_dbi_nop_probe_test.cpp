@@ -77,14 +77,18 @@ using test::kernel_path;
 bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, uint64_t offset,
                              std::string_view mnemonic, size_t max_insts) {
   uint64_t cur = offset;
+  std::vector<rj_code_binary_inst_t> word_buf(decoder.max_instruction_words());
   for (size_t i = 0; i < max_insts && cur + sizeof(uint32_t) <= text.size(); ++i) {
-    rj_code_binary_inst_t word_buf[2] = {0, 0};
-    const size_t avail = std::min<size_t>(sizeof(word_buf), text.size() - cur);
-    std::memcpy(word_buf, text.data() + cur, avail);
-    auto decoded = decoder.decode(word_buf);
+    std::fill(word_buf.begin(), word_buf.end(), 0);
+    const size_t avail =
+        std::min<size_t>(word_buf.size() * sizeof(rj_code_binary_inst_t), text.size() - cur);
+    std::memcpy(word_buf.data(), text.data() + cur, avail);
+    FailureOr<std::unique_ptr<Instruction>> decoded = decoder.decode(word_buf.data());
     if (decoded.failed())
       return false;
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    if (inst->size() <= 0 || static_cast<size_t>(inst->size()) > avail)
+      return false;
     if (inst->mnemonic() == mnemonic)
       return true;
     cur += static_cast<uint64_t>(inst->size());
@@ -189,6 +193,7 @@ protected:
         anchor_offset_ = off;
         patched_elf_bytes_ = std::move(result.elf_bytes);
         patches_ = std::move(result.patches);
+        sites_ = std::move(result.sites);
         break;
       }
       last_patch_error_ = result.errors.front();
@@ -210,6 +215,7 @@ protected:
   std::vector<uint8_t> patched_elf_bytes_;
   std::vector<uint32_t> probe_body_words_;
   std::vector<InstrumentationPatch> patches_;
+  std::vector<InstrumentedSite> sites_;
   uint64_t anchor_offset_ = 0;
   std::string last_patch_error_;
 };
@@ -281,13 +287,21 @@ void HsaDbiNopProbeFixture::run_patched_elf_contains_probe_call_instrumentation(
                                       probe_body_words_.size()))
       << "Copied probe body should return via s_setpc_b64";
 
-  // (f) The trampoline contains the s_swappc_b64 call into the probe. The
-  //     call sits within the before-region envelope at the head of the
-  //     trampoline; scan a small bounded window from trampoline_offset.
-  EXPECT_TRUE(decodes_mnemonic_within(*decoder, text_bytes, patch.trampoline_offset, "s_swappc_b64",
-                                      /*max_insts=*/12))
+  // (f) Require the call inside this site's actual before-region, bounded by
+  // the relocated guest instruction. Architecture-specific guards may grow it.
+  ASSERT_EQ(sites_.size(), 1u);
+  const InstrumentedSite &site = sites_.front();
+  ASSERT_EQ(site.instrumentation_offset, patch.trampoline_offset);
+  ASSERT_LE(site.instrumentation_offset, text_bytes.size());
+  ASSERT_LE(site.instrumentation_size, text_bytes.size() - site.instrumentation_offset);
+  ASSERT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
+  ASSERT_LE(site.guest_offset, text_bytes.size());
+  const std::span<const uint8_t> envelope =
+      text_bytes.subspan(site.instrumentation_offset, site.instrumentation_size);
+  EXPECT_TRUE(decodes_mnemonic_within(*decoder, envelope, 0, "s_swappc_b64",
+                                      envelope.size() / sizeof(uint32_t)))
       << "Trampoline at offset " << patch.trampoline_offset
-      << " should contain an s_swappc_b64 call to the probe";
+      << " should contain an s_swappc_b64 call before the relocated guest instruction";
 }
 
 // "Sabotage" verification: overwrite the first word of the COPIED probe body

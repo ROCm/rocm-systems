@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
@@ -25,6 +26,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "../instrumentor_test_access.h"
 
@@ -2023,17 +2025,18 @@ TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
 }
 
 // Normal planning needs no spills for this probe, but emission must still reject
-// RDNA3's unsupported boundary drain without publishing a partial patch or ELF.
-TEST(InstrumentorProbePatch, RejectsNoSpillRdna3BoundaryDrainWithoutOutput) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+// RDNA2's unsupported boundary drain without publishing a partial patch or ELF.
+TEST(InstrumentorProbePatch, RejectsNoSpillRdna2BoundaryDrainWithoutOutput) {
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA2;
   constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
   static_assert(nop.succeeded());
   constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, arch);
   static_assert(setpc.succeeded());
   auto target = make_amdgpu_kernel_elf({nop.value(), nop.value()}, /*private_bytes=*/0,
-                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+                                       /*granulated_sgpr_count=*/3, EF_AMDGPU_MACH_AMDGCN_GFX1030);
   auto probe =
-      make_amdgpu_probe_elf("rj_test_probe", {setpc.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+      make_amdgpu_probe_elf("rj_test_probe", {setpc.value()}, EF_AMDGPU_MACH_AMDGCN_GFX1030);
+
   AmdGpuCodeObject obj(target.data(), target.size());
   AmdGpuCodeObject probe_obj(probe.data(), probe.size());
   ASSERT_TRUE(obj.is_valid());
@@ -3037,10 +3040,8 @@ TEST(InstrumentorEntryPrologue, KernelEntryKeepsItsBytes) {
   EXPECT_EQ(text[0], branch) << "the kernel entry was overwritten";
 }
 
-// patch() is the production entry point, and no runtime builds the kernarg
-// wrapper the prologue loads through, so it refuses before planning anything.
-// Both entry points run the patch gates, so neither patches a probe that reads
-// the framework's entry storage unless the test skips them.
+// Both patch entry points require an explicit runtime binding for the kernarg
+// wrapper the prologue loads through; default options do not supply one.
 TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
   auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
@@ -3057,6 +3058,8 @@ TEST(InstrumentorEntryPrologue, PatchRefusesEntryStorageWithoutAWrapper) {
     ASSERT_FALSE(result.errors.empty());
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_NE(result.errors.front().find("kernarg wrapper"), std::string::npos)
+        << result.errors.front();
+    EXPECT_NE(result.errors.front().find("CallerSuppliedWrapper"), std::string::npos)
         << result.errors.front();
     EXPECT_NE(result.errors.front().find("rj_test_probe"), std::string::npos)
         << result.errors.front();
@@ -3476,6 +3479,37 @@ TEST(InstrumentorKernargRecord, OrdinaryProbeCallDeclaresNothing) {
   EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
 }
 
+TEST(InstrumentorKernargRecord, UnusedWrapperBindingRetainsTheOriginalKernargAbi) {
+  const std::vector<uint8_t> target = make_gfx950_kernarg_kernel_elf();
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("plain", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(target.data(), target.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::BeforeInst, InstrumentationKind::KernelEntry}) {
+    SCOPED_TRACE(static_cast<int>(kind));
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+    InstrumentationPoint point;
+    point.anchor_offset = kind == InstrumentationKind::KernelEntry ? 0 : 4;
+    point.kind = kind;
+    point.probe_obj = &probe;
+    point.probe_symbol = "plain";
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(patched.is_valid());
+    const Section *text = patched.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    EXPECT_EQ(kernels.front().descriptor.kernarg_size, kTestKernargSize);
+    EXPECT_EQ(result.resources.kernarg_bytes, kTestKernargSize);
+    EXPECT_TRUE(test::section_bytes(patched, kKernargExtensionMetadataSectionName).empty());
+  }
+}
+
 // An inline nop has nowhere to put arguments.
 TEST(InstrumentorProbePatch, RejectsArgumentsWithoutAProbe) {
   auto target = make_gfx950_kernel_elf_with_two_nops();
@@ -3831,8 +3865,11 @@ protected:
   Caved patch_spill(const std::vector<uint32_t> &kernel_body,
                     const std::vector<uint32_t> &probe_body, uint32_t private_bytes,
                     uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
-    auto target = a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
-                                 granulated_vgpr_count, accum_offset);
+    std::vector<uint8_t> target =
+        a_.make_kernel(kernel_body, private_bytes, /*granulated_sgpr_count=*/3,
+                       granulated_vgpr_count, accum_offset);
+    if (private_bytes != 0)
+      target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = a_.make_probe("rj_test_probe", probe_body);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -4583,11 +4620,10 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
   EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
 }
 
-// GFX9-style s_nop padding is omitted on RDNA4, and that is all this pins. The anchor
-// reads s8 through a VALU, which falls under RDNA4's separate SGPR hazard (deferred,
-// see docs/dbi-design.md), so the missing s_nop says nothing about whether this
-// sequence is hazard-free there. RDNA4 global loads are 12 bytes and cannot be
-// anchors, hence the VALU read.
+// GFX9-style s_nop padding is omitted on RDNA4; the resume s_wait_alu covers
+// the restored SGPR before the anchor's VALU read. Separate emitted-envelope
+// tests pin the internal SALU guards and the final restore drain. RDNA4 global
+// loads are 12 bytes and cannot be anchors, hence the VALU read.
 TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
   util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
   ASSERT_TRUE(maybe_clobber.succeeded());
@@ -4674,6 +4710,346 @@ TEST_F(Cdna4ProbeSpill, SpillsMultipleLiveClobberedSgprs) {
   ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
   EXPECT_NE(std::ranges::find(caved.cave, maybe_wait_loads_complete.value()), caved.cave.end());
   EXPECT_EQ(caved.scratch, 72u);
+}
+
+TEST(InstrumentorKernelBoundary, EntryAndAccessAtTheSameAnchorRunInDispatchOrder) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf({nop.value(), endpgm.value()}, 0);
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("boundary", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch);
+  Instrumentor debug_instrumentor(object, kArch);
+  for (const auto &[kind, offset] : {std::pair{InstrumentationKind::KernelEntry, uint64_t{0}},
+                                     std::pair{InstrumentationKind::BeforeInst, uint64_t{0}},
+                                     std::pair{InstrumentationKind::KernelExit, uint64_t{4}}}) {
+    InstrumentationPoint point;
+    point.kind = kind;
+    point.anchor_offset = offset;
+    point.probe_obj = &probe;
+    point.probe_symbol = "boundary";
+    instrumentor.add_point(point);
+    debug_instrumentor.add_point(point);
+  }
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 3u);
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> words = section_words(patched, ".text");
+  const std::optional<uint64_t> entry = patched_entry_text_offset(patched);
+  ASSERT_TRUE(entry);
+  const auto target_of = [&](uint64_t offset) {
+    return offset + 4 + int64_t{static_cast<int16_t>(words.at(offset / 4))} * 4;
+  };
+  EXPECT_EQ(target_of(*entry), result.sites[0].instrumentation_offset);
+  const InstrumentedSite &entry_site = result.sites[0];
+  EXPECT_EQ(entry_site.guest_size, 0u);
+  EXPECT_EQ(target_of(entry_site.guest_offset), 0u);
+  EXPECT_EQ(target_of(0), result.sites[1].instrumentation_offset);
+  EXPECT_EQ(target_of(4), result.sites[2].instrumentation_offset);
+  EXPECT_EQ(words.at(result.sites[2].guest_offset / 4), endpgm.value());
+  EXPECT_EQ(result.sites[2].guest_offset / 4 + 1, words.size());
+
+  const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(debug.errors.empty()) << debug.errors.front();
+  EXPECT_EQ(debug.elf_bytes, result.elf_bytes);
+  ASSERT_EQ(debug.patches.size(), 3u);
+  ASSERT_TRUE(debug.patches[0].return_target);
+  EXPECT_EQ(debug.patches[0].return_target, 0u);
+  EXPECT_EQ(debug.patches[1].return_target, 4u);
+  EXPECT_FALSE(debug.patches[2].return_target);
+}
+
+TEST(InstrumentorKernelBoundary, RejectsIncorrectBoundaryOffsetsAndMissingProbes) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf({nop.value(), endpgm.value()}, 0);
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("boundary", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const InstrumentationKind kind :
+       {InstrumentationKind::KernelEntry, InstrumentationKind::KernelExit}) {
+    Instrumentor wrong_offset(object, kArch);
+    InstrumentationPoint point;
+    point.kind = kind;
+    point.anchor_offset = kind == InstrumentationKind::KernelEntry ? 4 : 0;
+    point.probe_obj = &probe;
+    point.probe_symbol = "boundary";
+    wrong_offset.add_point(point);
+    const InstrumentedCodeObject wrong = wrong_offset.patch();
+    EXPECT_FALSE(wrong.errors.empty());
+    EXPECT_TRUE(wrong.elf_bytes.empty());
+
+    Instrumentor missing_probe(object, kArch);
+    missing_probe.add_point_by_offset(0, kind);
+    const InstrumentedCodeObject missing = missing_probe.patch();
+    EXPECT_FALSE(missing.errors.empty());
+    EXPECT_TRUE(missing.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstruction) {
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, ROCJITSU_CODE_ARCH_RDNA4);
+  static_assert(setpc.succeeded());
+  const std::vector<uint8_t> image =
+      make_gfx1200_wave32_kernel_elf({kGfx12GlobalStoreV0V1S2[0], kGfx12GlobalStoreV0V1S2[1],
+                                      kGfx12GlobalStoreV0V1S2[2], endpgm.value()},
+                                     0);
+  const std::vector<uint8_t> body = make_gfx1200_probe_elf("boundary", {setpc.value()});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint point;
+  point.kind = InstrumentationKind::KernelEntry;
+  point.probe_obj = &probe;
+  point.probe_symbol = "boundary";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 1u);
+  ASSERT_EQ(result.patches.size(), 1u);
+  ASSERT_TRUE(result.patches.front().return_target);
+  EXPECT_EQ(result.patches.front().return_target, 0u);
+  EXPECT_EQ(result.sites.front().guest_size, 0u);
+  EXPECT_TRUE(result.patches.front().patched_anchor_bytes.empty());
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const std::vector<uint32_t> words = section_words(patched, ".text");
+  ASSERT_GE(words.size(), 4u);
+  EXPECT_TRUE(
+      std::equal(kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end(), words.begin()));
+  const uint64_t branch_pc = result.sites.front().guest_offset;
+  const std::optional<int16_t> branch = compute_sopp_branch_simm16(branch_pc, 0);
+  ASSERT_TRUE(branch);
+  const util::FailureOr<uint32_t> branch_word = build_s_branch(*branch, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(branch_word.succeeded());
+  EXPECT_EQ(words.at(branch_pc / 4), branch_word.value());
+}
+
+TEST(InstrumentorResources, ScratchGrowthWithoutMetadataPublishesNothing) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, 64);
+  const std::vector<uint8_t> original = image;
+  const std::vector<uint8_t> probe_image =
+      make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "scratch";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_EQ(image, original);
+}
+
+TEST(InstrumentorResources, ScratchGrowthAndWrapperShareMetadataPublication) {
+  for (const DbiKernargBinding binding :
+       {DbiKernargBinding::None, DbiKernargBinding::CallerSuppliedWrapper}) {
+    for (const uint32_t original_private : {64u, 127u}) {
+      SCOPED_TRACE(static_cast<int>(binding));
+      SCOPED_TRACE(original_private);
+      const bool narrow = original_private == 127;
+      const std::vector<uint8_t> image = test::with_resource_metadata(
+          make_kernarg_kernel_elf({kMovV3V2, 0xbf810000u}, original_private,
+                                  EF_AMDGPU_MACH_AMDGCN_GFX950, 20),
+          {{"test_kernel", 20, 32, 4, original_private}}, narrow);
+      const std::vector<uint8_t> original = image;
+      const std::vector<uint8_t> probe_image =
+          make_gfx950_probe_elf("scratch", {kMovV2Zero, kProbeSetpcS30S31});
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+      const InstrumentationOptions options{.kernarg_binding = binding,
+                                           .register_growth = std::nullopt};
+      Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+      InstrumentationPoint point;
+      point.probe_obj = &probe;
+      point.probe_symbol = "scratch";
+      if (binding == DbiKernargBinding::CallerSuppliedWrapper)
+        point.probe_args = {{ProbeArgSource::LogBufferPtrLo}, {ProbeArgSource::LogBufferPtrHi}};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      Instrumentor debug_instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+      debug_instrumentor.add_point(point);
+      const InstrumentedCodeObjectDebug debug = debug_instrumentor.patch_with_debug_summaries();
+      EXPECT_EQ(debug.errors, result.errors);
+      EXPECT_EQ(debug.elf_bytes, result.elf_bytes);
+      if (narrow) {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_NE(result.errors.front().find("wider"), std::string::npos);
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+      } else {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        const AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_EQ(output.text_sections().size(), 1u);
+        const Section &text = *output.text_sections().front();
+        const std::vector<KernelDescriptorInfo> kernels =
+            scan_kernel_descriptors(result.elf_bytes, text.sectionOffset(), text.size());
+        ASSERT_EQ(kernels.size(), 1u);
+        const FailureOr<amdhsa::MetadataDocument> metadata =
+            amdhsa::MetadataDocument::parse(result.elf_bytes);
+        ASSERT_TRUE(metadata.succeeded());
+        const amdhsa::MetadataValue *entries = metadata.value().root().field("amdhsa.kernels");
+        ASSERT_NE(entries, nullptr);
+        ASSERT_EQ(entries->array.size(), 1u);
+        const amdhsa::MetadataValue &entry = entries->array.front();
+        EXPECT_GT(kernels.front().descriptor.private_segment_fixed_size, original_private);
+        EXPECT_EQ(entry.integer_field(".private_segment_fixed_size"),
+                  kernels.front().descriptor.private_segment_fixed_size);
+        EXPECT_EQ(entry.integer_field(".kernarg_segment_size"),
+                  kernels.front().descriptor.kernarg_size);
+        EXPECT_EQ(kernels.front().descriptor.kernarg_size,
+                  binding == DbiKernargBinding::CallerSuppliedWrapper ? 40u : 20u);
+      }
+      EXPECT_EQ(image, original);
+    }
+  }
+}
+
+TEST(InstrumentorResources, ExplicitPoliciesRequireTheirMetadataInputs) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  for (const InstrumentationOptions options :
+       {InstrumentationOptions{.preservation = GuestStatePreservation::DeclaredRegisters,
+                               .register_growth = std::nullopt},
+        InstrumentationOptions{.register_growth = OriginalRegisterCounts{32, 4}}}) {
+    Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+    instrumentor.add_point_by_offset(0);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+  }
+}
+
+TEST(InstrumentorResources, MissingMetadataPublishesNoPartialImageOrSites) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.register_growth = OriginalRegisterCounts{32, 4};
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "return";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("AMDHSA metadata"), std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_EQ(image.front(), 0x7f);
+}
+
+TEST(InstrumentorResources, RegisterBackupsExhaustTheRegisterFileBeforeImagePublication) {
+  const std::vector<uint8_t> image = make_gfx950_kernel_elf_with_two_nops();
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const std::vector<uint8_t> body = make_gfx950_probe_elf("return", {kProbeSetpcS30S31});
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  InstrumentationOptions options;
+  options.preservation = GuestStatePreservation::DeclaredRegisters;
+  options.register_growth =
+      OriginalRegisterCounts{static_cast<uint32_t>(REGISTER_SET_ALLOCATABLE_SGPRS), 4};
+  Instrumentor instrumentor(object, ROCJITSU_CODE_ARCH_CDNA4, options);
+  InstrumentationPoint point;
+  point.probe_obj = &probe;
+  point.probe_symbol = "return";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("register preservation exceeds the bounded register file"),
+            std::string::npos);
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+}
+
+TEST(InstrumentorResources, OddSgprCountsLeaveBothEntrySnapshotsOutsideRegisterBackups) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  for (const uint32_t original_sgprs : {34u, 35u}) {
+    SCOPED_TRACE(original_sgprs);
+    const std::vector<uint8_t> image = test::with_resource_metadata(
+        make_kernarg_kernel_elf({nop.value(), endpgm.value()}, 0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+                                kTestKernargSize, false, 5),
+        {{"test_kernel", kTestKernargSize, original_sgprs, 4, 0}});
+    const std::vector<uint8_t> body = make_gfx950_probe_elf("snapshots", {kProbeSetpcS30S31});
+    const AmdGpuCodeObject object(image.data(), image.size());
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    InstrumentationOptions options;
+    options.kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper;
+    options.preservation = GuestStatePreservation::DeclaredRegisters;
+    options.register_growth = OriginalRegisterCounts{original_sgprs, 4};
+    Instrumentor instrumentor(object, kArch, options);
+    InstrumentationPoint point;
+    point.kind = InstrumentationKind::KernelEntry;
+    point.probe_obj = &probe;
+    point.probe_symbol = "snapshots";
+    point.probe_args = {{.source = ProbeArgSource::EntryVgprLane0, .register_index = 0},
+                        {.source = ProbeArgSource::EntryVgprLane0, .register_index = 1}};
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_FALSE(result.elf_bytes.empty());
+    EXPECT_EQ(result.sites.size(), 1u);
+  }
+}
+
+TEST(InstrumentorProbePatch, Gfx1250RequiresProvenZeroBanksAndBankPreservingProbeBodies) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  static_assert(nop.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  for (const uint16_t bank : {0, 1}) {
+    for (const bool probe_changes_bank : {false, true}) {
+      const std::array<uint32_t, 1> select_bank =
+          cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = bank});
+      const std::vector<uint8_t> image = make_amdgpu_kernel_elf(
+          {select_bank[0], nop.value(), endpgm.value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+      std::vector<uint32_t> probe_words;
+      if (probe_changes_bank)
+        probe_words.push_back(select_bank[0]);
+      probe_words.push_back(setpc.value());
+      const std::vector<uint8_t> body =
+          make_amdgpu_probe_elf("banked", probe_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const AmdGpuCodeObject probe(body.data(), body.size());
+      Instrumentor instrumentor(object, kArch);
+      InstrumentationPoint point;
+      point.anchor_offset = 4;
+      point.probe_obj = &probe;
+      point.probe_symbol = "banked";
+      instrumentor.add_point(point);
+      const Instrumentor::ValidationResult result = instrumentor.validate_points();
+      if (bank == 0 && !probe_changes_bank) {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_EQ(result.sites.size(), 1u);
+      } else {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_NE(result.errors.front().find(probe_changes_bank ? "bank state" : "VGPR_MSB"),
+                  std::string::npos)
+            << result.errors.front();
+      }
+    }
+  }
 }
 
 } // namespace

@@ -28,6 +28,7 @@
 /// v3 after the probe returns; the spill bridges the scalar through a VGPR via
 /// v_writelane/v_readlane. Read v3 back: it must equal K.
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
 
@@ -126,6 +127,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
         /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -270,6 +272,7 @@ protected:
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -414,6 +417,7 @@ protected:
     auto target =
         test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
                                      /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
 
@@ -520,6 +524,7 @@ protected:
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
 
@@ -669,6 +674,7 @@ protected:
          kAccReadV7A0Hi, endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
         /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kMovV2Zero, mov_s8_0, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc},
         a_.e_flags);
@@ -831,6 +837,7 @@ protected:
          vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
          vadd(1, kSpilledSgpr, 1), endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
 
@@ -1052,6 +1059,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {probe_clobber_exec, setpc}, a_.base.e_flags);
 
@@ -1207,6 +1216,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
                                              a_.base.e_flags);
 
@@ -1369,6 +1380,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());
