@@ -1763,6 +1763,8 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
+  t.ddaArLLOneShotMinRanks = 16;
+  t.ddaArLLOneShotMaxBytes = 4 * kKiB;
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
@@ -6963,14 +6965,15 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
 }
 
 // The LL one-shot AllReduce keeps RCCL_DDA_LL_ONESHOT_THRESHOLD's default below
-// 16 ranks and stops at 4 KiB from 16.
+// the table's ddaArLLOneShotMinRanks and stops at ddaArLLOneShotMaxBytes from there.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_CappedFromSixteenRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLOneShotThreshold_CappedFromSixteenRanks",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = Gfx1250Table();
+        rcclArchThresholds table = MakeRankScaledTable();
+        comm->archThresholds = &table;
         const std::pair<int, size_t> cases[] = {{2, 1 * kMiB},  {8, 1 * kMiB},  {15, 1 * kMiB},
                                                 {16, 4 * kKiB}, {32, 4 * kKiB}, {64, 4 * kKiB}};
         for (const auto& c : cases) {
@@ -6978,6 +6981,25 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_CappedFromSixteenRanks) {
           EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
         }
         EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr));
+        table.ddaArLLOneShotMaxBytes = 8 * kKiB;
+        EXPECT_EQ(8 * kKiB, rcclDdaLLOneShotThreshold(comm)) << "the cap is the table's";
+        table.ddaArLLOneShotMinRanks = 0;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "0 ranks turns it off";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The rank cap is an arch-table entry, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        g_loadParam = ForceParam("RCCL_IGNORE_ARCH_TABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 32;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -7841,6 +7863,30 @@ TEST(WrapMicrotestIsolated, DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled) {
         for (int nRanks : {8, 16, 32}) {
           comm->nRanks = nRanks;
           EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "SPX " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX: the LL one-shot AllReduce stops at 4 KiB from 16 ranks; SPX keeps the 1 MiB default.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_Gfx1250DpxRankCap",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> cases[] = {{8, 1 * kMiB}, {15, 1 * kMiB}, {16, 4 * kKiB}, {32, 4 * kKiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
+        }
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (int nRanks : {16, 32, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "SPX " << nRanks;
         }
         DeleteCommWithArch(comm);
       });

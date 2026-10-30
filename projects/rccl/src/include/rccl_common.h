@@ -382,7 +382,7 @@ size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL one-shot AllReduce: RCCL_DDA_LL_ONESHOT_THRESHOLD when
-// set; else its default, lowered on large comms.
+// set; else its default, lowered on large comms per rcclArchThresholds::ddaArLLOneShot*.
 size_t rcclDdaLLOneShotThreshold(const ncclComm* comm);
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
 // lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
