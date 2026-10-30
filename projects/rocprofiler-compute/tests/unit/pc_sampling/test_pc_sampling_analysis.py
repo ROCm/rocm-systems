@@ -20,7 +20,7 @@ from pc_sampling.pc_sampling_analysis import (
     load_aggregated_pc_sampling,
     load_pc_sample_records,
 )
-from rocprof_compute_analyze.analysis_db import db_analysis
+from rocprof_compute_analyze.analysis_db import db_analysis, pc_sampling_dispatch_trace
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map_from_json,
@@ -2520,7 +2520,9 @@ def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
     )
     instance = make_db_analysis(str(tmp_path))
     instance._profiling_config = {"filter_blocks": ["21"]}  # pc_sampling_only -> True
-    result = instance.calc_dispatch_data({str(tmp_path): [tool_data]})
+    result = instance.calc_dispatch_data({
+        str(tmp_path): pc_sampling_dispatch_trace([tool_data])
+    })
     df = result[str(tmp_path)]
     assert list(df.columns) == [
         "dispatch_id",
@@ -2541,7 +2543,9 @@ def test_calc_dispatch_data_warns_for_empty_pc_sampling_results(
     instance._profiling_config = {"filter_blocks": ["21"]}
 
     with patch("utils.file_io.console_warning") as warning:
-        result = instance.calc_dispatch_data({str(tmp_path): []})
+        result = instance.calc_dispatch_data({
+            str(tmp_path): pc_sampling_dispatch_trace([])
+        })
 
     assert result[str(tmp_path)].empty
     warning.assert_called_once_with(
@@ -2557,7 +2561,9 @@ def test_calc_dispatch_data_stitches_pc_sampling_tool_records(
     instance._profiling_config = {"filter_blocks": ["21"]}
 
     result = instance.calc_dispatch_data({
-        str(tmp_path): make_multiprocess_dispatch_tool_data()
+        str(tmp_path): pc_sampling_dispatch_trace(
+            make_multiprocess_dispatch_tool_data()
+        )
     })
 
     df = result[str(tmp_path)]

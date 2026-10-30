@@ -18,6 +18,7 @@ from utils.file_io import (
     load_kernel_short_names,
     rank_kernels_by_total_duration,
     validate_kernel_filter_ids,
+    workload_total_duration_ns,
 )
 
 KERNEL_SYMBOLS_COLUMNS = ["Kernel_Name", "Kernel_Short_Name"]
@@ -183,6 +184,78 @@ def test_kernel_top_stats_rows_follow_the_ranking() -> None:
         assert kernel_top_df["Kernel_Name"].tolist() == (
             rank_kernels_by_total_duration(dispatch_frame)
         )
+
+
+# =============================================================================
+# workload_total_duration_ns: the denominator of top-stats Percent
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("filter_gpu_ids", "filter_dispatch_ids", "expected_total"),
+    [
+        (None, None, 1900),
+        (["0"], None, 1500),
+        (["1"], None, 400),
+        (None, ["> 2"], 600),
+        (None, ["1", "2"], 1300),
+        (["0"], ["> 1"], 1000),
+    ],
+    ids=[
+        "unfiltered",
+        "gpu",
+        "other_gpu",
+        "dispatch_bound",
+        "dispatch_ids",
+        "gpu_and_dispatch",
+    ],
+)
+def test_workload_total_duration_applies_gpu_and_dispatch_filters(
+    filter_gpu_ids, filter_dispatch_ids, expected_total
+) -> None:
+    """The total keeps the kernel time of every dispatch the filters keep."""
+    assert (
+        workload_total_duration_ns(_raw_pmc(), filter_gpu_ids, filter_dispatch_ids)
+        == expected_total
+    )
+
+
+def test_workload_total_duration_is_null_without_dispatches() -> None:
+    """A workload with no dispatch rows has no total, so the total is None."""
+    assert workload_total_duration_ns(pd.DataFrame(), None, None) is None
+    assert workload_total_duration_ns(_raw_pmc().iloc[0:0], ["0"], None) is None
+
+
+def test_workload_total_duration_is_zero_when_filters_drop_every_dispatch() -> None:
+    """Filters that keep no dispatch give a total of zero, not NULL."""
+    assert workload_total_duration_ns(_raw_pmc(), ["9"], None) == 0
+    assert workload_total_duration_ns(_raw_pmc(), None, ["9"]) == 0
+
+
+def test_dispatch_bound_without_a_number_is_an_error() -> None:
+    """A '>' bound with no number exits, rather than keeping every dispatch."""
+    with pytest.raises(SystemExit):
+        workload_total_duration_ns(_raw_pmc(), None, ["> x"])
+
+
+@pytest.mark.parametrize("filter_gpu_ids", [None, ["0"]])
+def test_top_stats_percent_is_kernel_total_over_workload_total(
+    tmp_path, filter_gpu_ids
+) -> None:
+    """Percent equals each kernel's total duration over the workload total."""
+    raw_pmc = _raw_pmc()
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=raw_pmc,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=filter_gpu_ids,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+
+    total = workload_total_duration_ns(raw_pmc, filter_gpu_ids, None)
+
+    derived_percent = kernel_top_df["Sum(ns)"] / total * 100
+    assert list(derived_percent) == pytest.approx(list(kernel_top_df["Percent"]))
 
 
 class TestValidateKernelFilterIds:

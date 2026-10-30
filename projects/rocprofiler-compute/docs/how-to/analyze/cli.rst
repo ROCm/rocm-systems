@@ -779,6 +779,8 @@ Analysis database views
    :align: center
    :alt: Analysis database views
 
+The ``compute_kernel_view`` view repeats the workload's total kernel duration in nanoseconds as ``workload_total_duration_ns``. The total covers the kernels that pass the ``--gpu-id`` and ``--dispatch`` filters, and ignores ``--kernel``. A kernel's Percent in the top-stats table is its ``duration_ns_sum`` divided by this total, times 100.
+
 Analysis database example
 
 .. note::

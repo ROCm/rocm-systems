@@ -106,6 +106,61 @@ def validate_kernel_filter_ids(
             )
 
 
+def filter_gpu_dispatch_frame(
+    df: pd.DataFrame,
+    filter_gpu_ids: Optional[list[str]],
+    filter_dispatch_ids: Optional[list[str]],
+) -> pd.DataFrame:
+    """Keep the rows that pass the gpu-id and dispatch-id filters.
+
+    The kernel filter (``-k``) is not applied here, so callers that need the
+    whole workload, such as the top-stats Percent, see every kernel.
+    """
+    if filter_gpu_ids:
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
+
+    if filter_dispatch_ids:
+        # NB: support ignoring the 1st n dispatched execution by '> n'
+        #     The better way may be parsing python slice string
+        first_filter = filter_dispatch_ids[0]
+
+        if isinstance(first_filter, str) and first_filter.startswith(">"):
+            match = re.match(r">\s*(\d+)", str(first_filter))
+            if match is None:
+                console_error(
+                    "analysis",
+                    f"{first_filter} is an invalid dispatch filter. "
+                    "Use '> n' to keep the dispatches after dispatch n.",
+                )
+            threshold = int(match.group(1))
+            df = df[df["Dispatch_ID"] > threshold]
+        else:
+            filter_strings = [str(f) for f in filter_dispatch_ids]
+            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
+
+    return df
+
+
+def workload_total_duration_ns(
+    dispatch_frame: pd.DataFrame,
+    filter_gpu_ids: Optional[list[str]],
+    filter_dispatch_ids: Optional[list[str]],
+) -> Optional[int]:
+    """Return the workload's total kernel duration in ns, before the ``-k`` filter.
+
+    The top-stats Percent of each kernel is its total duration divided by this.
+    None when the workload has no dispatch rows, since its total is unavailable.
+    """
+    if dispatch_frame.empty:
+        return None
+    filtered_df = filter_gpu_dispatch_frame(
+        dispatch_frame, filter_gpu_ids, filter_dispatch_ids
+    )
+    return int((filtered_df["End_Timestamp"] - filtered_df["Start_Timestamp"]).sum())
+
+
 @demarcate
 def create_df_kernel_top_stats(
     df_in: pd.DataFrame,
@@ -121,29 +176,7 @@ def create_df_kernel_top_stats(
         A tuple of (kernel_top_df, dispatch_info_df).
     """
 
-    df = df_in.copy()
-
-    # The logic below for filters are the same as in parser.apply_filters(),
-    # which can be merged together if need it.
-
-    if filter_gpu_ids:
-        df = df.loc[
-            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
-        ]
-
-    if filter_dispatch_ids:
-        # NB: support ignoring the 1st n dispatched execution by '> n'
-        #     The better way may be parsing python slice string
-        first_filter = filter_dispatch_ids[0]
-
-        if isinstance(first_filter, str) and first_filter.startswith(">"):
-            match = re.match(r">\s*(\d+)", str(first_filter))
-            if match:
-                threshold = int(match.group(1))
-                df = df[df["Dispatch_ID"] > threshold]
-        else:
-            filter_strings = [str(f) for f in filter_dispatch_ids]
-            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_strings)]
+    df = filter_gpu_dispatch_frame(df_in.copy(), filter_gpu_ids, filter_dispatch_ids)
 
     # First, create a dispatches file used to populate global vars
     dispatch_columns = ["Dispatch_ID", "Kernel_Name", "GPU_ID"]

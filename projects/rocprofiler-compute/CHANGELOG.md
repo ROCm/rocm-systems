@@ -25,7 +25,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
+* The analysis database stores each workload's total kernel duration, after the `--gpu-id` and `--dispatch` filters but before `-k`. `compute_kernel_view` repeats it as `workload_total_duration_ns`, so a kernel's top-stats Percent is its `duration_ns_sum` divided by that total. A workload with no dispatches stores NULL.
+
 ### Changed
+
+* A malformed `--dispatch` bound such as `> x` now stops with an error in the top stats and the analysis database. It used to keep every dispatch silently in the top stats and fail with an unhelpful traceback in the database.
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
 
