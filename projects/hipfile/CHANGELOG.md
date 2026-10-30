@@ -1,8 +1,10 @@
 # Changelog for hipFile
 
-## hipFile 0.7.0 for ROCm 10.3.0
+## (Unreleased) hipFile 0.7.0 
 
 ### Added
+
+* Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
 
 ### Changed
 

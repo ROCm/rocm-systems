@@ -34,6 +34,7 @@
 
 #include "util/simd.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -123,7 +124,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t width = 0)
       : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -133,12 +134,12 @@ struct Fixture {
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_int", cfg, &gpu_mem, &l2);
     decoder = Decoder::create(arch);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, width);
   }
 
   void seed_inputs(uint32_t rot, uint64_t exec) {
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(vb + 0, lane, kVals[lane % kVals.size()]);
       cu->write_vgpr(vb + 1, lane, kVals[(lane + rot) % kVals.size()]);
       cu->write_vgpr(vb + 2, lane, kVals[(lane + 2 * rot) % kVals.size()]);
@@ -152,7 +153,7 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
     return out;
   }
@@ -244,12 +245,13 @@ TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
     util::set_force_scalar_for_testing(force_scalar);
     for (const auto &test_case : cases) {
       Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(fixture.wf, nullptr);
       const auto words = cdna5::build_vop3(
           test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
       std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       const uint32_t base = fixture.wf->vgpr_alloc().base;
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+      for (uint32_t lane = 0; lane < fixture.wf->wf_size(); ++lane) {
         fixture.cu->write_vgpr(base, lane, test_case.src0);
         fixture.cu->write_vgpr(base + 1, lane, test_case.src1);
         fixture.cu->write_vgpr(base + 2, lane, test_case.src2);
@@ -314,3 +316,54 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
 }
 
 } // namespace
+
+TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits) {
+  struct Operation {
+    uint16_t rdna4_op, cdna5_op;
+    bool is_signed, maxmin;
+  };
+  constexpr std::array operations{
+      Operation{rdna4::kVMaxminU32Vop3, cdna5::kVMaxminU32Vop3, false, true},
+      Operation{rdna4::kVMinmaxU32Vop3, cdna5::kVMinmaxU32Vop3, false, false},
+      Operation{rdna4::kVMaxminI32Vop3, cdna5::kVMaxminI32Vop3, true, true},
+      Operation{rdna4::kVMinmaxI32Vop3, cdna5::kVMinmaxI32Vop3, true, false}};
+  ForceScalarGuard guard;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    Fixture fx(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64);
+    ASSERT_NE(fx.wf, nullptr);
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      for (auto operation : operations) {
+        const uint16_t op =
+            arch == ROCJITSU_CODE_ARCH_CDNA5 ? operation.cdna5_op : operation.rdna4_op;
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA5
+                ? cdna5::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258})
+                : rdna4::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
+          constexpr uint64_t exec = 0xa55a5aa55aa5a55a;
+          const auto actual = fx.run(inst.get(), rot, exec);
+          for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+            const uint32_t a = kVals[lane % kVals.size()];
+            const uint32_t b = kVals[(lane + rot) % kVals.size()];
+            const uint32_t c = kVals[(lane + 2 * rot) % kVals.size()];
+            uint32_t expected;
+            if (operation.is_signed) {
+              const int32_t x = static_cast<int32_t>(a), y = static_cast<int32_t>(b),
+                            z = static_cast<int32_t>(c);
+              expected =
+                  operation.maxmin ? std::min(std::max(x, y), z) : std::max(std::min(x, y), z);
+            } else {
+              expected =
+                  operation.maxmin ? std::min(std::max(a, b), c) : std::max(std::min(a, b), c);
+            }
+            EXPECT_EQ(actual[lane], (exec & (uint64_t{1} << lane)) ? expected : DST_SENTINEL)
+                << "arch=" << arch << " op=" << op << " lane=" << lane << " rot=" << rot;
+          }
+        }
+      }
+    }
+  }
+}

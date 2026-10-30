@@ -12,6 +12,7 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "multiplane.h"
+#include "ib_gid_utils.h"
 #include <mutex>
 #include <atomic>
 #include "net_ib_cast_inspect.h"
@@ -214,15 +215,12 @@ ncclResult_t IbCastDestroyBase(struct ncclIbNetCommDevBase* base) {
   return ncclSuccess;
 }
 
-// GID Format
-// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
-// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
 static uint16_t IbCastExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
-  return (be64toh(subnet_prefix) & 0xffff);
+  return ncclIbGidSubnetPrefix16(subnet_prefix);
 }
 
 static int IbCastExtractFlid(union ibv_gid* gid) {
-  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
+  return ncclIbGidFlid(gid->raw);
 }
 
 static sa_family_t envIbAddrFamily(void) {

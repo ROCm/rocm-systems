@@ -122,6 +122,17 @@ if(NOT WIN32)
     link_libraries(amd_comgr)
     link_libraries(hiprtc-builtins)
   endif() # end BUILD_SHARED_LIBS
+  # hipTestMain calls hsa_system_get_info; link HSA for shared builds too.
+  if(HIP_PLATFORM STREQUAL "amd")
+    list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm)
+    find_package(hsa-runtime64 REQUIRED CONFIG)
+    link_libraries(hsa-runtime64::hsa-runtime64)
+  endif()
+  # hipTestMain calls cuDeviceGetCount (CUDA driver API); link libcuda.
+  if(HIP_PLATFORM STREQUAL "nvidia")
+    find_package(CUDAToolkit REQUIRED)
+    link_libraries(CUDA::cuda_driver)
+  endif()
 endif() # end win32
 
 # Resolves ENABLE_SANITIZER, applies the sanitizer flags to this scope, and defines

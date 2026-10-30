@@ -126,6 +126,11 @@ With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the first-pass per-test deadline. Reporting uses
 `--soft-timeout`, including for the race suite.
 
+With `--ubsan`, which the workflow passes for UBSan builds, the simulator suites
+omit cases listed in the script's `ubsan_excluded_cases`. Those cases, such as
+the 2048x2048 rocBLAS SGEMM, exceed the deadline under UBSan instrumentation.
+Uninstrumented lanes still run them.
+
 ## gfx1201 simulator exclusions
 
 `fpsan_global_load_tr_gfx12_w64_test` is excluded because its wave64
