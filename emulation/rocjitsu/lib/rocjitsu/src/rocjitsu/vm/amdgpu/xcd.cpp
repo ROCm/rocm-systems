@@ -46,9 +46,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
       auto *cu = se->compute_unit(c);
       cu->set_shader_engine_location(i, c, config.shader_engine.cus_per_shader_array,
                                      se->num_compute_units());
-      // Freshly constructed CUs cannot have active waves or workgroups.
-      [[maybe_unused]] const util::Result attached = cp_->add_compute_unit(cu);
-      assert(attached.succeeded());
+      cp_->add_compute_unit(cu);
     }
     // Register the SE's SPI with the CP so ace_dispatch_all() can use the
     // interleaved SPI path for cross-workgroup spin-wait resolution.
@@ -62,23 +60,24 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   // Share one device-global GWS store across every CU of this XCD now that all
   // shader engines and their CUs exist.
-  [[maybe_unused]] const util::Result wired = wire_gws_to_cus();
-  assert(wired.succeeded() && "newly constructed CUs must accept their GWS store");
+  wire_gws_to_cus();
 }
 
-util::Result Xcd::wire_gws_to_cus(util::DiagnosticEmitter emit_error) {
+void Xcd::wire_gws_to_cus() {
   // Include CUs attached directly to the CP by custom topologies.
-  if (cp_)
-    return cp_->set_gws_device(gws_device_, emit_error);
+  if (cp_) {
+    [[maybe_unused]] const util::Result wired = cp_->set_gws_device(gws_device_);
+    assert(wired.succeeded() && "CUs must accept the XCD's GWS store during construction");
+    return;
+  }
   // Standalone-XCD fallback: no command processor, so wire the CUs directly.
   for (ShaderEngine *shader_engine : shader_engines_)
-    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
-      if (!compute_unit->can_set_gws_device(gws_device_))
-        return emit_error.emit() << "Cannot wire GWS store with active waves or workgroups";
+    for ([[maybe_unused]] ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      assert(compute_unit->can_set_gws_device(gws_device_) &&
+             "CUs must accept the XCD's GWS store during construction");
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       (void)compute_unit->set_gws_device(gws_device_);
-  return util::Result::success();
 }
 
 util::Result Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store,

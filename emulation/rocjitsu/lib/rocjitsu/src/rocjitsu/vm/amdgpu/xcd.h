@@ -63,10 +63,9 @@ public:
   /// @details Each CU takes a shared_ptr, so the store outlives every registered
   /// CU regardless of teardown order. Must be called after the CUs are attached to
   /// the command processor; the full constructor and the config loader both do so.
-  /// Preflights every CU and returns failure if an active CU would
-  /// change stores, before changing any CU. The caller serializes topology changes.
-  /// @param emit_error Destination for failure diagnostics.
-  util::Result wire_gws_to_cus(util::DiagnosticEmitter emit_error = {});
+  /// Called during topology construction, before execution starts; every CU must
+  /// accept the XCD's GWS store.
+  void wire_gws_to_cus();
 
   /// @brief Replace this XCD's default GWS store with an externally owned one (the
   /// SoC's device-wide store, shared across every XCD; see GwsDevice).

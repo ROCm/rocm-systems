@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -280,13 +281,11 @@ public:
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
-  /// @brief Attach a CU after checking compatibility with the CP's GWS store.
-  /// @details An incompatible active CU fails before ownership or wiring changes.
-  /// The caller serializes topology changes. Allocation failures may still throw.
-  /// @param emit_error Destination for failure diagnostics.
-  util::Result add_compute_unit(ComputeUnitCore *cu, util::DiagnosticEmitter emit_error = {}) {
-    if (gws_device_ && !cu->can_set_gws_device(gws_device_))
-      return emit_error.emit() << "Cannot attach an active CU to a different GWS store";
+  /// @brief Attach a CU during topology construction, before execution starts.
+  /// @details The CU must be compatible with the CP's GWS store.
+  void add_compute_unit(ComputeUnitCore *cu) {
+    assert((!gws_device_ || cu->can_set_gws_device(gws_device_)) &&
+           "CU must accept the CP's GWS store during construction");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -309,7 +308,6 @@ public:
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
-    return util::Result::success();
   }
 
   void startup() override;
