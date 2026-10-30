@@ -56,7 +56,7 @@ inline ImageAddressRegisters contiguous_image_address_registers(uint32_t first) 
   return {first, first + 1, first + 2, first + 3};
 }
 
-/// @brief Decode GFX11 MIMG address-register selectors.
+/// @brief Decode the four-selector prefix shared by GFX10 and GFX11 MIMG.
 /// @details Non-NSA encodings select consecutive registers beginning at @p first.
 /// NSA encodings keep @p first as VADDR0 and read VADDR1-3 from encoding word 2.
 /// @pre When @p nsa is true, @p raw_encoding points to at least three words.

@@ -34,7 +34,6 @@ void ImageLoadVimage::execute_impl(amdgpu::Wavefront &wf) {
                                     .d16 = bool(inst_.d16),
                                     .r128 = bool(inst_.r128),
                                     .tfe = bool(inst_.tfe),
-                                    .lwe = false,
                                     .da = true,
                                     .unorm = true})
           .failed()) {
@@ -80,7 +79,6 @@ void ImageStoreVimage::execute_impl(amdgpu::Wavefront &wf) {
                                     .d16 = bool(inst_.d16),
                                     .r128 = bool(inst_.r128),
                                     .tfe = bool(inst_.tfe),
-                                    .lwe = false,
                                     .da = true,
                                     .unorm = true})
           .failed()) {

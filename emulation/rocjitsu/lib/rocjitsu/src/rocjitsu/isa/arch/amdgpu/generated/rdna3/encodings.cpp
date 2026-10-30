@@ -1590,7 +1590,7 @@ void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
   if (!inst_.nsa)
     return;
   nsa_vaddr_operand_ = vaddr;
-  size_ = sizeof(OpEncoding) + sizeof(MachineInst);
+  size_ = sizeof(OpEncoding) + 1u * sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
 }

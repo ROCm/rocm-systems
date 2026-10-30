@@ -38,6 +38,19 @@ template <typename Fields> Fields query_fields() {
     f.tfe = 1;
   return f;
 }
+
+TEST(ImageResourceDecodeTest, Rdna1UsesSixteenBitDepthAndBaseArray) {
+  std::array<uint32_t, 8> descriptor{};
+  util::insert_bits_into_words(descriptor.data(), 124, 4, amdgpu::kImage3d);
+  util::insert_bits_into_words(descriptor.data(), 128, 16, 0x8000u);
+  util::insert_bits_into_words(descriptor.data(), 144, 16, 0x8000u);
+  const auto resource = amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA1);
+  EXPECT_EQ(resource.depth, 0x8001u);
+  EXPECT_EQ(resource.base_array, 0x8000u);
+  EXPECT_EQ(amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA1, 0),
+            (std::array<uint32_t, 4>{1, 1, 0x8001u, 1}));
+}
+
 class ImageResourceTest : public testing::TestWithParam<rj_code_arch_t> {
 protected:
   std::array<uint32_t, 8> descriptor(uint32_t type, bool view, bool uav = false) {
@@ -56,10 +69,9 @@ protected:
     set(128, 13, 17);
     set(gfx9 ? 160 : 144, 13, view ? 3 : 0);
     if (gfx12) {
-      // RDNA4 ISA Table 60 defines BASE_ARRAY as bits 156:144, so this sets the
-      // adjacent bit to verify that spec-defined width. ROCr resource_gfx12.h
-      // instead names bit 157 BASE_ARRAY_MSB; the gfx1201 RESINFO probe cited
-      // below did not isolate this bit, so it is not evidence for either layout.
+      // RDNA4 ISA Table 60 defines BASE_ARRAY as bits 156:144. An isolated
+      // gfx1201 RESINFO probe also ignores bit 157: base values 1 and 8193
+      // both report 8191 layers from a descriptor with depth 8192.
       set(157, 1, 1);
     }
     if (uav)

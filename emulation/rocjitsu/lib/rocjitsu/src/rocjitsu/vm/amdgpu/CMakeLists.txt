@@ -18,6 +18,7 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_vm.cpp
     gws_device.cpp
     hwreg.cpp
+    image_addressing.cpp
     iod.cpp
     l1_scalar_cache.cpp
     l1_vector_cache.cpp
