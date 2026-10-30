@@ -13,6 +13,7 @@ Math includes reciprocal/root, rounding, log/exp and trigonometric operations.
 Comparisons produce scalar predicate masks, with gfx12 FP-status reporting.
 Integer operations include arithmetic, packed halves, bit manipulation and carry results.
 Conversions cover integer, FP16/FP32/FP64, normalized and packed FP8 formats.
+Register operations provide movement, lane transfers and cross-lane routing.
 Family headers describe exact-result and FP-status support.
 FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
 and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.

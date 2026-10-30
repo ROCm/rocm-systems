@@ -5184,6 +5184,27 @@ TEST(MemoryWaitFootprintTest, DsLanePermutationsUseConsumedSourceLanes) {
   }
 }
 
+TEST(MemoryWaitFootprintTest, RdnaExtendedSwizzlesMatchObservedSourceFootprints) {
+  for (bool rdna3 : {false, true}) {
+    std::vector<std::vector<uint32_t>> cases;
+    for (uint16_t offset : {0xc020, 0xc420, 0xc02f, 0xe000, 0xe00f}) {
+      const auto words =
+          rdna3 ? rdna3::build_ds(rdna3::kDsSwizzleB32Ds, {.offset0 = uint8_t(offset),
+                                                           .offset1 = uint8_t(offset >> 8),
+                                                           .addr = 0,
+                                                           .vdst = 1})
+                : rdna4::build_vds(rdna4::kDsSwizzleB32Vds, {.offset0 = uint8_t(offset),
+                                                             .offset1 = uint8_t(offset >> 8),
+                                                             .addr = 0,
+                                                             .vdst = 1});
+      cases.emplace_back(words.begin(), words.end());
+    }
+    for (unsigned lanes : {32U, 64U})
+      check_vector_footprints(rdna3 ? ROCJITSU_CODE_ARCH_RDNA3 : ROCJITSU_CODE_ARCH_RDNA4, lanes, 4,
+                              cases);
+  }
+}
+
 TEST(MemoryWaitFootprintTest, BasicSwizzleModesMatchPublishedLaneExamples) {
   for (unsigned lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(ds_swizzle_lane(lane, 0x801b), (lane & ~3u) + 3 - (lane & 3u));

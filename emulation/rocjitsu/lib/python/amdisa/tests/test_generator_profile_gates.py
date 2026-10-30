@@ -1772,16 +1772,14 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
 
     assert 'uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);' in body
     assert 'lane &= wf.kernel_wave_size() - 1;' not in body
-    assert 'read_scalar_selected_lane(src0, lane)' in body
+    assert 'amdgpu::arith::execute_read_lane<false>' in body
     assert 'src1.encoding_value_' not in body
 
     inst = Instruction('V_READFIRSTLANE_B32', 'ENC_VOP1', 2, operands[:2])
     sem = InstructionSemantics('V_READFIRSTLANE_B32', 'vector_readfirstlane')
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP1')
 
-    assert 'uint64_t exec = wf.exec();' in body
-    assert 'exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0' in body
-    assert 'read_scalar_selected_lane(src0, lane)' in body
+    assert 'amdgpu::arith::execute_read_lane<true>' in body
     assert 'read_lane(src0, lane)' not in body
 
     operands = [
@@ -1794,9 +1792,8 @@ def test_readlane_family_decodes_lane_selector_as_scalar_value():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP3')
 
-    assert 'uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);' in body
-    assert 'lane &= wf.kernel_wave_size() - 1;' not in body
-    assert 'write_scalar_selected_lane(vdst, lane, val)' in body
+    assert 'amdgpu::arith::execute_write_lane' in body
+    assert 'vdst, src0, src1' in body
     assert 'src1.encoding_value_' not in body
 
 
@@ -4521,7 +4518,7 @@ def test_dbt_generation_canonicalizes_rdna35_cli_alias(tmp_path):
     assert generated_tables[0] == generated_tables[1]
 
 
-def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
+def test_single_isa_cndmask_routes_source_modifiers_to_rj_arith():
     spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
     semantics = derive_all_semantics(spec)
     generator = CodeGenerator(spec, '', semantics)
@@ -4534,8 +4531,15 @@ def test_single_isa_cndmask_qualifies_amdgpu_src_modifier():
         cndmask, semantics.instructions[cndmask.name], vop3.enc_name
     )
 
-    assert body.count('amdgpu::apply_vop3_b32_src_mod(') == 2
-    assert re.search(r'(?<!amdgpu::)apply_vop3_b32_src_mod\(', body) is None
+    assert 'amdgpu::arith::execute_conditional<false>' in body
+    for field, bit, flag in [
+        ('abs', 1, 'ABS_A'),
+        ('abs', 2, 'ABS_B'),
+        ('neg', 1, 'NEG_A'),
+        ('neg', 2, 'NEG_B'),
+    ]:
+        assert f'((inst_.{field} & {bit}) ? RJ_ARITH_ALU_{flag} : 0u)' in body
+    assert 'amdgpu::read_wave_mask_scalar(src2, wf)' in body
 
 
 def test_rdna4_64bit_literal_widening_is_format_specific(tmp_path):
@@ -5850,8 +5854,11 @@ def test_generated_modifier_storage_is_out_of_ordinary_vop_frames(
         assert 'DppPlan' in modified
         assert 'ScopedOperandDelegate' in modified
         assert 'ScopedVgprWriteMask' in modified
-        assert 'amdgpu::execute_' in ordinary
-        assert 'amdgpu::execute_' in modified
+        execute_prefix = (
+            'amdgpu::arith::execute_' if arch == 'rdna4' else 'amdgpu::execute_'
+        )
+        assert execute_prefix in ordinary
+        assert execute_prefix in modified
 
         header = (
             amdgpu_generated_root / arch / filename.replace('_exec.cpp', '.h')

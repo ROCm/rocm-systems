@@ -158,8 +158,8 @@ setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
 The migrated families are dense and sparse WMMA, fused floating-point arithmetic, basic
 floating-point arithmetic and selection, division, dot products, math functions,
-comparisons, integer arithmetic and conversions. Other handlers retain their existing
-implementations.
+comparisons, integer arithmetic, conversions and register and lane routing. Other
+handlers retain their existing implementations.
 
 ### Guest FP controls
 

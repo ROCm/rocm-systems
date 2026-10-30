@@ -6747,6 +6747,18 @@ class CodeGenerator:
         if rj_arith_compare is not None:
             return RjArithBody(rj_arith_compare)
 
+        from amdisa.codegen.execute.rj_arith_ds import gen_ds
+
+        rj_arith_ds = gen_ds(ctx)
+        if rj_arith_ds is not None:
+            return RjArithBody(rj_arith_ds)
+
+        from amdisa.codegen.execute.rj_arith_lane import gen_lane
+
+        rj_arith_lane = gen_lane(ctx)
+        if rj_arith_lane is not None:
+            return RjArithBody(rj_arith_lane)
+
         from amdisa.codegen.execute.rj_arith_vector import (
             gen_vector32,
             gen_carry32,
@@ -6799,7 +6811,38 @@ class CodeGenerator:
         )
 
         if result_writer is None:
-            for handler in (gen_integer_dot, gen_packed_integer, gen_widening_integer, gen_integer16, gen_vector32, gen_half_dot, gen_float_dot32, gen_packed_binary16, gen_packed_fma16, gen_mixed_fma, gen_float_unary16, gen_normalized, gen_packed_conversion, gen_conversion16, gen_conversion32, gen_conversion64, gen_fp8_narrow, gen_fp8_widen, gen_bit_pack, gen_byte_nibble_conversion, gen_float_unary32, gen_float_unary64, gen_float_binary64, gen_float_fma64, gen_float64_word, gen_float_binary16, gen_float_binary32, gen_float_ternary_selection, gen_float_fma16, gen_float_fma32):
+            for handler in (
+                gen_integer_dot,
+                gen_packed_integer,
+                gen_widening_integer,
+                gen_integer16,
+                gen_vector32,
+                gen_half_dot,
+                gen_float_dot32,
+                gen_packed_binary16,
+                gen_packed_fma16,
+                gen_mixed_fma,
+                gen_float_unary16,
+                gen_normalized,
+                gen_packed_conversion,
+                gen_conversion16,
+                gen_conversion32,
+                gen_conversion64,
+                gen_fp8_narrow,
+                gen_fp8_widen,
+                gen_bit_pack,
+                gen_byte_nibble_conversion,
+                gen_float_unary32,
+                gen_float_unary64,
+                gen_float_binary64,
+                gen_float_fma64,
+                gen_float64_word,
+                gen_float_binary16,
+                gen_float_binary32,
+                gen_float_ternary_selection,
+                gen_float_fma16,
+                gen_float_fma32,
+            ):
                 rj_arith_body = handler(ctx)
                 if rj_arith_body is not None:
                     return RjArithBody(rj_arith_body)
@@ -14649,7 +14692,22 @@ class CodeGenerator:
                             False,
                         )
                     )
+                from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
 
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DS_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in LANE_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h', False)
+                    )
                 from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
 
                 if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
