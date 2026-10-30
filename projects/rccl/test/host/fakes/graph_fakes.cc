@@ -65,6 +65,8 @@ int64_t ncclParamMultiRankGpuEnable() { return g_loadParam("MULTI_RANK_GPU_ENABL
 int64_t ncclParamWorkArgsBytes() { return g_loadParam("WORK_ARGS_BYTES", INT64_MAX); }
 int64_t rcclParamIntraGraphGen() { return g_loadParam("RCCL_INTRA_GRAPH_GEN", 0); }
 int64_t rcclParamInterGraphGen() { return g_loadParam("RCCL_INTER_GRAPH_GEN", 0); }
+// rccl-UnitTestsMicroTopo compiles graph/paths.cc without transport/p2p.cc.
+bool ncclP2pUsesMemcpy() { return false; }
 
 // --- OS layer, over the maps.
 std::map<std::string, std::string> g_pciPaths;
