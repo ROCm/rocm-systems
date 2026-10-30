@@ -124,7 +124,7 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   ASSERT_TRUE(root.add_flags("Processing", {count, output}, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flags("Empty", {}, diagnostic.emitter()).succeeded());
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command>\n"
-                               "       tool [options] [--] [arguments...]\n"
+                               "       tool [options] -- [arguments...]\n"
                                "\nOptions:\n  --help, -h\n      Show help\n"
                                "\nProcessing:\n  --count, -c N\n      Number of items\n"
                                "  --output, -o PATH\n      Output file\n"
@@ -141,7 +141,7 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   root.set_positional_usage("INPUT...");
   FailureOr<Command *> launch = root.add_command("launch", diagnostic.emitter());
   ASSERT_TRUE(launch.succeeded());
-  launch.value()->set_positional_usage("APP [ARGS...]");
+  launch.value()->set_positional_usage("-- APP [ARGS...]");
   auto config =
       std::make_shared<StringFlag>(FlagInfo{"--config", {}, "Config", ValueMode::Required, "PATH"});
   ASSERT_TRUE(launch.value()->add_flag(config, diagnostic.emitter()).succeeded());
@@ -149,9 +149,9 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   ASSERT_TRUE(status.succeeded());
   status.value()->set_positional_usage("");
   EXPECT_EQ(format_help(root), "Usage: tool [options] <command>\n"
-                               "       tool [options] [--] INPUT...\n"
+                               "       tool [options] -- INPUT...\n"
                                "\nCommands:\n  launch\n  status\n");
-  EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] [--] APP [ARGS...]\n"
+  EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] -- APP [ARGS...]\n"
                                           "\nOptions:\n  --config PATH\n      Config\n");
   EXPECT_EQ(format_help(*status.value()), "Usage: tool status [options]\n");
 }
@@ -269,9 +269,12 @@ TEST_F(CliTest, HelpSeparatesChildDispatchFromParentPositionals) {
   ASSERT_TRUE(run.succeeded());
 
   EXPECT_EQ(format_help(command), "Usage: tool [options] <command>\n"
-                                  "       tool [options] [--] [arguments...]\n"
+                                  "       tool [options] -- [arguments...]\n"
                                   "\nCommands:\n  run\n");
   EXPECT_EQ(format_help(*run.value()), "Usage: tool run [options] [--] [arguments...]\n");
+  Command launcher{"launcher"};
+  launcher.set_positional_usage("-- APP [ARGS...]");
+  EXPECT_EQ(format_help(launcher), "Usage: launcher [options] -- APP [ARGS...]\n");
 
   const std::array<std::string_view, 2> child_args{"run", "app"};
   EXPECT_TRUE(parse(command, child_args, local_diagnostic.emitter()).succeeded());
@@ -280,6 +283,7 @@ TEST_F(CliTest, HelpSeparatesChildDispatchFromParentPositionals) {
       parse(command, root_positional_args, local_diagnostic.emitter());
   ASSERT_TRUE(positional.succeeded());
   EXPECT_EQ(positional.value().command, &command);
+  EXPECT_EQ(positional.value().positionals_before_separator, 0u);
   EXPECT_EQ(positional.value().positional, (std::vector<std::string>{"app"}));
 }
 
@@ -352,6 +356,7 @@ TEST_F(CliTest, NestedCommandAcceptsPositionalsAndSeparatorStopsFlagParsing) {
   ASSERT_TRUE(result.succeeded()) << diagnostic.message();
   EXPECT_EQ(result.value().command, launch.value());
   EXPECT_TRUE(result.value().saw_separator);
+  EXPECT_EQ(result.value().positionals_before_separator, 0u);
   EXPECT_EQ(result.value().positional, (std::vector<std::string>{"application", "--flag"}));
 }
 
@@ -369,16 +374,24 @@ TEST(CliValues, SeparatorOwnsForwardedArguments) {
   FailureOr<ParsedArguments> empty = parse(command, empty_separator, diagnostic.emitter());
   ASSERT_TRUE(empty.succeeded());
   EXPECT_TRUE(empty.value().saw_separator);
+  EXPECT_EQ(empty.value().positionals_before_separator, 0u);
   EXPECT_TRUE(empty.value().positional.empty());
   std::string name = "application";
   const std::array<std::string_view, 7> args{"--config", "file.json", "--", name,
                                              "--config", "",          "--"};
   FailureOr<ParsedArguments> result = parse(command, args, diagnostic.emitter());
   ASSERT_TRUE(result.succeeded());
+  EXPECT_EQ(result.value().positionals_before_separator, 0u);
   name.assign("changed");
   EXPECT_EQ(result.value().positional,
             (std::vector<std::string>{"application", "--config", "", "--"}));
   EXPECT_EQ(config->value(), "file.json");
+  const std::array<std::string_view, 3> late_separator{"application", "--", "--flag"};
+  FailureOr<ParsedArguments> late = parse(command, late_separator, diagnostic.emitter());
+  ASSERT_TRUE(late.succeeded());
+  EXPECT_TRUE(late.value().saw_separator);
+  EXPECT_EQ(late.value().positionals_before_separator, 1u);
+  EXPECT_EQ(late.value().positional, (std::vector<std::string>{"application", "--flag"}));
 }
 
 TEST_F(CliTest, RegistrationSealsButValuesRemainWritable) {

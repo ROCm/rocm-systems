@@ -6,7 +6,9 @@
 #include "util/diagnostic.h"
 #include "util/result.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <span>
 #include <string>
@@ -15,6 +17,8 @@
 #include <vector>
 
 namespace rocjitsu::cli {
+
+inline constexpr std::string_view kDefaultValuePlaceholder = "VALUE";
 
 /// @brief Whether a flag consumes an argument or acts as a boolean switch.
 ///
@@ -33,7 +37,7 @@ struct FlagInfo {
   /// @brief Whether this flag consumes a value.
   ValueMode value_mode = ValueMode::Required;
   /// @brief Help placeholder for required values.
-  std::string value_placeholder = "VALUE";
+  std::string value_placeholder = std::string(kDefaultValuePlaceholder);
 };
 
 /// @brief Base class for one registered flag and its strongly typed value.
@@ -194,8 +198,8 @@ public:
   std::vector<std::shared_ptr<Flag>> flags() const;
   /// @brief Return registered help sections in registration order.
   ///
-  /// This borrowed view can be invalidated by subsequent registration.
-  std::span<const FlagGroup> groups() const { return groups_; }
+  /// This borrowed reference can be invalidated by subsequent registration.
+  const std::deque<FlagGroup> &groups() const { return groups_; }
   /// @brief Return borrowed child-command pointers in registration order.
   std::vector<const Command *> commands() const;
 
@@ -207,7 +211,7 @@ private:
   Command *parent_ = nullptr;
   bool sealed_ = false;
   std::string positional_usage_ = "[arguments...]";
-  std::vector<FlagGroup> groups_;
+  std::deque<FlagGroup> groups_;
   std::vector<std::unique_ptr<Command>> commands_;
 };
 
@@ -217,8 +221,12 @@ struct ParsedArguments {
   Command *command;
   /// @brief Owned positional arguments that remain valid independently.
   std::vector<std::string> positional;
-  /// @brief Whether parsing encountered -- before collecting positional arguments.
+  /// @brief Whether parsing encountered --.
   bool saw_separator = false;
+  /// @brief Number of positional arguments collected before --.
+  ///
+  /// Zero when no separator was seen.
+  size_t positionals_before_separator = 0;
 };
 
 /// @brief Parse arguments for a command tree.
