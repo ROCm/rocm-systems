@@ -9,6 +9,7 @@ target_sources(
             last_error.cpp
             gfx10_factory.cpp
             gfx115x_factory.cpp
+            gfx117x_factory.cpp
             gfx11_factory.cpp
             gfx1250_factory.cpp
             gfx12_factory.cpp

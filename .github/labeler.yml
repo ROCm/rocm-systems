@@ -12,7 +12,7 @@
 
 "project: cuid":
 - changed-files:
-  - any-glob-to-any-file: 'projects/cuid/**/*'
+  - any-glob-to-any-file: 'shared/cuid/**/*'
 
 "project: hip":
 - changed-files:

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/string_utility.hpp"
+
 #include <cctype>
 #include <string_view>
 
@@ -33,7 +35,6 @@ inline constexpr const char* PRINT_ENV          = "ROCPROFSYS_PRINT_ENV";
 // --- Tracing ---
 inline constexpr const char* TRACE         = "ROCPROFSYS_TRACE";
 inline constexpr const char* USE_TRACE     = "ROCPROFSYS_USE_TRACE";
-inline constexpr const char* TRACE_LEGACY  = "ROCPROFSYS_TRACE_LEGACY";
 inline constexpr const char* PERFETTO_FILE = "ROCPROFSYS_PERFETTO_FILE";
 inline constexpr const char* PERFETTO_BUFFER_SIZE_KB =
     "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB";
@@ -359,30 +360,16 @@ inline constexpr const char* USE_SHMEM =
 [[nodiscard]] inline int
 log_level_to_verbose(std::string_view level) noexcept
 {
-    auto const iequal = [](std::string_view lhs, std::string_view rhs) noexcept {
-        if(lhs.size() != rhs.size())
-        {
-            return false;
-        }
-        for(std::size_t idx = 0; idx < lhs.size(); ++idx)
-        {
-            if(std::tolower(static_cast<unsigned char>(lhs[idx])) !=
-               std::tolower(static_cast<unsigned char>(rhs[idx])))
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-    if(iequal(level, "trace"))
+    using utility::string::equals_ignore_case;
+    if(equals_ignore_case(level, "trace"))
     {
         return 2;
     }
-    if(iequal(level, "debug"))
+    if(equals_ignore_case(level, "debug"))
     {
         return 1;
     }
-    if(iequal(level, "info"))
+    if(equals_ignore_case(level, "info"))
     {
         return 0;
     }

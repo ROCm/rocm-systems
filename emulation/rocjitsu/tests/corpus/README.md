@@ -56,10 +56,75 @@ retains only its size and SHA-256. Its `finalize` command requires every pinned
 corpus input to have either a successful pair or a matching declared
 exclusion, which prevents partial runs from becoming a develop baseline.
 
-## Near-timeout reporting
+## HIP, race, and DBT corpus pin
+
+`ROCJITSU_DBT_CORPUS_REF` pins the HIP, race, and DBT suites together in
+`.github/workflows/rocjitsu-corpus-tests.yml`. Keep it equal to the `corpus_ref`
+manual-dispatch default. When advancing the pin, update both references to the
+selected merged revision and validate that pair in corpus CI before landing
+the systems pin update. Matching references also preserves canonical manual
+collection of the gfx1250 translation SHA baseline.
+
+## HIP file-limit matrix
+
+`run-file-limit-tests.sh` is the local entry point for the corpus's
+18 local/daemon file-limit cases. CI integration is deferred until the shared
+corpus pin advances to a revision containing this suite. The script builds the
+HIP client for `gfx950`, uses
+`tests/race-detector/race_test_config.json`, and runs CTest under `tini -s` so
+detached memory keepers are reaped. Install `tini` on `PATH`, CMake, Ninja, and a
+ROCm SDK, then build rocjitsu before invoking the script from its source root:
+
+```sh
+ROCM_PATH=/path/to/rocm-sdk \
+ROCJITSU_BUILD_DIR="$PWD/build" \
+ROCJITSU_CORPUS_DIR=/path/to/rocjitsu-test-corpus \
+  bash tests/corpus/run-file-limit-tests.sh
+```
+
+Use corpus revision `86181748e972cde89676634727f754fff58a3788` or a later
+revision containing `corpus/runtime/file-limits`; the current shared CI pin
+predates this suite. The script reads
+`RJ_ENABLE_ASAN` and `RJ_ENABLE_TSAN` from the rocjitsu build's `CMakeCache.txt`
+to select `address,undefined` or `thread` instrumentation for the HIP client's
+host code. For ASan/TSan, it also uses the cached `CMAKE_CXX_COMPILER` as the
+HIP compiler so the client's sanitizer runtime matches the launcher's preload.
+That compiler must be Clang with HIP/AMDGPU support for `gfx950` and the selected
+ROCm SDK. Use `RJ_SANITIZER_RUNTIME=AUTO` or `SHARED`; static sanitizer builds
+and non-Clang ASan/TSan compilers are rejected before configuring the client.
+The runner checks that the cached compiler accepts HIP for `gfx950` with the
+selected SDK before configuring the client. Both SDK `amdclang++` and compatible
+system Clang builds are supported. The
+client's build RPATH includes `$ROCM_PATH/lib` so system Clang can find HIP's
+shared libraries. Do not add a different compiler's sanitizer directory to
+`LD_LIBRARY_PATH` to work around a runtime mismatch.
+
+Default and UBSan-only builds use an uninstrumented SDK HIP client.
+Point `ROCJITSU_BUILD_DIR` at a separate matching rocjitsu build to run each
+sanitizer configuration. The suite build and CTest logs are retained under
+`$ROCJITSU_BUILD_DIR/file-limit-corpus`. Build parallelism uses Ninja's default;
+set `CMAKE_BUILD_PARALLEL_LEVEL` to limit it. CTest defaults to four concurrent
+tests to bound memory use. Extra arguments go to CTest, for example
+`-R local.early -V`.
+
+The script uses its own source tree by default; set `ROCJITSU_SOURCE_DIR` to
+override it. It does not check out or update the corpus revision and does not
+run the pytest corpus suites.
+
+## Per-test deadlines and near-timeout reporting
+
+`run-corpus-tests.sh` uses `--soft-timeout` for the first pass and
+`--hard-timeout` for failed-test retries (30 and 60 seconds by default).
+For race cases, it sets `ROCJITSU_RACE_CASE_TIMEOUT` to the same per-test
+deadline as the launch wrapper, overriding any inherited value on both
+passes. The Release workflow explicitly selects 360 seconds for the first
+pass and 600 seconds for retries. `--rerun-timeout` separately bounds each
+target's entire retry invocation; a successful retry retains the original CI
+failure.
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
-runtime approaches the pytest timeout.
+runtime approaches the first-pass per-test deadline. Reporting uses
+`--soft-timeout`, including for the race suite.
 
 ## gfx1201 simulator exclusions
 
@@ -161,3 +226,13 @@ target group mixes HIP-backed and pure simulator cases, while LeakSanitizer's
 stop-the-world scan stalls on HIP's multi-gigabyte mappings. The current corpus
 wrapper cannot vary that setting per individual case; ASan and UBSan remain
 enabled throughout.
+
+## Temporarily disabled gfx1250 integer and memory CTS tests
+
+`gfx1250_skip_tests.json` excludes all 22 integer CTS cases added by
+[rocjitsu-test-corpus#41](https://github.com/ROCm/rocjitsu-test-corpus/pull/41)
+and all 15 memory CTS cases added by
+[rocjitsu-test-corpus#42](https://github.com/ROCm/rocjitsu-test-corpus/pull/42),
+including their linked-image coverage checks.
+
+Reason: These tests are really slow and haven't been verified for their usefulness. Someone needs to investigate these before they are enabled

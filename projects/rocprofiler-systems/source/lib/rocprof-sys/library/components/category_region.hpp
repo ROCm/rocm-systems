@@ -3,24 +3,29 @@
 
 #pragma once
 
+#include "common/clocks.hpp"
 #include "common/defines.h"
+#include "common/static_object.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/causal/data.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/tracing/annotation.hpp"
 #include <cstdint>
 
+#include <algorithm>
 #include <charconv>
 #include <concepts>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <system_error>
 #include <thread>
@@ -30,6 +35,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 #include "logger/debug.hpp"
@@ -84,12 +90,9 @@ inline constexpr std::size_t delims_to_last_record = fields_per_record + 1;
 // Each renumbered idx field can grow by a few digits
 inline constexpr std::size_t renumber_growth_slack = 16;
 
-struct wall_clock_source
+struct timeline_clock_source
 {
-    timestamp_t now() const
-    {
-        return static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
-    }
+    [[nodiscard]] timestamp_t now() const { return clocks::timeline::now_ns(); }
 };
 
 struct trace_cache_region_sink
@@ -112,21 +115,30 @@ struct thread_metadata_source
     // Reads the current thread's system_value and registers its metadata
     std::uint64_t resolve_current_thread() const
     {
+        return resolve_thread(std::this_thread::get_id());
+    }
+
+    // Like resolve_current_thread(), but for a given thread id rather than the caller's.
+    // Lets the finalizing thread resolve the owner of orphaned regions it is draining
+    std::uint64_t resolve_thread(std::thread::id tid) const
+    {
         std::uint64_t thread_id = 0;
 
-        const auto& extended_info =
-            rocprofsys::thread_info::get(std::this_thread::get_id());
+        const auto& extended_info = rocprofsys::thread_info::get(tid);
         if(extended_info.has_value() && extended_info->index_data.has_value())
         {
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { .parent_process_id = getppid(),
-                  .process_id        = getpid(),
-                  .thread_id         = thread_id,
-                  .start             = UNKNOWN_TIME,
-                  .end               = UNKNOWN_TIME,
-                  .extdata           = "{}" });
+            rocprofsys::trace_cache::get_metadata_registry().ensure_thread(
+                thread_id, [thread_id] {
+                    return rocprofsys::trace_cache::info::thread{ .parent_process_id =
+                                                                      getppid(),
+                                                                  .process_id = getpid(),
+                                                                  .thread_id  = thread_id,
+                                                                  .start   = UNKNOWN_TIME,
+                                                                  .end     = UNKNOWN_TIME,
+                                                                  .extdata = "{}" };
+                });
         }
         return thread_id;
     }
@@ -134,7 +146,7 @@ struct thread_metadata_source
 
 struct real_region_policy
 {
-    using clock_type           = wall_clock_source;
+    using clock_type           = timeline_clock_source;
     using region_sink_type     = trace_cache_region_sink;
     using thread_metadata_type = thread_metadata_source;
 };
@@ -143,9 +155,55 @@ struct real_region_policy
 template <typename Policy = real_region_policy>
 struct category_region
 {
+    // Global directory of every thread's category_region instance, so finalization can
+    // drain threads other than the caller. Never destroyed so the thread-local handles
+    // that deregister at process exit can never touch a freed registry
+    struct registry_t
+    {
+        std::vector<category_region*> instances = {};
+        std::mutex                    mutex;
+
+        static registry_t& instance()
+        {
+            // registry_t is used as the context type so that every translation unit
+            // including this header shares a single registry
+            static auto*& registry =
+                common::static_object<registry_t, registry_t>::construct(
+                    common::do_not_destroy{});
+            return *registry;
+        }
+    };
+
+    // Registers the owning thread's instance on first use and removes it on thread exit
+    struct registry_handle_t
+    {
+        explicit registry_handle_t(category_region* owner)
+        : self{ owner }
+        {
+            auto&                       registry = registry_t::instance();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            registry.instances.push_back(self);
+        }
+
+        ~registry_handle_t()
+        {
+            auto&                       registry = registry_t::instance();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            std::erase(registry.instances, self);
+        }
+
+        registry_handle_t(const registry_handle_t&)            = delete;
+        registry_handle_t& operator=(const registry_handle_t&) = delete;
+
+        category_region* self = nullptr;
+    };
+
     static category_region& instance()
     {
         thread_local category_region inst;
+        // Registers this thread's instance so a cross-thread finalization flush can reach
+        // it, and removes it again when the thread exits
+        thread_local registry_handle_t handle{ &inst };
         return inst;
     }
 
@@ -365,7 +423,11 @@ struct category_region
     void cache_start(const char* name, std::string_view category,
                      std::string args_str = {})
     {
-        const auto start_ts = clock_.now();
+        const auto                  start_ts = clock_.now();
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        // Record the owning thread's std::thread::id at push time in case no end is
+        // received
+        owner_tid_ = std::this_thread::get_id();
         map_name_to_args[entry_key{ .name = name, .category = std::string{ category } }]
             .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
     }
@@ -378,6 +440,7 @@ struct category_region
             return;
         }
 
+        std::lock_guard<std::mutex> lock{ mutex_ };
         auto const key = entry_key{ .name = name, .category = std::string{ category } };
         auto const itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
@@ -404,6 +467,7 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
+        std::lock_guard<std::mutex> lock{ mutex_ };
         const entry_key key{ .name = name, .category = std::string{ category } };
         auto const      x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
@@ -430,8 +494,9 @@ struct category_region
     /// never popped still produce one region per outstanding push.
     void flush_pending_cached_entries()
     {
-        const auto          end_ts    = clock_.now();
-        const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        const auto                  end_ts    = clock_.now();
+        const std::uint64_t         thread_id = thread_meta_.resolve_current_thread();
 
         for(const auto& [key, entry_stack] : map_name_to_args)
         {
@@ -444,6 +509,24 @@ struct category_region
         map_name_to_args.clear();
     }
 
+    /// Drains every registered thread's outstanding frames during finalization. Each
+    /// orphaned push is emitted with a synthetic end timestamp and tagged "[incomplete]"
+    /// (excluding the main thread's program-entry frame, which is open by design).
+    static void flush_all_pending_cached_entries()
+    {
+        const auto end_ts = typename Policy::clock_type{}.now();
+
+        auto&                       registry = registry_t::instance();
+        std::lock_guard<std::mutex> lock{ registry.mutex };
+        for(auto* instance : registry.instances)
+        {
+            if(instance != nullptr)
+            {
+                instance->flush_pending_incomplete(end_ts);
+            }
+        }
+    }
+
 private:
     void cache_region(std::uint64_t thread_id, const std::string& name,
                       std::uint64_t start_ts, std::uint64_t end_ts,
@@ -453,10 +536,37 @@ private:
                            args_str.c_str());
     }
 
+    // Emits this thread's outstanding frames with the "[incomplete]" suffix. May run from
+    // a different (finalizing) thread, so it resolves the owner from the std::thread::id
+    // captured in cache_start() (not the current thread) and guards the map with mutex_
+    void flush_pending_incomplete(timestamp_t end_ts)
+    {
+        static constexpr std::string_view incomplete_suffix{ "incomplete" };
+        const auto&                       exe_name = rocprofsys::config::get_exe_name();
+
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        const std::uint64_t         thread_id = thread_meta_.resolve_thread(owner_tid_);
+
+        for(const auto& [key, entry_stack] : map_name_to_args)
+        {
+            const auto name = (key.name == exe_name)
+                                  ? key.name
+                                  : fmt::format("{} [{}]", key.name, incomplete_suffix);
+            for(const auto& entry : entry_stack)
+            {
+                cache_region(thread_id, name, entry.start_ts, end_ts, key.category,
+                             entry.args);
+            }
+        }
+        map_name_to_args.clear();
+    }
+
     Policy::clock_type                                    clock_{};
     Policy::region_sink_type                              sink_{};
     Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args;
+    std::mutex                                            mutex_;
+    std::thread::id                                       owner_tid_{};
 };
 
 }  // namespace rocprofsys::utility
@@ -466,7 +576,7 @@ namespace tim::quirk
 struct causal : concepts::quirk_type
 {};
 
-struct perfetto : concepts::quirk_type
+struct cache_only : concepts::quirk_type
 {};
 
 struct timemory : concepts::quirk_type
@@ -618,9 +728,6 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
@@ -655,14 +762,6 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         if(get_use_timemory())
         {
             tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-        }
-    }
-
-    if constexpr(_ct_use_perfetto)
-    {
-        if(get_use_perfetto())
-        {
-            tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
         }
     }
 
@@ -722,9 +821,6 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
-    constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
-
     constexpr bool _ct_use_causal =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
@@ -741,15 +837,6 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
         {
             ++tracing::pop_count();
-        }
-
-        if constexpr(_ct_use_perfetto)
-        {
-            if(get_use_perfetto())
-            {
-                tracing::pop_perfetto(CategoryT{}, name.data(),
-                                      std::forward<Args>(args)...);
-            }
         }
 
         if constexpr(_ct_use_timemory)
@@ -842,16 +929,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            std::int64_t _n = 0;
-            (tracing::add_perfetto_annotation(
-                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                 _args, _n++),
-             ...);
-        }
-    });
+    start<OptsT...>(_data.tool_id);
 
     if constexpr(sizeof...(Args) > 0)
     {
@@ -871,14 +949,7 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
         append_cache_args(_data.tool_id, region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_data.tool_id, [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            tracing::add_perfetto_annotation(
-                ctx, "return",
-                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
-        }
-    });
+    stop<OptsT...>(_data.tool_id);
 }
 
 template <typename CategoryT>
@@ -887,16 +958,7 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            std::int64_t _n = 0;
-            (tracing::add_perfetto_annotation(
-                 ctx, rocprofsys::utility::demangle<std::remove_reference_t<Args>>(),
-                 _args, _n++),
-             ...);
-        }
-    });
+    start<OptsT...>(_name.data());
 
     if constexpr(sizeof...(Args) > 0)
     {
@@ -916,14 +978,7 @@ category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
         append_cache_args(_name.data(), region_cache::serialize_return_arg(_args...));
     }
 
-    stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
-        if(config::get_perfetto_annotations())
-        {
-            tracing::add_perfetto_annotation(
-                ctx, "return",
-                fmt::format("{}", fmt::join(std::forward_as_tuple(_args...), ", ")));
-        }
-    });
+    stop<OptsT...>(_name.data());
 }
 
 template <typename CategoryT>

@@ -1,5 +1,16 @@
 # Changelog for rocSHMEM
-## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
+## Unreleased - rocSHMEM 3.9.0 for ROCm 10.3
+
+## rocSHMEM 3.8.0 for ROCm 10.2
+
+### Fixed
+* Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
+  Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
+* Fixed `rocshmem_tile_broadcast` (and `_wave`, `_wg` variants) on the IPC and GDA backends: the root PE's destination buffer was not written when `dst != src`, leaving it uninitialised while non-root PEs received the correct data via `tile_get`. The root PE now performs a local tile copy at the appropriate scope when `dst_data != src_data`, matching the nvshmem reference behaviour.
+* Fixed `rocshmem_ctx_tile_*` collective operations (allgather, broadcast, sum/max/min reduce, collective_wait) silently discarding the caller-supplied `rocshmem_ctx_t` context. The context was accepted but not forwarded to the internal bitcode layer, which always used `ROCSHMEM_CTX_DEFAULT` instead. The context is now threaded through correctly.
+
+### Added
+* Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
 
 ### Added
 * GDA device code refactor (#7217)
@@ -23,10 +34,25 @@
   A fence now skips the proxy when every non-blocking network operation queued on its context is already covered
   by a completed fence or quiet, and otherwise sends one proxy fence per wavefront.
   The `fence_*` functional tests now run on RO.
+* Fixed lost updates and hangs on the RO backend when more blocking operations
+  are in flight on one context than its proxy queue holds. A blocking call now
+  waits on its own status flag instead of re-reading it from the queue slot,
+  which the host may already have handed to another thread.
+  The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
+  `putmem_signal_on_stream` functional tests now run on RO.
 
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
+
+### Changed
+* SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`
+  when `USE_IPC=ON`). SDMA is disabled at runtime by default; set
+  `ROCSHMEM_SDMA_ENABLED=1` to activate it. This allows SDMA to be used without
+  rebuilding the library.
+* `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
+  Wave and workgroup operations automatically scale the threshold by the wavefront size,
+  avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
 
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
