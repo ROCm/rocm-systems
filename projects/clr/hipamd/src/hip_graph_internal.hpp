@@ -1165,7 +1165,18 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
 
   std::vector<Node>& GetNodes() { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
-  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool TopologicalOrder() {
+    if (!Graph::TopologicalOrder(topoOrder_)) {
+      return false;
+    }
+    memAllocNodes_.clear();
+    for (auto* node : topoOrder_) {
+      if (node->GetType() == hipGraphNodeTypeMemAlloc) {
+        memAllocNodes_.push_back(node);
+      }
+    }
+    return true;
+  }
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
@@ -1182,6 +1193,9 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
  protected:
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! MemAlloc nodes of topoOrder_, in order. Filled with topoOrder_, which a top-level exec
+  //! never changes after Init.
+  std::vector<Node> memAllocNodes_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   //! Extra capture-device stream created on first cross-device launch, covering

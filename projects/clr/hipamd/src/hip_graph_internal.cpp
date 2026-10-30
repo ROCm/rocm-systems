@@ -1762,10 +1762,8 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
     if (firstNode != nullptr) {
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
-      for (auto* node : topoOrder_) {
-        if (node->GetType() == hipGraphNodeTypeMemAlloc) {
-          static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool, launch_stream);
-        }
+      for (auto* node : memAllocNodes_) {
+        static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool, launch_stream);
       }
       parentGraph->FreeAllMemory(launch_stream);
       parentGraph->memalloc_nodes_ = 0;
@@ -3314,10 +3312,8 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
     if (firstNode != nullptr) {
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
-      for (auto* node : topoOrder_) {
-        if (node->GetType() == hipGraphNodeTypeMemAlloc) {
-          static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool, launch_stream);
-        }
+      for (auto* node : memAllocNodes_) {
+        static_cast<GraphMemAllocNode*>(node)->ReleaseCachedMapping(pool, launch_stream);
       }
       parentGraph->FreeAllMemory(launch_stream);
       parentGraph->memalloc_nodes_ = 0;
