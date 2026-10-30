@@ -274,8 +274,8 @@ void CheckConcurrentAllocationsStayWithinTotal(AllocKind kind) {
  * - The device memory of an APU must not exceed the share of all DRAM the OS lets a GPU use:
  *   the carve-out (dedicated), plus the part of the OS share (shared / host RAM) of all DRAM the
  *   carve-out doesn't cover.
- * - Regression test: the runtime reported the carve-out plus 75% of the aperture as device memory,
- *   though both are host DRAM. Applications filled it, the OS ran out of RAM and hung.
+ * - Regression test: the runtime reported the carve-out plus 75% of the aperture as device memory.
+ *   Applications filled it, the OS ran out of RAM and hung.
  * Test source
  * ------------------------
  * - unit/memory/hipMallocApu_test.cc

@@ -361,9 +361,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   const uint64_t gartCredit = gartSize - std::min<uint64_t>(gartSize / 4, 4 * Gi);
 
   if (settings().apuSystem_) {
-    // The carve-out is host DRAM too, so don't add the aperture on top of it. The OS lets a GPU
-    // share the part of host RAM the aperture is; that share of all DRAM, carve-out included, is
-    // what the GPU may hold, so borrow only what the carve-out doesn't cover.
+    // The OS lets a GPU share part of its RAM (the aperture) and counts GPU memory that firmware
+    // reserves from system RAM against that share. An APU's carve-out is such memory, but is
+    // reported as video memory, so the OS grants the share on top of it. Apply the share to all
+    // DRAM, carve-out included, and borrow only what the carve-out doesn't cover.
     const uint64_t hostRam = amd::Os::hostTotalPhysicalMemory();
     apuBorrowLimit_ = gartCredit;
     if (!PAL_APU_STACK_APERTURE && (hostRam > gartSize)) {
