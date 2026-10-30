@@ -197,9 +197,9 @@ Further resources
 
 For deeper analysis beyond the guided output:
 
-* **Block 30 raw metrics**: run ``-b 30`` to see the full set of
-  Memory Bandwidth Analysis metric tables (L1 cache, L2 bottleneck
-  indicators, EA indicators).
+* **Block 30 raw metrics**: run ``-b 30`` to see the metrics the guided
+  analysis evaluates (L1 cache stalls, L2 bottleneck indicators, EA
+  bottleneck indicators).
 * **Memory chart**: the :doc:`CLI analysis documentation </how-to/analyze/cli>`
   covers the memory chart layout in detail.
 * **CDNA performance model**: the :doc:`L2 cache
