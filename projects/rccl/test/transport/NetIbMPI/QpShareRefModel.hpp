@@ -73,18 +73,25 @@ public:
     explicit QpShareRefModel(int ngroups)
         : ngroups_(ngroups > 0 ? ngroups : 1), loads_(ngroups_, 0) {}
 
-    // Model the next successful connect(). Call this immediately before the
-    // real connection is established, in the same order the test issues them.
-    Placement AssignOnCreate() {
+    // Where the next connect() will land. Does not change the model, so a
+    // connect that fails leaves no trace in it -- in particular not in
+    // PeakLoad().
+    Placement Next() const {
         Placement p;
         p.group   = TotalRefs() % ngroups_;
         p.primary = (loads_[p.group] == 0);
-        loads_[p.group]++;
-        peakLoad_ = std::max(peakLoad_, loads_[p.group]);
         return p;
     }
 
-    // Model a comm teardown. Pass the Placement returned by AssignOnCreate().
+    // Record a connect() that succeeded, with the Placement Next() returned
+    // for it. Call before the next Next(), in the order the test connects.
+    void Commit(const Placement& p) {
+        if (p.group < 0 || p.group >= ngroups_) return;
+        loads_[p.group]++;
+        peakLoad_ = std::max(peakLoad_, loads_[p.group]);
+    }
+
+    // Model a comm teardown. Pass the Placement it was committed with.
     void Release(const Placement& p) {
         if (p.group < 0 || p.group >= ngroups_) return;
         if (loads_[p.group] > 0) loads_[p.group]--;

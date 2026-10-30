@@ -1115,9 +1115,8 @@ protected:
         int opened = 0;
         for (int c = 0; c < n; c++) {
             QpShareConn conn;
-            conn.place = model.AssignOnCreate();
+            conn.place = model.Next();
             if (!TryCastConnection(/*dev=*/0, &conn.listen, &conn.send, &conn.recv)) {
-                model.Release(conn.place);
                 ADD_FAILURE()
                     << what << ": connection " << c << " of " << n << " failed to establish"
                     << " (RCCL_IB_COMM_NGROUPS=" << QpShareNGroups()
@@ -1126,6 +1125,7 @@ protected:
                     << " in group " << conn.place.group;
                 break;
             }
+            model.Commit(conn.place);
             cs.push_back(conn);
             opened++;
         }
@@ -1167,6 +1167,62 @@ protected:
         return allOk != 0;
     }
 
+    // Register bufs[c] on comms[c] for every connection, stopping at the first
+    // failure. Returns the cross-rank agreed result, so callers can
+    // ASSERT_TRUE on it and both ranks take the same branch. Declare a
+    // SCOPE_EXIT(DeregisterAll(...)) after the buffers and before this call,
+    // so an early return cannot leave live MRs over freed memory.
+    bool RegisterAll(const std::vector<void*>& comms, std::vector<std::vector<char>>& bufs,
+                     std::vector<void*>& mhandles) {
+        bool ok = true;
+        for (size_t c = 0; c < comms.size() && ok; c++) {
+            if (RegisterMemory(comms[c], bufs[c].data(), bufs[c].size(), NCCL_PTR_HOST,
+                               &mhandles[c]) != ncclSuccess) {
+                ADD_FAILURE() << "RegisterMemory failed for conn " << c;
+                ok = false;
+            }
+        }
+        return RankAgree(ok);
+    }
+
+    // Deregister every handle that is set, and clear it, so a second call is a
+    // no-op.
+    void DeregisterAll(const std::vector<void*>& comms, std::vector<void*>& mhandles) {
+        for (size_t c = 0; c < comms.size(); c++) {
+            if (mhandles[c]) {
+                EXPECT_EQ(DeregisterMemory(comms[c], mhandles[c]), ncclSuccess);
+                mhandles[c] = nullptr;
+            }
+        }
+    }
+
+    // One connect -> transfer -> close cycle, so driver-internal CQs settle
+    // before a test baselines RDMA object counts. Returns false, with the
+    // failure recorded and the connection closed, if the cycle could not run;
+    // the caller should return.
+    bool WarmupCycle(std::vector<char>& buf, int tag) {
+        const int rank = MPIEnvironment::world_rank;
+        void* l = nullptr; void* s = nullptr; void* r = nullptr;
+        if (!TryCastConnection(/*dev=*/0, &l, &s, &r)) {
+            ADD_FAILURE() << "warmup connection failed";
+            return false;
+        }
+        void* comm = (rank == 0) ? r : s;
+        void* mh   = nullptr;
+        const bool regOk = (RegisterMemory(comm, buf.data(), buf.size(), NCCL_PTR_HOST, &mh) == ncclSuccess);
+        if (!regOk) ADD_FAILURE() << "RegisterMemory failed during warmup";
+        if (!RankAgree(regOk)) {
+            if (regOk) ADD_FAILURE() << "RegisterMemory failed on the peer during warmup";
+            if (mh) DeregisterMemory(comm, mh);
+            CloseCastConnection(l, s, r);
+            return false;
+        }
+        DoSendRecv(s, r, buf.data(), buf.data(), buf.size(), tag, mh, mh, /*seed=*/0);
+        MPI_Barrier(MPI_COMM_WORLD);
+        TeardownConnection(r, l, s, mh);
+        return true;
+    }
+
     // Highest refcount across the given comms: the sharing depth this run
     // actually achieved. 1 means no QP ended up shared.
     int MaxObservedSharingDepth(const std::vector<void*>& comms) {
@@ -1177,6 +1233,19 @@ protected:
             m = std::max(m, st.refcount);
         }
         return m;
+    }
+
+    // MaxObservedSharingDepth, plus the one thing about it that is
+    // policy-independent: with more comms than groups, some group must hold
+    // two. Without this, a regression that leaves every comm alone in its own
+    // group turns every data and stress test into a pass on the unshared path.
+    int ExpectSharingDepth(const std::vector<void*>& comms, int ngroups, const char* what) {
+        const int depth = MaxObservedSharingDepth(comms);
+        if (static_cast<int>(comms.size()) > ngroups) {
+            EXPECT_GT(depth, 1) << what << ": " << comms.size() << " comms over " << ngroups
+                                << " groups, yet no QP is shared";
+        }
+        return depth;
     }
 
     // Report what a QP-sharing run actually exercised.
@@ -1208,6 +1277,10 @@ protected:
     // holding after that policy changes. What it pins down is the bookkeeping:
     //
     //   * every comm is on the sharing path (commId set, group assigned);
+    //   * no two live comms hold the same commId. Completions are routed by
+    //     commId through g_IbCastCommTable, and IbCastFreeCommIdLocked does not
+    //     guard against a double free, so one that slipped through would hand
+    //     a single id to two comms that then take each other's completions;
     //   * a group's refcount equals the number of live comms reporting it, so a
     //     slot freed on close but still counted, or counted but not freed,
     //     shows up here;
@@ -1235,6 +1308,7 @@ protected:
             uint32_t qpn[NCCL_IB_MAX_QPS] = {};
         };
         std::map<int, GroupTally> groups;
+        std::map<uint16_t, size_t> commIdOwner;
         std::vector<struct ncclIbQpSharingState> states(comms.size());
         std::vector<bool> live(comms.size(), false);
         bool ok = true;
@@ -1247,6 +1321,11 @@ protected:
             if (states[i].commId == 0) {
                 ADD_FAILURE() << stage << ": conn " << i << " has no commId -- it"
                               << " silently fell back off the sharing path";
+                ok = false;
+            } else if (!commIdOwner.emplace(states[i].commId, i).second) {
+                ADD_FAILURE() << stage << ": conns " << commIdOwner[states[i].commId]
+                              << " and " << i << " both hold commId " << states[i].commId
+                              << ", so completions routed by commId reach only one of them";
                 ok = false;
             }
             if (states[i].sharedGroupIdx < 0) {
