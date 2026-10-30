@@ -733,6 +733,37 @@ differ at replay so the kernel computes an out-of-bounds index), not an argument
 capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` (Debug runtime) that the nulls
 are genuine before suspecting the `<<<>>>` / kernarg capture path.
 
+### Arguments are checked against the kernel's signature
+
+The archive is input, and a launch record does not have to agree with the code
+object it names. HIP walks the loaded kernel's full signature and copies
+`size` bytes out of `kernelParams[i]` for every parameter, except that it reads 8
+bytes for a pointer parameter whatever size the code object declares. A record with
+fewer arguments than the kernel declares, or an argument narrower than its
+parameter, is an over-read of replay's own argument vectors. Extra arguments and
+wider ones are never read. The 8-byte pointer read is why every decoded argument
+carries 8 zeroed bytes past its recorded size, and why the Sp3 kernarg buffer is
+allocated 8 bytes longer than the size passed as `HIP_LAUNCH_PARAM_BUFFER_SIZE`
+(CLR checks `offset + size` against that size only); the signature check still
+compares recorded sizes. After resolving the kernel, replay reads its signature with
+`hipKernelGetParamInfo` and refuses the launch (`hipErrorInvalidValue`, one
+`[HRR] ... seq=<n> ... launch refused` line naming the mismatch) unless the decoded
+record has at least as many arguments and each is at least as wide as its
+parameter. A payload that ends before its declared arguments decodes fewer of them: an
+argument the payload cuts short is dropped whole, never stored narrower, so
+truncation is refused only when it leaves fewer arguments than the kernel
+declares. The read ends on a call one index past
+the last parameter, which answers `hipErrorInvalidValue`; replay clears it so it
+does not stay as HIP's last error. The graph kernel-node paths apply the same check: an add skips the node and
+marks its graph incomplete; a set-params call (graph or exec) returns
+`hipErrorInvalidValue`, like a refused launch, because the node would otherwise
+keep its old arguments. The exception is a record whose own recorded result is
+`hipErrorInvalidValue` (capture records a set-params call even when HIP refused
+it): that failure is reproduced faithfully and the call returns `hipSuccess`. A `--replace-kernel` code object is checked against the
+recorded arguments the same way, so a replacement may not declare more parameters,
+or wider ones, than the record carries. The runtime exposes each parameter's size and offset but
+not its type, so the type is not compared.
+
 ## Fat Binary Registration
 
 `__hipRegisterFatBinary` fires at C++ static-init time before shims are installed.
@@ -1581,6 +1612,7 @@ The event wire format (finding H5):
 - `events.bin` marks such an archive with `HRR_FILE_FLAG_PACKED_HOST_RECTS` in `hrr_file_header.reserved`, and the layout came with the v7 bump, since a v6 reader ignores the flag. Replay then gives the host side of each pitched copy the dense layout of its blob (pitch equal to width, no offsets) and keeps the device side as recorded, so the copy moves the same bytes. A D2H check re-runs the copy into a scratch buffer of the blob's size and compares the two. Neither side of replay grows with the host pitch.
 - An archive without the flag lays a pitched host blob out from the base pointer with the recorded pitch and offsets, or holds the flat `width*height*depth` bytes (3D and driver D2H, `hipMemcpy3D` H2D). Replay keeps the recorded layout for it and compares only the copied rows. It skips a copy whose blob does not span the recorded rect, such as the flat blob of a rect that is not dense from the base, rather than read past the blob or issue it from the capture-time host address. A recorded rect whose footprint overflows `size_t` is skipped too. An archive whose every D2H check is skipped fails the replay rather than passing as one with no validation blobs.
 - The H2D source of the four `hipMemcpy3D` spellings is recorded only for a copy the runtime accepted.
+- Replay translates the `srcArray` and `dstArray` of the four `hipMemcpy3D` spellings through the array map before calling HIP, because CLR dereferences them. A handle replay never created (any array API other than `hipArrayCreate` / `hipArray3DCreate`) refuses the copy with `hipErrorInvalidValue`, naming the end and the recorded address; the recorded value never reaches the runtime. `hipMemcpy3DBatchAsync` refuses the same way, and also an array operand with a null handle or an operand type that is neither pointer nor array. The `hipDrvGraph*MemcpyNode*` copies translate an unknown array to null, which CLR refuses with `hipErrorInvalidValue`. A `hipMemcpy3D` whose kind is `hipMemcpyHostToDevice` with an array destination, or `hipMemcpyDeviceToHost` with an array source, is not replayed: its extent is in array elements, but the host rect and blob are sized in bytes, so issuing it would read or write past them. Replay notes it as unreplayable and returns `hipErrorNotSupported` (a D2H check on it counts as failed), so the replay ends instead of passing. The kind decides: a `hipMemcpyDefault` copy between `hipHostMalloc` memory and an array is still issued, as a device-to-device copy.
 - `hipMemset3D` / `hipMemset3DAsync` drop the destination pitched pointer/extent at
   capture (`pitchedDevPtr = 0`) and no-op at replay, so 3D-memset-initialized regions
   are invisible to replay.

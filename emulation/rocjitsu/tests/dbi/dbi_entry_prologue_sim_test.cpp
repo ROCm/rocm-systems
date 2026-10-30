@@ -5,8 +5,8 @@
 /// @brief Simulator end-to-end for the DBI kernel-entry prologue on CDNA3
 /// (gfx942), CDNA4 (gfx950), and RDNA4 (gfx1200).
 ///
-/// The RDNA4 code object is patched as Wave32, but DbiSim dispatches Wave64
-/// regardless (see dbi_sim.h). The prologue is pure scalar, so nothing here
+/// The RDNA4 code object is patched as Wave32, but this suite dispatches Wave64
+/// (see dbi_sim.h). The prologue is pure scalar, so nothing here
 /// depends on the executing wave size; the lanes read back are lanes 0-31.
 ///
 /// The static tests (tests/patch/instrumentor_test.cpp,

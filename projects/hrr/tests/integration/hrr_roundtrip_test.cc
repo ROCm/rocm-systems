@@ -317,6 +317,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
   CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
 }
 
+static void hrr_require_recorded_apis(const fs::path& cap_path,
+                                      const std::vector<hrr_api_id_t>& apis);
+
 /**
  * Test Description
  * ----------------
@@ -368,6 +371,15 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     INFO("Event count: " << arc.events.size());
     REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
   }
+
+  // The workload's array copies (block 19) need image support, which gfx950
+  // (MI350X) reports as absent. Where it has them, a capture without the copies
+  // would replay perfectly well, so ask for them.
+  int images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
+  if (images)
+    hrr_require_recorded_apis(cap.path, {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
+                                         HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC});
 
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (d2[i] == 94)

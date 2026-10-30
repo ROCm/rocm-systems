@@ -14,6 +14,8 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/coll_net.cc
+      - "CollNet*"
       # transport/p2p.cc
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"
@@ -73,6 +75,19 @@ test_categories:
       - "NetTelemetrySamplerMicrotest.*"
       - "NetTelemetryJsonMicrotest.*"
       - "NetTelemetryFlushMicrotest.*"
+      # transport/net_socket.cc, transport/net_socket/common.cc
+      - "NetSocketDevicesMicrotest.*"
+      - "NetSocketInitMicrotest.*"
+      - "NetSocketThreadsMicrotest.*"
+      - "NetSocketListenMicrotest.*"
+      - "NetSocketConnectMicrotest.*"
+      - "NetSocketAcceptMicrotest.*"
+      - "NetSocketRequestMicrotest.*"
+      - "NetSocketTransferMicrotest.*"
+      - "NetSocketTaskMicrotest.*"
+      - "NetSocketHelperThreadMicrotest.*"
+      - "NetSocketMultiSocketMicrotest.*"
+      - "NetSocketCloseMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"

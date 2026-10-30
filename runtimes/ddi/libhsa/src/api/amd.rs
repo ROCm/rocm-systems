@@ -5,6 +5,8 @@
 
 use std::ffi::c_void;
 
+use rocddi::device::gpu::profiling::SpmDestinationReport;
+
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::runtime::{InFlightToken, boundary, initialized_mut, lock, map_error};
@@ -357,29 +359,37 @@ pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
             Err(_) => return INVALID_ARGUMENT,
         };
         // SAFETY: The caller supplied readable/writable scalar storage.
-        let mut timeout_value = unsafe { timeout.read() };
-        let mut copied_value = 0;
-        let mut loss_value = false;
-        let result = device.gpu().and_then(|gpu| {
-            // SAFETY: The HSA C caller owns destination storage and must keep
-            // both old and new buffers writable while KFD may retain them.
-            // The raw core API exposes this retained-write obligation.
-            unsafe {
-                gpu.spm_set_destination(
-                    size,
-                    &mut timeout_value,
-                    &mut copied_value,
-                    (!destination.is_null()).then_some(destination as usize),
-                    &mut loss_value,
-                )
+        let timeout_value = unsafe { timeout.read() };
+        let (report, result) = match device.gpu() {
+            Err(error) => (
+                SpmDestinationReport {
+                    timeout: timeout_value,
+                    ..Default::default()
+                },
+                Err(error),
+            ),
+            Ok(gpu) => {
+                // SAFETY: The HSA C caller owns destination storage and must
+                // keep both old and new buffers writable while KFD may retain
+                // them. The raw core API exposes this retained-write duty.
+                match unsafe {
+                    gpu.spm_set_destination(
+                        size,
+                        timeout_value,
+                        (!destination.is_null()).then_some(destination as usize),
+                    )
+                } {
+                    Ok(report) => (report, Ok(())),
+                    Err(failure) => (failure.report, Err(failure.error)),
+                }
             }
-        });
+        };
         // KFD returns these fields together with the ioctl result, including
         // partial progress when the native call fails.
         unsafe {
-            timeout.write(timeout_value);
-            bytes_copied.write(copied_value);
-            data_loss.write(loss_value);
+            timeout.write(report.timeout);
+            bytes_copied.write(report.bytes_copied);
+            data_loss.write(report.data_loss);
         }
         result.map_or_else(map_error, |()| SUCCESS)
     })
