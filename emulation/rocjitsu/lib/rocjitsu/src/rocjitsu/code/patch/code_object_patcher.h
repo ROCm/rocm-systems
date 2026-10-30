@@ -143,9 +143,10 @@ public:
   /// tables that the text offset map can update safely.
   [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
-  /// @brief Raw .text offsets referenced by symbol-less ET_DYN RELATIVE64 addends.
-  /// @details Uses the shared relocation-place allocation policy. Unlike function-entry
-  /// discovery, retains interior and unaligned destinations for byte-edit preflight.
+  /// @brief Raw .text offsets referenced by symbol-less RELATIVE64 addends.
+  /// @details Collects references across ELF types when the shared relocation-place policy
+  /// classifies their storage as allocated. Unlike function-entry discovery, retains interior
+  /// and unaligned destinations for byte-edit preflight.
   /// This query does not replace the existing malformed/unsupported relocation checks.
   [[nodiscard]] std::vector<uint64_t> relative_text_addend_offsets() const;
 

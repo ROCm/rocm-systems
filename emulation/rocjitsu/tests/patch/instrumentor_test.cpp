@@ -894,11 +894,20 @@ TEST(InstrumentorPatch, PreservesAdditionalExecutableSectionAndDescriptorMapping
   constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
   std::vector<uint8_t> image = make_amdgpu_kernel_elf({build_s_nop(0, arch), build_s_endpgm(arch)},
                                                       0, 3, EF_AMDGPU_MACH_AMDGCN_GFX950);
+  const AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  const std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  const std::vector<Elf64_Shdr>::const_iterator data =
+      std::ranges::find_if(sections, [](const Elf64_Shdr &candidate) {
+        return candidate.sh_type == SHT_PROGBITS && (candidate.sh_flags & SHF_ALLOC) != 0 &&
+               (candidate.sh_flags & SHF_EXECINSTR) == 0;
+      });
+  ASSERT_NE(data, sections.end());
+  const size_t data_index = static_cast<size_t>(data - sections.begin());
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
-  Elf64_Shdr rodata = {};
-  const size_t section_header = header.e_shoff + 2 * sizeof(Elf64_Shdr);
-  std::memcpy(&rodata, image.data() + section_header, sizeof(rodata));
+  Elf64_Shdr rodata = *data;
+  const size_t section_header = header.e_shoff + data_index * header.e_shentsize;
   rodata.sh_flags |= SHF_EXECINSTR;
   std::memcpy(image.data() + section_header, &rodata, sizeof(rodata));
   const AmdGpuCodeObject source(image.data(), image.size());
@@ -912,7 +921,9 @@ TEST(InstrumentorPatch, PreservesAdditionalExecutableSectionAndDescriptorMapping
   ASSERT_TRUE(candidate.is_valid());
   ASSERT_EQ(candidate.allocated_executable_sections().size(), 2u);
   const CodeObjectPatcher patched(candidate);
-  const Elf64_Shdr after = patched.section_headers()[2];
+  const std::vector<Elf64_Shdr> after_sections = patched.section_headers();
+  ASSERT_LT(data_index, after_sections.size());
+  const Elf64_Shdr &after = after_sections[data_index];
   EXPECT_EQ(after.sh_flags, rodata.sh_flags);
   EXPECT_EQ(after.sh_size, rodata.sh_size);
   auto expected = std::vector<uint8_t>(image.begin() + rodata.sh_offset,

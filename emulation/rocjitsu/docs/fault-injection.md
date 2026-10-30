@@ -130,8 +130,21 @@ ordinal. See the [RDNA4 ISA, section 5.6 and Table 24](https://docs.amd.com/api/
 and [CDNA5 ISA, section 5.6 and Table 21](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf).
 CDNA5 ID -3 is admitted as a static cluster barrier, but its operations are
 inert for nonclustered dispatches and single-workgroup clusters.
-Selecting it records that dispatch assumption in `DropBarrierResult`; offline
-qualification does not establish that the dispatch activates cluster semantics.
+A Drop experiment also assumes a valid pristine protocol: exactly one cluster
+signal per workgroup, issued by one wave after workgroup synchronization, with
+every wave waiting for the cluster barrier. Cluster membership alone does not
+establish that protocol. See [CDNA5 ISA, section 5.6.6, page 51](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf#page=60).
+Selecting -3 records these preconditions in `DropBarrierResult`; offline
+qualification verifies neither workgroup size nor this protocol.
+
+Compiler output must still fit the admitted instruction shape. In
+[LLVM's barrier lowering](https://github.com/llvm/llvm-project/blob/f14f34f217a99d77628d547b1b3ba9fa47fbd06b/llvm/lib/Target/AMDGPU/AMDGPULowerIntrinsics.cpp#L128-L175),
+optimization with a known single-wave workgroup can produce the admitted
+same-block cluster signal/wait pair. Otherwise, including for multi-wave
+workgroups, lowering uses workgroup `s_barrier_signal_isfirst` and a conditional
+cluster signal in a different block from the cluster wait. Both `signal_isfirst`
+and cross-block pairs are outside this profile. This compiler-shape limitation
+comes from source inspection; it does not qualify physical GPU execution.
 
 These are host transformation capabilities. Neither the listing nor a successful
 mutation establishes GPU execution or detector qualification.

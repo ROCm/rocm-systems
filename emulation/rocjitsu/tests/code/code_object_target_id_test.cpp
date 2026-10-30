@@ -9,7 +9,7 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        provider-selected target registry in rj_code.cpp.
 ///
-/// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
+/// Covers the only currently supported targets (gfx90a, gfx942, gfx950, gfx1100,
 /// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
 /// guard the INVALID sentinel and prevent a future edit from silently aliasing
 /// one target onto another.

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -120,7 +121,8 @@ Result matches_drop_output(const FaultMutationContext &context,
 std::vector<uint8_t> make_gfx1250_two_kernel_barrier_elf(
     const std::vector<uint32_t> &first = {kSignal, kMov, kWait, kEnd},
     const std::vector<uint32_t> &second = {kSignal, kMov, kWait, kEnd}) {
-  std::vector<uint32_t> words(64, 0);
+  constexpr uint32_t kSecondEntryByteOffset = 256;
+  std::vector<uint32_t> words(kSecondEntryByteOffset / sizeof(uint32_t), 0);
   std::copy(first.begin(), first.end(), words.begin());
   words.insert(words.end(), second.begin(), second.end());
   std::vector<uint8_t> image = test::make_gfx950_two_kernel_elf(words, 0);
@@ -138,7 +140,7 @@ std::vector<uint8_t> make_gfx1250_two_kernel_barrier_elf(
     amdhsa::kernel_descriptor_t descriptor = kernel.descriptor;
     descriptor.kernel_code_properties |= amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
     if (kernel.kernel_name == "test_kernel1")
-      descriptor.kernel_code_entry_byte_offset += 256;
+      descriptor.kernel_code_entry_byte_offset += kSecondEntryByteOffset;
     std::memcpy(image.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
   }
   return image;
@@ -184,13 +186,14 @@ std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
 std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,
                                                  std::vector<uint32_t> words,
                                                  bool siblings = false) {
+  constexpr uint32_t kSecondEntryByteOffset = 256;
   const IsaGpuTargetDescription *binding =
       default_isa_target_registry().find_gpu_target(row.target);
   if (!binding)
     return {};
   if (siblings) {
     const std::vector<uint32_t> body = words;
-    words.resize(64, build_s_nop(0, row.arch));
+    words.resize(kSecondEntryByteOffset / sizeof(uint32_t), build_s_nop(0, row.arch));
     words.insert(words.end(), body.begin(), body.end());
   }
   std::vector<uint8_t> image =
@@ -213,7 +216,7 @@ std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,
     else
       descriptor.kernel_code_properties &= ~amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
     if (siblings && kernel.kernel_name == "test_kernel1")
-      descriptor.kernel_code_entry_byte_offset += 256;
+      descriptor.kernel_code_entry_byte_offset += kSecondEntryByteOffset;
     std::memcpy(image.data() + kernel.descriptor_file_offset, &descriptor, sizeof(descriptor));
   }
   return image;
@@ -401,11 +404,20 @@ TEST_P(FaultDropBarrierFamily, ExactSiblingSelectionAndCandidateCorruption) {
 TEST_P(FaultDropBarrierFamily, PreservesAdditionalExecutableSection) {
   const DropTargetRow &row = GetParam();
   std::vector<uint8_t> image = make_barrier_elf_for_target(row, make_barrier_words(row));
+  const AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  const std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+  const std::vector<Elf64_Shdr>::const_iterator data =
+      std::ranges::find_if(sections, [](const Elf64_Shdr &candidate) {
+        return candidate.sh_type == SHT_PROGBITS && (candidate.sh_flags & SHF_ALLOC) != 0 &&
+               (candidate.sh_flags & SHF_EXECINSTR) == 0;
+      });
+  ASSERT_NE(data, sections.end());
+  const size_t data_index = static_cast<size_t>(data - sections.begin());
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
-  Elf64_Shdr section = {};
-  const size_t offset = header.e_shoff + 2 * sizeof(section);
-  std::memcpy(&section, image.data() + offset, sizeof(section));
+  Elf64_Shdr section = *data;
+  const size_t offset = header.e_shoff + data_index * header.e_shentsize;
   section.sh_flags |= SHF_EXECINSTR;
   std::memcpy(image.data() + offset, &section, sizeof(section));
   const FaultMutationContext context(image);
@@ -832,15 +844,17 @@ TEST(FaultDropBarrier, SourceSnapshotSurvivesCallerEditsButSelectionCannotReplay
   ASSERT_TRUE(inventory.succeeded()) << error.message;
   const DropBarrierSelection selection = select_barrier_for_test(inventory.value());
   const uint32_t changed_mov = 0xbe800082u;
-  std::memcpy(image.data() + inventory.value().section().file_offset + 8, &changed_mov, 4);
+  const uint64_t mov_file_offset = inventory.value().section().file_offset + 8;
+  std::memcpy(image.data() + mov_file_offset, &changed_mov, sizeof(changed_mov));
   EXPECT_TRUE(std::ranges::equal(context.image(), original));
   const FaultMutationContext changed(image);
   EXPECT_TRUE(apply_drop_barrier(changed, selection, error).failed());
   EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
   const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
   ASSERT_TRUE(result.succeeded()) << error.message;
-  EXPECT_EQ(
-      std::memcmp(result.value().edit_result.image.data() + 0x108, original.data() + 0x108, 4), 0);
+  EXPECT_EQ(std::memcmp(result.value().edit_result.image.data() + mov_file_offset,
+                        original.data() + mov_file_offset, sizeof(changed_mov)),
+            0);
 }
 
 TEST(FaultDropBarrier, ExactSelectionRejectsDuplicateNames) {
@@ -1051,10 +1065,53 @@ TEST(FaultDropBarrier, LongSameBlockPairUsesCompleteMembersWithoutDistanceCutoff
   EXPECT_EQ(result.value().edit_result.edits.size(), 2u);
 }
 
-template <typename Edit> void edit_segment(std::vector<uint8_t> &image, size_t index, Edit edit) {
+enum class FixtureLoadRange { Text, KernelDescriptor };
+
+std::optional<size_t> load_segment_index(const std::vector<uint8_t> &image,
+                                         FixtureLoadRange range) {
+  const AmdGpuCodeObject source(image.data(), image.size());
+  if (!source.is_valid() || source.text_sections().size() != 1)
+    return std::nullopt;
+  const Section &text = *source.text_sections().front();
+  uint64_t file_offset = text.sectionOffset();
+  uint64_t size = text.size();
+  if (range == FixtureLoadRange::KernelDescriptor) {
+    const std::vector<KernelDescriptorInfo> kernels = scan_kernel_descriptors(
+        image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+    if (kernels.size() != 1)
+      return std::nullopt;
+    file_offset = kernels.front().descriptor_file_offset;
+    size = sizeof(amdhsa::kernel_descriptor_t);
+  }
   Elf64_Ehdr header = {};
   std::memcpy(&header, image.data(), sizeof(header));
-  const size_t offset = header.e_phoff + index * sizeof(Elf64_Phdr);
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!segments)
+    return std::nullopt;
+  std::optional<size_t> found;
+  for (size_t index = 0; index < segments->size(); ++index) {
+    const Elf64_Phdr &segment = (*segments)[index];
+    if (segment.p_type != PT_LOAD || file_offset < segment.p_offset)
+      continue;
+    const uint64_t delta = file_offset - segment.p_offset;
+    if (delta <= segment.p_filesz && size <= segment.p_filesz - delta) {
+      if (found)
+        return std::nullopt;
+      found = index;
+    }
+  }
+  return found;
+}
+
+template <typename Edit>
+void edit_segment(std::vector<uint8_t> &image, FixtureLoadRange range, Edit edit) {
+  const std::optional<size_t> index = load_segment_index(image, range);
+  ASSERT_TRUE(index) << "fixture must uniquely map the requested file range";
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  ASSERT_EQ(header.e_phentsize, sizeof(Elf64_Phdr));
+  const size_t offset = header.e_phoff + *index * header.e_phentsize;
   ASSERT_LE(offset + sizeof(Elf64_Phdr), image.size());
   Elf64_Phdr segment = {};
   std::memcpy(&segment, image.data() + offset, sizeof(segment));
@@ -1073,23 +1130,25 @@ TEST(FaultDropBarrier, RejectsTextNotFileBacked) {
   for (const uint64_t file_size : {0u, 4u}) {
     SCOPED_TRACE(file_size);
     std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-    edit_segment(image, 0, [&](Elf64_Phdr &segment) { segment.p_filesz = file_size; });
+    edit_segment(image, FixtureLoadRange::Text,
+                 [&](Elf64_Phdr &segment) { segment.p_filesz = file_size; });
     expect_load_mapping_rejection(image);
   }
 }
 
 TEST(FaultDropBarrier, RejectsDescriptorNotFileBacked) {
-  for (const uint64_t file_size : {0u, 63u}) {
+  for (const uint64_t file_size : {size_t{0}, sizeof(amdhsa::kernel_descriptor_t) - 1}) {
     SCOPED_TRACE(file_size);
     std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-    edit_segment(image, 1, [&](Elf64_Phdr &segment) { segment.p_filesz = file_size; });
+    edit_segment(image, FixtureLoadRange::KernelDescriptor,
+                 [&](Elf64_Phdr &segment) { segment.p_filesz = file_size; });
     expect_load_mapping_rejection(image);
   }
 }
 
 TEST(FaultDropBarrier, RejectsTextLoadAddressMismatch) {
   std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-  edit_segment(image, 0, [](Elf64_Phdr &segment) {
+  edit_segment(image, FixtureLoadRange::Text, [](Elf64_Phdr &segment) {
     segment.p_vaddr += 0x2000;
     segment.p_paddr += 0x2000;
   });
@@ -1098,7 +1157,7 @@ TEST(FaultDropBarrier, RejectsTextLoadAddressMismatch) {
 
 TEST(FaultDropBarrier, RejectsDescriptorLoadAddressMismatch) {
   std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-  edit_segment(image, 1, [](Elf64_Phdr &segment) {
+  edit_segment(image, FixtureLoadRange::KernelDescriptor, [](Elf64_Phdr &segment) {
     segment.p_vaddr += 0x2000;
     segment.p_paddr += 0x2000;
   });
@@ -1109,7 +1168,7 @@ TEST(FaultDropBarrier, RejectsMissingOrNonExecutableTextLoad) {
   for (const bool missing : {false, true}) {
     SCOPED_TRACE(missing);
     std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-    edit_segment(image, 0, [&](Elf64_Phdr &segment) {
+    edit_segment(image, FixtureLoadRange::Text, [&](Elf64_Phdr &segment) {
       if (missing)
         segment.p_type = PT_NOTE;
       else
@@ -1120,26 +1179,36 @@ TEST(FaultDropBarrier, RejectsMissingOrNonExecutableTextLoad) {
 }
 
 TEST(FaultDropBarrier, RejectsOverlappingLoadMappings) {
-  for (const size_t index : {0u, 1u}) {
+  for (const FixtureLoadRange range :
+       {FixtureLoadRange::Text, FixtureLoadRange::KernelDescriptor}) {
     for (const bool zero_fill : {false, true}) {
-      SCOPED_TRACE(index);
+      SCOPED_TRACE(range == FixtureLoadRange::Text ? "text load" : "descriptor load");
       SCOPED_TRACE(zero_fill);
       std::vector<uint8_t> image = make_gfx1250_barrier_elf();
+      const AmdGpuCodeObject original(image.data(), image.size());
+      ASSERT_TRUE(original.is_valid());
+      ASSERT_EQ(original.text_sections().size(), 1u);
+      const std::optional<size_t> index = load_segment_index(image, range);
+      ASSERT_TRUE(index) << "fixture must uniquely map the requested file range";
       Elf64_Ehdr header = {};
       std::memcpy(&header, image.data(), sizeof(header));
+      ASSERT_EQ(header.e_phentsize, sizeof(Elf64_Phdr));
+      ASSERT_LT(*index, header.e_phnum);
       Elf64_Phdr overlap = {};
-      std::memcpy(&overlap, image.data() + header.e_phoff + index * sizeof(overlap),
+      std::memcpy(&overlap, image.data() + header.e_phoff + *index * header.e_phentsize,
                   sizeof(overlap));
       overlap.p_vaddr += 4;
       overlap.p_paddr += 4;
       overlap.p_filesz = zero_fill ? 0 : 4;
       overlap.p_memsz = 4;
       overlap.p_align = 1;
-      // The fixture reserves enough header padding for this third segment.
-      ASSERT_LE(header.e_phoff + 3 * sizeof(overlap), 0x100u);
-      header.e_phnum = 3;
+      const uint64_t next_header_offset =
+          header.e_phoff + uint64_t{header.e_phnum} * header.e_phentsize;
+      ASSERT_LE(next_header_offset + sizeof(overlap),
+                original.text_sections().front()->sectionOffset());
+      ++header.e_phnum;
       std::memcpy(image.data(), &header, sizeof(header));
-      std::memcpy(image.data() + header.e_phoff + 2 * sizeof(overlap), &overlap, sizeof(overlap));
+      std::memcpy(image.data() + next_header_offset, &overlap, sizeof(overlap));
       expect_load_mapping_rejection(image);
     }
   }
@@ -1147,8 +1216,9 @@ TEST(FaultDropBarrier, RejectsOverlappingLoadMappings) {
 
 TEST(FaultDropBarrier, AcceptsFileBackedRangesInsideLargerLoadSegments) {
   std::vector<uint8_t> image = make_gfx1250_barrier_elf();
-  for (const size_t index : {0u, 1u}) {
-    edit_segment(image, index, [](Elf64_Phdr &segment) {
+  for (const FixtureLoadRange range :
+       {FixtureLoadRange::Text, FixtureLoadRange::KernelDescriptor}) {
+    edit_segment(image, range, [](Elf64_Phdr &segment) {
       segment.p_offset -= 4;
       segment.p_vaddr -= 4;
       segment.p_paddr -= 4;
@@ -1252,7 +1322,9 @@ TEST(FaultDropBarrier, SameBlockStaticPairInCycleAffectsAllOccurrences) {
   ASSERT_FALSE(result.value().assumptions.empty());
   EXPECT_NE(result.value().assumptions.front().find("every executed occurrence"),
             std::string::npos);
-  EXPECT_EQ(std::memcmp(result.value().edit_result.image.data() + 0x10c, image.data() + 0x10c, 8),
+  const uint64_t branch_file_offset = inventory.value().section().file_offset + 12;
+  EXPECT_EQ(std::memcmp(result.value().edit_result.image.data() + branch_file_offset,
+                        image.data() + branch_file_offset, 8),
             0);
 }
 
@@ -1329,8 +1401,10 @@ TEST(FaultDropBarrier, EmitterOracleRejectsHalfDropAndUnrelatedCorruption) {
   const DropBarrierSelection selection = select_barrier_for_test(inventory.value());
   FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
   ASSERT_TRUE(result.succeeded()) << error.message;
-  for (const size_t offset :
-       {size_t{0x104}, size_t{0x10c}, size_t{0x108}, size_t{0x110}, size_t{0x118}, size_t{48}}) {
+  const uint64_t text = inventory.value().section().file_offset;
+  for (const uint64_t offset :
+       {text + 4, text + 12, text + 8, text + 16, inventory.value().owner().descriptor_file_offset,
+        uint64_t{offsetof(Elf64_Ehdr, e_flags)}}) {
     std::vector<uint8_t> candidate = result.value().edit_result.image;
     candidate[offset] ^= 1;
     EXPECT_TRUE(matches_drop_output(context, selection, candidate, error).failed()) << offset;
@@ -1377,12 +1451,17 @@ TEST(FaultDropBarrier, UserBuiltinIdsKeepDistinctStaticScopes) {
     const FailureOr<DropBarrierResult> result =
         apply_drop_barrier(context, select_barrier_for_test(inventory.value()), error);
     ASSERT_TRUE(result.succeeded()) << error.message;
-    EXPECT_EQ(std::ranges::any_of(result.value().assumptions,
-                                  [](const std::string &assumption) {
-                                    return assumption.find("clustered dispatch") !=
-                                           std::string::npos;
-                                  }),
-              id == -3);
+    for (const std::string_view required_fact :
+         {"clustered dispatch", "exactly one signal per workgroup",
+          "after workgroup synchronization", "every wave waiting",
+          "does not verify workgroup size or this protocol"}) {
+      EXPECT_EQ(std::ranges::any_of(result.value().assumptions,
+                                    [&](const std::string &assumption) {
+                                      return assumption.find(required_fact) != std::string::npos;
+                                    }),
+                id == -3)
+          << required_fact;
+    }
   }
 }
 

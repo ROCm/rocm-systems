@@ -36,14 +36,15 @@ enum class FaultMutationErrorCode {
 };
 struct FaultMutationError {
   FaultMutationErrorCode code = FaultMutationErrorCode::None;
-  uint64_t offset = 0;
+  uint64_t offset = 0; // .text-relative byte location when known; zero is also the default.
   std::string message;
 };
+/// @brief One descriptor-backed hardware entry; offsets use the pristine context's image.
 class FaultMutationOwner {
 public:
-  std::string entry;
-  uint64_t entry_offset = 0;
-  uint64_t descriptor_file_offset = 0;
+  std::string entry;                   // Exact descriptor-derived kernel name used for discovery.
+  uint64_t entry_offset = 0;           // .text-relative byte offset, not an ELF file offset.
+  uint64_t descriptor_file_offset = 0; // Byte offset from the start of the ELF image.
   bool operator==(const FaultMutationOwner &) const = default;
 };
 
@@ -113,6 +114,8 @@ private:
 };
 
 /// @brief Read-only qualified records; retaining an inventory does not extend source lifetime.
+/// @details Accessor views borrow metadata retained by this inventory. Source expiry still
+/// prevents selection and apply, even while those metadata views remain readable.
 class FaultBarrierInventory {
 public:
   const TextSectionIdentity &section() const;
@@ -153,13 +156,14 @@ struct FaultMutationCapability {
   uint32_t wave_size;
   std::string_view admission;
 };
+/// @brief One logical Drop and its output evidence; emission alone leaves qualification unverified.
 struct DropBarrierResult {
   DropBarrierSelection selection;
   CheckedTextEditResult edit_result;
-  uint32_t logical_mutation_count = 1;
+  uint32_t logical_mutation_count = 1; // One split pair or singleton, independent of edit count.
   FaultQualification execution_validation = FaultQualification::Unverified;
   FaultQualification detector_qualification = FaultQualification::Unverified;
-  std::vector<std::string> assumptions;
+  std::vector<std::string> assumptions; // Mutation limits and unchecked runtime preconditions.
 };
 
 /// @brief Enumerate transformation admission from the registry used by discovery and apply.

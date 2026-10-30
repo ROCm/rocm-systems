@@ -23,9 +23,10 @@ enum class StaticBarrierScope { Workgroup, Cluster };
 enum class StaticBarrierErrorCode { None, UnsupportedForm, IncompleteBarrier };
 struct StaticBarrierError {
   StaticBarrierErrorCode code = StaticBarrierErrorCode::None;
-  uint64_t offset = 0;
+  uint64_t offset = 0; // .text-relative byte location when known; zero is also the default.
   std::string message;
 };
+/// @brief Original encoded instruction at a byte offset in the source .text.
 class StaticBarrierMember {
 public:
   uint64_t offset = 0;
@@ -39,8 +40,8 @@ public:
 class StaticBarrier {
 public:
   StaticBarrierForm form = StaticBarrierForm::BuiltinSplitPair;
-  uint64_t block_offset = 0;
-  int32_t barrier_id = 0;
+  uint64_t block_offset = 0; // Containing block's start in .text-relative bytes.
+  int32_t barrier_id = 0;    // Semantic builtin ID, not operand encoding; -1 for a full singleton.
   StaticBarrierScope scope = StaticBarrierScope::Workgroup;
   std::vector<StaticBarrierMember> members;
   bool operator==(const StaticBarrier &) const = default;
@@ -64,6 +65,7 @@ struct StaticBarrierPolicy {
 };
 
 /// @brief Query family policy only for a concrete binding present in the registry.
+/// @details Returned spans refer to static policy tables and do not borrow the registry.
 [[nodiscard]] std::optional<StaticBarrierPolicy>
 static_barrier_policy(rj_code_target_id_t target,
                       const IsaTargetRegistry &registry = default_isa_target_registry());

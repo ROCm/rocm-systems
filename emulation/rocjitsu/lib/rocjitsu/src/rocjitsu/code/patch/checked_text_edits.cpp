@@ -101,6 +101,7 @@ public:
   std::vector<Elf64_Shdr> sections;
   std::optional<SourceDecoder> isa;
   InstructionBoundaries owned_boundaries;
+  // Points to owned_boundaries for create(), or the borrowed Instrumentor index.
   const InstructionBoundaries *boundaries = nullptr;
   std::vector<uint64_t> symbol_endpoints;
   std::vector<uint64_t> relative_text_references;

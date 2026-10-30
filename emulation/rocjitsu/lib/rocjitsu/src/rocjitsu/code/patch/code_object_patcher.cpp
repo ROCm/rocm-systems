@@ -1294,8 +1294,6 @@ std::vector<uint64_t> CodeObjectPatcher::relative_text_addend_offsets() const {
     return {};
   Elf64_Ehdr header{};
   std::memcpy(&header, image_.data(), sizeof(header));
-  if (header.e_type != ET_DYN)
-    return {};
   const std::vector<Elf64_Shdr> sections = section_headers();
   const std::optional<size_t> text_index =
       validated_text_section(sections, text_section_index_, text_offset_, text_size_);

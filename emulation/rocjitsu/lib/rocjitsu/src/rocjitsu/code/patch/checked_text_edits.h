@@ -32,19 +32,21 @@ enum class TextEditErrorCode {
 
 struct TextEditError {
   TextEditErrorCode code = TextEditErrorCode::None;
-  uint64_t offset = 0;
+  uint64_t offset = 0; // .text-relative byte location when known; zero is also the default.
   std::string message;
 };
 
-/// @brief Source section facts; offsets are relative to the supplied code object.
+/// @brief Source .text identity in the supplied ELF image.
 struct TextSectionIdentity {
-  uint64_t index = 0;
-  uint64_t file_offset = 0;
-  uint64_t vaddr = 0;
-  uint64_t size = 0;
+  uint64_t index = 0;       // ELF section-header table index, not a text-section ordinal.
+  uint64_t file_offset = 0; // Byte offset from the start of the ELF image.
+  uint64_t vaddr = 0;       // Declared section virtual address, before any runtime load bias.
+  uint64_t size = 0;        // Section extent in bytes.
 };
 
 /// @brief Replace one complete original instruction with equally many bytes.
+/// @details offset is in .text-relative bytes. expected includes the full source encoding;
+/// replacement may contain multiple complete instructions occupying that same extent.
 class CheckedTextEdit {
 public:
   uint64_t offset = 0;
@@ -53,13 +55,16 @@ public:
   bool operator==(const CheckedTextEdit &) const = default;
 };
 
-/// @brief An equal-length range map, including unchanged source bytes.
+/// @brief Position correspondence for edited and unchanged equal-length ranges.
+/// @details Offsets are bytes within the respective source/candidate .text sections,
+/// not file offsets or virtual addresses. size is the shared byte extent.
 struct TextEditMapping {
   uint64_t source_offset = 0;
   uint64_t candidate_offset = 0;
   uint64_t size = 0;
 };
 
+/// @brief Owned full-ELF output with source-sorted edits and a map covering the whole .text.
 struct CheckedTextEditResult {
   std::vector<uint8_t> image;
   TextSectionIdentity section;
@@ -114,8 +119,9 @@ private:
 /// Checks source format, aliases, instruction extents, clauses, references, stale bytes
 /// and replacement encoding before writing. Other sections may be executable. Concrete
 /// bindings select concrete decoders; known legacy non-variant ELF architectures also work.
-/// Branch destinations, symbol endpoints and supported ET_DYN RELATIVE64 destinations
-/// may name edit boundaries, but must not enter an edited instruction's interior.
+/// Branch destinations, symbol endpoints and RELATIVE64 destinations admitted by the shared
+/// relocation-place allocation policy may name edit boundaries, but must not enter an
+/// edited instruction's interior.
 /// Equal-length writes leave ELF layout unchanged under the patcher's existing contract.
 /// No post-emission expected-delta or recipe analysis runs here; emitter tests establish
 /// output semantics. PT_LOAD, descriptors and ownership remain consumer preconditions.

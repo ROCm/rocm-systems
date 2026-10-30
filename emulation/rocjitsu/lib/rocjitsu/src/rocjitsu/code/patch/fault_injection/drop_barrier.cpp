@@ -82,18 +82,20 @@ std::optional<uint64_t> resolve_file_backed_address(std::span<const Elf64_Phdr> 
 
 } // namespace
 
+// Cached per-kernel qualification, owned by the context and any returned inventories.
+// Its weak source link lets a retained inventory detect context expiry.
 struct FaultBarrierRecord {
   TextSectionIdentity section;
   FaultMutationOwner owner;
   std::vector<StaticBarrier> barriers;
   std::weak_ptr<const AmdGpuCodeObject> source;
-  FaultMutationError error;
+  FaultMutationError error; // Kernel-local qualification failure; siblings may still be usable.
 };
 
 class FaultMutationContext::State {
 public:
   std::once_flag analysis_once;
-  FaultMutationError error;
+  FaultMutationError error; // Whole-image admission/ownership failure, shared by every discovery.
   bool analysis_ok = false;
   std::vector<std::shared_ptr<const FaultBarrierRecord>> kernels;
   std::unique_ptr<CheckedTextEditContext> edits;
@@ -509,7 +511,10 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
       "Execution and detector qualification have not been performed."};
   if (barrier.scope == StaticBarrierScope::Cluster)
     result.assumptions.emplace_back(
-        "Cluster barrier -3 only synchronizes a clustered dispatch; it is inert otherwise.");
+        "Cluster barrier -3 assumes a clustered dispatch with multiple workgroups per cluster; "
+        "it is inert otherwise. A valid pristine barrier requires exactly one signal per workgroup "
+        "after workgroup synchronization, with every wave waiting. Static qualification does not "
+        "verify workgroup size or this protocol.");
   return result;
 }
 } // namespace rocjitsu
