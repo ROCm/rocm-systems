@@ -18,8 +18,11 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,9 +43,13 @@ static_assert(sizeof(kfd_ioctl_acquire_vm_args) == 8 &&
 
 inline constexpr char kKfdProcRoot[] = "/sys/class/kfd/kfd/proc/";
 
+// The value the library reports for a statistic that is not available.
+inline constexpr uint32_t kNotAvailable32 = std::numeric_limits<uint32_t>::max();
+inline constexpr uint64_t kNotAvailable64 = std::numeric_limits<uint64_t>::max();
+
 // What a forked helper reports once set up: the step that failed, with errno.
 struct HelperReport {
-  enum Step { kReady, kOpenKfd, kOpenRenderNode, kAcquireVm, kAllocVram, kDupFd };
+  enum Step { kReady, kOpenKfd, kOpenRenderNode, kAcquireVm, kAllocVram, kDupFd, kMapVram };
   int step = -1;  // stays -1 without a complete report
   int err = 0;
 };
@@ -61,6 +68,40 @@ inline uint64_t KfdVram(const std::string& pid, uint32_t kfd_gpu_id) {
   std::ifstream file(kKfdProcRoot + pid + "/vram_" + std::to_string(kfd_gpu_id));
   uint64_t vram = 0;
   return (file >> vram) ? vram : 0;
+}
+
+// The VRAM, in bytes, that the DRM client which process `pid` opened on
+// `render_node` reports in its fdinfo, or 0.
+inline uint64_t DrmVramBytes(pid_t pid, const std::string& render_node) {
+  const std::string dir = "/proc/" + std::to_string(pid);
+  DIR* fds = opendir((dir + "/fd").c_str());
+  if (fds == nullptr) return 0;
+  uint64_t kib = 0;
+  while (const dirent* entry = readdir(fds)) {
+    char target[256] = {};
+    const std::string link = dir + "/fd/" + entry->d_name;
+    if (readlink(link.c_str(), target, sizeof(target) - 1) <= 0 || render_node != target) continue;
+    std::ifstream fdinfo(dir + "/fdinfo/" + entry->d_name);
+    for (std::string line; std::getline(fdinfo, line);) {
+      if (sscanf(line.c_str(), "drm-memory-vram: %" SCNu64, &kib) == 1) break;
+    }
+    break;
+  }
+  closedir(fds);
+  return kib * 1024;
+}
+
+// Whether this process runs in the initial PID namespace, where KFD's process
+// directories are named by its PIDs. Elsewhere, as in a container that does not
+// share the host's, the library lists this namespace's processes by their PIDs
+// here, with their KFD statistics not available.
+inline bool InInitialPidNamespace() {
+  // The initial PID namespace has a fixed inode number (PROC_PID_INIT_INO in
+  // the kernel's include/linux/proc_ns.h).
+  constexpr char kInitialPidNamespace[] = "pid:[4026531836]";
+  char link[64] = {};
+  return readlink("/proc/self/ns/pid", link, sizeof(link) - 1) > 0 &&
+         std::string(link) == kInitialPidNamespace;
 }
 
 // KFD names processes by host PID, which differs from fork()'s result inside a
