@@ -87,6 +87,18 @@ public:
                                    /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);
   }
 
+  /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
+  /// writes every range; it is validated against outstanding LDS reads.
+  void tensorLoad(int wave, std::vector<amdgpu::TensorDmaLdsRange> ranges, int elementBytes = 4) {
+    tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges, elementBytes);
+  }
+
+  /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
+  /// reads every range; it is validated against outstanding LDS writes.
+  void tensorStore(int wave, std::vector<amdgpu::TensorDmaLdsRange> ranges, int elementBytes = 4) {
+    tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges, elementBytes);
+  }
+
   /// Register a global store from VGPRs (tracked by vmcnt).
   /// Stores read VGPRs at issue time — no destination registers.
   void globalStore(int wave, uint64_t exec = 0) {
@@ -211,6 +223,12 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
+  void waitTensorcnt(int wave, int tensorcnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::TENSORCNT, tensorcnt);
+    waves_[wave]->dispatch(wait);
+  }
+
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
   void barrier() {
     for (auto *w : waves_) {
@@ -317,6 +335,24 @@ public:
   const EventRegistry &events() const { return detector_->events(); }
 
 private:
+  /// A transfer has no lanes; its violations report lane -1.
+  void tensorTransfer(int wave, MemoryEventType type,
+                      std::span<const amdgpu::TensorDmaLdsRange> ranges, int elementBytes) {
+    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
+    for (const auto &range : ranges) {
+      const int addr = static_cast<int>(range.address);
+      const int bytes = static_cast<int>(range.bytes);
+      if (type == MemoryEventType::GLOBAL_TO_LDS)
+        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+      else
+        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+    }
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
+    waves_[wave]->registerLdsRangeEvent(pc_++, type, ranges, elementBytes, obligations,
+                                        memoryOrder);
+  }
+
   std::unique_ptr<RaceDetector> detector_;
   std::vector<WaveRaceState *> waves_;
   std::vector<RaceViolation> violations_;

@@ -24,6 +24,8 @@ enum class MemoryCompletionClass : uint8_t {
   GDS,
   ASYNC_LOAD,
   ASYNC_STORE,
+  /// Tensor DMA transfers, which complete on TENSORCNT in issue order.
+  TENSOR,
   UNORDERED,
 };
 
