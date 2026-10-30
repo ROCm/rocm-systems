@@ -141,7 +141,7 @@ jobs:
             echo "::error::Change detection did not complete (${CHANGES_RESULT})."
             exit 1
           fi
-          if [[ "${RCCL_CHANGED}" != "true" ]]; then
+          if [[ "${RCCL_CHANGED}" == "false" ]]; then
             echo "No RCCL changes; host tests not required."
             exit 0
           fi

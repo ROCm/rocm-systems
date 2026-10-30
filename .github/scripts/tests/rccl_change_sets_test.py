@@ -67,7 +67,7 @@ EXAMPLES = {
 # rccl-host-unit-tests.yml runs on every path. Its `changes` job runs the
 # detector, and the test jobs skip unless it says the tests are needed.
 HOST_TESTS_WORKFLOW = ".github/workflows/rccl-host-unit-tests.yml"
-HOST_TESTS_SKIP_IF = "needs.changes.outputs.rccl == 'true'"
+HOST_TESTS_RUN_IF = "needs.changes.outputs.rccl == 'true'"
 HOST_TESTS_CHANGES_LINES = [
     "rccl: ${{ steps.filter.outputs.rccl }}",
     "id: filter",
@@ -124,7 +124,7 @@ class CoverageWorkflowTest(unittest.TestCase):
                 self.assertLessEqual(DEFAULT_TYPES, trigger.types)
                 allowed = set(STATUS_ONLY_IFS)
                 if rule.workflow == HOST_TESTS_WORKFLOW:
-                    allowed.add(HOST_TESTS_SKIP_IF)
+                    allowed.add(HOST_TESTS_RUN_IF)
                 self.assertLessEqual(
                     set(trigger.ifs), allowed, "an if: can skip the tests"
                 )
@@ -150,19 +150,22 @@ class CoverageWorkflowTest(unittest.TestCase):
         for line in HOST_TESTS_CHANGES_LINES:
             self.assertIn(line, jobs["changes"])
 
-        # The gate must run always and wait on every job that can be skipped.
+        # The gate must always run, wait on every other job, and fail when
+        # detection fails or did not say "false".
         gate = jobs["host-gate"]
         self.assertEqual([l for l in gate if l.startswith("if:")], ["if: always()"])
         needs = next((l for l in gate if l.startswith("needs: [")), None)
         self.assertIsNotNone(needs, "gate needs: must be a flow list")
-        skipped = {
-            job for job, lines in jobs.items() if f"if: {HOST_TESTS_SKIP_IF}" in lines
-        }
-        self.assertTrue(skipped)
         self.assertEqual(
             set(re.findall(r"[\w-]+", needs.removeprefix("needs:"))),
-            {"changes", *skipped},
+            set(jobs) - {"host-gate"},
         )
+        for line in [
+            'if [[ "${CHANGES_RESULT}" != "success" ]]; then',
+            'if [[ "${RCCL_CHANGED}" == "false" ]]; then',
+            "RESULTS: ${{ join(needs.*.result, ' ') }}",
+        ]:
+            self.assertIn(line, gate)
 
     def test_workflow_paths_include_rule_patterns(self):
         for rule in sets.COVERAGE_RULES:

@@ -8,6 +8,7 @@ Emits ``rccl=true|false`` for the `changes` job in rccl-host-unit-tests.yml.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -32,7 +33,12 @@ HOST_TEST_PATH_PATTERNS = [
 
 def touches_host_tests(changed_files: Iterable[str]) -> bool:
     """Whether the host unit tests must run for this file list."""
-    return matches_paths(changed_files, HOST_TEST_PATH_PATTERNS)
+    matched = sorted(
+        f for f in changed_files if matches_paths([f], HOST_TEST_PATH_PATTERNS)
+    )
+    if matched:
+        logging.info("Host-test paths touched (%d): %s", len(matched), matched[:10])
+    return bool(matched)
 
 
 def main(argv: list[str]) -> int:
