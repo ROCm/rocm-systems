@@ -312,6 +312,50 @@ class TestBuildDfs:
         assert 301 in ac.dfs
         assert 3001 not in ac.dfs
 
+    def test_no_analysis_filter_keeps_plot_points_and_memory_chart(self):
+        """Regression guard: build_dfs keeps every metric of the profiled blocks,
+        including the roofline plot points (402) and the memory chart (301).
+        The database behaviour itself is tested in test_analysis_db.py.
+        """
+        ac = _make_arch_config([
+            (300, _metric_panel(300, 301, metrics={"VGPR": {"value": "AVG(V)"}})),
+            (
+                400,
+                _metric_panel(
+                    400,
+                    402,
+                    metrics={
+                        "AI HBM": {"value": "AVG(X)"},
+                        "AI L2": {"value": "AVG(Y)"},
+                    },
+                ),
+            ),
+            (1100, _metric_panel(1100, 1101, metrics={"X1": {"value": "AVG(C)"}})),
+        ])
+        build_dfs(
+            ac,
+            sys_info=_sys_info(),
+            profiling_config={"filter_blocks": ["3", "4"]},
+        )
+
+        assert set(ac.dfs.keys()) == {301, 402}
+        assert list(ac.dfs[402]["Metric"]) == ["AI HBM", "AI L2"]
+
+    @pytest.mark.parametrize("membw_analysis", [True, False])
+    def test_membw_panel_built_only_when_profiled(self, membw_analysis):
+        """The membw panel (3000) is built when the profile collected it and
+        skipped otherwise."""
+        ac = _make_arch_config([
+            (3000, _metric_panel(3000, 3001, metrics={"L1 Hit": {"value": "AVG(T)"}})),
+        ])
+        build_dfs(
+            ac,
+            sys_info=_sys_info(),
+            profiling_config={"membw_analysis": membw_analysis},
+        )
+
+        assert (3001 in ac.dfs) is membw_analysis
+
 
 # =============================================================================
 # expand_placeholder_ranges

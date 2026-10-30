@@ -34,6 +34,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* The analysis database from `--output-format db` and `csv` now stores every metric the profile collected for each kernel that passes the filters and for the workload, including the roofline plot points and the memory chart values. `-b` no longer narrows these outputs, so it only selects the terminal report. Analysis is slower on workloads with many kernels, because every metric is evaluated for each kernel.
+
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
 
 * The PyTorch and Triton operator call trees now show each operator's arguments. `--torch-operator` and `--triton-operator` can now be used together.

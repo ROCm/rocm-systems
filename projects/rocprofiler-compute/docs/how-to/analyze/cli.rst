@@ -34,7 +34,8 @@ Walkthrough
    The terminal always shows the top stats, the system information and the System
    Speed-of-Light section. ``-b`` adds the given blocks, tables or metrics after them.
    ``report.txt`` in the run folder always holds every profiled block; ``-b`` does not change
-   it or the analysis database.
+   it or the analysis database. The analysis database and the CSV files keep every profiled
+   metric too, whatever ``-b`` selects.
 
 There are three high-level GPU analysis views:
 
@@ -756,6 +757,8 @@ holds:
   GIOP/s and KB per Wave are stored as Bytes/s, FLOP/s, IOP/s and Bytes per Wave. The roofline
   table ``compute_kernel_roofline_data`` keeps GFLOP/s and FLOPs/Byte. ``--decimal`` and
   ``--time-unit`` change the terminal output only, not the database.
+  Every metric the profile collected is stored, including the roofline plot points and the memory
+  chart values; ``-b`` does not narrow the database.
   For a workload profiled with ``--experimental --membw-analysis``, the database also holds the
   memory bandwidth analysis; see :ref:`membw-analysis-database`.
 * The roofline ceilings of each workload are in the view ``compute_roofline_ceiling_view``, also
@@ -763,7 +766,8 @@ holds:
   per data type and pipe (VALU, MFMA or WMMA) for compute. Each value is in Bytes/s, FLOP/s or
   IOP/s, taken from the device-0 row of ``roofline.csv``. A workload with no valid
   ``roofline.csv`` has no ceiling rows.
-* One CSV file per view of the :ref:`analysis database schema <analysis-database>`.
+* One CSV file per view of the :ref:`analysis database schema <analysis-database>`. The CSV files
+  hold every metric the profile collected for each kernel and for the workload.
 * For a PC-sampled workload, each kernel's disassembly and source and the samples per source
   line in ``per_kernel_pc_sampling/``; see :ref:`pc-sampling-per-kernel-csv` and
   :ref:`pc-sampling-per-source-line-csv`.

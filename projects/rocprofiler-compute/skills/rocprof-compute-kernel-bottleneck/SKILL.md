@@ -228,7 +228,8 @@ Every analyze run prints the top stats, system info, Speed-of-Light, and any
 folder holding `report.txt`, `analysis.db`, and one CSV per analysis view, and
 its last line gives the folder's absolute path. `-d/--output-directory` sets the
 parent directory, and `-o/--output-name` sets the folder name. An existing
-`-o` folder is an error, so pick a new name for each run. Do not pass
+`-o` folder is an error, so pick a new name for each run. The `analysis.db` and
+the CSV files keep every metric the profile collected, whatever `-b` selects. Do not pass
 `--output-format`; it is deprecated and has no effect. See
 [analysis output](../../docs/how-to/analyze/cli.rst).
 

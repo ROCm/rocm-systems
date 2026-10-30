@@ -4338,6 +4338,132 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
 
 
 # =============================================================================
+# Metric coverage: every metric table is stored per kernel and per workload
+# =============================================================================
+
+
+def test_run_analysis_stores_plot_points_and_memory_chart_per_kernel_and_workload(
+    db_session, tmp_path
+):
+    workload_path = str(tmp_path)
+    arch_config = schema.ArchConfig()
+    arch_config.panel_configs = {
+        300: {
+            "id": 300,
+            "title": "Memory Chart",
+            "data source": [{"metric_table": {"id": 301, "title": "Memory Chart"}}],
+        },
+        400: {
+            "id": 400,
+            "title": "Roofline",
+            "data source": [
+                {"metric_table": {"id": 402, "title": "Roofline Plot Points"}}
+            ],
+        },
+        3000: {
+            "id": 3000,
+            "title": "Memory Bandwidth Analysis",
+            "data source": [{"metric_table": {"id": 3001, "title": "L1 Cache"}}],
+        },
+    }
+    arch_config.dfs = {
+        301: pd.DataFrame(
+            {
+                "Metric": ["VGPR"],
+                "Value": ["to_avg(raw_pmc_df['Arch_VGPR'])"],
+                "Unit": ["Registers"],
+            },
+            index=pd.Index(["3.1.0"], name="Metric_ID"),
+        ),
+        3001: pd.DataFrame(
+            {
+                "Metric": ["L1 Cache - Peak VGPR"],
+                "Value": ["to_max(raw_pmc_df['Arch_VGPR'])"],
+                "Unit": ["Registers"],
+            },
+            index=pd.Index(["30.1.0"], name="Metric_ID"),
+        ),
+        402: pd.DataFrame(
+            {
+                "Metric": ["Performance (GFLOPs)"],
+                "Value": ["to_sum(raw_pmc_df['SQ_FLOPS'])"],
+                "Unit": ["GFLOP/s"],
+            },
+            index=pd.Index(["4.2.0"], name="Metric_ID"),
+        ),
+    }
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_a", "kernel_b"],
+        "Start_Timestamp": [0, 10, 30],
+        "End_Timestamp": [10, 30, 40],
+        "Arch_VGPR": [4.0, 8.0, 16.0],
+        "SQ_FLOPS": [1.0, 2.0, 4.0],
+    })
+
+    analyzer = make_counter_backed_database_analyzer(workload_path, ["3", "4"], [])
+    analyzer._arch_configs = {"gfx942": arch_config}
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    analyzer._dispatch_data_per_workload = {
+        workload_path: pd.DataFrame([
+            {
+                "dispatch_id": dispatch_id,
+                "kernel_name": kernel_name,
+                "gpu_id": 0,
+                "start_timestamp": start,
+                "end_timestamp": end,
+            }
+            for dispatch_id, (kernel_name, start, end) in enumerate(
+                [("kernel_a", 0, 10), ("kernel_a", 10, 30), ("kernel_b", 30, 40)],
+                start=1,
+            )
+        ])
+    }
+    (
+        analyzer._metrics_info_data_per_workload,
+        analyzer._metric_expression_data_per_workload,
+    ) = analyzer.calc_metrics_data()
+    analyzer._typed_sys_info_per_workload = analyzer.calc_typed_sys_info()
+    (
+        analyzer._kernel_values_data_per_workload,
+        analyzer._workload_values_data_per_workload,
+    ) = analyzer.calc_expressions()
+
+    run_analysis_with_existing_database(analyzer)
+
+    session = orm.Database.get_session()
+    kernel_values = {
+        (row.kernel.kernel_name, row.metric.metric_id): row.value
+        for row in session.query(orm.KernelMetricValue).filter(
+            orm.KernelMetricValue.value_name == "Value"
+        )
+    }
+    assert kernel_values[("kernel_a", "4.2.0")] == pytest.approx(3.0e9)
+    assert kernel_values[("kernel_b", "4.2.0")] == pytest.approx(4.0e9)
+    assert kernel_values[("kernel_a", "3.1.0")] == pytest.approx(6.0)
+    assert kernel_values[("kernel_b", "3.1.0")] == pytest.approx(16.0)
+    assert kernel_values[("kernel_a", "30.1.0")] == pytest.approx(8.0)
+    assert kernel_values[("kernel_b", "30.1.0")] == pytest.approx(16.0)
+
+    workload_values = {
+        row.metric.metric_id: row.value
+        for row in session.query(orm.WorkloadMetricValue).filter(
+            orm.WorkloadMetricValue.value_name == "Value"
+        )
+    }
+    assert workload_values["4.2.0"] == pytest.approx(7.0e9)
+    assert workload_values["3.1.0"] == pytest.approx(28.0 / 3.0)
+    assert workload_values["30.1.0"] == pytest.approx(16.0)
+
+    plot_point = (
+        session
+        .query(orm.MetricDefinition)
+        .filter(orm.MetricDefinition.metric_id == "4.2.0")
+        .one()
+    )
+    assert plot_point.sub_table_name == "Roofline Plot Points"
+
+
+# =============================================================================
 
 # Roofline ceilings stored per workload (FR-23)
 # =============================================================================
