@@ -592,6 +592,9 @@ jobs:
           if [[ "${{ matrix.run_race_corpus }}" == "true" ]]; then
             corpus_test_flags+=(--race-tests)
           fi
+          if [[ "${{ matrix.enable_ubsan }}" == "1" ]]; then
+            corpus_test_flags+=(--ubsan)
+          fi
           bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-corpus-tests.sh" "${corpus_test_flags[@]}" || corpus_test_status=$?
           exit "${corpus_test_status}"
 
