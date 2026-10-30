@@ -258,14 +258,14 @@ jobs:
             zlib1g-dev
 
       - name: Checkout rocm-systems
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-systems
           ref: ${{ needs.source-metadata.outputs.source_sha }}
           persist-credentials: false
 
       - name: Checkout benchmark workflow tooling
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: workflow-source
           ref: ${{ github.sha }}
@@ -285,7 +285,7 @@ jobs:
           printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout benchmark corpus
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocjitsu-test-corpus
           ref: ${{ env.CORPUS_SHA }}
@@ -293,7 +293,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout pinned Tensile source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ROCm/rocm-libraries
           ref: ${{ env.TENSILE_SHA }}
@@ -308,7 +308,7 @@ jobs:
           printf 'commit_sha=%s\n' "${TENSILE_COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout pinned native nanobind
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: wjakob/nanobind
           ref: ${{ env.NANOBIND_SHA }}
@@ -321,7 +321,7 @@ jobs:
         run: echo "name=${RUNNER_NAME}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -405,7 +405,7 @@ jobs:
 
       - name: Upload benchmark diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
           path: ${{ env.ROCJITSU_RESULT_DIR }}
@@ -414,7 +414,7 @@ jobs:
 
       - name: Upload preparation diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rocjitsu-preparation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.BENCHMARK_DIR }}/preparation-diagnostics.tar.gz
@@ -460,26 +460,26 @@ jobs:
 
     steps:
       - name: Download benchmark diagnostics
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ env.RESULTS_ARTIFACT }}
           path: ${{ env.RESULTS_DOWNLOAD_DIR }}
 
       - name: Checkout repository for publication
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: publication
           ref: ${{ env.RESULTS_BRANCH }}
 
       - name: Checkout publication validation source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: rocm-systems
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Set up publication validation Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -626,7 +626,7 @@ jobs:
 
       - name: Upload publication diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rocjitsu-publication-${{ github.run_id }}-${{ github.run_attempt }}
           # This also resolves if metadata fails before exporting its environment.
