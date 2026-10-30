@@ -364,7 +364,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
-  OptionalStringDiagnosticSink record_error(error_out);
+  auto record_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      *error_out = "probe-call resource planning: " + std::string(message);
+  };
   const util::DiagnosticEmitter error(record_error);
 
   // The link pair is whatever the probe's calling convention returns through,
@@ -665,7 +668,10 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
 std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
                                                                   std::string *error_out) {
-  OptionalStringDiagnosticSink record_error(error_out);
+  auto record_error = [error_out](std::string_view message) {
+    if (error_out != nullptr)
+      *error_out = "probe-call emission: " + std::string(message);
+  };
   const util::DiagnosticEmitter error(record_error);
 
   if (!plan.is_probe_call) {
@@ -731,11 +737,6 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     return true;
   };
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
-  auto record_move_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
-  };
-  const util::DiagnosticEmitter move_error(record_move_error);
 
   // The full-mask window: needed to spill, and to define the argument VGPRs in
   // every lane rather than only the ones active at the anchor. Mirrors
@@ -821,7 +822,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
         return std::nullopt;
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &move_error);
+          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
@@ -843,7 +844,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
   for (const ProbeArgumentMove &move : plan.argument_moves) {
     const util::FailureOr<uint32_t> word =
-        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &move_error);
+        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &error);
     if (word.failed())
       return std::nullopt;
     env.push_back(word.value());
@@ -1049,7 +1050,7 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
         return std::nullopt;
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &move_error);
+          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());

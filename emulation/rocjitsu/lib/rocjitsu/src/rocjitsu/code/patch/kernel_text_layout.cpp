@@ -862,9 +862,12 @@ allocate_branch_island_chain(uint64_t branch_pc, uint64_t target_offset,
 TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
                                                 const KernelTextLayout &layout,
                                                 rj_code_arch_t arch) {
-  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  std::string builder_message;
+  OptionalStringDiagnosticSink record_error(&builder_message);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch, &error);
   if (maybe_nop.failed())
-    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+    return relocation_error(0, builder_message);
   const uint32_t nop = maybe_nop.value();
 
   struct PlannedWindowPatch {
@@ -968,10 +971,9 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
             return relocation_error(fixup.source_inst_offset,
                                     "direct branch island patch points outside translated .text");
           }
-          util::FailureOr<uint32_t> branch = build_s_branch(*simm, arch);
+          util::FailureOr<uint32_t> branch = build_s_branch(*simm, arch, &error);
           if (branch.failed())
-            return relocation_error(fixup.source_inst_offset,
-                                    "Unimplemented instruction: s_branch for target architecture");
+            return relocation_error(fixup.source_inst_offset, builder_message);
           island_patches.push_back({.offset = (*chain)[i], .word = branch.value()});
         }
       } else {
@@ -1023,9 +1025,12 @@ TextRelocationResult patch_direct_branch_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
                                                      const KernelTextLayout &layout,
                                                      rj_code_arch_t arch) {
-  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  std::string builder_message;
+  OptionalStringDiagnosticSink record_error(&builder_message);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch, &error);
   if (maybe_nop.failed())
-    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+    return relocation_error(0, builder_message);
   const uint32_t nop = maybe_nop.value();
 
   struct PlannedWindowPatch {
@@ -1106,9 +1111,12 @@ TextRelocationResult patch_recovered_indirect_fixups(std::vector<uint8_t> &text,
 TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
                                                     const KernelTextLayout &layout,
                                                     rj_code_arch_t arch) {
-  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  std::string builder_message;
+  OptionalStringDiagnosticSink record_error(&builder_message);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch, &error);
   if (maybe_nop.failed())
-    return relocation_error(0, "Unimplemented instruction: s_nop for target architecture");
+    return relocation_error(0, builder_message);
   const uint32_t nop = maybe_nop.value();
 
   std::unordered_map<uint64_t, std::tuple<uint64_t, uint64_t, bool, uint16_t>> rewritten_regions;

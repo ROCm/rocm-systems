@@ -132,7 +132,8 @@ inline void append(std::vector<uint32_t> &words,
 // every SGPR may have been read on entry to a called function, which a probe is.
 // 0xfffe is the value LLVM's amdgpu-wait-sgpr-hazards pass emits for it.
 inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
-  constexpr auto wait = build_sopp_encoding(ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSWaitAluSopp, 0xfffe);
+  constexpr util::FailureOr<uint32_t> wait =
+      build_sopp_encoding(ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSWaitAluSopp, 0xfffe);
   static_assert(wait.succeeded());
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
     words.push_back(wait.value());

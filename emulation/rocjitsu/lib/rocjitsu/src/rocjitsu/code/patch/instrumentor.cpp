@@ -411,11 +411,11 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
     report(error_out, "trampoline plan: after_items must be empty for the inline nop");
     return false;
   }
-  util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch);
-  if (nop.failed()) {
-    report(error_out, "Unimplemented instruction: s_nop for target architecture");
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
+  if (nop.failed())
     return false;
-  }
   if (plan.before_items.size() != 1 || plan.before_items[0].words.size() != 1 ||
       plan.before_items[0].words[0] != nop.value()) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
@@ -876,11 +876,11 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
                           .c_str());
     return std::nullopt;
   }
-  util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_);
-  if (branch.failed()) {
-    report(error_out, "Unimplemented instruction: s_branch for target architecture");
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  util::FailureOr<uint32_t> branch = build_s_branch(*simm16, arch_, &error);
+  if (branch.failed())
     return std::nullopt;
-  }
   patch.words.push_back(branch.value());
   return patch;
 }
