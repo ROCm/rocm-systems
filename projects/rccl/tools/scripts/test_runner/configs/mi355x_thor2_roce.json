@@ -5602,6 +5602,44 @@
           "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
+    },
+    "symmetric_kernel_mpi_odd_ranks": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 3,
+      "num_nodes": 1,
+      "num_gpus": 3,
+      "timeout": 300,
+      "description": "Symmetric AllReduce deep-loop peer rotation at rank counts that are not a multiple of its peer batch. NCCL_SYM_CTAS is cached on first read, so it is set here.",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_SYM_CTAS": "2"
+      },
+      "tests": [
+        {
+          "name": "Symk_AllReduceDeepRotation_3Ranks",
+          "description": "Forced AllReduce_RSxLD_AGxST on 2 blocks, 16-byte and 4-byte deep tiers, rank-distinct sums at 3 ranks",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceDeep_PeerRotationTail",
+          "num_ranks": 3,
+          "num_gpus": 3
+        },
+        {
+          "name": "Symk_AllReduceDeepRotation_5Ranks",
+          "description": "Forced AllReduce_RSxLD_AGxST on 2 blocks, 16-byte and 4-byte deep tiers, rank-distinct sums at 5 ranks",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceDeep_PeerRotationTail",
+          "num_ranks": 5,
+          "num_gpus": 5
+        },
+        {
+          "name": "Symk_AllReduceDeepRotation_7Ranks",
+          "description": "Forced AllReduce_RSxLD_AGxST on 2 blocks, 16-byte and 4-byte deep tiers, rank-distinct sums at 7 ranks",
+          "test_filter": "SymmetricKernelCorruptionTest.AllReduceDeep_PeerRotationTail",
+          "num_ranks": 7,
+          "num_gpus": 7
+        }
+      ]
     }
   },
   "test_suites": [
@@ -6443,6 +6481,12 @@
       "name": "Symmetric Kernels (8-rank)",
       "description": "Symmetric ReduceScatter, AllReduce and AllGather partitioning and buffer-alignment correctness on 8 co-located ranks (NCCL_CUMEM_ENABLE=1)",
       "config": "symmetric_kernel_mpi_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric Kernels (odd ranks)",
+      "description": "Symmetric AllReduce deep-loop peer rotation on 3, 5 and 7 co-located ranks (NCCL_CUMEM_ENABLE=1, NCCL_SYM_CTAS=2)",
+      "config": "symmetric_kernel_mpi_odd_ranks",
       "enabled": true
     }
   ]
