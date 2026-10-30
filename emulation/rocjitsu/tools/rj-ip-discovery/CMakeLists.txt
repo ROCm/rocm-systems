@@ -11,6 +11,6 @@ target_link_libraries(
 set_target_properties(rj_ip_discovery PROPERTIES OUTPUT_NAME rj-ip-discovery)
 rj_configure_target(rj_ip_discovery TOOL)
 
-if(RJ_INSTALL_TESTS)
+if(BUILD_TESTING AND RJ_INSTALL_TESTS)
     rj_install_test_target(rj_ip_discovery)
 endif()

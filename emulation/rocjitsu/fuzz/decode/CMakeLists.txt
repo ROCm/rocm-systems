@@ -28,6 +28,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
-if(RJ_INSTALL_TESTS)
+if(BUILD_TESTING AND RJ_INSTALL_TESTS)
     rj_install_test_target(rj_decode_fuzz)
 endif()

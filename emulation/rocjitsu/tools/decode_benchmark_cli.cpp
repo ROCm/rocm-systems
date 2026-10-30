@@ -11,6 +11,7 @@
 namespace rocjitsu::tools {
 namespace {
 
+// \NPI new GPU: add a {"gfxNNNN", TARGET} row here
 constexpr std::array<NamedChoice<rj_code_target_id_t>, 6> kTargets{{
     {"gfx942", ROCJITSU_CODE_TARGET_GFX942},
     {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
@@ -20,8 +21,6 @@ constexpr std::array<NamedChoice<rj_code_target_id_t>, 6> kTargets{{
     {"gfx1251", ROCJITSU_CODE_TARGET_GFX1251},
 }};
 
-} // namespace
-
 std::string decode_target_description() {
   std::string description = "Target: auto";
   for (const NamedChoice<rj_code_target_id_t> &target : kTargets) {
@@ -30,6 +29,12 @@ std::string decode_target_description() {
   }
   return description;
 }
+
+} // namespace
+
+DecodeBenchmarkFlags::DecodeBenchmarkFlags()
+    : target(std::make_shared<DecodeTargetFlag>(
+          cli::FlagInfo{"--target", {"-t"}, decode_target_description()})) {}
 
 util::Result DecodeTargetFlag::set_value(std::optional<rj_code_target_id_t> value,
                                          util::DiagnosticEmitter diagnostic) {

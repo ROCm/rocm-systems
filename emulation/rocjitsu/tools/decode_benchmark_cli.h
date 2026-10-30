@@ -40,11 +40,10 @@ private:
   size_t minimum_;
 };
 
-std::string decode_target_description();
-
 struct DecodeBenchmarkFlags {
-  std::shared_ptr<DecodeTargetFlag> target = std::make_shared<DecodeTargetFlag>(
-      cli::FlagInfo{"--target", {"-t"}, decode_target_description()});
+  DecodeBenchmarkFlags();
+
+  std::shared_ptr<DecodeTargetFlag> target;
   std::shared_ptr<DecodeCountFlag> iterations = std::make_shared<DecodeCountFlag>(
       cli::FlagInfo{"--iterations", {"-n"}, "Positive iteration count (default: 1)"}, 1, 1);
   std::shared_ptr<DecodeCountFlag> invalid_limit = std::make_shared<DecodeCountFlag>(
