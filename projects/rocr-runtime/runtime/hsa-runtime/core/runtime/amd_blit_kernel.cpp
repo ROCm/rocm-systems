@@ -50,6 +50,8 @@
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
+#include "core/inc/runtime.h"
+#include "core/inc/thunk_loader.h"
 #include "core/util/utils.h"
 
 namespace rocr {
@@ -618,9 +620,10 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   // Protect completion_signal_.
   std::lock_guard<std::mutex> guard(lock_);
 
-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy()) {
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() &&
+      HSAKMT_CALL(hsaKmtDtifMemoryCopy)) {
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    HSAKMT_CALL(hsaKmtDtifMemoryCopy)(dst, src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
     return HSA_STATUS_SUCCESS;
   }
@@ -657,9 +660,10 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
     std::vector<core::Signal*>& gang_signals) {
 
-  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() && dep_signals.empty()) {
+  if (core::Runtime::runtime_singleton_->flag().enable_dtif_fast_copy() &&
+      HSAKMT_CALL(hsaKmtDtifMemoryCopy) && dep_signals.empty()) {
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] src = %p, dst = %p, size = 0x%lx", src, dst, size);
-    memcpy(dst, src, size);
+    HSAKMT_CALL(hsaKmtDtifMemoryCopy)(dst, src, size);
     LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, "[ROCDTIF blit kernel] Fast copy success");
 
     hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
