@@ -498,6 +498,38 @@ def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_dat
     _verify_names_match_json(csv_kernels_mangled, json_data, "mangled")
 
 
+_PUBLIC_API_CHECK = """
+import rocpd
+missing = [n for n in rocpd.__all__ if not hasattr(rocpd, n)]
+assert not missing, f"rocpd.__all__ names missing from package: {missing}"
+from rocpd import RocpdImportData
+from rocpd.importer import RocpdImportData as _impl
+assert RocpdImportData is _impl, "rocpd.RocpdImportData is not importer.RocpdImportData"
+exec("from rocpd import *", {})
+"""
+
+
+@pytest.mark.parametrize("disable_bindings", [False, True])
+def test_public_api_import(disable_bindings):
+    """Every name in rocpd.__all__ must be importable, with and without libpyrocpd."""
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.pop("ROCPD_DISABLE_BINDINGS", None)
+    if disable_bindings:
+        env["ROCPD_DISABLE_BINDINGS"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-c", _PUBLIC_API_CHECK],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

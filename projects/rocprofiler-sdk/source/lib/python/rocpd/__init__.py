@@ -42,6 +42,7 @@ except Exception:
     pass
 
 from . import bindings
+from .importer import RocpdImportData
 
 __all__ = [
     "connect",

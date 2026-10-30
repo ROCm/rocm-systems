@@ -381,34 +381,6 @@ rocprofiler_add_integration_execute_test(
 #
 #########################################################################################
 
-# Validate the csv/otf2 outputs generated without the python bindings
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-rocpd-nobindings
-    TEST_PATHS
-    COPY conftest.py validate.py
-    CONFIG pytest.ini
-    BUNDLE_TESTS
-    ARGS validate.py::test_otf2_data
-         validate.py::test_otf2_system_tree_node_data
-         validate.py::test_csv_data
-         --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
-         --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
-         --otf2-sys-tree-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
-         --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_agent_info.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_counter_collection_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_kernel_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_memory_allocation_trace.csv
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_regions_trace.csv
-         --db-input
-         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-rocpd-nobindings-generation)
-
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-rocpd
     TEST_PATHS
@@ -488,6 +460,50 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests;rocpd;region-category"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)
+
+# Validate the csv/otf2 outputs generated without the python bindings
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-nobindings
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_otf2_data
+         validate.py::test_otf2_system_tree_node_data
+         validate.py::test_csv_data
+         --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
+         --otf2-sys-tree-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_counter_collection_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_regions_trace.csv
+         --db-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-nobindings-generation)
+
+# Validate rocpd.__all__ is importable with and without the python bindings. Validate
+# helper doesn't pass PYTHONPATH from ENVIRONMENT through to the pytest run, so need to be
+# explicit and set PYTHON_PATH directly
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-public-api-import
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_public_api_import
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 #########################################################################################
 #
