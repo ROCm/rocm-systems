@@ -154,32 +154,34 @@ bool LdsInlineAccess::complete(const Instruction &inst, const LdsAccessRequest &
   const uint64_t exec = wf.exec(); // == lane_mask == exec_mask for DS
   Lds &lds = wf.lds();
 
-  // 2. Addresses: one raw read of the address VGPR and a 32-bit sum, zero-extended
-  //    for the LDS model. It never reads inactive lanes, so the array is not
-  //    initialized.
-  alignas(32) uint64_t addresses[64];
-  addr_calc::ds_lane_addresses({vgpr_lanes(cu, req.addr_vgpr), wave}, exec, wave,
-                               req.offset + wf.lds_base(), addresses);
+  // 2. Addresses: lane l accesses (address_lanes[l] + offset) mod 2^32. Loads give
+  //    the raw lanes and the offset to the reader, which adds the offset only where
+  //    it needs an address; stores expand their active lanes to 64-bit addresses.
+  const uint32_t *address_lanes = vgpr_lanes(cu, req.addr_vgpr);
+  const uint32_t offset = req.offset + wf.lds_base();
 
-  // 3. Hazards before any write: addresses are captured above, a store reads its
-  //    payload before LDS changes, and a load writes VGPRs only after its LDS
-  //    read, so a destination overlapping the address register is safe.
+  // 3. Hazards before any write: the reader reads the address lanes before the
+  //    writeback starts, a store reads its payload before LDS changes, so a
+  //    destination overlapping the address register is safe.
 
-  // 4. Reader/writer by address pattern (lds_access_patterns.h, later): broadcast,
-  //    contiguous, otherwise run-walk. Every access currently takes the run-walk in
-  //    Lds::vector_load / vector_store, with Lds' bounds and lazy-backing rules:
-  //    past capacity or unmaterialized reads as 0, writes past capacity are dropped.
+  // 4. Reader by address pattern (lds_access_patterns.h): contiguous 16-lane
+  //    segments are block copies, b64 rows where lane l + 16 follows lane l one
+  //    16-byte column per pair, up to four lanes fixed copies, other dense masks
+  //    one bounds check and fixed copies. Lanes not fully backed keep Lds' exact
+  //    rules. Stores keep the run walk in Lds::vector_store.
 
-  // 5. The access itself, through per-lane staging on the stack; only active
-  //    lanes are written and read.
+  // 5. The access itself, through per-lane staging on the stack. The reader may
+  //    write any lane of the span; writeback reads active lanes only.
   alignas(64) uint8_t lanes[64 * kMaxLaneBytes];
   if (req.is_load) {
     // LDS -> staging -> destination VGPR(s), applying sign_extend / d16.
-    lds.vector_load(addresses, exec, req.elem_size, req.num_elems, lanes);
+    lds.vector_load32(address_lanes, offset, exec, req.elem_size, req.num_elems, lanes);
     write_back(req, wf, cu, exec, stride, lanes);
   } else {
     // Payload VGPR(s) -> staging -> LDS, lanes ascending so the highest lane
-    // wins on overlap.
+    // wins on overlap. Inactive address lanes are never read.
+    alignas(32) uint64_t addresses[64];
+    addr_calc::ds_lane_addresses({address_lanes, wave}, exec, wave, offset, addresses);
     gather_payload(req, cu, exec, stride, lanes);
     lds.vector_store(addresses, exec, req.elem_size, req.num_elems, lanes);
   }
