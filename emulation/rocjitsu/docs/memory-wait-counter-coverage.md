@@ -53,6 +53,38 @@ ordinary loads, image samples and BVH results share VMcnt but keep separate
 classes. A newer result supersedes a fully covered older dependency only within
 the same ordered class; other classes and unordered results remain tracked.
 
+On RDNA3, RDNA3.5, RDNA4 and CDNA5, incoming LDS-routed FLAT results can
+overwrite pending indexed LDS or FLAT LDS results in issue order. This exemption
+is specific to the runtime checker and its resolved routing; static FLAT checks
+and incoming native indexed LDS overwrites remain conservative here. Global-routed
+lanes keep their separate VMEM rules. RDNA1/2 and older CDNA FLAT remain unqualified.
+
+RDNA3/3.5's FLAT ordering section places the LDS route in order with indexed LDS.
+RDNA4 and CDNA5 sections 5.7.1.3-4 state the same LDS-route completion guarantee
+and define LDS read completion as data available in VGPRs. CDNA5 section 10.1.1
+also warns that FLAT VGPR writes can be out of order while the counters retire
+in order. The checker interprets that warning in the context of independently
+completing VMEM and LDS paths, consistently with the specific LDS-route guarantee; it does
+not establish a CDNA5-specific exception within the LDS path.
+
+RDNA3, RDNA3.5 and RDNA4 direct/parameter LDS loads share an ordered EXP
+writeback class, separate from indexed LDS and exports, in both the runtime and
+static checkers. RDNA3/3.5 section 12.2.1.2 tracks both instructions through VGPR
+delivery and singles out mixed exports as potentially unordered; section 12.3
+uses nonzero EXP waits to pipeline parameter loads. RDNA4's EXPcnt table makes
+the same relationship explicit. CDNA5 does not support these direct/parameter
+instructions or their EXPcnt class. These policies follow the manuals and have
+not been qualified on physical hardware by this change.
+
+Globally routed FLAT stores share completion order with ordinary VMEM stores,
+so a sufficient partial store wait releases the corresponding gfx1250 replay
+sources. Static FLAT routing is unknown, so a possible FLAT store prevents
+nonzero Store waits from proving completion. In expert scheduling mode, its
+source lifetime remains pending until both VMEM and LDS completion are proven,
+or an explicit `vm_vsrc` wait releases it. FLAT load sources likewise require
+both routes. Source reads still require their own waits, even when the destination
+is an ordered overwrite.
+
 Before reading an incoming producer's operands, the checker applies the finite
 counter bound to each qualified ordered class in that counter. A capacity of `C`
 and an incoming increment of `U` leave at most `C-U` old counter units before
