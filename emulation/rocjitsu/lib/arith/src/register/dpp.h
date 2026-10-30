@@ -23,6 +23,11 @@ void dpp8_source(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
 void dpp8_x86_64_v3(uint32_t exec_mask, uint32_t selectors, bool fi, uint32_t *out,
                     const uint32_t *a);
 
+// Write all permuted source words, using zero for unreadable lanes.
+// Requires x86-64-v4 and validated controls; out must not overlap a.
+void dpp8_x86_64_v4(uint32_t exec_mask, uint32_t selectors, bool fi, uint32_t *out,
+                    const uint32_t *a);
+
 // Checks descriptor fields and the RDNA4 control encoding; low 32 bits are
 // validated by the instruction. Zero denotes no DPP modifier.
 bool valid_dpp(uint64_t instruction_flags);
@@ -35,6 +40,11 @@ uint32_t dpp16_source(uint64_t flags, uint32_t exec_mask, uint64_t instruction_f
 // Write all 32 source words and return EXEC after row/bank/source filtering.
 // Requires AVX2 and validated controls; out must not overlap a.
 uint32_t dpp16_x86_64_v3(uint32_t exec_mask, uint32_t control, uint32_t valid_row, bool fi,
+                         uint32_t *out, const uint32_t *a);
+
+// Write all permuted source words and return the readable-lane mask.
+// Requires x86-64-v4 and validated controls; out must not overlap a.
+uint32_t dpp16_x86_64_v4(uint32_t exec_mask, uint32_t control, uint32_t valid_row, bool fi,
                          uint32_t *out, const uint32_t *a);
 
 namespace RJ_ARITH_IMPL_NAMESPACE {
