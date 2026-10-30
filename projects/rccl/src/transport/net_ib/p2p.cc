@@ -17,6 +17,8 @@ int64_t ncclIbArThreshold = 8192;
 NCCL_PARAM(IbReceiverSideMatchingScheme, "IB_RECEIVER_SIDE_MATCHING_SCHEME", -2);
 RCCL_PARAM(IbSplitDataThreshold, "IB_SPLIT_DATA_THRESHOLD", 128);
 RCCL_PARAM(IbGdrFlushGpuMemNoRelaxedOrdering, "GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 1);
+// 1 = post the GDR flush scratchpad RDMA_WRITE and RDMA_READ as one linked ibv_post_send.
+RCCL_PARAM(IbGdrFlushSinglePost, "GDR_FLUSH_SINGLE_POST", 0);
 
 const char* ncclIbReqTypeStr[] = {"Unused", "Send", "Recv", "Flush", "IPut", "IGet", "Failed"};
 
@@ -681,12 +683,14 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
     // on the flush QP.
     bool useGpuFlushMem = rcclParamIbGdrFlushGpuMemNoRelaxedOrdering() &&
                           comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
+    // With RCCL_GDR_FLUSH_SINGLE_POST=1 the unsignaled WRITE is chained ahead of the
+    // signaled READ in one post; the RC send queue still executes them in order.
+    bool linkFlushWrs = useGpuFlushMem && rcclParamIbGdrFlushSinglePost();
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (uint64_t)(req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
 
+    struct ibv_send_wr writeWr = {};
     if (useGpuFlushMem) {
-      struct ibv_send_wr writeWr;
-      memset(&writeWr, 0, sizeof(writeWr));
       writeWr.wr_id = wr.wr_id;
       writeWr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       writeWr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
@@ -694,8 +698,12 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.num_sge = 1;
       writeWr.opcode = IBV_WR_RDMA_WRITE;
       writeWr.send_flags = 0;
-      struct ibv_send_wr* badWriteWr;
-      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
+      if (linkFlushWrs) {
+        writeWr.next = &wr;
+      } else {
+        struct ibv_send_wr* badWriteWr;
+        NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr), ret, iflushFail);
+      }
     }
     if (useGpuFlushMem) {
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
@@ -713,7 +721,12 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
           wr.wr_id);
     TIME_START(4);
     struct ibv_send_wr* bad_wr;
-    NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+    if (linkFlushWrs) {
+      // A failed linked post may have dropped the fence WRITE, so surface it like the separate WRITE post does.
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &bad_wr), ret, iflushFail);
+    } else {
+      NCCLCHECKGOTO(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &wr, &bad_wr), iflushRet, iflushFail);
+    }
     TIME_STOP(4);
 
     ncclIbAddEvent(req, i);
