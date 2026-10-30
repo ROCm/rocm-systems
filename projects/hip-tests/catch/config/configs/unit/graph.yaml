@@ -1202,8 +1202,6 @@ graph:
   Unit_hipGraphKernelNodeGetParams_Functional:
     <<: *level_default
     tags: [query]
-  Unit_hipGraphKernelNodeSetAttribute_Functional: *level_default
-  Unit_hipGraphKernelNodeSetAttribute_Negative: *level_default
   Unit_hipGraphKernelNodeSetParams_Negative:
     <<: *level_default
     tags: [node]
