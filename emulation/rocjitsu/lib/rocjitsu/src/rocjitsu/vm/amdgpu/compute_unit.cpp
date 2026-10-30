@@ -1550,6 +1550,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
                                            std::span<const uint64_t> pre_routing_addresses,
                                            uint64_t flat_local_lane_mask,
                                            uint64_t flat_dds_lane_mask) {
+  std::vector<ImageSampleFootprint> image_footprints;
   MemoryAccessObservation access;
   access.mnemonic = inst.mnemonic();
   access.pc = wf.pc;
@@ -1614,7 +1615,12 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.non_temporal = state.non_temporal;
     access.force_l1_bypass = state.request_force_l1_bypass;
     access.lds_destination = state.lds_dst;
-    access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    if (state.image_sample) {
+      for (const auto &tap : state.image_sample->taps)
+        image_footprints.push_back({std::span(tap.addresses).first(wf_size), tap.lane_mask});
+      access.image_sample_footprints = image_footprints;
+    } else
+      access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
     access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =
@@ -2311,9 +2317,16 @@ template <bool EnableAsync>
       // a perfectly mapped buffer.
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
       dbg_addrs.reserve(d.wf_size);
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-        if (d.lane_mask & (1ULL << lane))
-          dbg_addrs.push_back(d.per_lane_addr[lane]);
+      if (d.image_sample) {
+        for (const auto &tap : d.image_sample->taps)
+          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+            if (tap.lane_mask & (uint64_t{1} << lane))
+              dbg_addrs.push_back(tap.addresses[lane]);
+      } else {
+        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+          if (d.lane_mask & (1ULL << lane))
+            dbg_addrs.push_back(d.per_lane_addr[lane]);
+      }
     }
   }
   // One predicate for the whole access, used both to decide that this

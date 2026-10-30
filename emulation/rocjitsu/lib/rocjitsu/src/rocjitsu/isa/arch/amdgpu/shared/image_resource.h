@@ -29,8 +29,11 @@ struct ImageResource {
   uint32_t selectors = 0;
   uint32_t base_level = 0;
   uint32_t last_level = 0;
-  uint32_t max_level = 0;  ///< Last physical mip in the allocation.
-  bool compressed = false; ///< Compression metadata or compressed writes are enabled.
+  uint32_t max_level = 0;      ///< Last physical mip in the allocation.
+  uint32_t min_lod = 0;        ///< Raw resource LOD clamp; nonzero values are unqualified.
+  uint32_t perf_mod = 0;       ///< Resource filter-performance modifier.
+  bool corner_samples = false; ///< Sample coordinates refer to corners rather than centers.
+  bool compressed = false;     ///< Compression metadata or compressed writes are enabled.
   uint32_t swizzle_mode = 0;
   uint32_t type = 0;
   uint32_t base_array = 0;
@@ -59,6 +62,8 @@ inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &d
   };
   ImageResource resource;
   resource.base = ((uint64_t{field(32, 8)} << 32) | descriptor[0]) << 8;
+  resource.min_lod = field(40, 12);
+  resource.perf_mod = field(92, 3);
   resource.data_format = field(52, 6);
   resource.num_format = field(58, 4);
   resource.width = field(64, 14) + 1;
@@ -88,7 +93,12 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
   const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
   ImageResource resource;
+  resource.min_lod = rdna1 || arch == ROCJITSU_CODE_ARCH_RDNA2
+                         ? field(40, 12)
+                         : field(rdna4 ? 186 : 187, rdna4 ? 13 : 12);
   resource.base = ((uint64_t{field(32, 8)} << 32) | descriptor[0]) << 8;
+  resource.perf_mod = field(180, 3);
+  resource.corner_samples = field(183, 1);
   resource.type = field(124, 4);
   resource.width = field(62, rdna4 || rdna1 ? 16 : 14) + 1;
   resource.height = field(78, rdna4 || rdna1 ? 16 : 14) + 1;

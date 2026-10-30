@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_footprint.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -32,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
@@ -225,9 +227,10 @@ TEST_F(Cdna2ImageAccessTest, StoreThenLoadRoundTripsActiveLanesOfAnR32Image) {
   EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeef);
 }
 
-TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreReportUnimplemented) {
+TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreAccessLevelZero) {
   Image image;
   image.width = 64;
+  image.height = 2;
   bind(image);
   wf->set_exec(1);
   write_coordinates(0, {1, 1, 0});
@@ -238,6 +241,8 @@ TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreReportUnimplemented) {
   for (const bool load : {false, true}) {
     SCOPED_TRACE(testing::Message() << "load=" << load);
     memory.write32(kAddress, 0x12345678u);
+    cu->l1_vector().invalidate_all();
+    l2.invalidate_all();
     cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
     const auto words =
         cdna2::build_mimg(load ? cdna2::kImageLoadMipMimg : cdna2::kImageStoreMipMimg,
@@ -247,12 +252,13 @@ TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreReportUnimplemented) {
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
 
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_EQ(inst->data(), nullptr);
-    EXPECT_EQ(memory.read32(kAddress), 0x12345678u);
-    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    cu->l1_vector().flush_all();
+    l2.flush_all();
+    EXPECT_EQ(memory.read32(kAddress), load ? 0x12345678u : 0xdeadbeefu);
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), load ? 0x12345678u : 0xdeadbeefu);
   }
 }
 
@@ -650,14 +656,20 @@ TEST_F(Cdna2ImageAccessTest, ImageOnly565FormatStopsAsUnimplemented) {
             amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
-TEST_F(Cdna2ImageAccessTest, ImageOnlySrgbFormatStopsAsUnimplemented) {
+TEST_F(Cdna2ImageAccessTest, SrgbLoadDecodesColorAndPreservesAlpha) {
   Image image;
   image.data_format = kDfmt8888;
-  image.num_format = 9; // GFX9 TYPE_SRGB, outside the buffer NFMT table.
+  image.num_format = 9; // GFX9 TYPE_SRGB.
+  image.selectors = kIdentity;
   bind(image);
-  EXPECT_FALSE(issue(true));
-  EXPECT_EQ(wf->instruction_execution_error(),
-            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  memory.write32(kBase, 0x80402000);
+  ASSERT_TRUE(issue(true));
+  for (uint32_t lane : {0u, 2u}) {
+    EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
+    EXPECT_NEAR(std::bit_cast<float>(cu->read_vgpr(vb + 9, lane)), 0.014443844f, 1e-7);
+    EXPECT_NEAR(std::bit_cast<float>(cu->read_vgpr(vb + 10, lane)), 0.051269458f, 1e-7);
+    EXPECT_FLOAT_EQ(std::bit_cast<float>(cu->read_vgpr(vb + 11, lane)), 128.0f / 255);
+  }
 }
 
 TEST(ImageAccessTest, InstructionDimCoordinatesShareA16PackingContract) {
@@ -870,7 +882,7 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
   }
 }
 
-TEST(ImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
+TEST(ImageAccessTest, Rdna3MipUsesNsaSelectorsAndAtomicUsesBaseAddressPrinter) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
   ASSERT_NE(decoder, nullptr);
   const test::Gfx11MimgEncoding mimg{.nsa = true,
@@ -889,7 +901,7 @@ TEST(ImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
     const char *disassembly;
   };
   for (const Case test_case : {
-           Case{rdna3::kImageLoadMipMimg, "image_load_mip v8, v[2:4], s[8:15]"},
+           Case{rdna3::kImageLoadMipMimg, "image_load_mip v8, [v2, v6, v0], s[8:15]"},
            Case{rdna3::kImageAtomicAddMimg, "image_atomic_add v8, v[2:3], s[8:15]"},
        }) {
     SCOPED_TRACE(test_case.disassembly);
@@ -934,7 +946,7 @@ TEST_P(RdnaDecodedImageAccessTest, CompressionControlsStopBeforeImageMemoryAcces
   }
 }
 
-TEST_P(RdnaDecodedImageAccessTest, MipLoadAndStoreReportUnimplemented) {
+TEST_P(RdnaDecodedImageAccessTest, MipLoadAndStoreAccessLevelZero) {
   wf_->set_exec(1);
   const uint32_t vb = wf_->vgpr_alloc().base;
   cu_->write_vgpr(vb + 2, 0, 1);
@@ -951,12 +963,13 @@ TEST_P(RdnaDecodedImageAccessTest, MipLoadAndStoreReportUnimplemented) {
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
 
-    EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wf_).failed());
-    EXPECT_EQ(wf_->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_EQ(inst->data(), nullptr);
-    EXPECT_EQ(memory_.read32(kAddress), 0x12345678u);
-    EXPECT_EQ(cu_->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+    ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
+    cu_->l1_vector().flush_all();
+    l2_.flush_all();
+    EXPECT_EQ(memory_.read32(kAddress), load ? 0x12345678u : 0xdeadbeefu);
+    EXPECT_EQ(cu_->read_vgpr(vb + 8, 0), load ? 0x12345678u : 0xdeadbeefu);
   }
 }
 
@@ -1420,6 +1433,7 @@ protected:
   bool packed_coordinates = false;
   bool packed_data = false;
   uint32_t resource_selector = 0;
+  uint32_t component_mask = 1;
   bool unnormalized = true;
   bool declare_array = true;
   std::optional<uint32_t> dimension_override;
@@ -1446,7 +1460,7 @@ protected:
 
   template <typename Fields> Fields fields(uint32_t dimensions) {
     Fields encoding{};
-    encoding.dmask = 1;
+    encoding.dmask = component_mask;
     encoding.a16 = packed_coordinates;
     encoding.d16 = packed_data;
     if constexpr (requires { encoding.srsrc; })
@@ -1511,8 +1525,8 @@ protected:
       return {};
     return std::move(decoded).value();
   }
-  bool decoded_issue(bool load, uint32_t dimensions) {
-    auto inst = decoded_instruction(load, dimensions);
+  bool decoded_issue(bool load, uint32_t dimensions, bool mip = false) {
+    auto inst = decoded_instruction(load, dimensions, mip);
     if (!inst)
       return false;
     EXPECT_TRUE(inst->is_memory_op());
@@ -1526,6 +1540,205 @@ protected:
     return true;
   }
 };
+
+TEST_P(AllImageAccessTest, ImplicitSampleUsesQuadDerivativesToSelectTheMip) {
+  Image image;
+  image.width = image.height = 64;
+  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+  auto resource =
+      arch_is_cdna_4_or_lower(arch()) ? descriptor(image) : rdna_descriptor(image, arch());
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch()), gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  util::insert_bits_into_words<uint32_t>(resource.data(),
+                                         gfx9                                 ? 188
+                                         : gfx12                              ? 44
+                                         : arch() <= ROCJITSU_CODE_ARCH_RDNA2 ? 164
+                                                                              : 48,
+                                         gfx12 ? 5 : 4, 3u);
+  const auto bind_view = [&](uint32_t base, uint32_t last) {
+    auto view = resource;
+    util::insert_bits_into_words<uint32_t>(view.data(), gfx12 ? 57 : 108, gfx12 ? 5 : 4, base);
+    util::insert_bits_into_words<uint32_t>(view.data(), gfx12 ? 111 : 112, gfx12 ? 5 : 4, last);
+    for (uint32_t i = 0; i < view.size(); ++i)
+      cu->write_sgpr(sb + i, view[i]);
+  };
+  const std::array<uint32_t, 4> sampler{2 | (2 << 3) | (2 << 6),
+                                        gfx12 ? 0x1fffu << 13 : 0xfffu << 12, 1u << 26, 0};
+  for (uint32_t i = 0; i < sampler.size(); ++i)
+    cu->write_sgpr(sb + 8 + i, sampler[i]);
+  std::array<uint32_t, 3> words{};
+#define SAMPLE(ARCH, ENUM)                                                                         \
+  case ENUM: {                                                                                     \
+    auto f = fields<ARCH::MimgBuilderFields>(2);                                                   \
+    f.unorm = 0;                                                                                   \
+    f.ssamp = 2;                                                                                   \
+    const auto encoded = ARCH::build_mimg(ARCH::kImageSampleMimg, f);                              \
+    std::copy(encoded.begin(), encoded.end(), words.begin());                                      \
+    break;                                                                                         \
+  }
+  switch (arch()) {
+    SAMPLE(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
+    SAMPLE(cdna2, ROCJITSU_CODE_ARCH_CDNA2)
+    SAMPLE(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
+    SAMPLE(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
+    SAMPLE(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
+    SAMPLE(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    words = rdna4::build_vsample(
+        rdna4::kImageSampleVsample,
+        {.dim = 1, .dmask = 1, .vdata = 8, .rsrc = 0, .samp = 8, .vaddr0 = 0, .vaddr1 = 1});
+    break;
+  default:
+    FAIL();
+  }
+#undef SAMPLE
+  struct QuadCase {
+    uint32_t base;
+    std::array<std::array<uint32_t, 2>, 4> offsets;
+    uint32_t expected_level;
+  };
+  std::vector<QuadCase> cases;
+  for (uint32_t base : {0u, 1u}) {
+    for (uint32_t step : {0u, 1u, 2u, 4u, 8u}) {
+      cases.push_back({base,
+                       {{{0, 0}, {step, 0}, {0, step}, {step, step}}},
+                       std::max(base, step <= 1 ? 0u : uint32_t(std::countr_zero(step)))});
+    }
+  }
+  // Independent gfx1100/gfx1201 captures: the same coarse derivatives apply to
+  // all four lanes. Moving lane 3 cannot affect them; moving only lane 1 does.
+  cases.push_back({0, {{{0, 0}, {0, 0}, {0, 0}, {56, 56}}}, 0});
+  cases.push_back({0, {{{0, 0}, {8, 0}, {0, 1}, {1, 1}}}, 3});
+  for (const auto &test : cases) {
+    wf->set_exec(15);
+    SCOPED_TRACE(testing::Message() << test.base << ',' << test.expected_level);
+    const uint32_t level = test.expected_level;
+    bind_view(level, level);
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+      const uint32_t edge = (64u >> level) - 1;
+      write_coordinates(lane, {std::min(edge, (8 + test.offsets[lane][0]) >> level),
+                               std::min(edge, (8 + test.offsets[lane][1]) >> level), 0});
+      cu->write_vgpr(vb + 8, lane, 0xa0000000u + level);
+    }
+    ASSERT_TRUE(decoded_issue(false, 2));
+    bind_view(test.base, 3);
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+      cu->write_vgpr(vb, lane, std::bit_cast<uint32_t>((8.5f + test.offsets[lane][0]) / 64));
+      cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>((8.5f + test.offsets[lane][1]) / 64));
+      cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+    }
+    const auto issue_sample = [&]() {
+      auto decoder = Decoder::create(arch());
+      auto decoded = decoder->decode(words.data());
+      EXPECT_TRUE(decoded.succeeded());
+      auto inst = std::move(decoded).value();
+      inst->execute(*inst, wf);
+      if (!inst->data())
+        return false;
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      EXPECT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      return true;
+    };
+    ASSERT_TRUE(issue_sample());
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0xa0000000u + level);
+    EXPECT_TRUE(wf->wait_counters().empty());
+    if (test.base == 0 && level == 0) {
+      for (uint64_t mask : {1u, 7u}) {
+        wf->set_exec(mask);
+        wf->clear_instruction_execution_error();
+        EXPECT_FALSE(issue_sample());
+        EXPECT_EQ(wf->instruction_execution_error(),
+                  amdgpu::InstructionExecutionError::UnimplementedInstruction);
+        wf->clear_instruction_execution_error();
+        bind_view(0, 0);
+        EXPECT_TRUE(issue_sample());
+        EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+        bind_view(0, 3);
+      }
+    }
+  }
+}
+
+TEST_P(AllImageAccessTest, MipOpcodesUseViewRelativeLevelsForLoadsAndStores) {
+  for (bool a16 : {false, true}) {
+    for (bool nsa : {false, true}) {
+      if (nsa && arch_is_cdna_4_or_lower(arch()))
+        continue;
+      packed_coordinates = a16;
+      scattered = nsa;
+      SCOPED_TRACE(testing::Message() << "a16=" << a16 << " nsa=" << nsa);
+      const auto write_mip = [&](uint32_t level) {
+        const uint32_t selector = a16 ? (nsa ? 10 : 1) : (nsa ? 12 : 2);
+        cu->write_vgpr(vb + selector, 0, level);
+      };
+      Image image;
+      image.width = image.height = 64;
+      image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+      auto words =
+          arch_is_cdna_4_or_lower(arch()) ? descriptor(image) : rdna_descriptor(image, arch());
+      const bool gfx9 = arch_is_cdna_4_or_lower(arch()), gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+      const uint32_t max_bit = gfx9                                 ? 188
+                               : gfx12                              ? 44
+                               : arch() <= ROCJITSU_CODE_ARCH_RDNA2 ? 164
+                                                                    : 48;
+      util::insert_bits_into_words<uint32_t>(words.data(), max_bit, gfx12 ? 5 : 4, 1);
+      const auto bind_level = [&](uint32_t base) {
+        auto view = words;
+        util::insert_bits_into_words<uint32_t>(view.data(), gfx12 ? 57 : 108, gfx12 ? 5 : 4, base);
+        util::insert_bits_into_words<uint32_t>(view.data(), gfx12 ? 111 : 112, gfx12 ? 5 : 4, 1);
+        for (uint32_t i = 0; i < view.size(); ++i)
+          cu->write_sgpr(sb + i, view[i]);
+      };
+      wf->set_exec(1);
+      for (uint32_t reg : {0u, 1u, 2u, 10u, 12u})
+        cu->write_vgpr(vb + reg, 0, 0);
+      // Seed the two physical levels through independently qualified plain opcodes.
+      bind_level(0);
+      cu->write_vgpr(vb + 8, 0, 0x11112222);
+      ASSERT_TRUE(decoded_issue(false, 2));
+      bind_level(1);
+      cu->write_vgpr(vb + 8, 0, 0x33334444);
+      ASSERT_TRUE(decoded_issue(false, 2));
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeef);
+      cu->write_vgpr(vb + 8, 1, 0xdeadbeef);
+      write_mip(0);
+      ASSERT_TRUE(decoded_issue(true, 2, true));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x33334444u);
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
+      bind_level(0);
+      write_mip(1);
+      ASSERT_TRUE(decoded_issue(true, 2, true));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x33334444u);
+      cu->write_vgpr(vb + 8, 0, 0x77778888);
+      ASSERT_TRUE(decoded_issue(false, 2, true));
+      bind_level(1);
+      ASSERT_TRUE(decoded_issue(true, 2));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x77778888u);
+      bind_level(0);
+      ASSERT_TRUE(decoded_issue(true, 2));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11112222u);
+      bind_level(1);
+      for (uint32_t relative : {1u, 0xffffffffu}) {
+        SCOPED_TRACE(relative);
+        write_mip(relative);
+        ASSERT_TRUE(decoded_issue(true, 2, true));
+        EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0u);
+        cu->write_vgpr(vb + 8, 0, 0xaaaaaaaa);
+        ASSERT_TRUE(decoded_issue(false, 2, true)); // OOB cannot change either level.
+      }
+      ASSERT_TRUE(decoded_issue(true, 2));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x77778888u);
+      write_mip(0);
+      cu->write_vgpr(vb + 8, 0, 0x55556666);
+      ASSERT_TRUE(decoded_issue(false, 2, true));
+      ASSERT_TRUE(decoded_issue(true, 2));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x55556666u);
+      bind_level(0);
+      ASSERT_TRUE(decoded_issue(true, 2));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11112222u);
+    }
+  }
+}
 
 TEST_P(AllImageAccessTest, DecodedLoadAndStoreRoundTripDimensionsAndExec) {
   for (uint32_t dimensions = 1; dimensions <= 3; ++dimensions) {
@@ -1868,6 +2081,86 @@ TEST_P(AllImageAccessTest, LinearOneDimensionalArraysUseIndependentLayerStride) 
   }
 }
 
+TEST_P(AllImageAccessTest, RdnaSrgbFormatsDecodeColorAndKeepLinearAlpha) {
+  if (arch_is_cdna_4_or_lower(arch()))
+    GTEST_SKIP() << "GFX9 encodes sRGB in NFMT, covered separately";
+  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  // IEC sRGB transfer after F32 UNORM conversion. GFX11/12 point captures
+  // round color channels to BF16; alpha retains its linear F32 UNORM value.
+  const std::array<uint32_t, 4> expected =
+      gfx10 ? std::array<uint32_t, 4>{0x3e5d0a8b, 0x3d51ffef, 0x3f800000, 0x3f008081}
+            : std::array<uint32_t, 4>{0x3e5d0000, 0x3d520000, 0x3f800000, 0x3f008081};
+  for (uint32_t format = 0; format < 3; ++format) {
+    SCOPED_TRACE(format);
+    Image image;
+    auto words = rdna_descriptor(image, arch());
+    util::insert_bits_into_words<uint32_t>(words.data(),
+                                           arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 49 : 52,
+                                           gfx10 ? 9 : 8, (gfx10 ? 128u : 64u) + format);
+    util::insert_bits_into_words<uint32_t>(words.data(), 96, 12, kIdentity);
+    util::insert_bits_into_words<uint32_t>(words.data(), 128, 14, (256u >> format) - 1);
+    for (uint32_t i = 0; i < words.size(); ++i)
+      cu->write_sgpr(sb + i, words[i]);
+    const uint32_t components = 1u << format;
+    component_mask = (1u << components) - 1;
+    memory.write32(kBase, 0x80ff4080);
+    wf->set_exec(1);
+    write_coordinates(0, {0, 0, 0});
+    ASSERT_TRUE(decoded_issue(true, 2));
+    for (uint32_t component = 0; component < components; ++component)
+      EXPECT_EQ(cu->read_vgpr(vb + 8 + component, 0), expected[component]);
+    wf->clear_instruction_execution_error();
+    EXPECT_FALSE(decoded_issue(false, 2));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(memory.read32(kBase), 0x80ff4080u);
+    EXPECT_TRUE(wf->wait_counters().empty());
+    wf->clear_instruction_execution_error();
+  }
+}
+
+TEST_P(AllImageAccessTest, UnsupportedImageAtomicsDoNotIssueMemory) {
+  bind_image(2);
+  wf->set_exec(1);
+  write_coordinates(0, {0, 0, 0});
+  memory.write32(kBase, 0x12345678);
+  cu->write_vgpr(vb + 8, 0, 1);
+  std::array<uint32_t, 3> words{};
+#define ATOMIC_CASE(ARCH, ENUM)                                                                    \
+  case ENUM: {                                                                                     \
+    const auto encoded =                                                                           \
+        ARCH::build_mimg(ARCH::kImageAtomicAddMimg, fields<ARCH::MimgBuilderFields>(2));           \
+    std::copy(encoded.begin(), encoded.end(), words.begin());                                      \
+    break;                                                                                         \
+  }
+  switch (arch()) {
+    ATOMIC_CASE(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
+    ATOMIC_CASE(cdna2, ROCJITSU_CODE_ARCH_CDNA2)
+    ATOMIC_CASE(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
+    ATOMIC_CASE(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
+    ATOMIC_CASE(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
+    ATOMIC_CASE(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    words = rdna4::build_vimage(rdna4::kImageAtomicAddUintVimage,
+                                fields<rdna4::VimageBuilderFields>(2));
+    break;
+  default:
+    FAIL() << "Unexpected image architecture";
+  }
+#undef ATOMIC_CASE
+  auto decoder = Decoder::create(arch());
+  auto decoded = decoder->decode(words.data());
+  ASSERT_TRUE(decoded.succeeded());
+  auto instruction = std::move(decoded).value();
+  instruction->execute(*instruction, wf);
+  EXPECT_EQ(wf->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  EXPECT_FALSE(instruction->data());
+  EXPECT_EQ(memory.read32(kBase), 0x12345678u);
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 1u);
+  EXPECT_TRUE(wf->wait_counters().empty());
+}
+
 TEST_P(AllImageAccessTest, MisalignedLinearPitchNeedsQualifiedRounding) {
   const amdgpu::ImageAddressConfig config = amdgpu::default_image_address_config(arch());
   const amdgpu::ImageLayout layout{.width = 30, .height = 5, .pitch = 35, .element_bytes = 4};
@@ -1955,6 +2248,10 @@ TEST_P(AllImageAccessTest, ScatteredAndPackedCoordinatesReachTheSameTexel) {
 }
 
 TEST_P(AllImageAccessTest, WaitChecksConsumeTheEncodedCoordinateRegisters) {
+  Image image;
+  image.type = amdgpu::kImage3d;
+  if (arch_is_cdna_4_or_lower(arch()))
+    bind(image); // GFX9 selects the actual coordinate count from T#.
   wf->set_exec(1);
   auto &state = wf->ensure_memory_wait_scoreboard();
   scattered = !arch_is_cdna_4_or_lower(arch());
@@ -1996,6 +2293,7 @@ TEST_P(AllImageAccessTest, LivenessUsesScatteredCoordinatesAndScaledDescriptor) 
 }
 
 TEST_P(AllImageAccessTest, A16CoordinateWaitChecksIgnoreTheUnusedHighHalf) {
+  bind_image(3);
   wf->set_exec(1);
   scattered = !arch_is_cdna_4_or_lower(arch());
   packed_coordinates = true;
@@ -2472,18 +2770,6 @@ TEST(ImageAddressingTest, UnqualifiedCdnaTilingRegistersAreRejected) {
   }
 }
 
-TEST_P(AllImageAccessTest, UnsupportedExplicitMipInstructionsReportAnExecutionError) {
-  bind_image(2);
-  for (bool load : {false, true}) {
-    wf->clear_instruction_execution_error();
-    auto instruction = decoded_instruction(load, 2, true);
-    ASSERT_TRUE(instruction);
-    instruction->execute(*instruction, wf);
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-  }
-}
-
 TEST_P(AllImageAccessTest, ThickDisplayVolumesStopBeforeImageMemoryAccess) {
   if (arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA4)
     GTEST_SKIP() << "GFX9 display volumes are thin; GFX12 has different swizzle encodings";
@@ -2505,5 +2791,887 @@ TEST(ImageAddressingTest, RejectsArchitecturesWithoutImageMemoryInstructions) {
     EXPECT_FALSE(amdgpu::ImageAddressing::prepare(config, layout));
   }
 }
+
+enum class SampleTestOperation { Zero, Lod, Gradients, Gather, Unsupported };
+
+class ImageSamplerControlTest : public AllImageAccessTest {
+protected:
+  void bind_sample_image(Image image, bool floating = true, bool mip_view = false) {
+    image.num_format = floating ? 7 : kNfmtUint;
+    auto words =
+        arch_is_cdna_4_or_lower(arch()) ? descriptor(image) : rdna_descriptor(image, arch());
+    if (!arch_is_cdna_4_or_lower(arch()) && floating)
+      util::insert_bits_into_words<uint32_t>(words.data(),
+                                             arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 49 : 52, 8, 22u);
+    if (mip_view)
+      util::insert_bits_into_words<uint32_t>(
+          words.data(), arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 111 : 112,
+          arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 5 : 4, image.mip_levels - 1);
+    for (uint32_t word = 0; word < words.size(); ++word)
+      cu->write_sgpr(sb + word, words[word]);
+  }
+
+  void bind_sampler(uint32_t filter, int32_t bias = 0, uint32_t minimum = 0,
+                    bool normalized = true) {
+    const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+    const std::array<uint32_t, 4> sampler{2u | (2u << 3) | (2u << 6) | (normalized ? 0u : 1u << 15),
+                                          minimum | (768u << (gfx12 ? 13 : 12)),
+                                          filter | (static_cast<uint32_t>(bias) & 0x3fffu), 0};
+    for (uint32_t word = 0; word < sampler.size(); ++word)
+      cu->write_sgpr(sb + 8 + word, sampler[word]);
+  }
+
+  std::unique_ptr<Instruction> sample_instruction(SampleTestOperation operation, bool d16 = false,
+                                                  uint32_t sampler = 8) {
+    std::array<uint32_t, 3> words{};
+#define SAMPLE_CONTROL(ARCH, ENUM)                                                                 \
+  case ENUM: {                                                                                     \
+    auto encoding = fields<ARCH::MimgBuilderFields>(2);                                            \
+    encoding.unorm = 0;                                                                            \
+    encoding.ssamp = sampler / 4;                                                                  \
+    encoding.d16 = d16;                                                                            \
+    const uint16_t opcode = operation == SampleTestOperation::Zero  ? ARCH::kImageSampleLzMimg     \
+                            : operation == SampleTestOperation::Lod ? ARCH::kImageSampleLMimg      \
+                            : operation == SampleTestOperation::Gradients                          \
+                                ? ARCH::kImageSampleDMimg                                          \
+                            : operation == SampleTestOperation::Gather ? ARCH::kImageGather4LzMimg \
+                                                                       : ARCH::kImageSampleOMimg;  \
+    const auto encoded = ARCH::build_mimg(opcode, encoding);                                       \
+    std::copy(encoded.begin(), encoded.end(), words.begin());                                      \
+    break;                                                                                         \
+  }
+    switch (arch()) {
+      SAMPLE_CONTROL(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
+      SAMPLE_CONTROL(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
+      SAMPLE_CONTROL(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
+      SAMPLE_CONTROL(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
+      SAMPLE_CONTROL(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
+    case ROCJITSU_CODE_ARCH_CDNA2: {
+      // CDNA2's public ISA input exposes only base IMAGE_SAMPLE. A single-level
+      // sample without mip filtering has the same controls as the zero form.
+      if (operation != SampleTestOperation::Zero)
+        return {};
+      auto encoding = fields<cdna2::MimgBuilderFields>(2);
+      encoding.unorm = 0;
+      encoding.ssamp = sampler / 4;
+      const auto encoded = cdna2::build_mimg(cdna2::kImageSampleMimg, encoding);
+      std::copy(encoded.begin(), encoded.end(), words.begin());
+      break;
+    }
+    case ROCJITSU_CODE_ARCH_RDNA4: {
+      auto encoding = rdna4::VsampleBuilderFields{};
+      encoding.dim = dimension_override.value_or(1);
+      encoding.dmask = 1;
+      encoding.vdata = 8;
+      encoding.rsrc = 0;
+      encoding.samp = sampler;
+      encoding.vaddr0 = 0;
+      encoding.vaddr1 = 1;
+      encoding.vaddr2 = 2;
+      encoding.vaddr3 = 3;
+      encoding.d16 = d16;
+      const uint16_t opcode =
+          operation == SampleTestOperation::Zero        ? rdna4::kImageSampleLzVsample
+          : operation == SampleTestOperation::Lod       ? rdna4::kImageSampleLVsample
+          : operation == SampleTestOperation::Gradients ? rdna4::kImageSampleDVsample
+          : operation == SampleTestOperation::Gather    ? rdna4::kImageGather4LzVsample
+                                                        : rdna4::kImageSampleOVsample;
+      words = rdna4::build_vsample(opcode, encoding);
+      break;
+    }
+    default:
+      return {};
+    }
+#undef SAMPLE_CONTROL
+    auto decoder = Decoder::create(arch());
+    auto decoded = decoder->decode(words.data());
+    EXPECT_TRUE(decoded.succeeded());
+    return decoded.succeeded() ? std::move(decoded).value() : nullptr;
+  }
+
+  bool sample(SampleTestOperation operation, bool d16 = false, uint32_t sampler = 8) {
+    auto instruction = sample_instruction(operation, d16, sampler);
+    if (!instruction)
+      return false;
+    instruction->execute(*instruction, wf);
+    if (!instruction->data())
+      return false;
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    EXPECT_EQ(pipeline.issue(instruction.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    // Later cases seed backing storage directly, as in the base image fixture.
+    cu->l1_vector().flush_all();
+    l2.flush_all();
+    return true;
+  }
+};
+
+TEST_P(ImageSamplerControlTest, UnnormalizedWrapUsesClampAndMirrorOnce) {
+  Image image;
+  image.width = 16;
+  bind_sample_image(image);
+  for (uint32_t x = 0; x < 16; ++x)
+    memory.write32(kBase + x * 4, std::bit_cast<uint32_t>(float(x)));
+  wf->set_exec(1);
+  for (uint32_t wrap : {0u, 1u})
+    for (uint32_t filter : {0u, 1u}) {
+      bind_sampler((filter << 20) | (filter << 22), 0, 0, false);
+      cu->write_sgpr(sb + 8, (1u << 15) | wrap | (wrap << 3));
+      for (const auto &[x, mirror] :
+           {std::pair{-INFINITY, 15.0f}, std::pair{-16.5f, 15.0f}, std::pair{-1.5f, 1.0f},
+            std::pair{-0.5f, 0.0f}, std::pair{0.0f, 0.0f}, std::pair{16.5f, 15.0f}}) {
+        cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(x));
+        cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+        ASSERT_TRUE(sample(SampleTestOperation::Zero));
+        EXPECT_EQ(cu->read_vgpr(vb + 8, 0), std::bit_cast<uint32_t>(wrap == 1 ? mirror
+                                                                    : x < 1   ? 0.0f
+                                                                              : 15.0f));
+      }
+    }
+}
+
+TEST_P(ImageSamplerControlTest, GatherPreservesFloatPayloadsThatPointSamplingCanonicalizes) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA omits gather forms";
+  Image image;
+  image.width = image.height = 2;
+  bind_sample_image(image);
+  bind_sampler(0, 0, 0, false);
+  wf->set_exec(1);
+  // Captured on gfx1100/gfx1201: gather preserves NaN payload and denormal bits.
+  for (uint32_t payload : {0x7fc12345u, 0x7f800001u, 0xffc00001u, 1u, 0x80000001u, 0x007fffffu,
+                           0x80000000u, 0x7f800000u}) {
+    memory.write32(kBase, payload);
+    cu->l1_vector().invalidate_all();
+    l2.invalidate_all();
+    cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(0.5f));
+    cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+    ASSERT_TRUE(sample(SampleTestOperation::Zero));
+    const bool nan = (payload & 0x7fffffffu) > 0x7f800000u;
+    const bool denormal = (payload & 0x7f800000u) == 0;
+    const uint32_t point = nan ? 0xffc00000u : denormal ? payload & 0x80000000u : payload;
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), point);
+    cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(1.0f));
+    cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.0f));
+    ASSERT_TRUE(sample(SampleTestOperation::Gather));
+    EXPECT_EQ(cu->read_vgpr(vb + 11, 0), payload);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
+  const bool legacy = arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
+                      arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  for (bool resource_control : {false, true}) {
+    if (!resource_control && !legacy)
+      continue;
+    bind_sample_image(Image{});
+    bind_sampler(1u << 26);
+    if (resource_control) {
+      const uint32_t bit = legacy ? 40 : arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 186 : 187;
+      cu->write_sgpr(sb + bit / 32, cu->read_sgpr(sb + bit / 32) | (1u << (bit % 32)));
+    } else {
+      cu->write_sgpr(sb + 10, cu->read_sgpr(sb + 10) | (1u << 28));
+    }
+    wf->set_exec(1);
+    wf->clear_instruction_execution_error();
+    EXPECT_FALSE(sample(SampleTestOperation::Zero));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinate) {
+  if (arch_is_cdna_4_or_lower(arch()))
+    GTEST_SKIP() << "GFX9 has no DIM operand";
+  for (bool layered : {false, true}) {
+    for (uint32_t layer = 0; layer < (layered ? 2u : 1u); ++layer) {
+      Image image;
+      image.width = 4;
+      image.height = 2;
+      image.type = layered ? amdgpu::kImage2dArray : amdgpu::kImage2d;
+      image.depth = layered ? 2 : 1;
+      dimension_override = layered ? amdgpu::kImageDim1dArray : amdgpu::kImageDim1d;
+      bind_sample_image(image);
+      // GFX12 array rows use 128-byte alignment, while allocation keeps
+      // 256-byte rows for the layer stride (two rows = 512 bytes).
+      const uint32_t row_bytes = layered && arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+      for (uint32_t i = 0; i < 4; ++i) {
+        memory.write32(kBase + layer * 512 + i * 4, std::bit_cast<uint32_t>(1000.0f * layer + i));
+        memory.write32(kBase + layer * 512 + row_bytes + i * 4,
+                       std::bit_cast<uint32_t>(1000.0f * layer + 100.0f + i));
+      }
+      cu->l1_vector().invalidate_all();
+      l2.invalidate_all();
+      wf->set_exec(15);
+      for (bool normalized : {false, true}) {
+        for (bool linear : {false, true}) {
+          for (uint32_t wrap : {0u, 1u, 2u, 6u}) {
+            bind_sampler(linear ? (1u << 20) | (1u << 22) : 0, 0, 0, normalized);
+            cu->write_sgpr(sb + 8, (cu->read_sgpr(sb + 8) & ~(7u << 3)) | (wrap << 3));
+            for (uint32_t lane = 0; lane < 4; ++lane) {
+              const float x = lane + (linear ? 0.25f : 0.5f);
+              cu->write_vgpr(vb, lane, std::bit_cast<uint32_t>(normalized ? x / 4 : x));
+              // The instruction has no Y input; a following live VGPR is irrelevant.
+              cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(layered ? float(layer) : 1.5f));
+              cu->write_vgpr(vb + 2, lane, std::bit_cast<uint32_t>(1.5f));
+            }
+            ASSERT_TRUE(sample(SampleTestOperation::Zero));
+            for (uint32_t lane = 0; lane < 4; ++lane) {
+              float expected = 1000.0f * layer + (linear && lane ? lane - 0.25f : float(lane));
+              if (linear && wrap == 6)
+                expected *= 0.5f; // Half the footprint reads transparent black.
+              else if (linear && normalized && wrap == 0)
+                expected += 50.0f; // Half reads the last row, whose values are 100 higher.
+              EXPECT_EQ(cu->read_vgpr(vb + 8, lane), std::bit_cast<uint32_t>(expected));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, UnqualifiedCornerAndCombinedPerformanceControlsAreRejected) {
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch());
+  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  for (uint32_t control = 0; control < 6; ++control) {
+    if (control == 0 && gfx9)
+      continue; // GFX9 has no CORNER_SAMPLES field.
+    Image image;
+    if (control >= 4) {
+      image.type = amdgpu::kImage3d;
+      image.depth = 2;
+      dimension_override = amdgpu::kImageDim3d;
+    }
+    bind_sample_image(image);
+    bind_sampler(0);
+    if (control == 0)
+      cu->write_sgpr(sb + 5, cu->read_sgpr(sb + 5) | (1u << 23));
+    if (control == 1 || control == 3 || control == 5) {
+      const uint32_t bit = gfx9 ? 92 : 180;
+      cu->write_sgpr(sb + bit / 32, cu->read_sgpr(sb + bit / 32) | (1u << (bit % 32)));
+    }
+    if (control == 2 || control == 3) {
+      if (gfx12)
+        cu->write_sgpr(sb + 11, cu->read_sgpr(sb + 11) | 2u);
+      else
+        cu->write_sgpr(sb + 9, cu->read_sgpr(sb + 9) | (8u << 24));
+    }
+    if (control >= 4)
+      cu->write_sgpr(sb + 9, cu->read_sgpr(sb + 9) | (15u << 28));
+    wf->set_exec(1);
+    wf->clear_instruction_execution_error();
+    // The performance fields independently leave the qualified result unchanged.
+    if (control == 1 || control == 2 || control == 4) {
+      ASSERT_TRUE(sample(SampleTestOperation::Zero));
+    } else {
+      EXPECT_FALSE(sample(SampleTestOperation::Zero));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, TiledSamplerBaseXorIsRejected) {
+  Image image;
+  image.width = image.height = 64;
+  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 2 : 22;
+  bind_sample_image(image);
+  bind_sampler(0);
+  cu->write_sgpr(sb, (kBase + 256) >> 8);
+  wf->set_exec(1);
+  EXPECT_FALSE(sample(SampleTestOperation::Zero));
+  EXPECT_EQ(wf->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
+TEST(ImageFootprintTest, CapturedFractionalLodCoversLogSegmentsAndVolumeProjections) {
+  struct Case {
+    std::array<double, 3> dx, dy;
+    std::array<uint32_t, 3> extents;
+    uint32_t dimensions;
+    double expected;
+  };
+  // Independent matching gfx1100/gfx1201 captures. Constant-valued mip levels
+  // and linear mip filtering expose the sampler's fractional LOD directly.
+  const Case cases[] = {
+      {{0x1.019d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1p-7},
+      {{0x1.219d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.7p-3},
+      {{0x1.419d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.5p-2},
+      {{0x1.619d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.dcp-2},
+      {{0x1.819d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.2ep-1},
+      {{0x1.a19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.6ap-1},
+      {{0x1.c19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.ap-1},
+      {{0x1.e19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.d2p-1},
+      {{0x1.019d000000000p-8, 0x1.019d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.02p-1},
+      {{0x1.219d000000000p-8, 0x1.219d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.58p-1},
+      {{0x1.419d000000000p-8, 0x1.419d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.a6p-1},
+      {{0x1.619d000000000p-8, 0x1.619d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.ecp-1},
+      {{0x1.819d000000000p-8, 0x1.819d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.16p+0},
+      {{0x1.a19d000000000p-8, 0x1.a19d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.33p+0},
+      {{0x1.c19d000000000p-8, 0x1.c19d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.4fp+0},
+      {{0x1.e19d000000000p-8, 0x1.e19d000000000p-6, 0x0.0p+0},
+       {0x0.0p+0, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.68p+0},
+      {{0x1.019d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.019d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.02p-1},
+      {{0x1.219d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.219d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.58p-1},
+      {{0x1.419d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.419d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.a6p-1},
+      {{0x1.619d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.619d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.ecp-1},
+      {{0x1.819d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.819d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.16p+0},
+      {{0x1.a19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.a19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.33p+0},
+      {{0x1.c19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.c19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.4fp+0},
+      {{0x1.e19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {0x1.e19d000000000p-8, 0x0.0p+0, 0x0.0p+0},
+       {256, 64, 1},
+       2,
+       0x1.68p+0},
+      {{-0x1.5bf1f8p-6, 0x1.208a3ep-6, -0x1.e9ea3ep-5},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{-0x1.e8bfccp-6, 0x1.954decp-6, -0x1.5815d2p-4},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.34p-1},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {-0x1.bd65f2p-8, 0x1.a5ffcp-5, -0x1.1798d2p-5},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {-0x1.38d1c8p-7, 0x1.2862a6p-4, -0x1.88be08p-5},
+       {37, 19, 11},
+       3,
+       0x1.34p-1},
+      {{-0x1.26d1p-7, 0x1.fc4bc6p-7, -0x1.1ef782p-5},
+       {-0x1.11b9dcp-7, 0x1.376612p-5, -0x1.12e478p-4},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{-0x1.9e1ee4p-7, 0x1.64febp-6, -0x1.931838p-5},
+       {-0x1.807edcp-7, 0x1.b569d4p-5, -0x1.822252p-4},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+      {{0x1.adaf82p-9, 0x1.306cf8p-5, -0x1.2bf50ep-4},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{0x1.2dc8aep-8, 0x1.ab9e5ap-5, -0x1.a55788p-4},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {-0x1.7487acp-8, -0x1.a5a39ap-5, 0x1.2b5c58p-5},
+       {37, 19, 11},
+       3,
+       0x1.dp-4},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {-0x1.05a434p-7, -0x1.2821eep-4, 0x1.a48106p-5},
+       {37, 19, 11},
+       3,
+       0x1.34p-1},
+      {{0x1.13c47cp-11, -0x1.4ec31p-5, 0x1.1662e8p-4},
+       {-0x1.4a8bd8p-6, 0x1.3f30aep-7, 0x1.429284p-5},
+       {37, 19, 11},
+       3,
+       0x1.bp-4},
+      {{0x1.835cfcp-11, -0x1.d63b2cp-5, 0x1.870ab8p-4},
+       {-0x1.d04f3ap-6, 0x1.c05b9ap-7, 0x1.c51bd2p-5},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+      {{0x1.f69754p-7, 0x1.28e23ep-7, 0x1.4f38eep-4},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{0x1.60fcf4p-6, 0x1.a1065p-7, 0x1.d6e0bep-4},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {0x1.69a6c8p-11, -0x1.d06f0ep-5, 0x1.9a7648p-9},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {0x1.fc008ep-11, -0x1.46305ap-4, 0x1.204852p-8},
+       {37, 19, 11},
+       3,
+       0x1.34p-1},
+      {{-0x1.13823ap-9, 0x1.4af7a6p-5, -0x1.f45ec6p-5},
+       {0x1.daa314p-7, -0x1.dfee1ep-6, -0x1.17eee8p-4},
+       {37, 19, 11},
+       3,
+       0x1.bp-4},
+      {{-0x1.82ffe8p-9, 0x1.d0e6a6p-5, -0x1.5f6da4p-4},
+       {0x1.4d5adcp-6, -0x1.51128ep-5, -0x1.8936f4p-4},
+       {37, 19, 11},
+       3,
+       0x1.3p-1},
+      {{-0x1.e410d6p-7, -0x1.90339ap-5, -0x1.feeacep-9},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.dp-4},
+      {{-0x1.53fa24p-6, -0x1.191384p-4, -0x1.66d5fap-8},
+       {0x0p+0, 0x0p+0, 0x0p+0},
+       {37, 19, 11},
+       3,
+       0x1.34p-1},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {0x1.a609ap-7, 0x1.7b5c7p-12, -0x1.680f6ep-4},
+       {37, 19, 11},
+       3,
+       0x1.bp-4},
+      {{0x0p+0, 0x0p+0, 0x0p+0},
+       {0x1.286994p-6, 0x1.0a706ep-11, -0x1.f9c458p-4},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+      {{-0x1.5443bep-6, 0x1.b3ee3p-11, 0x1.c54ep-8},
+       {-0x1.25e2ep-6, 0x1.067ad4p-5, -0x1.b94152p-5},
+       {37, 19, 11},
+       3,
+       0x1.cp-4},
+      {{-0x1.ddf5e8p-6, 0x1.322b7cp-10, 0x1.3e5f5ap-7},
+       {-0x1.9cd066p-6, 0x1.70b2c6p-5, -0x1.35e8dep-4},
+       {37, 19, 11},
+       3,
+       0x1.32p-1},
+  };
+  for (const auto &test : cases) {
+    const double lod = amdgpu::image_gradient_lod(test.dx, test.dy, test.extents, test.dimensions);
+    EXPECT_EQ(std::clamp(lod, 0.0, 5.0), test.expected);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, DecodedGradientsSelectCapturedBoundaryMips) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA omits explicit gradient forms";
+  Image image;
+  image.width = 37;
+  image.height = 19;
+  image.mip_levels = 6;
+  bind_sample_image(image, true, true);
+  bind_sampler(1u << 26);
+  cu->write_sgpr(sb + 9, 1280u << (arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 13 : 12));
+  // Independent linear mip-atlas offsets for a 37x19 R32 allocation.
+  // Storage rounds mip extents upward; the accessible view still rounds down.
+  const std::array<uint32_t, 6> offsets =
+      arch_is_cdna_4_or_lower(arch()) ? std::array<uint32_t, 6>{0, 4864, 7424, 8704, 9472, 9984}
+                                      : std::array<uint32_t, 6>{5376, 2816, 1536, 768, 256, 0};
+  const uint32_t pitch = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+  for (uint32_t mip = 0; mip < 6; ++mip)
+    for (uint32_t y = 0; y < std::max(1u, 19u >> mip); ++y)
+      for (uint32_t x = 0; x < std::max(1u, 37u >> mip); ++x)
+        memory.write32(kBase + offsets[mip] + y * pitch + x * 4,
+                       std::bit_cast<uint32_t>(float(mip)));
+  struct Case {
+    std::array<float, 4> gradients;
+    float expected;
+  };
+  // Off-axis NPOT boundary captures; each gradient prefix is decoded and executed.
+  const Case cases[] = {
+      {{-0x1.85f86ap-6f, 0x1.4363e2p-6f, -0x1.467c04p-6f, 0x1.4f5242p-5f}, 0x0p+0f},
+      {{-0x1.8a4898p-6f, 0x1.46f78cp-6f, -0x1.4a187p-6f, 0x1.5307b4p-5f}, 0x1p+0f},
+      {{-0x1.85f86ap-5f, 0x1.4363e2p-5f, -0x1.467c04p-5f, 0x1.4f5242p-4f}, 0x1p+0f},
+      {{-0x1.8a4898p-5f, 0x1.46f78cp-5f, -0x1.4a187p-5f, 0x1.5307b4p-4f}, 0x1p+1f},
+      {{-0x1.85f86ap-4f, 0x1.4363e2p-4f, -0x1.467c04p-4f, 0x1.4f5242p-3f}, 0x1p+1f},
+      {{-0x1.8a4898p-4f, 0x1.46f78cp-4f, -0x1.4a187p-4f, 0x1.5307b4p-3f}, 0x1.8p+1f},
+      {{-0x1.85f86ap-3f, 0x1.4363e2p-3f, -0x1.467c04p-3f, 0x1.4f5242p-2f}, 0x1.8p+1f},
+      {{-0x1.8a4898p-3f, 0x1.46f78cp-3f, -0x1.4a187p-3f, 0x1.5307b4p-2f}, 0x1p+2f},
+      {{-0x1.ff83bep-8f, -0x1.8fff16p-9f, 0x1.6f4b42p-6f, -0x1.e72046p-5f}, 0x0p+0f},
+      {{-0x1.02960ap-7f, -0x1.946ba8p-9f, 0x1.735b3ap-6f, -0x1.ec838ep-5f}, 0x1p+0f},
+      {{-0x1.ff83bep-7f, -0x1.8fff16p-8f, 0x1.6f4b42p-5f, -0x1.e72046p-4f}, 0x1p+0f},
+      {{-0x1.02960ap-6f, -0x1.946ba8p-8f, 0x1.735b3ap-5f, -0x1.ec838ep-4f}, 0x1p+1f},
+      {{-0x1.ff83bep-6f, -0x1.8fff16p-7f, 0x1.6f4b42p-4f, -0x1.e72046p-3f}, 0x1p+1f},
+      {{-0x1.02960ap-5f, -0x1.946ba8p-7f, 0x1.735b3ap-4f, -0x1.ec838ep-3f}, 0x1.8p+1f},
+      {{-0x1.ff83bep-5f, -0x1.8fff16p-6f, 0x1.6f4b42p-3f, -0x1.e72046p-2f}, 0x1.8p+1f},
+      {{-0x1.02960ap-4f, -0x1.946ba8p-6f, 0x1.735b3ap-3f, -0x1.ec838ep-2f}, 0x1p+2f},
+      {{-0x1.982114p-7f, 0x1.46b13ap-7f, 0x1.edf4c2p-11f, -0x1.2bd04ap-4f}, 0x0p+0f},
+      {{-0x1.9ca4acp-7f, 0x1.4a4e3ep-7f, 0x1.f36b5ep-11f, -0x1.2f2132p-4f}, 0x1p+0f},
+      {{-0x1.982114p-6f, 0x1.46b13ap-6f, 0x1.edf4c2p-10f, -0x1.2bd04ap-3f}, 0x1p+0f},
+      {{-0x1.9ca4acp-6f, 0x1.4a4e3ep-6f, 0x1.f36b5ep-10f, -0x1.2f2132p-3f}, 0x1p+1f},
+      {{-0x1.982114p-5f, 0x1.46b13ap-5f, 0x1.edf4c2p-9f, -0x1.2bd04ap-2f}, 0x1p+1f},
+      {{-0x1.9ca4acp-5f, 0x1.4a4e3ep-5f, 0x1.f36b5ep-9f, -0x1.2f2132p-2f}, 0x1.8p+1f},
+      {{-0x1.982114p-4f, 0x1.46b13ap-4f, 0x1.edf4c2p-8f, -0x1.2bd04ap-1f}, 0x1.8p+1f},
+      {{-0x1.9ca4acp-4f, 0x1.4a4e3ep-4f, 0x1.f36b5ep-8f, -0x1.2f2132p-1f}, 0x1p+2f},
+  };
+  wf->set_exec(1);
+  for (const auto &test : cases) {
+    for (uint32_t word = 0; word < 4; ++word)
+      cu->write_vgpr(vb + word, 0, std::bit_cast<uint32_t>(test.gradients[word]));
+    cu->write_vgpr(vb + 4, 0, std::bit_cast<uint32_t>(0.5f));
+    cu->write_vgpr(vb + 5, 0, std::bit_cast<uint32_t>(0.5f));
+    ASSERT_TRUE(sample(SampleTestOperation::Gradients));
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), std::bit_cast<uint32_t>(test.expected));
+  }
+}
+
+TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteInputs) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA and installed SDK omit explicit-LOD forms";
+  Image image;
+  image.width = image.height = 16;
+  image.mip_levels = 4;
+  bind_sample_image(image, true, true);
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch());
+  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  // Independent linear mip-atlas offsets; each mip contains its level number.
+  const std::array<uint32_t, 4> offsets = gfx9 ? std::array<uint32_t, 4>{0, 4096, 6144, 7168}
+                                               : std::array<uint32_t, 4>{3584, 1536, 512, 0};
+  for (uint32_t level = 0; level < 4; ++level)
+    for (uint32_t y = 0; y < (16u >> level); ++y)
+      for (uint32_t x = 0; x < (16u >> level); ++x)
+        memory.write32(kBase + offsets[level] + y * (gfx12 ? 128 : 256) + x * 4,
+                       std::bit_cast<uint32_t>(static_cast<float>(level)));
+  struct Case {
+    bool zero;
+    float lod;
+    int32_t bias;
+    uint32_t minimum;
+    float expected;
+  };
+  // Exact captures on gfx1100/gfx1201. Odd bias distinguishes conversion before
+  // bias from a superficially similar nearest-even conversion after bias.
+  const Case cases[] = {{true, 0, 128, 0, 0.5f},
+                        {false, 1.0f / 512, 0, 0, 0},
+                        {false, 5.0f / 512, 0, 0, 2.0f / 256},
+                        {false, 3.0f / 512, 0, 0, 2.0f / 256},
+                        {false, 1.0f / 512, 1, 0, 1.0f / 256},
+                        {false, -1.0f / 512, 1, 0, 1.0f / 256},
+                        {false, -INFINITY, 256, 0, 0},
+                        {false, INFINITY, -256, 0, 3},
+                        {false, -INFINITY, 0x1fff, 256, 1},
+                        {false, INFINITY, -0x2000, 256, 3},
+                        {false, NAN, 256, 0, 1},
+                        {false, -1.0e30f, 256, 0, 0},
+                        {false, 1.0e30f, -256, 0, 3},
+                        {false, 0, 0, 384, 1.5f}};
+  wf->set_exec(1);
+  for (const Case &test : cases)
+    for (uint32_t mip_filter : {1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << test.zero << ',' << test.lod << ',' << test.bias << ','
+                                      << test.minimum << ',' << mip_filter);
+      bind_sampler(mip_filter << 26, test.bias, test.minimum);
+      cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(0.5f));
+      cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+      cu->write_vgpr(vb + 2, 0, std::bit_cast<uint32_t>(test.lod));
+      ASSERT_TRUE(sample(test.zero ? SampleTestOperation::Zero : SampleTestOperation::Lod));
+      const float expected = mip_filter == 2 ? test.expected : std::floor(test.expected + 0.5f);
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), std::bit_cast<uint32_t>(expected));
+    }
+  // Independent GFX11/12 captures distinguish integer-LOD mip blending.
+  for (uint32_t level = 0; level < 4; ++level)
+    for (uint32_t y = 0; y < (16u >> level); ++y)
+      for (uint32_t x = 0; x < (16u >> level); ++x)
+        memory.write32(kBase + offsets[level] + y * (gfx12 ? 128 : 256) + x * 4, 0x80000000u);
+  for (uint32_t spatial_filter : {0u, 1u})
+    for (uint32_t mip_filter : {1u, 2u})
+      for (float lod : {0.0f, 0.25f, 0.5f, 1.0f, 1.5f, 2.75f, 3.0f}) {
+        bind_sampler((spatial_filter << 20) | (spatial_filter << 22) | (mip_filter << 26));
+        cu->write_vgpr(vb, 0, 0u);
+        cu->write_vgpr(vb + 1, 0, 0u);
+        cu->write_vgpr(vb + 2, 0, std::bit_cast<uint32_t>(lod));
+        ASSERT_TRUE(sample(SampleTestOperation::Lod));
+        const bool blends = mip_filter == 2 && lod != std::floor(lod);
+        EXPECT_EQ(cu->read_vgpr(vb + 8, 0), blends ? 0u : 0x80000000u);
+      }
+  struct BlendCase {
+    uint64_t exec;
+    uint32_t fractional_lane;
+    float lod;
+    uint64_t gfx12_positive;
+    uint64_t other_positive;
+  };
+  // Captured quad contexts: a scalar witness cannot distinguish these rules.
+  const BlendCase blends[] = {{15, 8, 0.25f, 0, 0},
+                              {15, 3, 0.25f, 15, 8},
+                              {7, 3, 0.25f, 0, 0},
+                              {255, 4, 0.25f, 240, 16},
+                              {15, 3, 1.0f + 1.0f / 512, 0, 0},
+                              {15, 3, 3.5f, 0, 0},
+                              {2, 8, 0.25f, 0, 0}};
+  for (uint32_t spatial_filter : {0u, 1u})
+    for (const BlendCase &test : blends) {
+      SCOPED_TRACE(testing::Message()
+                   << test.exec << ',' << test.fractional_lane << ',' << test.lod);
+      wf->set_exec(test.exec);
+      bind_sampler((spatial_filter << 20) | (spatial_filter << 22) | (2u << 26));
+      for (uint32_t lane = 0; lane < 8; ++lane) {
+        cu->write_vgpr(vb, lane, 0u);
+        cu->write_vgpr(vb + 1, lane, 0u);
+        cu->write_vgpr(vb + 2, lane,
+                       std::bit_cast<uint32_t>(lane == test.fractional_lane ? test.lod : 1.0f));
+        cu->write_vgpr(vb + 8, lane, 0xA5A5A5A5u);
+      }
+      ASSERT_TRUE(sample(SampleTestOperation::Lod));
+      for (uint32_t lane = 0; lane < 8; ++lane) {
+        const uint64_t bit = uint64_t{1} << lane;
+        const uint64_t positive = gfx12 ? test.gfx12_positive : test.other_positive;
+        const uint32_t expected = !(test.exec & bit) ? 0xA5A5A5A5u
+                                  : positive & bit   ? 0u
+                                                     : 0x80000000u;
+        EXPECT_EQ(cu->read_vgpr(vb + 8, lane), expected);
+      }
+    }
+}
+
+TEST_P(ImageSamplerControlTest, NullGatherClearsEveryPackedAndUnpackedDestination) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA and installed SDK omit gather forms";
+  wf->set_exec(5);
+  for (bool d16 : {false, true})
+    for (uint32_t invalid : {0u, 1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << d16 << ',' << invalid);
+      Image image;
+      image.width = 2;
+      bind_sample_image(image, false);
+      memory.write32(kBase, 0x11);
+      memory.write32(kBase + 4, 0x33);
+      if (invalid == 0)
+        for (uint32_t word = 0; word < 8; ++word)
+          cu->write_sgpr(sb + word, 0);
+      if (invalid == 1) {
+        cu->write_sgpr(sb + 1, 0);
+      }
+      bind_sampler(0);
+      for (uint32_t lane : {0u, 1u, 2u}) {
+        cu->write_vgpr(vb, lane, std::bit_cast<uint32_t>(0.5f));
+        cu->write_vgpr(vb + 1, lane, std::bit_cast<uint32_t>(0.5f));
+        for (uint32_t reg = 0; reg < 4; ++reg)
+          cu->write_vgpr(vb + 8 + reg, lane, 0xdeadbeef);
+      }
+      ASSERT_TRUE(sample(SampleTestOperation::Gather, d16, invalid == 2 ? 104 : 8));
+      for (uint32_t lane : {0u, 1u, 2u})
+        for (uint32_t reg = 0; reg < 4; ++reg)
+          EXPECT_EQ(cu->read_vgpr(vb + 8 + reg, lane),
+                    lane != 1 && reg < (d16 ? 2u : 4u) ? 0u : 0xdeadbeefu);
+    }
+}
+
+TEST_P(ImageSamplerControlTest, IntegerFilteringIsExplicitlyUnsupportedButPointSamplingWorks) {
+  Image image;
+  image.width = 2;
+  bind_sample_image(image, false);
+  memory.write32(kBase, 1);
+  memory.write32(kBase + 4, 3);
+  wf->set_exec(1);
+  cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(0.5f));
+  cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+  for (uint32_t filter : {0u, (1u << 20) | (1u << 22), 2u << 26}) {
+    bind_sampler(filter);
+    wf->clear_instruction_execution_error();
+    if (filter == 0) {
+      ASSERT_TRUE(sample(SampleTestOperation::Zero));
+      EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 3u);
+    } else {
+      EXPECT_FALSE(sample(SampleTestOperation::Zero));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    }
+  }
+}
+
+TEST_P(ImageSamplerControlTest, ClampedLinearTapsPreserveNegativeZero) {
+  Image image;
+  image.width = 2;
+  bind_sample_image(image);
+  memory.write32(kBase, 0x80000000u);
+  memory.write32(kBase + 4, 0x80000000u);
+  wf->set_exec(1);
+  bind_sampler((1u << 20) | (1u << 22), 0, 0, false);
+  for (float x : {0.0f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f}) {
+    cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(x));
+    cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+    ASSERT_TRUE(sample(SampleTestOperation::Zero));
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), x > 0.5f && x < 1.5f ? 0u : 0x80000000u);
+  }
+  struct Case {
+    uint32_t width;
+    uint32_t wrap;
+    float x;
+    uint32_t expected;
+  };
+  // Captured normalized mirror/repeat edge and distinct-texel controls.
+  const Case cases[] = {{2, 1, 0, 0x80000000u},
+                        {4, 1, 0.05f, 0x80000000u},
+                        {4, 1, 1, 0x80000000u},
+                        {1, 0, 0, 0x80000000u},
+                        {1, 0, -0.3f, 0x80000000u},
+                        {1, 1, 1.3f, 0x80000000u},
+                        {2, 0, 0, 0},
+                        {2, 1, 0.5f, 0},
+                        {2, 6, 0, 0}};
+  for (const Case &test : cases) {
+    SCOPED_TRACE(testing::Message() << test.width << ',' << test.wrap << ',' << test.x);
+    image.width = test.width;
+    bind_sample_image(image);
+    for (uint32_t x = 0; x < image.width; ++x)
+      memory.write32(kBase + x * 4, 0x80000000u);
+    bind_sampler((1u << 20) | (1u << 22));
+    cu->write_sgpr(sb + 8, test.wrap | (2u << 3) | (2u << 6));
+    cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(test.x));
+    cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(0.5f));
+    ASSERT_TRUE(sample(SampleTestOperation::Zero));
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), test.expected);
+  }
+}
+
+TEST_P(ImageSamplerControlTest, UnsupportedSampleFormsReportAnExecutionError) {
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP() << "The public CDNA2 ISA exposes only the base sample form";
+  wf->clear_instruction_execution_error();
+  EXPECT_FALSE(sample(SampleTestOperation::Unsupported));
+  EXPECT_EQ(wf->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
+
+TEST_P(ImageSamplerControlTest, DerivativeMetadataUsesTwoCubeComponents) {
+  if (arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "MIMG DIM encoding on GFX10/GFX11";
+  for (uint32_t dim : {1u, 2u, 3u}) {
+    dimension_override = dim;
+    auto instruction = sample_instruction(SampleTestOperation::Gradients);
+    ASSERT_TRUE(instruction);
+    amdgpu::RegisterModifiers modifiers{};
+    instruction->amdgpu_register_modifiers(modifiers);
+    const uint32_t prefix = dim == 2 ? 6 : 4;
+    const uint32_t coordinates = dim == 1 ? 2 : 3;
+    EXPECT_EQ(modifiers.image_prefix_words, prefix);
+    EXPECT_EQ(modifiers.image_coordinate_count, coordinates);
+    InstDefUse uses(*instruction, 32);
+    for (uint32_t reg = 0; reg < prefix + coordinates; ++reg)
+      EXPECT_TRUE(uses.uses.contains({RegClass::VGPR, static_cast<uint16_t>(reg), 1}));
+    EXPECT_FALSE(
+        uses.uses.contains({RegClass::VGPR, static_cast<uint16_t>(prefix + coordinates), 1}));
+  }
+}
+
+TEST_P(ImageSamplerControlTest, VimageMipTracksItsFifthIndependentSelector) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "VIMAGE is a GFX12 encoding";
+  rdna4::VimageBuilderFields encoding{};
+  encoding.dim = 7;
+  encoding.dmask = 1;
+  encoding.vdata = 8;
+  encoding.rsrc = 0;
+  encoding.vaddr0 = 1;
+  encoding.vaddr1 = 9;
+  encoding.vaddr2 = 16;
+  encoding.vaddr3 = 23;
+  encoding.vaddr4 = 30;
+  const auto words = rdna4::build_vimage(rdna4::kImageLoadMipVimage, encoding);
+  auto decoder = Decoder::create(arch());
+  auto decoded = decoder->decode(words.data());
+  ASSERT_TRUE(decoded.succeeded());
+  amdgpu::RegisterModifiers modifiers{};
+  decoded.value()->amdgpu_register_modifiers(modifiers);
+  EXPECT_EQ(modifiers.image_coordinate_count, 5);
+  for (uint32_t i = 0; i < 5; ++i)
+    EXPECT_EQ(modifiers.image_coordinates[i], (std::array<uint32_t, 5>{1, 9, 16, 23, 30})[i]);
+}
+
+INSTANTIATE_TEST_SUITE_P(Architectures, ImageSamplerControlTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                         ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                                         ROCJITSU_CODE_ARCH_RDNA4));
 
 } // namespace

@@ -6,8 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_sample.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -34,7 +34,9 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
                                     .d16 = bool(inst_.d16),
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
-                                    .unorm = bool(inst_.unorm)})
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false})
           .failed()) {
     return;
   }
@@ -42,8 +44,25 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = true,
+                                    .gather = false})
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -78,7 +97,9 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
                                     .d16 = bool(inst_.d16),
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
-                                    .unorm = bool(inst_.unorm)})
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false})
           .failed()) {
     return;
   }
@@ -88,8 +109,26 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = true,
+                                    .gather = false})
+          .failed()) {
+    return;
+  }
+  amdgpu::capture_buffer_format_store(wf, *d,
+                                      wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -109,59 +148,91 @@ void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false},
+                                   amdgpu::ImageSampleMode::Implicit)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 } // namespace cdna2

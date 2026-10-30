@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+
 #include "util/result.h"
 
 #include <array>
@@ -20,7 +21,7 @@
 
 namespace rocjitsu::amdgpu {
 
-/// @brief Instruction fields controlling image access.
+/// @brief Encoded image access controls and coordinate VGPR selectors.
 struct ImageFields {
   uint32_t dmask = 0;
   uint32_t dim = 0;
@@ -31,18 +32,14 @@ struct ImageFields {
   bool lwe = false;
   bool da = false;
   bool unorm = false;
+  bool mip = false;    ///< The address tuple includes a view-relative mip level.
+  bool gather = false; ///< Return four selected texel components.
 };
 
-/// @brief Prepare IMAGE_LOAD/STORE from a selected mip view for the vector memory pipeline.
-/// @details The descriptor selects format, allocation mip chain, view level, bounds and tiling.
-/// Coordinates may use consecutive or noncontiguous VGPRs. Loads compact the descriptor
-/// selectors by DMASK; RDNA stores scatter packed inputs into shader-component slots and
-/// apply the descriptor's full inverse mapping. D16 packs values into half registers.
-/// Unsupported storage layouts or unqualified store mappings report an execution error.
-inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
-                                         uint32_t resource_reg,
-                                         const ImageAddressRegisters &address_registers,
-                                         ImageFields fields) {
+/// @brief Decode and qualify the descriptor and return its formatted-transfer state.
+inline util::FailureOr<ImageResource> prepare_image_resource(Wavefront &wf, VectorMemState &state,
+                                                             uint32_t resource_reg,
+                                                             ImageFields fields) {
   const auto fail = [&](InstructionExecutionError error) {
     wf.report_instruction_execution_error(error);
     return util::Result::failure();
@@ -58,13 +55,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   state.elem_size = 1;
   state.buffer_d16 = fields.d16;
   state.buffer_components = static_cast<uint32_t>(std::popcount(fields.dmask & 15u));
-  if (fields.r128)
-    return fail(InstructionExecutionError::UnimplementedInstruction);
-  if (fields.tfe || fields.lwe)
-    return fail(InstructionExecutionError::UnimplementedInstruction);
-  if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))
-    return fail(InstructionExecutionError::UnsupportedOperandValue);
-  const auto arch = wf.cu().arch();
+  const rj_code_arch_t arch = wf.cu().arch();
   if (arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
       arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2 &&
       arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
@@ -75,8 +66,12 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                  : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
                                  : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
                                                                     : BufferFormatEncoding::Gfx11;
+  if (fields.r128 || fields.tfe || fields.lwe)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
+  if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))
+    return fail(InstructionExecutionError::UnsupportedOperandValue);
   if (!scalar_selector_range_is_backed(wf, resource_reg, 8))
-    return util::Result::success();
+    return ImageResource{};
 
   std::array<uint32_t, 8> words{};
   for (uint32_t i = 0; i < words.size(); ++i)
@@ -84,7 +79,11 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   const ImageResource resource = decode_image_resource(words, arch);
 
   if (resource.type < kImage1d || resource.data_format == 0)
-    return util::Result::success();
+    return ImageResource{};
+
+  if (resource.compressed || resource.base_level > resource.last_level ||
+      resource.last_level > resource.max_level || resource.max_level >= 17)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
 
   // DMASK packs supplied shader components into consecutive registers (or
   // halves for D16). Loads compact their selectors to produce that tuple.
@@ -103,29 +102,68 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     state.image_store_component_mask = fields.dmask & 15u;
   }
 
-  const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
-  if (resource.type == kImageCube || resource.type > kImage2dArray ||
-      resource.base_level != resource.last_level || resource.last_level > resource.max_level ||
-      resource.compressed || resource.base_array != 0 || resource.array_pitch != 0)
-    return fail(InstructionExecutionError::UnimplementedInstruction);
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
   if (gfx9 && resource.data_format > 15)
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  state.buffer_format =
-      gfx9 ? resource.data_format | (resource.num_format << 4) : resource.data_format;
-  const auto format = prepare_buffer_format_state(state);
+  state.buffer_format = resource.data_format | (resource.num_format << 4);
+  state.image_srgb = false;
+  if (gfx9 && resource.num_format == 9) {
+    state.image_srgb = true;
+    state.buffer_format = resource.data_format; // Decode channels as UNORM first.
+  } else if (!gfx9) {
+    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const uint32_t first_srgb = gfx10 ? 128 : 64;
+    if (resource.data_format >= first_srgb && resource.data_format <= first_srgb + 2) {
+      constexpr std::array<uint32_t, 3> unorm{1, 14, 42};
+      state.image_srgb = true;
+      state.buffer_format = unorm[resource.data_format - first_srgb];
+      if (gfx10 && resource.data_format == first_srgb + 2)
+        state.buffer_format += 14;
+    }
+  }
+  if (state.image_srgb && !state.is_load)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
+  const util::FailureOr<bool> format = prepare_buffer_format_state(state);
   // Buffer decoder failure does not imply an illegal image format: images
   // also support formats such as SRGB that the buffer table does not model.
   if (format.failed())
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!format.value())
-    return util::Result::success();
+    return ImageResource{};
+
   // CDNA2 preserves its legacy compacted-selector acceptance; only RDNA's
   // full-selector/scatter path requires a qualified inverse mapping.
   if (!gfx9 && !state.is_load &&
       !image_store_selectors_supported(state.decoded_buffer_format, descriptor_selectors))
     return fail(InstructionExecutionError::UnimplementedInstruction);
 
+  return resource;
+}
+
+/// @brief Prepare IMAGE_LOAD/STORE with optional view-relative mip operands for the vector memory
+/// pipeline.
+/// @details The descriptor selects format, bounds, row pitch and tiling;
+/// coordinates may come from a consecutive tuple or NSA VGPRs.
+inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
+                                         uint32_t resource_reg, const ImageAddressRegisters &vaddr,
+                                         ImageFields fields) {
+  const auto fail = [&](InstructionExecutionError error) {
+    wf.report_instruction_execution_error(error);
+    return util::Result::failure();
+  };
+  const auto prepared = prepare_image_resource(wf, state, resource_reg, fields);
+  if (prepared.failed())
+    return util::Result::failure();
+  const auto &resource = prepared.value();
+  if (!resource.width)
+    return util::Result::success();
+  const uint64_t exec = wf.exec();
+  const rj_code_arch_t arch = wf.cu().arch();
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch);
+  const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
+  if (resource.type == kImageCube || resource.type > kImage2dArray || resource.compressed ||
+      resource.base_array != 0 || resource.array_pitch != 0)
+    return fail(InstructionExecutionError::UnimplementedInstruction);
   // Execution consumes the spatial prefix selected by the resource type,
   // which can be shorter than the DIM-encoded coordinate list. The compatibility
   // checks below require DIM to supply enough coordinates, not an equal count;
@@ -170,13 +208,17 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     if (dim_spatial_coordinates < resource_spatial_coordinates || dim_coordinates < coordinates)
       return fail(InstructionExecutionError::UnimplementedInstruction);
   }
-  const uint32_t address_words = fields.a16 ? (coordinates + 1) / 2 : coordinates;
-  for (uint32_t word = 0; word < address_words; ++word)
-    if (address_registers[word] >= wf.num_vgprs())
+  const uint32_t mip_coordinate = gfx9 ? coordinates : image_coordinate_count(fields.dim);
+  const uint32_t inputs = fields.mip ? mip_coordinate + 1 : coordinates;
+  const uint32_t registers = fields.a16 ? (inputs + 1) / 2 : inputs;
+  for (uint32_t i = 0; i < registers; ++i)
+    if (vaddr[i] >= wf.num_vgprs())
       return fail(InstructionExecutionError::UnsupportedOperandValue);
+  RegisterAccess regs(wf);
+  const uint32_t depth = layered || resource.type == kImage3d ? resource.depth : 1;
   const ImageLayout layout{.width = resource.width,
                            .height = has_y ? resource.height : 1u,
-                           .depth = layered || resource.type == kImage3d ? resource.depth : 1u,
+                           .depth = depth,
                            .pitch = resource.pitch,
                            .element_bytes = state.elem_size,
                            .swizzle_mode = resource.swizzle_mode,
@@ -184,33 +226,42 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
                                          : has_y                   ? 2u
                                                                    : 1u,
                            .mip_levels = resource.max_level + 1};
-  const auto addressing =
+  std::array<std::optional<ImageAddressing>, 17> addresses;
+  addresses[resource.base_level] =
       ImageAddressing::prepare(wf.cu().image_address_config(), layout, resource.base_level);
-  if (!addressing || !addressing->has_supported_base(resource.base))
+  if (!addresses[resource.base_level] ||
+      !addresses[resource.base_level]->has_supported_base(resource.base))
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  RegisterAccess regs(wf);
-  std::array<std::array<uint32_t, 64>, 3> addresses{};
-  for (uint32_t word = 0; word < address_words; ++word) {
-    const auto values =
-        regs.read_vgpr_region(wf.vgpr_alloc().base + address_registers[word], 1, exec);
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      if (exec & (uint64_t{1} << lane))
-        addresses[word][lane] = values.lane(0, lane);
-  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (uint64_t{1} << lane)))
       continue;
-    std::array<uint32_t, 3> coords{};
-    for (uint32_t i = 0; i < coordinates; ++i)
+    std::array<uint32_t, 4> coords{};
+    for (uint32_t i = 0; i < inputs; ++i)
       coords[i] =
-          fields.a16 ? (addresses[i / 2][lane] >> (16 * (i % 2))) & 0xffffu : addresses[i][lane];
+          fields.a16
+              ? (regs.read_vgpr(wf.vgpr_alloc().base + vaddr[i / 2], lane) >> (16 * (i % 2))) &
+                    0xffffu
+              : regs.read_vgpr(wf.vgpr_alloc().base + vaddr[i], lane);
     const uint32_t x = coords[0];
     const uint32_t y = has_y ? coords[1] : 0;
     const uint32_t slice = has_slice ? coords[slice_coordinate] : 0;
-    if (!addressing->contains(x, y, slice))
+    const uint64_t level64 =
+        uint64_t{resource.base_level} + (fields.mip ? coords[mip_coordinate] : 0);
+    if (level64 > resource.last_level)
       continue;
-    state.per_lane_addr[lane] =
-        addr_calc::buffer_virtual_address(resource.base + addressing->byte_offset(x, y, slice));
+    const uint32_t level = level64;
+    if (level > resource.last_level || x >= std::max(1u, resource.width >> level) ||
+        y >= std::max(1u, resource.height >> level) ||
+        slice >= (resource.type == kImage3d ? std::max(1u, depth >> level) : depth))
+      continue;
+    if (!addresses[level])
+      addresses[level] = ImageAddressing::prepare(wf.cu().image_address_config(), layout, level);
+    if (!addresses[level])
+      return fail(InstructionExecutionError::UnimplementedInstruction);
+    if (!addresses[level]->contains(x, y, slice))
+      continue;
+    const uint64_t offset = addresses[level]->byte_offset(x, y, slice);
+    state.per_lane_addr[lane] = addr_calc::buffer_virtual_address(resource.base + offset);
     state.lane_mask |= uint64_t{1} << lane;
   }
   return util::Result::success();

@@ -546,7 +546,7 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
       {{{0xD0430000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
        "image_atomic_add_uint v0, s[0:7] th:TH_ATOMIC_NT_RETURN scope:SCOPE_SYS"},
       {{{0xE446C000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_sample v0, s[0:7], s[0:3] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
+       "image_sample v0, v0, s[0:7], s[0:3] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);

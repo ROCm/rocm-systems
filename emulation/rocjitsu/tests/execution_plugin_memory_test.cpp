@@ -824,6 +824,75 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   EXPECT_EQ(access.unknown_lane_mask, 0b1010u);
 }
 
+TEST(RoutedMemoryObservationTest, DecodedImageSampleReportsEveryFilteredTexelOnce) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna4", 32, 128));
+  PluginSinkConfig sink_config;
+  sink_config.emplace<StringSink>();
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto observation = std::make_unique<MemoryObservationPlugin>();
+  auto *plugin = observation.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(observation)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  auto *cu = fixture.cu();
+  auto *wave = cu->dispatch_wf(0, 0x320, 128, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  constexpr uint64_t base = 0x10000;
+  std::array<uint32_t, 8> resource{};
+  util::insert_bits_into_words<uint32_t>(resource.data(), 0, 32, base >> 8);
+  util::insert_bits_into_words<uint32_t>(resource.data(), 49, 8, 22); // FMT_32_FLOAT.
+  util::insert_bits_into_words<uint32_t>(resource.data(), 62, 16, 3);
+  util::insert_bits_into_words<uint32_t>(resource.data(), 78, 16, 3);
+  util::insert_bits_into_words<uint32_t>(resource.data(), 96, 12,
+                                         4 | (5 << 3) | (6 << 6) | (7 << 9));
+  util::insert_bits_into_words<uint32_t>(resource.data(), 124, 4, 9); // IMAGE_2D.
+  util::insert_bits_into_words<uint32_t>(resource.data(), 128, 14, 63);
+  for (uint32_t i = 0; i < resource.size(); ++i)
+    cu->write_sgpr(wave->sgpr_alloc().base + i, resource[i]);
+  const std::array<uint32_t, 4> sampler{2 | (2 << 3) | (2 << 6) | (1 << 15), 0,
+                                        (1 << 20) | (1 << 22), 0};
+  for (uint32_t i = 0; i < sampler.size(); ++i)
+    cu->write_sgpr(wave->sgpr_alloc().base + 8 + i, sampler[i]);
+  const auto vb = wave->vgpr_alloc().base;
+  cu->write_vgpr(vb, 0, std::bit_cast<uint32_t>(1.f));
+  cu->write_vgpr(vb + 1, 0, std::bit_cast<uint32_t>(1.f));
+  cu->write_vgpr(vb + 8, 1, 0xdeadbeef);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto words = rdna4::build_vsample(rdna4::kImageSampleLzVsample, {.dim = 1,
+                                                                         .unorm = 1,
+                                                                         .dmask = 1,
+                                                                         .vdata = 8,
+                                                                         .rsrc = 0,
+                                                                         .samp = 8,
+                                                                         .vaddr0 = 0,
+                                                                         .vaddr1 = 1});
+  auto decoded = decoder->decode(words.data());
+  ASSERT_TRUE(decoded.succeeded());
+  auto inst = std::move(decoded).value();
+  ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+  ASSERT_EQ(plugin->accesses.size(), 1u);
+  const auto &access = plugin->accesses.front();
+  EXPECT_TRUE(access.addresses.empty());
+  ASSERT_EQ(access.image_footprints.size(), 4u);
+  EXPECT_EQ(access.image_footprint_masks, (std::vector<uint64_t>{1, 1, 1, 1}));
+  for (uint32_t i = 0; i < 4; ++i) {
+    ASSERT_EQ(access.image_footprints[i].size(), 32u);
+    EXPECT_EQ(access.image_footprints[i][0] % 4, 0u);
+    for (uint32_t earlier = 0; earlier < i; ++earlier)
+      EXPECT_NE(access.image_footprints[i][0], access.image_footprints[earlier][0]);
+  }
+  EXPECT_EQ(access.image_footprints[0][0], base);
+  EXPECT_EQ(access.image_footprints[1][0], base + 4);
+  EXPECT_EQ(access.image_footprints[3][0], access.image_footprints[2][0] + 4);
+  EXPECT_EQ(access.issued_counters, (std::vector<WaitCounterType>{WaitCounterType::SAMPLECNT}));
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
+  EXPECT_TRUE(wave->wait_counters().empty());
+  wave->halt();
+}
+
 TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPrefixes) {
   using namespace rocjitsu::plugins::race_detector;
   PluginFixture fixture;
