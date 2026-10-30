@@ -10,7 +10,7 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
-// The initial consumer is FP64 FMA; keep its format explicit.
+// IEEE binary64 fields shared by finite ADD, MUL and FMA rounding.
 struct FmaF64Format {
   using Bits = uint64_t;
   static constexpr int fraction = 52, bias = 1023;
