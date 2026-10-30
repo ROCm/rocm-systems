@@ -65,21 +65,22 @@ class AmdGpuCodeObject;
 class BasicBlock;
 class Decoder;
 class Instruction;
+class LivenessAnalysis;
 
 /// @brief Where the instrumentation should attach relative to the anchor.
 ///
 /// Internal enum mirroring the future public `rj_code_instrument_kind_t`.
-/// The inline-nop smoke build only supports BeforeInst; the other values are
-/// placeholders so the descriptor evolves into the Section 2 probe shape
-/// without renaming.
-///
-/// TODO: implement AfterInst, BlockEntry, and BlockExit.
-/// Today the validator rejects any kind other than BeforeInst.
+/// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
+/// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
+/// boundary kinds require a callable probe. AfterInst, BlockEntry, and BlockExit
+/// remain reserved and are rejected.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
   BlockEntry,
   BlockExit,
+  KernelEntry,
+  KernelExit,
 };
 
 /// @brief A request to instrument one site.
@@ -109,7 +110,7 @@ struct InstrumentationPoint {
   // not to this point, which is only the channel the declaration arrives
   // through until a probe descriptor carries it. Two points
   // naming one probe and describing it differently is an error, not two probes.
-  // Only the immediate values are per-site.
+  // Immediate values and the source indices of guest-register arguments are per-site.
   std::vector<ProbeArgValue> probe_args;
   // Run the probe body with every lane enabled rather than under the mask the
   // guest had at the anchor. For a uniform probe whose work does not depend on
@@ -136,9 +137,9 @@ struct ResolvedInstrumentationSite {
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
 
-  // Argument values for this site, copied from the request. Only the immediates
-  // are genuinely per-site: two sites can call one probe body with different
-  // constants. The shape they must conform to, and the mask policy, live on the
+  // Argument values for this site, copied from the request. Constants and guest
+  // register indices may differ between sites calling one body. The source
+  // shape they must conform to, and the mask policy, live on the
   // ProbeCallable that probe_index names.
   std::vector<ProbeArgValue> probe_args;
 
@@ -155,7 +156,8 @@ struct InstrumentationPatch {
   uint64_t anchor_offset;
   uint32_t original_size;
   uint64_t trampoline_offset; // .text-relative.
-  uint64_t return_target;
+  /// Target of the emitted return branch; absent for terminal callbacks.
+  std::optional<uint64_t> return_target;
   std::vector<uint8_t> original_bytes;
   std::vector<uint8_t> patched_anchor_bytes;
 
@@ -167,15 +169,51 @@ struct InstrumentationPatch {
   uint16_t target_pair_base = 0;    // dead pair holding the materialized address.
 };
 
-/// @brief Result of Instrumentor::patch().
-///
-/// All-or-nothing: when any fatal error occurs, `elf_bytes` is empty and
-/// `errors` is non-empty. On success, `errors` is empty and `elf_bytes`
-/// contains a re-parseable patched ELF.
+/// @brief Production attribution from an original anchor to its emitted bytes.
+/// @details Offsets are relative to .text. KernelEntry has no relocated guest
+/// instruction, so guest_size is zero and guest_offset names its return branch.
+struct InstrumentedSite {
+  InstrumentationKind kind = InstrumentationKind::BeforeInst;
+  uint64_t original_offset = 0;
+  uint64_t guest_offset = 0;
+  uint32_t guest_size = 0;
+  uint64_t instrumentation_offset = 0;
+  uint32_t instrumentation_size = 0;
+};
+
+/// @brief Original SGPR/VGPR metadata counts needed to request register growth.
+struct OriginalRegisterCounts {
+  uint32_t sgprs = 0;
+  uint32_t vgprs = 0;
+};
+
+struct InstrumentationResources {
+  uint32_t sgprs = 0;
+  uint32_t vgprs = 0;
+  uint32_t kernarg_bytes = 0;
+};
+
+/// @brief All-or-nothing result: failures publish neither ELF bytes nor sites.
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
   std::vector<std::string> warnings;
+  std::vector<InstrumentedSite> sites;
+  InstrumentationResources resources;
+};
+
+/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
+enum class DbiKernargBinding { None, CallerSuppliedWrapper };
+/// @brief Whether growth preserves live values or every originally declared GPR.
+enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+
+struct InstrumentationOptions {
+  DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
+  GuestStatePreservation preservation = GuestStatePreservation::LiveRegisters;
+  /// Original SGPR/VGPR metadata counts, already qualified by the consumer. Requests
+  /// register-to-register preservation and bounded allocation growth; absent
+  /// means the existing allocation/scratch policy.
+  std::optional<OriginalRegisterCounts> register_growth;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
@@ -221,7 +259,9 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
-///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
+///   - @p pt.kind is BeforeInst, KernelEntry, or KernelExit. Boundaries require
+///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
+///     that KernelEntry names the sole kernel's descriptor entry.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
 ///   - @p pt.probe_args is empty without a probe: an inline-nop site has
@@ -248,7 +288,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// One of several places where temporary constraints are enforced. The others:
 /// validate_anchor() rejects a non-zero `filter_flags`, the only
 /// InstrumentationPoint field still reserved, and any `kind` other than
-/// BeforeInst; Instrumentor::patch() rejects multi-text code objects. This one
+/// BeforeInst on the inline-nop path; Instrumentor::patch() rejects multi-text
+/// code objects. This one
 /// lives at the orchestrator boundary rather than inside TrampolineBuilder so
 /// the builder stays generic.
 /// Called by Instrumentor::patch() as a defense-check (make sure users/agents
@@ -362,9 +403,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// is possible that it does not own the registers even if they look dead from
 /// liveness. This coarse gate fails such a kernel closed early.
 ///
-/// NOTE: this exists only because the link pair is hardcoded and the kernel
-/// must be built padded up to it. Remove once the link pair is chosen from dead
-/// registers within the kernel's real allocation (SGPR auto-grow).
+/// With explicit register growth, the orchestrator first widens the allocation
+/// to include this fixed pair. Otherwise the original allocation must own it.
 [[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
                                                             uint16_t link_base) {
   return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
@@ -376,9 +416,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// The same coarse ownership question as probe_link_pair_fits_in_kernel, for the
 /// other set of registers the ABI fixes rather than picks. An index at or past
 /// the bound is either unallocated or aliases an AGPR, and the envelope would
-/// write it before the call. Renaming the probe's argument registers would mean
-/// rewriting the probe body, and growing the allocation is deferred, so a site
-/// that does not fit fails closed.
+/// write it before the call. The orchestrator may explicitly grow the allocation;
+/// otherwise a site that does not fit fails closed.
 ///
 /// An @p abi passing no arguments always fits.
 [[nodiscard]] constexpr bool probe_args_fit_in_kernel(uint32_t ordinary_vgpr_bound,
@@ -408,7 +447,8 @@ public:
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
   ///             validate_points() / patch() time rather than at construction.
-  Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch);
+  Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+               InstrumentationOptions options = {});
   ~Instrumentor();
 
   Instrumentor(const Instrumentor &) = delete;
@@ -448,9 +488,9 @@ public:
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
   ///
-  /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
-  /// prologue those need loads through a kernarg wrapper that no runtime builds
-  /// yet.
+  /// Entry-storage arguments require CallerSuppliedWrapper. The caller must
+  /// bind that wrapper for every instrumented dispatch. Resource edits require
+  /// an existing supported AMDHSA metadata note.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
@@ -466,19 +506,20 @@ public:
 private:
   const AmdGpuCodeObject &obj_;
   rj_code_arch_t arch_;
+  InstrumentationOptions options_;
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
 
-  // The patch gates refuse points that need runtime support no runtime provides
-  // yet. Tests skip them through the InstrumentorTestAccess friend to exercise
-  // the gated path, whether or not they provide that support themselves; the
-  // planner's checks after the gates still run. Production callers cannot skip.
+  // Tests can bypass runtime-binding gates to inspect a plan or supply their own
+  // dispatch support. Planner validation still runs; production callers cannot
+  // bypass the gates.
   friend struct InstrumentorTestAccess;
   bool skip_patch_gates_ = false;
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
+  std::unique_ptr<LivenessAnalysis> liveness_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
@@ -493,6 +534,9 @@ private:
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
+  [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
+                                           std::span<const KernelDescriptorInfo> kernels,
+                                           std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
@@ -500,9 +544,10 @@ private:
   // one of the caller's points: it exists because a probe asked for the
   // framework's entry storage, and it is what defines that storage.
   struct EntryProloguePatch {
-    uint64_t padding_bytes = 0;  ///< s_nop fill ahead of the stub, for entry alignment.
-    uint64_t stub_offset = 0;    ///< .text offset the descriptor enters at.
-    uint16_t storage_base = 0;   ///< Persistent pair every later site reads.
+    uint64_t padding_bytes = 0;           ///< s_nop fill ahead of the stub, for entry alignment.
+    uint64_t stub_offset = 0;             ///< .text offset the descriptor enters at.
+    std::optional<uint16_t> storage_base; ///< Persistent pair, when context is requested.
+    std::vector<EntryVgprCapture> captured_vgprs;
     std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
   };
 
@@ -520,6 +565,10 @@ private:
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<ProbeCallable> probes;
     std::vector<std::string> errors;
+    // The object's kernel descriptors and the wave size they share. A probe-call
+    // site is resolved only when there is at least one kernel and one wave size.
+    std::vector<KernelDescriptorInfo> kernels;
+    std::optional<uint8_t> wave_size;
   };
 
   // Validate and resolve every queued point in one pass.

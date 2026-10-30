@@ -3319,6 +3319,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroStrongstream",
                        "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroTransport",
                        "rccl-UnitTestsMicroUtils",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
