@@ -1422,9 +1422,9 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// is the hwmon pwm1 duty cycle, whose maximum is AMDSMI_MAX_FAN_SPEED (255). On GPUs with the
+/// gpu_od sysfs interface, the range accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od
+/// OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -1482,8 +1482,9 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
+/// This is the hwmon pwm1_max ceiling, AMDSMI_MAX_FAN_SPEED (255), and pairs with
+/// `amdsmi_get_gpu_fan_speed()`. On GPUs with the gpu_od sysfs interface, the range accepted by
+/// `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -4007,29 +4008,42 @@ pub fn amdsmi_get_gpu_available_counters(
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_info` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_info` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusInsufficientSize`] when processes keep starting through three attempts.
 pub fn amdsmi_get_gpu_compute_process_info() -> AmdsmiResult<(Vec<AmdsmiProcessInfoT>, u32)> {
-    let mut num_items: u32 = 0;
+    // A process that starts between the count and the read makes the read
+    // return INSUFFICIENT_SIZE; count again, as the Python API does. Processes
+    // that keep starting make the call fail after COUNT_ATTEMPTS.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_items: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
+            std::ptr::null_mut(),
+            &mut num_items
+        ));
 
-    // First call to get the number of items
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
-        std::ptr::null_mut(),
-        &mut num_items
-    ));
-
-    let mut procs: Vec<AmdsmiProcessInfoT> = Vec::with_capacity(num_items as usize);
-
-    // Second call to get the actual process information. It lowers num_items
-    // when processes exited after the count, and returns INSUFFICIENT_SIZE
-    // instead of raising it, so set_len() stays within the capacity.
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(
-        procs.as_mut_ptr(),
-        &mut num_items
-    ));
-
-    unsafe { procs.set_len(num_items as usize) };
-
-    Ok((procs, num_items))
+        let mut procs: Vec<AmdsmiProcessInfoT> = Vec::with_capacity(num_items as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_compute_process_info(procs.as_mut_ptr(), &mut num_items)
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_items as usize <= procs.capacity());
+                // SAFETY: the library writes at most the capacity passed in
+                // num_items, and on success sets num_items to the number of
+                // records it wrote (lower when processes exited after the
+                // count). So the first num_items records are within the
+                // capacity and initialized.
+                unsafe { procs.set_len(num_items as usize) };
+                return Ok((procs, num_items));
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the GPU compute process information by PID.
@@ -4122,24 +4136,45 @@ pub fn amdsmi_get_gpu_compute_process_info_by_pid(pid: u32) -> AmdsmiResult<Amds
 ///
 /// # Errors
 ///
-/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus` call fails.
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus` call fails,
+/// including [`AmdsmiStatusT::AmdsmiStatusInsufficientSize`] when the process keeps adding GPUs through three attempts.
 pub fn amdsmi_get_gpu_compute_process_gpus(pid: u32) -> AmdsmiResult<Vec<u32>> {
-    let mut num_devices: u32 = 0;
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
-        pid,
-        std::ptr::null_mut(),
-        &mut num_devices
-    ));
+    // As in amdsmi_get_gpu_compute_process_info(), count again when the process
+    // starts using another GPU between the count and the read.
+    const COUNT_ATTEMPTS: u32 = 3;
+    let mut attempt = 1;
+    loop {
+        let mut num_devices: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
+            pid,
+            std::ptr::null_mut(),
+            &mut num_devices
+        ));
 
-    let mut devices: Vec<u32> = Vec::with_capacity(num_devices as usize);
-    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
-        pid,
-        devices.as_mut_ptr(),
-        &mut num_devices
-    ));
-    unsafe { devices.set_len(num_devices as usize) };
-
-    Ok(devices)
+        let mut devices: Vec<u32> = Vec::with_capacity(num_devices as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_gpu_compute_process_gpus(
+                pid,
+                devices.as_mut_ptr(),
+                &mut num_devices,
+            )
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                debug_assert!(num_devices as usize <= devices.capacity());
+                // SAFETY: the library writes at most the capacity passed in
+                // num_devices, and on success sets num_devices to the number of
+                // indices it wrote. So the first num_devices indices are within
+                // the capacity and initialized.
+                unsafe { devices.set_len(num_devices as usize) };
+                return Ok(devices);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize if attempt < COUNT_ATTEMPTS => {
+                attempt += 1;
+            }
+            _ => return Err(status),
+        }
+    }
 }
 
 /// Get the XGMI error status of the device with the specified processor handle.
@@ -6259,6 +6294,121 @@ pub fn amdsmi_get_link_topology(
     ));
     let topology_info = unsafe { topology_info.assume_init() };
     Ok(topology_info)
+}
+
+/// Retrieves the CUID of the GPU or GPU partition with the specified processor handle.
+///
+/// The derived CUID names the component without disclosing its serial and is the value to
+/// record. The primary CUID is empty unless the caller is root. A temporary CUID has
+/// `auxiliary` set; do not record it alongside canonical CUIDs.
+///
+/// # Arguments
+///
+/// * `processor_handle` - A handle to the processor for which the CUID is being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiCuidInfoT>` - Returns `Ok(AmdsmiCuidInfoT)` containing the [`AmdsmiCuidInfoT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///
+///     match amdsmi_get_gpu_cuid_info(processor_handle) {
+///         Ok(info) => println!(
+///             "CUID: {} source: {:?} temporary: {}",
+///             info.derived(),
+///             info.source,
+///             info.auxiliary != 0
+///         ),
+///         Err(e) => panic!("Failed to get the CUID: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_gpu_cuid_info` call fails.
+pub fn amdsmi_get_gpu_cuid_info(
+    processor_handle: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiCuidInfoT> {
+    let mut info = MaybeUninit::<AmdsmiCuidInfoT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_gpu_cuid_info(
+        processor_handle,
+        info.as_mut_ptr()
+    ));
+    let info = unsafe { info.assume_init() };
+    Ok(info)
+}
+
+/// Lists every component on the node that has a CUID.
+///
+/// Covers the platform, each CPU package, each AMD GPU or GPU partition, each NPU and each NIC
+/// function, ordered by component type, then BDF, then device path. No processor handle is
+/// needed, so components amd-smi does not manage are included.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiCuidComponentT>>` - Returns `Ok(Vec<AmdsmiCuidComponentT>)` containing the list of [`AmdsmiCuidComponentT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     match amdsmi_get_cuid_components() {
+///         Ok(components) => {
+///             for component in components {
+///                 println!(
+///                     "{:?} {} {}",
+///                     component.info.component_type,
+///                     component.bdf(),
+///                     component.info.derived()
+///                 );
+///             }
+///         }
+///         Err(e) => println!("Failed to list the CUID components: {}", e),
+///     }
+/// #
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_cuid_components` call fails.
+pub fn amdsmi_get_cuid_components() -> AmdsmiResult<Vec<AmdsmiCuidComponentT>> {
+    loop {
+        let mut count: u32 = 0;
+        call_unsafe!(amdsmi_wrapper::amdsmi_get_cuid_components(
+            &mut count,
+            null_mut()
+        ));
+
+        let mut components = Vec::<AmdsmiCuidComponentT>::with_capacity(count as usize);
+        let status = unsafe {
+            amdsmi_wrapper::amdsmi_get_cuid_components(&mut count, components.as_mut_ptr())
+        };
+        match status {
+            AmdsmiStatusT::AmdsmiStatusSuccess => {
+                unsafe { components.set_len(count as usize) };
+                return Ok(components);
+            }
+            AmdsmiStatusT::AmdsmiStatusInsufficientSize => continue,
+            _ => return Err(status),
+        }
+    }
 }
 
 /// A macro to get all the GPU processor handles directly.

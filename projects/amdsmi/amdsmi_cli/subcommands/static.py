@@ -121,6 +121,8 @@ class StaticCommands:
         profile=None,
         mem_carveout=None,
         ampp=None,
+        cuid=None,
+        cuid_primary=None,
     ):
         """Get Static information for target gpu
 
@@ -147,6 +149,9 @@ class StaticCommands:
             soc_pstate (bool, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -155,6 +160,15 @@ class StaticCommands:
             args.gpu = gpu
         if asic:
             args.asic = asic
+        if cuid:
+            args.cuid = cuid
+        if cuid_primary:
+            args.cuid_primary = cuid_primary
+        if getattr(args, "cuid_primary", False):
+            # --cuid-primary selects a field of the CUID block, so asking for it
+            # asks for the block. Without this it is a no-op alongside any other
+            # flag.
+            args.cuid = True
         if bus:
             args.bus = bus
         if vbios:
@@ -227,6 +241,16 @@ class StaticCommands:
         if args.partition:
             current_platform_args += ["partition"]
             current_platform_values += [args.partition]
+
+        # Note: CUID is a special case for the same reason, and is not an
+        # amd-smi static default argument either.
+        # Reason: it changes the shape of the default output for every existing
+        #         consumer of `amd-smi static --json`, and on a build without
+        #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
+        #         --cuid or --cuid-primary.
+        if getattr(args, "cuid", False):
+            current_platform_args += ["cuid"]
+            current_platform_values += [args.cuid]
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -316,6 +340,10 @@ class StaticCommands:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict["asic"] = asic_dict
+        if getattr(args, "cuid", False):
+            static_dict["cuid"] = self.helpers.get_gpu_cuid_info(
+                args.gpu, include_primary=getattr(args, "cuid_primary", False)
+            )
         if args.bus:
             bus_info = {
                 "bdf": "N/A",
@@ -685,7 +713,7 @@ class StaticCommands:
             try:
                 driver_info = amdsmi_interface.amdsmi_get_gpu_driver_info(args.gpu)
                 driver_info_dict["name"] = driver_info["driver_name"]
-                driver_info_dict["version"] = driver_info["driver_full_version"]
+                driver_info_dict["version"] = driver_info["driver_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
                     "Failed to get driver info for gpu %s | %s", gpu_id, e.get_error_info()

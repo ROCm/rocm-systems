@@ -20,6 +20,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
@@ -184,9 +185,10 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
            static_cast<uint32_t>(bdf.device_number & 0x1f),
            static_cast<uint32_t>(bdf.function_number & 0x7));
 
-  std::string path = "/proc/" + std::to_string(pid) + "/fdinfo/";
-  std::string name_path = "/proc/" + std::to_string(pid) + "/exe";
-  std::string cgroup_path = "/proc/" + std::to_string(pid) + "/cgroup";
+  const std::string pid_dir = smi_amdgpu_proc_root() + std::to_string(pid);
+  std::string path = pid_dir + "/fdinfo/";
+  std::string name_path = pid_dir + "/exe";
+  std::string cgroup_path = pid_dir + "/cgroup";
 
   amdsmi_status_t ret = gpu_is_in_kfd_pid(bdf, pid, kfd_gpu_id);
 

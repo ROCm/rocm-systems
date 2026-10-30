@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -488,28 +487,6 @@ rsmi_status_t rsmi_shut_down(void) {
 
   if (smi.ref_count() == 0) {
     return RSMI_STATUS_INIT_ERROR;
-  }
-
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
   }
 
   (void)smi.ref_count_dec();
@@ -3867,19 +3844,8 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
-  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t current_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
-    if (parse_ret == 0) {
-      *speed = static_cast<int64_t>(current_pwm);
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // hwmon pwm1 is the running fan duty cycle. The gpu_od fan_minimum_pwm node is
+  // only a user-set curve floor (0 by default), so it must not be read here.
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
@@ -4024,20 +3990,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
-  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t od_min_pwm = 0;
-    uint64_t od_max_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
-    if (parse_ret == 0) {
-      *max_speed = od_max_pwm;
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // Pair with rsmi_dev_fan_speed_get: the running duty cycle comes from hwmon
+  // pwm1, so its max must be hwmon pwm1_max, not the gpu_od OD_RANGE limit.
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 
@@ -5389,14 +5343,6 @@ rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group
   CATCH
 }
 
-// Whether a GetProcessInfoForPID() error means that the process exited during
-// the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
-// error once the directory is gone). In a PID namespace other than the initial
-// one, ESRCH means that no process pid of that namespace has /dev/kfd open.
-static bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
-  return err == ESRCH || err == ENODEV || (err != 0 && !amd::smi::KfdProcessExists(pid));
-}
-
 rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t* procs, uint32_t* num_items) {
   TRY
 
@@ -5434,14 +5380,12 @@ rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t* procs, uint32_t
       // Non-fatal: if a process exited between enumeration and info
       // collection, zero-fill stats but keep process_id.
       // cu_occupancy uses KFD_STATS_INVALID to signal N/A.
-      if (KfdProcessExitedDuringRead(pid, proc_err_code)) {
+      if (amd::smi::KfdProcessExitedDuringRead(pid, proc_err_code)) {
         procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
         // Still running but unreadable: keep it with every stat not available,
         // as the amdsmi process list does.
-        procs[i] = rsmi_process_info_t{pid, std::numeric_limits<uint64_t>::max(),
-                                       std::numeric_limits<uint64_t>::max(), KFD_STATS_INVALID,
-                                       KFD_STATS_INVALID};
+        procs[i] = amd::smi::MakeUnavailableProcessInfo(pid);
       }
     }
   }
@@ -5598,8 +5542,8 @@ rsmi_status_t rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_in
   int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
-    return KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
-                                                : amd::smi::ErrnoToRsmiStatus(err);
+    return amd::smi::KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
+                                                          : amd::smi::ErrnoToRsmiStatus(err);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -5618,8 +5562,8 @@ rsmi_status_t rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_
   int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
-    return KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
-                                                : amd::smi::ErrnoToRsmiStatus(err);
+    return amd::smi::KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
+                                                          : amd::smi::ErrnoToRsmiStatus(err);
   }
 
   return RSMI_STATUS_SUCCESS;

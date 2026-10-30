@@ -38,7 +38,7 @@ namespace CeMPITestConstants
 constexpr size_t kSmallCount      = 4096;   // elements per rank for fast tests
 constexpr size_t kMediumCount     = 65536;  // elements per rank for larger tests
 // Total AllReduce message size that forces the CE multi-chunk pipeline. A shard
-// spills past one staging slot once the message exceeds NCCL_CE_AR_MAX_MSG_BYTES
+// spills past one staging slot once the message exceeds RCCL_CE_AR_2SHOT_MAX_BYTES
 // (256 MiB); 512 MiB yields >= 4 chunks per shard at every rank count, plus a
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
@@ -48,8 +48,10 @@ constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
 constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
 constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
 constexpr int    kCeOnlyIters      = 3;     // first call is CE registered, later ones CE 2-shot once ceARTmpBuf exists
-// A shard spans 8 default staging slots (128 MiB / nRanks vs 16 MiB / nRanks), so the CE pipeline must run.
-constexpr size_t kCeOnlyMinChunksPerShard = 2;
+// Staging pinned to 16 MiB in CeMPI_AllReduce::SetUp so 128 MiB / nRanks shard always spills its
+// slot (16 MiB / nRanks). At any rank count chunksPerShard >= 4; require >= 4 to catch single-shot
+// regressions. Must be set before the suite's first ncclCeInit: RCCL_PARAM latches forever.
+constexpr size_t kCeOnlyMinChunksPerShard = 4;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -112,12 +114,12 @@ protected:
         debugGuard_.reset();
     }
 
-    // Returns true when all CE prerequisites are met (driver + env vars).
+    // Returns true when all CE prerequisites are met (driver + env vars + the comm's symmetric memory).
     // Delegates to isCeDispatchConfigured() in CeTestHelpers.hpp — the single
     // source of truth shared with CeInternalMPITests.cpp.
     // Hierarchical CE (multi-node) only implements AllGather, AlltoAll and AlltoAllv; Scatter,
     // Gather, and AllReduce fall back to SM kernels when nNodes > 1.
-    virtual bool isCeExpected() const { return isCeDispatchConfigured(); }
+    virtual bool isCeExpected() const { return isCeDispatchConfigured(test_comm_); }
 
     // CE log markers: "Init CE" = CE initialised; "CE: rank" = CE path taken for a collective.
     enum class CeLogStatus { Taken, InitOnlyNoOp, NotInitialized };
@@ -272,7 +274,7 @@ protected:
     bool isCeAllReduceExpected() const
     {
         // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        return isCeAllReduceDispatchConfigured(test_comm_) && !isMultiNodeTest();
     }
 
     void assertCEAllReducePathTaken(const char* context)
@@ -526,7 +528,7 @@ protected:
 
         // DDA IPC claims AlltoAll on gfx942/950 only once nRanks >= 8. Smaller
         // communicators still take the CE path even when RCCL_DDA_ENABLE is left on.
-        if(isCeDispatchConfigured() && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
+        if(isCeDispatchConfigured(getActiveCommunicator()) && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
             GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
 
         const size_t totalElem = count * static_cast<size_t>(nRanks);
@@ -777,7 +779,7 @@ class CeMPI_Scatter : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Scatter; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // Root sends block r to rank r; non-root send bufs are registered but ignored.
     void runScatter(int minRanks, size_t count, int root, const char* testId)
     {
@@ -828,7 +830,7 @@ class CeMPI_Gather : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Gather; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // All ranks send; root gathers into block-pattern recvbuf; non-root recv bufs registered.
     void runGather(int minRanks, size_t count, int root, const char* testId)
     {
@@ -881,15 +883,22 @@ class CeMPI_AllReduce : public CeMPITest
 {
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard> ceAllReduceGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> ceArStagingGuard_;
 
     void SetUp() override
     {
         CeMPITest::SetUp();
         ceAllReduceGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_ALLREDUCE", "1");
+        // Pin before any createTestCommunicator in this suite. rcclParamCeArStagingBytes
+        // caches on first read; a late guard in MaxOp/MinOp alone cannot override a
+        // default latched by TwoRanks/FourRanks/etc.
+        ceArStagingGuard_ =
+            std::make_unique<MPIHelpers::MpiEnvGuard>("RCCL_CE_AR_STAGING_BYTES", "16777216");
     }
 
     void TearDown() override
     {
+        ceArStagingGuard_.reset();
         ceAllReduceGuard_.reset();
         CeMPITest::TearDown();
     }
@@ -985,8 +994,13 @@ protected:
             GTEST_SKIP() << skipReason;
         }
 
+        // Staging size is pinned in SetUp (see ceArStagingGuard_).
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
         ncclComm_t comm = getActiveCommunicator();
+        if(!isCeAllReduceDispatchConfigured(comm))
+        {
+            GTEST_SKIP() << "No symmetric memory on this communicator (cuMem unavailable), so CE AllReduce never runs";
+        }
         int        rank{}, nRanks{};
         ncclCommUserRank(comm, &rank);
         ncclCommCount(comm, &nRanks);
@@ -1068,7 +1082,18 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
 }
 
-// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2); under CTAPolicy=ZERO registered CE takes a 512 MiB Sum at any size.
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
+//
+// ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
+// i.e. once the message passes RCCL_CE_AR_2SHOT_MAX_BYTES. That cap does not gate
+// this path: it only sets ceAllReduceFits in taskAppend(), which gates the
+// unregistered "force" branch. With symmetric windows registered — as allocSymBuf
+// does here — ceAvailable alone selects CE, at any size.
+//
+// This exercises the persistent reduce kernel's double-buffered slot recycling,
+// the cross-rank signal doorbells and the Phase 3 drain loop, none of which run
+// on the single-shot path. At a non-power-of-two rank count it additionally hits
+// the partial tail chunk and the slotChunkBytes rounding from ce75b9a1.
 TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 {
     const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);

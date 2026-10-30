@@ -9,7 +9,8 @@
 /// lane bridge, off-mode scratch store/load, and the store- and load-completion
 /// waits (RDNA4 splits store and load counters, so both are needed). All use
 /// off-mode addressing (lds/sve left 0), so the caller passes only a within-lane
-/// byte offset from SpillManager.
+/// byte offset from SpillManager. Allocation and scalar encoding helpers may
+/// still throw.
 
 #pragma once
 
@@ -19,13 +20,17 @@
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
-#include "util/except.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 namespace rocjitsu {
 
 /// @brief Encode v_writelane_b32: bridge SGPR @p sgpr_src into lane of @p vgpr_dst.
-[[nodiscard]] inline std::array<uint32_t, 2>
-build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture.
+/// @param error Optional caller-owned emitter for the failure reason.
+inline util::FailureOr<std::array<uint32_t, 2>>
+build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_code_arch_t arch,
+                      const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
     return cdna3::build_vop3(
@@ -40,13 +45,19 @@ build_v_writelane_b32(uint16_t vgpr_dst, uint16_t sgpr_src, uint16_t lane, rj_co
         rdna4::kVWritelaneB32Vop3,
         {.vdst = static_cast<uint8_t>(vgpr_dst), .src0 = sgpr_src, .src1 = vop3_inline_uint(lane)});
   default:
-    throw util::UnimplementedInst("v_writelane_b32 for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: v_writelane_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Encode v_readlane_b32: read lane of @p vgpr_src back into @p sgpr_dst.
-[[nodiscard]] inline std::array<uint32_t, 2>
-build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture.
+/// @param error Optional caller-owned emitter for the failure reason.
+inline util::FailureOr<std::array<uint32_t, 2>>
+build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_code_arch_t arch,
+                     const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
     return cdna3::build_vop3(cdna3::kVReadlaneB32Vop3, {.vdst = static_cast<uint8_t>(sgpr_dst),
@@ -61,19 +72,23 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
                                                         .src0 = vop3_vgpr_src(vgpr_src),
                                                         .src1 = vop3_inline_uint(lane)});
   default:
-    throw util::UnimplementedInst("v_readlane_b32 for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: v_readlane_b32 for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Encode an off-mode scratch store of @p vdata at @p byte_offset.
+/// @param error Optional caller-owned emitter for the failure reason.
 /// @param acc When true, @p vdata names an AccVGPR (CDNA `acc` bit) rather than an
 ///   ordinary VGPR, so the store reads its data from the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note CDNA offset is 12-bit (0..4095); RDNA is 24-bit. 2 words on CDNA, 3 on RDNA.
-[[nodiscard]] inline std::vector<uint32_t> build_scratch_store_dword(uint16_t vdata,
-                                                                     uint32_t byte_offset,
-                                                                     rj_code_arch_t arch,
-                                                                     bool acc = false) {
+/// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
+inline util::FailureOr<std::vector<uint32_t>>
+build_scratch_store_dword(uint16_t vdata, uint32_t byte_offset, rj_code_arch_t arch,
+                          const util::DiagnosticEmitter *error = nullptr, bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatStoreDwordFlat,
@@ -82,7 +97,7 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
                                       .data = static_cast<uint8_t>(vdata),
                                       .saddr = 0x7F,
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0)});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
     const auto w = cdna4::build_flat(cdna4::kFlatStoreDwordFlat,
@@ -91,30 +106,36 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
                                       .data = static_cast<uint8_t>(vdata),
                                       .saddr = 0x7F,
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0)});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    if (acc)
-      throw util::UnimplementedInst("scratch_store of an AccVGPR on an arch without them");
+    if (acc) {
+      return error != nullptr ? error->emit() << "Unimplemented instruction: scratch_store of an "
+                                                 "AccVGPR on an arch without them"
+                              : util::Result::failure();
+    }
     const auto w = rdna4::build_vscratch(
         rdna4::kScratchStoreB32Vscratch,
         {.saddr = 0x7C, .vsrc = static_cast<uint8_t>(vdata), .ioffset = byte_offset & 0xFFFFFFu});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   default:
-    throw util::UnimplementedInst("scratch_store for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: scratch_store for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Encode an off-mode scratch load into @p vdst at @p byte_offset.
+/// @param error Optional caller-owned emitter for the failure reason.
 /// @param acc When true, @p vdst names an AccVGPR (CDNA `acc` bit) rather than an
 ///   ordinary VGPR, so the load writes its result into the accumulator file. AGPRs
 ///   exist only on CDNA; requesting @p acc on an arch without them is rejected.
 /// @note A build_wait_loads_complete() must precede any use of @p vdst.
-[[nodiscard]] inline std::vector<uint32_t> build_scratch_load_dword(uint16_t vdst,
-                                                                    uint32_t byte_offset,
-                                                                    rj_code_arch_t arch,
-                                                                    bool acc = false) {
+/// @returns Failure for an unsupported architecture or unsupported AccVGPR access.
+inline util::FailureOr<std::vector<uint32_t>>
+build_scratch_load_dword(uint16_t vdst, uint32_t byte_offset, rj_code_arch_t arch,
+                         const util::DiagnosticEmitter *error = nullptr, bool acc = false) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3: {
     const auto w = cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
@@ -123,7 +144,7 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
                                       .saddr = 0x7F,
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0),
                                       .vdst = static_cast<uint8_t>(vdst)});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_CDNA4: {
     const auto w = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
@@ -132,18 +153,23 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
                                       .saddr = 0x7F,
                                       .acc = static_cast<uint8_t>(acc ? 1 : 0),
                                       .vdst = static_cast<uint8_t>(vdst)});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   case ROCJITSU_CODE_ARCH_RDNA4: {
-    if (acc)
-      throw util::UnimplementedInst("scratch_load of an AccVGPR on an arch without them");
+    if (acc) {
+      return error != nullptr ? error->emit() << "Unimplemented instruction: scratch_load of an "
+                                                 "AccVGPR on an arch without them"
+                              : util::Result::failure();
+    }
     const auto w = rdna4::build_vscratch(
         rdna4::kScratchLoadB32Vscratch,
         {.saddr = 0x7C, .vdst = static_cast<uint8_t>(vdst), .ioffset = byte_offset & 0xFFFFFFu});
-    return {w.begin(), w.end()};
+    return std::vector<uint32_t>{w.begin(), w.end()};
   }
   default:
-    throw util::UnimplementedInst("scratch_load for target architecture");
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: scratch_load for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -152,7 +178,10 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 ///
 /// CDNA uses the unified vmcnt (s_waitcnt covers stores). RDNA4/GFX12 split the
 /// counters, so stores need s_wait_storecnt — s_wait_loadcnt does NOT order them.
-[[nodiscard]] inline uint32_t build_wait_stores_complete(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture.
+/// @param error Optional caller-owned emitter for the failure reason.
+inline util::FailureOr<uint32_t>
+build_wait_stores_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
     return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
@@ -161,12 +190,18 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sopp_encoding(arch, rdna4::kSWaitStorecntSopp, 0);
   default:
-    throw util::UnimplementedInst("store-completion wait for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: store-completion wait for target architecture"
+               : util::Result::failure();
   }
 }
 
 /// @brief Encode a wait for outstanding loads: s_waitcnt 0 (CDNA), s_wait_loadcnt 0 (RDNA).
-[[nodiscard]] inline uint32_t build_wait_loads_complete(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture.
+/// @param error Optional caller-owned emitter for the failure reason.
+inline util::FailureOr<uint32_t>
+build_wait_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA3:
     return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
@@ -175,7 +210,10 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
   case ROCJITSU_CODE_ARCH_RDNA4:
     return build_sopp_encoding(arch, rdna4::kSWaitLoadcntSopp, 0);
   default:
-    throw util::UnimplementedInst("load-completion wait for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: load-completion wait for target architecture"
+               : util::Result::failure();
   }
 }
 
@@ -195,24 +233,31 @@ build_v_readlane_b32(uint16_t sgpr_dst, uint16_t vgpr_src, uint16_t lane, rj_cod
 /// (VMEM + LDS -> VGPRs), s_wait_samplecnt 0 (image sample/gather -> VGPRs),
 /// s_wait_bvhcnt 0 (BVH ray-intersection -> VGPRs), and s_wait_kmcnt 0
 /// (scalar -> SGPRs).
-[[nodiscard]] inline std::vector<uint32_t> build_wait_all_loads_complete(rj_code_arch_t arch) {
+/// @returns Failure for an unsupported architecture.
+/// @param error Optional caller-owned emitter for the failure reason.
+inline util::FailureOr<std::vector<uint32_t>>
+build_wait_all_loads_complete(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   // CDNA2 has no scratch spill emitter (spilling is deferred), but a no-spill
   // probe call still reaches emit_probe_call and needs the unconditional boundary
   // drain. Its monolithic s_waitcnt 0 drains vmcnt+lgkmcnt, same as CDNA3/4.
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return {build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return {build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return {build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0)};
+    return std::vector<uint32_t>{build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0).value()};
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return {build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0),
-            build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0)};
+    return std::vector<uint32_t>{
+        build_sopp_encoding(arch, rdna4::kSWaitLoadcntDscntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitSamplecntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitBvhcntSopp, 0).value(),
+        build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0).value()};
   default:
-    throw util::UnimplementedInst("all-loads wait for target architecture");
+    return error != nullptr
+               ? error->emit()
+                     << "Unimplemented instruction: all-loads wait for target architecture"
+               : util::Result::failure();
   }
 }
 

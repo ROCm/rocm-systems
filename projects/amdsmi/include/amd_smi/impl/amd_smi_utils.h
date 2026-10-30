@@ -10,14 +10,17 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "rocm_smi/rocm_smi.h"
 
 extern "C" {
 void amdsmi_free_name_value_pairs(void* p);
@@ -314,12 +317,6 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
-inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
-
-auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
-                                      std::string_view package_version, amdsmi_driver_info_t* info)
-    -> amdsmi_status_t;
-
 /**
  *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
  *
@@ -327,24 +324,6 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
  *  date report.
  */
 auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
-
-/**
- *  @brief Select the DKMS package built for a running kernel.
- *
- *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then
- *  validates only that PACKAGE_VERSION directory through the dkms.conf behind
- *  its source symlink. Does not scan sibling packages.
- *
- *  @param[in] dkms_root Directory that contains kernel-* symlinks (for example
- *             /var/lib/dkms/amdgpu).
- *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
- *  @param[in] machine Hardware name from uname, such as x86_64.
- *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
- *              the kernel symlink points at a validated package.
- */
-auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
-                                        std::string_view machine, std::string* active_version)
-    -> amdsmi_status_t;
 
 /**
  *  @brief Parse one "drm-memory-<region>:" line of a DRM fdinfo file.
@@ -375,5 +354,28 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
  */
 auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
                                amdsmi_proc_info_t* info) -> amdsmi_status_t;
+
+/**
+ *  @brief Lists KFD processes into a buffer the way amd::smi::GetProcessInfo()
+ *  does: fills up to num_allocated entries, sets how many processes it found,
+ *  and returns 0 or an errno.
+ */
+using SmiKfdProcessLister =
+    std::function<int(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_found)>;
+
+/**
+ *  @brief List the KFD processes by PID, listing again with more room while
+ *  processes that start during a listing make it longer than the buffer.
+ *
+ *  @param[in] list Lists the processes; amd::smi::GetProcessInfo() outside tests.
+ *  @param[in] expected How many processes the last listing found; sizes the
+ *  first buffer.
+ *  @param[out] procs The processes found, with only process_id set. Empty when
+ *  KFD has no process directory (the listing returns ENOENT).
+ *  @return ::AMDSMI_STATUS_SUCCESS, ::AMDSMI_STATUS_RETRY if processes kept
+ *  starting through every listing, or the status for the listing's errno.
+ */
+auto smi_amdgpu_list_kfd_processes(const SmiKfdProcessLister& list, uint32_t expected,
+                                   std::vector<rsmi_process_info_t>* procs) -> amdsmi_status_t;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

@@ -96,6 +96,22 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 // whether this namespace's process pid runs with /dev/kfd open.
 bool KfdProcessExists(uint32_t pid);
 
+// Whether a GetProcessInfoForPID() error means that the process exited during
+// the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
+// error once the directory is gone). In a PID namespace other than the initial
+// one, ESRCH means that no process pid of that namespace has /dev/kfd open.
+bool KfdProcessExitedDuringRead(uint32_t pid, int err);
+
+// pid with every KFD statistic not available: all-ones in each field.
+rsmi_process_info_t MakeUnavailableProcessInfo(uint32_t pid);
+
+// The directory of KFD's per-process directories, /sys/class/kfd/kfd/proc.
+const char* KFDProcPathRoot();
+
+// Test-only hook to point KFDProcPathRoot() at a mock tree, whose directories
+// are named by this process's PIDs; nullptr restores the real one.
+void SetKFDProcPathRootForTesting(const char* path);
+
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 
