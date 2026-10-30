@@ -1,0 +1,430 @@
+compute.inst_cache_fetch_lat:
+  name: Instruction Cache Fetch Latency
+  formula: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH_REQS_sum)
+  unit: Cycles
+  description: >-
+    Average latency to fetch instruction from GL1 to Instruction Cache.
+compute.insts_async_load:
+  name: Instructions - Async Load
+  formula: SUM(SQ_INSTS_ASYNC_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of asynchronous memory load instructions (TDM async loads) issued.
+compute.insts_async_store:
+  name: Instructions - Async Store
+  formula: SUM(SQ_INSTS_ASYNC_STORE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of asynchronous memory store instructions (TDM async stores) issued.
+compute.insts_buffer_load:
+  name: Instructions - Buffer Load
+  formula: SUM(SQ_INSTS_BUFFER_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of buffer load instructions issued.
+compute.insts_buffer_store:
+  name: Instructions - Buffer Store
+  formula: SUM(SQ_INSTS_BUFFER_STORE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of buffer store instructions issued.
+compute.insts_double_precision:
+  name: Instructions - Double Precision
+  formula: SUM(SQ_INSTS_VALU_DP_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of double-precision VALU instructions issued.
+compute.insts_flat_load:
+  name: Instructions - Flat Load
+  formula: SUM(SQ_INSTS_FLAT_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of flat-addressed load instructions issued.
+compute.insts_flat_store:
+  name: Instructions - Flat Store
+  formula: SUM(SQ_INSTS_FLAT_STORE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of flat-addressed store instructions issued.
+compute.insts_global_scratch:
+  name: Instructions - Global Scratch
+  formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of global/scratch VMEM instructions issued.
+compute.insts_global_scratch_atomics:
+  name: Instructions - Global Scratch Atomics
+  formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of global/scratch atomic instructions issued.
+compute.insts_global_scratch_load:
+  name: Instructions - Global Scratch Load
+  formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of global/scratch load instructions issued.
+compute.insts_global_scratch_store:
+  name: Instructions - Global Scratch Store
+  formula: SUM(SQ_INSTS_VEC32_GLOBAL_SCRATCH_STORE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of global/scratch store instructions issued.
+compute.insts_internal:
+  name: Instructions - Internal
+  formula: SUM(SQ_INSTS_INTERNAL_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of internal (non-user-visible) instructions issued.
+compute.insts_lds:
+  name: Instructions - LDS
+  formula: SUM(SQ_INSTS_LDS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS instructions issued.
+compute.insts_lds_atomic_non_return:
+  name: Instructions - LDS Atomic Non-Return
+  formula: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of non-returning LDS atomic instructions issued.
+compute.insts_lds_atomic_return:
+  name: Instructions - LDS Atomic Return
+  formula: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of returning LDS atomic instructions issued.
+compute.insts_lds_load:
+  name: Instructions - LDS Load
+  formula: SUM(SQ_INSTS_VEC32_LDS_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS load instructions issued.
+compute.insts_lds_other:
+  name: Instructions - LDS Other
+  formula: SUM(SQ_INSTS_VEC32_LDS_OTHER_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of miscellaneous LDS operations issued.
+compute.insts_lds_store:
+  name: Instructions - LDS Store
+  formula: SUM(SQ_INSTS_VEC32_LDS_STORE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of LDS store instructions issued.
+compute.insts_multicast_load:
+  name: Instructions - Multicast Load
+  formula: SUM(SQ_INSTS_MULTICAST_LOAD_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of multicast load instructions issued.
+compute.insts_salu:
+  name: Instructions - SALU
+  formula: SUM(SQ_INSTS_SALU_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of SALU instructions issued.
+compute.insts_smem:
+  name: Instructions - SMEM
+  formula: SUM(SQ_INSTS_SMEM_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of scalar memory instructions issued.
+compute.insts_tdm:
+  name: Instructions - TDM
+  formula: SUM(SQ_INSTS_TDM_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of Tensor Data Mover instructions issued.
+compute.insts_transcendental:
+  name: Instructions - Transcendental
+  formula: SUM(SQ_INSTS_VALU_TRANS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of transcendental VALU instructions issued.
+compute.insts_valu:
+  name: Instructions - VALU
+  formula: SUM(SQ_INSTS_VALU_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of VALU instructions issued.
+compute.insts_vmem:
+  name: Instructions - VMEM
+  formula: SUM(SQ_INSTS_TEX_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of VMEM instructions issued.
+compute.insts_vmem_atomic_non_return:
+  name: Instructions - VMEM Atomic Non-Return
+  formula: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of non-returning VMEM atomic instructions issued.
+compute.insts_vmem_atomic_return:
+  name: Instructions - VMEM Atomic Return
+  formula: SUM(SQ_INSTS_TEX_ATOMIC_RTN_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of returning VMEM atomic instructions issued.
+compute.insts_vmem_flat:
+  name: Instructions - VMEM Flat
+  formula: SUM(SQ_INSTS_FLAT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of flat-addressed VMEM instructions issued.
+compute.ipc:
+  name: IPC
+  formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Instructions per Cycle
+  description: Average number of instructions per active WGP cycle.
+  peak: 5
+compute.pipeline_util_cmacc:
+  name: Pipeline Utilization - CMACC
+  formula: 100 * SUM(SQ_INST_CYCLES_VALU_CORE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of WGP-busy cycles the CMACC (FP32/FP16 VALU) pipeline is busy.
+compute.pipeline_util_double_precision:
+  name: Pipeline Utilization - Double Precision
+  formula: 100 * SUM(SQ_INST_CYCLES_VALU_DP_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: Percentage of WGP-busy cycles the FP64 pipeline is busy.
+compute.pipeline_util_smacc:
+  name: Pipeline Utilization - SMACC
+  formula: 100 * SUM(SQ_INST_CYCLES_VALU_SIDE_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of WGP-busy cycles the SMACC (transcendental) pipeline is busy.
+compute.pipeline_util_xdl:
+  name: Pipeline Utilization - XDL
+  formula: 100 * SUM(SQ_INST_CYCLES_VALU_WMMA_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+compute.tdm_issue_stall_rate:
+  name: TDM Issue Stall Rate
+  formula: 100 * SUM(SQ_INST_ISSUE_TDM_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of WGP-busy cycles the TDM pipeline cannot accept a new instruction.
+compute.total_flops:
+  name: Performance (GFLOPs)
+  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  unit: GFLOP/s
+  description: >-
+    Total achieved compute throughput combining all VALU and WMMA FLOPs.
+compute.total_insts:
+  name: Total Instructions
+  formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total instructions issued.
+compute.total_lds_insts:
+  name: Total LDS Instructions
+  formula: SUM(SQ_INSTS_VEC32_LDS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total LDS instructions issued.
+compute.valu_flops_fp16:
+  name: VALU FLOPs (FP16)
+  formula: SUM(SP_VALU_FLOPS_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP16 VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 128 / 1000
+compute.valu_flops_fp32:
+  name: VALU FLOPs (FP32)
+  formula: SUM(SP_VALU_FLOPS_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP32 VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 64 / 1000
+compute.valu_flops_fp64:
+  name: VALU FLOPs (FP64)
+  formula: SUM(SP_VALU_FLOPS_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP64 VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 32 / 1000
+compute.valu_fp_operations_fp16:
+  name: VALU FP Operations - FP16
+  formula: SUM(SP_VALU_FLOPS_FP16_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP16 operations executed by VALU.
+compute.valu_fp_operations_fp16_trans:
+  name: VALU FP Operations - FP16 Trans
+  formula: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP16 transcendental operations executed by VALU.
+compute.valu_fp_operations_fp32:
+  name: VALU FP Operations - FP32
+  formula: SUM(SP_VALU_FLOPS_FP32_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP32 operations executed by VALU.
+compute.valu_fp_operations_fp32_trans:
+  name: VALU FP Operations - FP32 Trans
+  formula: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP32 transcendental operations executed by VALU.
+compute.valu_fp_operations_fp64:
+  name: VALU FP Operations - FP64
+  formula: SUM(SP_VALU_FLOPS_FP64_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP64 operations executed by VALU.
+compute.valu_fp_operations_fp64_trans:
+  name: VALU FP Operations - FP64 Trans
+  formula: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP64 transcendental operations executed by VALU.
+compute.valu_insts_cmacc:
+  name: VALU Instructions - CMACC
+  formula: SUM(SQ_INSTS_VALU_CMACC_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of instructions issued that execute on the CMACC (core multiply-accumulate)
+    pipeline.
+compute.valu_insts_smacc:
+  name: VALU Instructions - SMACC
+  formula: SUM(SQ_INSTS_VALU_SMACC_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of instructions issued that execute on the SMACC (side multiply-accumulate
+    / transcendental) pipeline.
+compute.valu_insts_wmma:
+  name: VALU Instructions - WMMA
+  formula: SUM(SQ_INSTS_VEC32_VALU_WMMA_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of WMMA instructions issued.
+compute.valu_insts_xdl:
+  name: VALU Instructions - XDL
+  formula: SUM(SQ_INSTS_VALU_XDLMACC_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of instructions issued that execute on the XDL (eXtreme Deep Learning /
+    WMMA) pipeline.
+compute.valu_integer_operations:
+  name: VALU Integer Operations
+  formula: SUM(SP_VALU_IOPS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total integer operations executed by VALU.
+compute.valu_iops:
+  name: VALU IOPs
+  formula: SUM(SP_VALU_IOPS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GIOP/s
+  description: Achieved integer VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 64 / 1000
+compute.valu_trans_flops_fp16:
+  name: VALU Trans FLOPs (FP16)
+  formula: SUM(SP_VALU_FLOPS_FP16_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput.
+    TODO: Double check that transcendental ops are executed within ALU.
+  peak: $max_sclk * $cu_per_gpu * 64 / 1000
+compute.valu_trans_flops_fp32:
+  name: VALU Trans FLOPs (FP32)
+  formula: SUM(SP_VALU_FLOPS_FP32_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    Achieved FP32 transcendental (square root, reciprocal, trig) VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 32 / 1000
+compute.valu_trans_flops_fp64:
+  name: VALU Trans FLOPs (FP64)
+  formula: SUM(SP_VALU_FLOPS_FP64_TRANS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    Achieved FP64 transcendental (square root, reciprocal, trig) VALU throughput.
+  peak: $max_sclk * $cu_per_gpu * 16 / 1000
+compute.wmma_flops_bf16:
+  name: WMMA FLOPs (BF16)
+  formula: 2048 * SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved BF16 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 2048 / 1000
+  peak_empirical: $WMMABF16Flops_empirical_peak
+compute.wmma_flops_f6f4:
+  name: WMMA FLOPs (F6F4)
+  formula: 8192 * SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved mixed FP6/FP4 WMMA throughput.
+  peak_empirical: $WMMAF6F4Flops_empirical_peak
+compute.wmma_flops_fp16:
+  name: WMMA FLOPs (FP16)
+  formula: 2048 * SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP16 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 2048 / 1000
+  peak_empirical: $WMMAF16Flops_empirical_peak
+compute.wmma_flops_fp32:
+  name: WMMA FLOPs (FP32)
+  formula: 128 * SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP32 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 128 / 1000
+  peak_empirical: $WMMAF32Flops_empirical_peak
+compute.wmma_flops_fp4:
+  name: WMMA FLOPs (FP4)
+  formula: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP4 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
+  peak_empirical: $WMMAF4Flops_empirical_peak
+compute.wmma_flops_fp6:
+  name: WMMA FLOPs (FP6)
+  formula: 8192 * SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP6 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
+  peak_empirical: $WMMAF6Flops_empirical_peak
+compute.wmma_flops_fp64:
+  name: WMMA FLOPs (FP64)
+  formula: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP64 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 64 / 1000
+compute.wmma_flops_fp8:
+  name: WMMA FLOPs (FP8)
+  formula: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved FP8 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
+  peak_empirical: $WMMAF8Flops_empirical_peak
+compute.wmma_flops_mxfp8:
+  name: WMMA FLOPs (MXFP8)
+  formula: 4096 * SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: Achieved MXFP8 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
+  peak_empirical: $WMMAMXF8Flops_empirical_peak
+compute.wmma_fp_operations_bf16:
+  name: WMMA FP Operations - BF16
+  formula: SUM(SQ_VALU_WMMA_FLOP_BF16_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total BF16 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp16:
+  name: WMMA FP Operations - FP16
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP16_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP16 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp32:
+  name: WMMA FP Operations - FP32
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP32 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp4:
+  name: WMMA FP Operations - FP4
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP4_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP4 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp6:
+  name: WMMA FP Operations - FP6
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP6_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP6 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp64:
+  name: WMMA FP Operations - FP64
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP64 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp6fp4:
+  name: WMMA FP Operations - FP6FP4
+  formula: SUM(SQ_VALU_WMMA_FLOP_F6F4_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total mixed FP6/FP4 WMMA instruction dispatches.
+compute.wmma_fp_operations_fp8:
+  name: WMMA FP Operations - FP8
+  formula: SUM(SQ_VALU_WMMA_FLOP_FP8_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total FP8 WMMA instruction dispatches.
+compute.wmma_int_operations_int4:
+  name: WMMA Int Operations - Int4
+  formula: SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total Int4 WMMA instruction dispatches.
+compute.wmma_int_operations_int8:
+  name: WMMA Int Operations - Int8
+  formula: SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total Int8 WMMA instruction dispatches.
+compute.wmma_iops_int4:
+  name: WMMA IOPs (Int4)
+  formula: 8192 * SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GIOP/s
+  description: Achieved Int4 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 8192 / 1000
+compute.wmma_iops_int8:
+  name: WMMA IOPs (Int8)
+  formula: 4096 * SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GIOP/s
+  description: Achieved Int8 WMMA throughput.
+  peak: $max_sclk * $cu_per_gpu * 4 * 4096 / 1000
+  peak_empirical: $WMMAI8Ops_empirical_peak

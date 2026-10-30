@@ -1,0 +1,32 @@
+grbm.cp_util:
+  name: CP Utilization
+  formula: 100 * SUM(GRBM_CP_BUSY) / SUM(GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time the Command Processor was busy dispatching work
+    and processing commands. High CP busy with low shader activity may indicate dispatch
+    bottlenecks or excessive command stream overhead.
+grbm.gl2c_busy:
+  name: GL2C Busy
+  formula: 100 * SUM(GRBM_GL2C_BUSY) / SUM(GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time the GL2 cache was busy servicing memory requests.
+    High GL2 busy indicates memory-intensive workloads. Compare with compute activity
+    to determine if the workload is memory-bound or compute-bound.
+grbm.gpu_busy:
+  name: GPU Busy
+  formula: 100 * SUM(GRBM_GUI_ACTIVE) / SUM(GRBM_COUNT)
+  unit: Percent
+  description: >-
+    Percentage of time the GPU was actively processing work. This is the primary utilization
+    metric showing overall GPU activity. Low GPU busy indicates underutilization,
+    possibly due to insufficient workload or host-side bottlenecks.
+grbm.ta_busy:
+  name: TA Busy
+  formula: 100 * SUM(GRBM_TA_BUSY) / SUM(GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time the Texture Addresser was busy processing memory
+    address calculations. High TA busy indicates active texture or buffer memory operations.
+    This reflects the address generation workload for memory requests.
