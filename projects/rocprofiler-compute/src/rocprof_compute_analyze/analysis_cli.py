@@ -9,6 +9,7 @@ from typing import Any, NamedTuple, Optional
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from memory_chart.html.report import write_mem_chart_report
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_analyze.output_location import (
     REPORT_FILE_NAME,
@@ -375,6 +376,7 @@ class cli_analysis(OmniAnalyze_Base):
         super().write_outputs(run_folder)
         args = self.get_args()
         self._write_roofline_html(run_folder)
+        self._write_mem_chart_reports(run_folder)
         with (run_folder / REPORT_FILE_NAME).open("w", encoding="utf-8") as report:
             tty.show_all(
                 args,
@@ -489,6 +491,21 @@ class cli_analysis(OmniAnalyze_Base):
             figures.flops_datatypes,
             output_path=workload_folder / f"roofline-gpu-{ROOFLINE_DEVICE_ID}.html",
         )
+
+    def _write_mem_chart_reports(self, run_folder: Path) -> None:
+        """Save each workload's memory chart HTML into its run-folder subfolder."""
+        if self.pc_sampling_only():
+            return
+        args = self.get_args()
+        for position, path_info in enumerate(args.path, start=1):
+            run = self._runs[path_info[0]]
+            run_arch = str(run.sys_info.iloc[0]["gpu_arch"])
+            write_mem_chart_report(
+                run,
+                self._arch_configs[run_arch],
+                args,
+                run_folder / workload_folder_name(position, Path(path_info[0])),
+            )
 
     def list_operators(
         self,
