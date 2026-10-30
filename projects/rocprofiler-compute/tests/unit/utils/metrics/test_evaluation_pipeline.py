@@ -11,10 +11,13 @@ import pytest
 
 from utils.metrics.evaluation_pipeline import (
     calc_builtin_vars,
+    check_gui_active_counter,
     compute_pct_of_peak,
     create_empirical_peaks_dict,
     create_sys_vars,
     eval_metric,
+    is_pct_of_peak_flagged,
+    type_sys_vars,
     validate_dual_issue_metrics,
 )
 from utils.metrics.noise_clamper import (
@@ -527,3 +530,120 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
         result = create_sys_vars(sys_info)
         assert result["ammolite__num_gl1c"] == 8
+
+
+class TestSharedEvaluationHelpers:
+    """Helpers the CLI and DB evaluation paths share (FR-12, FR-14, FR-16)."""
+
+    @pytest.mark.parametrize(
+        "flag, expected",
+        [
+            (True, True),
+            ("True", True),
+            (np.True_, True),
+            (False, False),
+            ("", False),
+            (None, False),
+            (np.nan, False),
+        ],
+        ids=["bool", "string", "numpy-bool", "false", "empty", "none", "nan"],
+    )
+    def test_is_pct_of_peak_flagged_reads_bool_and_stringified_flag(
+        self, flag, expected
+    ):
+        """build_metric_value_string turns the flag into a string; both forms count."""
+        assert is_pct_of_peak_flagged(flag) is expected
+
+    def test_type_sys_vars_casts_specs_correction_strings(self, gfx942_sys_info):
+        """A --specs-correction value arrives as a string and is cast to its type."""
+        sys_info = {**gfx942_sys_info, "cu_per_gpu": "304", "cur_sclk": "2400"}
+        typed = type_sys_vars(sys_info, missing_as_null=True)
+        assert typed["cu_per_gpu"] == 304
+        assert isinstance(typed["cu_per_gpu"], int)
+        assert typed["cur_sclk"] == pytest.approx(2400.0)
+
+    def test_type_sys_vars_missing_required_is_nan_with_warning(self, gfx942_sys_info):
+        """Null mode leaves a missing required value NaN and warns once."""
+        sys_info = {**gfx942_sys_info, "cu_per_gpu": np.nan}
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as console_warning_mock:
+            typed = type_sys_vars(sys_info, missing_as_null=True)
+        assert np.isnan(typed["cu_per_gpu"])
+        console_warning_mock.assert_called_once()
+        assert "cu_per_gpu" in console_warning_mock.call_args.args[0]
+
+    def test_type_sys_vars_non_numeric_string_counts_as_missing(self, gfx942_sys_info):
+        """A value that is not a number is treated as missing, not raised."""
+        sys_info = {**gfx942_sys_info, "total_l2_chan": "N/A"}
+        with patch("utils.metrics.evaluation_pipeline.console_warning"):
+            typed = type_sys_vars(sys_info, missing_as_null=True)
+        assert np.isnan(typed["total_l2_chan"])
+
+    def test_type_sys_vars_zero_stays_zero(self, gfx942_sys_info):
+        """A zero required value stays 0 in null mode and still warns."""
+        sys_info = {**gfx942_sys_info, "total_l2_chan": 0}
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_warning"
+        ) as console_warning_mock:
+            typed = type_sys_vars(sys_info, missing_as_null=True)
+        assert typed["total_l2_chan"] == 0
+        assert "total_l2_chan" in console_warning_mock.call_args.args[0]
+
+    def test_type_sys_vars_num_xcd_defaults_to_one(self, gfx942_sys_info):
+        """num_xcd is 1 when the arch does not report it."""
+        sys_info = {k: v for k, v in gfx942_sys_info.items() if k != "num_xcd"}
+        typed = type_sys_vars(sys_info, missing_as_null=True)
+        assert typed["num_xcd"] == 1
+
+    def test_create_sys_vars_keeps_zero_fallback_for_missing_required(
+        self, gfx942_sys_info
+    ):
+        """create_sys_vars keeps the CLI's 0 fallback for a missing required value."""
+        sys_info = pd.Series({
+            **gfx942_sys_info,
+            "cu_per_gpu": np.nan,
+            "cur_sclk": np.nan,
+        })
+        with patch("utils.metrics.evaluation_pipeline.console_warning"):
+            result = create_sys_vars(sys_info)
+        assert result["ammolite__cu_per_gpu"] == 0
+        assert isinstance(result["ammolite__cu_per_gpu"], int)
+        # A float var keeps its float type when it falls back to 0.
+        assert isinstance(result["ammolite__cur_sclk"], float)
+        assert result["ammolite__cur_sclk"] == 0.0
+
+    def test_empirical_peaks_keep_every_column_from_the_first_row(self):
+        """Every roofline.csv column becomes a peak, taken from the first row."""
+        roofline_df = pd.DataFrame({
+            "device": [0, 1],
+            "MFMAF6F4Flops": [1234.5, 99.0],
+            "WMMAF64Flops": [50.0, 7.0],
+        })
+        peaks = create_empirical_peaks_dict(roofline_df, prefix="")
+        assert peaks == {
+            "device_empirical_peak": 0,
+            "MFMAF6F4Flops_empirical_peak": 1234.5,
+            "WMMAF64Flops_empirical_peak": 50.0,
+        }
+
+    def test_check_gui_active_counter_exempts_roofline_only_runs(self, gfx942_sys_info):
+        """A roofline-only run carries no GPU-activity counters, so it never halts."""
+        raw_pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE": [0, 0]})
+        sys_info = pd.Series({**gfx942_sys_info, "ip_blocks": "roofline"})
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_error"
+        ) as console_error_mock:
+            check_gui_active_counter(sys_info, raw_pmc_df)
+        console_error_mock.assert_not_called()
+
+    def test_check_gui_active_counter_passes_nonzero_activity(self, gfx942_sys_info):
+        """Non-zero activity, or no GRBM counter at all, does not halt."""
+        with patch(
+            "utils.metrics.evaluation_pipeline.console_error"
+        ) as console_error_mock:
+            check_gui_active_counter(
+                gfx942_sys_info, pd.DataFrame({"GRBM_GUI_ACTIVE": [5, 9]})
+            )
+            check_gui_active_counter(gfx942_sys_info, pd.DataFrame({"SQ_WAVES": [0]}))
+        console_error_mock.assert_not_called()

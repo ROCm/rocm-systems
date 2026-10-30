@@ -29,6 +29,9 @@ def to_min(*args: Any) -> float:
         return args[0].min()
     elif min(args) is None:
         return np.nan
+    elif any(np.isscalar(arg) and pd.isna(arg) for arg in args):
+        # min() would return the first argument when another is NaN.
+        return np.nan
     else:
         return min(args)
 
@@ -41,6 +44,9 @@ def to_max(*args: Any) -> float | np.ndarray:
     ):
         return np.maximum(args[0], args[1])
     elif max(args) is None:
+        return np.nan
+    elif any(np.isscalar(arg) and pd.isna(arg) for arg in args):
+        # max() would return the first argument when another is NaN.
         return np.nan
     else:
         return max(args)

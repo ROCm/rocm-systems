@@ -27,6 +27,7 @@ from pc_sampling import (
 )
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
+from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_analyze.analysis_db import (
     SourceFrameCollector,
     db_analysis,
@@ -83,10 +84,89 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     arch_config = SimpleNamespace(dfs={402: roofline_df})
     return SimpleNamespace(
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
+        _typed_sys_info_per_workload={
+            workload_path: sys_info_df.iloc[0].to_dict(),
+        },
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
         get_args=lambda: SimpleNamespace(),
     )
+
+
+def write_roofline_csv(workload_dir: Path, csv_text: str) -> None:
+    """Write a roofline.csv into a workload directory."""
+    (workload_dir / "roofline.csv").write_text(csv_text, encoding="utf-8")
+
+
+def make_pct_of_peak_arch_config():
+    """Build a metric table with one flagged and one unflagged Percent of Peak row.
+
+    The expressions are constants and one peak variable, so the expected
+    percentages are easy to derive.
+    """
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Flagged metric", "Plain metric"],
+            "Avg": ["100.0 / 3", "100.0 / 3"],
+            "Peak": ["$FP32Flops_empirical_peak", "$FP32Flops_empirical_peak"],
+            "Percent of Peak": [True, False],
+        },
+        index=pd.Index(["7.1.0", "7.1.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {701: metric_df}
+    arch_config.dfs_type = {701: "metric_table"}
+    arch_config.panel_configs = {
+        700: {
+            "id": 700,
+            "title": "Wavefront",
+            "data source": [
+                {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
+            ],
+        }
+    }
+    return arch_config
+
+
+def make_pct_of_peak_analyzer(workload_path: str, sys_info: dict):
+    """Build an analyzer whose metric config went through the real load_options path.
+
+    load_options runs build_metric_value_string, which stringifies the
+    Percent of Peak flag before calc_metrics_data reads it.
+    """
+    analyzer = db_analysis(
+        SimpleNamespace(normal_unit="per_kernel", gpu_kernel=None, path=[]),
+        {},
+    )
+    analyzer._arch_configs = {"gfx942": make_pct_of_peak_arch_config()}
+    analyzer.load_options()
+    analyzer._runs = {workload_path: schema.Workload(sys_info=pd.DataFrame([sys_info]))}
+    analyzer._pmc_df_per_workload = {
+        workload_path: pd.DataFrame({
+            "Kernel_Name": ["vecCopy"],
+            "SQ_WAVES": [1.0],
+            "GRBM_GUI_ACTIVE": [1000.0],
+        })
+    }
+    metrics_info, expressions = analyzer.calc_metrics_data()
+    analyzer._metrics_info_data_per_workload = metrics_info
+    analyzer._metric_expression_data_per_workload = expressions
+    return analyzer
+
+
+def calc_values_with_stubbed_dual_issue(analyzer):
+    """Run calc_expressions with the dual-issue check, which is not under test."""
+    with patch.object(db_analysis, "validate_dual_issue_metrics"):
+        return analyzer.calc_expressions()
+
+
+def select_metric_value(values_df, metric_id, value_name):
+    """Return the one stored value of a metric, or fail if it is not unique."""
+    rows = values_df[
+        (values_df["metric_id"] == metric_id) & (values_df["value_name"] == value_name)
+    ]
+    assert len(rows) == 1
+    return rows["value"].iloc[0]
 
 
 def store_instruction_lines(code_object_store):
@@ -1035,6 +1115,9 @@ def test_calc_expressions_noise_clamp():
     analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._roofline_ceilings_per_workload = {workload_path: {}}
+    analyzer._typed_sys_info_per_workload = {
+        workload_path: {"placeholder": 1, "gpu_arch": "gfx942"}
+    }
     analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
     analyzer._arch_configs = MagicMock()
 
@@ -1187,6 +1270,19 @@ class TestDerivePctOfPeakValues:
                 {"1.1"}, incomplete_values
             )
             assert new_rows == []
+
+    def test_uncalculable_percentage_is_stored_as_null(self):
+        """A flagged metric with a value and a NaN peak keeps a row whose value
+        is NULL, never 0 (FR-15)."""
+        values_df = self._make_values_df(
+            metric_ids=["1.1", "1.1"],
+            value_names=["Avg", "Peak"],
+            values=[50.0, np.nan],
+        )
+        new_rows = db_analysis._derive_pct_of_peak_values({"1.1"}, values_df)
+        assert len(new_rows) == 1
+        assert new_rows[0]["value_name"] == "Percent of Peak"
+        assert pd.isna(new_rows[0]["value"])
 
 
 # =============================================================================
@@ -3731,3 +3827,292 @@ def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_p
     # Also covers a layout file skipped as broken
     workload = run_memory_chart_workload(tmp_path, "gfx1030")
     assert workload.memory_chart_layout_extdata is None
+
+
+# =============================================================================
+# Calculation parity: Percent of Peak, roofline peaks, typed sys vars, NULL, guard
+# =============================================================================
+
+
+def test_percent_of_peak_is_stored_for_every_flagged_metric(tmp_path, gfx942_sys_info):
+    """The flag read through load_options still yields Percent of Peak rows.
+
+    The percentage is 100 * unrounded value / roofline peak (FR-12), and an
+    unflagged metric gets no such row.
+    """
+    drain_evaluation_diagnostics()
+    workload_path = str(tmp_path)
+    write_roofline_csv(tmp_path, "device,FP32Flops\n0,2000.0\n1,9999.0\n")
+    analyzer = make_pct_of_peak_analyzer(workload_path, gfx942_sys_info)
+    analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+    analyzer._typed_sys_info_per_workload = analyzer.calc_typed_sys_info()
+
+    kernel_values, workload_values = calc_values_with_stubbed_dual_issue(analyzer)
+
+    expected_pct = 100 * (100 / 3) / 2000.0
+    assert select_metric_value(
+        workload_values[workload_path], "7.1.0", "Percent of Peak"
+    ) == pytest.approx(expected_pct)
+    assert select_metric_value(
+        kernel_values[workload_path], "7.1.0", "Percent of Peak"
+    ) == pytest.approx(expected_pct)
+    assert not (
+        (workload_values[workload_path]["metric_id"] == "7.1.1")
+        & (workload_values[workload_path]["value_name"] == "Percent of Peak")
+    ).any()
+
+
+@pytest.mark.parametrize(
+    "gpu_arch, column",
+    [
+        ("gfx950", "MFMAF6F4Flops"),
+        ("gfx1250", "WMMAF6F4Flops"),
+        ("gfx1250", "WMMAF64Flops"),
+    ],
+    ids=["gfx950-mfma-f6f4", "gfx1250-wmma-f6f4", "gfx1250-wmma-fp64"],
+)
+def test_roofline_peaks_cover_every_column_from_the_first_row(
+    tmp_path, gpu_arch, column
+):
+    """Columns the old subset dropped (F6F4, WMMA FP64) become peak variables."""
+    write_roofline_csv(tmp_path, f"device,{column}\n0,1234.5\n1,99.0\n")
+    analyzer = db_analysis(SimpleNamespace(output_name=None), {})
+    analyzer._runs = {
+        str(tmp_path): schema.Workload(sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]))
+    }
+
+    ceilings = analyzer.calc_roofline_ceilings()
+
+    assert ceilings[str(tmp_path)][column] == pytest.approx(1234.5)
+
+
+@pytest.mark.parametrize(
+    "roofline_text",
+    [None, "device,FP32Flops\n0,2000.0,extra\n1,9999.0\n"],
+    ids=["missing", "invalid"],
+)
+def test_missing_or_invalid_roofline_gives_null_peaks_and_one_warning(
+    tmp_path, roofline_text, gfx942_sys_info
+):
+    """A roofline.csv that is missing or invalid: NULL peaks, one warning, no
+    failure warnings from the expressions that use the peaks (FR-13, FR-15)."""
+    drain_evaluation_diagnostics()
+    workload_path = str(tmp_path)
+    if roofline_text is not None:
+        write_roofline_csv(tmp_path, roofline_text)
+    analyzer = make_pct_of_peak_analyzer(workload_path, gfx942_sys_info)
+
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as console_warning_mock:
+        analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+    assert workload_path not in analyzer._roofline_ceilings_per_workload
+    console_warning_mock.assert_called_once()
+    assert "NULL" in console_warning_mock.call_args.args[0]
+
+    analyzer._typed_sys_info_per_workload = analyzer.calc_typed_sys_info()
+    _, workload_values = calc_values_with_stubbed_dual_issue(analyzer)
+
+    assert pd.isna(select_metric_value(workload_values[workload_path], "7.1.0", "Peak"))
+    assert pd.isna(
+        select_metric_value(workload_values[workload_path], "7.1.0", "Percent of Peak")
+    )
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as failure_warning_mock, patch(
+        "rocprof_compute_analyze.analysis_db.console_debug"
+    ):
+        report_evaluation_diagnostics()
+    failure_warning_mock.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "cu_per_gpu",
+    [np.nan, 0],
+    ids=["missing", "zero"],
+)
+def test_expression_on_missing_or_zero_sys_var_is_null_not_zero(
+    cu_per_gpu, gfx942_sys_info
+):
+    """A sys var that cannot be used makes the expression NULL, not 0 (FR-14, FR-15)."""
+    workload_path = "/fake/workload"
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{**gfx942_sys_info, "cu_per_gpu": cu_per_gpu}])
+        )
+    }
+    with patch("utils.metrics.evaluation_pipeline.console_warning"):
+        typed_sys_info = analyzer.calc_typed_sys_info()[workload_path]
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["Avg"],
+        "value": ["to_sum(raw_pmc_df['SQ_WAVES']) / ammolite__cu_per_gpu"],
+    })
+    pmc_df = pd.DataFrame({"SQ_WAVES": [1.0, 2.0]})
+
+    result = db_analysis.calc_dataframe_expressions(
+        pmc_df, typed_sys_info, expression_df
+    )
+
+    assert pd.isna(result.iloc[0])
+    drain_evaluation_diagnostics()
+
+
+def test_builtin_capped_at_missing_cu_per_gpu_is_null(gfx942_sys_info):
+    """numActiveCUs caps at cu_per_gpu, so a missing cu_per_gpu makes it NULL, not
+    an uncapped number (FR-14, FR-15)."""
+    workload_path = "/fake/workload"
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{**gfx942_sys_info, "cu_per_gpu": np.nan}])
+        )
+    }
+    with patch("utils.metrics.evaluation_pipeline.console_warning"):
+        typed_sys_info = analyzer.calc_typed_sys_info()[workload_path]
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["Avg"],
+        "value": ["ammolite__numActiveCUs"],
+    })
+    pmc_df = pd.DataFrame({
+        "SQ_BUSY_CU_CYCLES": [1.0e6],
+        "GRBM_GUI_ACTIVE": [1000.0],
+    })
+
+    result = db_analysis.calc_dataframe_expressions(
+        pmc_df, typed_sys_info, expression_df
+    )
+
+    assert pd.isna(result.iloc[0])
+    drain_evaluation_diagnostics()
+
+
+def test_specs_correction_string_values_still_evaluate(gfx942_sys_info):
+    """A --specs-correction value is a string in sys_info; it is typed first (FR-14)."""
+    workload_path = "/fake/workload"
+    analyzer = db_analysis(SimpleNamespace(), {})
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{**gfx942_sys_info, "cu_per_gpu": "304"}])
+        )
+    }
+    typed_sys_info = analyzer.calc_typed_sys_info()[workload_path]
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1"],
+        "value_name": ["Avg"],
+        "value": ["to_sum(raw_pmc_df['SQ_WAVES']) / ammolite__cu_per_gpu"],
+    })
+    pmc_df = pd.DataFrame({"SQ_WAVES": [1.0, 2.0]})
+
+    result = db_analysis.calc_dataframe_expressions(
+        pmc_df, typed_sys_info, expression_df
+    )
+
+    assert result.iloc[0] == pytest.approx(3.0 / 304)
+
+
+@pytest.mark.parametrize(
+    "ip_blocks, should_halt",
+    [("all", True), ("roofline", False)],
+    ids=["counter-run-halts", "roofline-only-exempt"],
+)
+def test_pre_processing_halts_on_idle_gpu_before_any_write(
+    ip_blocks, should_halt, gfx942_sys_info
+):
+    """FR-16: zero GPU activity halts pre-processing before any dispatch is built."""
+    workload_path = "/fake/workload"
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["vecCopy", "vecCopy"],
+        "GRBM_GUI_ACTIVE": [1000, 0],
+    })
+    analyzer = db_analysis(
+        SimpleNamespace(output_name=None, output_format="database"), {}
+    )
+    analyzer._runs = {
+        workload_path: schema.Workload(
+            sys_info=pd.DataFrame([{**gfx942_sys_info, "ip_blocks": ip_blocks}])
+        )
+    }
+    with ExitStack() as patch_stack:
+        patch_stack.enter_context(patch.object(OmniAnalyze_Base, "pre_processing"))
+        patch_stack.enter_context(
+            patch.object(db_analysis, "pc_sampling_collected", return_value=False)
+        )
+        patch_stack.enter_context(
+            patch.object(db_analysis, "calc_roofline_ceilings", return_value={})
+        )
+        patch_stack.enter_context(
+            patch.object(
+                db_analysis,
+                "calc_pmc_df_data",
+                return_value={workload_path: pmc_df},
+            )
+        )
+        patch_stack.enter_context(
+            patch.object(
+                db_analysis,
+                "apply_pmc_filters",
+                return_value={workload_path: pmc_df},
+            )
+        )
+        dispatch_mock = patch_stack.enter_context(
+            patch.object(db_analysis, "calc_dispatch_data", return_value={})
+        )
+        patch_stack.enter_context(
+            patch.object(db_analysis, "calc_metrics_data", return_value=({}, {}))
+        )
+        patch_stack.enter_context(
+            patch.object(db_analysis, "calc_expressions", return_value=({}, {}))
+        )
+        patch_stack.enter_context(
+            patch.object(db_analysis, "calc_roofline_data", return_value={})
+        )
+        patch_stack.enter_context(
+            patch("utils.metrics.evaluation_pipeline.console_warning")
+        )
+        error_mock = patch_stack.enter_context(
+            patch(
+                "utils.metrics.evaluation_pipeline.console_error",
+                side_effect=SystemExit,
+            )
+        )
+
+        if should_halt:
+            with pytest.raises(SystemExit):
+                analyzer.pre_processing()
+            error_mock.assert_called_once_with("Halting execution for warning above.")
+            dispatch_mock.assert_not_called()
+        else:
+            analyzer.pre_processing()
+            error_mock.assert_not_called()
+            dispatch_mock.assert_called_once()
+
+
+def test_peak_absent_from_a_valid_roofline_is_null_without_failure_warning(
+    tmp_path, gfx942_sys_info
+):
+    """A valid roofline.csv that does not measure a peak leaves it NULL. Its
+    expression gives no KeyError failure warning (FR-13, FR-15)."""
+    drain_evaluation_diagnostics()
+    workload_path = str(tmp_path)
+    write_roofline_csv(tmp_path, "device,FP32Flops\n0,2000.0\n1,9999.0\n")
+    analyzer = make_pct_of_peak_analyzer(workload_path, gfx942_sys_info)
+    analyzer._roofline_ceilings_per_workload = analyzer.calc_roofline_ceilings()
+    analyzer._typed_sys_info_per_workload = analyzer.calc_typed_sys_info()
+    # Only FP32Flops is measured, so FP64Flops has no peak in roofline.csv.
+    analyzer._metric_expression_data_per_workload[workload_path].loc[
+        lambda df: df["value_name"] == "Peak", "value"
+    ] = "ammolite__FP64Flops_empirical_peak"
+
+    _, workload_values = calc_values_with_stubbed_dual_issue(analyzer)
+
+    assert pd.isna(select_metric_value(workload_values[workload_path], "7.1.0", "Peak"))
+    with patch(
+        "rocprof_compute_analyze.analysis_db.console_warning"
+    ) as failure_warning_mock, patch(
+        "rocprof_compute_analyze.analysis_db.console_debug"
+    ):
+        report_evaluation_diagnostics()
+    failure_warning_mock.assert_not_called()

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 import numpy as np
 import pandas as pd
@@ -26,72 +26,95 @@ from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
+# Present for every arch; a missing or zero value warns.
+REQUIRED_SYS_VARS: tuple[tuple[str, type], ...] = (
+    ("se_per_gpu", int),
+    ("pipes_per_gpu", int),
+    ("cu_per_gpu", int),
+    ("simd_per_cu", int),
+    ("sqc_per_gpu", int),
+    ("lds_banks_per_cu", int),
+    ("cur_sclk", float),
+    ("cur_mclk", float),
+    ("max_mclk", float),
+    ("max_sclk", float),
+    ("max_waves_per_cu", int),
+    ("wave_size", int),
+    ("total_l2_chan", int),
+)
+# Arch-specific; silently skipped when the value is absent.
+OPTIONAL_SYS_VARS: tuple[tuple[str, type], ...] = (
+    ("num_memory_channels", float),
+    ("num_gl1c", int),
+)
 
-def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
-    """Create empirical peaks dictionary."""
+
+def create_empirical_peaks_dict(
+    empirical_peaks_df: pd.DataFrame,
+    prefix: str = "ammolite__",
+) -> dict[str, float]:
+    """Create empirical peaks dictionary, one entry per roofline.csv column.
+
+    The peaks come from the first row. The keys are prefix plus the column name
+    and "_empirical_peak".
+    """
     if empirical_peaks_df.empty:
         # Without roofline.csv, every ceiling is NaN.
         return {
-            f"ammolite__{name}_empirical_peak": np.nan
+            f"{prefix}{name}_empirical_peak": np.nan
             for name in mi_gpu_specs.get_all_roofline_columns()
         }
 
     peak_data_row = empirical_peaks_df.iloc[0]
     return {
-        f"ammolite__{col}_empirical_peak": peak_data_row[col]
+        f"{prefix}{col}_empirical_peak": peak_data_row[col]
         for col in empirical_peaks_df.columns
     }
 
 
-def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
-    """Create variables from sys.info."""
-    sys_vars_collection = {}
-    sys_info_dict = sys_info.to_dict()
+def type_sys_vars(
+    sys_info: Mapping[str, Any],
+    missing_as_null: bool,
+) -> dict[str, int | float]:
+    """Type the sys.info values that metric expressions read, by bare name.
 
-    # Present for every arch; warn when missing or zero.
-    required_sys_vars = [
-        ("se_per_gpu", int),
-        ("pipes_per_gpu", int),
-        ("cu_per_gpu", int),
-        ("simd_per_cu", int),
-        ("sqc_per_gpu", int),
-        ("lds_banks_per_cu", int),
-        ("cur_sclk", float),
-        ("cur_mclk", float),
-        ("max_mclk", float),
-        ("max_sclk", float),
-        ("max_waves_per_cu", int),
-        ("wave_size", int),
-        ("total_l2_chan", int),
-    ]
-    # Arch-specific; silently skipped when the column is absent.
-    optional_sys_vars = [
-        ("num_memory_channels", float),
-        ("num_gl1c", int),
-    ]
+    A missing required value warns. It becomes 0 for the CLI, and NaN (NULL) when
+    missing_as_null is set, so an expression that uses it evaluates to NULL. A zero
+    stays 0 and warns too. num_xcd defaults to 1 because RDNA is single-die.
+    """
+    typed: dict[str, Any] = {}
 
-    for var_name, var_type in required_sys_vars:
-        raw_value = sys_info_dict.get(var_name)
-        if pd.isna(raw_value) or var_type(raw_value) == 0:
+    for var_name, var_type in REQUIRED_SYS_VARS:
+        number = _cast_sys_value(sys_info.get(var_name), var_type)
+        if number is None or number == 0:
             console_warning(
                 f"{var_name} is not available in sysinfo.csv, please provide the "
                 "correct value using --specs-correction"
             )
-            raw_value = 0
-        sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
+        if number is None:
+            number = np.nan if missing_as_null else var_type(0)
+        typed[var_name] = number
 
-    for var_name, var_type in optional_sys_vars:
-        raw_value = sys_info_dict.get(var_name)
-        if not pd.isna(raw_value):
-            sys_vars_collection[f"ammolite__{var_name}"] = var_type(raw_value)
+    for var_name, var_type in OPTIONAL_SYS_VARS:
+        number = _cast_sys_value(sys_info.get(var_name), var_type)
+        if number is not None:
+            typed[var_name] = number
 
     # num_xcd is a CDNA-only concept; RDNA is single-die, so default to 1.
-    raw_num_xcd = sys_info_dict.get("num_xcd")
-    sys_vars_collection["ammolite__num_xcd"] = (
-        1 if pd.isna(raw_num_xcd) else int(raw_num_xcd)
-    )
+    num_xcd = _cast_sys_value(sys_info.get("num_xcd"), int)
+    typed["num_xcd"] = 1 if num_xcd is None else num_xcd
 
-    return sys_vars_collection
+    return typed
+
+
+def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
+    """Create CLI variables from sys.info, where a missing required value is 0."""
+    return {
+        f"ammolite__{var_name}": value
+        for var_name, value in type_sys_vars(
+            sys_info.to_dict(), missing_as_null=False
+        ).items()
+    }
 
 
 def calc_builtin_vars(
@@ -152,6 +175,36 @@ def calc_builtin_vars(
     return builtin_vars_collection
 
 
+def check_gui_active_counter(
+    sys_info: pd.Series | Mapping[str, Any],
+    raw_pmc_df: pd.DataFrame,
+) -> None:
+    """Halt the run when a non-roofline workload reports zero GPU activity."""
+    # Only non-roofline runs carry the GRBM counters that prove activity.
+    if sys_info.get("ip_blocks") == "roofline":
+        return
+    gui_active_counter = next(
+        (
+            counter
+            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
+            if counter in raw_pmc_df.columns
+        ),
+        None,
+    )
+    if gui_active_counter is not None and (raw_pmc_df[gui_active_counter] == 0).any():
+        console_warning(f"Detected {gui_active_counter} == 0")
+        console_error("Halting execution for warning above.")
+
+
+def is_pct_of_peak_flagged(flag: object) -> bool:
+    """Read a Percent of Peak flag, whether it is still a bool or already a string.
+
+    The metric config's pct_of_peak is a bool, but build_metric_value_string turns
+    it into "True" or "" before evaluation. Only "True" counts as flagged.
+    """
+    return str(flag).strip() == "True"
+
+
 @demarcate
 def eval_metric(
     dfs: dict,
@@ -163,23 +216,7 @@ def eval_metric(
     debug: bool,
 ) -> None:
     """Execute the expr string for each metric in the df."""
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
-    gui_active_counter = next(
-        (
-            counter
-            for counter in ("GRBM_GUI_ACTIVE_sum", "GRBM_GUI_ACTIVE")
-            if counter in raw_pmc_df.columns
-        ),
-        None,
-    )
-    if (
-        (not roof_only_run)
-        and gui_active_counter is not None
-        and (raw_pmc_df[gui_active_counter] == 0).any()
-    ):
-        console_warning(f"Detected {gui_active_counter} == 0")
-        console_error("Halting execution for warning above.")
+    check_gui_active_counter(sys_info, raw_pmc_df)
 
     sys_vars = create_sys_vars(sys_info)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
@@ -277,8 +314,7 @@ def compute_pct_of_peak(dfs: dict, dfs_type: dict) -> None:
         if not value_col or not peak_col:
             continue
 
-        # astype(bool) handles both Python bool and numpy.bool_ from pandas dtypes
-        mask = df[pct_of_peak_col].astype(bool)
+        mask = df[pct_of_peak_col].map(is_pct_of_peak_flagged).astype(bool)
         df[pct_of_peak_col] = ""
         df.loc[mask, pct_of_peak_col] = [
             pct if (pct := calc_pct_of_peak(v, p)) is not None else ""
@@ -321,3 +357,13 @@ def validate_dual_issue_metrics(
                 # DB cells may be non-numeric (e.g. "N/A"); skip those.
                 continue
             detector.check(metric_name, value, peak)
+
+
+def _cast_sys_value(raw_value: Any, var_type: type) -> Optional[int | float]:  # noqa ANN401
+    """Cast one sys.info value to var_type; None when it is missing or not a number."""
+    if raw_value is None:
+        return None
+    number = pd.to_numeric(raw_value, errors="coerce")
+    if pd.isna(number):
+        return None
+    return var_type(number)
