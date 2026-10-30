@@ -25,7 +25,7 @@ std::string decode_target_description() {
   std::string description = "Target: auto";
   for (const NamedChoice<rj_code_target_id_t> &target : kTargets) {
     description += ", ";
-    description += target.first;
+    description += target.name;
   }
   return description;
 }

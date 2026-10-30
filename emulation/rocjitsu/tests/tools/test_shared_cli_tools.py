@@ -49,7 +49,9 @@ assert b"ROCJITSU_ENABLE_VFIO=ON" in launcher_help
 assert b"memory-backend-memfd" in launcher_help
 assert b"memory-backend=mem" in launcher_help
 
-assert b"expected --" in invoke(launcher, "bare-application", status=1)
+assert b"application arguments must follow --" in invoke(
+    launcher, "bare-application", status=1
+)
 assert b"requires a value" in invoke(launcher, "--config", status=1)
 assert b"nonempty path" in invoke(launcher, "--vfio-socket=", status=1)
 assert b"requires a value" in invoke(pretranslate, "--store-root", status=2)

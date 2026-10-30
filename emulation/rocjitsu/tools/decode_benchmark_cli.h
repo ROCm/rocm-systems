@@ -6,6 +6,9 @@
 #include "rocjitsu/cli.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 

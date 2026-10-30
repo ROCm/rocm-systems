@@ -68,7 +68,9 @@ TEST(DecodeBenchmarkCli, BadInputAndHelpBehavior) {
     auto parsed = cli::parse(command, args, diagnostic.emitter());
     ASSERT_TRUE(parsed.succeeded()) << diagnostic.message();
     EXPECT_TRUE(flags.help->value());
-    EXPECT_NE(cli::format_help(command).find("--iterations, -n VALUE"), std::string::npos);
+    const std::string help = cli::format_help(command);
+    EXPECT_NE(help.find("--iterations, -n VALUE"), std::string::npos);
+    EXPECT_NE(help.find("Target: auto"), std::string::npos);
   }
 }
 

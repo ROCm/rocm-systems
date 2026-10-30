@@ -7,7 +7,7 @@
 namespace rocjitsu::launcher {
 namespace ucli = ::rocjitsu::cli;
 TEST(LaunchFlags, OmissionExplicitZeroAndRepeatedOverrides) {
-  ucli::Command command{"rocjitsu", ucli::PositionalMode::AfterSeparator};
+  ucli::Command command{"rocjitsu"};
   LaunchFlags flags;
   util::StringDiagnostic diagnostic;
   ASSERT_TRUE(flags.register_flags(command, diagnostic.emitter()).succeeded());

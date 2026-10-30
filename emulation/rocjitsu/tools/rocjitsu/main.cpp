@@ -406,7 +406,7 @@ void print_usage(const ucli::Command &command) {
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
-  ucli::Command command{"rocjitsu", ucli::PositionalMode::AfterSeparator};
+  ucli::Command command{"rocjitsu"};
   launcher::LaunchFlags flags;
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
@@ -448,6 +448,12 @@ int main(int argc, char *argv[]) {
   const bool daemon_mode = flags.daemon->value();
   const bool attach_mode = flags.attach->value();
   const bool has_app = !parsed.value().positional.empty();
+
+  if (has_app && !parsed.value().saw_separator) {
+    std::cerr << "rocjitsu: application arguments must follow --\n";
+    print_usage(command);
+    return 1;
+  }
 
   if (!config_path) {
     std::cerr << "rocjitsu: --config is required\n";
