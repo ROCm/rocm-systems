@@ -1,0 +1,131 @@
+name: AMDSMI ABI Gate
+
+# See projects/amdsmi/tests/abi_check/README.md.
+#
+# No paths filter on pull_request: a required check that never starts blocks
+# the PR forever, so unrelated PRs run the job and it passes in seconds.
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - 'release/therock-*'
+  merge_group:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/amdsmi/**'
+      - '.github/workflows/amdsmi-abi-gate.yml'
+  workflow_dispatch:
+
+# Parses headers from fork PRs: read-only token, no secrets.
+permissions:
+  contents: read
+
+# Only a PR's newer push cancels its older run; every push to develop and every
+# merge group gets its own run.
+concurrency:
+  group: amdsmi-abi-gate-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  abi_gate:
+    name: AMDSMI ABI gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+          filter: blob:none
+          persist-credentials: false
+          sparse-checkout: projects/amdsmi/tests/abi_check
+
+      - name: Resolve refs
+        id: refs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          BASE_REF="${BASE_REF#refs/heads/}"
+          case "$EVENT_NAME" in
+            pull_request) BASE=$(git rev-parse HEAD^1) ;;
+            merge_group) BASE="$MERGE_GROUP_BASE" ;;
+            push) BASE="$PUSH_BEFORE" ;;
+            *) BASE=$(git rev-parse HEAD^1) ;;
+          esac
+          if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]]; then
+            echo "No base commit for $EVENT_NAME; nothing to compare."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch -q --no-tags --depth=1 --filter=blob:none origin "$BASE"
+          if git diff --quiet "$BASE" HEAD -- projects/amdsmi/include projects/amdsmi/abi \
+              projects/amdsmi/tests/abi_check .github/workflows/amdsmi-abi-gate.yml; then
+            echo "No amdsmi ABI inputs changed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RELEASE=""
+          if [[ "$BASE_REF" != release/therock-* ]]; then
+            RELEASE=$(git ls-remote --heads origin 'refs/heads/release/therock-*' \
+              | sed 's|.*refs/heads/||' \
+              | { grep -E '^release/therock-[0-9]+(\.[0-9]+)*$' || true; } \
+              | sort -V | tail -n 1)
+          fi
+          if [[ -n "$RELEASE" ]]; then
+            git fetch -q --no-tags --depth=1 --filter=blob:none origin \
+              "refs/heads/$RELEASE:refs/remotes/origin/$RELEASE"
+            RELEASE="origin/$RELEASE"
+          fi
+          {
+            echo "base=$BASE"
+            echo "release=$RELEASE"
+            echo "skip=false"
+          } >> "$GITHUB_OUTPUT"
+
+      # The PR could otherwise edit the checker to pass itself. A base without
+      # it, such as an older release branch, gets develop's copy. The PR's copy
+      # runs only when develop has none either, which is the PR adding it.
+      - name: Vendor the checker from the base commit
+        if: steps.refs.outputs.skip == 'false'
+        env:
+          BASE: ${{ steps.refs.outputs.base }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/abi_gate"
+          dir=projects/amdsmi/tests/abi_check
+          trusted="$BASE"
+          if ! git cat-file -e "$BASE:$dir/abi_gate.py" 2>/dev/null; then
+            git fetch -q --no-tags --depth=1 --filter=blob:none origin \
+              refs/heads/develop:refs/remotes/origin/develop
+            trusted=origin/develop
+            echo "::notice::The base has no abi_gate.py; using develop's."
+          fi
+          if git cat-file -e "$trusted:$dir/abi_gate.py" 2>/dev/null; then
+            git show "$trusted:$dir/abi_gate.py" > "$RUNNER_TEMP/abi_gate/abi_gate.py"
+            git show "$trusted:$dir/requirements.txt" > "$RUNNER_TEMP/abi_gate/requirements.txt"
+          else
+            echo "::warning::Neither the base nor develop has abi_gate.py; running this PR's copy."
+            cp "$dir/abi_gate.py" "$dir/requirements.txt" "$RUNNER_TEMP/abi_gate/"
+          fi
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q -r "$RUNNER_TEMP/abi_gate/requirements.txt"
+
+      - name: Check ABI
+        if: steps.refs.outputs.skip == 'false'
+        env:
+          BASE: ${{ steps.refs.outputs.base }}
+          RELEASE: ${{ steps.refs.outputs.release }}
+        run: |
+          set -euo pipefail
+          args=(gate --base "$BASE" --new HEAD --summary-out "$GITHUB_STEP_SUMMARY")
+          if [[ -n "$RELEASE" ]]; then
+            args+=(--release "$RELEASE")
+          fi
+          "$RUNNER_TEMP/venv/bin/python" "$RUNNER_TEMP/abi_gate/abi_gate.py" "${args[@]}"
