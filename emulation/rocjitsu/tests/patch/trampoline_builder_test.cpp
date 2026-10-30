@@ -55,9 +55,10 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, kOriginalWord);
-  util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
-  ASSERT_TRUE(nop.succeeded());
-  plan.before_items = {InlineAsmItem{{nop.value()}}};
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_nop.succeeded());
+  const uint32_t nop = maybe_nop.value();
+  plan.before_items = {InlineAsmItem{{nop}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
@@ -74,7 +75,7 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   // return_branch_offset = 0x200 + 4 + 4 = 0x208.
   // return_simm16 = (0x104 - (0x208 + 4)) / 4 = -66.
   ASSERT_EQ(bytes->trampoline_words.size(), 3u);
-  EXPECT_EQ(bytes->trampoline_words[0], nop.value());
+  EXPECT_EQ(bytes->trampoline_words[0], nop);
   EXPECT_EQ(bytes->trampoline_words[1], kOriginalWord);
   util::FailureOr<uint32_t> return_branch = build_s_branch(-66, kArch);
   ASSERT_TRUE(return_branch.succeeded());
@@ -95,9 +96,10 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 8;
   plan.original_words = {kW0, kW1};
-  util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
-  ASSERT_TRUE(nop.succeeded());
-  plan.before_items = {InlineAsmItem{{nop.value()}}};
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_nop.succeeded());
+  const uint32_t nop = maybe_nop.value();
+  plan.before_items = {InlineAsmItem{{nop}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
@@ -108,13 +110,13 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
   util::FailureOr<uint32_t> forward_branch = build_s_branch(63, kArch);
   ASSERT_TRUE(forward_branch.succeeded());
   EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), forward_branch.value());
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 4), nop.value());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 4), nop);
 
   // Trampoline: [before s_nop, w0, w1, return s_branch].
   // return_branch_offset = 0x200 + 4 + 8 = 0x20C.
   // return_simm16 = (0x108 - (0x20C + 4)) / 4 = -66.
   ASSERT_EQ(bytes->trampoline_words.size(), 4u);
-  EXPECT_EQ(bytes->trampoline_words[0], nop.value());
+  EXPECT_EQ(bytes->trampoline_words[0], nop);
   EXPECT_EQ(bytes->trampoline_words[1], kW0);
   EXPECT_EQ(bytes->trampoline_words[2], kW1);
   util::FailureOr<uint32_t> return_branch = build_s_branch(-66, kArch);
