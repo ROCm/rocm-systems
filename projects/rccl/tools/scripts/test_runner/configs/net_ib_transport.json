@@ -1065,7 +1065,11 @@
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx1, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 64KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_RegMr" },
-        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_RegMr" }
+        { "name": "NetIB_GIN_PeerMem_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN peermem: mixed iput/iget/iput-signal (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedPutsClosedByDefault_Ctx1_4KiB", "description": "GIN peermem: aggregated puts closed by a default op (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_AggregatedPutsClosedByDefault_Ctx2_4KiB", "description": "GIN peermem: aggregated puts closed by a default op (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx2_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IFlushAfterAggregatedPuts_Ctx1_4KiB", "description": "GIN peermem: flush after aggregated puts (Ctx1, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx1_4KiB_RegMr" },
+        { "name": "NetIB_GIN_PeerMem_IFlushAfterAggregatedPuts_Ctx2_4KiB", "description": "GIN peermem: flush after aggregated puts (Ctx2, 4KiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx2_4KiB_RegMr" }
       ]
     },
     "net_ib_gin_dmabuf": {
@@ -1126,7 +1130,11 @@
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx1_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx1, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx1_1MiB_DmaBuf" },
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_4KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_4KiB_DmaBuf" },
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_64KiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 64KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_64KiB_DmaBuf" },
-        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" }
+        { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedPutsClosedByDefault_Ctx1_4KiB", "description": "GIN dmabuf: aggregated puts closed by a default op (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_AggregatedPutsClosedByDefault_Ctx2_4KiB", "description": "GIN dmabuf: aggregated puts closed by a default op (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedPutsClosedByDefault/Ctx2_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IFlushAfterAggregatedPuts_Ctx1_4KiB", "description": "GIN dmabuf: flush after aggregated puts (Ctx1, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx1_4KiB_DmaBuf" },
+        { "name": "NetIB_GIN_DmaBuf_IFlushAfterAggregatedPuts_Ctx2_4KiB", "description": "GIN dmabuf: flush after aggregated puts (Ctx2, 4KiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.IFlushAfterAggregatedPuts/Ctx2_4KiB_DmaBuf" }
       ]
     },
     "net_ib_host_api_fused": {

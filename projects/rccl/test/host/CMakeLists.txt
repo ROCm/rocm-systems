@@ -1118,6 +1118,15 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbGin -- src/transport/net_ib/gin.cc. Own binary: it defines ncclRmaIbProxy,
+  # which the cast gin suite does not, and it fakes the rest of net_ib rather than compiling it.
+  set(TEST_MICRO_NET_IB_GIN_SOURCE_FILES
+    net-ib-gin-batch-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -2435,6 +2444,25 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbGin -- doorbell batching in src/transport/net_ib/gin.cc
+# ---------------------------------------------------------------------------
+# _rccl_src_root is unset once the checks above it have run.
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/../../src/transport/net_ib/gin.cc"
+  "batch->wrs[batch->nWrs - 1].send_flags |= IBV_SEND_SIGNALED;"
+  "net-ib-gin-batch-test.cc: only the batch tail is signaled")
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbGin
+  SOURCES ${TEST_MICRO_NET_IB_GIN_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # plugin/gin.cc keeps the basename gin.cc, so add_file_unique() renames this copy.
+    # Re-check after any source-list reorder.
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_gin.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNet
