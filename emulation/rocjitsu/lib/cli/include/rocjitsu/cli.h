@@ -51,9 +51,9 @@ public:
   virtual std::string format_value() const = 0;
   /// @brief Whether this flag type can consume the implicit "true" from ValueMode::Switch.
   ///
-  /// Custom flags that intentionally parse switch values can keep the default.
-  /// Value-only flags override this to reject invalid tool definitions at registration time.
-  virtual bool allows_switch_mode() const { return true; }
+  /// Value-only flags reject switch registration by default. Flags that intentionally
+  /// parse bare-switch values must opt in.
+  virtual bool allows_switch_mode() const { return false; }
   util::Result parse_and_set(std::string_view text, util::DiagnosticEmitter diagnostic);
 
 protected:
@@ -81,6 +81,7 @@ public:
   bool value() const { return value_; }
   util::Result set_value(bool value, util::DiagnosticEmitter diagnostic = {});
   std::string format_value() const override;
+  bool allows_switch_mode() const override { return true; }
 
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override;

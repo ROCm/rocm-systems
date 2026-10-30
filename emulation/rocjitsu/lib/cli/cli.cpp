@@ -160,7 +160,7 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
   for (const auto &flag : flags) {
     if (!flag)
       return diagnostic.emit() << path() << ": null flag";
-    const auto &info = flag->info();
+    const FlagInfo &info = flag->info();
     if (info.value_mode == ValueMode::Switch && !flag->allows_switch_mode())
       return diagnostic.emit() << path() << ": " << info.name
                                << " cannot use switch mode with this flag type";
@@ -196,7 +196,7 @@ Result Command::add_flags(std::string description, std::vector<std::shared_ptr<F
 std::shared_ptr<Flag> Command::find_flag(std::string_view spelling) const {
   for (const auto &group : groups_)
     for (const auto &flag : group.flags) {
-      const auto &info = flag->info();
+      const FlagInfo &info = flag->info();
       if (info.name == spelling || std::ranges::find(info.aliases, spelling) != info.aliases.end())
         return flag;
     }
@@ -294,12 +294,18 @@ FailureOr<ParsedArguments> parse(Command &root, std::span<const std::string_view
 
 std::string format_help(const Command &command) {
   std::ostringstream out;
-  out << "Usage: " << command.path() << " [options]";
-  if (!command.commands().empty())
-    out << " <command>";
-  if (!command.positional_usage().empty()) {
+  const auto write_positional_usage = [&]() {
     out << (command.positional_mode() == PositionalMode::AfterSeparator ? " --" : " [--]") << ' '
         << command.positional_usage();
+  };
+  out << "Usage: " << command.path() << " [options]";
+  const bool has_commands = !command.commands().empty();
+  if (has_commands)
+    out << " <command>";
+  if (!command.positional_usage().empty()) {
+    if (has_commands)
+      out << "\n       " << command.path() << " [options]";
+    write_positional_usage();
   }
   out << "\n";
   for (const auto &group : command.groups()) {

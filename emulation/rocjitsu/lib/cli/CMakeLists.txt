@@ -15,6 +15,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     if(BUILD_TESTING)
         find_package(GTest REQUIRED)
     endif()
+else()
+    include(rj_configure_target)
 endif()
 
 add_library(rocjitsu_cli STATIC cli.cpp)

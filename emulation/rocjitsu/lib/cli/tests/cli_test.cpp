@@ -123,7 +123,8 @@ TEST_F(CliTest, HelpSectionsPreserveOrderAndDoNotIntroduceScope) {
   ASSERT_TRUE(root.add_flag(help, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flags("Processing", {count, output}, diagnostic.emitter()).succeeded());
   ASSERT_TRUE(root.add_flags("Empty", {}, diagnostic.emitter()).succeeded());
-  EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] [arguments...]\n"
+  EXPECT_EQ(format_help(root), "Usage: tool [options] <command>\n"
+                               "       tool [options] [--] [arguments...]\n"
                                "\nOptions:\n  --help, -h\n      Show help\n"
                                "\nProcessing:\n  --count, -c N\n      Number of items\n"
                                "  --output, -o PATH\n      Output file\n"
@@ -148,7 +149,8 @@ TEST_F(CliTest, HelpUsesCustomOrEmptyPositionalUsage) {
   FailureOr<Command *> status = root.add_command("status", diagnostic.emitter());
   ASSERT_TRUE(status.succeeded());
   status.value()->set_positional_usage("");
-  EXPECT_EQ(format_help(root), "Usage: tool [options] <command> [--] INPUT...\n"
+  EXPECT_EQ(format_help(root), "Usage: tool [options] <command>\n"
+                               "       tool [options] [--] INPUT...\n"
                                "\nCommands:\n  launch\n  status\n");
   EXPECT_EQ(format_help(*launch.value()), "Usage: tool launch [options] -- APP [ARGS...]\n"
                                           "\nOptions:\n  --config PATH\n      Config\n");
@@ -235,6 +237,44 @@ TEST_F(CliTest, BuiltInValueFlagsRejectSwitchMode) {
   }
   auto custom = std::make_shared<BoolFlag>(FlagInfo{"--custom", {}, "", ValueMode::Switch});
   EXPECT_TRUE(root.add_flag(custom, diagnostic.emitter()).succeeded());
+}
+
+TEST_F(CliTest, CustomFlagsMustOptIntoSwitchMode) {
+  class LocalFlag final : public Flag {
+  public:
+    explicit LocalFlag(bool allow_switch)
+        : Flag(FlagInfo{"--custom", {}, "", ValueMode::Switch}), allow_switch_(allow_switch) {}
+    std::string format_value() const override { return {}; }
+    bool allows_switch_mode() const override { return allow_switch_; }
+
+  private:
+    Result parse_value(std::string_view, DiagnosticEmitter) override { return Result::success(); }
+    bool allow_switch_;
+  };
+
+  EXPECT_TRUE(root.add_flag(std::make_shared<LocalFlag>(false), diagnostic.emitter()).failed());
+  EXPECT_TRUE(root.add_flag(std::make_shared<LocalFlag>(true), diagnostic.emitter()).succeeded());
+}
+
+TEST_F(CliTest, HelpSeparatesChildDispatchFromParentPositionalPolicy) {
+  Command command{"tool", PositionalMode::AfterSeparator};
+  util::StringDiagnostic local_diagnostic;
+  FailureOr<Command *> run = command.add_command("run", local_diagnostic.emitter());
+  ASSERT_TRUE(run.succeeded());
+
+  EXPECT_EQ(format_help(command), "Usage: tool [options] <command>\n"
+                                  "       tool [options] -- [arguments...]\n"
+                                  "\nCommands:\n  run\n");
+  EXPECT_EQ(format_help(*run.value()), "Usage: tool run [options] [--] [arguments...]\n");
+
+  const std::array<std::string_view, 2> child_args{"run", "app"};
+  EXPECT_TRUE(parse(command, child_args, local_diagnostic.emitter()).succeeded());
+  const std::array<std::string_view, 2> root_positional_args{"--", "app"};
+  FailureOr<ParsedArguments> positional =
+      parse(command, root_positional_args, local_diagnostic.emitter());
+  ASSERT_TRUE(positional.succeeded());
+  EXPECT_EQ(positional.value().command, &command);
+  EXPECT_EQ(positional.value().positional, (std::vector<std::string>{"app"}));
 }
 
 TEST_F(CliTest, ValueGrammarAndOwnedStrings) {
