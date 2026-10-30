@@ -1160,7 +1160,8 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   struct ncclDevComm devCommA, struct ncclDevComm devCommB) {
   /* Generator CTAs can be role-specialized at launch:
    *   RDMA phase: poll trainer/ring input and unpack/forward it.
-   *   LSA phase : TMA-pull from an in-domain leader and unpack it.
+   *   LSA phase : pull from an in-domain leader (TMA on CUDA, direct reads on AMD)
+   *               and unpack it.
    * Mixed roles use separate compact launch maps so one CTA does not have to
    * carry both RDMA and LSA work when the rank has both edge types. */
   const int num_channels = params->numChannels;
@@ -1191,6 +1192,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   extern __shared__ char tma_tile_smem[];
   char* tma_tile_base = (char*)(((uintptr_t)tma_tile_smem + 127ULL) & ~127ULL);
 #if defined(__HIP_PLATFORM_AMD__)
+  /* AMD has no TMA (the staging_tma_* primitives are no-ops there), so unpack
+   * reads each queued tile directly from the leader's LSA window. */
+  __shared__ const char* lsa_tile_src[PIPE_GENERATOR_QUEUE_DEPTH];
   barrier_subset_init();
 #endif
 
@@ -1199,8 +1203,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
   }
 
   if constexpr (DoLsaSources) {
-    /* Only LSA-source CTAs use TMA.  Their control warp fills shared-memory
-     * tiles, and unpack warps wait on these mbarriers before scattering. */
+    /* Only LSA-source CTAs use TMA (CUDA only; no-ops on AMD).  Their control
+     * warp fills shared-memory tiles, and unpack warps wait on these mbarriers
+     * before scattering. */
     if (threadIdx.x < PIPE_GENERATOR_QUEUE_DEPTH) {
       staging_tma_mbarrier_init(&tma_mbar[threadIdx.x], 1);
     }
@@ -1521,9 +1526,10 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
         if (active && chunks.count > 0 && is_control && lane_id == 0) {
           /* Generator LSA stage A: control warp lane 0.
            *
-           * Poll the local NVLink-domain leader FIFO, issue TMA loads from the
-           * leader's staging window into shared-memory tiles, enqueue each tile
-           * for unpack, and release LSA credits chunk by chunk. */
+           * Poll the local NVLink-domain leader FIFO, enqueue each tile for unpack
+           * (on CUDA after issuing its TMA load from the leader's staging window
+           * into shared memory; on AMD as a pointer into that window), and release
+           * LSA credits chunk by chunk. */
           StagingFlowCtrl poll_fc = source.fc;
           StagingFlowCtrl release_fc = source.fc;
           const uint64_t head_base = staging_cursor_load(lsa_region, source.fc.cursorHeadOffset);
@@ -1572,6 +1578,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
                 }
                 unsigned int q_idx = q_tail % (unsigned int)PIPE_GENERATOR_QUEUE_DEPTH;
                 size_t tile_bytes = pipe_min_size((size_t)TmaTileSize, this_bytes - tile_offset);
+#if defined(__HIP_PLATFORM_AMD__)
+                lsa_tile_src[q_idx] = remote_src + tile_offset;
+#else
                 char* tma_tile_buf = tma_tile_base + (size_t)q_idx * (size_t)TmaTileSize;
                 /* cp.async.bulk needs a multiple of 16 bytes; with a shorter tail the
                  * mbarrier never completes.  Load the padded size: the staging slot is
@@ -1579,6 +1588,7 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
                 const int tma_bytes = (int)((tile_bytes + 15) & ~(size_t)15);
                 staging_tma_mbarrier_expect(&tma_mbar[q_idx], tma_bytes);
                 staging_tma_load(tma_tile_buf, remote_src + tile_offset, &tma_mbar[q_idx], tma_bytes);
+#endif
 
                 q_desc[q_idx].staging_offset = 0;
                 q_desc[q_idx].byte_start = byte_start + tile_offset;
@@ -1606,9 +1616,11 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
         if (active && chunks.count > 0 && is_unpack) {
           /* Generator LSA stage B: unpack warps.
            *
-           * The unpack leader waits for the queued TMA tile mbarrier, then the
-           * unpack group scatters the tile to destination memory.  The last tile
-           * of each logical chunk advances q_done_chunks for LSA credit release. */
+           * The unpack leader waits for the next queued tile (on CUDA also for its
+           * TMA mbarrier), then the unpack group scatters it to destination memory:
+           * from shared memory on CUDA, directly from the leader's LSA window on AMD.
+           * The last tile of each logical chunk advances q_done_chunks for LSA
+           * credit release. */
           size_t tiles_done = 0;
           size_t chunks_done = 0;
           while (chunks_done < chunks.count) {
@@ -1620,7 +1632,9 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
               }
               __threadfence_block();
               cur_desc = q_desc[tiles_done % (unsigned int)PIPE_GENERATOR_QUEUE_DEPTH];
-#ifdef STAGING_PIPE_SYNC_TIMEOUT_DEBUG
+#if defined(__HIP_PLATFORM_AMD__)
+              /* No TMA tile to wait for on AMD. */
+#elif defined(STAGING_PIPE_SYNC_TIMEOUT_DEBUG)
               PIPE_SPIN_INIT(lsa_tma_mbarrier_wait);
               while (!staging_tma_mbarrier_try_wait(&tma_mbar[cur_desc.tile_buf],
                                                     tma_consumer_phase[cur_desc.tile_buf])) {
@@ -1633,9 +1647,15 @@ __global__ __launch_bounds__(PIPE_GENERATOR_THREADS, 1) void StagingReshardKerne
               staging_tma_mbarrier_wait(&tma_mbar[cur_desc.tile_buf], tma_consumer_phase[cur_desc.tile_buf]);
 #endif
             }
-            /* Publish the completed TMA tile descriptor to every unpack warp. */
+            /* Publish the tile descriptor (TMA-completed on CUDA) to every unpack warp. */
             barrier_sync_subset(PIPE_GENERATOR_UNPACK_BARRIER_ID, PIPE_GENERATOR_UNPACK_THREADS);
+#if defined(__HIP_PLATFORM_AMD__)
+            /* Per-wave acquire fence after control-lane acquire load; formally weak, relies on AMD memory model. */
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
+            const char* tile_src = lsa_tile_src[cur_desc.tile_buf];
+#else
             const char* tile_src = tma_tile_base + (size_t)cur_desc.tile_buf * (size_t)TmaTileSize;
+#endif
             const StagingPipeCopyLayout& source_layout =
               pipe_plan->lsaSourceLayouts[channel_id][source.copyLayoutIndex];
             pipe_unpack_chunk(user_dst, tile_src, source_layout, cur_desc.byte_start, cur_desc.bytes,
@@ -1727,7 +1747,11 @@ static ncclResult_t launchPipeGeneratorSpecialized(const StagingKernelParams* ho
                                                    StagingKernelParams* devParams, StagingPipeDevicePlan* devPipePlan,
                                                    const StagingPipeCallParams& call, struct ncclDevComm* devCommA,
                                                    struct ncclDevComm* devCommB, int numCtas, cudaStream_t stream) {
+#if defined(__HIP_PLATFORM_AMD__)
+  constexpr int dynamic_smem_bytes = 0;
+#else
   constexpr int dynamic_smem_bytes = DoLsaSources ? (PIPE_GENERATOR_QUEUE_DEPTH * TmaTileSize + 127) : 0;
+#endif
   int grid = numCtas;
   if constexpr (SplitMixedRoleCtas) {
     grid = pipeCountGeneratorRdmaLaunchChannels(hostParams) + pipeCountGeneratorLsaLaunchChannels(hostParams);
