@@ -1170,7 +1170,7 @@ def test_calc_roofline_ceilings_skips_an_invalid_roofline_csv(tmp_path, monkeypa
     }
 
     assert analyzer.calc_roofline_ceilings() == {}
-    assert "Skipping roofline ceilings" in mock_warning.call_args.args[0]
+    assert "Roofline peaks are NULL" in mock_warning.call_args.args[0]
 
 
 def test_calc_metrics_data_exports_qualified_per_channel_names():
