@@ -95,6 +95,57 @@ class CandidateResolutionTest(unittest.TestCase):
 
 
 class CandidateCompositionTest(unittest.TestCase):
+    def test_fresh_external_work_dir_is_created_before_install(self):
+        class InstallReached(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "new" / "work"
+            artifact_dir = root / "artifacts"
+            artifact_dir.mkdir()
+            lib = artifact_dir / "librccl.so"
+            lib.write_bytes(b"candidate")
+            tuner = root / "rccl_tuner_gfx950.csv"
+            tuner.write_text("collective,minBytes\n")
+            artifact = root / "candidate-artifact-run.json"
+            artifact.write_text(json.dumps({
+                "candidate_sha": SHA,
+                "artifact_source_sha": SHA,
+                "artifact_run_id": "123",
+            }))
+            fingerprint = {
+                "md5": "m",
+                "sha256": tm.sha256_file(lib),
+                "version": f"2.40.0-develop:{SHA[:7]}",
+                "size": lib.stat().st_size,
+            }
+            argv = [
+                "test_madengine.py",
+                "--artifact-dir", os.fspath(artifact_dir),
+                "--candidate-sha", SHA,
+                "--artifact-provenance", os.fspath(artifact),
+                "--candidate-tuner-config", os.fspath(tuner),
+                "--workload", "llama-3.1-70b-training",
+                "--cluster", "ruby",
+                "--nodes", "2",
+                "--work-dir", os.fspath(work),
+            ]
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(tm, "find_rccl_library", return_value=lib), \
+                    mock.patch.object(tm, "get_rccl_fingerprint",
+                                      return_value=fingerprint), \
+                    mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "rccl_kpack_files", return_value=[]), \
+                    mock.patch.object(tm, "install_madengine",
+                                      side_effect=InstallReached), \
+                    self.assertRaises(InstallReached):
+                tm.main()
+
+            self.assertTrue(work.is_dir())
+            self.assertEqual(work.stat().st_mode & 0o777, 0o755)
+            self.assertTrue((work / tm.CANDIDATE_PROVENANCE).is_file())
+
     def test_manifest_ties_library_and_tuner_to_exact_sha(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

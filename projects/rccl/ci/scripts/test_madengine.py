@@ -3263,6 +3263,22 @@ def generate_summary_report(
     return "\n".join(lines)
 
 
+def prepare_work_directory(work_dir: Path) -> None:
+    """Create a trusted, traversable work directory before any artifact write."""
+    work_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if work_dir.is_symlink() or not work_dir.is_dir():
+        raise RuntimeError(f"work directory must be a real directory: {work_dir}")
+    details = work_dir.stat(follow_symlinks=False)
+    if details.st_uid != os.geteuid():
+        raise RuntimeError(
+            f"work directory must be owned by uid {os.geteuid()}: {work_dir} "
+            f"(owner {details.st_uid})"
+        )
+    # Docker root needs to traverse this shared path; manifests and random log
+    # tokens themselves are separately created 0600.
+    work_dir.chmod(0o755)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -3379,6 +3395,7 @@ def main() -> None:
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="madengine_ci_"))
+    prepare_work_directory(work_dir)
     log.info("Work directory: %s", work_dir)
     log.info("Results directory: %s", results_dir)
 
