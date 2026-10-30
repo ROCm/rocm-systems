@@ -137,37 +137,26 @@ inline bool IsRealRequest(void* request) {
         }                                                                                \
     } while (0)
 
-// Skip a QP-sharing test when RCCL_IB_COMM_NGROUPS is absent/disabled, or when
-// a feature known to be mutually exclusive with sharing (resiliency, CAST
-// scheduler) is enabled alongside it. Must be called from the test body (not
-// a helper), because GTEST_SKIP() only interrupts execution when expanded
-// inline in the test scope. RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_SHARING_ENABLE
-// are set together by the qpshare_* categories in test_categories_mpi.yaml
-// (CI) and by the qpshare_base env block in
-// tools/scripts/test_runner/configs/mi355x_ainic_tw_roce.json (manual runs).
-#define QPSHARE_ENV_CHECK_OR_SKIP()                                                       \
+// Skip a QP-sharing test unless the net plugin actually enabled sharing, or when
+// resiliency is enabled alongside it. Reads the plugin's effective configuration
+// (ncclIbCastGetQpSharingConfig), so it must run after the plugin's init(). The
+// CAST scheduler needs no check: init() turns it off whenever sharing is on.
+// Must be called from the test body (not a helper), because GTEST_SKIP() only
+// interrupts execution when expanded inline in the test scope. The qpshare_*
+// categories in test_categories_mpi.yaml (CI) and the qpshare_base env block in
+// tools/scripts/test_runner/configs/mi355x_ainic_tw_roce.json (manual runs)
+// enable sharing.
+#define QPSHARE_ENABLED_OR_SKIP()                                                         \
     do {                                                                                   \
-        auto _qpshareIsSetTo1 = [](const char* name) {                                     \
-            const char* v = getenv(name);                                                  \
-            return v && v[0] && strcmp(v, "1") == 0;                                       \
-        };                                                                                  \
-        const char* _ng = getenv("RCCL_IB_COMM_NGROUPS");                                  \
-        if (!_ng || _ng[0] == '\0' || std::atoll(_ng) <= 0) {                              \
-            GTEST_SKIP() << "Requires RCCL_IB_COMM_NGROUPS > 0. "                          \
+        const struct ncclIbQpSharingConfig _cfg = QpShareConfig();                         \
+        if (!_cfg.enabled) {                                                               \
+            GTEST_SKIP() << "Requires QP sharing enabled in the net plugin "               \
+                            "(RCCL_IB_QP_SHARING_ENABLE=1, RCCL_IB_COMM_NGROUPS >= 1). "   \
                             "Use the qpshare_* categories in test_categories_mpi.yaml "     \
                             "or the qpshare_base config in mi355x_ainic_tw_roce.json.";     \
         }                                                                                   \
-        if (!_qpshareIsSetTo1("RCCL_IB_QP_SHARING_ENABLE")) {                              \
-            GTEST_SKIP() << "Requires RCCL_IB_QP_SHARING_ENABLE=1 -- otherwise the "       \
-                            "transport never takes the sharing path and this test "        \
-                            "would silently pass against the non-sharing code.";           \
-        }                                                                                   \
-        if (_qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_FAILOVER") ||                        \
-            _qpshareIsSetTo1("NCCL_IB_RESILIENCY_PORT_RECOVERY")) {                         \
+        if (_cfg.resiliencyEnabled) {                                                      \
             GTEST_SKIP() << "QP sharing tests do not support resiliency combos yet.";      \
-        }                                                                                   \
-        if (_qpshareIsSetTo1("RCCL_IB_QP_SCHED_ENABLE")) {                                 \
-            GTEST_SKIP() << "QP sharing tests do not support CAST scheduler combos yet.";  \
         }                                                                                   \
     } while (0)
 
@@ -1114,7 +1103,7 @@ protected:
         QpShareRefModel::Placement place;
 
         // This rank's comm: the one the introspection hook can be called on.
-        void* Mine(int rank) const { return rank == 0 ? recv : send; }
+        void* Mine() const { return MPIEnvironment::world_rank == 0 ? recv : send; }
     };
 
     // Open `n` connections, appending to `cs` and advancing `model` in step.
@@ -1131,8 +1120,8 @@ protected:
                 model.Release(conn.place);
                 ADD_FAILURE()
                     << what << ": connection " << c << " of " << n << " failed to establish"
-                    << " (RCCL_IB_COMM_NGROUPS=" << QpShareEnvNGroups()
-                    << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareEnvDepthMultiplier()
+                    << " (RCCL_IB_COMM_NGROUPS=" << QpShareNGroups()
+                    << " RCCL_IB_QP_DEPTH_MULTIPLIER=" << QpShareDepthMultiplier()
                     << "); it would have been comm #" << (model.Load(conn.place.group) + 1)
                     << " in group " << conn.place.group;
                 break;
@@ -1145,10 +1134,9 @@ protected:
 
     // This rank's comms, in order -- the vector ExpectQpShareLayout takes.
     std::vector<void*> MineOf(const std::vector<QpShareConn>& cs) {
-        const int rank = MPIEnvironment::world_rank;
         std::vector<void*> mine;
         mine.reserve(cs.size());
-        for (const QpShareConn& c : cs) mine.push_back(c.Mine(rank));
+        for (const QpShareConn& c : cs) mine.push_back(c.Mine());
         return mine;
     }
 
@@ -1196,8 +1184,8 @@ protected:
     // Goes to stdout on rank 0 (visible in mpirun logs) and into the gtest XML.
     void ReportQpShareCoverage(const char* what, int nconns, int maxCommsPerGroup,
                                int spread = -1) {
-        const int ng = QpShareEnvNGroups();
-        const int dm = QpShareEnvDepthMultiplier();
+        const int ng = QpShareNGroups();
+        const int dm = QpShareDepthMultiplier();
         RecordProperty("qpshare_ngroups", ng);
         RecordProperty("qpshare_depth_multiplier", dm);
         RecordProperty("qpshare_nconns", nconns);

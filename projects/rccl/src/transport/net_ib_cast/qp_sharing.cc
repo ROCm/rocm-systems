@@ -10,6 +10,9 @@
 #include <cassert>
 #include "net_ib_qp_sharing_inspect.h"
 
+extern int64_t ncclParamIbCastResiliencyPortFailover();
+extern int64_t ncclParamIbCastResiliencyPortRecovery();
+
 // QP sharing configuration parameters
 RCCL_PARAM(IbCastQpSharingEnable, "IB_QP_SHARING_ENABLE", 0);  // master switch: 0=off, 1=on
 RCCL_PARAM(IbCastCommNGroups, "IB_COMM_NGROUPS", 4);            // number of sharing groups (effective only when master switch is on)
@@ -313,6 +316,8 @@ extern "C" ncclResult_t ncclIbCastGetQpSharingState(void* comm, struct ncclIbQpS
     }
 
     if (base->qpSharing.groupIdx >= 0 && n > 0 && base->activeQps[0] && base->activeQps[0]->qp) {
+        // Teardown decrements refcounts and frees pool slots under this mutex,
+        // so hold it to read a slot that a concurrent close can't recycle.
         std::lock_guard<std::mutex> lock(g_IbCastQpSharingGlobalMutex);
         struct IbCastSharedQp* slot = IbCastFindSharedQpByQpn(base->activeQps[0]->qp->qp_num, base->isSend);
         if (slot) {
@@ -321,5 +326,15 @@ extern "C" ncclResult_t ncclIbCastGetQpSharingState(void* comm, struct ncclIbQpS
         }
     }
 
+    return ncclSuccess;
+}
+
+// ncclIbCastGetQpSharingConfig — report the QP-sharing configuration init() settled on.
+extern "C" ncclResult_t ncclIbCastGetQpSharingConfig(struct ncclIbQpSharingConfig* out) {
+    if (!out) return ncclInvalidArgument;
+    out->enabled = IbCastQpSharingEnabled();
+    out->ngroups = (int)rcclParamIbCastCommNGroups();
+    out->depthMultiplier = IbCastQpSharingDepthMultiplier();
+    out->resiliencyEnabled = ncclParamIbCastResiliencyPortFailover() || ncclParamIbCastResiliencyPortRecovery();
     return ncclSuccess;
 }

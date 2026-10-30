@@ -14,15 +14,19 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "net_ib_qp_sharing_inspect.h"
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Environment readers
+// Configuration readers
 //
-// RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_DEPTH_MULTIPLIER are plain RCCL_PARAMs
-// (qp_sharing.cc) -- only the RCCL_ prefix is honoured, there is no NCCL_ alias
-// for either despite what the feature commit message says. RCCL_PARAM caches
-// both for the process lifetime, so a test may read them once and assume they
-// hold for its whole run. That also means a sweep over either value needs one
+// The QP-sharing tunables come from the net plugin, not from the environment:
+// ncclIbCastGetQpSharingConfig() reports what init() actually settled on, so
+// they are only valid after the plugin's init() has run. RCCL_PARAM caches
+// both for the process lifetime, so a sweep over either value needs one
 // process (one mpirun) per point.
+//
+// QpShareEnvInt is for the tests' own knobs (QPSHARE_TEST_*), which are not
+// RCCL params and can vary in-process.
 // ─────────────────────────────────────────────────────────────────────────────
 
 static inline int QpShareEnvInt(const char* name, int fallback) {
@@ -31,17 +35,18 @@ static inline int QpShareEnvInt(const char* name, int fallback) {
     return static_cast<int>(std::atoll(v));
 }
 
-static inline int QpShareEnvNGroups() {
-    return QpShareEnvInt("RCCL_IB_COMM_NGROUPS", 0);
+static inline struct ncclIbQpSharingConfig QpShareConfig() {
+    struct ncclIbQpSharingConfig cfg = {};
+    if (ncclIbCastGetQpSharingConfig(&cfg) != ncclSuccess) cfg = {};
+    return cfg;
 }
 
-// qp_sharing.h's IbCastQpSharingDepthMultiplier() (called from connect.cc)
-// clamps the multiplier to >= 1 before it scales CQ/WR depth, so 0 or a
-// negative value behaves exactly like the default. That default is 8
-// (RCCL_PARAM(IbCastQpDepthMultiplier, "IB_QP_DEPTH_MULTIPLIER", 8) in
-// qp_sharing.cc) and this must track that literal, not connect.cc.
-static inline int QpShareEnvDepthMultiplier() {
-    return std::max(1, QpShareEnvInt("RCCL_IB_QP_DEPTH_MULTIPLIER", 8));
+static inline int QpShareNGroups() {
+    return QpShareConfig().ngroups;
+}
+
+static inline int QpShareDepthMultiplier() {
+    return QpShareConfig().depthMultiplier;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

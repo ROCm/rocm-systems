@@ -84,17 +84,16 @@ TEST_F(NetIbMPITest, QpShareAlgoLayoutSweep) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
     const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
+    const int ngroups = QpShareNGroups();
     const int target  = std::min(2 * ngroups + 1, kAlgoMaxConns);
     if (2 * ngroups + 1 > kAlgoMaxConns && rank == 0) {
         printf("[QPSHARE-COV] algo sweep capped at %d conns (ngroups=%d would need %d "
                "for two per group)\n", kAlgoMaxConns, ngroups, 2 * ngroups + 1);
     }
-
-    net_ = &netIbCast;
-    AssertInitAndGetDevices(nullptr);
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -154,13 +153,12 @@ TEST_F(NetIbMPITest, QpShareAlgoChurnLayout) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int ngroups = QpShareEnvNGroups();
-    const int maxLive = Clamp(2 * ngroups, 2, kChurnMaxLive);
-    const int steps   = 3 * maxLive + 6;
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int ngroups = QpShareNGroups();
+    const int maxLive = Clamp(2 * ngroups, 2, kChurnMaxLive);
+    const int steps   = 3 * maxLive + 6;
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -210,14 +208,13 @@ TEST_F(NetIbMPITest, QpShareDataAllConnsTransfer) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
-    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS",
-                                                  Clamp(ngroups + 2, 4, 32)));
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank    = MPIEnvironment::world_rank;
+    const int ngroups = QpShareNGroups();
+    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS",
+                                                  Clamp(ngroups + 2, 4, 32)));
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -290,13 +287,12 @@ TEST_F(NetIbMPITest, QpShareDataUnsharedGroups) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
-    const int nconns  = Clamp(ngroups, 1, 8);
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank    = MPIEnvironment::world_rank;
+    const int ngroups = QpShareNGroups();
+    const int nconns  = Clamp(ngroups, 1, 8);
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -374,13 +370,12 @@ TEST_F(NetIbMPITest, QpShareDataFlushRouting) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
-    const int nconns  = std::min(ngroups + 1, kFlushMaxConns);
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank    = MPIEnvironment::world_rank;
+    const int ngroups = QpShareNGroups();
+    const int nconns  = std::min(ngroups + 1, kFlushMaxConns);
 
     ncclNetProperties_t props;
     ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
@@ -559,13 +554,12 @@ TEST_F(NetIbMPITest, QpShareStressManyConns) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
-    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 100));
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank    = MPIEnvironment::world_rank;
+    const int ngroups = QpShareNGroups();
+    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 100));
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -647,14 +641,13 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank    = MPIEnvironment::world_rank;
-    const int ngroups = QpShareEnvNGroups();
-    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 50));
-    const int rounds  = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 10));
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank    = MPIEnvironment::world_rank;
+    const int ngroups = QpShareNGroups();
+    const int nconns  = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 50));
+    const int rounds  = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 10));
 
     QpShareRefModel model(ngroups);
     std::vector<QpShareConn> cs;
@@ -761,12 +754,11 @@ TEST_F(NetIbMPITest, QpShareStressConnectionChurn) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank  = MPIEnvironment::world_rank;
-    const int iters = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 2048));
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank  = MPIEnvironment::world_rank;
+    const int iters = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 2048));
 
     const size_t sz = 1024;
     std::vector<char> buf(sz);
@@ -879,14 +871,13 @@ TEST_F(NetIbMPITest, QpShareStressBatchCreateDestroy) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " processes";
 
-    QPSHARE_ENV_CHECK_OR_SKIP();
-    const int rank     = MPIEnvironment::world_rank;
-    const int ngroups  = QpShareEnvNGroups();
-    const int batches  = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 110));
-    const int perBatch = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 10));
-
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+    QPSHARE_ENABLED_OR_SKIP();
+    const int rank     = MPIEnvironment::world_rank;
+    const int ngroups  = QpShareNGroups();
+    const int batches  = std::max(1, QpShareEnvInt("QPSHARE_TEST_ITERS", 110));
+    const int perBatch = std::max(1, QpShareEnvInt("QPSHARE_TEST_NCONNS", 10));
 
     const size_t sz = 512;
     std::vector<char> buf(sz);

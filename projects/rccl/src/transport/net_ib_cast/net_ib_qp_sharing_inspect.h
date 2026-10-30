@@ -37,6 +37,19 @@ struct ncclIbQpSharingState {
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetQpSharingState(void* comm, struct ncclIbQpSharingState* out);
 
+/* Effective QP-sharing configuration as decided by the net plugin's init(),
+ * after its own adjustments (e.g. sharing is turned off when NGROUPS < 1).
+ * Only meaningful once init() has run. */
+struct ncclIbQpSharingConfig {
+  bool enabled;            /* IbCastQpSharingEnabled() */
+  int  ngroups;            /* RCCL_IB_COMM_NGROUPS */
+  int  depthMultiplier;    /* IbCastQpSharingDepthMultiplier() */
+  bool resiliencyEnabled;  /* NCCL_IB_RESILIENCY_PORT_FAILOVER or _RECOVERY */
+};
+
+/* Returns ncclInvalidArgument on a null pointer. */
+ncclResult_t ncclIbCastGetQpSharingConfig(struct ncclIbQpSharingConfig* out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
