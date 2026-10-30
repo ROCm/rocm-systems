@@ -82,7 +82,7 @@ prove layers 3 and 7 are done.
 | `goamdsmi_shim/` | `amdsmi_*` call added if the function must reach the Go shim |
 | `go/amdsmi/` | Read-only GPU CGO binding, Go-owned results, native units/availability, and `StatusError`; keep common Host spellings and conventional Go initialisms for BM-only names |
 
-The Go binding is handwritten. Its enum contract check covers 11 mirrored enums;
+The Go binding is handwritten. Its enum contract check covers 14 mirrored enums;
 the separate coverage inventory detects declaration and bound C type changes.
 A new C field can compile without becoming
 a Go field; review supported results and conversions explicitly, then update
