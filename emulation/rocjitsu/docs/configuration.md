@@ -342,9 +342,9 @@ does not select direct-CU groups; their WGP IDs still follow CU child order.
 
 This policy currently applies to dense and sparse WMMA, fused floating-point arithmetic,
 basic floating-point arithmetic and selection, division, dot products, math functions,
-comparisons, integer arithmetic, conversions, register and lane routing and graphics
-operations. Other instructions retain their existing implementations while integration
-proceeds by instruction family.
+comparisons, integer arithmetic, conversions, register and lane routing, graphics
+operations and scalar arithmetic. Other instructions retain their existing
+implementations while integration proceeds by instruction family.
 
 The optional top-level `arithmetic` object selects one semantics mode for
 RDNA3/RDNA4 instructions executed through rj-arith:
@@ -398,8 +398,8 @@ invalid and inexact cases; mode 3 accepts those instructions.
 
 These controls cover RDNA3/RDNA4 dense and sparse WMMA, fused floating-point arithmetic,
 basic floating-point arithmetic and selection, division, dot products, math functions,
-comparisons, integer arithmetic, conversions, register and lane routing and graphics
-operations.
+comparisons, integer arithmetic, conversions, register and lane routing, graphics
+operations and scalar arithmetic.
 Other GPU architectures retain their existing implementations. Decoding, register
 addressing, memory operations, scheduling, HWREG access and trap delivery remain
 rocjitsu responsibilities.
