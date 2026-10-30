@@ -4,6 +4,7 @@
 
 set(TEST_SRC
   hipPerfVMMAlloc.cc
+  hipPerfVMMImportedPeersBatchCopy.cc
 )
 
 hip_add_exe_to_target(NAME VMMPerformance
