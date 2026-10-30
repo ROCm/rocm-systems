@@ -42,9 +42,9 @@ from utils.utils_counter_defs import metric_expressions, metric_value_keys
 # raw data sources. Other generic prefixes, like "buildin__", might be used by
 # the editor. Whenever this prefix changes, update all shared metric helpers.
 
-# 001 is ID of pmc_kernel_top.csv table
+# 001 is ID of the Top Kernels table (built by create_df_kernel_top_stats)
 PMC_KERNEL_TOP_TABLE_ID: int = 1
-# 002 is ID of pmc_dispatch_info.csv table
+# 002 is ID of the Dispatch List table (built by create_df_kernel_top_stats)
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
 
 
@@ -589,8 +589,11 @@ def load_non_mertrics_table(
     pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     # NB:
-    #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
-    #     kernel names.
+    #   - The Top Kernels table is set by the caller before eval_metric because
+    #     we need the kernel names.
+    #   - Callers replace the from_csv entries of PMC_KERNEL_TOP_TABLE_ID and
+    #     PMC_DISPATCH_INFO_TABLE_ID with in-memory frames before this runs, so
+    #     no top-stats CSV is read.
     #   - There might be a better way/timing to load raw_csv_table.
 
     # NB:

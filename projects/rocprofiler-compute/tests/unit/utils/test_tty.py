@@ -229,6 +229,30 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     assert content.index("Stall reason definitions:") < content.index("v_mov")
 
 
+@pytest.mark.parametrize(
+    "table_id,expect_trimmed",
+    [
+        pytest.param(1, True, id="top_kernels"),
+        pytest.param(2, True, id="dispatch_list"),
+        pytest.param(101, False, id="other_raw_table"),
+    ],
+)
+def test_format_table_output_trims_only_top_stats_tables(
+    table_id: int, expect_trimmed: bool
+) -> None:
+    """--max-stat-num trims the in-memory top stats tables, found by table id."""
+    df = pd.DataFrame({"Kernel_Name": ["k_a", "k_b", "k_c", "k_d", "k_e"]})
+    content = format_table_output(
+        make_args(max_stat_num=2),
+        {"id": table_id, "title": "Top Stats", "source": "in_memory"},
+        df,
+        "raw_csv_table",
+        runs={"only": object()},
+    )
+    assert ("k_c" not in content) is expect_trimmed
+    assert "k_a" in content
+
+
 def test_format_table_output_scales_bytes_per_second() -> None:
     df = pd.DataFrame({
         "Metric": ["DRAM Read Bandwidth"],

@@ -73,6 +73,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     | `--output-format csv --output-name X` writes `./X/*.csv` | `-o X` writes `./X/*.csv` |
     | Rerunning with the same `--output-name` replaces the files | Exits with an error; choose a new name or omit `-o` |
     | `<workload>/empirRoof_gpu-0.html` | `<run folder>/1-<workload>/roofline-gpu-0.html` |
+    | `<workload>/pmc_kernel_top.csv` and `<workload>/pmc_dispatch_info.csv` | Not written. The top stats are built in memory and shown in the terminal and `report.txt` |
+
+* Analyze no longer writes `pmc_kernel_top.csv` or `pmc_dispatch_info.csv` into the workload directory. It only reads the workload directory, so a read-only or shared profile can be analyzed, and two analyses of one profile no longer overwrite each other's files.
+* Analyze no longer redirects a workload directory named `workloads` under the current directory to `workloads/<app>/<gpu>`. The roofline reads `roofline.csv` from the directory given with `-p`.
 
 * Renamed the analyze-mode dispatch filter to `--kernel-iteration-range`, matching profile mode. Update any analyze command by replacing `-d/--dispatch` with `--kernel-iteration-range`.
   * `--dispatch` is no longer accepted in analyze mode.

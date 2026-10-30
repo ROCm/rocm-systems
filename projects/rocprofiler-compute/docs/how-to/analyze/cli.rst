@@ -769,8 +769,8 @@ Analyze never modifies or deletes the files of an existing run folder. Listing o
 
 .. note::
 
-   Analyze still writes ``pmc_kernel_top.csv`` and ``pmc_dispatch_info.csv`` into the workload
-   directory.
+   Analyze only reads the workload directory and writes only to the run folder, so a read-only or
+   shared workload directory can be analyzed. The top stats tables are built in memory.
 
 .. note::
 

@@ -3,8 +3,10 @@
 
 """Analyze writes every artifact into one new run folder and nowhere else."""
 
+import os
 import re
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -13,9 +15,6 @@ from tests.integration.common import RUN_FOLDER_PREFIX, last_output_line
 from utils.utils_common import strip_ansi
 
 VCOPY_WORKLOAD = Path(__file__).resolve().parents[1] / "workloads/vcopy/MI300X_A1"
-
-# The top-stats scratch tables are still written into the workload directory.
-WORKLOAD_SCRATCH_FILES = {"pmc_dispatch_info.csv", "pmc_kernel_top.csv"}
 
 PANEL_HEADING = re.compile(r"^(\d+)\. ", re.MULTILINE)
 
@@ -28,11 +27,10 @@ def copy_workload(tmp_path):
 
 
 def snapshot_files(directory):
-    """Return each file under directory mapped to its bytes."""
+    """Map every path under directory to its bytes, or None for a directory."""
     return {
-        path.relative_to(directory): path.read_bytes()
+        path.relative_to(directory): None if path.is_dir() else path.read_bytes()
         for path in directory.rglob("*")
-        if path.is_file()
     }
 
 
@@ -147,10 +145,10 @@ def test_existing_output_name_errors_without_writing(
 
 
 @pytest.mark.misc
-def test_workload_directory_gains_only_the_scratch_tables(
+def test_run_leaves_the_workload_directory_byte_identical(
     binary_handler_analyze_rocprof_compute, tmp_path
 ):
-    """Analyze changes no existing workload file and adds only scratch tables."""
+    """A run adds no file or directory to the workload directory and changes none."""
     workload_path = copy_workload(tmp_path)
     before = snapshot_files(workload_path)
 
@@ -163,15 +161,63 @@ def test_workload_directory_gains_only_the_scratch_tables(
     ])
 
     assert code == 0
+    assert snapshot_files(workload_path) == before
+
+
+@pytest.mark.misc
+def test_run_folder_inside_the_workload_adds_only_that_folder(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """With -d inside the workload, existing files keep their bytes and the only
+    new entries are under the run folder."""
+    workload_path = copy_workload(tmp_path)
+    before = snapshot_files(workload_path)
+    run_folder = workload_path / "runs" / "run1"
+
+    code = run_into(binary_handler_analyze_rocprof_compute, workload_path, run_folder)
+
+    assert code == 0
+    assert (run_folder / "report.txt").is_file()
     after = snapshot_files(workload_path)
-    assert {path.name for path in after.keys() - before.keys()} <= (
-        WORKLOAD_SCRATCH_FILES
-    )
-    assert {
-        path
-        for path in before
-        if path.name not in WORKLOAD_SCRATCH_FILES and after[path] != before[path]
-    } == set()
+    assert {path: after[path] for path in before} == before
+    new_paths = after.keys() - before.keys()
+    assert new_paths
+    assert all(path.parts[0] == "runs" for path in new_paths)
+
+
+def make_read_only(directory):
+    """Remove write permission from every file and directory under directory."""
+    for path in [directory, *directory.rglob("*")]:
+        mode = path.stat().st_mode
+        path.chmod(mode & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
+
+
+def restore_write(directory):
+    """Give the owner write permission back so pytest can clean up tmp_path."""
+    for path in [directory, *directory.rglob("*")]:
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+
+
+@pytest.mark.misc
+def test_read_only_workload_directory_analyzes(
+    binary_handler_analyze_rocprof_compute, tmp_path
+):
+    """A workload that cannot be written to still analyzes into a run folder."""
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory write permissions")
+    workload_path = copy_workload(tmp_path)
+    before = snapshot_files(workload_path)
+    run_folder = tmp_path / "runs" / "run1"
+    make_read_only(workload_path)
+    try:
+        code = run_into(
+            binary_handler_analyze_rocprof_compute, workload_path, run_folder
+        )
+        assert code == 0
+        assert (run_folder / "report.txt").is_file()
+        assert snapshot_files(workload_path) == before
+    finally:
+        restore_write(workload_path)
 
 
 @pytest.mark.misc

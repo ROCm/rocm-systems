@@ -192,37 +192,12 @@ class Roofline:
         return self.__frame_bounds
 
     def roof_setup(self) -> None:
-        workload_dir_val = self.__run_parameters.get("workload_dir")
-
-        if not workload_dir_val:
+        """Check the workload directory is set. Nothing is created in it, so an
+        analyzed workload directory stays read-only."""
+        if not self.__run_parameters.get("workload_dir"):
             console_error(
                 "Workload directory is not set. Cannot perform setup.", exit=False
             )
-            return
-
-        base_dir = str(workload_dir_val)
-
-        base_path = Path(base_dir)
-
-        if base_path.name == "workloads" and base_path.parent == Path.cwd():
-            app_name = getattr(self.__args, "name", "default_app_name")
-            gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
-
-            new_path = base_path / app_name / gpu_model_name
-
-            if isinstance(workload_dir_val, list):
-                if isinstance(workload_dir_val[0], (list, tuple)):
-                    self.__run_parameters["workload_dir"][0][0] = str(new_path)
-                else:
-                    self.__run_parameters["workload_dir"][0] = str(new_path)
-            else:
-                self.__run_parameters["workload_dir"] = str(new_path)
-
-            final_dir = str(new_path)
-        else:
-            final_dir = base_dir
-
-        Path(final_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _peak_value(ceiling_data: dict[str, Any], key: str) -> Optional[float]:
