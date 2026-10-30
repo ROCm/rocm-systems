@@ -224,6 +224,27 @@ TEST_F(NetIbCastGdrMicrotestIsolated, DmaBufSupport_KernelRejectsTheDummyFd_IsSu
   });
 }
 
+// A missing mlx5dv_reg_dmabuf_mr used to leave EOPNOTSUPP. If the ibv dummy call
+// does not replace it, that errno is what selects ibv_reg_mr_iova2.
+TEST_F(NetIbCastGdrMicrotestIsolated, DmaBufSupport_IgnoresALeftoverMlx5Errno) {
+  RUN_ISOLATED_TEST("NetIbCastGdr_DmaBufLeftoverErrno", []() {
+    struct ibv_context ctx0 {}, ctx1 {};
+    struct ibv_pd pd {};
+    TwoDevices(&ctx0, &ctx1);
+    errno = EOPNOTSUPP;
+    ScopedHook alloc(g_ibvAllocPd, [&](struct ibv_pd** ret, struct ibv_context*) {
+      *ret = &pd;
+      return ncclSuccess;
+    });
+    ScopedHook reg(g_ibvDirectRegDmabufMr, [](struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) {
+      return (struct ibv_mr*)nullptr;  // does not write errno
+    });
+    ScopedHook dealloc(g_ibvDeallocPd, [](struct ibv_pd*) { return ncclSuccess; });
+    EXPECT_EQ(IbCastDmaBufSupport(0), ncclSuccess);
+    EXPECT_EQ(IbCastDevs[1].dmaBufSupported, 1);
+  });
+}
+
 struct DmaBufFailure {
   const char* name;
   bool allocFails;

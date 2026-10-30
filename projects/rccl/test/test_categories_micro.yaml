@@ -151,6 +151,8 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # misc/mlx5dvwrap.cc
+      - "Mlx5dvRegDmabufTest.*"
       # transport/nvls.cc (rccl-UnitTestsMicroNvls)
       - "NvlsHipStubTest.*"
       # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc

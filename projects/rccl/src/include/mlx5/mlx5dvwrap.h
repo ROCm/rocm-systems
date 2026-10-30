@@ -34,6 +34,12 @@ ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, u
                                        uint64_t iova, int fd, int access, int mlx5_access);
 struct ibv_mr* wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
                                                 int fd, int access, int mlx5_access);
+/* Register a DMA-BUF MR. When dataDirect is set, try mlx5dv_reg_dmabuf_mr first
+ * and fall back to ibv_reg_dmabuf_mr if that call is missing or fails. A missing
+ * symbol leaves dataDirect off, so registration calls ibv_reg_dmabuf_mr directly
+ * instead of ibv_reg_mr_iova2. */
+ncclResult_t wrap_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
+                                int fd, int access, bool dataDirect);
 ncclResult_t wrap_mlx5dv_query_device(struct ibv_context* ctx_in, struct mlx5dv_context* attrs_out);
 struct ibv_qp* wrap_mlx5dv_create_qp(struct ibv_context* context, struct ibv_qp_init_attr_ex* qp_attr,
                                      struct mlx5dv_qp_init_attr* mlx5_qp_attr);

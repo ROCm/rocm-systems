@@ -90,6 +90,7 @@ static thread_local int ibDmaSupportInitDev; // which device to init, must be th
 static void ibDmaBufSupportInitOnce() {
   ncclResult_t res;
   int dev_fail = 0;
+  int probeErrno = 0;
 
   // This is a physical device, not a virtual one, so select from ibDevs
   ncclIbMergedDev* mergedDev = ncclIbMergedDevs + ibDmaSupportInitDev;
@@ -99,10 +100,15 @@ static void ibDmaBufSupportInitOnce() {
   res = rocmLibraryInit();
   if (res != ncclSuccess) goto failure;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
-  // Test kernel DMA-BUF support with a dummy call (fd=-1)
+  // Test kernel DMA-BUF support with a dummy call (fd=-1). Zero errno first so a
+  // data-direct probe that left EOPNOTSUPP or ENOSYS cannot decide dev_fail when
+  // this call does not update errno. A false result here is the fd == -1 path
+  // into ibv_reg_mr_iova2.
+  errno = 0;
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);
   // ibv_reg_dmabuf_mr() will fail with EOPNOTSUPP/EPROTONOSUPPORT if not supported (EBADF otherwise)
-  dev_fail |= (errno == EOPNOTSUPP) || (errno == EPROTONOSUPPORT);
+  probeErrno = errno;
+  dev_fail |= (probeErrno == EOPNOTSUPP) || (probeErrno == EPROTONOSUPPORT);
   NCCLCHECKGOTO(wrap_ibv_dealloc_pd(pd), res, failure);
   // stop the search and goto failure
   if (dev_fail) goto failure;
