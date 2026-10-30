@@ -377,6 +377,136 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
                                            BlockLoadCase{"rdna4", false},
                                            BlockLoadCase{"rdna4", true}));
 
+/// Drives the race detector's tensor DMA hook for two gfx1250 waves of one
+/// workgroup, probing LDS with ordinary DS accesses. Race semantics are covered
+/// in race_detector_tests.cpp; these tests cover the hook's translation.
+class TensorDmaRaceTest : public ::testing::Test {
+protected:
+  PluginFixture fixture;
+  StringSink *sink = nullptr;
+  std::array<Wavefront *, 2> waves{};
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna5",
+                                               /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    fixture.soc->set_plugin_group(fixture.plugin_group_);
+    fixture.plugin_group_->onInit();
+    for (auto &wave : waves) {
+      wave = fixture.cu()->dispatch_wf(/*wg_id=*/0, /*pc=*/0x100, /*sgprs=*/128, /*vgprs=*/256,
+                                       /*wf_size=*/32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+    }
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 128,
+                                                       waves);
+  }
+
+  /// Report one tensor DMA transfer and return whether it produced a race.
+  bool transfer(int wave, bool is_load, std::span<const TensorDmaLdsRange> ranges) {
+    // Each access gets a distinct PC so reports are not deduplicated.
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    TensorDmaMemoryAccessObservation access;
+    access.mnemonic = is_load ? "tensor_load_to_lds" : "tensor_store_from_lds";
+    access.pc = waves[wave]->pc;
+    // The wave has moved past the instruction, as for a deferred transfer.
+    waves[wave]->pc += 8;
+    access.element_size_bytes = sizeof(uint32_t);
+    access.data_size = 2;
+    access.is_load = is_load;
+    access.lds_ranges = ranges;
+    fixture.plugin_group_->onAmdgpuTensorDmaMemoryAccess(access, *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool tensor_load(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+    return transfer(wave, true, std::span(ranges.begin(), ranges.size()));
+  }
+
+  bool tensor_store(int wave, std::initializer_list<TensorDmaLdsRange> ranges) {
+    return transfer(wave, false, std::span(ranges.begin(), ranges.size()));
+  }
+
+  /// Issue a one-lane DS access and report whether it produced a race.
+  bool ds_access(int wave, uint32_t address, bool is_load) {
+    waves[wave]->pc += 16;
+    const size_t previous = sink->str().size();
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool ds_read(int wave, uint32_t address) { return ds_access(wave, address, true); }
+  bool ds_write(int wave, uint32_t address) { return ds_access(wave, address, false); }
+
+  void wait_tensorcnt(int wave, uint16_t count) {
+    execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfcb0000u | count);
+  }
+
+  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
+};
+
+TEST_F(TensorDmaRaceTest, LoadIsAnLdsWriteRetiredByTensorcntAndBarrier) {
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  EXPECT_TRUE(ds_read(1, 4));
+  wait_tensorcnt(0, 0);
+  barrier();
+  EXPECT_FALSE(ds_read(1, 8));
+}
+
+TEST_F(TensorDmaRaceTest, StoreIsAnLdsReadRetiredByTensorcntAndBarrier) {
+  tensor_store(0, {{.address = 32, .bytes = 16}});
+  EXPECT_TRUE(ds_write(1, 40));
+  wait_tensorcnt(0, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, 44));
+}
+
+TEST_F(TensorDmaRaceTest, EveryRangeOfATransferIsTracked) {
+  // Probe the gap and the second range; a race is reported once per producer.
+  tensor_load(0, {{.address = 0, .bytes = 8}, {.address = 12, .bytes = 8}});
+  EXPECT_FALSE(ds_read(1, 8));
+  EXPECT_TRUE(ds_read(1, 16));
+}
+
+TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
+  EXPECT_FALSE(ds_read(1, 4));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(tensor_load(0, {{.address = 0, .bytes = 16}}));
+  // A transfer has no lanes.
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("type=LDS access=write"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {
+  // A deferred transfer completes after the wave's PC has moved past it; the
+  // event belongs to the observation's PC, not the wave's current one. Keep
+  // wave 0's PCs distinct from wave 1's so the report identifies the event.
+  waves[0]->pc = 0x2000;
+  const uint64_t instruction_pc = waves[0]->pc + 16;
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find(std::format("0x{:x}", instruction_pc)), std::string::npos) << report;
+  EXPECT_EQ(report.find(std::format("0x{:x}", instruction_pc + 8)), std::string::npos) << report;
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {

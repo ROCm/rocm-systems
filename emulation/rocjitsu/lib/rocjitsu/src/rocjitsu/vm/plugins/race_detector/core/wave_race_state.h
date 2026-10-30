@@ -120,6 +120,14 @@ public:
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, int elementBytes = 0);
 
+  /// Register an LDS event described by byte ranges rather than lanes, such as
+  /// a tensor DMA transfer. The event has no registers. Each range is retained
+  /// in whole elements of elementBytes that fit the LDS backing.
+  void registerLdsRangeEvent(uint64_t pc, MemoryEventType type,
+                             std::span<const LdsByteRange> ranges, int elementBytes,
+                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                             MemoryOrderClass memoryOrder);
+
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
   /// and laneBaseAddresses[lane] + offset1*8. So each active lane contributes 2 intervals of 8

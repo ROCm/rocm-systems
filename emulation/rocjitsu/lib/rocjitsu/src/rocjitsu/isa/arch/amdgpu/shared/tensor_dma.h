@@ -384,6 +384,9 @@ public:
   std::optional<GpuVmAccess> access;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
+  /// PC of the tensor DMA instruction. A deferred transfer completes after the
+  /// wave's PC has advanced past it.
+  uint64_t pc = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -696,6 +699,24 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   return fits && next_address == addresses.size();
 }
 
+/// @brief Merge the LDS bytes a transfer touched into runs, in element order.
+/// @details Loads write every element; out-of-tensor elements are zero-filled.
+/// Stores read only in-bounds elements.
+inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
+  std::vector<TensorDmaLdsRange> ranges;
+  ranges.reserve(state.elements.size());
+  const uint32_t size = state.desc.elem_size;
+  for (const TensorDmaTransferElement &element : state.elements) {
+    if (state.store_from_lds && !element.in_bounds)
+      continue;
+    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
+      ranges.back().bytes += size;
+    else
+      ranges.push_back({.address = element.lds_address, .bytes = size});
+  }
+  return ranges;
+}
+
 inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
                                         TensorDmaState &state) {
   if (state.outcome != VmAccessOutcome::Complete || state.observation_reported)
@@ -707,12 +728,13 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
 
   const size_t observed_address_count = static_cast<size_t>(
       std::ranges::count_if(state.elements, &TensorDmaTransferElement::in_bounds));
-  if (observed_address_count == 0)
+  const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
+  if (observed_address_count == 0 && lds_ranges.empty())
     return;
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
-      .pc = wf.pc,
+      .pc = state.pc,
       .compute_unit_id = wf.cu().id(),
       .dispatch_id = wf.dispatch_id(),
       .queue_id = wf.queue_id(),
@@ -730,6 +752,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
           static_cast<int64_t>(state.desc.global_strides[0] * state.desc.elem_size),
       .tensor_dim1_stride =
           static_cast<int64_t>(state.desc.global_strides[1] * state.desc.elem_size),
+      .lds_ranges = lds_ranges,
   };
   wf.cu().report_tensor_dma_memory_access(access);
 }
@@ -915,6 +938,7 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
       return util::Result::failure();
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
+    state->pc = wf.pc;
     if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
       return util::Result::failure();
     inst.set_data(std::move(state));

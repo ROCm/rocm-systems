@@ -495,6 +495,41 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   }
 }
 
+void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
+    const amdgpu::TensorDmaMemoryAccessObservation &access, const amdgpu::Wavefront &wf) {
+  if (access.lds_ranges.empty())
+    return;
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  auto *rs = s->race_state;
+  auto *detector = rs->getDetector();
+  const auto waveId = rs->getWaveId();
+  constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
+  const int elementBytes = static_cast<int>(access.element_size_bytes);
+
+  // A transfer has no lanes; its violations report lane -1. The core takes its
+  // own range type, independent of the observation protocol.
+  std::vector<LdsByteRange> ranges;
+  ranges.reserve(access.lds_ranges.size());
+  for (const auto &range : access.lds_ranges) {
+    ranges.push_back({.address = range.address, .bytes = range.bytes});
+    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, elementBytes);
+    if (bytes == 0)
+      continue;
+    const int addr = static_cast<int>(range.address);
+    if (access.is_load)
+      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+    else
+      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+  }
+
+  const std::array obligations{
+      amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
+  rs->registerLdsRangeEvent(
+      access.pc, access.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
+      ranges, elementBytes, obligations, memoryOrder);
+}
+
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
                                                uint64_t lane_mask, uint8_t byte_mask) {
   auto *s = get_state(wf);
