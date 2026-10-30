@@ -25,8 +25,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -35,25 +33,9 @@ hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uint8_t* p
 
 namespace {
 
-namespace fs = std::filesystem;
-
 struct FileCapGuard {
   uint64_t saved = hrr::max_file_bytes();
   ~FileCapGuard() { hrr::set_max_file_bytes(saved); }
-};
-
-// An archive directory holding one 16-byte blob with hash (1, 2).
-struct BlobDir {
-  fs::path root;
-  BlobDir() {
-    root = fs::temp_directory_path() / "hrr_blob_refusal_test";
-    fs::remove_all(root);
-    const std::string hex = hrr::hash_hex(1, 2);
-    fs::create_directories(root / "blobs" / hex.substr(0, 2));
-    std::ofstream(root / "blobs" / hex.substr(0, 2) / (hex + ".blob"), std::ios::binary)
-        << "0123456789abcdef";
-  }
-  ~BlobDir() { fs::remove_all(root); }
 };
 
 }  // namespace
@@ -66,7 +48,7 @@ struct BlobDir {
  *     --continue-on-error and before a consuming handler reaches its HIP call.
  */
 TEST_CASE("Unit_HRR_Blob_CapRefusalEndsTheReplay", "[hrr]") {
-  BlobDir dir;
+  hrr_test::BlobDir dir("0123456789abcdef");
   FileCapGuard guard;
   PlaybackContext ctx;
   ctx.archive_dir = dir.root.string();
@@ -86,7 +68,7 @@ TEST_CASE("Unit_HRR_Blob_CapRefusalEndsTheReplay", "[hrr]") {
  *     null without ending the replay.
  */
 TEST_CASE("Unit_HRR_Blob_AbsentBlobDoesNotEndTheReplay", "[hrr]") {
-  BlobDir dir;
+  hrr_test::BlobDir dir("0123456789abcdef");
   PlaybackContext ctx;
   ctx.archive_dir = dir.root.string();
   size_t sz = 0;
@@ -106,7 +88,7 @@ TEST_CASE("Unit_HRR_Blob_AbsentBlobDoesNotEndTheReplay", "[hrr]") {
  *     ends the replay, and says which capture mode would have recorded it.
  */
 TEST_CASE("Unit_HRR_Blob_WithheldContentIsRefused", "[hrr]") {
-  BlobDir dir;
+  hrr_test::BlobDir dir("0123456789abcdef");
   const std::string kMode =
       "captured in metadata-only mode. Content mode (HIP_HRR_CAPTURE_CONTENT=1 at capture) "
       "would have recorded it.";
