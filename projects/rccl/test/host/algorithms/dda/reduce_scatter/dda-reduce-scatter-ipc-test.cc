@@ -223,16 +223,19 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLau
   EXPECT_EQ(comm().addonStopEvent, nullptr);
 }
 
-// Sized on this rank's shard in elements; the 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS.
-TEST_F(DdaReduceScatterIpcMicrotest, Launch_GridFollowsShardAndCapsAt24) {
+// The in-kernel copy moves all 8 shards, so the grid is sized on 8 x count elements; the 24-block cap is
+// spelled out rather than read from DDA_IPC_MAXBLOCKS.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_InKernelGridFollowsTotalAndCapsAt24) {
   struct Case {
     size_t count;
     ncclDataType_t datatype;
     unsigned blocks, threads;
   };
-  const Case cases[] = {{4, ncclFloat32, 1, 64},         {2048, ncclFloat32, 1, 512},
-                        {2052, ncclFloat32, 2, 320},     {4096, ncclFloat16, 1, 512},
-                        {1u << 14, ncclFloat32, 8, 512}, {1u << 16, ncclFloat32, 24, 512}};
+  const Case cases[] = {{4, ncclFloat32, 1, 64},          {32, ncclFloat32, 1, 64},
+                        {128, ncclFloat32, 1, 256},       {2048, ncclFloat32, 8, 512},
+                        {2052, ncclFloat32, 9, 512},      {4096, ncclFloat16, 8, 512},
+                        {1u << 12, ncclFloat32, 16, 512}, {1u << 14, ncclFloat32, 24, 512},
+                        {kInKernelMaxFloats, ncclFloat32, 24, 512}};
   for (const Case& c : cases) {
     g_ddaLaunches.clear();
     ASSERT_EQ(Run(c.count, c.datatype), ncclSuccess);

@@ -146,6 +146,31 @@ static inline __device__ void copyFromSrcToDest(const T* __restrict__ srcbuff, T
   }
 }
 
+// copyFromSrcToDest with kUnroll loads in flight per thread. A grid capped below the
+// CU count is bound by outstanding loads, not bandwidth, when it copies many strides.
+template <typename T, int kUnroll>
+static inline __device__ void copyFromSrcToDestUnrolled(const T* __restrict__ srcbuff, T* __restrict__ destbuff,
+                                                        const size_t idxStart, const size_t idxEnd,
+                                                        const size_t idxStride) {
+  static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  static_assert(kUnroll > 0, "dda: kUnroll must be positive");
+  size_t idx = idxStart;
+  for (; idx + (kUnroll - 1) * idxStride < idxEnd; idx += kUnroll * idxStride) {
+    uint4 vals[kUnroll];
+#pragma unroll
+    for (int u = 0; u < kUnroll; ++u) {
+      vals[u] = reinterpret_cast<const uint4*>(&srcbuff[idx + u * idxStride])[0];
+    }
+#pragma unroll
+    for (int u = 0; u < kUnroll; ++u) {
+      *reinterpret_cast<uint4*>(&destbuff[idx + u * idxStride]) = vals[u];
+    }
+  }
+  for (; idx < idxEnd; idx += idxStride) {
+    *reinterpret_cast<uint4*>(&destbuff[idx]) = reinterpret_cast<const uint4*>(&srcbuff[idx])[0];
+  }
+}
+
 // Unified reduce-scatter helper for both the IPC and fabric paths.
 //   - NRANKS_CT > 0  : compile-time clique size; nRanks folds to a constant and
 //                      the peer loop is fully unrolled (the IPC / fabric 4,8
@@ -234,11 +259,14 @@ inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbu
          (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
 }
 
-// Reduce-scatter IPC copies each shard inside the kernel at or below this size.
-// Above it the host pre-copies the whole input into scratch. The cutoff is per
-// shard, so a multi-rank total cannot stage twice, and it lives only here: the
-// kernel takes a single copy-in-kernel flag and does not re-derive the size.
+// Reduce-scatter IPC copies the whole input inside the kernel when each shard is at
+// or below this size. Above it the host pre-copies the whole input into scratch. The
+// cutoff is per shard, so a multi-rank total cannot stage twice, and it lives only
+// here: the kernel takes a single copy-in-kernel flag and does not re-derive the size.
 constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
+
+// Loads in flight per thread for the reduce-scatter IPC in-kernel copy.
+constexpr int kDdaRsIpcKernelCopyUnroll = 4;
 
 enum class DdaRsIpcStaging {
   InKernel,    // kernel copies each shard from sendbuff

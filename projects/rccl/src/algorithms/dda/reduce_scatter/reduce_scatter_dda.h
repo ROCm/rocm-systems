@@ -28,14 +28,12 @@ __launch_bounds__(512)
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
   // kCopyInKernel is the host's only staging decision (ddaReduceScatterIpcStaging).
-  // The per-shard loop is the same for a one-block message and a multi-block one,
-  // so there is no fused whole-buffer copy and no second size cutoff in here.
+  // The shards are contiguous in sendbuff and in scratch, so one flat copy over all
+  // NRANKS * count elements stages them. The host sizes this grid on that total, which
+  // can leave threads idle in the reduce below.
   if constexpr (kCopyInKernel) {
-#pragma unroll NRANKS
-    for (int s = 0; s < NRANKS; ++s) {
-      const size_t off = static_cast<size_t>(s) * count;
-      copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
-    }
+    copyFromSrcToDestUnrolled<T, kDdaRsIpcKernelCopyUnroll>(sendbuff, ipcbuffs[selfRank], idxStart,
+                                                            static_cast<size_t>(NRANKS) * count, idxStride);
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
     // Host enqueued cudaMemcpyAsync into ddaScratch before launch.

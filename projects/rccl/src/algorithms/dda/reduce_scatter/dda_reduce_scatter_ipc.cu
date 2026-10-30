@@ -43,9 +43,13 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
     return ncclInvalidArgument;
   }
 
+  const bool copyInKernel =
+    dda::common::ddaReduceScatterIpcStaging(recvcount, sizeof(T)) == dda::common::DdaRsIpcStaging::InKernel;
+
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  // For reduce-scatter, we use recvcount for grid calculation since each rank processes its portion
-  auto gridBlock = dda::common::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
+  // The reduce covers this rank's shard, but the in-kernel copy moves all nRanks shards, so that path
+  // is sized on the total. A grid sized on the shard leaves most of the copy to too few blocks.
+  auto gridBlock = dda::common::getGridAndBlockDims(copyInKernel ? totalCount : recvcount, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -56,8 +60,6 @@ static ncclResult_t ncclReduceScatterDdaIpcTyped(const void* sendbuff, void* rec
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  const bool copyInKernel =
-    dda::common::ddaReduceScatterIpcStaging(recvcount, sizeof(T)) == dda::common::DdaRsIpcStaging::InKernel;
   if (!copyInKernel) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, totalCount * sizeof(T), cudaMemcpyDeviceToDevice, stream));
   }
