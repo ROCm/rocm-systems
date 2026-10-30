@@ -162,6 +162,33 @@ inline bool write_vector64_result(Wavefront &wave, RegisterAccess &registers,
   }
   return true;
 }
+using Ternary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *,
+                                  const uint32_t *const *, const uint32_t *const *,
+                                  const uint32_t *const *);
+using Ternary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
+                                  const uint32_t *const *, const uint32_t *const *,
+                                  const uint32_t *const *);
+
+// All three routed inputs remain live through the call, including aliased VGPRs.
+inline void execute_ternary32(Wavefront &wave, Ternary32Function wave32, Ternary64Function wave64,
+                              uint64_t flags, uint64_t modifiers, const Operand &destination,
+                              const Operand &source_a, const Operand &source_b,
+                              const Operand &source_c, uint8_t source_a_bytes = 0xF,
+                              uint8_t source_b_bytes = 0xF) {
+  const uint64_t exec_mask = wave.exec() & (wave.wf_size() == 32 ? 0xffffffffULL : ~0ULL);
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source_a, exec_mask, source_a_bytes),
+      b(registers, wave, source_b, exec_mask, source_b_bytes),
+      c(registers, wave, source_c, exec_mask);
+  write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data);
+      });
+}
 
 } // namespace rocjitsu::amdgpu::arith
 

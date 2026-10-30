@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "common/bits.h"
+#include "common/isa.h"
 #include <immintrin.h>
 #include <stdint.h>
 
@@ -27,6 +27,13 @@ template <> inline __m256i load<__m256i>(const void *p) {
 // Write vector values to destination storage.
 inline void store(void *p, __m256i value) {
   _mm256_storeu_si256(reinterpret_cast<__m256i *>(p), value);
+}
+
+// Store selected vector lanes, leaving words outside exec_mask unchanged.
+inline void masked_store(uint32_t *p, uint32_t exec_mask, __m256i value) {
+  auto mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask)),
+                                _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+  _mm256_maskstore_epi32(reinterpret_cast<int *>(p), mask, value);
 }
 
 // Add corresponding integer lanes with unsigned wraparound.
@@ -113,6 +120,11 @@ template <> inline __m512i load<__m512i>(const void *p) { return _mm512_loadu_si
 
 // Write vector values to destination storage.
 inline void store(void *p, __m512i value) { _mm512_storeu_si512(p, value); }
+
+// Store selected vector lanes, leaving words outside exec_mask unchanged.
+inline void masked_store(uint32_t *p, uint32_t exec_mask, __m512i value) {
+  _mm512_mask_storeu_epi32(p, __mmask16(exec_mask), value);
+}
 
 // Add corresponding integer lanes with unsigned wraparound.
 inline __m512i add(__m512i a, __m512i b) { return _mm512_add_epi32(a, b); }
