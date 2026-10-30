@@ -21,22 +21,24 @@ class Wavefront;
 /// describes it: register numbers and shape, not register contents.
 /// @details Field order matches the designated initializers the generator emits.
 struct LdsAccessRequest {
-  uint32_t addr_vgpr = 0; ///< Physical address VGPR.
-  uint32_t offset = 0;    ///< Byte offset, (offset1 << 8) | offset0.
-  uint32_t data_vgpr = 0; ///< Stores: first payload VGPR.
-  uint32_t dst_vgpr = 0;  ///< Loads: first destination VGPR.
-  uint8_t elem_size = 0;  ///< 1, 2, 4 or 8 bytes.
-  uint8_t num_elems = 0;  ///< Elements per lane.
-  bool is_load = false;
+  uint32_t addr_vgpr = 0;   ///< Physical address VGPR.
+  uint32_t offset = 0;      ///< Byte offset, (offset1 << 8) | offset0.
+  uint32_t data_vgpr = 0;   ///< Stores: first payload VGPR.
+  uint32_t dst_vgpr = 0;    ///< Loads: first destination VGPR.
+  uint8_t elem_size = 0;    ///< 1, 2, 4 or 8 bytes.
+  uint8_t num_elems = 0;    ///< Elements per lane.
   bool sign_extend = false; ///< Loads of i8/i16.
   bool d16_hi = false;      ///< Loads write, stores read, the upper 16 bits.
   bool d16_lo = false;      ///< Loads write the lower 16 bits.
 };
 
-/// @brief A plain load after its LDS read: the data is in lane-major staging,
-/// and these are where and how the writeback stores it.
+/// @brief A plain load between its LDS read and its writeback: where its data
+/// is, and where and how the writeback stores it.
 struct LdsStagedLoad {
   uint8_t *dst[4]; ///< Raw lanes of each destination VGPR.
+  /// Lanes 16g..16g+15, lane-major: in staging, or in place in LDS when those
+  /// lanes read consecutive bytes.
+  const uint8_t *group[4];
   uint64_t exec;
   uint32_t wave;
   bool sram_ecc;
@@ -51,30 +53,29 @@ public:
   /// Largest per-lane footprint of a plain DS access (b128).
   static constexpr uint32_t kMaxLaneBytes = 16;
 
-  /// @brief Plain single-address load, without a VectorMemState: the LDS read
-  /// out of line, then the writeback for the opcode's format @p F.
+  /// @brief Plain single-address load of format @p F, without a
+  /// VectorMemState: the LDS read, then the writeback for @p F, both inlined
+  /// into the opcode's handler (lds_inline_access_steps.h).
   template <lds_writeback::DstFormat F>
-  static bool complete(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
-    alignas(64) uint8_t staging[64 * kMaxLaneBytes];
-    LdsStagedLoad load;
-    if (!access(inst, req, wf, staging, load))
-      return false;
-    lds_writeback::write_back_as<F>(load.dst, load.sram_ecc, load.wave, load.exec, staging);
-    return true;
-  }
+  static bool load(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
   /// @brief Plain single-address store, without a VectorMemState.
-  static bool complete(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
+  static bool store(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
   /// @brief Every other DS form: run the routed path's access code on @p d.
   static bool complete(const Instruction &inst, VectorMemState &d, Wavefront &wf);
 
 private:
-  /// Steps 1-5 of a plain access: a store completes; a load stops with its data
-  /// in @p staging and its destination in @p load.
+  /// Steps 1-6 of a plain access, in lds_inline_access_steps.h: a store
+  /// completes; a load stops before its writeback, with its data read through
+  /// @p load.group and its destination in @p load.
+  template <bool IsLoad>
   static bool access(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
                      uint8_t *staging, LdsStagedLoad &load);
 };
 
 } // namespace amdgpu
 } // namespace rocjitsu
+
+// load<F>() is inlined into each generated handler.
+#include "rocjitsu/vm/amdgpu/lds_inline_access_steps.h"

@@ -242,7 +242,8 @@ TEST(LdsTest, DescendingLanesAtCapacityKeepPerElementBounds) {
 // active lane must hold vector_load()'s bytes: whole contiguous waves,
 // independent 16-lane segments, b64 rows where lane l + 16 reads 8 bytes after
 // lane l, broadcast and scattered lanes, at the capacity and the lazy backing,
-// and with offsets that wrap 2^32.
+// and with offsets that wrap 2^32. The same holds read through vector_load32()'s
+// view, in wave64 and, when the mask allows it, wave32.
 TEST(LdsTest, SpanLoadsMatchVectorLoadOnActiveLanes) {
   constexpr std::array<std::pair<uint32_t, uint32_t>, 8> kShapes{
       {{1, 1}, {2, 1}, {4, 1}, {8, 1}, {4, 2}, {4, 3}, {4, 4}, {8, 2}}};
@@ -334,6 +335,14 @@ TEST(LdsTest, SpanLoadsMatchVectorLoadOnActiveLanes) {
     lds.vector_load(addrs.data(), mask, elem_size, num_elems, expected.data());
     lds.vector_load_span(addrs.data(), mask, elem_size, num_elems, span.data());
     lds.vector_load32(lanes.data(), offset, mask, elem_size, num_elems, native.data());
+    std::vector<uint8_t> staged64(64 * stride, 0x3C), staged32(64 * stride, 0xC3);
+    const uint8_t *view64[4] = {}, *view32[2] = {};
+    lds.vector_load32<64>(lanes.data(), offset, mask, elem_size, num_elems, staged64.data(),
+                          view64);
+    const bool wave32 = (mask >> 32) == 0;
+    if (wave32)
+      lds.vector_load32<32>(lanes.data(), offset, mask, elem_size, num_elems, staged32.data(),
+                            view32);
     for (uint64_t active = mask; active; active &= active - 1) {
       const uint32_t at = static_cast<uint32_t>(std::countr_zero(active)) * stride;
       ASSERT_TRUE(std::equal(span.begin() + at, span.begin() + at + stride, expected.begin() + at))
@@ -341,6 +350,15 @@ TEST(LdsTest, SpanLoadsMatchVectorLoadOnActiveLanes) {
       ASSERT_TRUE(
           std::equal(native.begin() + at, native.begin() + at + stride, expected.begin() + at))
           << "vector_load32 iteration " << iteration << " lane " << at / stride;
+      const uint32_t lane = at / stride;
+      const uint8_t *seen = view64[lane / 16] + (lane % 16) * stride;
+      ASSERT_TRUE(std::equal(seen, seen + stride, expected.begin() + at))
+          << "vector_load32 view iteration " << iteration << " lane " << lane;
+      if (wave32) {
+        seen = view32[lane / 16] + (lane % 16) * stride;
+        ASSERT_TRUE(std::equal(seen, seen + stride, expected.begin() + at))
+            << "vector_load32<32> view iteration " << iteration << " lane " << lane;
+      }
     }
   }
 }
