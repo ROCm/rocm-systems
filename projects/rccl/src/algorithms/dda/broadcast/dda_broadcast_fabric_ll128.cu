@@ -22,13 +22,11 @@
 #include <cstddef>
 #include <cstdint>
 
-// Tuned block size, and the fallback when the env override is out of range.
-constexpr unsigned kDdaLL128BcDefaultThreads = 512;
-
-RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
+// Block size; 0 (or out of range) picks it by size, see ddaLL128BcThreads.
+RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", 0);
 
 // One-shot up to this many bytes, scatter-allgather above it (up to the LL128 tier cap).
-RCCL_PARAM(DdaLL128BcOneShotThreshold, "DDA_LL128_BC_ONESHOT_THRESHOLD", (int64_t)512 * 1024);
+RCCL_PARAM(DdaLL128BcOneShotThreshold, "DDA_LL128_BC_ONESHOT_THRESHOLD", (int64_t)256 * 1024);
 
 namespace {
 
@@ -52,14 +50,21 @@ DdaLL128BcArch ddaLL128BcArch(const ncclComm* comm) {
   return {64, 64, kDdaLL128WireWordsPerSliceW<64>, kDdaLL128DataBytesPerSliceL<8, 64>};
 }
 
+bool ddaLL128BcTwoShot(size_t bytes) {
+  return (int64_t)bytes > rcclParamDdaLL128BcOneShotThreshold();
+}
+
 // RCCL_DDA_LL128_BC_THREADS when it is a multiple of the arch warp and at most kDdaBcMaxThreads.
-unsigned ddaLL128BcThreads(const ncclComm* comm) {
+// Otherwise tuned on gfx1250: smaller blocks spread small chunks over more CUs.
+unsigned ddaLL128BcThreads(const ncclComm* comm, size_t bytes) {
   const int64_t userInput = rcclParamDdaLL128BcThreads();
   const int64_t warp = (int64_t)ddaLL128BcArch(comm).warp;
   if (userInput >= warp && userInput <= kDdaBcMaxThreads && userInput % warp == 0) {
     return (unsigned)userInput;
   }
-  return kDdaLL128BcDefaultThreads;
+  if (!ddaLL128BcTwoShot(bytes)) return 256;
+  const size_t chunk = bytes / (size_t)(comm->nRanks - 1);
+  return chunk <= ((size_t)512 << 10) ? 128 : chunk <= ((size_t)4 << 20) ? 256 : 512;
 }
 
 size_t ddaLL128BcSlices(const ncclComm* comm, size_t bytes) {
@@ -67,15 +72,11 @@ size_t ddaLL128BcSlices(const ncclComm* comm, size_t bytes) {
   return (bytes + per - 1) / per;
 }
 
-bool ddaLL128BcTwoShot(size_t bytes) {
-  return (int64_t)bytes > rcclParamDdaLL128BcOneShotThreshold();
-}
-
 // Root: one column per peer (at least one block each, as AllGather LL128), the
 // rest of the budget split across slice groups. Non-root: groups within the budget.
 // Two-shot: a root column covers one chunk; a non-root covers nRanks-1 chunks.
 dim3 ddaLL128BcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
-  const size_t warps = ddaLL128BcThreads(comm) / ddaLL128BcArch(comm).warp;
+  const size_t warps = ddaLL128BcThreads(comm, bytes) / ddaLL128BcArch(comm).warp;
   const size_t peers = (size_t)(comm->nRanks - 1);
   const size_t slices = ddaLL128BcSlices(comm, bytes);
   const bool twoShot = ddaLL128BcTwoShot(bytes);
@@ -133,7 +134,7 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
   const DdaLL128BcArch arch = ddaLL128BcArch(comm);
-  const unsigned threads = ddaLL128BcThreads(comm);
+  const unsigned threads = ddaLL128BcThreads(comm, bytes);
   const bool twoShot = ddaLL128BcTwoShot(bytes);
   INFO(NCCL_COLL,
        "DDA Broadcast LL128 %s: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u line=%dB warp=%zu aligned=%d",

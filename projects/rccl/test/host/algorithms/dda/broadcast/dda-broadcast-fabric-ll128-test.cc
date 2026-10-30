@@ -39,11 +39,11 @@ constexpr int kOtherRoot = 0;
 // Payload per slice: gfx9 64B lines on wave64, gfx1250 128B lines on wave32.
 constexpr size_t kGfx9Slice = 3584;
 constexpr size_t kGfx1250Slice = 1920;
-// One group per block at the default 512 threads: 8 gfx9 slices, 16 gfx1250 slices.
-constexpr size_t kGfx9Group = 8 * kGfx9Slice;
-constexpr size_t kGfx1250Group = 16 * kGfx1250Slice;
+// One group per block at the one-shot 256 threads: 4 gfx9 slices, 8 gfx1250 slices.
+constexpr size_t kGfx9Group = 4 * kGfx9Slice;
+constexpr size_t kGfx1250Group = 8 * kGfx1250Slice;
 constexpr char kOneShotThreshold[] = "RCCL_DDA_LL128_BC_ONESHOT_THRESHOLD";
-constexpr size_t kDefaultOneShotThreshold = 512 << 10;
+constexpr size_t kDefaultOneShotThreshold = 256 << 10;
 constexpr size_t kTwoShotThreshold = 64 << 10;
 // Two-shot on 8 ranks: 140 gfx9 slices, 20 per chunk.
 constexpr size_t kTwoShotBytes = 7 * 20 * kGfx9Slice;
@@ -124,8 +124,8 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
 };
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsOverrideMustBeAnArchWarpMultipleUpTo512) {
-  const std::pair<int64_t, unsigned> wave64[] = {{512, 512}, {64, 64},   {256, 256}, {32, 512},
-                                                 {96, 512},  {576, 512}, {0, 512},   {-64, 512}};
+  const std::pair<int64_t, unsigned> wave64[] = {{512, 512}, {64, 64},   {128, 128}, {32, 256},
+                                                 {96, 256},  {576, 256}, {0, 256},   {-64, 256}};
   for (const auto& [env, threads] : wave64) {
     params_["RCCL_DDA_LL128_BC_THREADS"] = env;
     EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, threads) << "gfx950 DDA_LL128_BC_THREADS " << env;
@@ -133,7 +133,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsOverrideMustBeAnArchWarpM
   // The warp follows the arch, not comm->WarpSize.
   SetArch("gfx1250");
   comm().WarpSize = 64;
-  const std::pair<int64_t, unsigned> wave32[] = {{32, 32}, {96, 96}, {16, 512}, {48, 512}, {1024, 512}};
+  const std::pair<int64_t, unsigned> wave32[] = {{32, 32}, {96, 96}, {16, 256}, {48, 256}, {1024, 256}};
   for (const auto& [env, threads] : wave32) {
     params_["RCCL_DDA_LL128_BC_THREADS"] = env;
     EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, threads) << "gfx1250 DDA_LL128_BC_THREADS " << env;
@@ -148,10 +148,10 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsAreWarpsOfArchSlice
     EXPECT_EQ(launch.grid.x, groups) << "gfx950 bytes " << bytes;
     EXPECT_EQ(launch.grid.y, 1u) << "gfx950 bytes " << bytes;
   }
-  // Four warps per block at 256 threads.
-  params_["RCCL_DDA_LL128_BC_THREADS"] = 256;
-  EXPECT_EQ(RunOne(kOtherRoot, 4 * kGfx9Slice).grid.x, 1u);
-  EXPECT_EQ(RunOne(kOtherRoot, 4 * kGfx9Slice + 16).grid.x, 2u);
+  // Eight warps per block at 512 threads.
+  params_["RCCL_DDA_LL128_BC_THREADS"] = 512;
+  EXPECT_EQ(RunOne(kOtherRoot, 8 * kGfx9Slice).grid.x, 1u);
+  EXPECT_EQ(RunOne(kOtherRoot, 8 * kGfx9Slice + 16).grid.x, 2u);
   params_.erase("RCCL_DDA_LL128_BC_THREADS");
   SetArch("gfx1250");
   EXPECT_EQ(RunOne(kOtherRoot, kGfx1250Group).grid.x, 1u);
@@ -346,7 +346,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndB
   const DdaLaunch& launch = g_ddaLaunches[0];
   EXPECT_EQ(launch.kernel, Kernel<true>());
   EXPECT_EQ(launch.grid.x, 1u);
-  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.block.x, 256u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -384,6 +384,29 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_OneShotUpToDefaultThreshold) {
   params_.erase(kOneShotThreshold);
   EXPECT_EQ(RunOne(kOtherRoot, kDefaultOneShotThreshold).kernel, Kernel<true>());
   EXPECT_EQ(RunOne(kOtherRoot, kDefaultOneShotThreshold + 16).kernel, TwoShotKernel<true>());
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_OneShotDefaultsTo256Threads) {
+  params_[kOneShotThreshold] = kTwoShotThreshold;
+  EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, 256u);
+  EXPECT_EQ(RunOne(kRank, kTwoShotThreshold).block.x, 256u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotThreadsFollowChunkSizeUnlessOverridden) {
+  params_[kOneShotThreshold] = kTwoShotThreshold;
+  // Chunk is bytes / (nRanks - 1): 128 up to 512 KiB, 256 up to 4 MiB, 512 above.
+  const std::tuple<int, size_t, unsigned> cases[] = {
+      {8, 7 * (512 << 10), 128},      {8, 7 * (512 << 10) + 16, 256}, {8, 7 * (4 << 20), 256},
+      {8, 7 * (4 << 20) + 16, 512},   {2, 512 << 10, 128},            {2, (512 << 10) + 16, 256}};
+  for (const auto& [nRanks, bytes, threads] : cases) {
+    comm().nRanks = nRanks;
+    EXPECT_EQ(RunOne(kOtherRoot, bytes).block.x, threads) << "nRanks " << nRanks << " bytes " << bytes;
+    EXPECT_EQ(RunOne(kRank, bytes).block.x, threads) << "nRanks " << nRanks << " bytes " << bytes;
+  }
+  comm().nRanks = 8;
+  params_["RCCL_DDA_LL128_BC_THREADS"] = 64;
+  EXPECT_EQ(RunOne(kOtherRoot, 7 * (4 << 20) + 16).block.x, 64u);
+  EXPECT_EQ(RunOne(kOtherRoot, 7 * (512 << 10)).block.x, 64u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_TwoShotRootColumnsEachCoverOneChunk) {
