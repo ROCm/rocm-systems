@@ -295,6 +295,123 @@ def test_packed_selection_architecture_and_state_binding(arch, name):
     assert 'arithmetic_flags()' in body
 
 
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    ],
+)
+def test_dot4_formats_and_c_modifiers(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    body = gen_float_dot32(
+        context(
+            'rdna4',
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+        )
+    )
+    assert 'rj_arith_' + name.lower() in body
+    assert 'inst_.neg & 4' in body and 'RJ_ARITH_DOT_NEG_C' in body
+    assert 'inst_.neg_hi & 4' in body and 'RJ_ARITH_DOT_ABS_C' in body
+    assert 'arithmetic_flags()' in body
+    assert (
+        gen_float_dot32(
+            context(
+                'rdna3',
+                name,
+                ['d'],
+                ['a', 'b', 'c'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('low', 'high'),
+            )
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize('arch, count', [('rdna3', 6), ('rdna4', 12)])
+def test_generated_float_dot_methods_replace_all_legacy_paths(arch, count):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for encoding in ('vop2', 'vop3p'):
+        source = (root / (encoding + '_exec.cpp')).read_text()
+        for match in re.finditer(
+            r'void (VDot(?:2(?:acc)?F32|4F32)\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            source,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert 'arith::execute_' in body, match[1]
+            assert 'ROCJITSU_TRY_SIMD' not in body, match[1]
+            assert 'amdgpu::execute_v_dot' not in body, match[1]
+            assert 'amdgpu::gfx' not in body, match[1]
+            checked += 1
+    assert checked == count
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', ['V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'])
+def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_half_dot
+
+    body = gen_half_dot(context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True))
+    arch_suffix = '_gfx12' if arch == 'rdna4' else ''
+    api = 'rj_arith_' + name.lower()
+    assert api + '_w32' + arch_suffix + ', ' + api + '_w64' + arch_suffix in body
+    for source in 'ABC':
+        assert 'RJ_ARITH_ALU_ABS_' + source in body
+        assert 'RJ_ARITH_ALU_NEG_' + source in body
+    assert 'RJ_ARITH_ALU_HIGH_C' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' not in body and 'RJ_ARITH_ALU_HIGH_B' not in body
+    assert 'pk16_src_needs_narrowing(inst_.src0, a.size_bits())' in body
+    assert 'dot2_src_needs_half_replication(inst_.src1)' in body
+    assert 'dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u' in body
+    assert 'arithmetic_flags()' in body
+    assert (
+        gen_half_dot(context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True))
+        is None
+    )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_half_dot_regular_and_dpp_bodies_use_rj_arith(arch):
+    source = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+        / 'vop3_exec.cpp'
+    ).read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VDot2(?:F16F16|Bf16Bf16)Vop3)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+        source,
+    ):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert 'arith::execute_dot2_f16' in body
+        assert 'fp_mode::dot2_' not in body
+        assert 'ROCJITSU_TRY_SIMD' not in body
+        checked += 1
+    assert checked == 4
+
+
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 @pytest.mark.parametrize(
     'name', ['V_ADD_F16', 'V_SUB_F16', 'V_SUBREV_F16', 'V_MUL_F16', 'V_LDEXP_F16']
@@ -728,3 +845,82 @@ def test_frexp32_architecture_suffix(arch):
     suffix = '_gfx12' if arch == 'rdna4' else ''
     for wave in (32, 64):
         assert f'rj_arith_{name.lower()}_w{wave}{suffix},' in body
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'rdna3_5', 'cdna5'])
+@pytest.mark.parametrize(
+    'name', ['V_DOT4_I32_IU8', 'V_DOT4_U32_U8', 'V_DOT8_I32_IU4', 'V_DOT8_U32_U4']
+)
+def test_integer_dot_dispatch(arch, name):
+    from amdisa.codegen import CodeGenerator
+    from amdisa.gpuisa import Instruction, Operand
+    from amdisa.isa_profile import (
+        Rdna3Profile,
+        Rdna4Profile,
+        Rdna3_5Profile,
+        Cdna5Profile,
+    )
+    from amdisa.semantics import derive_semantics
+
+    profiles = {
+        'rdna3': Rdna3Profile,
+        'rdna4': Rdna4Profile,
+        'rdna3_5': Rdna3_5Profile,
+        'cdna5': Cdna5Profile,
+    }
+    generator = object.__new__(CodeGenerator)
+    generator.isa_spec = SimpleNamespace(
+        arch_name=arch, profile=profiles[arch](), inst_encodings=[], encoding_map={}
+    )
+    operands = [Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0)]
+    operands += [
+        Operand(f'src{i}', 32, 'OPR_SRC', True, False, False, False, i + 1)
+        for i in range(3)
+    ]
+    inst = Instruction(name, 'ENC_VOP3P', 0, operands)
+    body = generator._gen_execute_body(
+        inst, derive_semantics(name, 'ENC_VOP3P'), 'ENC_VOP3P'
+    )
+    if arch not in ('rdna3', 'rdna4'):
+        assert 'arith::execute_ternary32' not in body
+        assert 'rj_arith_' not in body
+        if arch == 'cdna5' and 'DOT4' in name:
+            assert 'inst_.clamp && amdgpu::dot4_clamp_supported(wf)' in body
+        return
+    assert 'arith::execute_ternary32' in body
+    assert 'wf.cu().arithmetic_flags(),' in body
+    for flag in ('CLAMP', 'LO_A_HIGH', 'LO_B_HIGH', 'HI_A_LOW', 'HI_B_LOW'):
+        assert 'RJ_ARITH_DOT_' + flag in body
+    for operand in ('A', 'B'):
+        assert ('RJ_ARITH_DOT_SIGNED_' + operand in body) == ('_I32_' in name)
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave},' in body
+    assert 'ROCJITSU_TRY_SIMD' not in body
+    assert 'amdgpu::execute_v_dot' not in body
+
+
+@pytest.mark.parametrize(
+    'arch,encoding',
+    [
+        ('cdna5', 'ENC_VOP3P'),
+        ('rdna3_5', 'ENC_VOP3P'),
+        ('rdna3', 'ENC_VOP3'),
+        ('rdna4', 'ENC_VOP3'),
+    ],
+)
+def test_integer_dot_helper_declines_other_architectures_and_encodings(arch, encoding):
+    from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+
+    assert (
+        gen_integer_dot(
+            context(
+                arch,
+                'V_DOT4_I32_IU8',
+                ['d'],
+                ['a', 'b', 'c'],
+                enc_name=encoding,
+                opsel_exprs=('low', 'high'),
+            )
+        )
+        is None
+    )

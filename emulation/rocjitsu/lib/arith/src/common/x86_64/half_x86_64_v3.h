@@ -42,11 +42,12 @@ inline __m256 prepare_omod_f16(__m256 value, uint32_t instruction_flags) {
 // Widen the selected halves with ABS then NEG. PreserveNan retains signaling
 // bits through x86 conversion for selection operations.
 template <bool PreserveNan = false>
-__m256 half_input(__m256i words, int shift, uint32_t modifiers) {
+__m256 half_input(__m256i words, int shift, uint32_t instruction_flags) {
   auto halves =
       _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
-                       _mm256_set1_epi32(modifiers & RJ_ARITH_ALU_ABS_A ? 0x7fff : 0xffff));
-  halves = _mm256_xor_si256(halves, _mm256_set1_epi32(modifiers & RJ_ARITH_ALU_NEG_A ? 0x8000 : 0));
+                       _mm256_set1_epi32(instruction_flags & RJ_ARITH_ALU_ABS_A ? 0x7fff : 0xffff));
+  halves = _mm256_xor_si256(halves,
+                            _mm256_set1_epi32(instruction_flags & RJ_ARITH_ALU_NEG_A ? 0x8000 : 0));
 
   auto value = _mm256_cvtph_ps(
       _mm_packus_epi32(_mm256_castsi256_si128(halves), _mm256_extracti128_si256(halves, 1)));

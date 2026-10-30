@@ -320,11 +320,11 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
     return modifiers & (RJ_ARITH_ALU_HIGH_A << source) ? 0xC : 0x3;
   };
   PackedFloatInput a(registers, wave, lhs, wave.exec(), narrow_sources & 1, narrow_sources & 1,
-                     source_bytes(0));
+                     false, source_bytes(0));
   PackedFloatInput b(registers, wave, rhs, wave.exec(), narrow_sources & 2, narrow_sources & 2,
-                     source_bytes(1));
+                     false, source_bytes(1));
   PackedFloatInput c(registers, wave, third, wave.exec(), narrow_sources & 4, narrow_sources & 4,
-                     source_bytes(2));
+                     false, source_bytes(2));
   uint32_t causes = 0;
   const bool success = write_vector32_result(
       wave, registers, destination, exec_mask,
@@ -336,6 +336,79 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
       },
       !half_output, destination_bytes);
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// DOT2 uses architecture-defined accumulation independent of guest MODE. DOT2ACC
+// supplies old D as explicit C, so staged output retains the original addend.
+inline void execute_dot2_f32(Wavefront &wave, FloatTernaryWave32Function wave32,
+                             FloatTernaryWave64Function wave64, uint64_t flags, uint64_t modifiers,
+                             const Operand &destination, const Operand &lhs, const Operand &rhs,
+                             const Operand &addend, bool bf16, unsigned narrow_sources,
+                             unsigned replicate_sources) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!wave.exec())
+    return;
+  RegisterAccess registers(wave);
+  PackedFloatInput a(registers, wave, lhs, wave.exec(), narrow_sources & 1, replicate_sources & 1,
+                     bf16);
+  PackedFloatInput b(registers, wave, rhs, wave.exec(), narrow_sources & 2, replicate_sources & 2,
+                     bf16);
+  VectorInput32 c(registers, wave, addend, wave.exec());
+  uint32_t causes = 0;
+  const bool success = write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        uint32_t *state = &causes;
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data,
+                            state)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
+      });
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// True16 DOT2 reads packed A/B and only the selected half of C. Partial write
+// views preserve the other destination half without an architectural read of D.
+inline void execute_dot2_f16(Wavefront &wave, FloatTernaryWave32Function wave32,
+                             FloatTernaryWave64Function wave64, uint64_t flags, uint64_t modifiers,
+                             const Operand &destination, const Operand &lhs, const Operand &rhs,
+                             const Operand &addend, bool bf16, unsigned narrow_sources,
+                             unsigned replicate_sources) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!wave.exec())
+    return;
+  // Fixed RNE/denormal rules are owned by rj-arith, not the guest MODE register.
+  if (wave.fp16_ovfl())
+    flags |= RJ_ARITH_FP16_OVFL;
+  RegisterAccess registers(wave);
+  PackedFloatInput a(registers, wave, lhs, wave.exec(), narrow_sources & 1, replicate_sources & 1,
+                     bf16);
+  PackedFloatInput b(registers, wave, rhs, wave.exec(), narrow_sources & 2, replicate_sources & 2,
+                     bf16);
+  // Inline accumulators replicate their formatted low half before OPSEL; raw
+  // register and literal carriers retain their independently selected halves.
+  const bool replicate_c = replicate_sources & 4;
+  PackedFloatInput c(registers, wave, addend, wave.exec(), false, replicate_c, bf16,
+                     replicate_c                       ? 0x3
+                     : modifiers & RJ_ARITH_ALU_HIGH_C ? 0xC
+                                                       : 0x3);
+  uint32_t causes = 0;
+  const bool success = write_vector32_result(
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
+        uint32_t *state = &causes;
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data,
+                            state)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
+      },
+      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
