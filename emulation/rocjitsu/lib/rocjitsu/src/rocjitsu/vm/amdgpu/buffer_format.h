@@ -44,7 +44,11 @@ buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding = BufferForma
 util::FailureOr<std::array<uint32_t, 4>>
 unpack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint8_t> bytes,
                      BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
-/// Packs an untyped descriptor-selected store, including DST_SEL qualification.
+/// @brief Pack an untyped descriptor-selected store, including DST_SEL qualification.
+/// @details Native gfx1100/gfx1201 single-channel FLOAT32 buffer stores resolve all-zero
+/// DST_SEL to A8: W supplies R when present; otherwise @p missing supplies R.
+/// This routing is extrapolated to the other supported targets and does not
+/// apply to image stores.
 util::Result
 pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t> components,
                    std::span<uint8_t> bytes,

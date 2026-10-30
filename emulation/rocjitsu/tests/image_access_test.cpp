@@ -246,6 +246,23 @@ TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreReportUnimplemented) {
   }
 }
 
+TEST_F(Cdna2ImageAccessTest, ZeroSelectorsDoNotUseBufferStoreA8Routing) {
+  wf->set_exec(1);
+  write_coordinates(0, {0, 0, 0});
+  for (uint32_t format : {kDfmt32, kDfmt8888}) {
+    SCOPED_TRACE(format);
+    Image image;
+    image.data_format = format;
+    image.selectors = 0;
+    bind(image);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      cu->write_vgpr(vb + 8 + reg, 0, format == kDfmt32 ? 0x12345678u : 0x11u * (reg + 1));
+    memory.write32(kBase, 0xdeadbeef);
+    ASSERT_TRUE(issue(false));
+    EXPECT_EQ(memory.read32(kBase), 0u);
+  }
+}
+
 TEST_F(Cdna2ImageAccessTest, ArrayLayersFollowRowsOfPitchElements) {
   Image image;
   image.type = amdgpu::kImage2dArray;

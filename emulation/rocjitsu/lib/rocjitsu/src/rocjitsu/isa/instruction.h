@@ -419,39 +419,36 @@ public:
 
   /// @brief Produce the disassembly string for this instruction.
   ///
-  /// @details On first call, generates and caches the disassembly string. Subsequent
-  /// calls return the cached string.
-  /// @returns Reference to the disassembly string.
-  const std::string &disassemble() const {
-    if (disassembly_.empty()) {
-      append_mnemonic(disassembly_);
-      bool first = true;
-      // TODO: Include explicit fieldless operands (and/or implicit ones too).
-      for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
-        if (!should_print_dst_operand(operand_index))
-          continue;
-        disassembly_ += (first ? " " : ", ");
-        append_dst_operand(disassembly_, operand_index);
-        first = false;
-      }
-      for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-        if (!should_print_src_operand(operand_index))
-          continue;
-        if (omit_repeated_destination_sources_) {
-          bool repeats_dst = false;
-          for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
-            repeats_dst |= should_print_dst_operand(dst_index) &&
-                           src_operands_[operand_index] == dst_operands_[dst_index];
-          if (repeats_dst)
-            continue;
-        }
-        disassembly_ += (first ? " " : ", ");
-        append_src_operand(disassembly_, operand_index);
-        first = false;
-      }
-      build_modifiers(disassembly_);
+  /// @returns Text owned by the caller, independent of this instruction's lifetime.
+  virtual std::string disassemble() const {
+    std::string out;
+    append_mnemonic(out);
+    bool first = true;
+    // TODO: Include explicit fieldless operands (and/or implicit ones too).
+    for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
+      if (!should_print_dst_operand(operand_index))
+        continue;
+      out += (first ? " " : ", ");
+      append_dst_operand(out, operand_index);
+      first = false;
     }
-    return disassembly_;
+    for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
+      if (!should_print_src_operand(operand_index))
+        continue;
+      if (omit_repeated_destination_sources_) {
+        bool repeats_dst = false;
+        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+          repeats_dst |= should_print_dst_operand(dst_index) &&
+                         src_operands_[operand_index] == dst_operands_[dst_index];
+        if (repeats_dst)
+          continue;
+      }
+      out += (first ? " " : ", ");
+      append_src_operand(out, operand_index);
+      first = false;
+    }
+    build_modifiers(out);
+    return out;
   }
 
 protected:
@@ -492,7 +489,7 @@ protected:
   bool omit_repeated_destination_sources_ = false;
   static_assert(sizeof(amdgpu::MemoryIssueInfo) <= 6,
                 "memory issue metadata must fit Instruction's existing padding");
-  /// @brief AMDGPU issue metadata; kept here to use padding before disassembly_.
+  /// @brief AMDGPU issue metadata; kept here to use padding before flags_.
   amdgpu::MemoryIssueInfo memory_issue_info_;
   /// @brief Append the encoding-specific mnemonic spelling used by disassembly.
   /// The default matches mnemonic(); encoding decorations may override it.
@@ -520,8 +517,6 @@ protected:
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
     out += src_operands_[operand_index]->name();
   }
-  /// @brief Cached disassembly string.
-  mutable std::string disassembly_;
   /// @brief Instruction property flags bitmask.
   uint64_t flags_ = 0;
   std::unique_ptr<DynamicInstState> data_;

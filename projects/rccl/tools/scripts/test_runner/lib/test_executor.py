@@ -3319,6 +3319,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroStrongstream",
                        "rccl-UnitTestsMicroTopo",
+                       "rccl-UnitTestsMicroTransport",
                        "rccl-UnitTestsMicroUtils",
                        "rccl-UnitTestsMicroInit-uncached",
                        "rccl-UnitTestsMicroInit-faultinj",
@@ -3330,7 +3331,10 @@ class TestExecutor:
                        "rccl-UnitTestsMicroDda",
                        "rccl-UnitTestsMicroTopo",
                        "rccl-UnitTestsMicroNetIbCastInit",
-                       "rccl-UnitTestsMicroNetIbCastDataPath"]:
+                       "rccl-UnitTestsMicroNetIbCastDataPath",
+                       "rccl-UnitTestsMicroNet",
+                       "rccl-UnitTestsMicroMisc",
+                       "rccl-UnitTestsMicroP2pResiliency"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

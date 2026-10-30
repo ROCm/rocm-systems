@@ -119,6 +119,7 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
 } // namespace
 
 std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallable &callable,
+                                                               uint8_t wave_size,
                                                                std::string *error_out) {
   const auto &registry = default_isa_target_registry();
   if (callable.target != ROCJITSU_CODE_TARGET_INVALID) {
@@ -163,7 +164,7 @@ std::optional<ProbeClobberSummary> build_probe_clobber_summary(const ProbeCallab
     // Ordinary clobbers (SGPR/VGPR/AccVGPR), including implicit defs. Special
     // singletons in du.defs are projected out — they are summarized separately
     // via scan_special_state below and must not enter ordinary_clobbers.
-    const InstDefUse du(*inst);
+    const InstDefUse du(*inst, wave_size);
     summary.ordinary_clobbers |= du.defs.ordinary_only();
 
     scan_special_state(*inst, summary);

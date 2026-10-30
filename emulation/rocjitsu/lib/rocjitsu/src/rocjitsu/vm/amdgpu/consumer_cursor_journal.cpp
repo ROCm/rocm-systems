@@ -4,7 +4,6 @@
 #include "rocjitsu/vm/amdgpu/consumer_cursor_journal.h"
 
 #include <cassert>
-#include <stdexcept>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -12,8 +11,8 @@ namespace rocjitsu::amdgpu {
 ConsumerCursorJournal::ConsumerCursorJournal(uint64_t address,
                                              std::optional<uint64_t> initial_cursor, uint32_t width)
     : address_(address), width_(width) {
-  if (width_ != sizeof(uint32_t) && width_ != sizeof(uint64_t))
-    throw std::invalid_argument("consumer cursor width must be 32 or 64 bits");
+  assert((width_ == sizeof(uint32_t) || width_ == sizeof(uint64_t)) &&
+         "consumer cursor width must be 4 or 8 bytes");
   reset(initial_cursor);
 }
 
