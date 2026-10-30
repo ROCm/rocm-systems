@@ -11,19 +11,26 @@ namespace rocjitsu::arith {
 namespace {
 
 // Select the architecture's dot stage without exposing scalar templates to SIMD.
-template <bool Bf16> uint32_t dot(const uint16_t *a, const uint16_t *b, uint32_t c, bool rdna3) {
+template <bool Bf16, bool Packed>
+uint32_t dot(const uint16_t *a, const uint16_t *b, uint32_t c, bool rdna3, bool saturate) {
   if (rdna3) {
-    return gfx11_dot2_f32<Bf16>(a[0], b[0], a[1], b[1], c);
+    return gfx11_dot2_bits<Bf16, Packed>(a[0], b[0], a[1], b[1], c, saturate);
   }
-  return gfx12_dot_bits<Bf16, 4>({a[0], a[1], a[2], a[3]}, {b[0], b[1], b[2], b[3]}, c);
+  return gfx12_dot_bits<Bf16, 4, Packed>({a[0], a[1], a[2], a[3]}, {b[0], b[1], b[2], b[3]}, c,
+                                         saturate);
 }
 
 } // namespace
 
 // Return the scalar model's result for an exceptional vector lane.
 [[gnu::noinline]] uint32_t repair_wmma_dot(const uint16_t *a, const uint16_t *b, uint32_t c,
-                                           bool bf16, bool rdna3) {
-  return bf16 ? dot<true>(a, b, c, rdna3) : dot<false>(a, b, c, rdna3);
+                                           bool bf16, bool rdna3, bool packed, bool saturate) {
+  if (packed) {
+    return bf16 ? dot<true, true>(a, b, c, rdna3, saturate)
+                : dot<false, true>(a, b, c, rdna3, saturate);
+  }
+  return bf16 ? dot<true, false>(a, b, c, rdna3, saturate)
+              : dot<false, false>(a, b, c, rdna3, saturate);
 }
 
 } // namespace rocjitsu::arith
