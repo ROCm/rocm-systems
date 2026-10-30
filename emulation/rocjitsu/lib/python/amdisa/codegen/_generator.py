@@ -2019,8 +2019,6 @@ class CodeGenerator:
             template <typename Derived>
             void execute_with_backend(Instruction &instruction, void *context) {{
               auto &wf = *static_cast<Isa::Context *>(context);
-              if (wf.instruction_execution_failed())
-                return;
               for (int i = 0; i < instruction.num_src_operands(); ++i) {{
                 if (!instruction.src_operand(i)->execution_backend_available()) {{
                   wf.report_instruction_execution_error(
