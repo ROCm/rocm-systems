@@ -100,6 +100,7 @@ private:
 
     std::shared_ptr<const profiler_hub::pytorch::pytorch_store_t> m_pytorch_store;
     std::deque<std::vector<ph_event_t>>                           m_pytorch_event_results;
+    std::uint32_t                                                 m_omit_track = 0;
 
     profiler_hub::common::thread_pool m_thread_pool{ default_thread_pool_size() };
 

@@ -7,6 +7,7 @@
 #include "reader_catalog.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <thread>
@@ -81,6 +82,18 @@ ph_ctx::ph_ctx(std::shared_ptr<const profiler_hub::pytorch::pytorch_store_t> sto
 , m_connection_pool{ m_file_path, k_no_connections, m_catalog }
 , m_pytorch_store{ std::move(store) }
 {
+    // Test hook: serves track PROFILER_HUB_OMIT_TRACK with no events, so a viewer can be
+    // shown to display data from this context.
+    if(const char* omit = std::getenv("PROFILER_HUB_OMIT_TRACK"))
+    {
+        char*      end   = nullptr;
+        const auto value = std::strtoul(omit, &end, 10);
+        if(end != omit && *end == '\0')
+        {
+            m_omit_track = static_cast<std::uint32_t>(value);
+        }
+    }
+
     initialize_track_list();
     initialize_node_agents();
     initialize_node_processes();
@@ -225,7 +238,7 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     if(m_pytorch_store)
     {
         ph_event_list_t list{ .list_size = 0, .events = nullptr };
-        if(start_ts == 0 && end_ts == 0)
+        if(track_id != m_omit_track && start_ts == 0 && end_ts == 0)
         {
             // The store is never written after open and lives as long as this ctx, so the
             // list stays valid until ph_ctx_free; the C list type is just not const.
@@ -234,7 +247,7 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
                 ph_event_list_t{ .list_size = static_cast<std::uint32_t>(events.size()),
                                  .events    = const_cast<ph_event_t*>(events.data()) };
         }
-        else
+        else if(track_id != m_omit_track)
         {
             auto events = m_pytorch_store->query(track_id, start_ts, end_ts);
 
@@ -244,6 +257,13 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
                 ph_event_list_t{ .list_size = static_cast<std::uint32_t>(result.size()),
                                  .events    = result.data() };
         }
+        fmt::println(
+            "[Profiler-Hub] pytorch: get_track_events track={} start={} end={} -> {} "
+            "events",
+            track_id,
+            start_ts,
+            end_ts,
+            list.list_size);
         return list;
     }
 
