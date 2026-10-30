@@ -4619,18 +4619,42 @@ def test_generated_rdna4_local_vop3_pack_paths_use_selected_halves(
 ):
     rdna4_vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
 
-    def local_body(class_name: str, next_class_name: str) -> str:
-        return _generated_method_body(rdna4_vop3, class_name, next_class_name)
+    for method in ('execute_impl', 'execute_modifier_impl'):
+        pack = ' '.join(
+            _generated_function_body(
+                rdna4_vop3, f'void VPackB32F16Vop3::{method}'
+            ).split()
+        )
+        assert '((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)' in pack
+        assert '((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u)' in pack
+        assert 'execute_float_pack' in pack
+        assert '/*half_sources=*/true' in pack
+        assert 'rj_arith_v_pack_b32_f16_w64_gfx12' in pack
+        assert 'vdst, src0, src1' in pack
+        assert 'RJ_ARITH_ALU_HIGH_D' not in pack
 
-    pack = local_body('VPackB32F16Vop3', 'VCvtPkNormI16F16Vop3')
-    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in pack
-    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in pack
-
-    pknorm = local_body('VCvtPkNormI16F16Vop3', 'VCvtPkNormU16F16Vop3')
-    assert 'read_vop3_true16_src(src0, wf, lane, inst_.opsel, 0)' in pknorm
-    assert 'read_vop3_true16_src(src1, wf, lane, inst_.opsel, 1)' in pknorm
-    assert 'float s0 = std::bit_cast<float>' not in pknorm
-    assert 'auto cvt_i16 = [](float f) -> int16_t {' in pknorm
+    for kind in ('I16', 'U16'):
+        for method in ('execute_impl', 'execute_modifier_impl'):
+            pknorm = ' '.join(
+                _generated_function_body(
+                    rdna4_vop3, f'void VCvtPkNorm{kind}F16Vop3::{method}'
+                ).split()
+            )
+            assert 'const uint32_t opsel = amdgpu::vop3_opsel(inst_);' in pknorm
+            assert '((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)' in pknorm
+            assert '((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u)' in pknorm
+            assert 'RJ_ARITH_ALU_HIGH_D' not in pknorm
+            assert 'execute_float_pack' in pknorm
+            assert '/*half_sources=*/true' in pknorm
+            assert f'rj_arith_v_cvt_pk_norm_{kind.lower()}_f16_w64_gfx12' in pknorm
+            assert 'vdst, src0, src1' in pknorm
+            for operand, bit in (('A', 1), ('B', 2)):
+                assert (
+                    f'((inst_.abs & {bit}) ? RJ_ARITH_ALU_ABS_{operand} : 0u)' in pknorm
+                )
+                assert (
+                    f'((inst_.neg & {bit}) ? RJ_ARITH_ALU_NEG_{operand} : 0u)' in pknorm
+                )
 
 
 def test_gfx1250_generated_vop3_lshrrev_b16_uses_true16_helpers(
@@ -7098,18 +7122,27 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     rdna4_generated_root: Path,
 ):
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
-    body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    # The raw half is flushed, widened, then given ABS/NEG.
-    flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
-    assert body.index('source_modifier::apply_to_float(') < body.index(
-        'util::f16_to_f32'
-    )
-    assert body.index('util::f16_to_f32') < body.index(flush)
-    assert '0, inst_.abs, inst_.neg)' in body
-    assert 'amdgpu::fp_mode::cvt_f32_f16' in body
-    assert 'wf.fp_denorm_mode_f16_f64()' in body
-    assert 'wf.ieee_mode()' in body
+    for method in ('execute_impl', 'execute_modifier_impl'):
+        body = ' '.join(
+            _generated_function_body(vop3, f'void VCvtF32F16Vop3::{method}').split()
+        )
+        assert 'const uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+        assert '((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)' in body
+        assert '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)' in body
+        assert '((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)' in body
+        assert 'RJ_ARITH_ALU_HIGH_D' not in body
+        assert (
+            'const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;'
+            in body
+        )
+        assert 'const uint8_t destination_bytes = 0xF;' in body
+        assert 'rj_arith_v_cvt_f32_f16_w32_gfx12' in body
+        assert 'rj_arith_v_cvt_f32_f16_w64_gfx12' in body
+        assert 'execute_float_conversion' in body
+        assert 'wf.fp_denorm_mode_f16_f64() & 1' in body
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+        assert 'wf.ieee_mode()' in body and 'RJ_ARITH_FP_IEEE_MODE' in body
+        assert 'source_bytes, destination_bytes' in body
 
 
 def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(

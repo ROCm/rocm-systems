@@ -6741,6 +6741,15 @@ class CodeGenerator:
             return rj_arith_division
 
         from amdisa.codegen.execute.rj_arith_float import (
+            gen_byte_nibble_conversion,
+            gen_bit_pack,
+            gen_fp8_widen,
+            gen_fp8_narrow,
+            gen_conversion64,
+            gen_conversion32,
+            gen_conversion16,
+            gen_packed_conversion,
+            gen_normalized,
             gen_float_unary32,
             gen_float_unary64,
             gen_float64_word,
@@ -6825,6 +6834,33 @@ class CodeGenerator:
                     self._op_sel_hi_2_expr(inst.enc_name),
                 )
                 or gen_float_unary16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_normalized(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_packed_conversion(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_fp8_narrow(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_fp8_widen(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_bit_pack(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_byte_nibble_conversion(
                     self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
                 )
                 or gen_float_unary32(
