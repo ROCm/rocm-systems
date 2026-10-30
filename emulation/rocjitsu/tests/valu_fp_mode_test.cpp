@@ -5787,7 +5787,7 @@ INSTANTIATE_TEST_SUITE_P(MinMax, ValuRdna3OmodOverflowTest,
 
 class ValuMullitModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// V_MULLIT_F32 has no SIMD path; both settings check that it stays scalar-correct.
+// Compatibility MULLIT shares rj-arith's exact MUL backend.
 TEST_P(ValuMullitModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
