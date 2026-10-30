@@ -276,9 +276,6 @@ graph:
   Unit_hipGraphExecUpdate_3DMemset_AllocationExtent: *level_default
   Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_default
   Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_default
-  Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
-    <<: *level_default
-    tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
     disabled:
