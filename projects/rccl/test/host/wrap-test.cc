@@ -7893,7 +7893,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
 }
 
 // gfx1250 DPX: DDA LL128 takes AllReduce up to its cap; one 16-byte shard past
-// it, the selector moves on.
+// it, the regular Ring/Tree selection takes it.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_Gfx1250DpxLL128StopsAtCap",
@@ -7904,6 +7904,14 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
                                  });
+        // Tree, not the fake's default Ring, marks an answer from the regular Ring/Tree selection.
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL128;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
         ncclComm* comm = MakeArDdaComm(8);
         comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
         const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
@@ -7911,7 +7919,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
         for (const auto& c : cases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll128, SelectAllReduceDdaAlgo(comm, c.second)) << c.first;
-          EXPECT_NE(ll128, SelectAllReduceDdaAlgo(comm, c.second + (size_t)c.first * 16)) << c.first;
+          EXPECT_EQ(NCCL_ALGO_TREE, SelectAllReduceDdaAlgo(comm, c.second + (size_t)c.first * 16)) << c.first;
         }
         DeleteCommWithArch(comm);
       });
