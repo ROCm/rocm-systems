@@ -46,6 +46,8 @@ Regression pins for bug classes already hit in ROCr's SDMA path:
 64-bit fence/poll carry `sys` and system scope; 32-bit fence scope only on scope-field parts; fused
 wait/signal blocks are system scope for every fused kind (linear, swap, multicast, indirect); the
 indirect packet is compacted when wait/signal are absent and does not rely on a zeroed buffer.
+Classic and gfx125+ swap chunk counts and every emitted operand address preserve their respective
+64-byte and 32-byte alignment, including sizes between and above the two packet limits.
 
 Profiling (`unit/profiling_test.cpp`) pins the ordering ROCr fixed in ROCm/rocm-systems#12615: with a
 timestamp surface set, no fused body signals completion inline (the gfx125+ signal block is gone),
@@ -109,6 +111,7 @@ Apply each to a scratch copy of `include/`, rebuild, expect red:
 | drop `sys` on 64-bit fence / poll | `PacketFields.Fence64*`, `Poll64*` |
 | always emit the wait block in the indirect builder | `PacketFields.IndirectCopyIsCompacted*` |
 | drop swap alignment / support check | `Validation.SwapIsGated*` |
+| choose a classic swap chunk size that is not a multiple of 64 | `PacketFields.ChunkedSwapPreservesOperandAlignment` |
 | drop indirect gfx125 gate | `Validation.IndirectCopyNeedsGfx125Plus` |
 | `bytes >= size` -> `bytes > size` in reserve | `Ring.ARequestAtOrAbove*` (hangs; times out) |
 | fused size `1+6` -> `1+5` | `SizingMatchesEmission/gfx1250`, golden frames |
