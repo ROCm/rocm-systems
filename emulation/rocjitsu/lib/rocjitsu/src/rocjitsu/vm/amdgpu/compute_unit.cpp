@@ -1938,31 +1938,37 @@ template <bool EnableAsync>
   }
   const bool vm_address_space = vm_access != nullptr;
 
-  rj_code_binary_inst_t words[4];
-  static_assert(sizeof(words) == InstructionCache::kFetchBytes,
-                "the I$ fetch width must match the issue window");
-  VmAccessOutcome fetch_outcome = VmAccessOutcome::Complete;
-  if (vm_address_space) {
-    if (debug_active()) {
-      fetch_outcome = vm_access->read(
-          active->pc, std::span<std::byte>(reinterpret_cast<std::byte *>(words), sizeof(words)),
-          VmAccessKind::Execute);
-    } else {
-      sync_inst_cache_debug_epoch();
-      fetch_outcome = inst_cache_.fetch(*vm_access, active->pc, reinterpret_cast<uint8_t *>(words));
-    }
-  } else if (debug_active()) {
-    // A debugger writes breakpoints straight into code memory with none of the
-    // maintenance that invalidates the I$, so bypass it while one is attached.
-    for (int i = 0; i < 4; ++i)
-      words[i] = memory_->fetch32(active->pc + i * 4);
-  } else {
-    // A session that has come and gone may have written over lines cached
-    // before it attached, whether or not this wave issued while it was
-    // running. Take the invalidation set_debug_active() published.
+  std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> words{};
+  constexpr uint32_t kFirstFetchBytes = InstructionCache::kFetchBytes;
+  constexpr uint32_t kFirstFetchWords = kFirstFetchBytes / sizeof(words[0]);
+  static_assert(kFirstFetchWords + 1 == words.size());
+  const bool debugger_active = debug_active();
+  if (!debugger_active)
     sync_inst_cache_debug_epoch();
-    inst_cache_.fetch(*memory_, active->pc, reinterpret_cast<uint8_t *>(words));
-  }
+  const auto fetch = [&](uint64_t pc, uint32_t *dst, uint32_t byte_count) {
+    if (vm_address_space) {
+      if (debugger_active)
+        return vm_access->read(pc, {reinterpret_cast<std::byte *>(dst), byte_count},
+                               VmAccessKind::Execute);
+      return inst_cache_.fetch(*vm_access, pc, reinterpret_cast<uint8_t *>(dst), byte_count);
+    }
+    if (debugger_active) {
+      for (uint32_t word = 0; word < byte_count / sizeof(*dst); ++word)
+        dst[word] = memory_->fetch32(pc + word * sizeof(*dst));
+    } else {
+      inst_cache_.fetch(*memory_, pc, reinterpret_cast<uint8_t *>(dst), byte_count);
+    }
+    return VmAccessOutcome::Complete;
+  };
+  VmAccessOutcome fetch_outcome = fetch(active->pc, words.data(), kFirstFetchBytes);
+  // GFX10 MIMG has a two-bit NSA count at bits 2:1. Only NSA=3 needs
+  // a fifth word; shorter instructions must not fetch beyond the normal window.
+  constexpr uint32_t kMimgEncodingAndNsaMask = 0xfc000006u;
+  constexpr uint32_t kMimgWithThreeNsaWords = 0xf0000006u;
+  if (fetch_outcome == VmAccessOutcome::Complete &&
+      (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (words[0] & kMimgEncodingAndNsaMask) == kMimgWithThreeNsaWords)
+    fetch_outcome = fetch(active->pc + kFirstFetchBytes, &words.back(), sizeof(words.back()));
 
   if (fetch_outcome != VmAccessOutcome::Complete) {
     drain_async_window();
@@ -1993,7 +1999,6 @@ template <bool EnableAsync>
   active->trace_inst_count_++;
 
   util::StringDiagnostic decode_error;
-  const bool debugger_active = debug_active();
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
                                                     decode_error.emitter(), reuse_decoded);
@@ -2068,7 +2073,7 @@ template <bool EnableAsync>
       may_submit = false;
       if (async_pool().available()) {
         MmaAdmissionCache::Words first;
-        std::ranges::copy_n(words, first.size(), first.begin());
+        std::ranges::copy_n(words.begin(), first.size(), first.begin());
         issuer = admission->inspect(*decoder_, inst_cache_, *memory_, vm_access, active->pc, vmid,
                                     active->num_vgprs(), storage->has_accvgprs, first);
         may_submit = issuer.has_value();
@@ -2142,8 +2147,9 @@ template <bool EnableAsync>
   }
 
   if (observes_before_execute_instruction_)
-    plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active,
-                                                    std::span<const uint32_t>(words, 4));
+    plugin_group_->onAmdgpuBeforeExecuteInstruction(
+        active->pc, *inst, *active,
+        std::span(words).first(std::max<size_t>(kFirstFetchWords, inst_size / 4)));
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
