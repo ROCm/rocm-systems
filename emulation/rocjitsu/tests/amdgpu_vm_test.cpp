@@ -2659,6 +2659,8 @@ TEST(GpuMemoryThreadingTest, NarrowTransactionPolicyPublishesSeparateHalvesOfOne
       // first 64 bytes publish alone.
       alignas(KfdProcess::kPageSize) std::array<uint8_t, 256> backing{};
       auto *host = backing.data() + 64;
+      ASSERT_LE(reinterpret_cast<uintptr_t>(host) % KfdProcess::kPageSize + 128,
+                KfdProcess::kPageSize);
       auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host);
       auto *second_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host + 64);
       ASSERT_NE(first_mutex, second_mutex);

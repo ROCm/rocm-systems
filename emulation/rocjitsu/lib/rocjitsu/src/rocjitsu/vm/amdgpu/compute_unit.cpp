@@ -1399,21 +1399,29 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Check all writes before adding any new dependencies. FLAT has the same
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result = defs != classified.end() && defs->kind == WaitEventKind::FlatLoad;
-  const auto ordered_write_order =
+  const auto vmem_write_order =
       legacy && defs != classified.end() && defs->counter == WaitCounterKind::Load
           ? scoreboard.ordered_write_order(*defs, config_.arch)
           : MemoryWaitScoreboard::kUnordered;
-  if (flat)
+  if (flat) {
+    const auto ds_event =
+        std::ranges::find(classified, WaitCounterKind::Ds, &ClassifiedEvent::counter);
+    const auto lds_write_order =
+        has_ordered_flat_lds_writeback(config_.arch) && ds_event != classified.end()
+            ? scoreboard.ordered_write_order(*ds_event, config_.arch)
+            : MemoryWaitScoreboard::kUnordered;
     for (size_t i = 0; i < num_destinations; ++i) {
       const auto &d = destinations[i];
       if (track_xcnt && !xscalar)
         scoreboard.xcnt_ordered_write(d.reg, d.lanes, d.bytes);
       // The incoming class determines VMEM writeback ordering before its issue.
-      // Shared FLAT lanes are written by DS rather than the VMEM pipeline.
+      // Shared FLAT lanes use their own DS completion class. Only architectures
+      // with ordered LDS-route writeback can share that class with indexed LDS.
       const uint64_t shared_lanes = flat_result ? d.lanes & flat_shared_lanes : 0;
-      scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, ordered_write_order);
-      scoreboard.access(d.reg, shared_lanes, d.bytes, true);
+      scoreboard.access(d.reg, d.lanes & ~shared_lanes, d.bytes, true, vmem_write_order);
+      scoreboard.access(d.reg, shared_lanes, d.bytes, true, lds_write_order);
     }
+  }
   // FLAT's actual route determines which completion proves translation. Only
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
