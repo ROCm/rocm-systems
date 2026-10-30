@@ -445,7 +445,7 @@ mod tests {
     ///
     /// This is the upgrade, and the documents are the real ones: the
     /// previous release's `mi350x` has five SDMA engines, four CUs per
-    /// shader array and no queue count at all, against a shipped MI355X
+    /// shader array and no queue count at all, against a shipped MI350X
     /// of two engines and eight queues each. Patching the one field into
     /// it would leave a machine neither party ships, and leaving it
     /// alone leaves `--profile`'s own default unable to start a session,

@@ -13,9 +13,11 @@ Pre-built simulator configs are in `configs/`:
 | `gfx90a_mi210_kmd.json` | Single CDNA2 GPU (daemon/KFD mode) |
 | `gfx942_cdna3.json` | Single CDNA3 GPU (standalone simulation) |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU (daemon/KFD mode) |
-| `gfx950_mi355x.json` | Single CDNA4 GPU (standalone simulation) |
-| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU (daemon/KFD mode) |
-| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs (multi-GPU daemon mode) |
+| `gfx950_mi355x.json` | Single MI350X, PCI `0x75a0` (standalone simulation; legacy filename) |
+| `gfx950_mi355x_kmd.json` | Single MI350X, PCI `0x75a0` (daemon/KFD mode; legacy filename) |
+| `gfx950_mi355x_kmd_2gpu.json` | Two MI350X GPUs (multi-GPU daemon mode; legacy filename) |
+| `gfx950_mi355x_pci75a3.json` | Single MI355X, PCI `0x75a3` (standalone simulation) |
+| `gfx950_mi355x_pci75a3_kmd.json` | Single MI355X, PCI `0x75a3` (daemon/KFD mode) |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU (standalone or PCI/VFIO simulation) |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
@@ -23,6 +25,20 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
 | `gfx1201_r9700.json` | Single RDNA4 GPU (standalone simulation) |
+
+Config filenames are external interfaces. Scripts and CI jobs select them by
+filename, so renaming one changes the device seen by every caller that still
+uses the old name. The `gfx950_mi355x*.json` files therefore keep their legacy
+names even though they describe the captured MI350X with PCI ID `0x75a0`. Use
+`gfx950_mi355x_pci75a3*.json` for MI355X with PCI ID `0x75a3`.
+
+For gfx950, the ISA does not identify the product. Choose a config by its PCI
+device ID when hipBLASLt or another library selects behavior by device. Both
+gfx950 products use the captured MI350X model: 8 XCDs × 4 shader engines × 9
+CU slots per engine, or 288 slots, while `simd_count / simd_per_cu` reports 256
+active CUs. Rocjitsu does not model a harvested-CU mask, so all modeled CU
+slots can receive work. The MI355X configs change only the PCI ID and
+marketing name.
 
 ### PCI/VFIO guest compatibility
 
@@ -253,7 +269,7 @@ Increasing the budget alone retains these serial defaults.
 Set `cpu_dispatch_threads: 0` to opt into the parallel granules below, or set a
 positive dispatch width explicitly. The engine stays at one unless overridden.
 
-| Budget | MI355X, 2 GPUs E/D | Retained threads | MI455X, 4 GPUs E/D | Retained threads |
+| Budget | MI350X, 2 GPUs E/D | Retained threads | MI455X, 4 GPUs E/D | Retained threads |
 |---:|---:|---:|---:|---:|
 | 1 | 1/1 | 1 | 1/1 | 1 |
 | 2 | 1/1 | 1 | 1/1 | 1 |
