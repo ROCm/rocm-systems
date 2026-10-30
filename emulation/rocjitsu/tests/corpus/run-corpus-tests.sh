@@ -15,6 +15,7 @@
 #   --hard-timeout N     Per-test timeout for failed-test reruns (default: 60)
 #   --rerun-timeout N    Overall failed-test rerun budget (default: 1200)
 #   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
+#   --ubsan              The launcher has UBSan; omit cases too slow to run with it
 #   --race-tests         Also run the RocJITsu race-detector HIP corpus
 #   --rerun-failed       Rerun only tests that failed the soft-timeout pass
 #   --warn-perf          Warn about passing tests close to the soft timeout
@@ -47,11 +48,20 @@ rerun_timeout_seconds=1200
 rerun_failed=false
 warn_perf=false
 sanitizer_mode=none
+ubsan=false
 race_tests=false
+
+# These cases mainly test problem size, and UBSan instrumentation makes them
+# exceed the per-test timeout. UBSan lanes still run the smaller cases of the
+# same programs, and uninstrumented lanes run these.
+ubsan_excluded_cases=(
+  rocblas_sgemm.large_2048x2048
+)
 
 usage() {
   echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
-    "[--sanitizer none|clang-asan|gcc-asan] [--race-tests] [--rerun-failed] [--warn-perf]" >&2
+    "[--sanitizer none|clang-asan|gcc-asan] [--ubsan] [--race-tests] [--rerun-failed]" \
+    "[--warn-perf]" >&2
 }
 
 targets=(
@@ -115,6 +125,10 @@ while (( $# )); do
           ;;
       esac
       shift 2
+      ;;
+    --ubsan)
+      ubsan=true
+      shift
       ;;
     --rerun-failed)
       rerun_failed=true
@@ -274,6 +288,11 @@ run_pytest() {
   )
   if [[ -n "${skip_config_path}" ]]; then
     pytest_cmd+=(--skip-tests-config "${skip_config_path}")
+  fi
+  if [[ "${ubsan}" == true && "${suites}" != race ]]; then
+    local excluded_expression
+    printf -v excluded_expression ' or %s' "${ubsan_excluded_cases[@]}"
+    pytest_cmd+=(-k "not (${excluded_expression# or })")
   fi
   if (( overall_timeout_seconds > 0 )); then
     timeout --signal=TERM --kill-after=10s "${overall_timeout_seconds}s" \
