@@ -997,6 +997,31 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
       s->SetSyncPolicy(static_cast<amd::SyncPolicy>(syncPolicy));
       break;
     }
+    case hipStreamAttributeAccessPolicyWindow: {
+      const auto& apw = value->accessPolicyWindow;
+
+      if (apw.hitRatio < 0.0f || apw.hitRatio > 1.0f) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      if (apw.missProp == hipAccessPropertyPersisting) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      if (apw.num_bytes > 0 && apw.hitRatio == 0.0f) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+
+      hipDeviceProp_t prop{};
+      hipError_t status = ihipGetDeviceProperties(&prop, s->DeviceId());
+      if (status != hipSuccess) {
+        HIP_RETURN(status);
+      }
+      if (apw.num_bytes > static_cast<size_t>(prop.accessPolicyMaxWindowSize)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+
+      s->SetAccessPolicyWindow(apw);
+      break;
+    }
     default: {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -1032,6 +1057,10 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
       value_out->priority = s->GetPriority();
       break;
     }
+    case hipStreamAttributeAccessPolicyWindow: {
+      value_out->accessPolicyWindow = s->GetAccessPolicyWindow();
+      break;
+    }
     default: {
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -1054,8 +1083,9 @@ hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
   constexpr bool wait = false;
   auto* src_stream = hip::getStream(src, wait);
   auto* dst_stream = hip::getStream(dst, wait);
-  // Currently, SyncPolicy is the only stream attribute we can set during runtime.
+  // Copy all settable stream attributes.
   dst_stream->SetSyncPolicy(src_stream->GetSyncPolicy());
+  dst_stream->SetAccessPolicyWindow(src_stream->GetAccessPolicyWindow());
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

@@ -2119,8 +2119,7 @@ class GraphKernelNode : public GraphNode {
         return hipErrorInvalidValue;
       }
 
-      // need to check against accessPolicyMaxWindowSize from device
-      // accessPolicyMaxWindowSize not implemented on the device side yet
+      // Validate against the device's accessPolicyMaxWindowSize (L2 cache size).
       if (params->accessPolicyWindow.num_bytes > accessPolicyMaxWindowSize) {
         return hipErrorInvalidValue;
       }
