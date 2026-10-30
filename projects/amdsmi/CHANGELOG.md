@@ -171,6 +171,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed a crash in `amdsmi_get_gpu_process_list()` when several threads query GPUs at once (AILITOOLS-1234)**.
+  - `AMDSmiGPUDevice::get_compute_process_list_impl()` now holds `ComputeProcessCache::mutex_` while it copies `process_info_cache_map`, so callers no longer utilize a freed map node and abort with `SIGSEGV`; a regression guard test covers the race.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
