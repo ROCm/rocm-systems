@@ -630,6 +630,7 @@ kfd_driver_base_t::agent_snapshot (
       return AMD_DBGAPI_STATUS_SUCCESS;
     }
 
+  version_t kfd_version = get_kfd_version ();
   std::vector<kfd_dbg_device_info_entry> kfd_device_infos (snapshot_count);
   if (amd_dbgapi_status_t status
       = kfd_agent_snapshot (kfd_device_infos.data (), snapshot_count,
@@ -696,6 +697,15 @@ kfd_driver_base_t::agent_snapshot (
         = (entry.array_count * entry.num_xcc) / entry.simd_arrays_per_engine;
       agent_info.name = marketing_name (
         agent_info.vendor_id, agent_info.device_id, agent_info.revision_id);
+
+      if (kfd_version >= version_t {1, 24})
+        {
+          if (entry.pci_domain <= std::numeric_limits<uint16_t>::max ())
+            warning ("GPUID %s: PCI domain ID value overflow, narrowing",
+                     to_cstring (agent_info.os_agent_id));
+
+          agent_info.domain = static_cast<uint16_t> (entry.pci_domain);
+        }
     }
 
   return AMD_DBGAPI_STATUS_SUCCESS;
