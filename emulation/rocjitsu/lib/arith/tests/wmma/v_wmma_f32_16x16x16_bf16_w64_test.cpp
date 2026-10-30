@@ -30,10 +30,12 @@ using Registers = rocjitsu::arith::test::Registers<64, 64>;
 TEST(WmmaF32BF16W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::expect_bf16_loose_subnormal<64, true>(
       rj_arith_v_wmma_f32_16x16x16_bf16_w64);
-  rocjitsu::arith::test::expect_wmma_exact_simd<true, 64, true>(
+  rocjitsu::arith::test::expect_wmma_exact_simd<true, 64, true, false>(
       rj_arith_v_wmma_f32_16x16x16_bf16_w64);
 
   rocjitsu::arith::test::expect_matrix_modifiers<true, 64, true>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w64);
+  rocjitsu::arith::test::expect_wmma_fixed_controls<true, 64, true, false>(
       rj_arith_v_wmma_f32_16x16x16_bf16_w64);
 
   std::minstd_rand random;
