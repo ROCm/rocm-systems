@@ -86,8 +86,8 @@ Panel Config:
           unit: Gbps
         Cache Hit Rate:
           avg: NOISE_CLAMP(COLLECT_SUM(_collect.vl1d_chr_non_rw, _collect.vl1d_hit_atom), 100)
-          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
-          max: None
+          min: MIN(_collect.vl1d_chr_non_rw + _collect.vl1d_hit_atom)  # min over dispatches of the summed pieces
+          max: MAX(_collect.vl1d_chr_non_rw + _collect.vl1d_hit_atom)  # max over dispatches of the summed pieces
           unit: Percent
         Cache Accesses:
           avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
@@ -96,8 +96,8 @@ Panel Config:
           unit: (Requests + $normUnit)
         Cache Hits:
           avg: COLLECT_SUM(_collect.vl1d_hits_non_rw, _collect.vl1d_hits_atom)
-          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
-          max: None
+          min: MIN(_collect.vl1d_hits_non_rw + _collect.vl1d_hits_atom)  # min over dispatches of the summed pieces
+          max: MAX(_collect.vl1d_hits_non_rw + _collect.vl1d_hits_atom)  # max over dispatches of the summed pieces
           unit: (Requests + $normUnit)
         Invalidations:
           avg: SUM(TCP_TOTAL_WRITEBACK_INVALIDATES_sum) / SUM($denom)
