@@ -39,9 +39,9 @@ Build options in PyTorch's HIP port keep their original names. ``torch.cuda.gds.
 fio
 ===
 
-`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester widely used for storage benchmarking. AMD maintains a fork at `ROCm/fio <https://github.com/ROCm/fio>`_ that adds a ``libhipfile`` I/O engine, so fio job files can drive hipFile reads and writes against GPU memory.
+`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester commonly used for storage benchmarking. fio versions 3.43 and later include a ``libhipfile`` engine that lets you drive hipFile I/O workloads from fio job files.
 
-For build and run instructions, see :doc:`/how-to/use-with-fio`.
+For build instructions, see :doc:`/how-to/use-with-fio`.
 
 IOR
 ===
