@@ -443,11 +443,13 @@ TEST_F(FaultMutationCli, EmitsAdmittedClusterBarrierAtExactOffsetZero) {
     EXPECT_NE(stderr_.find("Execution and detector qualification have not been performed."),
               std::string::npos)
         << stderr_;
-    EXPECT_NE(
-        stderr_.find(
-            "Cluster barrier -3 only synchronizes a clustered dispatch; it is inert otherwise."),
-        std::string::npos)
-        << stderr_;
+    for (const std::string_view required_fact :
+         {"Cluster barrier -3 assumes a clustered dispatch with multiple workgroups per cluster",
+          "it is inert otherwise", "exactly one signal per workgroup",
+          "after workgroup synchronization", "every wave waiting",
+          "does not verify workgroup size or this protocol"}) {
+      EXPECT_NE(stderr_.find(required_fact), std::string::npos) << required_fact << '\n' << stderr_;
+    }
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
     ASSERT_EQ(source.text_sections().size(), 1u);
