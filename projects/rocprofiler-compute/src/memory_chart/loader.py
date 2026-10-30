@@ -164,6 +164,11 @@ class PanelConfigs:
         return cls._by_arch[arch]
 
 
+def has_layout(gpu_arch: Optional[str]) -> bool:
+    """Return whether a usable memory-chart layout is available for gpu_arch."""
+    return Layouts.for_arch(gpu_arch) is not None
+
+
 def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
     """True when every table of a panel config is drawn as the memory chart."""
     sources = panel.get("data source") or []
@@ -213,6 +218,25 @@ def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
     )
     _check_references(layout, raw_blocks)
     return layout
+
+
+def layout_from_stored(data: dict[str, Any]) -> Layout:
+    """Check a layout copy stored in the analysis database and index its blocks.
+
+    The layout's name is the stem of the shipped file it matches, since the
+    diagram names the chart by that stem. A copy that matches no shipped file is
+    named after its first architecture.
+    """
+    shipped = next(
+        (path for path in layout_files() if _read_json(path) == data),
+        None,
+    )
+    path = shipped if shipped is not None else Path(f"{data['archs'][0]}.json")
+    return layout_from_json(path, data)
+
+
+def _read_json(path: Path) -> Any:  # noqa: ANN401
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

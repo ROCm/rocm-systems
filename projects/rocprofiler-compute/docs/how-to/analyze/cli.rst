@@ -20,6 +20,8 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
 
+* :ref:`Memory Chart HTML report <cli-memory-chart-html>`: View aggregate and per-kernel memory charts in a browser.
+
 Run ``rocprof-compute analyze -h`` for more details.
 
 .. _cli-walkthrough:
@@ -113,6 +115,20 @@ There are three high-level GPU analysis views:
                                                                                                         ╰────────────────────────────────────────────╯
 
    Legend: <---- Read  ----> Write  <---> Atomic  █ Util  █ Hit%
+
+.. _cli-memory-chart-html:
+
+Analyzing a Memory Chart writes an offline ``memory-chart-gpu-0.html`` into the workload's
+subfolder of the run folder, ``<n>-<workload>/``. The file name does not change with the
+filters. Open it in a browser to select a kernel or use **Show all** for the aggregate view.
+
+``-k`` sets the initial view when it selects exactly one kernel; all analyzed
+kernels remain available. GPU and dispatch filters restrict the data and are shown
+as the scope of the aggregate view.
+
+Every analyze run writes the report whatever ``--output-format`` is, because that option
+has no effect. Including ``--view table``, a workload with memory chart data gets a report.
+A PC-sampling-only workload gets none.
 
 .. _cli-memory-chart-viewing:
 
@@ -773,6 +789,8 @@ holds:
   :ref:`pc-sampling-per-source-line-csv`.
 * For a single workload with roofline data, ``1-<workload>/roofline-gpu-0.html``, where
   ``<workload>`` is the name of the workload directory given with ``-p``.
+* For each workload with memory chart data, ``<n>-<workload>/memory-chart-gpu-0.html``, where ``<n>``
+  is the workload's position among the ``-p`` paths; see :ref:`cli-memory-chart-html`.
 
 The terminal shows the top stats, the system information and the System Speed-of-Light section,
 followed by any blocks selected with ``-b``. It also names the roofline HTML file when one is saved.

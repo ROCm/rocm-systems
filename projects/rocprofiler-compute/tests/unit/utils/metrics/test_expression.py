@@ -12,6 +12,7 @@ from utils.metrics.expression import (
     CodeTransformer,
     InvalidExpressionError,
     build_eval_string,
+    top_level_round_digits,
     update_denominator_string,
     update_normal_unit_string,
 )
@@ -146,3 +147,35 @@ class TestExpression:
             result = build_eval_string('"".__class__')
         assert result == ""
         assert mock_warning.called
+
+
+@pytest.mark.parametrize(
+    ("expression", "digits"),
+    [
+        ("to_round(to_avg(raw_pmc_df['VGPR']), 0)", 0),
+        ("to_round(100 * to_sum(raw_pmc_df['A']) / to_sum(raw_pmc_df['B']), 1)", 1),
+        ("to_round(to_avg(raw_pmc_df['A']) * ammolite__wave_size / 1024, 3)", 3),
+    ],
+)
+def test_top_level_round_digits_reads_a_round_around_the_whole_expression(
+    expression, digits
+):
+    """A single to_round call gives the digits the terminal rounds to."""
+    assert top_level_round_digits(expression) == digits
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "to_avg(raw_pmc_df['A'])",
+        "to_round(to_avg(raw_pmc_df['A']), 1) + to_round(to_avg(raw_pmc_df['B']), 2)",
+        "to_round(to_avg(raw_pmc_df['A']), n)",
+        "to_round(to_avg(raw_pmc_df['A']), True)",
+        "",
+        None,
+        float("nan"),
+    ],
+)
+def test_top_level_round_digits_ignores_other_expressions(expression):
+    """Read only one whole to_round(value, digits) call, not nested rounds."""
+    assert top_level_round_digits(expression) is None

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import re
+from typing import Optional
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
@@ -293,3 +294,29 @@ def build_metric_value_string(
                         update_normal_unit_string,
                         normal_unit=normal_unit,
                     )
+
+
+def top_level_round_digits(eval_string: object) -> Optional[int]:
+    """Return the digits of an eval string that is one to_round(value, digits).
+
+    The terminal rounds a metric to these digits, so the database, which keeps
+    every digit, is rounded to them when it is rendered. Returns None for any
+    other string, including a to_round nested in a larger expression.
+    """
+    if not isinstance(eval_string, str) or not eval_string:
+        return None
+    try:
+        node = ast.parse(eval_string, mode="eval").body
+    except SyntaxError:
+        return None
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "to_round"
+        and len(node.args) == 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, int)
+        and not isinstance(node.args[1].value, bool)
+    ):
+        return None
+    return node.args[1].value

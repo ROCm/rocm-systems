@@ -145,6 +145,10 @@ def test_from_base_unit_value_inverts_to_base_unit_value(
 def test_from_base_unit_value_divides_a_stored_value_by_its_scale():
     """A Bytes/s value stored for a GB/s metric is shown in GB/s again."""
     assert from_base_unit_value("GB/s", "Value", 1.5e9) == 1.5
+
+
+def test_from_base_unit_value_divides_kb_per_wave_by_1024():
+    """Bytes per Wave read back as KB per Wave is exact, since 1024 is a power of 2."""
     assert from_base_unit_value("KB per Wave", "Value", 2560.0) == 2.5
 
 
@@ -153,7 +157,7 @@ def test_from_base_unit_value_keeps_percent_of_peak_unscaled():
     assert from_base_unit_value("GB/s", "Percent of Peak", 42.5) == 42.5
 
 
-@pytest.mark.parametrize("value", [None, "N/A"])
+@pytest.mark.parametrize("value", [None, "N/A", "text"])
 def test_from_base_unit_value_passes_non_numbers_through(value):
     """A NULL or text value is returned as it is, never shown as 0."""
     assert from_base_unit_value("GB/s", "Value", value) is value
