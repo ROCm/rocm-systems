@@ -725,7 +725,8 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   const bool has_defs = defs != classified.value().end();
   const bool ordered_writeback =
       has_defs &&
-      ((legacy && defs->counter == WaitCounterKind::Load) || defs->counter == WaitCounterKind::Ds ||
+      ((legacy && defs->counter == WaitCounterKind::Load) ||
+       (defs->counter == WaitCounterKind::Ds && defs->kind == WaitEventKind::Ds) ||
        (has_ordered_lds_direct_writeback(wf.cu().arch()) && defs->counter == WaitCounterKind::Exp &&
         defs->kind == WaitEventKind::LdsDirect));
   const uint16_t order =

@@ -1490,9 +1490,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
         // FLAT's LDS-serviced lanes share native LDS's order class, so partial
         // waits retire them together. Only qualified targets also write them
         // to registers in order with native LDS results.
-        result.ordered_overwrite = event.kind != WaitEventKind::FlatLoad ||
-                                   counter != WaitCounterKind::Ds ||
-                                   has_ordered_flat_lds_writeback(config_.arch);
+        if (event.kind == WaitEventKind::FlatLoad && counter == WaitCounterKind::Ds)
+          result.ordered_overwrite = has_ordered_flat_lds_writeback(config_.arch);
         scoreboard.add(result);
       }
   }
