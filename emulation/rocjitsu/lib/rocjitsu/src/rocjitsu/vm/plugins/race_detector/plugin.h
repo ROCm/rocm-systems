@@ -89,6 +89,9 @@ public:
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
+  /// Release the workgroup's detector. Reported races are still counted.
+  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
+
   void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
@@ -121,6 +124,9 @@ public:
 
   std::string getSummary() const;
 
+  /// Number of workgroups whose detector state is still held.
+  size_t retainedWorkgroupCount() const;
+
 private:
   struct WorkgroupKey {
     uint32_t dispatch_id;
@@ -142,7 +148,7 @@ private:
     return wf ? get_state(*wf) : nullptr;
   }
 
-  std::mutex dispatch_mutex_;
+  mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
   std::mutex report_mutex_;

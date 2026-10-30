@@ -263,6 +263,19 @@ void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInf
                            kernel_names.symbol));
 }
 
+void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  // The workgroup's wavefronts have halted. Their slots keep pointers into this
+  // detector only until the next workgroup dispatch replaces the plugin state,
+  // before any instruction runs.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  detectors_.erase(WorkgroupKey{dispatch_id, wg_id});
+}
+
+size_t RaceDetectorPlugin::retainedWorkgroupCount() const {
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  return detectors_.size();
+}
+
 void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,

@@ -979,6 +979,59 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   }
 }
 
+TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
+  PluginFixture f;
+  f.initialize(/*num_wf_slots=*/2);
+  ASSERT_FALSE(testing::Test::HasFatalFailure());
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *race = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *second = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  first->set_exec(1u);
+  second->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> first_waves{first};
+  std::array<amdgpu::Wavefront *, 1> second_waves{second};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104,
+                                               first_waves);
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1, 256, 104,
+                                               second_waves);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 2u);
+
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/0);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 1u);
+
+  // The other workgroup of the dispatch still detects a read before its load
+  // completes.
+  constexpr uint32_t kDst = 4;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = second->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = second->vgpr_alloc().base + kDst;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(second->pc, load, *second);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *second);
+  f.plugin_group_->onAmdgpuReadVgprLanes(second, second->vgpr_alloc().base + kDst,
+                                         /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/1);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+}
+
 TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {
   auto rejects_without_access = [](MemPipelineTag tag) {
     constexpr uint32_t kVgprsPerWave = 16;
