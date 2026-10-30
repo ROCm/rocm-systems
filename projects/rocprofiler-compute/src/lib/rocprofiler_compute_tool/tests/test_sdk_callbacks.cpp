@@ -229,35 +229,13 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
     EXPECT_EQ(collector->load_count, 1);
 }
 
-TEST_F(TestSdkCallbacks, SymbolRegistrationWithPcSamplingEnabled_ForwardsNormalizedKey)
+TEST_F(TestSdkCallbacks, SymbolRegistration_StoresCodeObjectIdAndStrippedMangledName)
 {
-    auto collector           = std::make_shared<MockPcSamplingCollector>();
-    auto snapshotter         = std::make_shared<MockSourceSnapshotter>();
-    m_tool_data->pc_sampling = std::make_shared<pc_sampling_feature_t>(PcSamplingMode::HostTrap,
-                                                                       "unused.json",
-                                                                       "unused_sources",
-                                                                       collector,
-                                                                       snapshotter);
     invoke_tool_tracing_callback(10, "_Z3fooi.kd", 42);
-    ASSERT_EQ(collector->symbol_registrations.size(), 1);
-    EXPECT_EQ(collector->symbol_registrations[0].kernel_id, 10);
-    EXPECT_EQ(collector->symbol_registrations[0].code_object_id, 42);
-    EXPECT_EQ(collector->symbol_registrations[0].symbol_name, "_Z3fooi");
-    EXPECT_EQ(m_tool_data->kernel_symbols.at(10).kernel_name, "foo(int)");
-}
-
-TEST_F(TestSdkCallbacks, SymbolRegistrationWithPcSamplingDisabled_KeepsSharedSymbolRecord)
-{
-    auto collector = std::make_shared<MockPcSamplingCollector>();
-    m_tool_data->pc_sampling =
-        std::make_shared<pc_sampling_feature_t>(PcSamplingMode::Disabled,
-                                                "unused.json",
-                                                "unused_sources",
-                                                collector,
-                                                std::make_shared<MockSourceSnapshotter>());
-    invoke_tool_tracing_callback(10, "_Z3fooi.kd");
-    EXPECT_TRUE(collector->symbol_registrations.empty());
-    EXPECT_EQ(m_tool_data->kernel_symbols.at(10).kernel_name, "foo(int)");
+    const auto& symbol = m_tool_data->kernel_symbols.at(10);
+    EXPECT_EQ(symbol.code_object_id, 42);
+    EXPECT_EQ(symbol.mangled_name, "_Z3fooi");
+    EXPECT_EQ(symbol.kernel_name, "foo(int)");
 }
 
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)

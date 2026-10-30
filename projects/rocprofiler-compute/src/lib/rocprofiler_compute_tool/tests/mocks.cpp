@@ -338,23 +338,16 @@ void MockPcSamplingCollector::on_code_object_load(
     ++load_count;
 }
 
-void MockPcSamplingCollector::on_kernel_symbol_register(uint64_t         kernel_id,
-                                                        uint64_t         code_object_id,
-                                                        std::string_view symbol_name)
-{
-    symbol_registrations.push_back({kernel_id, code_object_id, std::string{symbol_name}});
-}
-
-bool MockPcSamplingCollector::has_code_objects() const
-{
-    return m_has_code_objects;
-}
-
-void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& /*writer*/,
-                                       const std::set<uint64_t>& dispatched_kernel_ids)
+void MockPcSamplingCollector::finalize(rocprofiler_compute_tool::code_object_writer_t& writer,
+                                       const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols)
 {
     ++finalize_count;
-    last_dispatched_kernel_ids = dispatched_kernel_ids;
+    last_dispatched_symbols = dispatched_symbols;
+    if (!m_has_code_objects)
+        return;
+
+    writer.start_code_obj(1);
+    writer.end_code_obj();
 }
 
 void MockPcSamplingCollector::set_has_code_objects(bool has_code_objects)

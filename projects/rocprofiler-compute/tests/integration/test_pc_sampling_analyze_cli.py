@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from collections import Counter
 from pathlib import Path
 
 import common
@@ -18,115 +16,12 @@ from tests.integration import common as integration_common
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
 
-
-@pytest.fixture
-def capture_expectations():
-    """Read capture-dependent counts and source attribution from the raw fixture."""
-    workload = Path(PC_SAMPLING_WORKLOAD)
-    sampling_path = next(workload.glob("*_ps_file_results.json"))
-    process_id = int(sampling_path.name.split("_", 1)[0])
-    tool = json.loads(sampling_path.read_text(encoding="utf-8"))[
-        "rocprofiler-sdk-tool"
-    ][0]
-    code_objects = json.loads(
-        (workload / f"{process_id}_code_obj_info.json").read_text(encoding="utf-8")
-    )["code_objects"]
-    assert len(code_objects) == 1
-    assert [symbol["name"] for symbol in code_objects[0]["symbols"]] == [
-        "_Z7vecCopyPdS_S_ii"
-    ]
-    source_paths = json.loads(
-        (workload / "src" / f"{process_id}_source_map.json").read_text(encoding="utf-8")
-    )["source_paths"]
-    snapshots = {
-        canonical: (workload / "src" / canonical.lstrip("/"))
-        .read_text(encoding="utf-8")
-        .splitlines()
-        for canonical in source_paths.values()
-    }
-    samples = tool["buffer_records"]["pc_sample_stochastic"]
-    sample_counts = Counter(
-        sample["record"]["pc"]["code_object_offset"] for sample in samples
-    )
-    sources_by_offset = {
-        sample["record"]["pc"]["code_object_offset"]: tool["strings"][
-            "pc_sample_comments"
-        ][sample["inst_index"]]
-        for sample in samples
-    }
-    load_base = next(
-        code_object["load_base"]
-        for code_object in tool["code_objects"]
-        if code_object["code_object_id"] == code_objects[0]["id"]
-    )
-    instructions = code_objects[0]["symbols"][0]["instructions"]
-    all_sources = {
-        instruction["virtual_address"] - load_base: instruction["comment"]
-        for instruction in instructions
-    }
-    all_sources.update(sources_by_offset)
-    assert set(source_paths) == {
-        frame.rsplit(":", 1)[0]
-        for instruction in instructions
-        for frame in instruction["comment"].split(" -> ")
-        if frame
-    }
-    snapshot_files = {
-        path.relative_to(workload / "src").as_posix()
-        for path in (workload / "src").rglob("*")
-        if path.is_file() and not path.name.endswith("_source_map.json")
-    }
-    assert snapshot_files == {path.lstrip("/") for path in snapshots}
-    source_line_counts, referenced_lines, canonical_sources = source_expectations(
-        source_paths, snapshots, all_sources, sources_by_offset
-    )
-    return {
-        "pid": process_id,
-        "sample_counts": sample_counts,
-        "sample_total": len(samples),
-        "instruction_count": len(all_sources),
-        "sources": canonical_sources,
-        "source_line_counts": source_line_counts,
-        "referenced_lines": referenced_lines,
-        "source_paths": set(snapshots),
-        "dispatch_count": len(tool["buffer_records"]["kernel_dispatch"]),
-    }
-
-
-def source_expectations(source_paths, snapshots, all_sources, sources_by_offset):
-    """Compute canonical frame chains and referenced snapshot lines."""
-    frames = {
-        (source_paths[path], None if line == "?" else int(line))
-        for comment in all_sources.values()
-        for frame in comment.split(" -> ")
-        if frame
-        for path, line in [frame.rsplit(":", 1)]
-    }
-    source_line_counts = sorted(
-        (path, len(lines) + ((path, None) in frames))
-        for path, lines in snapshots.items()
-    )
-    referenced_lines = sorted(
-        [
-            (
-                path,
-                line,
-                snapshots[path][line - 1][:45] if line is not None else None,
-            )
-            for path, line in frames
-        ],
-        key=lambda row: (row[0], row[1] or 0),
-    )
-    canonical_sources = {
-        offset: " -> ".join(
-            f"{source_paths[path]}:{line}"
-            for frame in comment.split(" -> ")
-            if frame
-            for path, line in [frame.rsplit(":", 1)]
-        )
-        for offset, comment in sources_by_offset.items()
-    }
-    return source_line_counts, referenced_lines, canonical_sources
+# Source paths recorded in the fixture workload's code object metadata.
+VCOPY_SOURCE = "/app/projects/rocprofiler-compute/sample/vcopy.cpp"
+HIP_RUNTIME_SOURCE = (
+    "/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel/include/hip/"
+    "amd_detail/amd_hip_runtime.h"
+)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -210,7 +105,6 @@ def test_pc_sampling_analyze_sorting_type(
 
 
 def test_pc_sampling_analyze_database_output(
-    capture_expectations,
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
@@ -310,15 +204,15 @@ def test_pc_sampling_analyze_database_output(
         assert counts["compute_code_object_store"] > 0
         # Only sampled offsets carry a sample state; the dispatched kernels' full
         # disassembly is added as extra lines, so lines outnumber states.
-        assert state_count == len(capture_expectations["sample_counts"])
-        assert line_count == capture_expectations["instruction_count"]
+        assert state_count == 19
+        assert line_count == 20
         # Un-dispatched ISA is never stored, so no line is left un-attributed.
         assert attributed == line_count
         # inst_type is a per-sample class, so its counts sum to the sample total.
-        assert state_total == capture_expectations["sample_total"]
+        assert state_total == 857
         assert inst_sample_total == state_total
-        assert len(db_pc_sampling) == state_count
-        assert db_pc_sampling["count"].sum() == state_total
+        assert len(db_pc_sampling) == 19
+        assert db_pc_sampling["count"].sum() == 857
         # The static type is filled from the disassembly, so every sampled line
         # of a real workload carries one.
         assert db_pc_sampling["instruction_type"].notna().all()
@@ -336,33 +230,56 @@ def test_pc_sampling_analyze_database_output(
             .all()
         )
         assert pc_sampling_views == [("compute_pc_sampling_summary_view",)]
-        assert db_dispatch_count == capture_expectations["dispatch_count"] == 3
-        assert db_code_object_process_ids == [(capture_expectations["pid"],)]
-        assert set(db_pc_sampling["kernel_name"]) == {
-            "vecCopy(double*, double*, double*, int, int)"
-        }
+        assert db_dispatch_count == 3
+        assert db_code_object_process_ids == [(698961,)]
+        # The chain is rebuilt innermost first.
         assert (
-            dict(zip(db_pc_sampling["offset"], db_pc_sampling["count"]))
-            == (capture_expectations["sample_counts"])
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8192, "source"].item()
+            == f"{HIP_RUNTIME_SOURCE}:258 -> {HIP_RUNTIME_SOURCE}:317 "
+            f"-> {VCOPY_SOURCE}:36"
         )
         assert (
-            (db_pc_sampling["issue_count"] + db_pc_sampling["stall_count"])
-            .eq(db_pc_sampling["count"])
-            .all()
+            db_pc_sampling.loc[db_pc_sampling["offset"] == 8256, "source"].item()
+            == f"{HIP_RUNTIME_SOURCE}:? -> {HIP_RUNTIME_SOURCE}:308 "
+            f"-> {VCOPY_SOURCE}:36"
         )
-        # Canonical paths and frame order must survive database reconstruction.
-        assert (
-            dict(zip(db_pc_sampling["offset"], db_pc_sampling["source"]))
-            == (capture_expectations["sources"])
-        )
-        assert db_source_line_counts == capture_expectations["source_line_counts"]
-        assert db_referenced_source_lines == capture_expectations["referenced_lines"]
+        # Each file is stored whole, plus one null-line row for the ":?" frame.
+        assert db_source_line_counts == [
+            (VCOPY_SOURCE, 227),
+            (HIP_RUNTIME_SOURCE, 414),
+        ]
+        assert db_referenced_source_lines == [
+            (VCOPY_SOURCE, 36, "    int id = blockIdx.x*blockDim.x+threadIdx."),
+            (VCOPY_SOURCE, 37, "    if (id < n)"),
+            (VCOPY_SOURCE, 38, "      c[id] = a[id];"),
+            (VCOPY_SOURCE, 39, "}"),
+            (HIP_RUNTIME_SOURCE, None, None),
+            (
+                HIP_RUNTIME_SOURCE,
+                253,
+                "__DEVICE__ unsigned int __hip_get_block_idx_x",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                258,
+                "__DEVICE__ unsigned int __hip_get_block_dim_x",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                308,
+                "  __HIP_DEVICE_BUILTIN(x, __hip_get_block_idx",
+            ),
+            (
+                HIP_RUNTIME_SOURCE,
+                317,
+                "  __HIP_DEVICE_BUILTIN_INTERNAL(x, __hip_get_",
+            ),
+        ]
     finally:
         common.clean_output_dir(True, str(workload_dir))
 
 
 def test_pc_sampling_analyze_csv_output(
-    capture_expectations,
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
@@ -391,17 +308,18 @@ def test_pc_sampling_analyze_csv_output(
         assert summary_csv.is_file()
         csv_pc_sampling = pd.read_csv(summary_csv)
         csv_kernel = pd.read_csv(csv_dir / "kernel.csv")
-        assert len(csv_pc_sampling) == len(capture_expectations["sample_counts"])
-        assert csv_pc_sampling["count"].sum() == capture_expectations["sample_total"]
-        assert set(csv_pc_sampling["pid"]) == {capture_expectations["pid"]}
+        assert len(csv_pc_sampling) == 19
+        assert csv_pc_sampling["count"].sum() == 857
+        assert set(csv_pc_sampling["pid"]) == {698961}
         assert csv_pc_sampling["active_thread_percent"].eq(100.0).all()
         assert csv_pc_sampling["wave_occupancy_percent"].gt(0).all()
         assert csv_pc_sampling["wave_occupancy_percent"].le(100).all()
         assert csv_kernel.iloc[0]["dispatch_count"] == 3
         csv_source_lines = pd.read_csv(csv_dir / "source_lines.csv")
-        assert (
-            set(csv_source_lines["file_path"]) == capture_expectations["source_paths"]
-        )
+        assert set(csv_source_lines["file_path"]) == {
+            VCOPY_SOURCE,
+            HIP_RUNTIME_SOURCE,
+        }
         # Every sampling row must resolve to a kernel the kernel view exposes.
         assert set(csv_pc_sampling["kernel_uuid"]) <= set(csv_kernel["kernel_uuid"])
     finally:

@@ -12,7 +12,7 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <utility>
 
 namespace rocprofiler_compute_tool
 {
@@ -32,16 +32,10 @@ public:
 
     virtual ~pc_sampling_collector_t() = default;
     virtual void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) = 0;
-    /** Records a kernel's ELF symbol key; repeated kernel IDs replace earlier keys. */
-    virtual void on_kernel_symbol_register(uint64_t         kernel_id,
-                                           uint64_t         code_object_id,
-                                           std::string_view symbol_name) = 0;
-    /** Writes only symbols belonging to dispatched kernel IDs. */
-    virtual void finalize(code_object_writer_t&     writer,
-                          const std::set<uint64_t>& dispatched_kernel_ids) = 0;
-    /** Returns whether a supported code object was registered with the translator. */
-    virtual bool                                   has_code_objects() const = 0;
-    virtual const std::set<std::filesystem::path>& get_source_paths() const = 0;
+    /** Writes only symbols whose (code object ID, mangled name) key is dispatched. */
+    virtual void finalize(code_object_writer_t&                             writer,
+                          const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) = 0;
+    virtual const std::set<std::filesystem::path>& get_source_paths() const                     = 0;
 };
 
 class pc_sampling_collector_impl_t : public pc_sampling_collector_t
@@ -50,30 +44,19 @@ public:
     pc_sampling_collector_impl_t(code_object_translator_t::ptr translator);
     pc_sampling_collector_impl_t(code_object_translator_t::ptr translator, sdk_wrapper_t::ptr sdk_wrapper);
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
-    void on_kernel_symbol_register(uint64_t         kernel_id,
-                                   uint64_t         code_object_id,
-                                   std::string_view symbol_name) override;
-    void finalize(code_object_writer_t& writer, const std::set<uint64_t>& dispatched_kernel_ids) override;
-    bool                                   has_code_objects() const override;
+    void finalize(code_object_writer_t&                             writer,
+                  const std::set<std::pair<uint64_t, std::string>>& dispatched_symbols) override;
     const std::set<std::filesystem::path>& get_source_paths() const override;
 
 private:
-    struct KernelSymbolKey
-    {
-        uint64_t    code_object_id = 0;
-        std::string symbol_name;
-    };
-
-    void write_symbol(code_object_writer_t& writer, uint64_t code_object_id, const symbol_t& symbol);
     std::string_view        source_frame_separator() const;
     static bool             is_source_line_token(std::string_view token);
     static std::string_view path_from_source_frame(std::string_view frame);
     void collect_source_paths_from_comment(std::string_view                 comment,
                                            std::set<std::filesystem::path>& source_paths) const;
 
-    code_object_translator_t::ptr                 m_translator;
-    sdk_wrapper_t::ptr                            m_sdk_wrapper;
-    std::set<std::filesystem::path>               m_source_paths;
-    std::unordered_map<uint64_t, KernelSymbolKey> m_kernel_symbols;
+    code_object_translator_t::ptr   m_translator;
+    sdk_wrapper_t::ptr              m_sdk_wrapper;
+    std::set<std::filesystem::path> m_source_paths;
 };
 }  // namespace rocprofiler_compute_tool

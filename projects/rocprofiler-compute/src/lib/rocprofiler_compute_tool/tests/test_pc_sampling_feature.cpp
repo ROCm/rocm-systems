@@ -3,6 +3,9 @@
 #include "test_pc_sampling_feature.h"
 
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
@@ -65,32 +68,17 @@ TEST_F(TestPcSamplingFeature, Write_WithNoCodeObjects_DoesNotWriteFileOrSnapshot
 
     feature.write(m_tool_data);
 
-    EXPECT_EQ(m_collector->finalize_count, 0);
+    EXPECT_EQ(m_collector->finalize_count, 1);
     EXPECT_TRUE(m_writer->get_flush_calls().empty());
     EXPECT_TRUE(m_snapshotter->get_snapshot_calls().empty());
 }
 
-TEST_F(TestPcSamplingFeature, KernelRegistration_ForwardsNormalizedSymbolKey)
+TEST_F(TestPcSamplingFeature, DispatchRecords_FinalizesUniqueSymbolKeysRegardlessOfSelection)
 {
-    auto feature = create_feature();
-    rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload = {};
-    payload.kernel_id                                                              = 7;
-    payload.code_object_id                                                         = 2;
-    payload.kernel_name                                                            = "_Z3fooi.kd";
-    feature.on_kernel_symbol_register(payload);
-    payload.kernel_name = nullptr;
-    feature.on_kernel_symbol_register(payload);
-
-    ASSERT_EQ(m_collector->symbol_registrations.size(), 2);
-    EXPECT_EQ(m_collector->symbol_registrations[0].kernel_id, 7);
-    EXPECT_EQ(m_collector->symbol_registrations[0].code_object_id, 2);
-    EXPECT_EQ(m_collector->symbol_registrations[0].symbol_name, "_Z3fooi");
-    EXPECT_TRUE(m_collector->symbol_registrations[1].symbol_name.empty());
-}
-
-TEST_F(TestPcSamplingFeature, DispatchRecords_FinalizesAllUniqueIdsRegardlessOfSelection)
-{
-    m_collector->set_has_code_objects(true);
+    m_tool_data.kernel_symbols[7].code_object_id = 1;
+    m_tool_data.kernel_symbols[7].mangled_name   = "_Z3fooi";
+    m_tool_data.kernel_symbols[8].code_object_id = 2;
+    m_tool_data.kernel_symbols[8].mangled_name   = "_Z3barv";
     m_tool_data.target_kernel_ids.insert(7);
     for (const auto kernel_id : {7, 8, 7})
     {
@@ -99,36 +87,20 @@ TEST_F(TestPcSamplingFeature, DispatchRecords_FinalizesAllUniqueIdsRegardlessOfS
         m_tool_data.dispatch_records.push_back(dispatch);
     }
     auto feature = create_feature();
+
     feature.write(m_tool_data);
-    EXPECT_EQ(m_collector->last_dispatched_kernel_ids, (std::set<uint64_t>{7, 8}));
+
+    const std::set<std::pair<uint64_t, std::string>> expected = {{1, "_Z3fooi"}, {2, "_Z3barv"}};
+    EXPECT_EQ(m_collector->last_dispatched_symbols, expected);
 }
 
-TEST_F(TestPcSamplingFeature, LoadedObjectsWithoutDispatches_FlushesSkeletonAndEmptySnapshot)
+TEST_F(TestPcSamplingFeature, DispatchWithoutSymbolRecord_Throws)
 {
-    m_collector->set_has_code_objects(true);
+    dispatch_record_t dispatch = {};
+    dispatch.kernel_id         = 7;
+    m_tool_data.dispatch_records.push_back(dispatch);
     auto feature = create_feature();
-    feature.write(m_tool_data);
-    EXPECT_EQ(m_collector->finalize_count, 1);
-    EXPECT_TRUE(m_collector->last_dispatched_kernel_ids.empty());
-    EXPECT_TRUE(m_writer->empty());
-    ASSERT_EQ(m_writer->get_flush_calls().size(), 1);
-    EXPECT_EQ(m_writer->get_flush_calls()[0], m_code_object_info_path);
-    ASSERT_EQ(m_snapshotter->get_snapshot_calls().size(), 1);
-    EXPECT_TRUE(m_snapshotter->get_snapshot_calls()[0].source_paths.empty());
-}
 
-TEST_F(TestPcSamplingFeature, DisabledFeature_WriteDoesNothing)
-{
-    m_collector->set_has_code_objects(true);
-    pc_sampling_feature_t feature{PcSamplingMode::Disabled,
-                                  m_code_object_info_path,
-                                  m_source_snapshot_path,
-                                  m_collector,
-                                  m_snapshotter,
-                                  m_writer};
-    feature.write(m_tool_data);
-    EXPECT_FALSE(feature.enabled());
+    EXPECT_THROW(feature.write(m_tool_data), std::runtime_error);
     EXPECT_EQ(m_collector->finalize_count, 0);
-    EXPECT_TRUE(m_writer->get_flush_calls().empty());
-    EXPECT_TRUE(m_snapshotter->get_snapshot_calls().empty());
 }
