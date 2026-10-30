@@ -152,6 +152,11 @@ do_host_tests() {
 
   # The two binaries this script runs directly. Each writes its own JUnit XML
   # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
+  # What the front door's own children print goes to host_tests_micro.logs/<Qualifier>.log as the
+  # run proceeds, rather than onto this console interleaved under one timestamp stream; each of
+  # those files is then appended to LOG_FILE below, so LOG_FILE still holds everything the run
+  # printed and remains the one console artefact CI uploads. See MICROTEST_README.md,
+  # "Where the children's output goes".
   #
   # rccl-UnitTestsHostAll is the front door for the ~40 rccl-UnitTestsMicro*
   # binaries: it discovers them beside itself at run time, runs the ones holding
@@ -192,6 +197,10 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
+    # Start this binary's log directory empty. The dispatcher truncates each log it is about to
+    # write, but a log left by a binary that is not run this time would otherwise be appended to
+    # LOG_FILE as though it came from this run.
+    rm -rf "${xml%.*}.logs"
     # Direct this binary's llvm profiles into the subdir `coverage` reads back.
     # Without this, instrumented binaries write default.profraw into the CWD and
     # coverage sees nothing. %p (PID) + %m (module hash) keep the
@@ -217,8 +226,30 @@ do_host_tests() {
         | tee -a "$LOG_FILE"
       rc=1
     fi
+    # The front door's children print into <report>.logs/<Qualifier>.log rather than onto this
+    # console, so append those files here once the run is over. LOG_FILE stays the one artefact
+    # that holds everything the run printed -- CI uploads it and nothing else of the console --
+    # while the per-binary files remain for reading a single binary without scrolling. Appending
+    # after the fact keeps the two readable: the children's output arrives grouped by binary
+    # instead of ~40 binaries' lines interleaved under one timestamp stream.
+    append_child_logs "${xml%.*}.logs"
   done
   return "$rc"
+}
+
+# Append each per-binary log written by the front door into LOG_FILE, under a banner naming the
+# file it came from. A directory that does not exist is not an error: it only means the binary
+# just run was not the front door, or it fronted nothing.
+append_child_logs() {
+  local log_dir="$1" child
+  [ -d "$log_dir" ] || return 0
+  for child in "$log_dir"/*.log; do
+    [ -f "$child" ] || continue
+    {
+      echo "----- $(basename "$child" .log) ($child) -----"
+      cat "$child"
+    } >> "$LOG_FILE"
+  done
 }
 
 # CPU-only compile probes that #pragma GCC poison in poison_hip_atomics.h
