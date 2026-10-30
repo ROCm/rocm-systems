@@ -6962,6 +6962,58 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
+// The LL one-shot AllReduce keeps RCCL_DDA_LL_ONESHOT_THRESHOLD's default below
+// 16 ranks and stops at 4 KiB from 16.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_CappedFromSixteenRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_CappedFromSixteenRanks",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        const std::pair<int, size_t> cases[] = {{2, 1 * kMiB},  {8, 1 * kMiB},  {15, 1 * kMiB},
+                                                {16, 4 * kKiB}, {32, 4 * kKiB}, {64, 4 * kKiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
+        }
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL_ONESHOT_THRESHOLD wins at every rank count, even at
+// its default value.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_EnvWinsOverRankCap",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "1048576");
+        g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(1) << 20);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        for (int nRanks : {8, 16, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// An empty value is not a setting, so the rank cap stays in force.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_EmptyEnvIsUnset",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 32;
+        EXPECT_EQ(4 * kKiB, rcclDdaLLOneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
 // no budget or no table keep the init cap.
 TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {

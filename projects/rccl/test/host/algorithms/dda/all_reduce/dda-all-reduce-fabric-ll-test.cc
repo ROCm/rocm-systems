@@ -196,6 +196,17 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOnWh
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 512, ncclFloat16));
 }
 
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOfThisComm) {
+  const ncclComm* seen = nullptr;
+  g_rcclDdaLLOneShotThreshold = [&](const ncclComm* c) {
+    seen = c;
+    return size_t{4096};
+  };
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 1024));
+  EXPECT_EQ(seen, mock_.get());
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 1028));
+}
+
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_WholeMessageIn16ByteUnitsWithinTheSlot) {
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 6));
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 12));
@@ -308,6 +319,21 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotFirstThenTwoShotElseInternalE
   g_ddaLaunches.clear();
   EXPECT_EQ(RunLL(260), ncclInternalError);
   EXPECT_EQ(RunLL(256, ncclInt32), ncclInternalError);
+  EXPECT_TRUE(g_ddaLaunches.empty());
+}
+
+// The tier gate and the launcher read one one-shot cap: past it the two-shot
+// runs, or no LL tier claims the message.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_PastThisCommsOneShotCapRunsTwoShot) {
+  comm().nRanks = 16;
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{4096}; };
+  EXPECT_EQ(RunOneLL(1024).kernel, (LLOneShot<float, 0>()));
+  EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 1088, ncclFloat32, ncclSum));
+  EXPECT_EQ(RunOneLL(1088).kernel, (LLTwoShot<float, 0>()));
+  // 16-byte aligned, but its shards are not.
+  EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 1028, ncclFloat32, ncclSum));
+  g_ddaLaunches.clear();
+  EXPECT_EQ(RunLL(1028), ncclInternalError);
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 

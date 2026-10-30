@@ -1209,6 +1209,21 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLLTwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
+// The one-shot sends the whole message to every peer, so from this many ranks
+// the two-shot takes over earlier.
+constexpr int kDdaLLOneShotLargeCommMinRanks = 16;
+constexpr size_t kDdaLLOneShotLargeCommMaxBytes = 4 * 1024;
+
+// RCCL_DDA_LL_ONESHOT_THRESHOLD wins when the user sets it.
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm) {
+  static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+  const size_t threshold = (size_t)rcclParamDdaLLOneShotThreshold();
+  if (envSet || comm == nullptr || comm->nRanks < kDdaLLOneShotLargeCommMinRanks) {
+    return threshold;
+  }
+  return std::min(threshold, kDdaLLOneShotLargeCommMaxBytes);
+}
+
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
 // RCCL_DDA_LL128 three-way logic:
 //   kDdaThresholdUnset (-1, default): auto — enabled iff arch table has non-zero

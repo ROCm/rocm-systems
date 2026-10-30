@@ -9,6 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
+* On gfx1250 communicators of 16 or more ranks, the DDA LL one-shot AllReduce hands messages larger than 4 KiB to the DDA LL two-shot when `RCCL_DDA_LL_ONESHOT_THRESHOLD` is unset. Setting `RCCL_DDA_LL_ONESHOT_THRESHOLD` keeps its value as the one-shot limit at every rank count.
 
 ### Removed
 
