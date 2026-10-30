@@ -14,6 +14,7 @@
 #include <map>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -82,6 +83,20 @@ public:
       return VmAccessOutcome::Faulted;
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
+  }
+
+  AtomicCompareExchangeResult compare_exchange(VmMemoryDomain domain, uint64_t address,
+                                               uint32_t width, uint64_t expected,
+                                               uint64_t desired) override {
+    const AtomicLoadResult loaded = atomic_load(domain, address, width);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return {.outcome = loaded.outcome};
+    if (loaded.value != expected)
+      return {.outcome = VmAccessOutcome::Complete, .observed = loaded.value, .exchanged = false};
+    const VmAccessOutcome outcome = atomic_store(domain, address, width, desired);
+    return {.outcome = outcome,
+            .observed = loaded.value,
+            .exchanged = outcome == VmAccessOutcome::Complete};
   }
 
   template <typename T> void store(uint64_t address, const T &value) {
@@ -154,7 +169,8 @@ public:
   static constexpr uint64_t kRing = 0x100;
   static constexpr uint64_t kReadPointer = 0x80;
 
-  RingConsumerFixture() : memory(std::make_shared<QueueMemory>()) {
+  explicit RingConsumerFixture(std::size_t size = 0x1000)
+      : memory(std::make_shared<QueueMemory>(size)) {
     address_space = vm.register_translated(7, memory, memory);
   }
 
@@ -173,6 +189,231 @@ public:
   GpuVm vm;
   AddressSpaceHandle address_space;
 };
+
+TEST(SdmaRingConsumerTest, SwapExchangesBothRangesAndRetiresTheFollowingFence) {
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    SCOPED_TRACE(static_cast<int>(dialect));
+    RingConsumerFixture fixture;
+    constexpr uint64_t kAddressA = 0x400;
+    constexpr uint64_t kAddressB = 0x500;
+    constexpr uint64_t kFence = 0x600;
+    for (uint32_t index = 0; index < 64; ++index) {
+      fixture.memory->store<uint8_t>(kAddressA + index, index + 1);
+      fixture.memory->store<uint8_t>(kAddressB + index, 255 - index);
+    }
+    // ROCr's seven-dword COPY_LINEAR_SWAP followed by its completion fence.
+    const std::array<uint32_t, 11> packets = {0x901, 63, 0,      kAddressA, 0,         kAddressB,
+                                              0,     5,  kFence, 0,         0x12345678};
+    fixture.memory->store(RingConsumerFixture::kRing, packets);
+    SdmaRingConsumer consumer(fixture.vm,
+                              {.address_space = fixture.address_space,
+                               .ring_base = RingConsumerFixture::kRing,
+                               .ring_bytes = 64,
+                               .read_pointer_address = RingConsumerFixture::kReadPointer,
+                               .initial_cursor = 0},
+                              dialect);
+
+    ASSERT_EQ(consumer.service(sizeof(packets)), SdmaRingStatus::Idle);
+    EXPECT_EQ(consumer.cursor(), sizeof(packets));
+    EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), sizeof(packets));
+    EXPECT_EQ(fixture.memory->load<uint32_t>(kFence), 0x12345678u);
+    for (uint32_t index = 0; index < 64; ++index) {
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kAddressA + index), 255 - index);
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kAddressB + index), index + 1);
+    }
+  }
+}
+
+TEST(SdmaRingConsumerTest, MalformedPacketWarnsOnceWithItsHeaderAndRing) {
+  RingConsumerFixture fixture;
+  fixture.memory->store<uint32_t>(RingConsumerFixture::kRing, 0x00007f01);
+  SdmaRingConsumer consumer = fixture.make_consumer();
+  testing::internal::CaptureStderr();
+  const SdmaRingStatus first = consumer.service(4);
+  const SdmaRingStatus second = consumer.service(4);
+  const std::string log = testing::internal::GetCapturedStderr();
+
+  EXPECT_EQ(first, SdmaRingStatus::Malformed);
+  EXPECT_EQ(second, SdmaRingStatus::Malformed);
+  EXPECT_NE(log.find("[rj warn]"), std::string::npos);
+  EXPECT_NE(log.find("ring=0x100"), std::string::npos);
+  EXPECT_NE(log.find("header=0x00007f01"), std::string::npos);
+  EXPECT_NE(log.find("opcode=1 sub-opcode=127"), std::string::npos);
+  EXPECT_EQ(std::ranges::count(log, '\n'), 1);
+  EXPECT_EQ(consumer.cursor(), 0u);
+}
+
+TEST(SdmaRingConsumerTest, SwapBroadcastFlagAtPublishedRingTailReportsItsHeader) {
+  for (const SdmaPacketDialect dialect :
+       {SdmaPacketDialect::LegacyExtendedCount, SdmaPacketDialect::Gfx1250}) {
+    SCOPED_TRACE(static_cast<int>(dialect));
+    RingConsumerFixture fixture;
+    const uint32_t header = dialect == SdmaPacketDialect::Gfx1250 ? 0x08000901 : 0x10000901;
+    // Publish only the seven swap dwords. Unrelated trailing words must not
+    // determine whether the decoder can identify the unsupported flag.
+    const std::array<uint32_t, 7> packet = {header, 63, 0, 0x400, 0, 0x500, 0};
+    fixture.memory->store(RingConsumerFixture::kRing, packet);
+    fixture.memory->store<uint64_t>(0x400, 123);
+    fixture.memory->store<uint64_t>(0x500, 456);
+    SdmaRingConsumer consumer(fixture.vm,
+                              {.address_space = fixture.address_space,
+                               .ring_base = RingConsumerFixture::kRing,
+                               .ring_bytes = 64,
+                               .read_pointer_address = RingConsumerFixture::kReadPointer,
+                               .initial_cursor = 0},
+                              dialect);
+    testing::internal::CaptureStderr();
+    const SdmaRingStatus first = consumer.service(sizeof(packet));
+    const SdmaRingStatus second = consumer.service(sizeof(packet));
+    const std::string log = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(first, SdmaRingStatus::Malformed);
+    EXPECT_EQ(second, SdmaRingStatus::Malformed);
+    EXPECT_NE(log.find("root_cursor=0x0"), std::string::npos);
+    EXPECT_NE(
+        log.find(dialect == SdmaPacketDialect::Gfx1250 ? "header=0x08000901" : "header=0x10000901"),
+        std::string::npos);
+    EXPECT_EQ(std::ranges::count(log, '\n'), 1);
+    EXPECT_EQ(consumer.cursor(), 0u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x400), 123u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(0x500), 456u);
+  }
+}
+
+TEST(SdmaRingConsumerTest, SwapWaitSignalBlocksThenRetiresTheFollowingFence) {
+  RingConsumerFixture fixture(0x2000);
+  constexpr uint64_t kAddressA = 0x400;
+  constexpr uint64_t kAddressB = 0x500;
+  constexpr uint64_t kWaitAddress = 0x1600;
+  constexpr uint64_t kSignalAddress = 0x1700;
+  constexpr uint64_t kFenceAddress = 0x800;
+  fixture.memory->store<uint64_t>(kAddressA, 0x1122334455667788);
+  fixture.memory->store<uint64_t>(kAddressB, 0xaabbccddeeff0011);
+  fixture.memory->store<uint64_t>(kWaitAddress, 1);
+  fixture.memory->store<uint64_t>(kSignalAddress, 1);
+  const std::array<uint32_t, 23> packets = {0xc0000901,
+                                            3u | (3u << 18),
+                                            kWaitAddress,
+                                            0,
+                                            0,
+                                            0,
+                                            UINT32_MAX,
+                                            UINT32_MAX,
+                                            63,
+                                            (3u << 18) | (3u << 26),
+                                            kAddressA,
+                                            0,
+                                            kAddressB,
+                                            0,
+                                            0x70u | (3u << 18),
+                                            kSignalAddress,
+                                            0,
+                                            1,
+                                            0,
+                                            5,
+                                            kFenceAddress,
+                                            0,
+                                            0x12345678};
+  fixture.memory->store(RingConsumerFixture::kRing, packets);
+  SdmaRingConsumer consumer = fixture.make_consumer(0, 128);
+
+  EXPECT_EQ(consumer.service(sizeof(packets)), SdmaRingStatus::Blocked);
+  EXPECT_EQ(consumer.cursor(), 0u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kAddressA), 0x1122334455667788u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kSignalAddress), 1u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kFenceAddress), 0u);
+  fixture.memory->store<uint64_t>(kWaitAddress, 0);
+  ASSERT_EQ(consumer.service(sizeof(packets)), SdmaRingStatus::Idle);
+  EXPECT_EQ(consumer.cursor(), sizeof(packets));
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kAddressA), 0xaabbccddeeff0011u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kAddressB), 0x1122334455667788u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kSignalAddress), 0u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kFenceAddress), 0x12345678u);
+}
+
+TEST(SdmaRingConsumerTest, ProducerFailureDoesNotBlameTheBufferedPacket) {
+  RingConsumerFixture fixture(0x2000);
+  constexpr uint64_t kWaitAddress = 0x1600;
+  constexpr uint64_t kAddressA = 0x400;
+  constexpr uint64_t kAddressB = 0x500;
+  fixture.memory->store<uint64_t>(kWaitAddress, 1);
+  const std::array<uint32_t, 14> packet = {0x40000901,
+                                           3,
+                                           static_cast<uint32_t>(kWaitAddress),
+                                           0,
+                                           0,
+                                           0,
+                                           UINT32_MAX,
+                                           UINT32_MAX,
+                                           63,
+                                           0,
+                                           static_cast<uint32_t>(kAddressA),
+                                           0,
+                                           static_cast<uint32_t>(kAddressB),
+                                           0};
+  fixture.memory->store(RingConsumerFixture::kRing, packet);
+  SdmaRingConsumer consumer = fixture.make_consumer();
+  ASSERT_EQ(consumer.service(sizeof(packet)), SdmaRingStatus::Blocked);
+
+  testing::internal::CaptureStderr();
+  const SdmaRingStatus result = consumer.service(4);
+  const std::string log = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(result, SdmaRingStatus::Malformed);
+  EXPECT_NE(log.find("malformed SDMA ring: ring=0x100 cursor=0x0"), std::string::npos);
+  EXPECT_EQ(log.find("header="), std::string::npos);
+  EXPECT_EQ(std::ranges::count(log, '\n'), 1);
+}
+
+TEST(SdmaRingConsumerTest, NestedMalformedHeaderSurvivesRetirementPublicationRetry) {
+  for (const bool retry : {false, true}) {
+    for (const VmAccessOutcome publication :
+         {VmAccessOutcome::Complete, VmAccessOutcome::Malformed, VmAccessOutcome::Faulted}) {
+      SCOPED_TRACE(retry);
+      SCOPED_TRACE(static_cast<int>(publication));
+      RingConsumerFixture fixture;
+      constexpr uint64_t kIndirect = 0x400;
+      constexpr uint64_t kDestination = 0x600;
+      const std::array<uint32_t, 6> nested = {
+          2, static_cast<uint32_t>(kDestination), 0, 0, 0x12345678, 0x00007f01};
+      const std::array<uint32_t, 6> packet = {
+          4, static_cast<uint32_t>(kIndirect), 0, nested.size(), 0, 0};
+      fixture.memory->store(kIndirect, nested);
+      fixture.memory->store(RingConsumerFixture::kRing, packet);
+      if (retry)
+        fixture.memory->return_next_atomic_store(RingConsumerFixture::kReadPointer,
+                                                 VmAccessOutcome::Unavailable);
+      fixture.memory->return_next_atomic_store(RingConsumerFixture::kReadPointer, publication);
+      SdmaRingConsumer consumer = fixture.make_consumer();
+
+      testing::internal::CaptureStderr();
+      if (retry) {
+        const SdmaRingStatus blocked = consumer.service(sizeof(packet));
+        EXPECT_EQ(blocked, SdmaRingStatus::Blocked);
+      }
+      const SdmaRingStatus first = consumer.service(sizeof(packet));
+      const SdmaRingStatus second = consumer.service(sizeof(packet));
+      const SdmaRingStatus third = consumer.service(sizeof(packet));
+      const std::string log = testing::internal::GetCapturedStderr();
+      const SdmaRingStatus terminal = publication == VmAccessOutcome::Faulted
+                                          ? SdmaRingStatus::Faulted
+                                          : SdmaRingStatus::Malformed;
+      EXPECT_EQ(first, terminal);
+      EXPECT_EQ(second, terminal);
+      EXPECT_EQ(third, terminal);
+      EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x12345678u);
+      EXPECT_EQ(consumer.cursor(), sizeof(packet));
+      EXPECT_EQ(fixture.memory->atomic_store_attempts(RingConsumerFixture::kReadPointer),
+                retry ? 2u : 1u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer),
+                publication == VmAccessOutcome::Complete ? sizeof(packet) : 0u);
+      EXPECT_NE(log.find("malformed SDMA packet (root or indirect)"), std::string::npos);
+      EXPECT_NE(log.find("root_cursor=0x0 header=0x00007f01 opcode=1 sub-opcode=127"),
+                std::string::npos);
+      EXPECT_EQ(std::ranges::count(log, '\n'), 1);
+    }
+  }
+}
 
 TEST(ConsumerCursorJournalTest, PublishesThroughTheRetirementSnapshot) {
   RingConsumerFixture fixture;
