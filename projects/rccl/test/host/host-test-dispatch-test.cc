@@ -800,6 +800,89 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
     EXPECT_STREQ(getenv("GTEST_TOTAL_SHARDS"), "4");
 }
 
+// ── binaryDirectory ─────────────────────────────────────────────────
+//
+// Which layout is in use is decided by looking, so these do touch the filesystem -- there is no
+// pure function underneath to test instead, and a wrong decision here runs nothing at all and
+// still exits 0 on the way there.
+
+namespace {
+
+// A directory tree that removes itself.
+class ScopedDir {
+public:
+    ScopedDir()
+    {
+        std::string buffer =
+            (std::filesystem::temp_directory_path() / "rccl-dispatch-test-XXXXXX").string();
+        path_ = mkdtemp(buffer.data()) == nullptr ? "" : buffer;
+    }
+    ~ScopedDir()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+    ScopedDir(const ScopedDir &) = delete;
+    ScopedDir &operator=(const ScopedDir &) = delete;
+
+    const std::string &path() const { return path_; }
+
+    // An executable file named *name* under this directory, parents created as needed.
+    std::string addExecutable(const std::string &name) const
+    {
+        const std::filesystem::path file = std::filesystem::path(path_) / name;
+        std::error_code ec;
+        std::filesystem::create_directories(file.parent_path(), ec);
+        std::ofstream(file) << "#!/bin/sh\n";
+        std::filesystem::permissions(file, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::add, ec);
+        return file.string();
+    }
+
+private:
+    std::string path_;
+};
+
+}  // namespace
+
+TEST(HostDispatchLayoutMicrotest, TheFrontedBinariesAreFoundInTheMicroSubdirectory)
+{
+    // The build tree's layout: the front door at the top, everything it runs one level down, so
+    // a listing of the build output shows which binary to run.
+    const ScopedDir tree;
+    ASSERT_FALSE(tree.path().empty());
+    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
+    tree.addExecutable("micro/rccl-UnitTestsMicroInit");
+
+    EXPECT_EQ(binaryDirectory(tree.path(), self),
+              (std::filesystem::path(tree.path()) / "micro").string());
+}
+
+TEST(HostDispatchLayoutMicrotest, AFlatLayoutIsStillFound)
+{
+    // An install keeps them beside the front door, and the same binary runs from there.
+    const ScopedDir tree;
+    ASSERT_FALSE(tree.path().empty());
+    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
+    tree.addExecutable("rccl-UnitTestsMicroInit");
+
+    EXPECT_EQ(binaryDirectory(tree.path(), self), tree.path());
+}
+
+TEST(HostDispatchLayoutMicrotest, AnEmptyMicroDirectoryDoesNotHideTheFlatLayout)
+{
+    // micro/ existing but holding nothing is not the build layout, so the binaries beside the
+    // front door are still the ones that run.
+    const ScopedDir tree;
+    ASSERT_FALSE(tree.path().empty());
+    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
+    tree.addExecutable("rccl-UnitTestsMicroInit");
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(tree.path()) / "micro", ec);
+
+    EXPECT_EQ(binaryDirectory(tree.path(), self), tree.path());
+}
+
 // ── child logs ──────────────────────────────────────────────────────
 
 TEST(HostDispatchLogMicrotest, LogsLandBesideTheMergedReport)

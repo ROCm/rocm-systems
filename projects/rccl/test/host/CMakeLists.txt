@@ -1144,6 +1144,11 @@ function(rccl_add_micro_binary _name)
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
   target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
+  # Every binary built here is one rccl-UnitTestsHostAll runs, so every one of them belongs in
+  # micro/ -- leaving the front door and rccl-HostUnitTests, the two a person invokes, at the top
+  # of the build tree. Installs stay flat; the front door finds the directory by looking.
+  set_target_properties(${_name} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/micro")
 endfunction()
 
 # =====================================================================
@@ -1660,7 +1665,8 @@ set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_L
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
-  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/micro")
   target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
@@ -3080,12 +3086,33 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
 # them at run time, so a test harness integrates with this one target and never needs a copy of
 # the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
 #
-# Defined through the same helper as the binaries it runs purely so the two build modes, the
-# install rule and the host-only flags stay in one place; it compiles no production source and
-# links no fakes.
-rccl_add_micro_binary(rccl-UnitTestsHostAll
-  SOURCES host_test_dispatch.cc
-  EXTRA_DEFS ${_MICRO_MODE_DEFS})
+# Defined here rather than through rccl_add_micro_binary(), which builds the binaries this one
+# runs: everything that helper does is for a fronted binary -- it puts its target in micro/, where
+# this one must not be (it discovers its siblings beside itself), and it compiles production
+# source against the hipified tree and links the fakes, neither of which this one has.
+add_executable(rccl-UnitTestsHostAll host_test_dispatch.cc)
+target_include_directories(rccl-UnitTestsHostAll PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rccl-UnitTestsHostAll PRIVATE nlohmann_json::nlohmann_json)
+if(BUILD_TESTS)
+  target_include_directories(rccl-UnitTestsHostAll PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE ${MICRO_TEST_LINK_LIBS})
+  rccl_apply_host_only_flags(rccl-UnitTestsHostAll)
+  rocm_install(TARGETS rccl-UnitTestsHostAll COMPONENT tests)
+else()
+  # Record for the HOST_TEST_COVERAGE loop, as the micro binaries are: the dispatcher's own
+  # coverage is read back from rccl-UnitTestsMicroHostDispatch, but an uninstrumented binary
+  # writes no profile at all, and `coverage` would then see a gap it cannot explain.
+  list(APPEND HOST_TEST_BINARIES rccl-UnitTestsHostAll)
+  target_compile_options(rccl-UnitTestsHostAll PRIVATE -ffunction-sections)
+  set(_front_door_link_opts -no-hip-rt -Wl,--gc-sections)
+  # -no-pie only for the non-PIC RCCL-vendored libgtest.a (see _MICRO_LINK_NO_PIE).
+  if(_MICRO_LINK_NO_PIE)
+    list(APPEND _front_door_link_opts -no-pie)
+  endif()
+  target_link_options(rccl-UnitTestsHostAll PRIVATE ${_front_door_link_opts})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE
+    GTest::GTest Threads::Threads fmt::fmt-header-only)
+endif()
 
 # =====================================================================
 # Standalone-only tail: coverage, the runner's binary list, no CTest registration.

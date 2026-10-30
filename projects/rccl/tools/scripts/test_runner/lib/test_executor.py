@@ -3302,8 +3302,14 @@ class TestExecutor:
         # absent is dropped without a word. The naming convention is the registry,
         # the same one rccl-UnitTestsHostAll discovers its siblings by, so a new
         # host binary is picked up here with no change at all.
+        #
+        # Both directories are globbed because the fronted binaries live in host/micro/ in a
+        # build tree and flat in host/ in an install, and this runs against either.
         host_test_dir = os.path.join(test_dir, "host")
-        for binary_path in sorted(glob.glob(os.path.join(host_test_dir, "rccl-UnitTests*"))):
+        host_binaries = glob.glob(os.path.join(host_test_dir, "rccl-UnitTests*")) + glob.glob(
+            os.path.join(host_test_dir, "micro", "rccl-UnitTests*")
+        )
+        for binary_path in sorted(host_binaries):
             if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
