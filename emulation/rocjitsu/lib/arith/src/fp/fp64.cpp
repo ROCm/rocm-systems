@@ -34,8 +34,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
   constexpr uint64_t fp_flags =
       RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
       RJ_ARITH_FP_IEEE_MODE |
-      ((Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
-        Op == rocjitsu::arith::Fp64::Mul || rocjitsu::arith::is_selection(Op))
+      ((Op != rocjitsu::arith::Fp64::Rcp && Op != rocjitsu::arith::Fp64::Rsq &&
+        Op != rocjitsu::arith::Fp64::Sqrt)
            ? RJ_ARITH_FP_ROUND_MASK
            : 0) |
       (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
@@ -66,9 +66,12 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  // AVX2 has no per-instruction directed FP64 FMA. Use the inherited integer
+  // AVX2 has no per-instruction directed FP64 ADD/MUL/FMA. Use the inherited integer
   // model for directed modes; nearest rounding retains the existing SIMD path.
-  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
+  constexpr bool directed_arithmetic =
+      Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
+      Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
+  if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c);
     return RJ_ARITH_SUCCESS;
@@ -161,10 +164,29 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       value = 1.0 / __builtin_sqrt(x);
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Fract) {
-      value = x - __builtin_floor(x);
+      const uint64_t bits = rocjitsu::arith::double_bits(x);
+      const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+      // FRACT rounds the subtraction in the guest mode, then caps its range.
+      value = rounding && (bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL
+                  ? rocjitsu::arith::as_double(rocjitsu::arith::fma_finite_f64(
+                        bits, 0x3ff0000000000000ULL,
+                        rocjitsu::arith::double_bits(-__builtin_floor(x)), rounding))
+                  : x - __builtin_floor(x);
       double limit = rocjitsu::arith::as_double(0x3fefffffffffffffULL);
+      // GPU FRACT canonicalizes a zero fractional part, including round-down.
+      if (value == 0) {
+        value = 0;
+      }
       if (value > limit) {
         value = limit;
+      }
+    }
+    if constexpr (Op == rocjitsu::arith::Fp64::Trunc || Op == rocjitsu::arith::Fp64::Ceil ||
+                  Op == rocjitsu::arith::Fp64::Floor || Op == rocjitsu::arith::Fp64::Rndne) {
+      // Integral rounding quiets NaNs before output scaling.
+      uint64_t bits = rocjitsu::arith::double_bits(value);
+      if ((bits & 0x7fffffffffffffffULL) > 0x7ff0000000000000ULL) {
+        value = rocjitsu::arith::as_double(bits | 0x0008000000000000ULL);
       }
     }
     const bool preserve_nan =

@@ -116,12 +116,16 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     }
     if constexpr (Op == Fp64::Fract) {
       value = _mm256_sub_pd(x, _mm256_floor_pd(x));
+      value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
+                               _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
       auto limit = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_C(0x3fefffffffffffff)));
       value = _mm256_blendv_pd(value, limit, _mm256_cmp_pd(value, limit, _CMP_GT_OQ));
     }
     if (mode & RJ_ARITH_ALU_OMOD_MASK) {
       value = prepare_omod_f64(value, mode);
-      if constexpr (rocjitsu::arith::is_selection(Op)) {
+      if constexpr (rocjitsu::arith::is_selection(Op) || Op == Fp64::Trunc || Op == Fp64::Ceil ||
+                    Op == Fp64::Rndne || Op == Fp64::Floor || Op == Fp64::Fract ||
+                    Op == Fp64::FrexpMant) {
         value = selection_omod_round(value, _mm256_mul_pd(value, scale), flags);
       } else {
         value = _mm256_mul_pd(value, scale);

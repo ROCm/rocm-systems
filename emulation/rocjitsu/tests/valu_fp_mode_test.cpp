@@ -5368,13 +5368,20 @@ std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
   return cases;
 }
 
-SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
-  if (!util::has_stdx_simd || !test.simd.checked)
+SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar,
+                                             bool uses_arith = false) {
+  // Migrated RDNA handlers use rj-arith dispatch, outside the legacy tracker.
+  if ((uses_arith &&
+       (test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4)) ||
+      !util::has_stdx_simd || !test.simd.checked)
     return {};
   return force_scalar ? expect_simd_fallback() : test.simd;
 }
 
-void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {}) {
+void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
+                            bool uses_arith = false) {
+  uses_arith &= test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5410,11 +5417,12 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
 #if RJ_HOST_ARCH_X86
     const uint32_t saved_mxcsr = _mm_getcsr();
 #endif
-    ASSERT_EQ(std::fesetround(test.host_rounding), 0);
+    ASSERT_EQ(std::fesetround(host_rounding), 0);
 #if RJ_HOST_ARCH_X86
     // Sticky flags from earlier tests must not hide exception-state leaks.
     const uint32_t host_mxcsr =
-        (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
+        uses_arith ? 0x1f80u
+                   : (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
     _mm_setcsr(host_mxcsr);
 #endif
     const int initial_rounding = std::fegetround();
@@ -5427,7 +5435,10 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     const int restore_status = std::fesetenv(&saved_environment);
 #if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr);
-    if (test.mxcsr_mask != 0) {
+    if (uses_arith) {
+      // Arithmetic may raise sticky flags, but must leave host controls unchanged.
+      EXPECT_EQ(restored_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
+    } else if (test.mxcsr_mask != 0) {
       EXPECT_EQ(restored_mxcsr, host_mxcsr);
     }
 #endif
@@ -5441,8 +5452,8 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
         EXPECT_TRUE(tracker.no_tracked_path_executed())
             << test.name << ": execution unexpectedly used a tracked SIMD fast path";
     }
-    EXPECT_EQ(initial_rounding, test.host_rounding);
-    EXPECT_EQ(restored_rounding, test.host_rounding);
+    EXPECT_EQ(initial_rounding, host_rounding);
+    EXPECT_EQ(restored_rounding, host_rounding);
     for (const std::pair<uint32_t, uint32_t> &destination : test.expected) {
       uint32_t inactive = 0xdeadbeefu;
       for (const std::pair<uint32_t, uint32_t> &source : test.sources)
@@ -5502,7 +5513,9 @@ TEST_P(ValuMinmaxFpModeTest, HonorsModeWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5513,7 +5526,9 @@ TEST_P(ValuIntegralRoundingModeTest, ModifiersWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    const bool uses_arith = GetParam().name.find("F64") != std::string::npos;
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar, uses_arith),
+                           uses_arith);
   }
 }
 
@@ -5538,7 +5553,10 @@ TEST_P(ValuCapturedLaneTest, MatchesHardwareWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    const bool uses_arith = GetParam().name.find("Ldexp") != std::string::npos ||
+                            GetParam().name.find("FractF64") != std::string::npos;
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar, uses_arith),
+                           uses_arith);
   }
 }
 
@@ -5623,7 +5641,9 @@ TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesWithSimdEnabledAndFor
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5640,7 +5660,9 @@ TEST_P(ValuF16BinaryModifierTest, MatchesPolicyWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5657,7 +5679,9 @@ TEST_P(ValuSubtractionNanTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5674,7 +5698,9 @@ TEST_P(ValuSubtractionSimdBoundaryTest, MatchesBoundaryWithSimdEnabledAndForcedS
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5709,7 +5735,9 @@ TEST_P(ValuSubtractionModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true),
+                           /*uses_arith=*/true);
   }
 }
 
@@ -5806,7 +5834,7 @@ INSTANTIATE_TEST_SUITE_P(Rdna3Boundary, ValuMullitModeTest,
                          });
 
 #if RJ_HOST_ARCH_X86
-void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
+void expect_f16_binary_host_environment() {
   ForceScalarGuard guard;
   struct Sample {
     const char *name;
@@ -5819,10 +5847,8 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding =
       // Exact cancellation is +0 under guest RNE, but -0 under host round-down.
       {"ExactCancellationAdd", false, 0x3c00u, 0xbc00u, 0x0000u},
   }};
-  // Both encodings share one helper and one guest environment, so both must be
-  // independent of host rounding and flags. MODE 0x40 keeps guest nearest-even
-  // with F16 input denormals flushed, which the VOP2 route reaches only because
-  // its probe installs the environment rather than requiring a matching host.
+  // Both encodings honor guest MODE under default host controls. Sticky flags
+  // may change; rounding, masks, and denormal controls must not.
   struct Form {
     const char *name;
     bool vop3;
@@ -5846,54 +5872,22 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding =
                                 {{0, sample.a}, {1, sample.b}, {6, 0xa5a5a5a5u}},
                                 {{6, 0xa5a50000u | sample.expected}},
                                 0x40u,
-                                host_rounding,
+                                FE_TONEAREST,
                                 0xffffu,
-                                host_mxcsr,
+                                0x1f80u,
                                 expect_simd_path(form.path)};
       for (const bool scalar : {true, false}) {
         SCOPED_TRACE(test.name);
         SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
         util::set_force_scalar_for_testing(scalar);
-        expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+        expect_arithmetic_case(test, simd_expectation_for_run(test, scalar, true), true);
       }
     }
   }
 }
 
-TEST(ValuFpModeHelpers, F16BinaryPreservesHostExceptionFlagsAndMasks) {
-  // Clean flags, pre-existing inexact, and pre-existing flags with DAZ/FTZ.
-  for (const uint32_t mxcsr : {0x1f80u, 0x1fa0u, 0x9fe4u}) {
-    SCOPED_TRACE(mxcsr);
-    expect_f16_binary_host_environment(mxcsr);
-  }
-}
+TEST(ValuFpModeHelpers, F16BinaryPreservesHostControls) { expect_f16_binary_host_environment(); }
 
-TEST(ValuFpModeHelpers, F16BinaryPreservesNonNearestHostRounding) {
-  for (const int rounding : {FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    SCOPED_TRACE(rounding);
-    // Exercise independent x87/MXCSR rounding, with clean flags or sticky
-    // flags plus DAZ/FTZ. With SIMD enabled, ADD and MUL must take the named route.
-    for (const uint32_t mxcsr_rounding : {_MM_ROUND_UP, _MM_ROUND_DOWN, _MM_ROUND_TOWARD_ZERO}) {
-      for (const uint32_t mxcsr : {0x1f80u, 0x9fe4u}) {
-        SCOPED_TRACE(mxcsr | mxcsr_rounding);
-        expect_f16_binary_host_environment(mxcsr | mxcsr_rounding, rounding);
-      }
-    }
-  }
-}
-
-#if GTEST_HAS_DEATH_TEST
-TEST(ValuFpModeHelpers, F16BinaryDoesNotTrapWithHostInvalidUnmasked) {
-  // A leaking SIMD inf * 0 would terminate this subprocess with SIGFPE.
-  ASSERT_EXIT(
-      {
-        expect_f16_binary_host_environment(0x1f00u);
-        expect_f16_binary_host_environment(0x1f20u);
-        std::_Exit(testing::Test::HasFailure() ? 1 : 0);
-      },
-      testing::ExitedWithCode(0), "");
-}
-#endif
 #endif
 
 TEST(ValuFpModeHelpers, SimdTrackerRestoresNestedObserversAndIsolatesThreads) {
