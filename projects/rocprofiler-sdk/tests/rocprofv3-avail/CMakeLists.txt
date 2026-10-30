@@ -147,8 +147,9 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters_2
-    COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail>
-            pmc-check SQ_WAVES GRBM_COUNT ${COUNTER_CHECK_L2_HIT}:device=0
+    COMMAND
+        ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail> pmc-check
+        SQ_WAVES:device=0 GRBM_COUNT:device=0 ${COUNTER_CHECK_L2_HIT}:device=0
     DEPENDS rocprofiler-sdk::rocprofv3-avail
     TIMEOUT 45
     LABELS "integration-tests"
