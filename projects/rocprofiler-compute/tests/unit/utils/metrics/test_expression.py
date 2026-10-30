@@ -13,6 +13,7 @@ from utils.metrics.expression import (
     InvalidExpressionError,
     build_eval_string,
     reject_counter_bearing_composite_extents,
+    transform_expression,
     update_denominator_string,
     update_normal_unit_string,
 )
@@ -123,6 +124,11 @@ class TestExpression:
         "formula, blocked_node",
         [
             ('"".__class__', "Attribute"),
+            ("obj.__class__", "Attribute"),
+            ("_collect.__class__", "Attribute"),
+            ("df.columns", "Attribute"),
+            ("foo.bar", "Attribute"),
+            ("_collect.ipc_issued_a.extra", "Attribute"),
             ("(lambda: 1)()", "Lambda"),
             ("[x for x in (1,)]", "ListComp"),
             ("(x for x in (1,))", "GeneratorExp"),
@@ -145,6 +151,39 @@ class TestExpression:
         """build_eval_string warns and returns empty for unsafe formulas."""
         with patch("utils.metrics.expression.console_warning") as mock_warning:
             result = build_eval_string('"".__class__')
+        assert result == ""
+        assert mock_warning.called
+
+    def test_collect_piece_sum_inside_min_is_one_expression(self) -> None:
+        """MIN of _collect pieces is accepted and is not a PMC column."""
+        formula = "MIN(_collect.ipc_issued_a + _collect.ipc_issued_b)"
+        assert transform_expression(ast.parse(formula), formula) is True
+        reduced = build_eval_string(formula)
+        assert reduced == (
+            "to_min(collect_piece('_collect.ipc_issued_a')"
+            " + collect_piece('_collect.ipc_issued_b'))"
+        )
+        assert "raw_pmc_df" not in reduced
+
+    def test_collect_sum_avg_still_skips_the_ast(self) -> None:
+        """COLLECT_SUM averages stay on the composite path, not this parser."""
+        formula = "COLLECT_SUM(_collect.ipc_issued_a, _collect.ipc_issued_b)"
+        assert build_eval_string(formula) == ""
+
+    @pytest.mark.parametrize(
+        "formula",
+        [
+            "_collect.__class__",
+            "df.columns",
+            "foo.bar",
+            "obj.__class__",
+            "_collect.ipc_issued_a.extra",
+        ],
+    )
+    def test_disallowed_attributes_do_not_build(self, formula: str) -> None:
+        """Dunder and ordinary attribute access still produce no eval string."""
+        with patch("utils.metrics.expression.console_warning") as mock_warning:
+            result = build_eval_string(formula)
         assert result == ""
         assert mock_warning.called
 

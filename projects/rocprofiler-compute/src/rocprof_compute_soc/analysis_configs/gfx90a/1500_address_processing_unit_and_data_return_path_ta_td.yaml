@@ -160,8 +160,8 @@ Panel Config:
           unit: (Instructions + $normUnit)
         Read Instructions:
           avg: COLLECT_SUM(_collect.td_read_load, _collect.td_read_store_atomic_corr)
-          min: None  # MIN(a/d)+MIN(b/d) is not MIN((a+b)/d)
-          max: None
+          min: MIN(_collect.td_read_load + _collect.td_read_store_atomic_corr)  # min over dispatches of the summed pieces
+          max: MAX(_collect.td_read_load + _collect.td_read_store_atomic_corr)  # max over dispatches of the summed pieces
           unit: (Instructions + $normUnit)
         Write Instructions:
           avg: SUM(TD_STORE_WAVEFRONT_sum) / SUM($denom)
