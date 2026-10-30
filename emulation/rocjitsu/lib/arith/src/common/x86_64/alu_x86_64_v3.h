@@ -51,6 +51,20 @@ inline __m256d flush_denorm_f64(__m256d value) {
   return _mm256_blendv_pd(value, _mm256_castsi256_pd(sign), _mm256_castsi256_pd(tiny));
 }
 
+// Prepare FP32 results for a nonzero OMOD: tiny values become +0, while
+// halving normal values below twice minimum normal produces signed zero.
+inline __m128 prepare_omod_f32(__m128 value, uint32_t instruction_flags) {
+  auto magnitude = _mm_and_si128(_mm_castps_si128(value), _mm_set1_epi32(INT32_MAX));
+  auto tiny = _mm_cmpgt_epi32(_mm_set1_epi32(0x00800000), magnitude);
+  value = _mm_andnot_ps(_mm_castsi128_ps(tiny), value);
+  if ((instruction_flags & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF) {
+    auto underflow = _mm_cmpgt_epi32(_mm_set1_epi32(0x01000000), magnitude);
+    auto sign = _mm_and_ps(value, _mm_castsi128_ps(_mm_set1_epi32(INT32_MIN)));
+    value = _mm_blendv_ps(value, sign, _mm_castsi128_ps(underflow));
+  }
+  return value;
+}
+
 // Apply the FP32 input/output tininess rules associated with active OMOD scaling.
 inline __m256 prepare_omod_f32(__m256 value, uint32_t instruction_flags) {
   auto magnitude = _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX));

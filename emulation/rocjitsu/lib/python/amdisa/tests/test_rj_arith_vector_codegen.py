@@ -309,6 +309,31 @@ def test_integer_dot_signedness_bits_are_not_negation_or_half_selectors(arch):
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('name', ['V_CVT_I32_I16', 'V_CVT_U32_U16'])
+def test_integer_widening_half_selection_and_ignored_modifiers(arch, name):
+    for vop3 in (False, True):
+        body = gen_vector32(arch, name, ['dst'], ['src'], vop3)
+        assert 'rj_arith_' + name.lower() + '_w64' in body
+        assert 'execute_unary32' in body
+        assert ('vop3_opsel' in body) == vop3
+        assert 'RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3' in body
+        assert 'arithmetic_flags()' in body
+        for ignored in ('inst_.abs', 'inst_.neg', 'inst_.omod', 'inst_.clamp'):
+            assert ignored not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_packed_saturation_reads_word_and_writes_selected_half(arch):
+    for vop3 in (False, True):
+        body = gen_vector32(arch, 'V_SAT_PK_U8_I16', ['dst'], ['src'], vop3)
+        assert 'rj_arith_v_sat_pk_u8_i16_w64' in body
+        assert 'execute_unary32' in body
+        assert ('vop3_opsel(inst_) & 8' in body) == vop3
+        assert '0xF, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3' in body
+        assert 'inst_.abs' not in body and 'inst_.neg' not in body
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 def test_qsad_register_layouts_and_no_legacy_bypass(arch):
     from amdisa.codegen.execute.rj_arith_vector import QSAD_NAMES, gen_wide_integer
 

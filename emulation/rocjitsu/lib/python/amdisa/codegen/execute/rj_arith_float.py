@@ -123,6 +123,493 @@ def gen_float_unary64(ctx: ExecuteContext) -> str | None:
     return '\n'.join(lines)
 
 
+PACKED_CONVERSION_NAMES = {
+    'V_CVT_PK_RTZ_F16_F32',
+    'V_CVT_PK_I16_F32',
+    'V_CVT_PK_U16_F32',
+}
+
+
+def gen_packed_conversion(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in PACKED_CONVERSION_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 2:
+        return None
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
+    if mnemonic == 'V_CVT_PK_RTZ_F16_F32':
+        lines += [
+            '  if (!(wf.fp_denorm_mode_f32() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;',
+            '  if (!(wf.fp_denorm_mode_f16_f64() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;',
+            '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        ]
+    modifiers = '0'
+    if is_vop3:
+        terms = [
+            '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)',
+            '((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u)',
+            '((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)',
+            '((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u)',
+            '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
+        ]
+        if mnemonic == 'V_CVT_PK_RTZ_F16_F32':
+            terms += ['(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2)']
+        lines += ['  const uint64_t modifiers = ' + ' | '.join(terms) + ';']
+        modifiers = 'modifiers'
+    lines += [
+        f'  amdgpu::arith::execute_float_pack(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'      flags, {modifiers},',
+        f'      {dst[0]}, {src[0]}, {src[1]}, /*half_sources=*/false);',
+    ]
+    return '\n'.join(lines)
+
+
+NORMALIZED_NAMES = {
+    'V_CVT_PK_NORM_I16_F32',
+    'V_CVT_PK_NORM_U16_F32',
+    'V_CVT_PK_NORM_I16_F16',
+    'V_CVT_PK_NORM_U16_F16',
+    'V_CVT_NORM_I16_F16',
+    'V_CVT_NORM_U16_F16',
+}
+
+
+def gen_normalized(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in NORMALIZED_NAMES:
+        return None
+    packed = '_PK_' in mnemonic
+    half = mnemonic.endswith('_F16')
+    if len(dst) != 1 or len(src) != (2 if packed else 1):
+        return None
+    api = 'rj_arith_' + mnemonic.lower()
+    if packed and half and arch == 'rdna4':
+        api += '_gfx12'
+    lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
+    if half:
+        lines += [
+            '  if (!(wf.fp_denorm_mode_f16_f64() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
+        ]
+    terms = []
+    if is_vop3:
+        if half:
+            lines += ['  const uint32_t opsel = amdgpu::vop3_opsel(inst_);']
+        if packed:
+            terms += ['(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)']
+        for i, operand in enumerate('AB' if packed else 'A'):
+            terms += [
+                f'((inst_.abs & {1 << i}) ? RJ_ARITH_ALU_ABS_{operand} : 0u)',
+                f'((inst_.neg & {1 << i}) ? RJ_ARITH_ALU_NEG_{operand} : 0u)',
+            ]
+            if half:
+                terms += [f'((opsel & {1 << i}) ? RJ_ARITH_ALU_HIGH_{operand} : 0u)']
+        if not packed:
+            terms += [
+                '((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)',
+            ]
+    lines += [
+        '  const uint64_t modifiers = ' + (' | '.join(terms) if terms else '0u') + ';'
+    ]
+    if not packed:
+        lines += [
+            '  const uint8_t source_bytes = (modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3;',
+            '  const uint8_t destination_bytes = (modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3;',
+            f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {dst[0]}, {src[0]}, source_bytes, destination_bytes);',
+        ]
+    elif half:
+        lines += [
+            f'  amdgpu::arith::execute_float_pack(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {dst[0]}, {src[0]}, {src[1]}, /*half_sources=*/true);',
+        ]
+    else:
+        lines += [
+            f'  amdgpu::arith::execute_binary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {dst[0]}, {src[0]}, {src[1]});',
+        ]
+    return '\n'.join(lines)
+
+
+CONVERSION16_NAMES = {
+    'V_CVT_F16_I16',
+    'V_CVT_F16_U16',
+    'V_CVT_I16_F16',
+    'V_CVT_U16_F16',
+    'V_CVT_F16_F32',
+    'V_CVT_F32_F16',
+}
+
+
+def gen_conversion16(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in CONVERSION16_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    output, source = mnemonic.split('_')[-2:]
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    lines = [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
+    ]
+    if arch == 'rdna3' and output.startswith('F'):
+        lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
+    if output == 'F16':
+        lines += ['  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;']
+    for fmt, bit, flag in ((source, 1, 'INPUT'), (output, 2, 'OUTPUT')):
+        if fmt.startswith('F'):
+            denorm = 'fp_denorm_mode_f32' if fmt == 'F32' else 'fp_denorm_mode_f16_f64'
+            lines += [
+                f'  if (!(wf.{denorm}() & {bit})) flags |= RJ_ARITH_FP_FLUSH_{flag}_DENORMALS;'
+            ]
+    if output.startswith('F'):
+        rounding = 'fp_round_mode_f32' if output == 'F32' else 'fp_round_mode_f16_f64'
+        lines += [f'  flags |= uint64_t(wf.{rounding}()) << 24;']
+    terms = []
+    if is_vop3:
+        lines += ['  const uint32_t opsel = amdgpu::vop3_opsel(inst_);']
+        terms += [
+            '(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2)',
+            '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
+        ]
+        if source != 'F32':
+            terms += ['((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u)']
+        if output != 'F32':
+            terms += ['((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)']
+        if source.startswith('F'):
+            terms += [
+                '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)',
+                '((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)',
+            ]
+    lines += [
+        '  const uint64_t modifiers = ' + (' | '.join(terms) if terms else '0u') + ';'
+    ]
+    source_bytes = (
+        '0xF' if source == 'F32' else '(modifiers & RJ_ARITH_ALU_HIGH_A) ? 0xC : 0x3'
+    )
+    destination_bytes = (
+        '0xF' if output == 'F32' else '(modifiers & RJ_ARITH_ALU_HIGH_D) ? 0xC : 0x3'
+    )
+    lines += [
+        f'  const uint8_t source_bytes = {source_bytes};',
+        f'  const uint8_t destination_bytes = {destination_bytes};',
+        f'  amdgpu::arith::execute_float_conversion(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'      flags, modifiers, {dst[0]}, {src[0]}, /*from_double=*/false, /*to_double=*/false,',
+        '      source_bytes, destination_bytes);',
+    ]
+    return '\n'.join(lines)
+
+
+CONVERSION32_NAMES = {
+    'V_CVT_F32_I32',
+    'V_CVT_F32_U32',
+    'V_CVT_I32_F32',
+    'V_CVT_U32_F32',
+    'V_CVT_NEAREST_I32_F32',
+    'V_CVT_FLOOR_I32_F32',
+}
+
+
+def gen_conversion32(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in CONVERSION32_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    to_float = mnemonic in ('V_CVT_F32_I32', 'V_CVT_F32_U32')
+    fixed_round = mnemonic in ('V_CVT_NEAREST_I32_F32', 'V_CVT_FLOOR_I32_F32')
+    reports = not to_float and not fixed_round
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch == 'rdna4' and not fixed_round else '')
+    )
+    lines = [
+        '  const uint64_t flags = amdgpu::arith::float32_flags(',
+        '      wf, wf.cu().arithmetic_flags());',
+    ]
+    if to_float:
+        lines = [
+            line.replace('const uint64_t flags', 'uint64_t flags') for line in lines
+        ]
+        lines += ['  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;']
+    modifiers = []
+    if is_vop3:
+        modifiers += ['(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)']
+        if not fixed_round:
+            modifiers += ['(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2)']
+        if not to_float:
+            modifiers += [
+                '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)',
+                '((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)',
+            ]
+    lines += [
+        '  const uint64_t modifiers = '
+        + (' | '.join(modifiers) if modifiers else '0u')
+        + ';'
+    ]
+    if reports:
+        lines += [
+            f'  amdgpu::arith::execute_float_conversion(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'      flags, modifiers, {dst[0]}, {src[0]}, /*from_double=*/false, /*to_double=*/false);',
+        ]
+    else:
+        lines += [
+            f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'      flags, modifiers, {dst[0]}, {src[0]});',
+        ]
+    return '\n'.join(lines)
+
+
+CONVERSION64_NAMES = {
+    'V_CVT_F64_I32',
+    'V_CVT_F64_U32',
+    'V_CVT_I32_F64',
+    'V_CVT_U32_F64',
+    'V_CVT_F64_F32',
+    'V_CVT_F32_F64',
+}
+
+
+def gen_conversion64(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in CONVERSION64_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    output, source = mnemonic.split('_')[-2:]
+    from_integer = source in ('I32', 'U32')
+    to_double = output == 'F64'
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    lines = [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
+    ]
+    if not from_integer:
+        denorm = 'fp_denorm_mode_f16_f64' if source == 'F64' else 'fp_denorm_mode_f32'
+        lines += [
+            f'  if (!(wf.{denorm}() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
+        ]
+    if output.startswith('F'):
+        denorm = 'fp_denorm_mode_f16_f64' if to_double else 'fp_denorm_mode_f32'
+        lines += [
+            f'  if (!(wf.{denorm}() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;'
+        ]
+    if output.startswith('F'):
+        rounding = 'fp_round_mode_f32' if output == 'F32' else 'fp_round_mode_f16_f64'
+        lines += [f'  flags |= uint64_t(wf.{rounding}()) << 24;']
+    if arch == 'rdna3' and output.startswith('F'):
+        lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
+    modifiers = '0u'
+    if is_vop3:
+        modifiers = '(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)'
+        if not from_integer:
+            modifiers += ' | ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
+    lines += [f'  const uint64_t modifiers = {modifiers};']
+    if from_integer:
+        lines += [
+            f'  amdgpu::arith::execute_widen32_to_pair(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'      flags, modifiers, {dst[0]}, {src[0]}, 0xF);',
+        ]
+    else:
+        lines += [
+            f'  amdgpu::arith::execute_float_conversion(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'      flags, modifiers, {dst[0]}, {src[0]}, /*from_double=*/{str(source == "F64").lower()},',
+            f'      /*to_double=*/{str(to_double).lower()});',
+        ]
+    return '\n'.join(lines)
+
+
+FP8_NARROW_NAMES = {
+    'V_CVT_PK_FP8_F32',
+    'V_CVT_PK_BF8_F32',
+    'V_CVT_SR_FP8_F32',
+    'V_CVT_SR_BF8_F32',
+}
+
+
+def gen_fp8_narrow(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch != 'rdna4' or mnemonic not in FP8_NARROW_NAMES or not is_vop3:
+        return None
+    if len(dst) != 1 or len(src) != 2:
+        return None
+    stochastic = '_SR_' in mnemonic
+    api = 'rj_arith_' + mnemonic.lower()
+    lines = [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        '  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+        '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u);',
+    ]
+    if stochastic:
+        lines += [
+            '  const unsigned byte = (inst_.opsel >> 2) & 3;',
+            '  modifiers |= uint64_t(byte) << 16;',
+            '  const uint8_t destination_bytes = uint8_t(1u << byte);',
+        ]
+    else:
+        lines += [
+            '  modifiers |= ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |',
+            '      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u) |',
+            '      ((inst_.opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);',
+            '  const uint8_t destination_bytes = (inst_.opsel & 8) ? 0xC : 0x3;',
+        ]
+    lines += [
+        f'  amdgpu::arith::execute_binary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+        f'      {dst[0]}, {src[0]}, {src[1]}, destination_bytes);',
+    ]
+    return '\n'.join(lines)
+
+
+FP8_WIDEN_NAMES = {
+    'V_CVT_F32_FP8',
+    'V_CVT_F32_BF8',
+    'V_CVT_PK_F32_FP8',
+    'V_CVT_PK_F32_BF8',
+}
+
+
+def gen_fp8_widen(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch != 'rdna4' or mnemonic not in FP8_WIDEN_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    packed = '_PK_' in mnemonic
+    api = 'rj_arith_' + mnemonic.lower()
+    selector = 'inst_.opsel' if is_vop3 else '0u'
+    lines = [f'  const unsigned selector = {selector};']
+    if packed:
+        lines += [
+            '  const uint64_t modifiers = (selector & 1) ? RJ_ARITH_ALU_HIGH_A : 0u;',
+            '  const uint8_t source_bytes = (selector & 1) ? 0xC : 0x3;',
+        ]
+    else:
+        lines += [
+            '  const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);',
+            '  const uint64_t modifiers = uint64_t(byte) << 16;',
+            '  const uint8_t source_bytes = uint8_t(1u << byte);',
+        ]
+    adapter = 'execute_widen32_to_pair' if packed else 'execute_unary32'
+    lines += [
+        f'  amdgpu::arith::{adapter}(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(), modifiers,',
+        f'      {dst[0]}, {src[0]}, source_bytes);',
+    ]
+    return '\n'.join(lines)
+
+
+BYTE_NIBBLE_CONVERSION_NAMES = {f'V_CVT_F32_UBYTE{byte}' for byte in range(4)} | {
+    'V_CVT_OFF_F32_I4'
+}
+
+
+def gen_byte_nibble_conversion(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in BYTE_NIBBLE_CONVERSION_NAMES:
+        return None
+    if len(dst) != 1 or len(src) != 1:
+        return None
+    byte = 0 if mnemonic == 'V_CVT_OFF_F32_I4' else int(mnemonic[-1])
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    modifiers = (
+        '(uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)'
+        if is_vop3
+        else '0u'
+    )
+    return '\n'.join(
+        [
+            '  uint64_t flags = wf.cu().arithmetic_flags();',
+            '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
+            '  if (!(wf.fp_denorm_mode_f32() & 2)) flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;',
+            f'  const uint64_t modifiers = {modifiers};',
+            f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, flags, modifiers,',
+            f'      {dst[0]}, {src[0]}, {1 << byte});',
+        ]
+    )
+
+
+BIT_PACK_NAMES = {'V_PACK_B32_F16', 'V_CVT_PK_U8_F32'}
+
+
+def gen_bit_pack(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in BIT_PACK_NAMES or not is_vop3:
+        return None
+    half = mnemonic == 'V_PACK_B32_F16'
+    if len(dst) != 1 or len(src) != (2 if half else 3):
+        return None
+    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
+    denorm = 'fp_denorm_mode_f16_f64' if half else 'fp_denorm_mode_f32'
+    lines += [
+        f'  if (!(wf.{denorm}() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
+    ]
+    if half:
+        lines += ['  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;']
+    if not half:
+        lines += ['  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;']
+    terms = []
+    if half:
+        lines += ['  const uint32_t opsel = amdgpu::vop3_opsel(inst_);']
+    for i, operand in enumerate('AB' if half else 'A'):
+        terms += [
+            f'((inst_.abs & {1 << i}) ? RJ_ARITH_ALU_ABS_{operand} : 0u)',
+            f'((inst_.neg & {1 << i}) ? RJ_ARITH_ALU_NEG_{operand} : 0u)',
+        ]
+        if half:
+            terms += [f'((opsel & {1 << i}) ? RJ_ARITH_ALU_HIGH_{operand} : 0u)']
+    if not half:
+        terms += ['(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)']
+    lines += ['  const uint64_t modifiers = ' + ' | '.join(terms) + ';']
+    helper = 'execute_float_pack' if half else 'execute_byte_pack'
+    operands = ', '.join(dst + src) + (', /*half_sources=*/true' if half else '')
+    lines += [
+        f'  amdgpu::arith::{helper}(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'      flags, modifiers,',
+        f'      {operands});',
+    ]
+    return '\n'.join(lines)
+
+
 SELECTION_F64 = {
     'rdna3': {'V_MIN_F64', 'V_MAX_F64'},
     'rdna4': {'V_MIN_NUM_F64', 'V_MAX_NUM_F64', 'V_MINIMUM_F64', 'V_MAXIMUM_F64'},
@@ -945,13 +1432,22 @@ FLOAT_NAMES = (
     | BINARY_F64['rdna3']
     | BINARY_F64['rdna4']
     | BINARY_SELECTION_F16
+    | BIT_PACK_NAMES
+    | BYTE_NIBBLE_CONVERSION_NAMES
+    | CONVERSION16_NAMES
+    | CONVERSION32_NAMES
+    | CONVERSION64_NAMES
     | DOT2_F32_NAMES
     | DOT4_F32_NAMES
     | FMA_F16
     | FMA_F32
+    | FP8_NARROW_NAMES
+    | FP8_WIDEN_NAMES
     | HALF_DOT_NAMES
     | MIXED_FMA_NAMES
+    | NORMALIZED_NAMES
     | PACKED_BINARY16_NAMES
+    | PACKED_CONVERSION_NAMES
     | PACKED_FMA16_NAMES
     | TERNARY_SELECTION_RDNA3
     | TERNARY_SELECTION_RDNA4

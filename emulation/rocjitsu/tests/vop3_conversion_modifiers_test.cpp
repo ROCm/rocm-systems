@@ -325,7 +325,15 @@ TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInp
         ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           const auto &c = cases[(first + lane) % std::size(cases)];
-          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), static_cast<uint32_t>(c.expected))
+          // ISA V_CVT_NEAREST_I32_F32 does not specify a NaN result.
+          // gfx1201 selects a signed limit, unlike ordinary CVT's NaN-to-zero.
+          // RDNA3 shares this expectation, but was not measured in this capture.
+          const bool signed_nan =
+              (GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA4) &&
+              (c.bits & 0x7fffffffu) > 0x7f800000u;
+          const uint32_t expected = signed_nan ? (c.bits >> 31 ? 0x80000000u : 0x7fffffffu)
+                                               : static_cast<uint32_t>(c.expected);
+          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected)
               << "arch=" << GetParam() << " input=" << c.bits << " vop3=" << vop3
               << " scalar=" << force_scalar;
         }

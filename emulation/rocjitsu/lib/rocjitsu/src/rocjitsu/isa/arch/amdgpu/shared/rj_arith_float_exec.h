@@ -51,6 +51,44 @@ using FloatUnary32Function = int (*)(uint64_t, uint32_t, uint64_t, uint32_t *con
 using FloatUnary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *const *,
                                      const uint32_t *const *, uint32_t *);
 
+// Convert selected FP16/integer halves, FP32/integer words and FP64 pairs.
+// Pair selectors and byte masks describe layouts; flags describe FP formats.
+// Rejected conversions commit neither destination words nor optional state.
+inline void execute_float_conversion(Wavefront &wave, FloatUnary32Function wave32,
+                                     FloatUnary64Function wave64, uint64_t flags,
+                                     uint64_t modifiers, const Operand &destination,
+                                     const Operand &source, bool from_double, bool to_double,
+                                     uint8_t source_bytes = 0xF, uint8_t destination_bytes = 0xF) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  uint32_t causes = 0;
+  const auto convert = [&](const uint32_t *const *a) {
+    const auto invoke = [&](uint32_t *const *d, uint64_t write_mask) {
+      uint32_t *state = &causes;
+      return wave.wf_size() == 32 ? wave32(flags, uint32_t(write_mask), modifiers, d, a, state)
+                                  : wave64(flags, write_mask, modifiers, d, a, state);
+    };
+    return to_double ? write_vector64_result(wave, registers, destination, exec_mask, invoke)
+                     : write_vector32_result(wave, registers, destination, exec_mask, invoke,
+                                             /*allow_direct=*/destination_bytes == 0xF,
+                                             destination_bytes);
+  };
+  bool success;
+  if (from_double) {
+    VectorInput64 a(registers, wave, source, exec_mask);
+    success = convert(a.data.data());
+  } else {
+    VectorInput32 a(registers, wave, source, exec_mask, source_bytes);
+    success = convert(&a.data);
+  }
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
 // Execute with guest FP modes and routed operands. Only successfully written
 // lanes contribute fresh causes; rejected calls commit neither results nor state.
 inline void execute_float_unary32(Wavefront &wave, FloatUnary32Function wave32,
@@ -169,6 +207,35 @@ inline void execute_float64_word(Wavefront &wave, FloatBinary32Function wave32,
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, a.data.data(), &b.data,
                             state)
                    : wave64(flags, write_mask, modifiers, d, a.data.data(), &b.data, state);
+      });
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// Pack two converted values into a full destination word. Half sources read
+// only their selected bytes; these fixed-rounding conversions ignore guest MODE.
+// Commit vector results and optional state only after a successful rj-arith call.
+inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
+                               FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
+                               const Operand &destination, const Operand &lhs, const Operand &rhs,
+                               bool half_sources) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  const uint8_t a_bytes = half_sources ? (modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3) : 0xF;
+  const uint8_t b_bytes = half_sources ? (modifiers & RJ_ARITH_ALU_HIGH_B ? 0xC : 0x3) : 0xF;
+  VectorInput32 a(registers, wave, lhs, exec_mask, a_bytes);
+  VectorInput32 b(registers, wave, rhs, exec_mask, b_bytes);
+  uint32_t causes = 0;
+  const bool success = write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        uint32_t *state = &causes;
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, state)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, state);
       });
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
@@ -337,6 +404,35 @@ inline void execute_mixed_fma(Wavefront &wave, FloatTernaryWave32Function wave32
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
       },
       !half_output, destination_bytes);
+  if (success) {
+    wave.set_trapsts(wave.trapsts() | causes);
+    wave.raise_alu_causes(causes);
+  }
+}
+
+// Convert A to a byte, insert it at the per-lane position B in the preserved
+// word C, and write a full D word. These conversions ignore guest MODE.
+// Snapshot every source before committing D or optional exception causes.
+inline void execute_byte_pack(Wavefront &wave, FloatTernaryWave32Function wave32,
+                              FloatTernaryWave64Function wave64, uint64_t flags, uint64_t modifiers,
+                              const Operand &destination, const Operand &value,
+                              const Operand &selector, const Operand &preserved) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask)
+    return;
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, value, exec_mask);
+  VectorInput32 b(registers, wave, selector, exec_mask);
+  VectorInput32 c(registers, wave, preserved, exec_mask);
+  uint32_t causes = 0;
+  const bool success = write_vector32_result(
+      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+        uint32_t *state = &causes;
+        return wave.wf_size() == 32
+                   ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, &b.data, &c.data,
+                            state)
+                   : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
+      });
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

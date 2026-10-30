@@ -78,6 +78,12 @@ TERNARY32 = {
 }
 
 
+WIDEN16_NAMES = {'V_CVT_I32_I16', 'V_CVT_U32_U16'}
+
+
+SATURATE_NAMES = {'V_SAT_PK_U8_I16'}
+
+
 # These multiplication APIs do not accept CLAMP. The ISA ignores it here;
 # forwarding it would turn an ignored encoding bit into a rj-arith error.
 UNMODIFIED_MULTIPLIES = {
@@ -97,7 +103,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     is_vop3 = ctx.is_vop3
     if arch not in ('rdna3', 'rdna4') or mnemonic not in VECTOR32_NAMES:
         return None
-    if mnemonic in UNARY32:
+    if mnemonic in UNARY32 | WIDEN16_NAMES | SATURATE_NAMES:
         kind, count = 'unary', 1
     elif mnemonic in BINARY32:
         kind, count = 'binary', 2
@@ -106,6 +112,31 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if len(dst) != 1 or len(src) != count:
         return None
     api = 'rj_arith_' + mnemonic.lower()
+    if mnemonic in SATURATE_NAMES:
+        modifiers = (
+            '(amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u'
+            if is_vop3
+            else '0u'
+        )
+        return (
+            f'  const uint64_t modifiers = {modifiers};\n'
+            f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+            '      wf.cu().arithmetic_flags(),\n'
+            f'      modifiers, {dst[0]}, {src[0]}, 0xF, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);'
+        )
+    if mnemonic in WIDEN16_NAMES:
+        # VOP1 true16 operands already select a half; VOP3 uses explicit OPSEL.
+        modifiers = (
+            '(amdgpu::vop3_opsel(inst_) & 1) ? RJ_ARITH_ALU_HIGH_A : 0u'
+            if is_vop3
+            else '0u'
+        )
+        return (
+            f'  const uint64_t modifiers = {modifiers};\n'
+            f'  amdgpu::arith::execute_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
+            '      wf.cu().arithmetic_flags(),\n'
+            f'      modifiers, {dst[0]}, {src[0]}, modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);'
+        )
     modifiers = (
         'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u'
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
@@ -280,7 +311,10 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
 WIDENING_MAD_NAMES = {'V_MAD_U32_U16', 'V_MAD_I32_I16'}
 
 
-WIDENING_INTEGER_NAMES = WIDENING_MAD_NAMES
+INTEGER_PACK_NAMES = {'V_CVT_PK_U16_U32', 'V_CVT_PK_I16_I32'}
+
+
+WIDENING_INTEGER_NAMES = WIDENING_MAD_NAMES | INTEGER_PACK_NAMES
 
 
 def gen_widening_integer(ctx: ExecuteContext) -> str | None:
@@ -408,4 +442,4 @@ def gen_integer_dot(ctx: ExecuteContext) -> str | None:
     )
 
 
-VECTOR32_NAMES = UNARY32 | BINARY32 | TERNARY32
+VECTOR32_NAMES = UNARY32 | BINARY32 | TERNARY32 | WIDEN16_NAMES | SATURATE_NAMES
