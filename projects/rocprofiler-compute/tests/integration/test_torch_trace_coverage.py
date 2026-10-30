@@ -7,6 +7,9 @@
 evenly between CUDA ``torch.ops`` and structural operators. Compares
 ``torch.profiler`` to the analyze call forest. Use ``--coverage-n 100``
 for a nightly run. Requires a GPU.
+
+Distributed collectives require separate process-group coverage and are excluded
+from this single-GPU random workload.
 """
 
 import json
@@ -65,6 +68,16 @@ def test_random_operator_kernel_coverage(
     }
 
     aten_ops, structural_ops, excluded_aten_ops = coverage_utils.discover_operators()
+    # NCCL/RCCL initialization and collectives can stall the reference profiler.
+    # Exercise them separately from this single-GPU operator coverage test.
+    single_gpu_ops = [
+        op for op in structural_ops if not op.name.startswith("torch.distributed.")
+    ]
+    print(
+        f"Excluded {len(structural_ops) - len(single_gpu_ops)} distributed "
+        "operators from single-GPU coverage."
+    )
+    structural_ops = single_gpu_ops
     structural_sample_count = min(sample_budget // 2, len(structural_ops))
     aten_sample_count = min(sample_budget - structural_sample_count, len(aten_ops))
     sampled_aten = rng.sample(aten_ops, aten_sample_count)
