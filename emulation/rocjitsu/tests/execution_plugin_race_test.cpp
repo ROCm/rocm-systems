@@ -493,6 +493,15 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
 }
 
+TEST_F(TensorDmaRaceTest, TransferWithoutLdsAccessStillCountsOnTensorcnt) {
+  // A NULL tensor moves no data but occupies a TENSORcnt slot, so waiting for
+  // all but one transfer completes the load issued before it.
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  tensor_load(0, {});
+  wait_tensorcnt(0, 1);
+  EXPECT_FALSE(ds_read(0, 4));
+}
+
 TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {
   // A deferred transfer completes after the wave's PC has moved past it; the
   // event belongs to the observation's PC, not the wave's current one. Keep
