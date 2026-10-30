@@ -38,14 +38,11 @@
 // undetectable and exactly-full looks empty -- accepted, documented limits.
 
 #include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <iterator>
 #include <set>
 #include <string_view>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -153,15 +150,6 @@ struct drained_record
     bool     start_known  = false;
 };
 
-// One record copied out of the ring. `region` is the source region. ABI v4 has no
-// reader-side loss detection (a ring lap is undetectable by contract), so there is
-// no per-record loss verdict to carry.
-struct copied_record
-{
-    fw_record rec    = {};
-    uint32_t  region = 0;
-};
-
 // Reader-side state: the consumer-private ring cursors. Touched ONLY by the
 // ring-copier thread, so it needs no lock. rptr[] lives here (local memory), not
 // in the read-only BO. ABI v4 has no producer-visible read cursor, so there is
@@ -176,22 +164,6 @@ struct ring_cursors
     uint32_t max_unread = 0;
 };
 
-namespace detail
-{
-// Whether copy_pipes' output can be sized up front (std::vector can; a test sink
-// that only offers emplace_back cannot).
-template <typename OutT, typename = void>
-struct can_reserve : std::false_type
-{};
-
-template <typename OutT>
-struct can_reserve<
-    OutT,
-    std::void_t<decltype(std::declval<OutT&>().reserve(std::declval<OutT&>().size()))>>
-: std::true_type
-{};
-}  // namespace detail
-
 // Processor-side state: start/eop pairing. Touched ONLY by the processor thread,
 // so it needs no lock either. Deliberately separate from ring_cursors: the whole
 // point of the split is that the copier never touches this.
@@ -199,9 +171,9 @@ struct pair_state
 {
     struct pending_record
     {
-        copied_record record     = {};
-        uint64_t      seen_at_ns = 0;
-        uint64_t      epoch      = 0;
+        fw_record rec        = {};
+        uint64_t  seen_at_ns = 0;
+        uint64_t  epoch      = 0;
     };
 
     struct work_item
@@ -334,10 +306,8 @@ struct pair_state
     }
 };
 
-// STAGE 1 (reader thread): copy raw records out of the read-only ring, as fast
-// as possible and touching nothing else. This is the only code reading the
-// volatile mapping -- so NO lock, no map, no pairing or timestamp math. Returns
-// the number copied, or 0 on invalid geometry.
+// STAGE 1 (reader thread): copy the ring into the session's record stream; returns the
+// records copied (0 on invalid geometry); throws std::bad_alloc if a chunk cannot be allocated.
 //
 // ABI v4: wptr[i] is a wrapping 32-bit slot index; the consumer read cursor rptr[i]
 // is local-only (no shared rptr[] to publish). On the first drain rptr is primed to
@@ -345,17 +315,17 @@ struct pair_state
 // the same math handles a legacy free-running u32 producer, since only the masked
 // slot and the masked delta are used. A full lap between reads is undetectable and
 // exactly-full (N unread) looks empty -- accepted, documented limits.
-template <typename OutT>
+struct reader_alloc_log;  // reader-private diagnostics log, defined in record_stream.hpp
+
+template <typename StreamT>
 uint64_t
 copy_pipes(const uint8_t*       records_base,
            uint32_t             num_regions,
            uint32_t             region_record_count,
            const volatile void* wptr_base,
            ring_cursors&        cursors,
-           OutT&                out,
-           // Reserved before the first memcpy so a record is counted
-           // from the instant it leaves the ring into `out`. nullptr in tests.
-           std::atomic<uint64_t>* inflight = nullptr)
+           StreamT&             stream,
+           reader_alloc_log&    alloc_log)
 {
     if(num_regions == 0 || num_regions > kMaxRegions) return 0;
 
@@ -372,12 +342,9 @@ copy_pipes(const uint8_t*       records_base,
         cursors.rptr_init = true;
     }
 
-    // Snapshot every region's producer index first, then copy. Sizing the output
-    // once from the snapshot means the copy loop never reallocates (a growing
-    // vector here was the reader's dominant cost under load, and every extra
-    // microsecond in this loop is lap exposure). Records the firmware writes after
-    // the snapshot are simply left for the next pass, exactly as records written
-    // into an already-visited region always were.
+    // Snapshot every region's producer index first, then copy. Records the
+    // firmware writes after the snapshot are simply left for the next pass,
+    // exactly as records written into an already-visited region always were.
     uint32_t wptr[kMaxRegions]   = {};
     uint32_t unread[kMaxRegions] = {};
     uint64_t total               = 0;
@@ -393,42 +360,36 @@ copy_pipes(const uint8_t*       records_base,
     }
     if(total == 0) return 0;
 
-    if constexpr(detail::can_reserve<OutT>::value) out.reserve(out.size() + total);
-
-    // Reserve BEFORE the first memcpy: from that instant these records live in
-    // `out` and will be processed while the pipe still reads empty. This is
-    // exactly what the batch's publish fetch_sub removes. Release pairs with
-    // the GC gate's acquire load.
-    if(inflight != nullptr) inflight->fetch_add(total, std::memory_order_release);
-
+    // The BO is a byte view of a packed fw_record array (20-byte records, so any
+    // record offset is 4-byte aligned). Source stays byte-addressed: the ring is
+    // an external mapping, not a C++ fw_record array.
     for(uint32_t p = 0; p < num_regions; ++p)
     {
-        const uint32_t r = cursors.rptr[p];
-        for(uint32_t k = 0; k < unread[p]; ++k)
-        {
-            const uint32_t idx  = (r + k) & mask;
-            const uint64_t slot = static_cast<uint64_t>(p) * region_slots + idx;
-            auto           _out = copied_record{};
-            std::memcpy(&_out.rec, records_base + slot * kFwRecBytes, sizeof(_out.rec));
-            _out.region = p;
-            out.emplace_back(_out);
-        }
+        const uint32_t r     = cursors.rptr[p];
+        const uint32_t start = r & mask;
+        const uint64_t base  = static_cast<uint64_t>(p) * region_slots;
+        // Each region's unread run is contiguous in the ring except at the wrap:
+        // at most two appends per region, and append splits at chunk boundaries.
+        const uint32_t head = std::min(unread[p], region_slots - start);
+        if(head > 0) stream.append(records_base + (base + start) * kFwRecBytes, head, alloc_log);
+        if(unread[p] > head)
+            stream.append(records_base + base * kFwRecBytes, unread[p] - head, alloc_log);
         cursors.rptr[p] = wptr[p];
     }
     return total;
 }
 
-// STAGE 2 (processor thread): pair start/eop out of an already-copied batch.
+// STAGE 2 (processor thread): pair start/eop out of an already-copied segment.
 // No ring access, so it may take locks and do timestamp work.
 template <typename OnRecord>
 uint64_t
-pair_records(const copied_record* records,
-             size_t               count,
-             pair_state&          state,
-             uint64_t             now_ns,
-             OnRecord&&           on_record,
-             bool                 lookahead = false,
-             uint64_t             epoch     = 0)
+pair_records(const fw_record* records,
+             size_t           count,
+             pair_state&      state,
+             uint64_t         now_ns,
+             OnRecord&&       on_record,
+             bool             lookahead = false,
+             uint64_t         epoch     = 0)
 {
     uint64_t seen = 0;
 
@@ -436,8 +397,8 @@ pair_records(const copied_record* records,
     // events and subsequent events on their key wait for the next snapshot:
     // both an earlier START and an earlier EOP may be in an already-sampled region.
     const size_t deferred_count = state.deferred_records.size();
-    auto         record_at      = [&](size_t index) -> const copied_record& {
-        return index < deferred_count ? state.deferred_records[index].record
+    auto         record_at      = [&](size_t index) -> const fw_record& {
+        return index < deferred_count ? state.deferred_records[index].rec
                                                    : records[index - deferred_count];
     };
     auto& work = state.pairing_work;
@@ -446,7 +407,7 @@ pair_records(const copied_record* records,
     size_t held_items = 0;
     for(size_t index = 0; index < deferred_count + count; ++index)
     {
-        const auto& rec = record_at(index).rec;
+        const auto& rec = record_at(index);
         if(rec.record_type == kRecPadding || rec.doorbell_off == 0) continue;
         if(rec.record_type != kRecStart && rec.record_type != kRecEop) continue;
 
@@ -480,8 +441,12 @@ pair_records(const copied_record* records,
         auto& merged = state.pairing_merge;
         merged.clear();
         merged.reserve(work.size());
-        std::merge(
-            work.begin(), held_end, held_end, work.end(), std::back_inserter(merged), pairing_order);
+        std::merge(work.begin(),
+                   held_end,
+                   held_end,
+                   work.end(),
+                   std::back_inserter(merged),
+                   pairing_order);
         work.swap(merged);
     }
 
@@ -491,9 +456,8 @@ pair_records(const copied_record* records,
     bool     defer_key    = false;
     for(const auto& w : work)
     {
-        const auto&    copied       = record_at(w.index);
-        const auto&    rec          = copied.rec;
-        const uint64_t ts  = w.tick;
+        const auto&    rec          = record_at(w.index);
+        const uint64_t ts           = w.tick;
         const uint64_t key          = w.key;
         const bool     ready        = w.index < deferred_count;
         const uint64_t copied_at    = ready ? state.deferred_records[w.index].seen_at_ns : now_ns;
@@ -503,7 +467,7 @@ pair_records(const copied_record* records,
         if(defer_key || (lookahead && !ready))
         {
             defer_key = true;
-            state.next_deferred_records.push_back({copied, copied_at, copied_epoch});
+            state.next_deferred_records.push_back({rec, copied_at, copied_epoch});
             state.deferred_epoch = std::min(state.deferred_epoch, copied_epoch);
             continue;
         }

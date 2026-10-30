@@ -24,7 +24,6 @@
 
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 #include "lib/rocprofiler-sdk/kfd/doorbell_map.hpp"
-#include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 
 #include <algorithm>
 #include <array>
@@ -60,9 +59,9 @@
 // THREADING: exactly one mutex, and the hub NEVER invokes caller code while
 // holding it -- every operation returns owned values the caller acts on
 // afterwards. PayloadT is only default-constructed, moved and destroyed, so a
-// payload destructor never runs under the hub lock. The enqueue-side capacity
-// hint reads only atomics kept on their own cache lines, so the common case
-// takes no lock and does not share a line with the mutex.
+// payload destructor never runs under the hub lock. The enqueue-side hint reads
+// only atomics kept on their own cache line, so the common case takes no lock
+// and does not share a line with the mutex.
 //
 // PayloadT is a template parameter so the hub is unit-testable with a fake
 // payload and carries no dependency on the HSA queue session types.
@@ -88,42 +87,10 @@ struct loss_stats
     uint64_t correlation_ids = 0;
 };
 
-// Sole bound on hub growth for entries whose window never closes (gc_closed_windows
-// only reaps closed windows; F3's start_max_age_ns ages pending_starts, not the hub
-// -- the two are unrelated). Env ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU,
-// default 2000000, accepted range [1, 4194304], read once (F3 pattern). Reject-and-
-// default via D8's parse contract; the upper limit keeps cap far below SIZE_MAX so
-// the register_batch comparisons cannot be defeated by an absurd value.
-//
-// Graph bursts can leave many dispatches pending relative to the processor's
-// retirement rate. At capacity, new batches use signals without scanning or
-// evicting existing entries: their completion records may still be in the ring
-// or the processor backlog. Only completion and lifecycle cleanup (closed-window
-// GC, quarantine, teardown) reclaim them.
-inline size_t
-hub_max_pending_per_gpu()
-{
-    static const size_t _v = []() -> size_t {
-        constexpr long _dflt = 2'000'000;
-        auto           _parsed =
-            env_long_in_range("ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU", 1, 4'194'304);
-        return static_cast<size_t>(_parsed.value_or(_dflt));
-    }();
-    return _v;
-}
-
-// Exact per-GPU cap shortfall: by how many entries `batch` new entries would
-// exceed `cap` given `live` already present, or 0 if they fit. All
-// three are size_t; the checked branches never form `live + batch` (overflows) or
-// subtract into a wrap on a healthy GPU (the underflow the review flagged). Pure
-// and header-exposed so the D9 arithmetic is a deterministic unit seam.
-inline size_t
-hub_cap_need(size_t live, size_t batch, size_t cap)
-{
-    if(live > cap) return (live - cap) + batch;          // live-cap guarded by live>cap
-    if(batch > cap - live) return batch - (cap - live);  // cap-live safe: live <= cap
-    return 0;                                            // fits: no shortfall
-}
+// No admission cap: hub growth is bounded only by completion (EOP retirement) and
+// lifecycle cleanup (closed-window GC, quarantine, teardown) -- the pending-START
+// registry stays separately bounded by pending_starts_cap()
+// (ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS, kfd/kfd_reader.cpp).
 
 template <typename PayloadT>
 class DispatchHub
@@ -176,8 +143,8 @@ public:
     // keep admitting in-flight batches.
     //
     // Admission never evicts existing entries: an entry's completion record may
-    // still be in the ring or the processor backlog. On refusal the batch and
-    // every GPU's pending map are unmutated.
+    // still be in the ring or the processor backlog. On refusal the batch and the
+    // pending map are unmutated.
     bool register_batch(std::vector<registration>&& batch)
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
@@ -198,8 +165,7 @@ public:
         if(signal_less_disabled()) return false;
 
         // Check the whole batch under the same lock as insertion and retirement,
-        // so concurrent submitters cannot both consume the same headroom.
-        if(!batch_fits_locked(shape)) return false;
+        // so a racing submitter cannot register an open-window key in between.
         for(const auto& reg : batch)
             if(!key_admissible_locked(reg.key)) return false;
 
@@ -211,10 +177,8 @@ public:
             e.payload        = std::move(reg.payload);
             const auto* _w   = e.window.get();
             m_entries.emplace(reg.key, std::move(e));
-            ++m_pending_by_gpu[reg.key.gpu_id];
             if(_w != nullptr) ++m_pending_by_window[_w];
         }
-        publish_pending_total_locked();
         return true;
     }
 
@@ -225,29 +189,23 @@ public:
         return register_batch(std::move(batch));
     }
 
-    // Enqueue-side capacity and quarantine hint for `count` dispatches on one
-    // (gpu, doorbell slot). Advisory: register_batch() remains the authority.
-    // While no slot is quarantined and the whole hub has room, this reads three
-    // atomics and takes no lock; otherwise it answers exactly, under m_mu, so a
-    // permanently quarantined slot is refused here instead of on every batch.
-    bool can_register_batch(uint32_t gpu_id, uint32_t doorbell_slot, size_t count) const
+    // Enqueue-side quarantine hint for one (gpu, doorbell slot). Advisory:
+    // register_batch() remains the authority. While no slot is quarantined this
+    // reads only atomics and takes no lock; otherwise it answers exactly, under
+    // m_mu, so a permanently quarantined slot is refused here instead of on every
+    // batch.
+    bool can_register_batch(uint32_t gpu_id, uint32_t doorbell_slot) const
     {
         if(m_abandoned.load(std::memory_order_acquire)) return false;
         if(signal_less_disabled() ||
            m_mode.load(std::memory_order_acquire) != session_mode::running)
             return false;
-        const size_t cap = hub_max_pending_per_gpu();
-        if(count > cap) return false;
-        // The hub-wide total bounds every per-GPU count, so "fits hub-wide" implies
-        // "fits on this GPU".
-        if(m_quarantined_count.load(std::memory_order_acquire) == 0 &&
-           hub_cap_need(m_pending_total.load(std::memory_order_acquire), count, cap) == 0)
-            return true;
+        if(m_quarantined_count.load(std::memory_order_acquire) == 0) return true;
         auto lk = std::lock_guard<std::mutex>{m_mu};
-        if(signal_less_disabled() || m_mode.load(std::memory_order_acquire) != session_mode::running)
+        if(signal_less_disabled() ||
+           m_mode.load(std::memory_order_acquire) != session_mode::running)
             return false;
-        if(m_quarantined.count({gpu_id, doorbell_slot}) != 0) return false;
-        return hub_cap_need(pending_count_for_gpu_locked(gpu_id), count, cap) == 0;
+        return m_quarantined.count({gpu_id, doorbell_slot}) == 0;
     }
 
     // Would register_batch() accept these keys right now? Advisory only: the
@@ -264,7 +222,6 @@ public:
         auto lk = std::lock_guard<std::mutex>{m_mu};
         if(signal_less_disabled()) return false;
         if(m_mode.load(std::memory_order_acquire) != session_mode::running) return false;
-        if(!batch_fits_locked(shape)) return false;
         for(const auto& key : keys)
             if(!key_admissible_locked(key)) return false;
         return true;
@@ -292,7 +249,6 @@ public:
 
         auto lk  = std::lock_guard<std::mutex>{m_mu};
         auto out = record_kernel_end_locked(key, start_ticks_opt, end_ticks);
-        if(out) publish_pending_total_locked();
         return out;
     }
 
@@ -323,7 +279,6 @@ public:
                 ++proved;
             }
         }
-        if(proved != 0) publish_pending_total_locked();
         return proved;
     }
 
@@ -409,7 +364,6 @@ public:
                 ++it;
             }
         }
-        if(!out.empty()) publish_pending_total_locked();
         return out;
     }
 
@@ -450,7 +404,6 @@ public:
                 ++it;
             }
         }
-        if(!out.empty()) publish_pending_total_locked();
         auto stats            = loss_stats{};
         stats.dispatches      = out.size();
         stats.correlation_ids = ids.size();
@@ -588,19 +541,6 @@ private:
         return true;
     }
 
-    // Caller holds m_mu. Every GPU in the batch has room for its share. Checked
-    // comparisons only (hub_cap_need) -- never live+batch-cap, which can overflow.
-    bool batch_fits_locked(const batch_shape& shape) const
-    {
-        const size_t cap = hub_max_pending_per_gpu();
-        for(size_t i = 0; i < shape.gpus; ++i)
-        {
-            const auto& [gpu, count] = shape.counts[i];
-            if(hub_cap_need(pending_count_for_gpu_locked(gpu), count, cap) != 0) return false;
-        }
-        return true;
-    }
-
     // A closed window whose GC grace has expired. Reads gc_deadline_ns only after
     // observing the closed t_close (release-published by close_window).
     static bool window_due(const owner_window& w, uint64_t now_ns)
@@ -616,14 +556,6 @@ private:
         for(const auto& _itr : m_pending_by_window)
             if(window_due(*_itr.first, now_ns)) return true;
         return false;
-    }
-
-    // Caller holds m_mu. Publish the live count the lock-free capacity hint reads;
-    // once per mutating operation, not per entry, so the processor does not
-    // bounce that cache line once per retired kernel.
-    void publish_pending_total_locked()
-    {
-        m_pending_total.store(m_entries.size(), std::memory_order_release);
     }
 
     // A doorbell slot is only unique per GPU, so every slot-keyed container is
@@ -653,13 +585,6 @@ private:
             if(w && w->t_close.load(std::memory_order_acquire) == kWindowOpen) return false;
         }
         return true;
-    }
-
-    // Caller holds m_mu. Live PENDING entries on one GPU (0 if none).
-    size_t pending_count_for_gpu_locked(uint32_t gpu_id) const
-    {
-        auto it = m_pending_by_gpu.find(gpu_id);
-        return it == m_pending_by_gpu.end() ? 0 : it->second;
     }
 
     // Caller holds m_mu. Insert into the bounded ledger; once it saturates,
@@ -692,18 +617,15 @@ private:
             out.emplace_back(leak_locked(it));
         }
         m_entries.clear();
-        m_pending_by_gpu.clear();
         m_pending_by_window.clear();
-        publish_pending_total_locked();
         auto stats            = loss_stats{};
         stats.dispatches      = out.size();
         stats.correlation_ids = ids.size();
         return {std::move(out), stats};
     }
 
-    // Three groups, each on its own cache line: the mutex (written by every lock
-    // and unlock), the read-mostly gates the enqueue fast path loads on every
-    // batch, and the pending total (written once per mutating hub operation).
+    // Two groups, each on its own cache line: the mutex (written by every lock
+    // and unlock) and the read-mostly gates the enqueue hint loads on every batch.
     // Sharing a line would make the lock-free hint pay for every lock handoff.
     static constexpr size_t kCacheLine = 64;
 
@@ -712,37 +634,27 @@ private:
     // Checked before m_mu on every operation, so a forked child never touches the
     // inherited mutex or map.
     alignas(kCacheLine) std::atomic<bool> m_abandoned = {false};
-    // Written only under m_mu; atomic so the capacity hint can read it lock-free.
+    // Written only under m_mu; atomic so the hint can read it lock-free.
     std::atomic<session_mode> m_mode = {session_mode::running};
-    // m_quarantined.size(), published under m_mu for the capacity hint.
+    // m_quarantined.size(), published under m_mu for the hint.
     std::atomic<size_t> m_quarantined_count = {0};
-
-    // m_entries.size(), published under m_mu for the capacity hint.
-    alignas(kCacheLine) std::atomic<size_t> m_pending_total = {0};
 
     pending_entry_map  m_entries          = {};
     correlation_id_set m_ledger           = {};
     bool               m_ledger_saturated = false;
     // A single GPU's queue destroy must not quarantine another GPU's live slot.
     slot_set m_quarantined = {};
-    // Live PENDING count per gpu_id (the cap is per-GPU) and per owner window (so
-    // GC can tell in O(windows) whether any closed window still holds entries).
-    // Incremented at insert, decremented on every erase path via erase_entry_locked.
-    // The window keys stay valid while counted: each counted entry owns a
-    // window_ptr to the same window.
-    std::unordered_map<uint32_t, size_t>            m_pending_by_gpu    = {};
+    // Live PENDING count per owner window, so GC can tell in O(windows) whether
+    // any closed window still holds entries. Incremented at insert, decremented
+    // on every erase path via erase_entry_locked. The window keys stay valid
+    // while counted: each counted entry owns a window_ptr to the same window.
     std::unordered_map<const owner_window*, size_t> m_pending_by_window = {};
 
-    // Caller holds m_mu. Erase an entry and keep the per-GPU and per-window counts
-    // in step; the single removal point every path funnels through so neither
-    // count can drift. Returns the iterator following the erased element.
+    // Caller holds m_mu. Erase an entry and keep the per-window count in step;
+    // the single removal point every path funnels through so the count cannot
+    // drift. Returns the iterator following the erased element.
     typename pending_entry_map::iterator erase_entry_locked(typename pending_entry_map::iterator it)
     {
-        auto _g = m_pending_by_gpu.find(it->first.gpu_id);
-        if(_g != m_pending_by_gpu.end() && _g->second > 0)
-        {
-            if(--_g->second == 0) m_pending_by_gpu.erase(_g);
-        }
         if(const auto* _w = it->second.window.get())
         {
             auto _c = m_pending_by_window.find(_w);
