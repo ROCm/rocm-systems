@@ -4,14 +4,46 @@
  */
 
 #include "configuration.h"
+#include "context.h"
 #include "environment.h"
 #include "hip.h"
 #include "hipfile-literals.h"
+#include "sys.h"
 
 #include <cstdio>
+#include <fcntl.h>
 #include <optional>
+#include <string_view>
+#include <system_error>
 
 using namespace hipFile;
+
+/* On WSL2, ROCr drives the GPU through librocdxg (/dev/dxg) instead of KFD.
+ * librocdxg does not implement AIS, so fastpath I/O fails with an error that
+ * is not eligible for fallback.
+ */
+static bool
+rocrUsesDxg() noexcept
+{
+    const char *detection{Context<Sys>::get()->getenv("HSA_ENABLE_DXG_DETECTION")};
+    if (detection && std::string_view{detection} == "0") {
+        return false;
+    }
+
+    int fd;
+    try {
+        fd = Context<Sys>::get()->open("/dev/dxg", O_RDWR | O_CLOEXEC);
+    }
+    catch (const std::system_error &) {
+        return false;
+    }
+    try {
+        Context<Sys>::get()->close(fd);
+    }
+    catch (const std::system_error &) {
+    }
+    return true;
+}
 
 bool
 Configuration::fastpath() const noexcept
@@ -19,7 +51,8 @@ Configuration::fastpath() const noexcept
     static bool fastpath_env{!Environment::force_compat_mode().value_or(false)};
     static bool readExists{!!getHipAmdFileReadPtr()};
     static bool writeExists{!!getHipAmdFileWritePtr()};
-    return readExists && writeExists && m_fastpath_override.value_or(fastpath_env);
+    static bool usesDxg{rocrUsesDxg()};
+    return readExists && writeExists && !usesDxg && m_fastpath_override.value_or(fastpath_env);
 }
 
 void
