@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-torch-trace
-description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute torch and triton tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, or asks about torch.compile and Inductor kernels. Not for CUDA tools, Windows, non-Python applications, or user-authored ROCTx ranges.
+description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute ML API tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, asks about torch.compile and Inductor kernels, or wants to select user-defined ROCTx regions from a traced Python profile. Not for CUDA tools, Windows, compiled non-Python binaries, or starting and stopping a profile at ROCTx ranges.
 ---
 
 # Map GPU kernels to PyTorch operators
@@ -129,12 +129,12 @@ operator list are what distinguish the two.
 ## 6. ROCTx scope
 
 rocprof-compute uses ROCTx internally: torch tracing injects ROCTx regions to
-annotate operators, which is what makes attribution possible. That is the only
-place ROCTx is involved.
+annotate operators, which is what makes attribution possible.
 
-rocprof-compute does not start, stop, or resume collection at a user-authored
-ROCTx range. User-defined ROCTx regions are selected later, at analyze time,
-with `--list-operators user` and `--operator user:PATTERN`. That keeps the
-range and nested GPU work; it does not control when profiling ran.
+rocprof-compute does not start, stop, or resume counter collection at a user-authored
+ROCTx range. User-defined ROCTx regions are instrumented with every
+`--trace-ml-api` run. List or filter them at analyze time with
+`--list-operators user` and `--operator user:PATTERN`. That keeps the region
+and nested GPU work.
 To keep only some kernels or dispatches from an already collected profile,
 use `-k` or `-d`.
