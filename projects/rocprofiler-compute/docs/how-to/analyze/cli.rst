@@ -826,6 +826,8 @@ Analysis database views
 
 The ``compute_kernel_view`` view repeats the workload's total kernel duration in nanoseconds as ``workload_total_duration_ns``. The total covers the kernels that pass the ``--gpu-id`` and ``--dispatch`` filters, and ignores ``--kernel``. A kernel's Percent in the top-stats table is its ``duration_ns_sum`` divided by this total, times 100.
 
+The ``compute_metadata`` table holds one row per database. Its ``schema_version`` column is the schema version of the database (2.6.0 in this release). The row also records the analyze options that change the stored values, as the CLI parsed them: ``normal_unit`` (``--normal-unit``), ``kernel_filter`` (``-k``), ``kernel_iteration_range`` (``--kernel-iteration-range``), ``gpu_id`` (``--gpu-id``) and ``specs_correction`` (``--specs-correction``). ``kernel_filter`` and ``kernel_iteration_range`` hold one list per use of their option, and ``gpu_id`` holds the ``--gpu-id`` values in order. ``normal_unit`` is always stored, at its default ``per_kernel`` when ``--normal-unit`` is not given. The other four are stored as NULL when their option is not given.
+
 Analysis database example
 
 .. note::

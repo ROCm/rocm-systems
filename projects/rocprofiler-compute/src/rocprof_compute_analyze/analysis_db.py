@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import argparse
 import ast
 import csv
 import itertools
@@ -376,6 +377,22 @@ class SourceFrameCollector:
         })
 
 
+def recorded_options(args: argparse.Namespace) -> dict[str, Any]:
+    """The metadata columns for the analyze options that change stored values.
+
+    Each value is the option as the CLI parsed it. normal_unit always has a
+    value, its default when not given; the other four are NULL when the option
+    was not given.
+    """
+    return {
+        "normal_unit": args.normal_unit,
+        "specs_correction": args.specs_correction,
+        "kernel_filter": args.gpu_kernel,
+        "kernel_iteration_range": args.gpu_dispatch_id,
+        "gpu_id": args.gpu_id,
+    }
+
+
 def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
     """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
 
@@ -673,6 +690,7 @@ class db_analysis(OmniAnalyze_Base):
                 compute_version=version["version"],
                 git_version=version["sha"],
                 schema_version=orm.SCHEMA_VERSION,
+                **recorded_options(self.get_args()),
             )
         )
 

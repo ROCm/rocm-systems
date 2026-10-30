@@ -19,7 +19,7 @@ Profiler analysis data.
 ROCm Compute Profiler and ROCm Optiq work together through an analysis database. First, run
 ``rocprof-compute analyze``, which writes ``analysis.db`` into its
 :ref:`run folder <analysis-output-format>`. Then, open the database in ROCm Optiq.
-For more information about the database contents, see the :ref:`analysis database schema <analysis-database>`.
+For more information about the database contents, see the :ref:`analysis database schema <analysis-database>`. The database names its schema version in the ``schema_version`` column of the ``compute_metadata`` table; this release writes schema 2.6.0.
 The database holds every metric the profile collected for each kernel and for the workload, including the roofline plot points and the memory chart values, whatever ``-b`` selects.
 
 Before you begin, review the `ROCm Optiq system requirements`_. Also, make sure that

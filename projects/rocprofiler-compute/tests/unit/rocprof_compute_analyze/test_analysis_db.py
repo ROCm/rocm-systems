@@ -3,6 +3,7 @@
 
 """Unit tests for analysis_db.py static methods."""
 
+import argparse
 import copy
 import csv
 import json
@@ -19,6 +20,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from argparser import omniarg_parser
 from membw_analysis.engine import run_membw_analysis
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts
@@ -36,6 +38,7 @@ from rocprof_compute_analyze.analysis_db import (
     filter_dispatch_frame,
     membw_metric_tables,
     pc_sampling_dispatch_trace,
+    recorded_options,
     report_evaluation_diagnostics,
 )
 from utils import analysis_orm as orm
@@ -236,6 +239,30 @@ def make_source_frame_collector(workload, workload_path="/fake/workload"):
     return SourceFrameCollector(Path(workload_path), workload)
 
 
+def make_analyze_args(**options):
+    """Build the analyze options build_database reads, at their CLI defaults."""
+    defaults = {
+        "normal_unit": "per_kernel",
+        "specs_correction": None,
+        "gpu_kernel": None,
+        "gpu_dispatch_id": None,
+        "gpu_id": None,
+    }
+    return SimpleNamespace(**{**defaults, **options})
+
+
+def parse_analyze_args(argv):
+    """Parse an analyze command line with the real option definitions."""
+    parser = argparse.ArgumentParser(prog="tool")
+    omniarg_parser(
+        parser,
+        Path.cwd(),
+        common.SUPPORTED_ARCHS,
+        {"ver_pretty": "rocprof-compute (unit test)"},
+    )
+    return parser.parse_args(["analyze", *argv])
+
+
 def make_pc_sampling_database_analyzer(
     tool_data_per_workload,
     filter_gpu_ids=(),
@@ -244,10 +271,7 @@ def make_pc_sampling_database_analyzer(
     sys_info_row=None,
 ):
     """Build a database analyzer configured for sampling-only workloads."""
-    analyzer = db_analysis(
-        SimpleNamespace(),
-        {},
-    )
+    analyzer = db_analysis(make_analyze_args(), {})
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([
@@ -303,12 +327,10 @@ def make_counter_backed_database_analyzer(
     workload_path,
     filter_blocks,
     tool_data_records,
+    args=None,
 ):
     """Build a counter-backed analyzer with optional sampling records."""
-    analyzer = db_analysis(
-        SimpleNamespace(),
-        {},
-    )
+    analyzer = db_analysis(args or make_analyze_args(), {})
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
@@ -1588,7 +1610,7 @@ def make_workload_total_analyzer(
 ):
     """Build a counter-backed analyzer holding one unfiltered counter frame."""
     analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
+        make_analyze_args(output_name=None, output_format="database"),
         {},
     )
     analyzer._runs = {
@@ -2333,10 +2355,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     workload = schema.Workload(
         sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
     )
-    analyzer = db_analysis(
-        SimpleNamespace(),
-        {},
-    )
+    analyzer = db_analysis(make_analyze_args(), {})
     analyzer._runs = {workload_path: workload}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._roofline_ceiling_rows_per_workload = {}
@@ -4947,7 +4966,7 @@ def test_pre_processing_halts_on_idle_gpu_before_any_write(
         "GRBM_GUI_ACTIVE": [1000, 0],
     })
     analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"), {}
+        make_analyze_args(output_name=None, output_format="database"), {}
     )
     analyzer._runs = {
         workload_path: schema.Workload(
@@ -5330,3 +5349,126 @@ def test_run_analysis_stores_membw_analysis_only_for_profiled_workloads(
         text("SELECT COUNT(*) FROM compute_membw_node_view")
     ).scalar()
     assert view_row_count == expected_view_row_count
+
+
+def test_schema_version_is_2_6_0():
+    """The schema bump that carries the wave 3 tables and metadata options."""
+    assert orm.SCHEMA_VERSION == "2.6.0"
+
+
+def test_recorded_options_keep_each_value_as_the_cli_parsed_it():
+    """Every recorded option is the parsed CLI value, filters one list per use."""
+    args = parse_analyze_args([
+        "-p",
+        "/fake/first",
+        "-p",
+        "/fake/second",
+        "-k",
+        "1",
+        "2",
+        "-k",
+        "3",
+        "--kernel-iteration-range",
+        "1",
+        "3:5",
+        "--gpu-id",
+        "0",
+        "1",
+        "-n",
+        "per_wave",
+        "--specs-correction",
+        "MALL:1",
+    ])
+
+    assert recorded_options(args) == {
+        "normal_unit": "per_wave",
+        "specs_correction": "MALL:1",
+        "kernel_filter": [[1, 2], [3]],
+        "kernel_iteration_range": [["1", "3:5"]],
+        "gpu_id": ["0", "1"],
+    }
+
+
+def test_recorded_options_keep_a_single_filter_across_several_paths():
+    """A single -k or --kernel-iteration-range is not repeated per -p in args."""
+    args = parse_analyze_args([
+        "-p",
+        "/fake/first",
+        "-p",
+        "/fake/second",
+        "-k",
+        "1",
+        "--kernel-iteration-range",
+        "2:4",
+    ])
+    analyzer = db_analysis(args, {})
+    analyzer._arch_configs = {}
+
+    analyzer.load_options()
+
+    assert args.gpu_kernel == [[1]]
+    assert args.gpu_dispatch_id == [["2:4"]]
+    assert recorded_options(args)["kernel_filter"] == [[1]]
+    assert recorded_options(args)["kernel_iteration_range"] == [["2:4"]]
+
+
+def test_recorded_options_are_null_when_not_given():
+    """An option the user did not pass is NULL; the normal unit keeps its default."""
+    args = parse_analyze_args(["-p", "/fake/workload"])
+
+    assert recorded_options(args) == {
+        "normal_unit": "per_kernel",
+        "specs_correction": None,
+        "kernel_filter": None,
+        "kernel_iteration_range": None,
+        "gpu_id": None,
+    }
+
+
+def test_metadata_row_records_schema_version_and_the_cli_options(db_session, tmp_path):
+    """The one metadata row of a database carries its schema and parsed options."""
+    args = parse_analyze_args([
+        "-p",
+        str(tmp_path),
+        "-k",
+        "1",
+        "--kernel-iteration-range",
+        "2:4",
+        "--gpu-id",
+        "0",
+        "-n",
+        "per_second",
+        "--specs-correction",
+        "MALL:1",
+    ])
+    analyzer = make_counter_backed_database_analyzer(
+        str(tmp_path), ["3"], [], args=args
+    )
+
+    run_analysis_with_existing_database(analyzer)
+
+    row = db_session.query(orm.Metadata).one()
+    assert row.schema_version == "2.6.0"
+    assert row.normal_unit == "per_second"
+    assert row.specs_correction == "MALL:1"
+    assert row.kernel_filter == [[1]]
+    assert row.kernel_iteration_range == [["2:4"]]
+    assert row.gpu_id == ["0"]
+
+
+def test_metadata_row_stores_null_for_options_not_given(db_session, tmp_path):
+    """An analyze run without filters or specs correction stores NULL for them."""
+    args = parse_analyze_args(["-p", str(tmp_path)])
+    analyzer = make_counter_backed_database_analyzer(
+        str(tmp_path), ["3"], [], args=args
+    )
+
+    run_analysis_with_existing_database(analyzer)
+
+    row = db_session.execute(
+        text(
+            "SELECT normal_unit, specs_correction, kernel_filter, "
+            "kernel_iteration_range, gpu_id FROM compute_metadata"
+        )
+    ).one()
+    assert row == ("per_kernel", None, None, None, None)

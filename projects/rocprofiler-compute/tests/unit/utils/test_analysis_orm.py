@@ -1510,3 +1510,202 @@ def test_same_roof_under_two_workloads_allowed(db_session):
     db_session.commit()
 
     assert db_session.query(RooflineCeiling).count() == 2
+
+
+# Columns of the tables and views schema 2.5.0 shipped. Schema 2.6.0 only adds
+# to them, so a query written against 2.5.0 must still run.
+SCHEMA_2_5_0_TABLE_COLUMNS = {
+    "compute_metadata": ["id", "compute_version", "git_version", "schema_version"],
+    "compute_workload": [
+        "workload_id",
+        "name",
+        "sub_name",
+        "sys_info_extdata",
+        "roofline_bench_extdata",
+        "profiling_config_extdata",
+        "memory_chart_layout_extdata",
+    ],
+    "compute_metric_definition": [
+        "metric_uuid",
+        "workload_id",
+        "name",
+        "metric_id",
+        "description",
+        "table_name",
+        "sub_table_name",
+        "unit",
+    ],
+    "compute_kernel_roofline_data": [
+        "roofline_uuid",
+        "kernel_uuid",
+        "total_flops",
+        "l0_cache_data",
+        "l1_cache_data",
+        "l2_cache_data",
+        "hbm_cache_data",
+        "lds_cache_data",
+    ],
+    "compute_dispatch": [
+        "dispatch_uuid",
+        "kernel_uuid",
+        "dispatch_id",
+        "gpu_id",
+        "start_timestamp",
+        "end_timestamp",
+    ],
+    "compute_kernel": ["kernel_uuid", "workload_id", "kernel_name", "short_name"],
+    "compute_code_object_store": [
+        "code_object_uuid",
+        "workload_id",
+        "pid",
+        "code_object_id",
+        "load_base",
+    ],
+    "compute_kernel_symbol": [
+        "kernel_symbol_uuid",
+        "code_object_uuid",
+        "kernel_uuid",
+        "code_object_offset",
+    ],
+    "compute_instruction_type_lookup": ["instruction_type_lookup_uuid", "text"],
+    "compute_instruction_line": [
+        "instruction_uuid",
+        "kernel_symbol_uuid",
+        "instruction_type_uuid",
+        "code_object_offset",
+        "instruction",
+    ],
+    "compute_source_file": [
+        "source_file_uuid",
+        "workload_id",
+        "file_path",
+        "md5_checksum",
+    ],
+    "compute_source_line": [
+        "source_line_uuid",
+        "source_file_uuid",
+        "line_number",
+        "content",
+    ],
+    "compute_instruction_source_line": [
+        "instruction_source_line_uuid",
+        "instruction_uuid",
+        "source_line_uuid",
+        "frame_index",
+    ],
+    "compute_pc_sample_state": [
+        "pc_sample_state_uuid",
+        "instruction_uuid",
+        "source_line_uuid",
+        "total_count",
+        "issue_count",
+        "stall_count",
+        "active_thread_percent",
+        "wave_occupancy_percent",
+        "dispatch_uuid",
+    ],
+    "compute_pc_sample_stall_reason_lookup": [
+        "pc_sample_stall_reason_lookup_uuid",
+        "text",
+    ],
+    "compute_pc_sample_stall_reason": [
+        "pc_sample_stall_reason_uuid",
+        "pc_sample_state_uuid",
+        "pc_sample_stall_reason_lookup_uuid",
+        "count",
+    ],
+    "compute_instruction_sample_lookup": ["instruction_sample_lookup_uuid", "text"],
+    "compute_instruction_sample": [
+        "instruction_sample_uuid",
+        "pc_sample_state_uuid",
+        "instruction_sample_lookup_uuid",
+        "count",
+    ],
+    "compute_kernel_metric_value": [
+        "value_uuid",
+        "metric_uuid",
+        "kernel_uuid",
+        "value_name",
+        "value",
+    ],
+    "compute_workload_metric_value": [
+        "value_uuid",
+        "metric_uuid",
+        "workload_id",
+        "value_name",
+        "value",
+    ],
+}
+
+SCHEMA_2_5_0_VIEW_COLUMNS = {
+    "compute_kernel_view": [
+        "kernel_uuid",
+        "workload_id",
+        "workload_name",
+        "kernel_name",
+        "short_name",
+        "dispatch_count",
+        "duration_ns_sum",
+        "duration_ns_min",
+        "duration_ns_max",
+        "duration_ns_median",
+        "duration_ns_mean",
+    ],
+    "compute_kernel_metric_view": [
+        "workload_id",
+        "workload_name",
+        "kernel_uuid",
+        "kernel_name",
+        "metric_uuid",
+        "metric_name",
+        "metric_id",
+        "description",
+        "table_name",
+        "sub_table_name",
+        "unit",
+        "value_uuid",
+        "value_name",
+        "value",
+    ],
+    "compute_workload_metric_view": [
+        "workload_id",
+        "workload_name",
+        "metric_uuid",
+        "metric_name",
+        "metric_id",
+        "description",
+        "table_name",
+        "sub_table_name",
+        "unit",
+        "value_uuid",
+        "value_name",
+        "value",
+    ],
+    "compute_pc_sampling_summary_view": PC_SAMPLING_SUMMARY_VIEW_COLUMNS,
+    "compute_source_lines_view": [
+        "workload_id",
+        "file_path",
+        "md5_checksum",
+        "line_number",
+        "content",
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    ("relation", "columns"),
+    [
+        *SCHEMA_2_5_0_TABLE_COLUMNS.items(),
+        *SCHEMA_2_5_0_VIEW_COLUMNS.items(),
+    ],
+)
+def test_schema_2_5_0_queries_still_run(db_session, relation, columns):
+    """A select of every 2.5.0 column still runs against the 2.6.0 schema."""
+    Database.create_views()
+    db_session.commit()
+
+    rows = db_session.execute(
+        text(f"SELECT {', '.join(columns)} FROM {relation}")
+    ).fetchall()
+
+    assert rows == []

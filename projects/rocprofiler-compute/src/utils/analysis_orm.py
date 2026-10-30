@@ -55,7 +55,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.5.0"
+SCHEMA_VERSION = "2.6.0"
 
 
 Base = declarative_base()
@@ -741,6 +741,18 @@ class Metadata(Base):
     compute_version = Column(String)
     git_version = Column(String)
     schema_version = Column(String)
+    # The analyze options that change stored values, as the CLI parsed them.
+    # normal_unit always holds a value (its default when not given); the other
+    # four are NULL when the option was not given. kernel_filter and
+    # kernel_iteration_range hold one list per occurrence of the option;
+    # gpu_id holds the --gpu-id values in order. They are typed columns, not a
+    # key/value table: there are five fixed options, one row per database, and
+    # named columns can be selected without a join.
+    normal_unit = Column(String)
+    specs_correction = Column(String)
+    kernel_filter = Column(JSON(none_as_null=True))
+    kernel_iteration_range = Column(JSON(none_as_null=True))
+    gpu_id = Column(JSON(none_as_null=True))
 
 
 def per_kernel_isa_file_key_columns() -> list[Any]:

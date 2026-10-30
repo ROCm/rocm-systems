@@ -176,11 +176,11 @@ class OmniAnalyze_Base:
                 arch_config.dfs_type,
                 args.normal_unit,
             )
-        # Error checking for multiple runs and multiple kernel filters
+        # Error checking for multiple runs and multiple kernel filters. A single
+        # -k is extended to every path per run in pre_processing, not here, so
+        # the parsed options stay as the CLI gave them.
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
-            if len(args.gpu_kernel) == 1:
-                args.gpu_kernel *= len(args.path)
-            else:
+            if len(args.gpu_kernel) != 1:
                 console_error(
                     "analysis",
                     "The number of -k/--kernel doesn't match the number of --dir.",
@@ -353,9 +353,9 @@ class OmniAnalyze_Base:
             if not filter_list:
                 continue
 
-            # Extend single filter to match all paths
+            # Extend single filter to match all paths, without touching args
             if len(filter_list) == 1 and len(args.path) > 1:
-                filter_list *= len(args.path)
+                filter_list = filter_list * len(args.path)
 
             # Apply filters to workloads
             for path_info, filter_value in zip(args.path, filter_list):

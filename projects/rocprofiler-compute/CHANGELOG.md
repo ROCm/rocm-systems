@@ -36,6 +36,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* The analysis database schema is now 2.6.0, recorded in `compute_metadata.schema_version`. The change is additive, so queries that ran on schema 2.5.0 still run.
+  * New tables: `compute_roofline_ceiling` and `compute_workload_benchmark`, and `compute_membw_analysis`, `compute_membw_node`, `compute_membw_supporting_metric` and `compute_membw_guidance_block`. The bullets above and under Resolved issues describe their contents.
+  * New views: `compute_roofline_ceiling_view` and `compute_membw_node_view`.
+  * New column: `compute_workload.total_duration_ns`, which `compute_kernel_view` repeats as `workload_total_duration_ns`.
+  * New `compute_metadata` columns `normal_unit`, `specs_correction`, `kernel_filter`, `kernel_iteration_range` and `gpu_id` record the analyze options that change the stored values, as the CLI parsed them. `normal_unit` always holds a value (`per_kernel` when `-n` is not given). The other four are NULL when their option is not given.
+  * No existing table or view lost a column.
+
 * The analysis database from `--output-format db` and `csv` now stores every metric the profile collected for each kernel that passes the filters and for the workload, including the roofline plot points and the memory chart values. `-b` no longer narrows these outputs, so it only selects the terminal report. Analysis is slower on workloads with many kernels, because every metric is evaluated for each kernel.
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
