@@ -2,6 +2,7 @@
 
 import pytest
 
+from rocm_bootstrap.package_metadata import package_owner
 from rocm_bootstrap.targets import (
     ALL_FAMILIES,
     ALL_SUB_FAMILIES,
@@ -70,24 +71,25 @@ class TestHierarchyStructure:
         for sf in ALL_SUB_FAMILIES:
             assert sf.level == PackagingLevel.SUB_FAMILY
         for t in ALL_TARGETS:
-            b = lookup_bundle(t.name)
+            b = bundle_for_target(t, PackagingLevel.TARGET)
             assert b.level == PackagingLevel.TARGET
 
-    def test_target_bundles_are_singletons(self):
-        """Each target-level bundle has exactly one member."""
+    def test_target_bundles_retain_canonical_members(self):
         for t in ALL_TARGETS:
-            b = lookup_bundle(t.name)
-            assert len(b.members) == 1
-            assert b.members[0] is t
+            b = bundle_for_target(t, PackagingLevel.TARGET)
+            assert t in b.members
+            assert b.key == package_owner(t.name)
+        assert packaging_chain("gfx1250-strict") == packaging_chain("gfx1250")
+        assert lookup_target("gfx1250-strict") is not lookup_target("gfx1250")
 
     def test_all_targets_count(self):
         """Sanity check: we have a reasonable number of targets."""
         # 8 (gfx9.0) + 1 (gfx9.4) + 1 (gfx9.5)
         # + 4 (gfx10.1) + 7 (gfx10.3)
         # + 4 (gfx11.0) + 4 (gfx11.5)
-        # + 2 (gfx12.0) + 2 (gfx12.5)
-        # = 33
-        assert len(ALL_TARGETS) == 33
+        # + 2 (gfx12.0) + 3 (gfx12.5)
+        # = 34
+        assert len(ALL_TARGETS) == 34
 
 
 # ---------------------------------------------------------------------------
@@ -133,14 +135,18 @@ class TestGfxTarget:
 class TestGfxTargetVersion:
     @pytest.mark.parametrize("target", ALL_TARGETS, ids=lambda t: t.name)
     def test_round_trip(self, target: GfxTarget):
-        """parse_gfx_target_version(target.gfx_target_version) == target."""
+        """Numeric lookup retains gfx1250 for 120500."""
         gtv = target.gfx_target_version
-        assert parse_gfx_target_version(gtv) is target
+        expected = (
+            lookup_target("gfx1250") if target.name == "gfx1250-strict" else target
+        )
+        assert parse_gfx_target_version(gtv) is expected
 
     @pytest.mark.parametrize(
         "gtv,expected_name",
         [
             (120001, "gfx1201"),
+            (120500, "gfx1250"),
             (110000, "gfx1100"),
             (90402, "gfx942"),
             (110001, "gfx1101"),  # major=11, minor=0, stepping=1
@@ -160,10 +166,14 @@ class TestGfxTargetVersion:
             parse_gfx_target_version(999999)
 
     @pytest.mark.parametrize("target", ALL_TARGETS, ids=lambda t: t.name)
-    def test_no_gtv_collisions(self, target: GfxTarget):
-        """Every target has a unique gfx_target_version."""
+    def test_expected_numeric_version_multiplicity(self, target: GfxTarget):
+        """Reject unexpected duplicate numeric versions; allow the registered
+        gfx1250/gfx1250-strict pair.
+        """
         gtvs = [t.gfx_target_version for t in ALL_TARGETS]
-        assert gtvs.count(target.gfx_target_version) == 1
+        assert gtvs.count(target.gfx_target_version) == (
+            2 if target.name in {"gfx1250", "gfx1250-strict"} else 1
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +367,7 @@ class TestAllBundles:
     def test_filter_target(self):
         bundles = all_bundles(PackagingLevel.TARGET)
         assert all(b.level == PackagingLevel.TARGET for b in bundles)
-        assert len(bundles) == len(ALL_TARGETS)
+        assert len(bundles) == len({package_owner(t.name) for t in ALL_TARGETS})
 
 
 # ---------------------------------------------------------------------------

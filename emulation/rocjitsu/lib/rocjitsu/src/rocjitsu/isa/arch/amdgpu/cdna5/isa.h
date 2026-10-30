@@ -64,6 +64,7 @@ public:
 
 /// @brief gfx1250 ISA traits.
 struct Isa : amdgpu::RdnaIsaBase {
+  static constexpr uint32_t ASYNC_MMA_WAVE_SIZE = 32; ///< Async MMA adapter wave size.
   using Decoder = rocjitsu::cdna5::Decoder;
   using MachineInst = rocjitsu::cdna5::MachineInst;
   using OperandType = rocjitsu::cdna5::OperandType;
@@ -83,7 +84,6 @@ struct Isa : amdgpu::RdnaIsaBase {
                                                       OperandType opr_type, int ev,
                                                       amdgpu::VgprMsbRole role);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace rocjitsu::cdna5

@@ -74,6 +74,7 @@ set(COMMON_FILES
   common.h
   common.cu
   gin_sdma_allgather_policy.h
+  gin_sdma_broadcast_policy.h
   gin_sdma_devtime.h
   gin_sdma_devtime_host.h
   nccl1_compat.h
@@ -144,27 +145,6 @@ endif()
 add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
-    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
-    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
-    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
-    # in ALL rocshmem symbols (not just those it references directly) so that
-    # -rdynamic exports them for librccl.so to resolve at runtime.
-    target_link_libraries(alltoall_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
-
-    # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
-    # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
-    if (ENABLE_DEVICE_API)
-      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
-    endif()
-    target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_libraries(all_gather_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
-endif()
 if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu PROPERTIES LANGUAGE CXX)
@@ -191,3 +171,29 @@ add_rccl_test(reduce)
 add_rccl_test(scatter)
 add_rccl_test(sendrecv)
 add_rccl_test(all_reduce_bias)
+if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
+    function(_rccl_tests_link_rocshmem_gin_rdc target)
+        target_compile_definitions(${target} PRIVATE ENABLE_ROCSHMEM_GIN NCCL_GIN_ANVIL_SDMA_ENABLE=1)
+        target_compile_options(${target} PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
+        # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
+        # symbols unresolved (--allow-shlib-undefined).  The executable must pull
+        # in ALL rocshmem symbols (not just those it references directly) so that
+        # -rdynamic exports them for librccl.so to resolve at runtime.
+        target_link_libraries(${target} PRIVATE
+            -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
+        target_link_options(${target} PRIVATE -fgpu-rdc --hip-link -rdynamic)
+    endfunction()
+
+    # Binaries launched against a --rocshmem-gin librccl.so must RDC-link
+    # rocSHMEM so GIN host symbols resolve from the executable. These are the
+    # binaries with GIN device paths: alltoall_perf (-D 3/-D 4), and
+    # all_gather_perf / broadcast_perf (Anvil SDMA, -D 3).
+    # all_reduce_perf is omitted: it still does not build under
+    # ENABLE_ROCSHMEM_GIN.
+    foreach(_gin_rdc_bin IN ITEMS
+        all_gather_perf
+        alltoall_perf
+        broadcast_perf)
+      _rccl_tests_link_rocshmem_gin_rdc(${_gin_rdc_bin})
+    endforeach()
+endif()

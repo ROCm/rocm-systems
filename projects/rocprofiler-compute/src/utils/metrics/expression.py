@@ -8,8 +8,6 @@ from __future__ import annotations
 import ast
 import re
 
-import astunparse
-
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
@@ -85,7 +83,7 @@ SUPPORTED_CALL: dict[str, str] = {
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
     "MOD": "to_mod",
-    # Concat operation from the memory chart "active cus"
+    # String concatenation operation
     "CONCAT": "to_concat",
     # Threshold-based clamping for multi-pass profiling noise
     "NOISE_CLAMP": "to_noise_clamp",
@@ -224,7 +222,7 @@ def build_eval_string(equation: str) -> str:
     if not transform_expression(ast_node, equation):
         return ""
 
-    equation_string = astunparse.unparse(ast_node)
+    equation_string = ast.unparse(ast_node)
 
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']
@@ -263,75 +261,6 @@ def update_normal_unit_string(equation: str, normal_unit: str) -> str:
         rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
         str(equation),
     )
-
-
-def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    function_filter = {
-        "MIN": None,
-        "MAX": None,
-        "AVG": None,
-        "ROUND": None,
-        "TO_INT": None,
-        "GB": None,
-        "STD": None,
-        "GFLOP": None,
-        "GOP": None,
-        "OP": None,
-        "CU": None,
-        "NC": None,
-        "UC": None,
-        "CC": None,
-        "RW": None,
-        "GIOP": None,
-        "GFLOPs": None,
-        "CONCAT": None,
-        "MOD": None,
-    }
-
-    built_in_counter = [
-        "LDS_Per_Workgroup",
-        "Grid_Size",
-        "Workgroup_Size",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Scratch_Per_Workitem",
-        "Start_Timestamp",
-        "End_Timestamp",
-    ]
-
-    visited = False
-    counters: list[str] = []
-    if not isinstance(formula, str):
-        return visited, counters
-    try:
-        tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
-            .replace("$denom", "SQ_WAVES")
-            .replace(
-                "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
-            )
-            .replace("$", "")
-        )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                val = (
-                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                )
-                if val.isupper() and val not in function_filter:
-                    counters.append(val)
-                    visited = True
-                if val in built_in_counter:
-                    visited = True
-    except Exception:
-        pass
-
-    return visited, counters
 
 
 def build_metric_value_string(

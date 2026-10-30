@@ -28,6 +28,8 @@ from .records import (
 
 BytesLike = Union[bytes, bytearray, memoryview]
 
+_LIBRARY_BASENAME = "librocprof-trace-decoder.so"
+
 
 class DecoderError(RuntimeError):
     def __init__(self, status: int, message: str | None = None):
@@ -176,6 +178,7 @@ class _Dispatch(ctypes.Structure):
         ("dispatch_pkt_addr", ctypes.c_uint64),
         ("byte_offset", ctypes.c_uint64),
         ("entry_point", _PcInfo),
+        ("dispatch_id", ctypes.c_uint64),
     ]
 
 
@@ -226,20 +229,35 @@ def _find_library(explicit: str | os.PathLike[str] | None = None) -> str:
             candidate = root / name
             if candidate.exists():
                 return str(candidate)
-        for candidate in sorted(root.glob("librocprof-trace-decoder.so.*"), reverse=True):
+        for candidate in sorted(
+            root.glob(f"{_LIBRARY_BASENAME}.*"), key=_library_version_key, reverse=True
+        ):
             if candidate.is_file():
                 return str(candidate)
 
     # Let the platform loader try its normal search path.
-    return "librocprof-trace-decoder.so"
+    return _LIBRARY_BASENAME
 
 
 def _library_names() -> list[str]:
-    names = ["librocprof-trace-decoder.so", "librocprof-trace-decoder.dylib"]
-    version_parts = _PACKAGE_VERSION.split(".")
-    if len(version_parts) >= 2:
-        names.append(f"librocprof-trace-decoder.so.{version_parts[0]}.{version_parts[1]}")
+    parts = _PACKAGE_VERSION.split(".")
+    names = [
+        f"{_LIBRARY_BASENAME}." + ".".join(parts[:count])
+        for count in range(1, min(len(parts), 3) + 1)
+    ]
+    names.append(_LIBRARY_BASENAME)
+    names.append("librocprof-trace-decoder.dylib")
     return names
+
+
+def _library_version_key(path: Path) -> tuple[int, ...]:
+    """Sort key for versioned library names, so .so.0.10 outranks .so.0.9."""
+    version: list[int] = []
+    for piece in path.name[len(_LIBRARY_BASENAME) + 1 :].split("."):
+        if not piece.isdigit():
+            break
+        version.append(int(piece))
+    return tuple(version)
 
 
 def _library_roots() -> list[Path]:
@@ -663,6 +681,7 @@ def _convert_occupancy(c: _Occupancy) -> Occupancy:
         is_ext=(bits >> 8) & 0x1,
         workgroup_id=(bits >> 9) & 0x7F,
         cluster_id=(bits >> 16) & 0x1F,
+        dispatch_id=(bits >> 21) & 0x3FF,
     )
 
 
@@ -777,6 +796,7 @@ def _convert_dispatch(c: _Dispatch) -> Dispatch:
         dispatch_pkt_addr=int(c.dispatch_pkt_addr),
         byte_offset=int(c.byte_offset),
         entry_point=_pc(c.entry_point),
+        dispatch_id=int(c.dispatch_id),
     )
 
 

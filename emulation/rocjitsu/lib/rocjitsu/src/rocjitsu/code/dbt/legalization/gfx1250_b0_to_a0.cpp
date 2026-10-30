@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
@@ -24,6 +25,10 @@
 
 namespace rocjitsu {
 namespace {
+
+// gfx1250 is Wave32-only.
+constexpr uint8_t kGfx1250WaveSize =
+    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
 
 /// @brief Exact instruction names handled by the B0-to-A0 expansion profile.
 ///
@@ -172,7 +177,9 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     const Instruction &inst,
     const std::unordered_map<uint64_t, const Instruction *> &source_instruction_by_offset,
     const Gfx1250VgprMsbAnalysis &vgpr_msb) {
-  RegisterSet pending_defs = InstDefUse(inst, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll).defs;
+  RegisterSet pending_defs =
+      InstDefUse(inst, kGfx1250WaveSize, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll)
+          .defs.ordinary_only();
   uint64_t next_offset = inst.src_loc() + inst.size();
   while (true) {
     const auto next_it = source_instruction_by_offset.find(next_offset);
@@ -197,10 +204,10 @@ inline constexpr std::array<std::string_view, 17> kExactB0ToA0TranslationMnemoni
     if (!canonical_split_scaffolding && !gfx1250_b0_to_a0_requires_wmma_completion_wait(next))
       return false;
 
-    const InstDefUse access(next, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
+    const InstDefUse access(next, kGfx1250WaveSize, &vgpr_msb, UnknownVgprDefPolicy::ExpandAll);
     if (access.uses.intersects(pending_defs))
       return false;
-    pending_defs |= access.defs;
+    pending_defs |= access.defs.ordinary_only();
 
     if (next.size() <= 0)
       return false;

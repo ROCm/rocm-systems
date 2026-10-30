@@ -43,25 +43,20 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA driver memory-location enum shim (host-NUMA)
-//
-// CU_MEM_LOCATION_TYPE_HOST_NUMA is a CUDA driver enumerator (CUmemLocationType,
-// value 3) with no ROCm equivalent: hipMemLocationType has no host-NUMA member,
-// CLR rejects host-NUMA VMM locations, and there is no <cuda.h> on the AMD build
-// (CUDA headers are hipified away), so the enumerator is undeclared in every AMD
-// translation unit. RCCL gates all host-NUMA VMM allocation paths behind
-// `CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200`, so on a ROCm < 7.12 build the
-// only live references are the *ungated* v2.30.4 elastic-buffer-for-GIN comparisons
-// in dev_runtime.cc (host) and nccl_device/impl/gin__funcs.h (device). Define the
-// macro to its genuine CUDA value so those comparisons compile and stay inert: AMD
-// GIN segments are always device-backed (memType == CU_MEM_LOCATION_TYPE_DEVICE),
-// never host-NUMA, so every comparison evaluates false and the host-NUMA branches
-// never execute. A #define is collision-free precisely because no <cuda.h> declares
-// the enumerator on AMD; the guard leaves NVIDIA and ROCm >= 7.12 builds (which
-// provide the real API) untouched.
+// The GIN put-fence compares memType to HOST_NUMA, which dev_runtime.cc writes for host VMM segments.
+// HIP below 7.12 has no such enumerator, so define it here; NVIDIA and ROCm >= 7.12 are untouched.
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(__HIP_PLATFORM_AMD__) && (!defined(ROCM_VERSION) || ROCM_VERSION < 71200)
+// 7.0.2.x backport: alias the real HostNuma (hipify does not map it); the CMake probe tells it from stock 7.0.2.
+// HIP_VERSION because rocmwrap.h is not included yet; unhipified host tests pin ROCM_VERSION < 7.12.
+#if defined(__HIP_PLATFORM_AMD__) && ((HIP_VERSION) < 71260540 || (defined(ROCM_VERSION) && ROCM_VERSION < 71200)) && \
+    !defined(CU_MEM_LOCATION_TYPE_HOST_NUMA)
+#if (HIP_VERSION) >= 70051831 && (HIP_VERSION) < 70060000 && defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+// TODO: drop this alias once the 7.0.2.2 hipify ships the LCOMPILER-2603 mapping.
+#define CU_MEM_LOCATION_TYPE_HOST_NUMA hipMemLocationTypeHostNuma
+#else
 #define CU_MEM_LOCATION_TYPE_HOST_NUMA 3
+#endif
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -123,7 +118,7 @@
 #if defined(NCCL_HIP_PLATFORM)
   // AMD GPUs use 64-wide waves (or 32 in wave32 mode)
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__gfx1100__) || defined(__gfx1101__) || \
-  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1250__)
+  defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
 #define NCCL_WARP_SIZE 32
 #else
 #define NCCL_WARP_SIZE 64
@@ -161,26 +156,26 @@ enum thread_scope {
   thread_scope_system = 3
 };
 
-// Map thread_scope to HIP memory scope
-NCCL_DEVICE_INLINE constexpr int toHipMemoryScope(thread_scope scope) {
+// Map thread_scope to Clang scoped-atomic memory scope
+NCCL_DEVICE_INLINE constexpr int toMemoryScope(thread_scope scope) {
   switch (scope) {
   case thread_scope_thread:
-    return __HIP_MEMORY_SCOPE_SINGLETHREAD;
+    return __MEMORY_SCOPE_SINGLE;
   case thread_scope_block:
-    return __HIP_MEMORY_SCOPE_WORKGROUP;
+    return __MEMORY_SCOPE_WRKGRP;
   case thread_scope_device:
-    return __HIP_MEMORY_SCOPE_AGENT;
+    return __MEMORY_SCOPE_DEVICE;
   case thread_scope_system:
-    return __HIP_MEMORY_SCOPE_SYSTEM;
+    return __MEMORY_SCOPE_SYSTEM;
   default:
-    return __HIP_MEMORY_SCOPE_SYSTEM;
+    return __MEMORY_SCOPE_SYSTEM;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // atomic_ref implementation for HIP
 //
-// Provides cuda::atomic_ref-compatible interface using HIP atomics
+// Provides cuda::atomic_ref-compatible interface using scoped atomics
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T, thread_scope Scope = thread_scope_system>
@@ -191,11 +186,11 @@ struct atomic_ref {
 
   NCCL_DEVICE_INLINE void store(T val, memory_order order = memory_order_seq_cst) const {
     if constexpr (sizeof(T) == 4) {
-      __hip_atomic_store(reinterpret_cast<unsigned int*>(ptr), *reinterpret_cast<unsigned int*>(&val), order,
-                         toHipMemoryScope(Scope));
+      __scoped_atomic_store_n(reinterpret_cast<unsigned int*>(ptr), *reinterpret_cast<unsigned int*>(&val), order,
+                              toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
-      __hip_atomic_store(reinterpret_cast<unsigned long long*>(ptr), *reinterpret_cast<unsigned long long*>(&val),
-                         order, toHipMemoryScope(Scope));
+      __scoped_atomic_store_n(reinterpret_cast<unsigned long long*>(ptr), *reinterpret_cast<unsigned long long*>(&val),
+                              order, toMemoryScope(Scope));
     } else {
       __atomic_store_n(ptr, val, order);
     }
@@ -204,11 +199,11 @@ struct atomic_ref {
   NCCL_DEVICE_INLINE T load(memory_order order = memory_order_seq_cst) const {
     T result;
     if constexpr (sizeof(T) == 4) {
-      unsigned int tmp = __hip_atomic_load(reinterpret_cast<unsigned int*>(ptr), order, toHipMemoryScope(Scope));
+      unsigned int tmp = __scoped_atomic_load_n(reinterpret_cast<unsigned int*>(ptr), order, toMemoryScope(Scope));
       result = *reinterpret_cast<T*>(&tmp);
     } else if constexpr (sizeof(T) == 8) {
       unsigned long long tmp =
-        __hip_atomic_load(reinterpret_cast<unsigned long long*>(ptr), order, toHipMemoryScope(Scope));
+        __scoped_atomic_load_n(reinterpret_cast<unsigned long long*>(ptr), order, toMemoryScope(Scope));
       result = *reinterpret_cast<T*>(&tmp);
     } else {
       result = __atomic_load_n(ptr, order);
@@ -218,9 +213,9 @@ struct atomic_ref {
 
   NCCL_DEVICE_INLINE T fetch_add(T val, memory_order order = memory_order_seq_cst) const {
     if constexpr (sizeof(T) == 4) {
-      return __hip_atomic_fetch_add(ptr, val, order, toHipMemoryScope(Scope));
+      return __scoped_atomic_fetch_add(ptr, val, order, toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
-      return __hip_atomic_fetch_add(ptr, val, order, toHipMemoryScope(Scope));
+      return __scoped_atomic_fetch_add(ptr, val, order, toMemoryScope(Scope));
     } else {
       return __atomic_fetch_add(ptr, val, order);
     }
@@ -229,15 +224,15 @@ struct atomic_ref {
   NCCL_DEVICE_INLINE bool compare_exchange_weak(T& expected, T desired, memory_order success,
                                                 memory_order failure) const {
     if constexpr (sizeof(T) == 4) {
-      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned int*>(ptr),
+      return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned int*>(ptr),
                                                 reinterpret_cast<unsigned int*>(&expected),
-                                                *reinterpret_cast<unsigned int*>(&desired), success, failure,
-                                                toHipMemoryScope(Scope));
+                                                *reinterpret_cast<unsigned int*>(&desired), /*weak=*/true, success,
+                                                failure, toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
-      return __hip_atomic_compare_exchange_weak(reinterpret_cast<unsigned long long*>(ptr),
+      return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned long long*>(ptr),
                                                 reinterpret_cast<unsigned long long*>(&expected),
-                                                *reinterpret_cast<unsigned long long*>(&desired), success, failure,
-                                                toHipMemoryScope(Scope));
+                                                *reinterpret_cast<unsigned long long*>(&desired), /*weak=*/true,
+                                                success, failure, toMemoryScope(Scope));
     } else {
       return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/true, success, failure);
     }
@@ -251,15 +246,15 @@ struct atomic_ref {
   NCCL_DEVICE_INLINE bool compare_exchange_strong(T& expected, T desired, memory_order success,
                                                   memory_order failure) const {
     if constexpr (sizeof(T) == 4) {
-      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned int*>(ptr),
-                                                  reinterpret_cast<unsigned int*>(&expected),
-                                                  *reinterpret_cast<unsigned int*>(&desired), success, failure,
-                                                  toHipMemoryScope(Scope));
+      return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned int*>(ptr),
+                                                reinterpret_cast<unsigned int*>(&expected),
+                                                *reinterpret_cast<unsigned int*>(&desired), /*weak=*/false, success,
+                                                failure, toMemoryScope(Scope));
     } else if constexpr (sizeof(T) == 8) {
-      return __hip_atomic_compare_exchange_strong(reinterpret_cast<unsigned long long*>(ptr),
-                                                  reinterpret_cast<unsigned long long*>(&expected),
-                                                  *reinterpret_cast<unsigned long long*>(&desired), success, failure,
-                                                  toHipMemoryScope(Scope));
+      return __scoped_atomic_compare_exchange_n(reinterpret_cast<unsigned long long*>(ptr),
+                                                reinterpret_cast<unsigned long long*>(&expected),
+                                                *reinterpret_cast<unsigned long long*>(&desired), /*weak=*/false,
+                                                success, failure, toMemoryScope(Scope));
     } else {
       return __atomic_compare_exchange_n(ptr, &expected, desired, /*weak=*/false, success, failure);
     }

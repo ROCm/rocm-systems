@@ -61,10 +61,16 @@ struct ncclIbConnectionMetadata {
   // The receiver side gets in this member, from the sender, the address of the
   // memory to which the receiver writes the CTS messages.
   uint64_t addr;
+  uint64_t remSpeedBufAddr;
+  uint32_t remSpeedBufRkey;
   int ndevs;
   int tc;
   int sl;
   int isP2p;
+  // Receiver to sender: the GDR flush flags to write after each flagged
+  // payload, or 0 when this connection keeps the RDMA read flush.
+  uint32_t flagFlushRkey;
+  uint64_t flagFlushAddr;
 };
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);

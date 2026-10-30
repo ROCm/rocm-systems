@@ -74,11 +74,13 @@
 #include "hipmodule_init_tester.hpp"
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
+#include "buffer_register_symmetric_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
 #include "tile_reduce_tester.hpp"
+#include "tile_nd_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -166,7 +168,9 @@ Tester::Tester(TesterArguments args) : args(args) {
       case WGPutSignalTestType:
       case WGPutSignalNBITestType:
       case QpPutNbiTestType:
+      case QpPutNbiPollTestType:
       case SdmaPutNbiTestType:
+      case SdmaPutNbiPollTestType:
         max_msg_size = args.max_volume_size / args.num_wgs;
         break;
       case PingPongTestType:
@@ -816,6 +820,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Wave Signal Fetch";
       testers.push_back(new SignalingOperationsTester(args));
       break;
+    case SignalAddTestType:
+      test_name = "Signal Add";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalSetTestType:
+      test_name = "Signal Set";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalWaitUntilTestType:
+      test_name = "Signal Wait Until";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
       testers.push_back(new FloodTester(args));
@@ -863,6 +879,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case LibraryInfoTestType:
       test_name = "Library Info Test";
       testers.push_back(new LibraryInfoTester(args));
+      break;
+    case BufferRegisterSymmetricTestType:
+      test_name = "Buffer Register Symmetric Test";
+      testers.push_back(new BufferRegisterSymmetricTester(args));
       break;
     case FenceOrderPutWaveSignalTestType:
       test_name = "Fence PutWaveSignal Ordering";
@@ -936,6 +956,110 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case TilePutWaveRowMajorTestType:
+      test_name = "Tile Put Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveColumnMajorTestType:
+      test_name = "Tile Put Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorTestType:
+      test_name = "Tile Get Wave Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveColumnMajorTestType:
+      test_name = "Tile Get Wave Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorTestType:
+      test_name = "Tile Put WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGColumnMajorTestType:
+      test_name = "Tile Put WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorTestType:
+      test_name = "Tile Get WG Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGColumnMajorTestType:
+      test_name = "Tile Get WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutRowMajorStartCoordTestType:
+      test_name = "Tile Put Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetRowMajorStartCoordTestType:
+      test_name = "Tile Get Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveRowMajorStartCoordTestType:
+      test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorStartCoordTestType:
+      test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorStartCoordTestType:
+      test_name = "Tile Put WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorStartCoordTestType:
+      test_name = "Tile Get WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePut3DTestType:
+      test_name = "Tile Put 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet3DTestType:
+      test_name = "Tile Get 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG3DTestType:
+      test_name = "Tile Put WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG3DTestType:
+      test_name = "Tile Get WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut4DTestType:
+      test_name = "Tile Put 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet4DTestType:
+      test_name = "Tile Get 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG4DTestType:
+      test_name = "Tile Put WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG4DTestType:
+      test_name = "Tile Get WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave3DTestType:
+      test_name = "Tile Put Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave3DTestType:
+      test_name = "Tile Get Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave4DTestType:
+      test_name = "Tile Put Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave4DTestType:
+      test_name = "Tile Get Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
@@ -978,15 +1102,64 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TileReduceTestType:
       test_name = "Tile Reduce";
-      testers.push_back(new TileReduceTester(args));
+      // float, short, int, long × SUM, MAX, MIN
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
-      testers.push_back(new TileReduceTester(args));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
-      testers.push_back(new TileReduceTester(args));
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
+          [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
+      TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(float, ROCSHMEM_MIN,  1.0f, 2.0f, static_cast<int>(v) == 1);
+      TILE_REDUCE_PUSH(short, ROCSHMEM_SUM,  1,    0,    v == static_cast<short>(n_pes));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MAX,  1,    0,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(short, ROCSHMEM_MIN,  1,    2,    v == static_cast<short>(1));
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_SUM,  1,    0,    v == n_pes);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MAX,  1,    0,    v == 1);
+      TILE_REDUCE_PUSH(int,   ROCSHMEM_MIN,  1,    2,    v == 1);
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_SUM,  1L,   0L,   v == static_cast<long>(n_pes));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MAX,  1L,   0L,   v == static_cast<long>(1));
+      TILE_REDUCE_PUSH(long,  ROCSHMEM_MIN,  1L,   2L,   v == static_cast<long>(1));
+#undef TILE_REDUCE_PUSH
       break;
 #if defined(USE_GDA)
     case QpPingPongTestType:
@@ -998,6 +1171,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "QP-Direct Put NBI";
       testers.push_back(new QpPutNbiTester(args));
       break;
+    case QpPutNbiPollTestType:
+      test_name = "QP-Direct Put NBI Poll";
+      testers.push_back(new QpPutNbiTester(args));
+      break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
@@ -1007,6 +1184,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
+      testers.push_back(new SdmaPutNbiTester(args));
+      break;
+    case SdmaPutNbiPollTestType:
+      test_name = "SDMA-Direct Put NBI Poll";
       testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif
@@ -1154,6 +1335,9 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalAddTestType:
+    case SignalSetTestType:
+    case SignalWaitUntilTestType:
     case FloodPutTestType:
     case FloodPutNBITestType:
     case FloodPTestType:
@@ -1165,6 +1349,7 @@ bool Tester::peLaunchesKernel() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case BufferRegisterSymmetricTestType:
     case FenceOrderPutWaveSignalTestType:
     case FenceOrderPutLargeSmallTestType:
     case FenceOrderFanoutTestType:

@@ -2,7 +2,7 @@
 name: amdsmi-review-tests
 description: "Test review subagent. Checks test coverage, quality, missing tests. Use when: test review, coverage check, test quality."
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 5"
+model: "Claude Sonnet 5.5"
 user-invocable: false
 ---
 
@@ -10,12 +10,12 @@ user-invocable: false
 
 You review test coverage, quality, and patterns for the amd-smi project.
 
-**PR bot gate:** the *Systems PR Bot* blocks any PR that changes source
-(`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in `tools/systems_pr_bot/policy.yml`)
-without adding a `test_*` / `*_test.*` file in the same PR (it adds the
-"Not ready to Review" label). Treat a code change with no accompanying test as
-❌ BLOCKING, not just a coverage gap. Doc/config-only changes (no source extension
-touched) are exempt and auto-pass.
+**PR bot warning:** the *Systems PR Bot* warns (it does not block or add a label)
+when a PR edits source (`.c/.cc/.cpp/.h/.hpp/.py/.go/.rs`; full list in
+`tools/systems_pr_bot/policy.yml`) without a `test_*` / `*_test.*` file in the
+same PR. Judge on behavior: a change with behavior to assert and no test is
+❌ BLOCKING. A pure removal of never-compiled code has nothing to assert, so the
+warning is a false positive there. Doc/config-only changes auto-pass.
 
 **Load `amdsmi-python-style-guide` skill when reviewing Python test files.**
 **Load `amdsmi-test-runner` skill for test execution commands and expected outputs.**

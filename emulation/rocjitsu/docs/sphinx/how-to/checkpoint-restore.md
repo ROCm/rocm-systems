@@ -42,7 +42,7 @@ must supply the VM handle, a file path, and the current simulation tick.
 
     ``` c
     rj_vm_t *vm = NULL;
-    rj_status_t status = rj_vm_create("configs/amdgpu_cdna4.json",
+    rj_status_t status = rj_vm_create("configs/gfx950_mi355x.json",
                                        RJ_VM_MODE_DEFAULT, &vm);
 
     uint64_t tick = 0;
@@ -98,8 +98,9 @@ saved checkpoint file. The restored VM is ready to continue execution.
     ```
 
 `rj_vm_restore_checkpoint` returns `ROCJITSU_STATUS_INVALID_FILE` if the
-checkpoint file cannot be opened and `ROCJITSU_STATUS_ERROR` if
-deserialization fails.
+checkpoint file cannot be opened, read, or deserialized, or contains invalid
+execution-thread allocation settings. It returns `ROCJITSU_STATUS_ERROR` if
+the restored configuration does not contain a SoC.
 
 ## Save periodic checkpoints during a long simulation
 
@@ -131,8 +132,8 @@ Both checkpoint functions return `rj_status_t`. The relevant codes are:
 |------|---------|
 | `ROCJITSU_STATUS_SUCCESS` | Operation completed successfully. |
 | `ROCJITSU_STATUS_INVALID_ARGUMENT` | A required argument is `NULL`. |
-| `ROCJITSU_STATUS_INVALID_FILE` | The checkpoint file could not be opened or read (restore only). |
-| `ROCJITSU_STATUS_ERROR` | Serialization, deserialization, or I/O failed. |
+| `ROCJITSU_STATUS_INVALID_FILE` | The checkpoint file could not be opened, read, or deserialized, or contains invalid execution-thread allocation settings (restore only). |
+| `ROCJITSU_STATUS_ERROR` | Serialization or I/O failed during save, or the restored configuration has no SoC. |
 
 
 For the full list of status codes, see

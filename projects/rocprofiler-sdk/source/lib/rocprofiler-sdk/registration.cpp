@@ -30,6 +30,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/static_tl_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -58,6 +59,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration/attach.hpp"
 #include "lib/rocprofiler-sdk/registration/iterate.hpp"
 #include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
@@ -75,6 +77,7 @@
 #include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <fmt/format.h>
@@ -365,6 +368,7 @@ struct client_library
     rocprofiler_tool_configure_attach_result_t* configure_attach_result = nullptr;
     rocprofiler_client_id_t                     internal_client_id      = {};
     rocprofiler_client_id_t                     mutable_client_id       = {};
+    bool                                        configured_by_attach    = false;
 
     std::string_view get_name() const
     {
@@ -410,6 +414,8 @@ emplace_client(Tp&                                 data,
                rocprofiler_configure_func_t        _cfg_func,
                rocprofiler_configure_attach_func_t _attach_func)
 {
+    _attach_func = resolve_attach_for_configure(_cfg_func, _attach_func);
+
     constexpr auto client_id_size = sizeof(rocprofiler_client_id_t);
     uint32_t       _prio          = get_client_offset() + data.size();
     auto           _client_v      = client_library{std::string{_name},
@@ -426,7 +432,7 @@ emplace_client(Tp&                                 data,
     {
         if(itr && *itr == _client_v)
         {
-            ROCP_WARNING << fmt::format(
+            ROCP_INFO << fmt::format(
                 "found matching client library for '{}' :: {}", _name, itr->get_name());
             return itr;
         }
@@ -437,12 +443,27 @@ emplace_client(Tp&                                 data,
     return client;
 }
 
+// set when a ROCP_TOOL_LIBRARIES library could not be loaded. It is never reset: the clients are
+// found once per process (get_clients) and rocprofiler-register requires the same tool library on
+// every attach, so a later attach cannot load a different set of libraries.
+bool&
+get_tool_library_load_failed()
+{
+    static auto _v = false;
+    return _v;
+}
+
 client_library_vec_t
 find_clients()
 {
     auto data = client_library_vec_t{};
 
-    auto is_unique_configure_func = [&data](auto* _cfg_func) {
+    // configure functions of ROCP_TOOL_LIBRARIES libraries which are not used because another
+    // library in the list could not be loaded
+    auto rejected_configure_funcs = std::unordered_set<rocprofiler_configure_func_t>{};
+
+    auto is_unique_configure_func = [&data, &rejected_configure_funcs](auto* _cfg_func) {
+        if(rejected_configure_funcs.count(_cfg_func) > 0) return false;
         for(const auto& itr : data)
         {
             if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
@@ -490,30 +511,8 @@ find_clients()
             return std::vector<std::string>{};
         }
 
-        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
-        auto       val_arr   = std::vector<std::string>{};
-        size_t     pos       = 0;
-        const auto delimiter = std::string_view{":"};
-        auto       token     = std::string{};
-
-        if(val.empty())
-        {
-            // do nothing
-        }
-        else if(val.find(delimiter) == std::string::npos)
-        {
-            val_arr.emplace_back(val);
-        }
-        else
-        {
-            while((pos = val.find(delimiter)) != std::string::npos)
-            {
-                token = val.substr(0, pos);
-                if(!token.empty()) val_arr.emplace_back(token);
-                val.erase(0, pos + delimiter.length());
-            }
-        }
-        return val_arr;
+        return rocprofiler::sdk::parse::tokenize(
+            common::get_env("ROCP_TOOL_LIBRARIES", std::string{}), ":");
     };
 
     auto env = get_env_libs();
@@ -523,6 +522,9 @@ find_clients()
 
     if(!env.empty())
     {
+        // ROCP_TOOL_LIBRARIES libraries which were loaded
+        auto env_handles = std::vector<std::pair<std::string, void*>>{};
+
         for(const auto& itr : env)
         {
             ROCP_INFO << "[ROCP_TOOL_LIBRARIES] searching " << itr << " for rocprofiler_configure";
@@ -555,9 +557,35 @@ find_clients()
 
             if(!handle)
             {
-                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
+                const auto* _err = dlerror();
+                ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr
+                           << "': " << ((_err) ? _err : "unknown error");
+                get_tool_library_load_failed() = true;
+                continue;
             }
 
+            env_handles.emplace_back(itr, handle);
+        }
+
+        // A library which could not be loaded fails the whole list: none of the libraries are
+        // used as tools, but the application continues
+        if(get_tool_library_load_failed())
+        {
+            ROCP_ERROR << "[ROCP_TOOL_LIBRARIES] no tool library in '"
+                       << common::get_env("ROCP_TOOL_LIBRARIES", std::string{})
+                       << "' will be used because at least one could not be loaded";
+
+            for(const auto& [itr, handle] : env_handles)
+            {
+                if(auto _sym = rocprofiler_configure_dlsym(handle))
+                    rejected_configure_funcs.emplace(_sym);
+            }
+            env_handles.clear();
+        }
+
+        for(const auto& [itr, env_handle] : env_handles)
+        {
+            auto* handle = env_handle;
             for(const auto& ditr : data)
             {
                 if(ditr->dlhandle && ditr->dlhandle == handle)
@@ -745,6 +773,12 @@ invoke_client_configure(std::optional<client_library>& itr)
     {
         itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
 
+        // rocprofiler-register sets ROCPROFILER_REGISTER_TOOL_ATTACHED before it propagates the
+        // API tables during an attach, so a client configured while it is set was loaded by that
+        // attach. A client which declined configuration was not attached.
+        itr->configured_by_attach =
+            common::get_env_optional("ROCPROFILER_REGISTER_TOOL_ATTACHED").has_value();
+
         if(itr->configure_attach_func)
         {
             auto* _attach_result =
@@ -760,12 +794,12 @@ invoke_client_configure(std::optional<client_library>& itr)
             }
         }
 
-        ROCP_WARNING << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("initialized tool configure for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
     }
     else
     {
@@ -810,12 +844,12 @@ invoke_client_initializer(std::optional<client_library>& itr)
                 invoke_client_finalizer(_id);
         };
 
-        ROCP_WARNING << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
-                                    itr->get_name(),
-                                    sdk::utility::as_hex(itr->configure_func),
-                                    sdk::utility::as_hex(itr->configure_result),
-                                    sdk::utility::as_hex(itr->configure_result->initialize),
-                                    sdk::utility::as_hex(itr->configure_result->finalize));
+        ROCP_INFO << fmt::format("invoking tool initialize for {} :: {} :: {} :: {} :: {}",
+                                 itr->get_name(),
+                                 sdk::utility::as_hex(itr->configure_func),
+                                 sdk::utility::as_hex(itr->configure_result),
+                                 sdk::utility::as_hex(itr->configure_result->initialize),
+                                 sdk::utility::as_hex(itr->configure_result->finalize));
         context::push_client(itr->internal_client_id.handle);
         itr->configure_result->initialize(client_fini_func, itr->configure_result->tool_data);
         context::pop_client(itr->internal_client_id.handle);
@@ -876,7 +910,8 @@ invoke_client_attaches()
         return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
-    auto ret = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto ret              = ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    auto invoked_attaches = false;
     for(auto& itr : *get_clients())
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_attach)
@@ -891,15 +926,31 @@ invoke_client_attaches()
                                                       _contexts.size(),
                                                       itr->configure_attach_result->tool_data);
 
-            ret = ROCPROFILER_STATUS_SUCCESS;
+            ret              = ROCPROFILER_STATUS_SUCCESS;
+            invoked_attaches = true;
+        }
+        else if(itr && itr->configured_by_attach)
+        {
+            // the attach which loaded this client also invoked its rocprofiler_configure, so the
+            // attach succeeded even though there is no tool_attach. Only the first attach can
+            // claim this.
+            ROCP_WARNING << fmt::format(
+                "rocprofiler-sdk client '{}' does not implement tool_attach. It was configured "
+                "when it was loaded by this attach, but it does not support detach or reattach",
+                itr->get_name());
+
+            itr->configured_by_attach = false;
+            ret                       = ROCPROFILER_STATUS_SUCCESS;
         }
         else if(itr)
         {
-            ROCP_INFO << "Client " << itr->name << " does not have tool_attach function";
+            ROCP_WARNING << fmt::format("rocprofiler-sdk client '{}' does not implement "
+                                        "tool_attach and does not support attach",
+                                        itr->get_name());
         }
     }
 
-    if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
+    if(invoked_attaches && get_attach_status())
         get_attach_status()->is_attached.store(true, std::memory_order_release);
 
     return ret;
@@ -926,7 +977,7 @@ invoke_client_detaches()
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
-            // F23 terminal fail-closed fence: client detach frees the tool's callback
+            // Terminal fail-closed fence: client detach frees the tool's callback
             // and buffer machinery next, so no callback-capable signal-less completion
             // may survive. On timeout this abandons+disables signal-less process-wide
             // (correct here -- the client is going away). No-op with the feature off.
@@ -943,7 +994,10 @@ invoke_client_detaches()
         }
         else if(itr)
         {
-            ROCP_INFO << "Client " << itr->name << " does not have tool_detach function";
+            ROCP_WARNING << fmt::format("rocprofiler-sdk client '{}' does not implement "
+                                        "tool_detach and does not support detach. It remains "
+                                        "active",
+                                        itr->get_name());
         }
     }
 
@@ -970,12 +1024,12 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
-                ROCP_WARNING << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
-                                            itr->get_name(),
-                                            sdk::utility::as_hex(itr->configure_func),
-                                            sdk::utility::as_hex(itr->configure_result),
-                                            sdk::utility::as_hex(itr->configure_result->initialize),
-                                            sdk::utility::as_hex(itr->configure_result->finalize));
+                ROCP_INFO << fmt::format("invoking tool finalize for {} :: {} :: {} :: {} :: {}",
+                                         itr->get_name(),
+                                         sdk::utility::as_hex(itr->configure_func),
+                                         sdk::utility::as_hex(itr->configure_result),
+                                         sdk::utility::as_hex(itr->configure_result->initialize),
+                                         sdk::utility::as_hex(itr->configure_result->finalize));
 
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
@@ -983,7 +1037,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
-                // F23 terminal fail-closed fence: the client finalizer frees the
+                // Terminal fail-closed fence: the client finalizer frees the
                 // tool's callback/buffer machinery next, so no callback-capable
                 // signal-less completion may survive. On timeout abandon+disable
                 // process-wide. No-op with the feature off.
@@ -1081,14 +1135,27 @@ initialize()
 
     ROCP_INFO << "rocprofiler initialize called...";
 
-    if(get_init_status() != 0)
+    if(get_init_status() == 1) return;
+
+    // A re-entrant call from the thread that is currently running the call_once
+    // below must return instead of blocking: invoke_client_configures() dlopens
+    // the tool library, whose constructor can call back into initialize(), and
+    // std::call_once on an in-progress once_flag deadlocks the thread executing
+    // it. Any *other* thread falls through and blocks until initialization
+    // completes, rather than proceeding against a partially initialized SDK.
+    static thread_local bool _initializing = false;
+    if(_initializing)
     {
-        ROCP_INFO << "rocprofiler initialize ignored...";
+        ROCP_INFO << "rocprofiler initialize ignored (re-entrant call during "
+                     "initialization)...";
         return;
     }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        auto _initializing_scope = common::scope_destructor{[]() { _initializing = false; },
+                                                            []() { _initializing = true; }};
+
         ROCP_INFO << "rocprofiler initialize started...";
         // set the "ROCPROFILER_REGISTER_LIBRARY" env var
         set_rocprofiler_register_library();
@@ -1163,15 +1230,17 @@ finalize()
         auto num_clients = get_num_clients();
         set_fini_status(-1);
 
-        // Signal-less teardown steps 1-6, in the one order that strands no
-        // EOP-proven completion. Must precede the sequence below:
-        // queue_controller_fini joins the task group, and correlation_id_finalize
-        // consults the loss ledger this populates. No-op unless signal-less is
-        // active.
+        // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
+        // completion. Must precede the sequence below: queue_controller_fini stops the
+        // completion monitor that runs these completions, and correlation_id_finalize
+        // consults the loss ledger this populates. Its drain waits on the in-flight counter,
+        // so it still works when an application hsa_shut_down stopped the monitor first.
+        // No-op in a process that never brought the dispatch log up.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
         counters::device_counting_service_finalize();
+        SPM::spm_device_counting_service_finalize();
         hsa::queue_controller_fini();
         thread_trace::finalize();
         ompt::finalize_ompt();
@@ -1200,6 +1269,14 @@ finalize()
 rocprofiler_status_t
 attach()
 {
+    if(get_clients() && get_tool_library_load_failed())
+    {
+        ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded "
+                      "when this process first configured rocprofiler-sdk. Restart the process "
+                      "to retry";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
     return invoke_client_attaches();
 }
 
@@ -1294,10 +1371,20 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         return status;
     }
 
-    // init status may be -1 (currently initializing) or 1 (already initialized).
-    // if either case, we want to ignore this function call but if this is
-    if(rocprofiler::registration::get_init_status() != 0)
+    // An already initialized SDK (init_status > 0) took the anytime-initialization
+    // path above, so a non-zero status here means init_status < 0: initialization
+    // is in progress and the configuration window is closed. init_status == 0 is
+    // the normal first forced configure and falls through to the code below.
+    if(auto _init_status = rocprofiler::registration::get_init_status(); _init_status != 0)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
+                        "rocprofiler-sdk initialization is already in progress (init_status="
+                     << _init_status
+                     << "). The configuration window is closed; this commonly occurs when the "
+                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
+                        "called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     // ROCPROFILER_REGISTER_FORCE_LOAD=1 forces rocprofiler-register to load rocprofiler-sdk
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
@@ -1541,11 +1628,26 @@ rocprofiler_set_api_table(const char* name,
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
+        // Enable before profiling resources take clock samples. ROCr keeps this mode enabled
+        // for the process lifetime; API-only tools do not need the additional sampling.
+        if(!rocprofiler::context::get_registered_contexts(
+                rocprofiler::hsa::needs_high_precision_timestamps)
+                .empty())
+            rocprofiler::hsa::enable_high_precision_timestamps(hsa_api_table->amd_ext_);
+
         rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
-        rocprofiler::thread_trace::initialize(hsa_api_table);
+        // An exception must not cross the ROCr C ABI, but a thread-trace failure must not
+        // prevent the rest of the profiler from initializing either.
+        try
+        {
+            rocprofiler::thread_trace::initialize(hsa_api_table);
+        } catch(const std::exception& e)
+        {
+            ROCP_ERROR << "Unable to initialize thread-trace resources: " << e.what();
+        }
         // code_object::initialize must precede queue_controller_init: when the attach library is
         // in use, queue interception is live immediately upon queue_controller_init returning, so
         // any dispatch that arrives before code object hooks are installed would miss load
@@ -1555,6 +1657,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         // Process agent ctx's that were started prior to HSA init
         rocprofiler::counters::device_counting_service_hsa_registration();
+        rocprofiler::SPM::spm_device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
@@ -1593,16 +1696,23 @@ rocprofiler_set_api_table(const char* name,
                 [](const rocprofiler::context::context* ctx) {
                     return ctx->device_thread_trace != nullptr;
                 });
+            auto registered_contexts = rocprofiler::context::get_registered_contexts();
 
             ROCP_INFO << fmt::format(
-                "[queue-interposition] non-inline contexts found: {}. The presence of "
-                "any of these contexts will prevent inline intercept (for the time being).",
+                "[queue-interposition] {} registered contexts, {} of them non-inline. The presence "
+                "of any non-inline context will prevent inline intercept (for the time being).",
+                registered_contexts.size(),
                 non_queue_interposition_contexts.size());
 
             // if non_queue_interposition_contexts is empty, default to inline intercept.
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
             auto enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // With no registered context there is nothing to intercept for. Installing the inline
+            // path starts the completion monitor and its record emitter, and the SDK creates no
+            // internal threads when no tool is active. This overrides the environment variable.
+            if(registered_contexts.empty()) enable_queue_interposition = false;
 
             if(enable_queue_interposition && !device_thread_trace_contexts.empty() &&
                !rocprofiler::hsa::enable_queue_intercept())

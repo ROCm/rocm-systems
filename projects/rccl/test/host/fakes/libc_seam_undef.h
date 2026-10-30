@@ -1,0 +1,50 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Removes the libc seam installed by fakes/libc_seam.h.
+//
+// Include immediately after the #include <UNIT>_CC_PATH so the test body sees
+// real libc again; a test that wants a seamed call can name micro_* directly.
+// No include guard on purpose: the push/pop pair is positional.
+
+#undef nanosleep
+#undef pthread_create
+#undef posix_memalign
+#undef clock_gettime
+#undef atexit
+#undef ioctl
+#undef readlink
+#undef closedir
+#undef readdir
+#undef opendir
+#undef fopen
+#undef open
+#undef access
+#undef gethostname
+#undef free
+#undef calloc
+#undef malloc
+#undef fprintf
+#undef exit
+#undef perror
+#undef fflush
+#undef fwrite
+#undef gai_strerror
+#undef getnameinfo
+#undef freeaddrinfo
+#undef getaddrinfo
+#undef setsockopt
+#undef send
+#undef recv
+#undef fcntl
+#undef accept
+#undef listen
+#undef bind
+#undef connect
+#undef socket
+#undef close
+#undef read
+#undef write

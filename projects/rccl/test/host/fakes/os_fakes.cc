@@ -4,18 +4,33 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Real implementations of the src/os/linux.cc allocation shims. Not stubs: the
-// host-only microtests want working aligned allocation, and posix_memalign is
-// exactly what production uses.
-//
-// The other src/os/*.cc entry points (ncclOsCpuCount, ncclOsSetAffinity,
-// ncclOsTopoGetStrFromSys) are still split between collective_stubs.cc and
-// nccl_stubs.cc. That predates this file and is left alone here rather than
-// widening the change; consolidate them when one of those targets next moves.
+// Fakes for the src/os/linux.cc entry points, shared by the host-only microtest
+// binaries. The allocation shims are real, not stubs: the microtests want
+// working aligned allocation, and posix_memalign is exactly what production uses.
 
+#include "os_fakes.h"
+
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <sched.h>
 
-#include "os.h"
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+// Omitted when RCCL_OS_FAKES_OMIT_ncclSocketClose is defined: the target's own socket model closes sockets.
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("os_fakes", "ncclSocketClose");
+}
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+#endif
 
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
@@ -24,3 +39,161 @@ void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
 }
 
 void ncclOsAlignedFree(void* ptr) { free(ptr); }
+
+ncclResult_t ncclOsInitialize() { return ncclSuccess; }
+uint64_t ncclOsGetPid() { return 4321; }
+ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; }
+char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
+size_t ncclOsGetPageSize() { return 4096; }
+size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no cap
+
+// Controllable (was fail-loud). Records the mask too: :1608 and exit::2403 both call this, and without the
+// recorder either call site could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity)
+// with nothing noticing. Default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
+int g_ncclOsCpuCountValue = 0;
+int g_ncclOsCpuCountCalls = 0;
+std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
+static std::mutex g_affinityMutex;  // proxy.cc's two service threads call these concurrently
+int ncclOsCpuCount(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
+  g_ncclOsCpuCountCalls++;
+  g_ncclOsCpuCountMasks.push_back(affinity);
+  return g_ncclOsCpuCountValue;
+}
+
+// Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
+// ever reads affinitySave back, which is what the AffinitySaveIsNeverRestored test pins.
+// Writes an EMPTY mask by default, so ncclOsCpuCount's 0 default stays consistent and :1609-1610 are skipped.
+std::function<ncclResult_t(ncclAffinity*)> g_ncclOsGetAffinity =
+    [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffinity(affinity); }
+
+// Controllable (was fail-loud). Records the affinity it was handed: without that, exit::2404 forwarding
+// comm->cpuAffinity vs any other mask is unobservable -- a fake that drops an argument untests it.
+// Keeps EVERY mask, not just the latest: :1610 and exit::2404 both call this, so a single "last"
+// slot lets the exit: write mask what :1610 forwarded -- which left a mutant swapping :1610 to
+// affinitySave alive. Tests index the call site they mean.
+ncclResult_t g_ncclOsSetAffinityResult = ncclSuccess;
+std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
+ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
+  std::lock_guard<std::mutex> lock(g_affinityMutex);
+  g_ncclOsSetAffinityMasks.push_back(affinity);
+  return g_ncclOsSetAffinityResult;
+}
+
+// Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
+// Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
+ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+int g_ncclOsTopoGetStrFromSysCalls = 0;
+static ncclResult_t DefaultOsTopoGetStrFromSys(const char*, const char*, char* value, int maxLen) {
+  if (g_ncclOsTopoGetStrFromSysResult != ncclSuccess) return g_ncclOsTopoGetStrFromSysResult;
+  if (value && maxLen > 0) std::snprintf(value, maxLen, "Linux version 6.8.0-microtest");
+  return ncclSuccess;
+}
+std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys =
+    DefaultOsTopoGetStrFromSys;
+ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
+  ++g_ncclOsTopoGetStrFromSysCalls;
+  return g_ncclOsTopoGetStrFromSys(path, fileName, strValue, maxLen);
+}
+
+// fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
+// reports for a GPU's own BDF -- an accelerator class -- rather than an empty string. An empty
+// default is what let the mloPart=0 stamp on non-partitioned GPUs ship green: with it, isGpu is 0
+// for every test that does not set comm->busId, so the fn==0 arm of the fallback was unreachable and
+// InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset could not see the stamp on its own rank.
+// A test that wants the HIP-alias shape (BDF absent from sysfs) must now ask for "" explicitly.
+// Duplicates PCI_ACCELERATOR_CLASS (src/graph/xml.h), which this TU does not include.
+static const char* const kDefaultPciDeviceClass = "0x120000";
+std::string g_pciDeviceClass = kDefaultPciDeviceClass;
+int g_pciDeviceClassCalls = 0;
+std::string g_lastPciDeviceClassBusId;
+ncclResult_t ncclOsGetPciDeviceClassByBusId(const char* busId, char* deviceClass, size_t maxLen) {
+  ++g_pciDeviceClassCalls;
+  g_lastPciDeviceClassBusId = busId ? busId : "";
+  if (deviceClass && maxLen > 0) {
+    std::strncpy(deviceClass, g_pciDeviceClass.c_str(), maxLen - 1);
+    deviceClass[maxLen - 1] = '\0';
+  }
+  return ncclSuccess;
+}
+
+// fillInfo's compute-partition probe. "SPX" is the unpartitioned default, so the class-probe
+// fallback stays on the path it had before partition detection existed.
+static const char* const kDefaultComputePartition = "SPX";
+std::string g_pciComputePartition = kDefaultComputePartition;
+int g_pciComputePartitionCalls = 0;
+std::string g_lastPciComputePartitionBusId;
+ncclResult_t ncclOsGetPciDeviceComputePartitionByBusId(const char* busId, char* partition, size_t maxLen) {
+  ++g_pciComputePartitionCalls;
+  g_lastPciComputePartitionBusId = busId ? busId : "";
+  if (partition && maxLen > 0) {
+    std::strncpy(partition, g_pciComputePartition.c_str(), maxLen - 1);
+    partition[maxLen - 1] = '\0';
+  }
+  return ncclSuccess;
+}
+
+void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
+void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+bool ncclOsCpuIsSet(const ncclAffinity& affinity, int cpu) { return CPU_ISSET(cpu, &affinity); }
+int ncclOsGetCpu() { return 0; }
+uint64_t ncclOsGetTid() { return 0; }
+
+// The real pair makes the mutex/cond process-shared; the counters show each was called.
+int g_ncclOsMutexCondSharedCalls = 0;
+int g_ncclOsMutexCondUnsharedCalls = 0;
+void ncclOsSetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondSharedCalls++;
+  *initialized = 1;
+}
+void ncclOsUnsetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
+  g_ncclOsMutexCondUnsharedCalls++;
+  *initialized = 0;
+}
+
+// Topology discovery's sysfs reads. With no PCI path, ncclTopoGetXmlFromSys keeps whatever attributes a test pre-built.
+ncclResult_t ncclOsGetPciPath(const char*, char** path) {
+  *path = nullptr;
+  return ncclSystemError;
+}
+ncclResult_t ncclOsGetBcmLinks(const char*, int* nlinks, char** peers) {
+  *nlinks = 0;
+  *peers = nullptr;
+  return ncclSuccess;
+}
+ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t maxLen, int* cpuOffset) {
+  *cpuOffset = 0;
+  if (maxLen > 0) {
+    affinityStr[0] = '\0';
+  }
+  return ncclSuccess;
+}
+
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
+void ResetOsFakes() {
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+  g_ncclSocketClose = DefaultSocketClose;
+#endif
+  g_ncclOsCpuCountValue = 0;
+  g_ncclOsCpuCountCalls = 0;
+  g_ncclOsCpuCountMasks.clear();
+  g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
+  g_ncclOsSetAffinityResult = ncclSuccess;
+  g_ncclOsSetAffinityMasks.clear();
+  g_ncclOsMutexCondSharedCalls = 0;
+  g_ncclOsMutexCondUnsharedCalls = 0;
+  g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
+  g_ncclOsTopoGetStrFromSysCalls = 0;
+  g_ncclOsTopoGetStrFromSys = DefaultOsTopoGetStrFromSys;
+  g_pciDeviceClass = kDefaultPciDeviceClass;
+  g_pciDeviceClassCalls = 0;
+  g_lastPciDeviceClassBusId.clear();
+  g_pciComputePartition = kDefaultComputePartition;
+  g_pciComputePartitionCalls = 0;
+  g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
+}

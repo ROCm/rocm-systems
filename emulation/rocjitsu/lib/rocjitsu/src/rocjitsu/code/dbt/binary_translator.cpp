@@ -85,7 +85,7 @@ public:
       return decoder_->decode(inst, emit_error);
 
     std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
-    std::copy_n(inst, kLookaheadWords, canonical.begin());
+    std::ranges::copy_n(inst, kLookaheadWords, canonical.begin());
     constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
     canonical[1] = (canonical[1] & ~kSrc2Mask) | (0x100u << 18);
     return decoder_->decode(canonical.data(), emit_error);
@@ -162,6 +162,21 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
   return true;
 }
 
+/// @brief The guest wave size every kernel in @p translations shares.
+///
+/// @details An object-wide analysis cannot apply each kernel's own wave size, so kernels that
+/// disagree get 64: wave-mask operands keep the pair width they decode with.
+[[nodiscard]] uint8_t common_guest_wavefront_size(std::span<const KdTranslation> translations) {
+  if (translations.empty())
+    return 64;
+  const uint8_t wave_size = translations.front().guest_wavefront_size;
+  for (const KdTranslation &translation : translations) {
+    if (translation.guest_wavefront_size != wave_size)
+      return 64;
+  }
+  return wave_size;
+}
+
 /// @brief Indirect transfers in one scope whose target pair was loaded from the kernarg segment.
 ///
 /// @details A target this object never computed and never stored still has a provenance when it
@@ -228,7 +243,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
     if (state.pointer.empty() && state.loaded.empty())
       return;
-    const InstDefUse def_use(inst);
+    const InstDefUse def_use(inst, kd.guest_wavefront_size);
     // Only the pairs actually being tracked can be killed, and there are a handful at most.
     // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
     // instruction per sweep, which profiled as half of all translation time.
@@ -2203,9 +2218,10 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     }
 
     util::StringDiagnostic decode_error;
-    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result =
-        BasicBlock::build(output, *decoder, host_arch_, decode_error.emitter(), block_leaders,
-                          ExternalEntryPolicy::ExplicitOnly);
+    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
+        output, *decoder, host_arch_,
+        {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
+        decode_error.emitter());
     if (block_result.failed()) {
       append_rewrite_discharge_error(
           result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
@@ -2290,6 +2306,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             registry.find_default_gpu_target(*guest_descriptor))
       effective_guest_target = default_target->public_id;
   }
+  const IsaGpuTargetDescription *effective_guest_gpu_target =
+      registry.find_gpu_target(effective_guest_target);
+  const bool effective_setreg_vgpr_msb_fixup =
+      effective_guest_gpu_target != nullptr &&
+      effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
 
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
@@ -2480,17 +2501,23 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   block_split_points.erase(std::ranges::unique(block_split_points).begin(),
                            block_split_points.end());
 
-  // Phase 2: build a CFG over .text, including recovered indirect targets as
-  // block leaders, then compute one source-reachable block set per descriptor
+  // Phase 2: use shared CFG construction with eager decoding. DBT already
+  // inspects whole text sections; discovering indirect targets during decoding
+  // would repeat large dataflow passes without reducing this workload. Keep
+  // function symbols and stored-pointer targets as split points, not external
+  // entries, so helper bodies retain the facts established by their callers.
+  // Then compute one source-reachable block set per descriptor
   // root. These sets are intentionally kernel-local: if two roots reach the same
   // helper block, Phase 3 emits that helper into both relocated bodies so every
   // branch or call target can be resolved through the current kernel's placement
   // map without borrowing another kernel's return continuation.
   std::vector<std::unique_ptr<BasicBlock>> blocks;
   util::StringDiagnostic decode_error;
-  auto block_result =
-      BasicBlock::build(obj, *decoder, guest_arch_, decode_error.emitter(), block_leaders,
-                        ExternalEntryPolicy::ExplicitOnly, block_split_points);
+  auto block_result = BasicBlock::build_cfg(obj, *decoder, guest_arch_,
+                                            {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+                                             .entries = block_leaders,
+                                             .split_points = block_split_points},
+                                            decode_error.emitter());
   if (block_result.failed()) {
     append_error(result.diagnostics, DiagnosticKind::Legalization, decode_error.message());
     return leave_unchanged();
@@ -2504,7 +2531,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const BlockOffsetIndex block_index = build_block_offset_index(blocks);
   const uint64_t text_vaddr = obj.text_sections().front()->vaddr();
   const auto relocation_pair_analysis =
-      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr);
+      analyze_relocation_pairs(blocks, relocation_function_tables, text_vaddr,
+                               common_guest_wavefront_size(descriptor_translations));
   const auto &relocation_table_dispatches = relocation_pair_analysis.dispatches;
   const auto relocation_table_calls = attach_relocation_table_call_edges(
       block_index, relocation_function_tables, relocation_table_dispatches);
@@ -3292,6 +3320,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     liveness_options.max_free_vgpr =
         static_cast<uint16_t>(isa_properties(host_arch_).max_addressable_vgprs_per_wf);
     liveness_options.arch = guest_arch_;
+    liveness_options.target = effective_guest_target;
     liveness_options.entry_block = scope.entry;
     liveness_options.additional_entry_blocks = scope_adopted_entry_blocks;
     liveness_options.text = text;
@@ -3319,6 +3348,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       liveness_options.live_before_instructions = std::span<const Instruction *const>(
           live_before_instructions.data(), live_before_instructions.size());
     }
+    // Model rules that query liveness without declaring that requirement.
+    if (force_unavailable_liveness_)
+      scope_requires_liveness = false;
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
@@ -3333,8 +3365,23 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), /*exec=*/nullptr,
-                                  liveness_options, scope_analysis_edges);
+      // The EXEC analysis must use the liveness wave size (the LivenessAnalysis
+      // constructor requires a match), so a Wave32 ExecMaskAnalysis cannot be
+      // paired with the B0-to-A0 liveness below while it runs at 64.
+      //
+      // B0-to-A0 liveness keeps the decoded operand widths instead of gfx1250's
+      // Wave32, so that its translated output stays stable; narrowing it is #14566.
+      // This 64 is an output-stability policy, not the width the code executes at.
+      // It is conservative today because the only CDNA5 wave mask decoded as a pair
+      // is the VOPD3 v_dual_cndmask_b32 selector, a source: keeping the SGPR above
+      // it live is safe. CDNA5 wave-mask destinations already decode as one SGPR;
+      // a pair-decoded destination would kill the SGPR above it, which is not safe.
+      constexpr uint8_t kB0ToA0DecodedWidthLivenessWaveSize = 64;
+      const uint8_t liveness_wave_size = is_gfx1250_b0_to_a0_profile
+                                             ? kB0ToA0DecodedWidthLivenessWaveSize
+                                             : scope.translation->guest_wavefront_size;
+      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_wave_size,
+                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
@@ -3353,7 +3400,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           wmma_completion_wait_vgpr_msb = std::make_unique<Gfx1250VgprMsbAnalysis>(
               KernelBlockScope(scope.blocks), scope.entry, scope_analysis_edges, text,
-              scope_adopted_entry_blocks);
+              scope_adopted_entry_blocks, effective_setreg_vgpr_msb_fixup);
         }
         vgpr_msb = wmma_completion_wait_vgpr_msb.get();
       }
@@ -3940,6 +3987,28 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         const bool target_is_relocated_by_construction =
             (object_produces_code_addresses && code_addresses_fully_accounted) ||
             kernarg_supplied_targets().contains(offset);
+        // A join keeps its fallthrough edge, but its SGPR-held resume edge to the waiting side
+        // is unknown. G_FORK also has an unknown SGPR-held target. Liveness can miss registers
+        // needed on those paths, allowing scratch allocation to clobber them.
+        // Refuse before the relocated-by-construction permission can admit the join verbatim.
+        if ((inst.flags() & BRANCH_STACK) != 0) {
+          auto failure = make_kernel_failure(
+              DiagnosticKind::Legalization,
+              "conditional branch stack (fork/join) is not supported for relocated kernel text",
+              offset, std::string(inst.mnemonic()));
+          if (continue_after_failure && !skip_failed_kernels) {
+            append_error(result.diagnostics, failure.kind, failure.message, failure.guest_offset,
+                         failure.mnemonic, failure.required_work);
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
+              continue;
+            }
+          }
+          if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
+            skip_scope = true;
+            break;
+          }
+          return leave_unchanged();
+        }
         if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
             !has_recovered_indirect_call && !has_relocation_table_call &&
             !recovered_indirect_return && !direct_branch_delta &&
@@ -4084,6 +4153,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto expansion =
               semantic_translator_->try_lower_expand(inst, offset, text, liveness, kernel_context);
           if (expansion.status == ExpandStatus::Failed) {
+            if (expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError, expansion.message,
+                           offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed,
                 expansion.message.empty()
@@ -4155,6 +4229,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           auto registered_expansion = semantic_translator_->try_lower_instruction_rewrite(
               inst, offset, text, liveness, kernel_context);
           if (registered_expansion.status == ExpandStatus::Failed) {
+            if (registered_expansion.internal_error) {
+              append_error(result.diagnostics, DiagnosticKind::InternalError,
+                           registered_expansion.message, offset, std::string(inst.mnemonic()));
+              return leave_unchanged();
+            }
             auto failure = make_kernel_failure(
                 DiagnosticKind::ExpandFailed, registered_expansion.message, offset,
                 std::string(inst.mnemonic()), std::move(registered_expansion.required_work));

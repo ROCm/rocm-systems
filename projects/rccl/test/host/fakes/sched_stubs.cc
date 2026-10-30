@@ -6,8 +6,8 @@
 
 // Fail-loud stub floor for the plan schedulers and the deep launch paths a
 // host-only microtest never executes: src/scheduler/symmetric_sched.cc,
-// src/scheduler/allgatherv_sched.cc, src/rma/rma_proxy_launch.cc,
-// src/allocator.cc and src/device/onerank.cu.
+// src/scheduler/allgatherv_sched.cc, src/rma/rma_proxy_launch.cc
+// and src/device/onerank.cu.
 //
 // Reaching one aborts, which is the point: an unfaked path must be loud, not
 // silent. A test that needs one replaces that individual entry with a real fake.
@@ -16,8 +16,15 @@
 #include "device.h"
 #include "info.h"
 #include "nccl.h"
+#include "scheduler.h"
 
 #include "fail_loud.h"
+#include "sched_stubs.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_convertSymTaskDevOp, convertSymTaskDevOp);
+ASSERT_HOOK_MATCHES_PROD(g_ncclLaunchOneRank, ncclLaunchOneRank);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // scheduler/symmetric_sched.cc
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm*, struct ncclTaskColl*,
@@ -32,6 +39,15 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm*,
                                         struct ncclKernelPlan*) {
   FailLoudUnfaked("sched_stubs", "ncclSymmetricTaskScheduler");
 }
+static void DefaultConvertSymTaskDevOp(struct ncclComm*, struct ncclTaskColl*) {
+  FailLoudUnfaked("sched_stubs", "convertSymTaskDevOp");
+}
+
+std::function<void(struct ncclComm*, struct ncclTaskColl*)> g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
+
+void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
+  g_convertSymTaskDevOp(comm, task);
+}
 
 // scheduler/allgatherv_sched.cc
 ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm*, struct ncclKernelPlan*,
@@ -45,12 +61,20 @@ ncclResult_t ncclRmaProxyReclaimPlan(struct ncclComm*, struct ncclKernelPlan*) {
 }
 
 // device/onerank.cu
-ncclResult_t ncclLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull,
-                               ncclDataType_t, hipStream_t, void const*) {
+static ncclResult_t DefaultLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull, ncclDataType_t,
+                                         hipStream_t, hipEvent_t, void const*) {
   FailLoudUnfaked("sched_stubs", "ncclLaunchOneRank");
 }
+std::function<ncclResult_t(void*, void const*, size_t, struct ncclDevRedOpFull, ncclDataType_t, hipStream_t,
+                           hipEvent_t, void const*)>
+    g_ncclLaunchOneRank = DefaultLaunchOneRank;
+ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
+                               ncclDataType_t type, hipStream_t stream, hipEvent_t launchCompletionEvent,
+                               void const* acc) {
+  return g_ncclLaunchOneRank(dst, src, nElts, redOp, type, stream, launchCompletionEvent, acc);
+}
 
-// allocator.cc
-ncclResult_t ncclShadowPoolToHost(struct ncclShadowPool*, void*, void**) {
-  FailLoudUnfaked("sched_stubs", "ncclShadowPoolToHost");
+void ResetSchedStubs() {
+  g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
+  g_ncclLaunchOneRank = DefaultLaunchOneRank;
 }

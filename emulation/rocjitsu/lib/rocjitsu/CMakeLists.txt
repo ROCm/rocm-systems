@@ -30,23 +30,86 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# Vendored DRM/amdgpu UAPI headers. kfd_ioctl.h includes <libdrm/drm.h>, so
-# attach this target privately at the HSA include chokepoints.
-add_library(rocjitsu_drm_headers INTERFACE)
-target_include_directories(
-    rocjitsu_drm_headers
-    SYSTEM
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/external_headers/drm_headers
+option(
+    RJ_BUILD_CONSAN_COMPILER
+    "Build the experimental offline ConSan compiler"
+    OFF
+)
+option(
+    RJ_BUILD_CONSAN_RUNTIME
+    "Build the experimental standalone ConSan HSA plugin"
+    OFF
+)
+option(
+    RJ_BUILD_CONSAN_ANALYZER
+    "Build the standalone offline ConSan analyzer"
+    OFF
 )
 
 add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
+add_subdirectory(src/rocjitsu/code/consan)
 add_subdirectory(src/rocjitsu/isa)
+
+# Private static-analysis composition. It owns no default ISA registry: each
+# final image supplies a model registry (or an execution-capable registry when
+# embedding analyses in the simulator). Reuse the existing compiled objects.
+set(ROCJITSU_ANALYSIS_OBJECT_LIBS
+    rocjitsu_analysis
+    rocjitsu_code_object
+    rocjitsu_isa
+)
+add_library(rocjitsu_analysis_internal STATIC)
+target_include_directories(
+    rocjitsu_analysis_internal
+    PUBLIC
+        $<BUILD_INTERFACE:${ROCJITSU_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${ROCJITSU_SRC_DIR}>
+)
+foreach(_object_lib IN LISTS ROCJITSU_ANALYSIS_OBJECT_LIBS)
+    target_sources(
+        rocjitsu_analysis_internal
+        PRIVATE $<TARGET_OBJECTS:${_object_lib}>
+    )
+endforeach()
+# Generated ISA headers currently include simdojo types. This is a header-only
+# requirement; the simulation library is deliberately absent from the link.
+target_link_libraries(
+    rocjitsu_analysis_internal
+    PUBLIC util Threads::Threads simdojo_headers rocjitsu_kernel_descriptor_scan
+)
+set_target_properties(
+    rocjitsu_analysis_internal
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
+
+# The checker archive owns target policies and stream analysis, and leaves ISA
+# registry selection to its final consumer just like the analysis archive.
+add_library(
+    rocjitsu_waitcheck_internal
+    STATIC
+    $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_state>
+    $<TARGET_OBJECTS:rocjitsu_waitcheck_stream>
+)
+target_link_libraries(
+    rocjitsu_waitcheck_internal
+    PUBLIC rocjitsu_analysis_internal
+)
+set_target_properties(
+    rocjitsu_waitcheck_internal
+    PROPERTIES POSITION_INDEPENDENT_CODE ON
+)
 
 # Private base archive for code-object translation frontends. Architecture
 # models and decoder factories are supplied by each frontend, so this target
 # does not pull in the simulator implementation or the all-ISA registry.
-set(ROCJITSU_DBT_BASE_OBJECT_LIBS rocjitsu_analysis rocjitsu_code rocjitsu_isa)
+set(ROCJITSU_DBT_BASE_OBJECT_LIBS
+    ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
+    rocjitsu_code
+    rocjitsu_executable
+)
 add_library(rocjitsu_dbt_internal STATIC)
 foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
     target_sources(
@@ -54,11 +117,23 @@ foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
         PRIVATE $<TARGET_OBJECTS:${_object_lib}>
     )
 endforeach()
-target_link_libraries(rocjitsu_dbt_internal PUBLIC util Threads::Threads)
+target_link_libraries(
+    rocjitsu_dbt_internal
+    PUBLIC
+        util
+        Threads::Threads
+        rocjitsu_kernel_descriptor_scan
+        rocjitsu_kernarg_extension
+        rocjitsu_amdhsa_metadata
+)
 set_target_properties(
     rocjitsu_dbt_internal
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
+
+if(RJ_BUILD_CONSAN_COMPILER)
+    add_subdirectory(src/rocjitsu/code/patch/consan)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Fixed-profile gfx1250 B0-to-A0 translator. Its default registry contains
@@ -78,11 +153,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         SHARED
         src/rocjitsu/code/dbt/gfx1250_b0_to_a0_library.cpp
     )
+    # The CDNA4-to-CDNA3 lowering downcasts to CDNA4 instruction classes. With
+    # vptr checks, it references their RTTI, which only the CDNA4 model emits.
+    # This library links only the gfx1250 model, so it compiles that source
+    # without vptr checks.
+    rj_vptr_free_sources(
+        _translator_code_objects
+        rocjitsu_code
+        dbt/semantic/cdna4_to_cdna3.cpp
+    )
     foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
-        target_sources(
-            rocjitsu_gfx1250_b0_to_a0
-            PRIVATE $<TARGET_OBJECTS:${_object_lib}>
-        )
+        if(_object_lib STREQUAL "rocjitsu_code")
+            set(_translator_objects ${_translator_code_objects})
+        else()
+            set(_translator_objects $<TARGET_OBJECTS:${_object_lib}>)
+        endif()
+        target_sources(rocjitsu_gfx1250_b0_to_a0 PRIVATE ${_translator_objects})
     endforeach()
     set_target_properties(
         rocjitsu_gfx1250_b0_to_a0
@@ -96,6 +182,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
             rocjitsu_cdna5_model_registry
+            rocjitsu_kernel_descriptor_scan
+            rocjitsu_kernarg_extension
+            rocjitsu_amdhsa_metadata
             simdojo_headers
             util
             Threads::Threads

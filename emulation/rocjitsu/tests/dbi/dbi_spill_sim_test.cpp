@@ -28,32 +28,16 @@
 /// v3 after the probe returns; the spill bridges the scalar through a VGPR via
 /// v_writelane/v_readlane. Read v3 back: it must equal K.
 
-#include "../aql_queue.h"
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
-#include "../halt_snapshot_plugin.h"
-#include "embedded_schema.h"
+#include "dbi_sim.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/vm/amdgpu/command_processor.h"
-#include "rocjitsu/vm/amdgpu/compute_unit.h"
-#include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/soc.h"
-
-#include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -61,9 +45,6 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -85,7 +66,6 @@ using test::kMovV4S9;
 using test::kMovV5V2;
 using test::kMovV6S8;
 
-constexpr uint32_t kWaveSize = 64;
 constexpr uint32_t kSentinel = 7;  // Inline-const value placed into the spilled reg (1..64).
 constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch swapped restores.
 
@@ -108,109 +88,6 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
     throw util::UnimplementedInst("v_add_u32 for target architecture");
   }
 }
-
-// Minimal single-CU simulator (CDNA3, CDNA4, or RDNA4, selected by the constructor
-// arch) that lays out a kernel descriptor + code in GPU memory (AMDHSA ABI), dispatches
-// one workgroup, runs to completion, and reads back a VGPR. Self-contained so this
-// slice does not disturb the file-local VmFixture in amdgpu_vm_test.cpp.
-class DbiSim {
-public:
-  // Defaults to CDNA4/wave64; pass ("cdna3", 64) or ("rdna4", 32) for other arches.
-  explicit DbiSim(std::string_view arch = "cdna4", uint32_t wave_size = kWaveSize)
-      : wave_size_(wave_size) {
-    const std::string json =
-        std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
-        R"("},)"
-        R"("topology":{"root":{"name":"soc","type":"soc","children":[)"
-        R"({"name":"vram","type":"gpu_memory"},)"
-        R"({"name":"xcd0","type":"xcd","children":[)"
-        R"({"name":"l2","type":"l2_cache"},)"
-        R"({"name":"cp","type":"command_processor"},)"
-        R"({"name":"se0","type":"shader_engine","children":[)"
-        R"({"name":"cu[0:1]","type":"compute_unit","config":[)"
-        R"({"key":"num_wf_slots","value":"10"},)"
-        R"({"key":"sgprs_per_wf","value":"800"},)"
-        R"({"key":"vgprs_per_wf","value":"256"},)"
-        R"({"key":"lds_size_kb","value":"64"})"
-        R"(]}]}]}]},"links":[)"
-        R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
-        R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
-        R"(]}})";
-    loaded_ = config::load_config_from_string(json, kEmbeddedSchema);
-    soc_ = loaded_.soc();
-    mem_ = loaded_.memory();
-    engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
-    engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
-    plugin_group_ = test::make_halt_snapshot_group(&snapshot_plugin_);
-    soc_->set_plugin_group(plugin_group_);
-  }
-
-  amdgpu::GpuMemory *mem() { return mem_; }
-
-  uint32_t queue_seq_ = 0;
-  amdgpu::CommandProcessor *cp() { return soc_->xcd(0)->command_processor(); }
-  amdgpu::ComputeUnitCore *cu() { return soc_->xcd(0)->shader_engine(0)->compute_unit(0); }
-
-  // Write a kernel_descriptor_t (entry at code start) followed by `code`, with
-  // the given per-lane scratch size, and return the kernel_object address.
-  uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    using namespace rocr::llvm::amdhsa;
-    kernel_descriptor_t kd{};
-    kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((256 / 8) - 1));
-    // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
-    kd.private_segment_fixed_size = private_bytes;
-
-    mem_->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
-    mem_->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size() * sizeof(uint32_t),
-                     addr + sizeof(kernel_descriptor_t));
-    return addr;
-  }
-
-  // Dispatch `code` (scratch = private_bytes) over one wave and return v[reg]
-  // for every lane after the kernel halts.
-  std::vector<uint32_t> run_and_read_vgpr(const std::vector<uint32_t> &code, uint32_t private_bytes,
-                                          uint32_t reg) {
-    const uint64_t ko = write_kernel(0x1000, code, private_bytes);
-    // Callers reuse one DbiSim for several dispatches, and each AqlQueue leaves
-    // its registration behind on the CP, so every run needs its own queue --
-    // its own id, since two live queues sharing one on a CP are rejected (fan-out
-    // routes shards back by (queue_id, process_id)), and its own ring and pointer
-    // page, since queues sharing a ring would let one doorbell be fetched and
-    // dispatched once per registration.
-    const uint32_t queue_id = ++queue_seq_;
-    const uint64_t ring = test::AqlQueue::DEFAULT_RING_ADDR + uint64_t{queue_id} * 0x100000ULL;
-    test::AqlQueue queue(mem_, cp(), ring, test::AqlQueue::DEFAULT_RING_SIZE, ring + 0x10000,
-                         ring + 0x10008, ring + 0x10010, /*xcd_fanout=*/false,
-                         /*queue_id=*/queue_id);
-    queue.dispatch(ko, /*grid_size_x=*/wave_size_, /*workgroup_size_x=*/wave_size_);
-    engine_->run();
-
-    if (snapshot_plugin_->snapshots().empty())
-      return {};
-    const test::WavefrontSnapshot &wf = snapshot_plugin_->snapshots().front();
-
-    std::vector<uint32_t> out(wave_size_);
-    for (uint32_t lane = 0; lane < wave_size_; ++lane)
-      out[lane] = wf.vgpr(reg, lane);
-    return out;
-  }
-
-private:
-  uint32_t wave_size_ = kWaveSize;
-  config::LoadedConfig loaded_;
-  SoC *soc_ = nullptr;
-  amdgpu::GpuMemory *mem_ = nullptr;
-  std::shared_ptr<ExecutionPluginGroup> plugin_group_;
-  test::HaltSnapshotPlugin *snapshot_plugin_ = nullptr;
-  std::unique_ptr<simdojo::SimulationEngine> engine_;
-};
 
 // VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
 // and RDNA4 (gfx1200, wave32). The arches share one base fixture each; the
@@ -246,6 +123,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
         /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -278,7 +156,8 @@ protected:
   // the descriptor scratch grew (64 -> 68) to hold the per-lane slot.
   void expect_spilled_vgpr_survives() {
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
-    DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
@@ -291,16 +170,20 @@ protected:
   // scratch/VSCRATCH load so v2 stays clobbered (0) and v3 reads 0; then confirm
   // the intact text restores it.
   void expect_missing_restore_clobbers_vgpr() {
-    const std::vector<uint32_t> load = build_scratch_load_dword(2, 64, a_.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(2, 64, a_.arch);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const std::vector<uint32_t> &load = maybe_load.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), load.begin(), load.end());
+    auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue scratch load (the restore) not found";
     for (size_t i = 0; i < load.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
 
-    DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
@@ -308,7 +191,8 @@ protected:
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the restore, v3 should read the clobbered 0";
 
-    DbiSim intact(a_.sim_arch, a_.wave_size);
+    test::DbiSim intact;
+    ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
@@ -374,6 +258,7 @@ protected:
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -405,7 +290,8 @@ protected:
   // made after the probe returns) equals the sentinel on every active lane.
   void expect_spilled_sgpr_survives() {
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
-    DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
@@ -417,17 +303,20 @@ protected:
   // Negative control: nop the epilogue v_readlane (the scalar restore) so s8 stays
   // clobbered (0) and v3 reads 0; then confirm the intact text restores it.
   void expect_missing_readlane_clobbers_sgpr() {
-    const std::array<uint32_t, 2> readlane =
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const std::array<uint32_t, 2> readlane = maybe_readlane.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), readlane.begin(), readlane.end());
+    auto it = std::ranges::search(sabotaged, readlane).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue v_readlane (the scalar restore) not found";
     for (size_t i = 0; i < readlane.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
 
-    DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
@@ -435,7 +324,8 @@ protected:
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the readlane, v3 should read the clobbered 0";
 
-    DbiSim intact(a_.sim_arch, a_.wave_size);
+    test::DbiSim intact;
+    ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
@@ -503,6 +393,7 @@ protected:
     auto target =
         test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
                                      /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
 
@@ -539,10 +430,12 @@ protected:
   void expect_both_sgprs_survive() {
     EXPECT_EQ(patched_scratch_, 72u) << "descriptor scratch must grow to cover both spill slots";
 
-    DbiSim sim_s8(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim_s8;
+    ASSERT_NO_FATAL_FAILURE(sim_s8.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 =
         sim_s8.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
-    DbiSim sim_s9(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim_s9;
+    ASSERT_NO_FATAL_FAILURE(sim_s9.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v4 =
         sim_s9.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/4);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
@@ -603,6 +496,7 @@ protected:
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
 
@@ -636,7 +530,8 @@ protected:
   // and the descriptor scratch grew (64 -> 68) to hold the per-lane slot.
   void expect_spilled_accvgpr_survives() {
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to cover the spill slot";
-    DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
@@ -649,17 +544,20 @@ protected:
   // acc0 stays clobbered (0) and v3 reads 0; then confirm the intact text
   // restores it.
   void expect_missing_restore_clobbers_accvgpr() {
-    const std::vector<uint32_t> load =
-        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, /*acc=*/true);
+    const util::FailureOr<std::vector<uint32_t>> maybe_load =
+        build_scratch_load_dword(/*acc0=*/0, 64, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_load.succeeded());
+    const std::vector<uint32_t> &load = maybe_load.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), load.begin(), load.end());
+    auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue acc scratch load (the restore) not found";
     for (size_t i = 0; i < load.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
 
-    DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
@@ -667,7 +565,8 @@ protected:
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the restore, v3 should read the clobbered 0";
 
-    DbiSim intact(a_.sim_arch, a_.wave_size);
+    test::DbiSim intact;
+    ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
@@ -737,6 +636,7 @@ protected:
          kAccReadV7A0Hi, endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
         /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kMovV2Zero, mov_s8_0, kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc},
         a_.e_flags);
@@ -770,7 +670,8 @@ protected:
   // every active lane, and the descriptor grew to cover three slots (64 -> 76).
   void expect_all_survive() {
     EXPECT_EQ(patched_scratch_, 76u) << "descriptor scratch must cover three spill slots";
-    DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     // One dispatch per reg: the harness snapshots a fresh run each call, which is
     // fine here since the kernel is deterministic.
     for (const auto &[reg, src] :
@@ -787,16 +688,23 @@ protected:
   // acc scratch load) so every value stays clobbered (0); confirm the intact text
   // restores all three.
   void expect_missing_restores_clobber_all() {
-    const std::vector<uint32_t> vload = build_scratch_load_dword(2, 64, a_.arch);
-    const std::array<uint32_t, 2> readlane =
+    const util::FailureOr<std::vector<uint32_t>> maybe_vload =
+        build_scratch_load_dword(2, 64, a_.arch);
+    ASSERT_TRUE(maybe_vload.succeeded());
+    const std::vector<uint32_t> &vload = maybe_vload.value();
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
         build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    const std::vector<uint32_t> aload =
-        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, /*acc=*/true);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const std::array<uint32_t, 2> readlane = maybe_readlane.value();
+    const util::FailureOr<std::vector<uint32_t>> maybe_aload =
+        build_scratch_load_dword(/*acc0=*/0, 72, a_.arch, nullptr, /*acc=*/true);
+    ASSERT_TRUE(maybe_aload.succeeded());
+    const std::vector<uint32_t> &aload = maybe_aload.value();
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
     const auto nop_seq = [&](const auto &seq, const char *what) {
-      auto it = std::search(sabotaged.begin(), sabotaged.end(), seq.begin(), seq.end());
+      auto it = std::ranges::search(sabotaged, seq).begin();
       ASSERT_NE(it, sabotaged.end()) << "restore not found: " << what;
       for (size_t i = 0; i < seq.size(); ++i)
         *(it + static_cast<std::ptrdiff_t>(i)) = nop;
@@ -805,7 +713,8 @@ protected:
     nop_seq(readlane, "SGPR readlane");
     nop_seq(aload, "acc scratch load");
 
-    DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     for (uint32_t reg : {5u, 6u, 7u}) {
       const std::vector<uint32_t> v = broken.run_and_read_vgpr(sabotaged, patched_scratch_, reg);
       ASSERT_EQ(v.size(), a_.wave_size);
@@ -813,7 +722,8 @@ protected:
         EXPECT_EQ(v[lane], 0u) << "lane " << lane << ": v" << reg << " should read the clobbered 0";
     }
 
-    DbiSim intact(a_.sim_arch, a_.wave_size);
+    test::DbiSim intact;
+    ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     for (uint32_t reg : {5u, 6u, 7u}) {
       const std::vector<uint32_t> v =
           intact.run_and_read_vgpr(patched_text_, patched_scratch_, reg);
@@ -881,6 +791,7 @@ protected:
          vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
          vadd(1, kSpilledSgpr, 1), endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
 
@@ -920,12 +831,14 @@ protected:
     // Guard non-triviality: the bridge must be the reused spilled v0, not a dead VGPR. A live
     // VGPR can only become the bridge via the reuse fallback, so an epilogue readlane pulling
     // s8 out of v0 proves the reused-bridge path was taken.
-    const auto readlane = build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    EXPECT_NE(
-        std::search(patched_text_.begin(), patched_text_.end(), readlane.begin(), readlane.end()),
-        patched_text_.end())
+    const util::FailureOr<std::array<uint32_t, 2>> maybe_readlane =
+        build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
+    ASSERT_TRUE(maybe_readlane.succeeded());
+    const auto &readlane = maybe_readlane.value();
+    EXPECT_NE(std::ranges::search(patched_text_, readlane).begin(), patched_text_.end())
         << "SGPR bridge is not the reused spilled v0";
-    DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v0 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/0);
     ASSERT_EQ(v0.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
@@ -1055,6 +968,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {probe_clobber_exec, setpc}, a_.base.e_flags);
 
@@ -1087,7 +1002,8 @@ protected:
   // EXEC survives: the relocated v_mov writes K to the active low lanes, leaving
   // the inactive high lanes at their prior 0.
   void expect_preserved_exec_survives() {
-    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v3 = sim.run_and_read_vgpr(patched_text_, /*private_bytes=*/0,
                                                            /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.base.wave_size) << "kernel did not run to completion";
@@ -1107,7 +1023,8 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     sabotaged[restore] = build_s_nop(0, a_.base.arch);
 
-    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, /*private_bytes=*/0, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.base.wave_size);
@@ -1116,7 +1033,8 @@ protected:
           << "lane " << lane << ": without the EXEC restore, no lane should be written";
 
     // Revert: the intact restore recovers the low-lane writes.
-    DbiSim intact(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim intact;
+    ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, /*private_bytes=*/0, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.base.wave_size);
@@ -1193,6 +1111,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
                                              a_.base.e_flags);
 
@@ -1225,7 +1145,8 @@ protected:
   // Full-mask spilling saves/restores v2 on all lanes, so v3 (a full-mask copy made
   // after the probe) reads the sentinel everywhere despite the widening probe.
   void expect_full_mask_spill_survives() {
-    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.base.wave_size) << "kernel did not run to completion";
@@ -1238,12 +1159,15 @@ protected:
   // Negative control: nop the store-side EXEC=-1 toggle, so the store runs under the
   // anchor mask and v2's inactive lanes are never saved -- they lose the sentinel.
   void expect_missing_store_full_mask_loses_high_lanes() {
-    const std::vector<uint32_t> store = build_scratch_store_dword(2, 64, a_.base.arch);
+    const util::FailureOr<std::vector<uint32_t>> maybe_store =
+        build_scratch_store_dword(2, 64, a_.base.arch);
+    ASSERT_TRUE(maybe_store.succeeded());
+    const std::vector<uint32_t> &store = maybe_store.value();
     const uint32_t toggle = build_s_mov_b64(scalar_operand_exec_lo(a_.base.arch),
                                             scalar_inline_neg_one(a_.base.arch), a_.base.arch);
     // The in-flight-load drain now sits at the envelope top, not in the spill
     // prologue, so the store's immediately preceding word is the EXEC=-1 toggle.
-    auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
+    auto it = std::ranges::search(patched_text_, store).begin();
     ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
     const size_t store_idx = static_cast<size_t>(it - patched_text_.begin());
     ASSERT_GE(store_idx, 1u);
@@ -1254,7 +1178,8 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     sabotaged[toggle_idx] = build_s_nop(0, a_.base.arch);
 
-    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v3 =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.base.wave_size);
@@ -1336,6 +1261,8 @@ protected:
 
     auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
                                                /*granulated_sgpr_count=*/3, a_.base.e_flags);
+
+    target = test::with_descriptor_metadata(target, a_.base.arch);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
     ASSERT_TRUE(obj.is_valid());
@@ -1365,7 +1292,8 @@ protected:
   // The probe ran under the anchor mask: v5 holds the marker only on the lanes that
   // were active at the anchor; the rest keep their prior 0.
   void expect_probe_runs_under_anchor_mask() {
-    DbiSim sim(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v5 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/5);
     ASSERT_EQ(v5.size(), a_.base.wave_size) << "kernel did not run to completion";
@@ -1383,7 +1311,8 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     sabotaged[restore] = build_s_nop(0, a_.base.arch);
 
-    DbiSim broken(a_.base.sim_arch, a_.base.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.base.sim_arch, a_.base.wave_size));
     const std::vector<uint32_t> v5 =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/5);
     ASSERT_EQ(v5.size(), a_.base.wave_size);

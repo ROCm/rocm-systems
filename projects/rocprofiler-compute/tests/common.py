@@ -1,24 +1,31 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import copy
+import gzip
 import inspect
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import uuid
 from pathlib import Path
 from threading import Thread
+from typing import Set
 from unittest.mock import Mock
+
+import config
+from memory_chart.loader import Layouts, PanelConfigs
+from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
 SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
-
-# Imported after sys.path is extended, since it lives under src/.
-from utils import csv_compression  # noqa: E402
 
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
@@ -33,6 +40,30 @@ SUPPORTED_ARCHS = {
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
+
+
+def memory_chart_archs() -> list[str]:
+    """Analysis-config archs that have a memory chart panel."""
+    return sorted(
+        path.name
+        for path in config.analysis_configs_dir.iterdir()
+        if path.is_dir() and PanelConfigs.for_arch(path.name)
+    )
+
+
+def memory_chart_layout_data(arch: str) -> dict:
+    """The parsed layout file of an arch's memory chart."""
+    return json.loads(Layouts.for_arch(arch).path.read_text(encoding="utf-8"))
+
+
+def with_metric_change(data: dict, metric: str, **fields) -> dict:
+    """A copy of layout *data* with *fields* set on every item and arrow of *metric*."""
+    data = copy.deepcopy(data)
+    items = [item for block in data["blocks"] for item in block.get("content", [])]
+    for entry in (*items, *data["arrows"]):
+        if entry["metric"] == metric:
+            entry.update(fields)
+    return data
 
 
 def check_resource_allocation():
@@ -58,13 +89,28 @@ def check_resource_allocation():
 def check_file_pattern(pattern, file_path):
     """Check if the given pattern exists in the file.
 
-    Opened through the compression boundary so a compressed results file is
-    searched by its contents, the same as a plain one.
+    Callers pass compressed counter artifacts as well as plain files such as
+    sysinfo.csv and profiling_config.yaml, so the reader follows the name.
     """
-    content = ""
-    with csv_compression.open_csv_read(file_path) as f:
+    if str(file_path).endswith(".gz"):
+        opener = gzip.open(file_path, "rt", encoding="utf-8")
+    else:
+        opener = open(file_path, encoding="utf-8")
+    with opener as f:
         content = f.read()
     return len(re.findall(pattern, content)) != 0
+
+
+def write_gzip_csv(path, text):
+    """Write text to a gzip CSV through the interface the source uses."""
+    with csv_compression.open_gzip_csv_write(path) as f:
+        f.write(text)
+    return Path(path)
+
+
+def write_result_csv(workload_dir, text, pass_index=0):
+    """Write a compressed rocpd counter artifact into workload_dir."""
+    return write_gzip_csv(workload_dir / f"results_pmc_perf_{pass_index}.csv.gz", text)
 
 
 def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
@@ -96,6 +142,12 @@ def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
     return output_dir
 
 
+def unique_output_param_id(prefix):
+    """Return a get_output_dir param_id that no other pytest worker or run uses."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
+
+
 def clean_output_dir(cleanup, output_dir):
     """Remove output directory generated from rocprofiler-compute execution
 
@@ -121,11 +173,6 @@ def read_binary_file_tree(root: Path) -> dict[Path, bytes]:
         for file_path in root.rglob("*")
         if file_path.is_file()
     }
-
-
-def strip_ansi(s: str) -> str:
-    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
-    return ansi_escape.sub("", s)
 
 
 def _tee(pipe, sink, out) -> None:
@@ -198,3 +245,16 @@ def patch_console(monkeypatch, module, *names, **overrides):
         monkeypatch.setattr(f"{module}.console_{name}", mock)
         mocks[name] = mock
     return mocks
+
+
+_KERNEL_SUFFIX_RE = re.compile(r"(?:\s*(?:\[clone \.[^\]]+\]|\.kd))+\s*$")
+
+
+def normalize_kernel_name(name: str) -> str:
+    """Return ``name`` without trailing ``.kd`` or ``[clone ...]`` suffixes."""
+    return _KERNEL_SUFFIX_RE.sub("", name).strip()
+
+
+def normalize_kernel_names(names: Set[str]) -> Set[str]:
+    """Return the normalized form of each name in ``names``."""
+    return {normalize_kernel_name(name) for name in names}

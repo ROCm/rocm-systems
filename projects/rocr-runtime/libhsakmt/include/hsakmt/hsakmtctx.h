@@ -511,19 +511,6 @@ hsaKmtAvailableMemoryCtx(
     );
 
 /**
-  Returns the KFD topology-first GPU used as the default host/GTT anchor
-  (libhsakmt gpu_mem[0] / first_gpu_mem).
-*/
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtGetDefaultHostGpuCtx(
-    HsaKFDContext     *ctx,                //IN
-    HSAuint32         *NodeId,             //OUT
-    HSAuint32         *GpuId               //OUT
-    );
-
-/**
   Registers with KFD a memory buffer that may be accessed by the GPU
 */
 
@@ -613,6 +600,18 @@ hsaKmtExportDMABufHandleCtx(
     HSAuint64         MemorySizeInBytes,  //IN
     int               *DMABufFd,          //OUT
     HSAuint64         *Offset             //OUT
+    );
+
+/**
+ Query the placement and size of an allocation from its DMA-BUF fd.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfoCtx(
+    HsaKFDContext     *ctx,               //IN
+    int               DMABufFd,           //IN
+    HsaDmaBufInfo     *Info               //OUT
     );
 
 /**

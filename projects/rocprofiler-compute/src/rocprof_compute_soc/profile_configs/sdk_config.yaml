@@ -11522,7 +11522,7 @@ rocprofiler-sdk:
       - gfx950
       block: TCP
       event: 40
-  - name: TCP_UTCL1_STALL_LFIFO_NO_RES
+  - name: TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES
     description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident
     properties: []
     definitions:
@@ -11637,13 +11637,13 @@ rocprofiler-sdk:
     - architectures:
       - gfx950
       expression: reduce(TCP_UTCL1_LFIFO_FULL,sum)
-  - name: TCP_UTCL1_STALL_LFIFO_NO_RES_sum
+  - name: TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum
     description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident. Sum over TCP instances.
     properties: []
     definitions:
     - architectures:
       - gfx950
-      expression: reduce(TCP_UTCL1_STALL_LFIFO_NO_RES,sum)
+      expression: reduce(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES,sum)
   - name: TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum
     description: Total utcl1 stalls due to utcl2_req out of credits. Sum over TCP instances.
     properties: []
@@ -12119,6 +12119,9 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
+    - architectures:
+      - gfx1250
+      expression: GL2C_WRITE_SECTORS_sum*32/1024
   - name: WaveDepWait
     description: 'Unit: percent'
     properties: []
@@ -12171,6 +12174,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx1250
       expression: WRITE_SIZE
   - name: WriteUnitStalled
     description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
@@ -12316,19 +12320,6 @@ rocprofiler-sdk:
       - gfx950
       - gfx1250
       expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
-  - name: SQ_INST_LEVEL_LDS_ACCUM_sum
-    description: Accumulate SQ_INST_LEVEL_LDS
-    properties: []
-    definitions:
-    - architectures:
-      - gfx908
-      - gfx90a
-      - gfx940
-      - gfx941
-      - gfx942
-      - gfx950
-      - gfx1250
-      expression: reduce(SQ_INST_LEVEL_LDS_ACCUM, sum)
   - name: SQ_INST_LEVEL_SMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_SMEM
     properties: []
@@ -12405,13 +12396,13 @@ rocprofiler-sdk:
     - architectures:
       - gfx1250
       expression: accumulate(SQC_DCACHE_TC_INFLIGHT_LEVEL, HIGH_RES)
-  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM_sum
-    description: Accumulated SQG_LEVEL_WGP_ACTIVE (sum across SQG instances).
+  - name: SQG_LEVEL_WGP_ACTIVE_ACCUM
+    description: Accumulated SQG_LEVEL_WGP_ACTIVE.
     properties: []
     definitions:
     - architectures:
       - gfx1250
-      expression: reduce(accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES),sum)
+      expression: accumulate(SQG_LEVEL_WGP_ACTIVE, HIGH_RES)
   - name: TCC_PROBE_EVICT_sum
     description: Number of evictions/invalidations due to probes. Not windowable. Sum over TCC instances.
     properties: []

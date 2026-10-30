@@ -7,22 +7,24 @@
 Analyze mode
 ************
 
-ROCm Compute Profiler offers several ways to interact with the metrics it generates from
-profiling. Your level of familiarity with the profiled application, computing
-environment, and experience with ROCm Compute Profiler should inform the analysis method you
-choose.
+ROCm Compute Profiler offers two ways to interact with the metrics it generates
+from profiling: the built-in command line analyzer, which prints the analysis
+report to the terminal, and ROCm Optiq, a graphical application that explores
+the analysis databases the tool writes. Your level of familiarity with the
+profiled application, computing environment, and experience with ROCm Compute
+Profiler should inform the analysis method you choose.
 
 .. note::
 
-   Analyze mode requires Python 3.9 or newer; its dependencies (numpy, pandas,
-   dash, textual) drop support for older versions. Profile mode runs on Python
-   3.8+. See the Python version support table in :doc:`/install/quickstart`.
+   Analyze mode needs a Python version and a set of third-party packages that
+   profile mode does not. Install them in their own virtual environment. See
+   the Python version support table in :doc:`/install/quickstart`.
 
 .. note::
 
-   Analyze mode concatenates the per-pass ``results_*.csv`` files written by
-   ``rocpd`` profiling into a unified ``pmc_perf.csv`` for analysis. If the
-   workload directory already contains a ``pmc_perf.csv``, that file is used
+   Analyze mode concatenates the per-pass ``results_*.csv.gz`` files written by
+   ``rocpd`` profiling into a unified ``pmc_perf.csv.gz`` for analysis. If the
+   workload directory already contains a ``pmc_perf.csv.gz``, that file is used
    as-is.
 
 .. note::
@@ -35,8 +37,6 @@ See the following sections to explore ROCm Compute Profiler's analysis and visua
 options.
 
 * :doc:`cli`
-* :doc:`standalone-gui` (experimental feature)
-* :doc:`tui` (experimental feature)
 * :doc:`optiq` (graphical application)
 
 .. note::

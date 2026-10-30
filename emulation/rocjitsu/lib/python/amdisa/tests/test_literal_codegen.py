@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from amdisa.codegen._generator import CodeGenerator
+from amdisa.codegen._generator import CodeGenerator, _Literal32Widening
 from amdisa.codegen.execute.simd_codegen import (
     SIMD_VOP2_TERNARY,
     simd_ternary_literal_operand_name,
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -166,7 +166,8 @@ def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
     reader_end = source.index('\n}', reader_start)
     reader = source[reader_start:reader_end]
     assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(operand, lane)' in reader
+    assert 'read_lane_pair32(' in reader
+    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
     assert 'return {pair.lo, pair.hi};' in reader
 
 
@@ -272,12 +273,35 @@ def test_f64_simm32_literal_operand_uses_extension_word_as_double_high_bits():
     ) == stmt
 
 
+def test_128bit_packed_f64_widens_simm32_but_packed_u64_does_not():
+    packed_f64 = _operand(
+        'src0', 'OPR_SRC', size=128, data_format_name='FMT_NUM_PK2_F64'
+    )
+    packed_u64 = _operand(
+        'src0', 'OPR_SRC', size=128, data_format_name='FMT_NUM_PK2_U64'
+    )
+
+    assert (
+        CodeGenerator._literal_operand_simm32_widening(
+            packed_f64, 'OPR_SIMM32', 'cdna5', 'V_PK_ADD_F64', 'ENC_VOP3P'
+        )
+        is _Literal32Widening.F64_HIGH_BITS
+    )
+    assert (
+        CodeGenerator._literal_operand_simm32_widening(
+            packed_u64, 'OPR_SIMM32', 'cdna5', 'V_PK_ADD_U64', 'ENC_VOP3P'
+        )
+        is None
+    )
+
+
 def test_64bit_simm32_literal_operand_requires_data_format():
     with pytest.raises(
         ValueError,
         match=(
             "architecture 'rdna4', instruction 'V_FMAC_F64', encoding 'ENC_VOP2': "
-            "64-bit SIMM32 input operand 'src0' has unsupported data format '<missing>'"
+            "SIMM32 input operand 'src0' has no widening policy for size 64 and "
+            "data format '<missing>'"
         ),
     ):
         CodeGenerator._literal_operand_fixup_stmt(
@@ -400,7 +424,8 @@ def test_64bit_simm32_literal_operand_rejects_unrecognized_data_format():
         ValueError,
         match=(
             "architecture 'cdna4', instruction 'S_FAKE_I64', encoding 'ENC_SOP2': "
-            "64-bit SIMM32 input operand 'ssrc0' has unsupported data format 'FMT_NUM_X64'"
+            "SIMM32 input operand 'ssrc0' has no widening policy for size 64 and "
+            "data format 'FMT_NUM_X64'"
         ),
     ):
         CodeGenerator._literal_operand_fixup_stmt(
@@ -787,6 +812,155 @@ def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
 
     assert body == '  wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);'
     assert 'int64_t' not in body
+
+
+def _cdna4_codegen() -> CodeGenerator:
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    return codegen
+
+
+@pytest.mark.parametrize(
+    'arch_name,profile,pc_mask,has_rel32_tag',
+    [
+        ('cdna4', Cdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('rdna4', Rdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('cdna5', Cdna5Profile, '0x01FFFFFFFFFFFFFFULL', False),
+    ],
+)
+@pytest.mark.parametrize('operation', ['scalar_setpc', 'scalar_swappc'])
+def test_scalar_pc_target_decoding_preserves_raw_address_width(
+    arch_name, profile, pc_mask, has_rel32_tag, operation
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        profile=profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [_operand('ssrc0', 'OPR_SSRC', size=64, order=1)]
+    if operation == 'scalar_swappc':
+        operands.insert(
+            0,
+            _operand(
+                'sdst',
+                'OPR_SDST',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=0,
+            ),
+        )
+    name = 'S_SETPC_B64' if operation == 'scalar_setpc' else 'S_SWAPPC_B64'
+    inst = Instruction(name, 'ENC_SOP1', opcode=0, operands=operands)
+
+    body = codegen._gen_execute_body(
+        inst, InstructionSemantics(name, operation), 'ENC_SOP1'
+    )
+
+    assert f'constexpr uint64_t kPcAddressMask = {pc_mask};' in body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in body
+    assert ('if (encoded >> 32 == 0x1FFFFu' in body) == has_rel32_tag
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in body
+    assert 'target |= ~kPcAddressMask' not in body
+    assert body.count('wf.pc = target - size_;') == 1
+    if operation == 'scalar_swappc':
+        assert body.index('wf.pc = target - size_;') < body.index(
+            'write_scalar64(sdst, next_pc)'
+        )
+
+
+def test_cbranch_fork_generated_execute_reads_mask_and_target_operands():
+    codegen = _cdna4_codegen()
+    i_fork = Instruction(
+        'S_CBRANCH_I_FORK',
+        'ENC_SOPK',
+        opcode=16,
+        operands=[
+            _operand('sdst', 'OPR_SDST', size=64, order=1),
+            _operand('simm16', 'OPR_LABEL', size=16, order=2),
+        ],
+    )
+    g_fork = Instruction(
+        'S_CBRANCH_G_FORK',
+        'ENC_SOP2',
+        opcode=41,
+        operands=[
+            _operand('ssrc0', 'OPR_SSRC_NOLIT', size=64, order=1),
+            _operand('ssrc1', 'OPR_SSRC_NOLIT', size=64, order=2),
+        ],
+    )
+
+    i_body = codegen._gen_execute_body(
+        i_fork,
+        InstructionSemantics('S_CBRANCH_I_FORK', 'cbranch_fork', operation='direct'),
+        'ENC_SOPK',
+    )
+    g_body = codegen._gen_execute_body(
+        g_fork,
+        InstructionSemantics('S_CBRANCH_G_FORK', 'cbranch_fork', operation='indirect'),
+        'ENC_SOP2',
+    )
+
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(sdst);' in i_body
+    assert 'static_cast<int16_t>(simm16.encoding_value_)' in i_body
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);' in g_body
+    assert 'encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);' in g_body
+    assert 'constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;' in g_body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in g_body
+    assert 'if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)' in g_body
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in g_body
+    assert 'target |= ~kPcAddressMask' not in g_body
+    assert g_body.count('wf.pc =') == 1
+    for body in (i_body, g_body):
+        assert body.endswith(
+            '  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;'
+        )
+
+
+def test_cbranch_join_generated_execute_reads_saved_csp_from_ssrc0():
+    codegen = _cdna4_codegen()
+    join = Instruction(
+        'S_CBRANCH_JOIN',
+        'ENC_SOP1',
+        opcode=46,
+        operands=[
+            _operand('ssrc0', 'OPR_SREG', order=1),
+            _operand(
+                'sdst_exec',
+                'OPR_SDST_EXEC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=2,
+                fieldless=True,
+            ),
+            _operand(
+                'pc',
+                'OPR_PC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=3,
+                fieldless=True,
+            ),
+        ],
+    )
+
+    body = codegen._gen_execute_body(
+        join, InstructionSemantics('S_CBRANCH_JOIN', 'cbranch_join'), 'ENC_SOP1'
+    )
+
+    assert body == (
+        '  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+        '  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;'
+    )
 
 
 def test_literal_fma_can_share_with_matching_operand_layouts_only():

@@ -241,7 +241,7 @@ __device__ void IPCContext::alltoallmem_wg(rocshmem_team_t team, void *dst,
 __device__ void IPCContext::internal_alltoallmem_wg(rocshmem_team_t team, void *dst,
                                                     const void *src, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
 #endif
@@ -263,7 +263,7 @@ __device__ void IPCContext::alltoallmem_wg_linear(rocshmem_team_t team, void *ds
   // Have each PE put their designated data to the other PEs
   for (int j = 0; j < pe_size; j++) {
     int dest_pe = team_obj->get_pe_in_world(j);
-    putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems, 
+    putmem_nbi_wg(reinterpret_cast<char *>(dst) + my_pe_in_team * nelems,
                   reinterpret_cast<const char *>(src) + j * nelems, nelems, dest_pe);
   }
   if (is_thread_zero_in_block()) {
@@ -414,7 +414,7 @@ __device__ void IPCContext::broadcastmem_wg(rocshmem_team_t team,
   internal_broadcastmem_wg(dest, source, nelems, pe_root_world,
                               pe_start, stride, pe_size, p_sync);
 }
-__device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest, 
+__device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems){
   if (dest == nullptr || source == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
@@ -423,13 +423,13 @@ __device__ int IPCContext::alltoallmem_wave(rocshmem_team_t team, void* dest,
 
   return ROCSHMEM_SUCCESS;
 }
-__device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void* dest, 
+__device__ void IPCContext::internal_alltoallmem_wave(rocshmem_team_t team, void* dest,
                                   const void* source, int nelems) {
 #if defined(USE_SDMA)
-  if (nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (nelems < 512)
-  #endif
+#endif
     alltoallmem_linear_thread_puts_wave(team, dest, source, nelems);
   else
     alltoallmem_linear_wave(team, dest, source, nelems);
@@ -509,7 +509,7 @@ __device__ int IPCContext::fcollectmem_wave(rocshmem_team_t team, void *dst,
                                             const void *src, int nelems) {
   if (dst == nullptr || src == nullptr || team == ROCSHMEM_TEAM_INVALID)
     return ROCSHMEM_ERROR;
-  
+
   fcollectmem_linear_wave(team, dst, src, nelems);
 
   return ROCSHMEM_SUCCESS;

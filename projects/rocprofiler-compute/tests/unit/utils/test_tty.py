@@ -4,19 +4,28 @@
 """Unit tests for src/utils/tty.py."""
 
 import argparse
+import sys
 from io import StringIO
 from types import SimpleNamespace
+from typing import Optional
 
 import pandas as pd
 import pytest
 
+import config
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.tty import (
+    _render_membw_guidance,
+    build_continuation_indent,
     convert_time_columns,
+    format_args_variant_lines,
     format_duration,
+    format_node_args,
     format_node_stats,
     format_table_output,
     has_time_data,
     print_operator_node,
+    resolve_hidden_columns,
     show_all,
     show_call_tree,
     show_operator_summary,
@@ -24,10 +33,9 @@ from utils.tty import (
 from utils.utils_analysis import (
     CallTreeNode,
     KernelStats,
-    build_call_trees,
-    build_operator_summary,
+    rollup_node_stats,
 )
-from utils.utils_common import is_gfx115x
+from utils.utils_common import strip_ansi
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
@@ -46,17 +54,99 @@ _OPERATOR_SUMMARY_COLUMNS = [
 ]
 
 
-def _build_summary_from_dataframe(rows):
-    call_trees = build_call_trees(pd.DataFrame(rows))
-    return build_operator_summary(call_trees)
+def make_args(**overrides) -> argparse.Namespace:
+    """Minimal args for the plain-table render path, plus any overrides."""
+    defaults = {"decimal": 2, "view": None, "normal_unit": "per_wave"}
+    return argparse.Namespace(**{**defaults, **overrides})
 
 
-def make_args() -> argparse.Namespace:
-    """Minimal args for the plain-table render path."""
-    return argparse.Namespace(decimal=2, view=None, normal_unit="per_wave")
+def make_membw_panel(*, include_panel: bool = True) -> SimpleNamespace:
+    """Arch configs and runs holding the single EA Interface table of panel 3000."""
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["EA read request fraction - HBM"],
+        "Avg": [50.0],
+        "Unit": ["Percent"],
+    })
+    table_config = {
+        "id": 3013,
+        "title": "EA Interface",
+        "header": {"metric": "Metric", "value": "Avg", "unit": "Unit"},
+    }
+    panel_configs = (
+        {
+            3000: {
+                "id": 3000,
+                "title": "Memory Bandwidth Analysis",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+        if include_panel
+        else {}
+    )
+    arch_configs = SimpleNamespace(panel_configs=panel_configs)
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={3013: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
 
 
-def _sample_time_data() -> pd.DataFrame:
+def make_roofline_panel(*, html_path: Optional[str] = None) -> SimpleNamespace:
+    """Arch configs and runs holding the single rates table of roofline panel 400."""
+    metric_dataframe = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    table_config = {
+        "id": 401,
+        "title": "Roofline Performance Rates",
+        "cli_style": "Roofline",
+        "header": {"metric": "Metric", "value": "Value"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            400: {
+                "id": 400,
+                "title": "Roofline",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={401: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
+            roofline_html_path=html_path,
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
+
+
+def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
+    """Run show_all over a make_roofline_panel fixture and return its output."""
+    rendered_output = StringIO()
+    show_all(
+        make_args(
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=False,
+            path=[["fixture"]],
+            time_unit="ns",
+            view=view,
+        ),
+        panel.runs,
+        panel.arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+    return rendered_output.getvalue()
+
+
+def sample_time_data() -> pd.DataFrame:
     """Metric table mixing a time row, a cycle row, and a count row."""
     return pd.DataFrame({
         "Metric_ID": ["7.2.0", "7.2.1", "7.2.2"],
@@ -68,9 +158,42 @@ def _sample_time_data() -> pd.DataFrame:
     })
 
 
-def _original_ns_values() -> dict[str, float]:
-    """Original nanosecond values for the time row of _sample_time_data."""
+def original_ns_values() -> dict[str, float]:
+    """Original nanosecond values for the time row of sample_time_data."""
     return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
+
+
+@pytest.mark.parametrize(
+    ("include_cols", "expected"),
+    [
+        pytest.param(None, ["Description", "Unit", "Count"], id="defaults"),
+        pytest.param(["Description"], ["Unit", "Count"], id="include-description"),
+        pytest.param(["Avg"], ["Description", "Unit", "Count"], id="include-avg"),
+    ],
+)
+def test_resolve_hidden_columns(
+    monkeypatch: pytest.MonkeyPatch,
+    include_cols: list[str] | None,
+    expected: list[str],
+) -> None:
+    """Explicitly included columns are removed from the hidden columns."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    assert resolve_hidden_columns(make_args(include_cols=include_cols)) == expected
+
+
+def test_resolve_hidden_columns_does_not_modify_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutating resolved columns does not change the configured hidden columns."""
+    hidden_columns = ["Description", "Unit", "Count"]
+    monkeypatch.setattr(config, "HIDDEN_COLUMNS_CLI", hidden_columns)
+
+    resolved = resolve_hidden_columns(make_args(include_cols=None))
+    resolved.append("Avg")
+
+    assert config.HIDDEN_COLUMNS_CLI == ["Description", "Unit", "Count"]
 
 
 def test_format_table_output_suppresses_empty_column() -> None:
@@ -102,11 +225,31 @@ def test_format_table_output_keeps_pc_sampling_table_21_1() -> None:
     )
     assert content != ""
     assert "v_mov" in content
+    assert content.index("Stall reason definitions:") < content.index("v_mov")
+
+
+def test_format_table_output_scales_bytes_per_second() -> None:
+    df = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [1e9],
+        "Unit": ["Bytes/s"],
+    })
+
+    content = format_table_output(
+        make_args(),
+        {"id": 300, "title": "Memory Chart"},
+        df,
+        "metric_table",
+        runs={"only": object()},
+    )
+
+    assert "GB/s" in content
+    assert "1000000000" not in content
 
 
 def test_has_time_data_detection() -> None:
     """has_time_data is True only when a 'ns' Unit column is present."""
-    assert has_time_data(_sample_time_data())
+    assert has_time_data(sample_time_data())
 
     no_time_data = pd.DataFrame({
         "Metric": ["Non-Time Metric"],
@@ -121,26 +264,26 @@ def test_has_time_data_detection() -> None:
 
 def test_default_unit_is_nanoseconds() -> None:
     """The fixture's time row defaults to nanoseconds."""
-    sample_time_data = _sample_time_data()
-    time_rows = sample_time_data["Unit"].str.lower().str.contains("ns", na=False)
+    time_data = sample_time_data()
+    time_rows = time_data["Unit"].str.lower().str.contains("ns", na=False)
     assert time_rows.any()
-    assert sample_time_data.loc[0, "Unit"] == "ns"
+    assert time_data.loc[0, "Unit"] == "ns"
 
 
 def test_conversion_to_seconds() -> None:
     """Converting to seconds divides the time row and leaves others untouched."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "s")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "s")
 
     assert converted_df.loc[0, "Unit"] == "s"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Avg"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Min"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["s"], abs=1e-10
+        ns_values["Max"] / TIME_UNITS["s"], abs=1e-10
     )
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -148,58 +291,52 @@ def test_conversion_to_seconds() -> None:
 
 def test_conversion_to_milliseconds() -> None:
     """Converting to milliseconds divides the time row by 10^6."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "ms")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "ms")
 
     assert converted_df.loc[0, "Unit"] == "ms"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Min"] / TIME_UNITS["ms"], abs=1e-6
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Max"] / TIME_UNITS["ms"], abs=1e-6
     )
 
 
 def test_conversion_to_microseconds() -> None:
     """Converting to microseconds divides the time row by 10^3."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "us")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "us")
 
     assert converted_df.loc[0, "Unit"] == "us"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Avg"] / TIME_UNITS["us"], abs=1e-3
     )
     assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Min"] / TIME_UNITS["us"], abs=1e-3
     )
     assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"] / TIME_UNITS["us"], abs=1e-3
+        ns_values["Max"] / TIME_UNITS["us"], abs=1e-3
     )
 
 
 def test_conversion_to_nanoseconds() -> None:
     """Converting to nanoseconds leaves the time row unchanged."""
-    original_ns_values = _original_ns_values()
-    converted_df = convert_time_columns(_sample_time_data(), "ns")
+    ns_values = original_ns_values()
+    converted_df = convert_time_columns(sample_time_data(), "ns")
 
     assert converted_df.loc[0, "Unit"] == "ns"
-    assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"], abs=1e-10
-    )
-    assert converted_df.loc[0, "Min"] == pytest.approx(
-        original_ns_values["Min"], abs=1e-10
-    )
-    assert converted_df.loc[0, "Max"] == pytest.approx(
-        original_ns_values["Max"], abs=1e-10
-    )
+    assert converted_df.loc[0, "Avg"] == pytest.approx(ns_values["Avg"], abs=1e-10)
+    assert converted_df.loc[0, "Min"] == pytest.approx(ns_values["Min"], abs=1e-10)
+    assert converted_df.loc[0, "Max"] == pytest.approx(ns_values["Max"], abs=1e-10)
 
 
 def test_non_time_rows_unchanged() -> None:
     """Cycle and Count rows keep their unit and value after conversion."""
-    converted_df = convert_time_columns(_sample_time_data(), "ms")
+    converted_df = convert_time_columns(sample_time_data(), "ms")
 
     assert converted_df.loc[1, "Unit"] == "Cycle"
     assert converted_df.loc[2, "Unit"] == "Count"
@@ -209,9 +346,9 @@ def test_non_time_rows_unchanged() -> None:
 
 def test_invalid_time_unit_is_noop() -> None:
     """An unrecognised target unit leaves the frame unchanged."""
-    sample_time_data = _sample_time_data()
-    original_df = sample_time_data.copy()
-    converted_df = convert_time_columns(sample_time_data, "invalid_unit")
+    time_data = sample_time_data()
+    original_df = time_data.copy()
+    converted_df = convert_time_columns(time_data, "invalid_unit")
     pd.testing.assert_frame_equal(converted_df, original_df)
 
 
@@ -224,30 +361,30 @@ def test_missing_unit_column_is_noop() -> None:
 
 def test_conversion_with_missing_columns() -> None:
     """Conversion works when Min/Max columns are absent."""
-    original_ns_values = _original_ns_values()
-    df_partial = _sample_time_data()[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
+    ns_values = original_ns_values()
+    df_partial = sample_time_data()[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
     converted_df = convert_time_columns(df_partial, "ms")
 
     assert converted_df.loc[0, "Unit"] == "ms"
     assert converted_df.loc[0, "Avg"] == pytest.approx(
-        original_ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
+        ns_values["Avg"] / TIME_UNITS["ms"], abs=1e-6
     )
 
 
 def test_mathematical_correctness_all_units() -> None:
     """Every supported unit divides the time row by the correct factor."""
-    original_ns_values = _original_ns_values()
+    ns_values = original_ns_values()
     for target_unit, divisor in TIME_UNITS.items():
-        converted_df = convert_time_columns(_sample_time_data(), target_unit)
+        converted_df = convert_time_columns(sample_time_data(), target_unit)
 
         assert converted_df.loc[0, "Avg"] == pytest.approx(
-            original_ns_values["Avg"] / divisor, abs=1e-10
+            ns_values["Avg"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Min"] == pytest.approx(
-            original_ns_values["Min"] / divisor, abs=1e-10
+            ns_values["Min"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Max"] == pytest.approx(
-            original_ns_values["Max"] / divisor, abs=1e-10
+            ns_values["Max"] / divisor, abs=1e-10
         )
         assert converted_df.loc[0, "Unit"] == target_unit
 
@@ -306,12 +443,11 @@ def test_show_all_membw_analysis_panel_gate(
     monkeypatch: pytest.MonkeyPatch,
     membw_analysis: bool,
 ) -> None:
-    """Panel 3000 is rendered only when memory bandwidth analysis is enabled."""
+    """Panel 3000 is rendered only when its table was built."""
     args = argparse.Namespace(
         decimal=2,
         filter_metrics=None,
         include_cols=None,
-        membw_analysis=membw_analysis,
         normal_unit="per_wave",
         path=[["fixture"]],
         time_unit="ns",
@@ -338,7 +474,7 @@ def test_show_all_membw_analysis_panel_gate(
     )
     runs = {
         "fixture": SimpleNamespace(
-            dfs={3013: metric_dataframe},
+            dfs={3013: metric_dataframe} if membw_analysis else {},
             sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
         )
     }
@@ -378,6 +514,122 @@ def test_show_all_membw_analysis_panel_gate(
     assert "30.13 EA Interface" in output_lines
 
 
+def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = argparse.Namespace(
+        decimal=2,
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=False,
+        normal_unit="per_wave",
+        path=[["fixture"]],
+        time_unit="ns",
+        view=None,
+    )
+    metric_dataframe = pd.DataFrame({
+        "Metric": ["DRAM Read Bandwidth"],
+        "Value": [512e9],
+        "Unit": ["Bytes/s"],
+    })
+    table_config = {
+        "id": 301,
+        "title": "Instruction Cache",
+        "cli_style": "mem_chart",
+        "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
+        "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"}},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            300: {
+                "id": 300,
+                "title": "Memory Chart",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={301: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx1250"}]),
+        )
+    }
+    calls: list[tuple[dict, str, str, dict]] = []
+
+    monkeypatch.setattr(
+        "utils.tty.process_table_data",
+        lambda *_args, **_kwargs: metric_dataframe,
+    )
+
+    def chart_stub(
+        mem_data: dict, *, chart_title: str, gpu_arch: str, units: dict, membw=None
+    ) -> str:
+        calls.append((mem_data, chart_title, gpu_arch, units))
+        return "rendered gfx1250 memory chart"
+
+    monkeypatch.setattr("utils.tty.plot_mem_chart", chart_stub)
+    rendered_output = StringIO()
+
+    show_all(
+        args,
+        runs,
+        arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    # Values are unscaled Bytes/s; units are the config's, not the display's
+    assert calls == [
+        (
+            {"DRAM Read Bandwidth": 512e9},
+            "3. Memory Chart (Normalization: per_wave)",
+            "gfx1250",
+            {"DRAM Read Bandwidth": "Bytes/s"},
+        )
+    ]
+    assert "rendered gfx1250 memory chart" in rendered_output.getvalue()
+
+
+def test_show_all_renders_identically_to_file_and_stdout(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A report is the same whether analyze writes it to a .txt file or stdout."""
+    args = make_args(
+        filter_metrics=None,
+        include_cols=None,
+        membw_analysis=True,
+        path=[["fixture"]],
+        time_unit="ns",
+    )
+    panel = make_membw_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_args, **_kwargs: panel.metric_dataframe
+    )
+
+    report_path = tmp_path / "analysis_report.txt"
+    with open(report_path, "w", encoding="utf-8") as report_file:
+        show_all(
+            args,
+            panel.runs,
+            panel.arch_configs,
+            report_file,
+            profiling_config={"filter_blocks": []},
+        )
+
+    capsys.readouterr()
+    show_all(
+        args,
+        panel.runs,
+        panel.arch_configs,
+        sys.stdout,
+        profiling_config={"filter_blocks": []},
+    )
+
+    file_report = report_path.read_text(encoding="utf-8")
+    assert file_report == capsys.readouterr().out
+    assert "30. Memory Bandwidth Analysis" in file_report
+
+
 def test_edge_cases_and_error_handling() -> None:
     """Empty, NaN, and mixed-case unit frames convert without error."""
     empty_df = pd.DataFrame()
@@ -397,68 +649,6 @@ def test_edge_cases_and_error_handling() -> None:
     result = convert_time_columns(mixed_case_df, "ms")
     assert result.loc[0, "Unit"] == "ms"
     assert result.loc[1, "Unit"] == "ms"
-
-
-@pytest.mark.parametrize(
-    "gpu_arch",
-    [
-        pytest.param("gfx1151", id="rdna35"),
-        pytest.param("gfx942", id="cdna"),
-    ],
-)
-def test_format_table_output_dispatches_memory_chart_renderer(
-    monkeypatch: pytest.MonkeyPatch,
-    gpu_arch: str,
-) -> None:
-    """Memory Chart output uses the architecture renderer and shared heading."""
-    calls: dict[str, dict] = {}
-
-    def record(name: str, return_value: str):
-        def stub(mem_data: dict, *, chart_title: str) -> str:
-            calls[name] = {
-                "mem_data": mem_data,
-                "chart_title": chart_title,
-            }
-            return return_value
-
-        return stub
-
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx11.plot_mem_chart",
-        record("gfx11", "rendered RDNA3.5 memory chart"),
-    )
-    monkeypatch.setattr(
-        "utils.tty.mem_chart_gfx9.plot_mem_chart",
-        record("gfx9", "rendered CDNA memory chart"),
-    )
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-
-    content = format_table_output(
-        make_args(),
-        {
-            "id": 701,
-            "title": "Memory Chart",
-            "cli_style": "mem_chart",
-        },
-        df,
-        "metric_table",
-        runs={"only": object()},
-        gpu_arch=gpu_arch,
-    )
-
-    expected = "gfx11" if is_gfx115x(gpu_arch) else "gfx9"
-    unexpected = "gfx9" if is_gfx115x(gpu_arch) else "gfx11"
-    assert calls[expected] == {
-        "mem_data": {"Metric A": 1},
-        "chart_title": "7. Memory Chart (Normalization: per_wave)",
-    }
-    assert unexpected not in calls
-    return_value = (
-        "rendered RDNA3.5 memory chart"
-        if is_gfx115x(gpu_arch)
-        else "rendered CDNA memory chart"
-    )
-    assert content == f"{return_value}\n"
 
 
 def test_format_duration_microseconds_below_threshold():
@@ -517,50 +707,6 @@ def test_format_node_stats_renders_na_when_dispatch_stats_missing():
     assert "dispatch_max: N/A" in rendered
 
 
-def test_show_call_tree_prints_location_and_stats(capsys):
-    root = CallTreeNode(name="main.py:10")
-    root.kernel_launches = 1
-    root.total_duration_ms = 0.5
-    child = CallTreeNode(name="op_a")
-    child.kernel_launches = 1
-    child.total_duration_ms = 0.5
-    child.kernels["kern"] = KernelStats(launches=1, total_duration_ns=500_000.0)
-    root.children["op_a"] = child
-    show_call_tree({"main.py:10": root})
-    output = capsys.readouterr().out
-    assert "main.py:10" in output
-    assert "dispatches: 1" in output
-    assert "kern" in output
-
-
-def test_show_call_tree_sorted_by_duration(capsys):
-    root_a = CallTreeNode(name="a.py:1")
-    root_a.total_duration_ms = 10.0
-    root_a.kernel_launches = 1
-    root_b = CallTreeNode(name="b.py:1")
-    root_b.total_duration_ms = 20.0
-    root_b.kernel_launches = 2
-    show_call_tree({"a.py:1": root_a, "b.py:1": root_b})
-    output = capsys.readouterr().out
-    assert output.index("b.py:1") < output.index("a.py:1")
-
-
-def test_show_call_tree_kernel_id_printed(capsys):
-    root = CallTreeNode(name="f.py:1")
-    root.kernel_launches = 1
-    root.total_duration_ms = 1.0
-    child = CallTreeNode(name="op")
-    child.kernel_launches = 1
-    child.total_duration_ms = 1.0
-    child.kernels["kern_x"] = KernelStats(
-        launches=1, total_duration_ns=1_000_000.0, kernel_id=42
-    )
-    root.children["op"] = child
-    show_call_tree({"f.py:1": root})
-    output = capsys.readouterr().out
-    assert "(id 42)" in output
-
-
 def test_print_operator_node_branching_shows_stats(capsys):
     node = CallTreeNode(name="branch")
     node.kernel_launches = 2
@@ -612,6 +758,189 @@ def test_print_operator_node_long_kernel_wraps(capsys):
     assert not any(line.strip().startswith("(id 7)") for line in output_lines)
 
 
+def test_print_operator_node_folds_identical_children(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    print_operator_node(parent)
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_show_call_tree_folds_identical_sibling_leaves(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    parent = CallTreeNode(name="forward")
+    parent.invocation_ids.add("0")
+    parent.children = [first, second]
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    rollup_node_stats(parent)
+    show_call_tree({"1": [parent]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 1
+    assert "calls: 2" in output
+    assert parent.children == [first, second]
+
+
+def test_format_node_args_present() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={"(self=float32[2x2])": {"1@m.py:1", "2@m.py:1"}},
+    )
+    assert format_node_args(node) == " args=(self=float32[2x2])"
+
+
+def test_format_node_args_absent() -> None:
+    assert format_node_args(CallTreeNode(name="aten::mm")) == ""
+    empty_parens = CallTreeNode(name="aten::mm", args_invocations={"()": set()})
+    assert format_node_args(empty_parens) == ""
+
+
+def test_format_args_variant_lines_orders_by_call_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "  2 calls  (self=float32[4x4])",
+        "  1 call   (self=float32[2x2])",
+    ]
+
+
+def test_format_args_variant_lines_empty_below_two_variants() -> None:
+    assert format_args_variant_lines(CallTreeNode(name="aten::mm")) == []
+    single = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    assert format_args_variant_lines(single) == []
+
+
+def test_format_args_variant_lines_caps_variant_count() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            f"(self=float32[{index}x{index}])": {str(index)} for index in range(7)
+        },
+    )
+    lines = format_args_variant_lines(node)
+    assert lines[0] == "args variants:"
+    assert len(lines) == 7
+    assert lines[-1] == "  ... 2 more variants"
+
+
+def test_format_args_variant_lines_omits_counts_without_invocation_ids() -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": set(),
+            "(self=float32[4x4])": set(),
+        },
+    )
+    assert format_args_variant_lines(node) == [
+        "args variants:",
+        "    (self=float32[2x2])",
+        "    (self=float32[4x4])",
+    ]
+
+
+def test_print_operator_node_shows_args(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm", args_invocations={"(self=float32[2x2])": {"1@m.py:1"}}
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "aten::mm" in output
+    assert "args=(self=float32[2x2])" in output
+
+
+def test_print_operator_node_shows_args_variants_block(capsys) -> None:
+    node = CallTreeNode(
+        name="aten::mm",
+        args_invocations={
+            "(self=float32[2x2])": {"1@m.py:1"},
+            "(self=float32[4x4])": {"2@m.py:1", "3@m.py:1"},
+        },
+    )
+    node.kernels["kernel_gemm"] = KernelStats(launches=1, total_duration_ns=1000.0)
+    print_operator_node(node)
+    output = capsys.readouterr().out
+    assert "args=" not in output
+    assert "args variants:" in output
+    assert "2 calls  (self=float32[4x4])" in output
+    assert "1 call   (self=float32[2x2])" in output
+
+
+def test_build_continuation_indent_keeps_pipes() -> None:
+    assert build_continuation_indent("   |  └─ ", "   |  ") == "   |     "
+    assert build_continuation_indent("   |  ", "   |  ") == "   |  "
+    assert build_continuation_indent("└─ ", "") == "   "
+
+
+def test_show_call_tree_does_not_fold_roots_across_threads(capsys):
+    first = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    first.invocation_ids.add("1")
+    first.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=2_000_000.0,
+        min_duration_ns=2_000_000.0,
+        max_duration_ns=2_000_000.0,
+    )
+    second = CallTreeNode(name="aten::addmm", file_name="net.py", line_number=10)
+    second.invocation_ids.add("2")
+    second.kernels["addmm"] = KernelStats(
+        launches=1,
+        total_duration_ns=3_000_000.0,
+        min_duration_ns=3_000_000.0,
+        max_duration_ns=3_000_000.0,
+    )
+    rollup_node_stats(first)
+    rollup_node_stats(second)
+    show_call_tree({"1": [first], "2": [second]})
+    output = capsys.readouterr().out
+    assert output.count("aten::addmm") == 2
+
+
 # ---------------------------------------------------------------------------
 # show_operator_summary
 # ---------------------------------------------------------------------------
@@ -623,31 +952,265 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
     assert "no operators with recorded dispatches" in output
 
 
-def test_show_operator_summary_renders_per_cell_unit_suffix(capsys):
-    summary = _build_summary_from_dataframe([
-        {
-            "Operator_Name": "op_a",
-            "Kernel_Name": "kern",
-            "Context_Id": "10@f.py:1",
-            "Start_Timestamp_kernel": 0,
-            "End_Timestamp_kernel": 2_000_000,
+# ---------------------------------------------------------------------------
+# --view table
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "view,gpu_arch,expect_chart",
+    [
+        pytest.param(None, "gfx950", True, id="default"),
+        pytest.param("table", "gfx950", False, id="view_table"),
+        pytest.param(None, "gfx1030", False, id="arch_without_layout"),
+    ],
+)
+def test_show_all_view_table_replaces_memory_chart_panel(
+    monkeypatch: pytest.MonkeyPatch,
+    view,
+    gpu_arch: str,
+    expect_chart: bool,
+) -> None:
+    """A mem-chart-only panel emits the merged chart, or tables under --view table
+    or on an architecture without a chart layout."""
+    mem_chart_marker = "rendered memory chart"
+    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
+    monkeypatch.setattr(
+        "utils.tty.plot_mem_chart",
+        lambda *_a, **_k: mem_chart_marker,
+    )
+    rendered_output = StringIO()
+
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            300: {
+                "id": 300,
+                "title": "Memory Chart",
+                "data source": [
+                    {
+                        "metric_table": {
+                            "id": 301,
+                            "title": "Memory Chart",
+                            "cli_style": "mem_chart",
+                            "header": {"metric": "Metric", "value": "Value"},
+                        }
+                    }
+                ],
+            }
         }
-    ])
-    show_operator_summary(summary)
-    output = capsys.readouterr().out
-    assert "ms" in output or "us" in output
-    assert "Operator" in output
-    assert "Total" in output
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={301: df},
+            sys_info=pd.DataFrame([{"gpu_arch": gpu_arch}]),
+        )
+    }
+
+    show_all(
+        make_args(
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=False,
+            path=[["fixture"]],
+            time_unit="ns",
+            view=view,
+        ),
+        runs,
+        arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+
+    output = rendered_output.getvalue()
+    assert (mem_chart_marker in output) is expect_chart
+    assert ("3.1 Memory Chart" in output) is not expect_chart
 
 
-def test_show_operator_summary_renders_na_for_nan_cells(capsys):
-    root = CallTreeNode(name="f.py:1")
-    op = CallTreeNode(name="op")
-    op.kernel_launches = 1
-    op.total_duration_ms = 0.0
-    op.invocation_ids.add("ctx")
-    root.children["op"] = op
-    summary = build_operator_summary({"f.py:1": root})
-    show_operator_summary(summary)
+@pytest.mark.parametrize(
+    "view,expect_roofline_called",
+    [
+        pytest.param(None, True, id="default"),
+        pytest.param("table", False, id="view_table"),
+    ],
+)
+def test_show_all_view_table_skips_per_kernel_roofline_layout(
+    monkeypatch: pytest.MonkeyPatch,
+    view,
+    expect_roofline_called: bool,
+) -> None:
+    """--view table prints the roofline tables as plain tables instead of the
+    per-kernel layout."""
+    roofline_called = False
+
+    def _spy(*_a, **_k) -> bool:
+        nonlocal roofline_called
+        roofline_called = True
+        return False
+
+    monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
+    panel = make_roofline_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
+    )
+
+    output = render_roofline_panel(panel, view)
+
+    assert roofline_called is expect_roofline_called
+    if view == "table":
+        assert "4.1 Roofline Performance Rates" in output
+        assert "Metric A" in output
+
+
+@pytest.mark.parametrize("view", [None, "table"], ids=["default", "view_table"])
+@pytest.mark.parametrize("html_path", [None, "wl/empirRoof_gpu-0.html"])
+def test_show_all_prints_roofline_html_path_under_heading(
+    monkeypatch: pytest.MonkeyPatch,
+    view: Optional[str],
+    html_path: Optional[str],
+) -> None:
+    """Both views name the saved roofline HTML right under the block heading."""
+    panel = make_roofline_panel(html_path=html_path)
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
+    )
+
+    output = render_roofline_panel(panel, view)
+
+    if html_path:
+        assert (
+            f"4. Roofline\n\nInteractive roofline plot saved to {html_path}\n" in output
+        )
+    else:
+        assert "Interactive roofline plot" not in output
+
+
+# ---------------------------------------------------------------------------
+# _render_membw_guidance
+# ---------------------------------------------------------------------------
+
+
+def make_membw_result(
+    availability="full",
+    availability_reason=None,
+    guidance_blocks=(),
+    nodes=(),
+):
+    return MemBwAnalysisResult(
+        arch="gfx950",
+        availability=availability,
+        availability_reason=availability_reason,
+        nodes=nodes,
+        guidance_blocks=guidance_blocks,
+    )
+
+
+class TestRenderMembwGuidance:
+    def test_no_bottlenecks_shows_status_line(self):
+        result = make_membw_result()
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected (GL1 / GL2 / EA)" in output
+
+    def test_active_bottleneck_shows_guidance_panel(self):
+        active_node = BottleneckNode(
+            id="gl1_tcp_utcl1_stall",
+            label="TCP UTCL1 stall",
+            level="GL1",
+            state="active",
+            supporting=(),
+            children=(),
+            guidance_id="g1",
+        )
+        result = make_membw_result(
+            guidance_blocks=(
+                "[GL1] TCP stalled by UTCL1\n"
+                "  Condition : >= 10%\n"
+                "  Measured  : 18.7%\n"
+                "  Impact    : Address translation pressure",
+            ),
+            nodes=(active_node,),
+        )
+        output = _render_membw_guidance(result)
+        plain = strip_ansi(output)
+        assert "Memory Bandwidth Guided Analysis" in plain
+        assert "TCP stalled by UTCL1" in plain
+        assert "18.7%" in plain
+        assert "╭" in output or "│" in output
+
+    def test_unavailable_shows_unavailable_message(self):
+        result = make_membw_result(
+            availability="unavailable",
+            availability_reason="no data",
+        )
+        output = _render_membw_guidance(result)
+        assert "Unavailable" in output
+        assert "no data" in output
+
+    def test_partial_shows_partial_message(self):
+        result = make_membw_result(
+            availability="partial",
+            availability_reason="missing: key1, key2",
+        )
+        output = _render_membw_guidance(result)
+        assert "Partial data" in output
+        assert "missing: key1, key2" in output
+
+    def test_all_indeterminate_shows_inconclusive(self):
+        indeterminate_node = BottleneckNode(
+            id="n1",
+            label="test",
+            level="GL1",
+            state="indeterminate",
+            supporting=(),
+            children=(),
+        )
+        result = make_membw_result(
+            nodes=(indeterminate_node,),
+        )
+        output = _render_membw_guidance(result)
+        assert "Inconclusive" in output
+        assert "insufficient counter data" in output
+
+    def test_active_node_without_guidance_shows_fallback(self):
+        active_parent = BottleneckNode(
+            id="gl2_mem_bw_bound",
+            label="GL2 memory BW bound",
+            level="GL2",
+            state="active",
+            supporting=(),
+            children=(),
+        )
+        result = make_membw_result(nodes=(active_parent,), guidance_blocks=())
+        output = _render_membw_guidance(result)
+        assert "No bottlenecks detected" not in output
+        assert "Bottlenecks detected" in output
+
+
+def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
+    """Constructed nodes: file:line, duration order, and kernel_id print."""
+    longer = CallTreeNode(name="nn.Module.SimpleModel.forward")
+    longer.total_duration_ms = 8.0
+    longer.invocation_ids.add("0")
+    child = CallTreeNode(
+        name="nn.Module.Linear.forward",
+        file_name="simple_torch_code.py",
+        line_number=19,
+    )
+    child.total_duration_ms = 5.0
+    child.invocation_ids.add("10")
+    child.kernels["addmm_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=5_000_000.0,
+        kernel_id=4,
+    )
+    longer.children = [child]
+    shorter = CallTreeNode(name="aten::relu")
+    shorter.total_duration_ms = 1.0
+    shorter.invocation_ids.add("90")
+    show_call_tree({"1": [longer], "2": [shorter]})
     output = capsys.readouterr().out
-    assert "N/A" in output
+    assert "Thread_Id" not in output
+    assert output.index("nn.Module.SimpleModel.forward") < output.index("aten::relu")
+    assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
+    assert "aten::relu simple_torch_code.py" not in output
+    assert "(id 4)" in output

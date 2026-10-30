@@ -46,13 +46,16 @@ typedef enum rj_vm_mode_t {
   /// a host runtime (e.g., ROCR) can issue ioctls through the interposer.
   RJ_VM_MODE_LOCAL = 1,
   /// @brief Multi-process serving (daemon). Same as LOCAL, plus all GPU
-  /// allocations are backed by memfds for cross-process sharing via
-  /// SCM_RIGHTS. Used by the rocjitsu CLI in daemon mode to host the
+  /// allocations have shareable backing handles (memfds or opaque tokens)
+  /// transferable via SCM_RIGHTS. Map them with rj_vm_map_shared_mem.
+  /// Used by the rocjitsu CLI in daemon mode to host the
   /// simulator on behalf of remote client processes.
   RJ_VM_MODE_DAEMON = 2,
 } rj_vm_mode_t;
 
 /// @brief Device command descriptor for rj_vm_execute.
+/// @details Map shared_handle with rj_vm_map_shared_mem; it may be an opaque
+/// token rather than a memfd. The VM owns the handle; the caller must not close it.
 typedef struct rj_vm_cmd_t {
   uint32_t cmd;               ///< Platform-specific command number.
   void *buf;                  ///< Command arguments buffer (with inlined arrays).
@@ -66,9 +69,11 @@ typedef struct rj_vm_cmd_t {
 
 /// @brief Device memory mapping descriptor.
 typedef struct rj_vm_map_t {
-  uint64_t addr;        ///< Requested mapping address.
-  uint64_t length;      ///< Length in bytes to map.
-  int64_t offset;       ///< Platform-specific offset encoding.
+  uint64_t addr;   ///< Requested mapping address.
+  uint64_t length; ///< Length in bytes to map.
+  /// Platform/KFD-encoded offset for rj_vm_device_map{,_as}; page-aligned byte
+  /// offset within the backing for rj_vm_map_shared_mem.
+  int64_t offset;
   uint32_t prot;        ///< Memory protection flags.
   uint32_t flags;       ///< Mapping flags.
   uint64_t mapped_addr; ///< [out] Address the mapping was placed at.
@@ -109,6 +114,9 @@ typedef struct rj_vm_gpu_info_t {
   uint32_t max_slots_scratch_cu;
 
   uint64_t local_mem_size;
+  uint64_t visible_vram_size;
+  uint32_t control_stack_size;
+  uint32_t context_save_size;
   uint32_t vram_type;
   uint32_t lds_size_kb;
   uint32_t mem_width;
@@ -146,9 +154,17 @@ typedef struct rj_vm_gpu_info_t {
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The JSON file could not be opened.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The file could not be opened or read,
+/// config parsing or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm);
+
+/// @brief Create a VM from only one named system node in a JSON file.
+/// @details The node must exist and must agree with `local_node` in the file,
+/// when present. A NULL or empty node uses JSON `local_node`; if neither
+/// selects a node, the graph must contain exactly one node.
+RJ_API_EXPORT rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id,
+                                                rj_vm_mode_t mode, rj_vm_t **vm);
 
 /// @brief Create a VM from a JSON configuration string.
 ///
@@ -156,10 +172,15 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 /// @param[in] mode VM creation mode (DEFAULT, LOCAL, or DAEMON).
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, config parsing
+/// or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
+
+/// @brief Create a VM from one named system node in a JSON string.
+RJ_API_EXPORT rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                                            rj_vm_mode_t mode, rj_vm_t **vm);
 
 /// @brief Load and attach the execution plugins declared in a config to a VM.
 ///
@@ -169,10 +190,12 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
 /// enable plugins without linking the simulator's C++ ABI. Call once after
 /// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
-/// no `plugins` attaches an empty group (near-zero overhead). This function must
-/// complete before the first rj_vm_step or rj_vm_run call and must not overlap
-/// either call; that ordering keeps plugin initialization and replacement
-/// outside the simulation-callback interval.
+/// no `plugins` attaches an empty group (near-zero overhead). Plugin load
+/// failures are best-effort unless the config sets the top-level
+/// `require_all_plugins` boolean to true. This function must complete before the
+/// first rj_vm_step or rj_vm_run call and must not overlap either call; that
+/// ordering keeps plugin initialization and replacement outside the
+/// simulation-callback interval.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON (same text used to create
 ///            the VM). Never NULL.
@@ -183,7 +206,8 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or configuration failed.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
+///                               required plugin could not be loaded.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 
@@ -222,7 +246,7 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// on success.
 /// @retval ROCJITSU_STATUS_SUCCESS Step completed successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or execution failed.
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
@@ -244,6 +268,7 @@ RJ_API_EXPORT rj_status_t rj_vm_run(rj_vm_t *vm, uint64_t *ticks_executed);
 /// @param[in] tick Simulation tick to record as the checkpoint timestamp.
 /// @retval ROCJITSU_STATUS_SUCCESS Checkpoint saved successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm or @p path is NULL.
+/// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple GPUs.
 /// @retval ROCJITSU_STATUS_ERROR Serialization or I/O failed.
 RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t tick);
 
@@ -252,8 +277,9 @@ RJ_API_EXPORT rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *p
 /// @param[out] vm The restored VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM restored successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be opened.
-/// @retval ROCJITSU_STATUS_ERROR Deserialization failed.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The checkpoint file could not be opened, read, or
+/// deserialized, or contains invalid execution-thread allocation metadata.
+/// @retval ROCJITSU_STATUS_ERROR The restored configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm);
 
 /// @brief Execute a device command (local mode — uses the local process).
@@ -333,14 +359,48 @@ RJ_API_EXPORT rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path);
 /// @param[out] info Simulated GPU metadata.
 RJ_API_EXPORT rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info);
 
+/// @brief Get the number of node-local GPUs published by this VM.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count);
+
+/// @brief Get metadata for one node-local GPU ordinal.
+RJ_API_EXPORT rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info);
+
 /// @brief Get the borrowed backing memory handle (local mode).
 /// @details The VM retains ownership; the caller must not close the handle.
+/// The handle may be an opaque token; use rj_vm_map_shared_mem rather than
+/// assuming it supports host mmap or file I/O. Returns -1 when no backing exists.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem(rj_vm_t *vm, int64_t offset, rj_handle_t *handle);
 
 /// @brief Get the borrowed backing memory handle for a specific process (daemon mode).
 /// @details The VM retains ownership; the caller must not close the handle.
+/// Mapping and lifetime rules are the same as for rj_vm_get_shared_mem.
 RJ_API_EXPORT rj_status_t rj_vm_get_shared_mem_as(rj_vm_t *vm, uint32_t process_id, int64_t offset,
                                                   rj_handle_t *handle);
+
+/// @brief Map a shared backing handle into the calling process without preloading.
+/// @details Accepts handles from rj_vm_get_shared_mem{,_as}, rj_vm_cmd_t::shared_handle,
+/// or their dup/SCM_RIGHTS aliases. The handle is borrowed and is not closed.
+/// Retain the allocation size separately and transfer it alongside the descriptor
+/// with SCM_RIGHTS. Non-preloaded host fstat/lseek cannot query a token's backing
+/// size; map->length comes from that retained size and the requested view.
+/// map->offset is a byte offset within the backing, not a KFD mmap offset.
+/// Use MAP_SHARED, a nonnegative page-aligned offset, and a nonempty range
+/// within the allocation. Supported flags are MAP_SHARED with optional MAP_FIXED,
+/// MAP_FIXED_NOREPLACE, and MAP_32BIT where available. All other flags (including
+/// MAP_PRIVATE, MAP_ANONYMOUS, and MAP_LOCKED) and invalid ranges fail with EINVAL
+/// for both backing forms. Opaque tokens do not support file I/O.
+/// Token mappings require a live creating keeper, the same IPC namespace, and current System V IPC
+/// permissions; failures report ESTALE, EXDEV, or EACCES respectively.
+/// On success the caller owns the view and may use host munmap/mprotect.
+/// Views outlive handles, but the caller must stop simulator access before
+/// unmapping or changing protections. Keep librocjitsu loaded while using this API.
+/// @param[in] handle Backing descriptor, valid for the duration of this call.
+/// @param[in,out] map Host mapping parameters and result.
+/// @retval ROCJITSU_STATUS_SUCCESS Mapping succeeded; map_errno is zero.
+/// @retval ROCJITSU_STATUS_ERROR Mapping failed; mapped_addr is MAP_FAILED and
+/// map_errno contains the host error.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT map is NULL.
+RJ_API_EXPORT rj_status_t rj_vm_map_shared_mem(rj_handle_t handle, rj_vm_map_t *map);
 
 /// @brief Request the simulation engine to stop.
 ///

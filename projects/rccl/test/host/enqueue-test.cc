@@ -8,8 +8,9 @@
 // helpers are directly callable.
 //
 // LINE-NUMBER BASE: every `enqueue.cc:NNNN` citation in these tests refers to
-// src/enqueue.cc as committed, NOT to the hipified copy this TU compiles. Hipify
-// inserts one line near the top, so add 1 when navigating build/hipify/src/enqueue.cc.
+// src/enqueue/enqueue.cc as committed, NOT to the hipified copy this TU compiles.
+// Hipify inserts one line near the top, so add 1 when navigating
+// build/hipify/src/enqueue/enqueue.cc.
 
 #include <gtest/gtest.h>
 
@@ -24,7 +25,8 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
-#include "fakes/enqueue_fakes.h"
+#include "ScopedHook.h"
+#include "fakes/enqueue_test_deps.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
 // transitive includes see them.
@@ -69,7 +71,7 @@
 // ---------------------------------------------------------------------------
 #define NCCL_DEVICE_COMMON_H_
 // ncclDevKernelArgsDefaultStorage comes from src/include/device.h, already in
-// scope via fakes/enqueue_fakes.h -> sym_kernels.h (enqueue.cc itself is only
+// scope via fakes/enqueue_test_deps.h -> sym_kernels.h (enqueue.cc itself is only
 // included later). The generated device_table.h is NOT needed here.
 void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage) {}
@@ -78,8 +80,8 @@ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage) {}
 void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 
-// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue.cc -- enqueue.cc is
-// basename-unique in the tree, so hipify keeps its name (no _tmp suffix).
+// ENQUEUE_CC_PATH is ${PROJECT_BINARY_DIR}/hipify/src/enqueue/enqueue.cc -- hipify
+// keeps the src/enqueue/ directory layout.
 #include ENQUEUE_CC_PATH
 
 class EnqueueMicrotest : public ::testing::Test {
@@ -90,8 +92,8 @@ class EnqueueMicrotest : public ::testing::Test {
   // identical for every global in the reset closure today, but nothing enforces
   // that, and SetUp costs one line to stop relying on it. It also means a future
   // second fixture in this binary cannot inherit a dirty process.
-  void SetUp() override { ResetEnqueueFakes(); }
-  void TearDown() override { ResetEnqueueFakes(); }
+  void SetUp() override { ResetEnqueueTestDeps(); }
+  void TearDown() override { ResetEnqueueTestDeps(); }
 };
 
 // ---------------------------------------------------------------------------
@@ -252,6 +254,18 @@ TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_SimpleTermDominatesAtWarp32) {
   EXPECT_EQ(4112, rcclShmemScratchWarpSize(942, 32)) << "measured constant";
 }
 
+TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_Ll128TermDominatesAtGfx1250) {
+  // gfx1250 is the only arch where LL128 wins the max(): 32 elems/thread, and
+  // ncclCollUnroll(1250) is 6 rather than 8.
+  constexpr int kLL128 = (32 * 32) * int(sizeof(uint64_t));
+  constexpr int kSimple = (ncclCollUnroll(1250) * 32 + 1) * 16;
+  static_assert(kLL128 > kSimple, "LL128 is expected to dominate at gfx1250/warp32");
+  EXPECT_EQ((kLL128 + 15) & -16, rcclShmemScratchWarpSize(1250, 32));
+  EXPECT_EQ(8192, rcclShmemScratchWarpSize(1250, 32)) << "measured constant";
+  EXPECT_EQ(8, rcclLL128ShmemElemsPerThread(942)) << "non-gfx1250 unchanged";
+  EXPECT_EQ(32, rcclLL128ShmemElemsPerThread(1250));
+}
+
 TEST_F(EnqueueMicrotest, ShmemScratchWarpSize_NvlsTermNeverWins) {
   // HONEST SCOPE: :66 gates the NVLS term on `cudaArch >= 900`, but that gate is
   // an EQUIVALENT MUTANT today. ncclNvlsUnrollBytes is the constant 4*16 for
@@ -324,6 +338,68 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
   EXPECT_EQ(0, rcclShmemDynamicSize(950, 64));
 }
 #endif
+
+// ===========================================================================
+// rcclP2pTaskParts (enqueue.cc:1333) and rcclP2pPolicyChannels (enqueue.cc:1342)
+//
+// Multi-node AINIC Scatter takes the most power-of-two parts whose nRanks - 1
+// flows fit p2pnChannels, at most p2pnChannelsPerPeer; everything else takes
+// p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it may
+// depend only on comm-wide fields.
+// ===========================================================================
+
+namespace {
+std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels, int perPeer) {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  comm->nNodes = nNodes;
+  comm->nRanks = nRanks;
+  comm->p2pnChannels = p2pnChannels;
+  comm->p2pnChannelsPerPeer = perPeer;
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  return comm;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitThePool) {
+  g_rcclUseAinicValue = true;
+  struct Case {
+    int nNodes, nRanks, p2pnChannels, perPeer, scatterParts;
+  };
+  // 8 GPUs per node with the MI355X pools, the pool boundary (16 peers x 2 parts fill 32 channels,
+  // 17 peers do not), power-of-two rounding (64 / 19 = 3) and the one-part floor (64 / 127 = 0).
+  for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
+                 Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
+    auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
+    EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter))
+      << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
+    for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
+                         ncclFuncAlltoAllv}) {
+      EXPECT_EQ(k.perPeer, rcclP2pTaskParts(comm.get(), f)) << "collAPI=" << int(f);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterKeepsPerPeerOutsideMultiNodeAinicOrWithAUserCount) {
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  g_rcclUseAinicValue = false;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "not AINIC";
+  g_rcclUseAinicValue = true;
+  comm->config.nChannelsPerNetPeer = 2;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "NCCL_NCHANNELS_PER_NET_PEER set";
+  comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+  comm->nNodes = 1;
+  EXPECT_EQ(2, rcclP2pTaskParts(comm.get(), ncclFuncScatter)) << "single node";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+  // Returns before the arch policy table, so comm->topo is never read.
+  g_rcclUseAinicValue = true;
+  auto comm = P2pPartsComm(/*nNodes=*/4, /*nRanks=*/32, /*p2pnChannels=*/32, /*perPeer=*/2);
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(comm.get(), &task));
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), nullptr));
+}
 
 // ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
@@ -643,6 +719,50 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgScalesWithRankCount) {
   EXPECT_NE(a.scalarArg, b.scalarArg);
 }
 
+TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat8_PacksFloatReciprocalNotFp8Bits) {
+  // AICOMRCCL-1945. The fp8 arms used to pack 1/nRanks as a host (always OCP) fp8 byte,
+  // which gfx942 device code decodes as FNUZ, i.e. at half the value. The rank counts are
+  // ones an fp8 scalar cannot carry at all: 1/3 and 1/384 are not representable, and
+  // 1/1024 rounds to zero in OCP e4m3. The full 64 bits are compared, so no stray fp8 byte
+  // or poison may survive above the float.
+  for (int nRanks : {3, 8, 384, 1024}) {
+    AvgComm comm(nRanks);
+    float want = float(1.0 / nRanks);
+    uint32_t wantBits;
+    std::memcpy(&wantBits, &want, sizeof(wantBits));
+    for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+      auto out = MakeRedOpOut();
+      ASSERT_EQ(ncclSuccess, hostToDevRedOp(&out, ncclAvg, dt, comm.get())) << "dtype=" << int(dt);
+      EXPECT_EQ(ncclDevPreMulSum, out.op) << "dtype=" << int(dt);
+      EXPECT_EQ(uint64_t(wantBits), out.scalarArg) << "dtype=" << int(dt) << " nRanks=" << nRanks;
+      EXPECT_FALSE(out.scalarArgIsPtr) << "dtype=" << int(dt);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
+  // Mirrors rccl_float8.h: only these take the OCP typedef in device code.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1200"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1201"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942")) << "explicit FNUZ typedef";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx90a")) << "software fallback, which is FNUZ";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz(nullptr)) << "an unknown arch lands on the software fallback";
+  // comm->archName carries target features, and IsArchMatch is a prefix compare.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950:sramecc+:xnack-"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942:sramecc+:xnack-"));
+}
+
+TEST_F(EnqueueMicrotest, Fp8ToFloat_DecodesInTheRequestedEncoding) {
+  // 0x38 separates all four encodings: OCP and FNUZ differ by one in exponent bias, and
+  // e4m3 and e5m2 place the exponent differently.
+  EXPECT_EQ(1.0f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/false));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/true));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/false));
+  EXPECT_EQ(0.25f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/true));
+}
+
 // ---------------------------------------------------------------------------
 // NOT A BUG -- investigated and cleared. The ncclAvg inner datatype switch
 // (:3235-3275) has no `default:` arm, which reads like an uninitialised-`op`
@@ -715,8 +835,9 @@ struct ChunkComm {
   ncclComm& comm{*storage};
   explicit ChunkComm(int protoSimpleBuf = 1 << 22) {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; ++p) comm.buffSizes[p] = protoSimpleBuf;
+    comm.p2pLl128BuffSize = protoSimpleBuf;
     // LOAD-BEARING: rcclProtoGrainSize(LL128) (scheduler.h:22) is
-    //   WarpSize * ELEMS_PER_THREAD * ll128DataElems * 8 / ll128LineElems
+    //   WarpSize * ll128ShmemElemsPerThread * ll128DataElems * 8 / ll128LineElems
     // so a zero WarpSize makes grainSize 0, and :3028's
     // `chunkSize / grainSize * grainSize` then SIGFPEs. A zero-initialised
     // ncclComm is not a usable fixture for any LL128 path.
@@ -727,6 +848,7 @@ struct ChunkComm {
     comm.nvlsTreeMaxChunkSize = 128 * 1024;
     comm.ll128LineElems = 120;
     comm.ll128DataElems = 112;
+    comm.ll128ShmemElemsPerThread = 8;
     comm.channels[0].tree.depth = 4;
     comm.channels[0].collnetDirect.depth = 4;
     comm.channels[0].collnetDirect.nHeads = 1;
@@ -1016,6 +1138,95 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_PipelineLadder_LargeBytesStayUnhalved)
   EXPECT_EQ(uint32_t((1 << 22) / NCCL_STEPS), r.chunkSize);
 }
 
+namespace {
+// gfx950 LL128 with the RCCL_IB_GDR_FLUSH_FLAG_TUNE x4 collective buffer: 8 nodes x 8 GPUs, a 448 KiB default
+// (send/recv) buffer, 8-word lines with 7 data words. The default chunk is 49 KiB, the x4 chunk 196 KiB, and
+// both are multiples of the fixture's 1792-byte LL128 grain.
+constexpr int kLl128DefaultBuff = 448 << 10;
+constexpr uint32_t kLl128DefaultChunk = (kLl128DefaultBuff / NCCL_STEPS / 8) * 7;
+constexpr uint32_t kLl128ScaledChunk = 4 * kLl128DefaultChunk;
+constexpr int kScaledChannels = 64;
+
+void MakeScaledLl128(ChunkComm& cc, int nRanks = 64, bool scaled = true) {
+  cc.comm.nNodes = nRanks / 8;
+  cc.comm.nRanks = nRanks;
+  cc.comm.ll128LineElems = 8;
+  cc.comm.ll128DataElems = 7;
+  cc.comm.buffSizes[NCCL_PROTO_LL128] = 4 * kLl128DefaultBuff;
+  cc.comm.p2pLl128BuffSize = scaled ? kLl128DefaultBuff : 4 * kLl128DefaultBuff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineShrinksToDefaultChunk) {
+  // 16 MB on 64 channels is ~1 chunk per channel at 196 KiB, far under nRanks / 2 = 32, so the chunk halves to
+  // the default and stops there. Measured on 8 nodes: the x4 chunk ran 16 MB broadcast at 63% of the default.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  ASSERT_EQ(0u, kLl128ScaledChunk % rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()));
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    auto r = RunChunking(cc, t, kScaledChannels, size_t(16) << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, r.chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, 1024).chunkSize)
+        << "func=" << int(f) << ": never below the default chunk";
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineKeepsLargeChunkForLargeMessages) {
+  // 1 GB carries 83 chunks of 196 KiB per channel, past nRanks / 2, so the x4 chunk stays (+6% measured);
+  // 256 MB carries 20, so one halving to 98 KiB brings it to 41.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+    EXPECT_EQ(kLl128ScaledChunk / 2, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize)
+        << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128PipelineThresholdScalesWithRanks) {
+  // The same 256 MB on 2 nodes (nRanks / 2 = 8) already has enough chunks for the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, /*nRanks=*/16);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(256) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128PipelineUnscaledBufferKeepsItsChunk) {
+  // A large LL128 buffer that send/recv shares (NCCL_LL128_BUFFSIZE) is not the scaled collective buffer, so the
+  // pipeline ladder leaves it alone, as before.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncBroadcast, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize);
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128RingCollectivesKeepTheLargeChunk) {
+  // Only the pipeline patterns shrink: Ring all_gather / reduce_scatter / all_reduce gain from the x4 chunk.
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncAllReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_RING, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(16) << 20).chunkSize) << "func=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_ScaledLl128TreeKeepsTheDefaultChunk) {
+  // Tree/LL128 never uses the scaled chunk, even where its ladder would not halve (1 GB).
+  ChunkComm cc(1 << 22);
+  MakeScaledLl128(cc);
+  for (ncclFunc_t f : {ncclFuncAllReduce, ncclFuncBroadcast, ncclFuncReduce}) {
+    auto t = MakeTask(f, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+    EXPECT_EQ(kLl128DefaultChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize) << "func=" << int(f);
+  }
+  MakeScaledLl128(cc, 64, /*scaled=*/false);
+  auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+  EXPECT_EQ(kLl128ScaledChunk, RunChunking(cc, t, kScaledChannels, size_t(1) << 30).chunkSize)
+      << "an unscaled buffer keeps its chunk";
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_CollnetChain_ClampsToTwoFiftySixK) {
   // :2960 chunkSize = min(256*1024, stepSize*chunkSteps). With a large buffer
   // the 256K clamp is what decides, so this pins the literal.
@@ -1103,8 +1314,49 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
   // divides by zero. This fails loudly instead of core-dumping the suite.
   ChunkComm cc;
   EXPECT_GT(rcclProtoGrainSize(NCCL_PROTO_LL128, cc.get()), 0)
-      << "LL128 grain is WarpSize*8*ll128DataElems*8/ll128LineElems -- a zero "
-         "WarpSize or ll128DataElems makes calcCollChunking:3028 SIGFPE";
+      << "LL128 grain is WarpSize*ll128ShmemElemsPerThread*ll128DataElems*8/ll128LineElems -- a zero "
+         "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
+}
+
+TEST_F(EnqueueMicrotest, OneRpnNetRegChannelCap_AppliesToBroadcastAlone) {
+  EXPECT_TRUE(ncclUseOneRpnNetRegChannelCap(ncclFuncBroadcast));
+  for (int i = 0; i < int(ncclNumFuncs); ++i) {
+    const auto func = static_cast<ncclFunc_t>(i);
+    if (func == ncclFuncBroadcast) continue;
+    EXPECT_FALSE(ncclUseOneRpnNetRegChannelCap(func)) << "func=" << i;
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_OneRpnRegisteredAllGatherUsesTheUnregisteredSchedule) {
+  constexpr size_t kPerRankBytes = 11 * 1024 * 1024;
+  constexpr size_t kGlobalBytes = 2 * kPerRankBytes;
+  ChunkComm cc(/*protoSimpleBuf=*/1 << 22);
+  cc.comm.nRanks = 2;
+  cc.comm.nNodes = 2;
+  cc.comm.isOneRPN = true;
+
+  auto unregistered = MakeTask(ncclFuncAllGather, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  unregistered.chunkSteps = ALLGATHER_CHUNKSTEPS;
+  unregistered.sliceSteps = ALLGATHER_SLICESTEPS;
+  auto registered = unregistered;
+  registered.regBufType = NCCL_NET_REG_BUFFER;
+
+  auto workaround = RunChunking(cc, unregistered, /*nChannels=*/1, kGlobalBytes);
+  auto zeroCopy = RunChunking(cc, registered, /*nChannels=*/1, kGlobalBytes);
+  ASSERT_EQ(ncclSuccess, workaround.rc);
+  ASSERT_EQ(ncclSuccess, zeroCopy.rc);
+  ASSERT_EQ(0, workaround.proxyOp.reg);
+  ASSERT_EQ(1, zeroCopy.proxyOp.reg);
+
+  EXPECT_EQ(workaround.chunkSize, zeroCopy.chunkSize);
+  EXPECT_EQ(workaround.proxyOp.chunkSize, zeroCopy.proxyOp.chunkSize);
+  EXPECT_EQ(workaround.proxyOp.sliceSize, zeroCopy.proxyOp.sliceSize);
+  EXPECT_EQ(workaround.proxyOp.chunkSteps, zeroCopy.proxyOp.chunkSteps);
+  EXPECT_EQ(workaround.proxyOp.sliceSteps, zeroCopy.proxyOp.sliceSteps);
+  EXPECT_EQ(workaround.proxyOp.loopSize, zeroCopy.proxyOp.loopSize);
+  EXPECT_EQ(workaround.proxyOp.loopOffset, zeroCopy.proxyOp.loopOffset);
+  EXPECT_EQ(workaround.proxyOp.nsteps, zeroCopy.proxyOp.nsteps);
+  EXPECT_NE(size_t(NCCL_MAX_NET_SIZE), size_t(zeroCopy.proxyOp.chunkSize));
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {
@@ -1174,6 +1426,44 @@ TEST_F(EnqueueMicrotest, PackedChannels_TinyTransfer_PacksIntoOneChannel) {
   // however many are offered.
   EXPECT_EQ(1, rcclKernelPackedChannels(RankComm(8).get(), ncclFuncAllReduce, 4,
                                         ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+}
+
+TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
+  // nChannels == 0 skips the cap. Count 10240 / max 32 packs to 5.
+  {
+    RankComm rc(8);
+    EXPECT_EQ(0, rc.get()->nChannels);
+    EXPECT_EQ(5, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels > nChannels: the cap is applied before the packer arithmetic.
+  // 3 with the cap, 5 without it, 4 if the cap were applied after the arithmetic.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 4;
+    EXPECT_EQ(3, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels <= nChannels: the cap does not change the answer.
+  {
+    RankComm uncapped(8);
+    RankComm capped(8);
+    capped.get()->nChannels = 16;
+    const size_t count = size_t(1) << 24;
+    int plain = rcclKernelPackedChannels(uncapped.get(), ncclFuncAllReduce, count,
+                                         ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    int limited = rcclKernelPackedChannels(capped.get(), ncclFuncAllReduce, count,
+                                           ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    EXPECT_EQ(8, plain);
+    EXPECT_EQ(plain, limited);
+  }
+  // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 1;
+    EXPECT_EQ(1, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
 }
 
 TEST_F(EnqueueMicrotest, PackedChannels_LargeTransfer_SaturatesToMaxChannels) {
@@ -1469,7 +1759,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SingleRank_ShortCircuitsToRingSimpl
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlltoAllFuncs_TakeTheSameFastPath) {
   // Three funcs share the nRanks==1 short circuit even at many ranks.
   for (auto f : {ncclFuncAlltoAllPivot, ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
-    ResetEnqueueFakes();
+    ResetEnqueueTestDeps();
     CostComm cc(/*nRanks=*/8);
     CostTable tbl;
     auto task = CostTask(f);
@@ -1513,7 +1803,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TooManyLocalRanks_SkipsCollNetAlgor
   }
 
   // Control: at the arity limit the CollNet rows ARE populated.
-  ResetEnqueueFakes();
+  ResetEnqueueTestDeps();
   CostComm ok;
   ok.get()->maxLocalRanks = NCCL_MAX_DIRECT_ARITY + 1;
   CostTable tbl2;
@@ -1567,7 +1857,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8RingAboveEightRanks_IsPenalised)
   // nRanks > 8 and the datatype is fp8. Assert the RATIO, so the penalty factor
   // itself is pinned rather than just "bigger".
   for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
-    ResetEnqueueFakes();
+    ResetEnqueueTestDeps();
     CostComm big(/*nRanks=*/16);
     CostTable tbl;
     auto task = CostTask(ncclFuncAllReduce, dt);
@@ -1737,6 +2027,32 @@ TEST_F(EnqueueMicrotest, RedOpCreate_DeviceResidence_StoresPointerNotBytes) {
   const ncclUserRedOp& u = rc.get()->userRedOps[ix];
   EXPECT_TRUE(u.opFull.scalarArgIsPtr);
   EXPECT_EQ(reinterpret_cast<uint64_t>(&scalar), u.opFull.scalarArg);
+}
+
+TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediateFp8_DecodesToFloatWithTheDeviceEncoding) {
+  // FuncPreMulSum<fp8> reads float bits, so the user's byte is promoted here. It must be
+  // read in the device's encoding, as the device reads the payload and an ncclScalarDevice
+  // scalar; the host typedef would be off by 2x wherever the device is FNUZ.
+  const uint8_t byte = 0x38;
+  const struct { ncclDataType_t dt; const char* arch; float want; } kCases[] = {
+      {ncclFloat8e4m3, "gfx950", 1.0f},  {ncclFloat8e4m3, "gfx942", 0.5f},
+      {ncclFloat8e4m3, "gfx90a", 0.5f},  {ncclFloat8e4m3, "gfx1201:xnack-", 1.0f},
+      {ncclFloat8e5m2, "gfx950", 0.5f},  {ncclFloat8e5m2, "gfx942", 0.25f}};
+  for (auto c : kCases) {
+    RedOpComm rc;
+    rc.get()->archName = const_cast<char*>(c.arch);
+    ncclRedOp_t op = ncclSum;
+    ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, const_cast<uint8_t*>(&byte), c.dt,
+                                                         ncclScalarHostImmediate, rc.get()))
+        << "arch=" << c.arch;
+    const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+    const ncclUserRedOp& u = rc.get()->userRedOps[ix];
+    EXPECT_FALSE(u.opFull.scalarArgIsPtr) << "arch=" << c.arch;
+    uint32_t want;
+    std::memcpy(&want, &c.want, sizeof(want));
+    EXPECT_EQ(uint64_t(want), u.opFull.scalarArg) << "dtype=" << int(c.dt) << " arch=" << c.arch;
+    rc.get()->archName = nullptr;  // not owned here
+  }
 }
 
 TEST_F(EnqueueMicrotest, RedOpCreate_MarksSlotAllocatedViaFreeNext) {
@@ -1952,14 +2268,14 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeGfx950_IsEnabled) {
 }
 
 TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_Gfx950WithAinic_IsDisabled) {
-  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinic is a seam in
+  // The `!rcclUseAinic()` conjunct -- the reason g_rcclUseAinicValue is a seam in
   // fakes/transport_stubs.cc rather than the fail-loud stub it used to be.
   // Without it the flag stays false in every test and dropping the conjunct
   // survives. Differential with MultiNodeGfx950_IsEnabled, which is identical
   // but for the AINIC flag.
   BatchComm bc(/*nNodes=*/2, "gfx950");
   SetBatchParam(-1);
-  g_rcclUseAinic = true;
+  g_rcclUseAinicValue = true;
   EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get()))
       << "gfx950 with AINIC must not enable p2p batching";
 }
@@ -1974,37 +2290,453 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
-// getImplicitOrder (enqueue.cc:1996)
-// On AMD the CUDA driver-version arm is #if'd out entirely, so only two arms
-// are reachable: param-on -> Serial, param-off -> None. Pinning that the AMD
-// build cannot return ncclImplicitOrderLaunch is the useful assertion.
+// rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
+// bracket an addon collective wraps its own launch in.
+//
+// AICOMRCCL-2184: the epilogue records comm->doneEvent unless a kernel took it as
+// its stop event. The production launches that take nothing are the CE two-shot
+// AllReduce and the hierarchical ReduceScatter, which need CE-capable hardware or
+// eight nodes, so the arm is only assertable here.
+//
+// In the two cases that must not record, the hipEventRecord hook fails every
+// call: an unexpected call then shows up twice, in the hook's call count and in
+// the result the bracket returns.
+//
+// Each case installs the capture answer it relies on instead of inheriting it: a host binary has no
+// graph and can only answer "not capturing", and a case that took that answer without asking for it
+// would look covered while never reaching capture at all.
 // ===========================================================================
 
+namespace {
+// Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
+hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
+hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+
+// ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
+// device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
+struct AddonComm {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  AddonComm() {
+    comm->cudaDev   = g_currentDevice;
+    comm->doneEvent = kAddonDoneEvent;
+  }
+  ncclComm* c() { return comm.get(); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  hipEvent_t recordedEvent = nullptr;
+  hipStream_t recordedStream = nullptr;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    recordedEvent = event;
+    recordedStream = stream;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  ASSERT_EQ(1, record.calls);
+  EXPECT_EQ(kAddonDoneEvent, recordedEvent);
+  EXPECT_EQ(kAddonStream, recordedStream);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  // The tag advances however the event reached the stream, so the next collective on another
+  // stream still gets its edge.
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclInternalError,
+            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
+// comm->opCount in step with the native path.
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
+  EXPECT_EQ(8u, ac.c()->opCount);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
+  EXPECT_EQ(7u, ac.c()->opCount);
+}
+
+// ===========================================================================
+// rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
+// per-communicator chain that ncclLaunchPrepare / ncclLaunchFinish capture native collectives into:
+// sharedRes->deviceStream when graphStreamOrdering is on, its serialEvent when it is off.
+// ===========================================================================
+
+namespace {
+hipStream_t const        kAddonDeviceStream = reinterpret_cast<hipStream_t>(0xD57);
+hipStream_t const        kAddonLiveStream   = reinterpret_cast<hipStream_t>(0x11E);
+hipEvent_t const         kAddonScratchEvent = reinterpret_cast<hipEvent_t>(0x5C8);
+hipEvent_t const         kAddonSerialEvent  = reinterpret_cast<hipEvent_t>(0x5E1);
+unsigned long long const kAddonGraphId      = 42;
+
+struct CapturingAddonComm : AddonComm {
+  std::unique_ptr<ncclSharedResources> sharedRes{new ncclSharedResources{}};
+  explicit CapturingAddonComm(int graphStreamOrdering) {
+    comm->config.graphStreamOrdering    = graphStreamOrdering;
+    comm->sharedRes                     = sharedRes.get();
+    sharedRes->scratchEvent             = kAddonScratchEvent;
+    sharedRes->deviceStream.liveStream  = kAddonLiveStream;
+    sharedRes->deviceStream.serialEvent = kAddonSerialEvent;
+  }
+};
+
+ncclResult_t CapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  if (graph) {
+    *graph         = ncclCudaGraphNone(mode);
+    graph->graphId = kAddonGraphId;
+  }
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceStreamChain) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  struct ncclStrongStream* const deviceStream = &ac.c()->sharedRes->deviceStream;
+  std::vector<std::string> calls;
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool, hipStream_t* workStream) {
+                       EXPECT_EQ(kAddonGraphId, graph.graphId);
+                       EXPECT_EQ(deviceStream, ss);
+                       *workStream = kAddonDeviceStream;
+                       calls.push_back("acquire");
+                       return ncclSuccess;
+                     });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [&](hipStream_t waiter, hipStream_t waited, hipEvent_t event) {
+    EXPECT_EQ(kAddonStream, waiter);
+    EXPECT_EQ(kAddonDeviceStream, waited);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    calls.push_back("wait");
+    return ncclSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonStream, stream);
+    calls.push_back(event == kAddonDoneEvent      ? "recordDone"
+                    : event == kAddonScratchEvent ? "recordScratch"
+                                                  : "recordOther");
+    return hipSuccess;
+  });
+  ScopedHook advanceToEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph, hipStream_t, hipEvent_t) {
+    return ncclInternalError;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [&](hipStream_t stream, hipStream_t source) {
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonStream, source);
+    calls.push_back("advance");
+    return ncclSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease, [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(deviceStream, ss);
+    calls.push_back("release");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
+    calls.push_back("launch");
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "advance", "release"}), calls);
+  EXPECT_EQ(0, advanceToEvent.calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/0);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  int bootstrapRecords = 0;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    if (event == kAddonSerialEvent) {
+      EXPECT_EQ(kAddonLiveStream, stream);
+      ++bootstrapRecords;
+    }
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int flags) {
+    EXPECT_EQ(kAddonStream, stream);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(static_cast<unsigned int>(hipEventWaitExternal), flags);
+    return hipSuccess;
+  });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent, [](struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return ncclSuccess;
+  });
+
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  }
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  // The live-stream record only bootstraps the first capture's external wait.
+  EXPECT_EQ(1, bootstrapRecords);
+  EXPECT_EQ(2, wait.calls);
+  EXPECT_EQ(2, graphRecord.calls);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.graphOriginCaptured);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.everCaptured);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
+  AddonComm ac;  // no sharedRes: touching the capture chain would crash, not just miscount
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+    if (graph) *graph = ncclCudaGraphNone(mode);
+    return ncclSuccess;
+  });
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [](hipStream_t, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent,
+                         [](struct ncclCudaGraph, hipEvent_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  EXPECT_EQ(0, waitStream.calls);
+  EXPECT_EQ(0, graphRecord.calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDeviceStream) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                       *workStream = kAddonDeviceStream;
+                       return ncclSuccess;
+                     });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook advance(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(1, acquire.calls);
+  EXPECT_EQ(1, release.calls);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0, advance.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
+// ncclLaunchFinish fast-forward of deviceStream under capture: a single user stream reads the
+// launch stream's frontier directly, several user streams go through finishedEvent.
+// ===========================================================================
+
+namespace {
+hipStream_t const kSecondUserStream = reinterpret_cast<hipStream_t>(0x2B5);
+
+struct CapturedLaunchFinish {
+  CapturingAddonComm ac{/*graphStreamOrdering=*/1};
+  std::unique_ptr<ncclKernelPlan> plan{new ncclKernelPlan{}};
+  ncclCudaStreamList streams[2] = {};
+  explicit CapturedLaunchFinish(int numStreams) {
+    struct ncclKernelPlanner* planner = &ac.c()->planner;
+    planner->capturingGraph = ncclCudaGraphNone(ac.c()->config.graphUsageMode);
+    planner->capturingGraph.graphId = kAddonGraphId;
+    streams[0].stream = kAddonStream;
+    if (numStreams == 2) {
+      streams[0].next = &streams[1];
+      streams[1].stream = kSecondUserStream;
+    }
+    planner->streams = &streams[0];
+    planner->numStreams = numStreams;
+    ncclIntruQueueEnqueue(&planner->planQueue, plan.get());
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedSingleStream_AdvancesDeviceStreamToTheLaunchStream) {
+  CapturedLaunchFinish lf(/*numStreams=*/1);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonScratchEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return hipSuccess;
+  });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph graph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        EXPECT_EQ(kAddonGraphId, graph.graphId);
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t stream, hipStream_t source) {
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonStream, source);
+    return ncclSuccess;
+  });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(1, toStream.calls);
+  EXPECT_EQ(0, toEvent.calls);
+  EXPECT_EQ(1, release.calls);
+}
+
+TEST_F(EnqueueMicrotest, LaunchFinish_CapturedTwoStreams_AdvancesDeviceStreamToTheFinishedEvent) {
+  CapturedLaunchFinish lf(/*numStreams=*/2);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook acquired(g_ncclStrongStreamAcquiredWorkStream,
+                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                        *workStream = kAddonDeviceStream;
+                        return ncclSuccess;
+                      });
+  ScopedHook toStream(g_ncclStreamAdvanceToStream, [](hipStream_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook toEvent(g_ncclStreamAdvanceToEvent, [](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return ncclSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int) {
+    EXPECT_EQ(kSecondUserStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    return hipSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclLaunchFinish(lf.ac.c()));
+
+  EXPECT_EQ(0, toStream.calls);
+  EXPECT_EQ(1, toEvent.calls);
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_EQ(1, release.calls);
+}
+
+// ===========================================================================
+// getImplicitOrder (enqueue.cc:2091)
+// Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
+// CUDA driver-version arm is #if'd out, so only two arms are reachable:
+// config==1 -> Serial, anything else (0 / UNDEF) -> None. Pinning that the AMD
+// build cannot return ncclImplicitOrderLaunch is the useful assertion.
+// ncclComm is too large for the stack (see BatchPlanComm).
+// ===========================================================================
+
+namespace {
+std::unique_ptr<ncclComm> MakeLaunchOrderComm(int launchOrderImplicit) {
+  auto comm = std::unique_ptr<ncclComm>(new ncclComm{});
+  comm->config.launchOrderImplicit = launchOrderImplicit;
+  return comm;
+}
+}  // namespace
+
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamDisabled_IsNone) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 0);
+  auto comm = MakeLaunchOrderComm(0);
   auto mode = ncclImplicitOrderLaunch;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
+  EXPECT_EQ(ncclImplicitOrderNone, mode);
+}
+
+TEST_F(EnqueueMicrotest, GetImplicitOrder_UndefDefault_IsNone) {
+  auto comm = MakeLaunchOrderComm(NCCL_CONFIG_UNDEF_INT);
+  auto mode = ncclImplicitOrderLaunch;  // poison
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderNone, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_ParamEnabled_IsSerialOnAmd) {
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  auto comm = MakeLaunchOrderComm(1);
   auto mode = ncclImplicitOrderNone;  // poison
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&mode, comm.get(), /*capturing=*/false));
   EXPECT_EQ(ncclImplicitOrderSerial, mode);
 }
 
 TEST_F(EnqueueMicrotest, GetImplicitOrder_CapturingIsIrrelevantOnAmd) {
   // HONEST SCOPE: this pins that `capturing` does not change the answer; it does
   // NOT prove the AMD arm is what produced it. Under the seam's driver 12000 the
-  // CUDA arm returns Serial for both values too (:2002 12000 < 12090; :2006
-  // 12030 <= min(CUDART, 12000) is false), so an #if change would not fail here.
-  // getImplicitOrder's third parameter (driver, :1996) is what separates the arms.
-  SetParam("LAUNCH_ORDER_IMPLICIT", 1);
+  // CUDA arm returns Serial for both values too, so an #if change would not fail
+  // here. The optional driver argument is what separates the CUDA arms.
+  auto comm = MakeLaunchOrderComm(1);
   auto a = ncclImplicitOrderNone;
   auto b = ncclImplicitOrderNone;
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, /*capturing=*/true));
-  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, /*capturing=*/false));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&a, comm.get(), /*capturing=*/true));
+  ASSERT_EQ(ncclSuccess, getImplicitOrder(&b, comm.get(), /*capturing=*/false));
   EXPECT_EQ(a, b);
   EXPECT_EQ(ncclImplicitOrderSerial, a);
 }
@@ -2064,7 +2796,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_FirstItem_OpensABatchAndCountsIt) {
   // "can we append?" decision reads these back.
   BatchPlanComm bp;
   addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl,
-                     /*devFuncId=*/7, /*workOffset=*/0);
+                     /*devFuncId=*/7, /*progressSlot=*/0, /*workOffset=*/0);
   ASSERT_EQ(1, bp.queueLength());
   EXPECT_EQ(1, bp.p()->nWorkBatches);
   auto* b = bp.tailBatch();
@@ -2090,8 +2822,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondCollItem_ExceedsByteBudgetAndOpensNe
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeColl);
   ASSERT_GT(2 * ws, size_t(NCCL_MAX_DEV_WORK_BATCH_BYTES))
       << "precondition: two coll items must not fit in one batch";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, uint32_t(ws));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, uint32_t(ws));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
 }
@@ -2101,8 +2833,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
   // contiguous offset, same epoch, distinct rounds -> one batch, two bits set.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "must reuse the open batch";
   EXPECT_EQ(1, bp.p()->nWorkBatches);
@@ -2124,12 +2856,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_BcastCapSplitsAtExactlyMaxItem) {
   // than opening a batch of its own: `0 != offset % workSize` is what would
   // otherwise split these and mask the cap.
   for (int i = 0; i < maxitem; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(i * bcastSize));
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(i * bcastSize));
   }
   const int beforeCap = bp.queueLength();
 
   // The (maxitem + 1)th item is the first to see nBcasts == maxitem.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(maxitem * bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(maxitem * bcastSize));
   EXPECT_EQ(beforeCap + 1, bp.queueLength())
       << "the cap at :240 must open a new batch on the item that reaches maxitem";
 }
@@ -2156,8 +2888,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
   const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
   ASSERT_LT(1, ncclMaxDevWorkBatchBytes(bp.c()->cudaArch) / int(sizeof(ncclDevWorkBcast)))
       << "maxitem must exceed the single bcast item, or the :240 cap is the splitter";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(bcastSize));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
   EXPECT_EQ(0, bp.chan()->workBatchQueue.head->batch.nextExtends)
@@ -2179,9 +2911,9 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_NonMultipleOffset_CreatesExtensionBatch) {
   // before the extension logic could be reached.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
   auto* first = bp.tailBatch();
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(1, first->nextExtends) << "the previous batch must be marked as extended";
@@ -2194,15 +2926,15 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_OffsetBeyondBitsetRange_CreatesExtensionBa
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   {
     BatchPlanComm fits(/*nNodes=*/4);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(63 * ws), 1, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(63 * ws), 1, true);
     EXPECT_EQ(1, fits.queueLength()) << "slot 63 is the last representable one";
     EXPECT_NE(0ull, fits.tailBatch()->offsetBitset & (1ull << 63));
   }
   {
     BatchPlanComm over(/*nNodes=*/4);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(64 * ws), 1, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(64 * ws), 1, true);
     EXPECT_EQ(2, over.queueLength()) << "slot 64 must spill to an extension batch";
   }
 }
@@ -2213,13 +2945,13 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ExtensionBatchDoesNotResetWipCounters) {
   // genuinely new batch resets it.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);  // misaligned -> extension
   EXPECT_EQ(2 * ws, bp.chan()->wipBatch.workBytes) << "extension must ACCUMULATE";
 
   // A different funcId forces a genuinely new batch, which DOES reset.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, 0, /*p2pRound=*/2, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, /*progressSlot=*/0, 0, /*p2pRound=*/2, true);
   EXPECT_EQ(ws, bp.chan()->wipBatch.workBytes) << "a new batch must RESET";
 }
 
@@ -2227,8 +2959,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ChannelsAreIndependent) {
   // Every decision reads comm->planner.wipPlan.channels[channelId], so work on
   // one channel must not disturb another. Catches a hardcoded index.
   BatchPlanComm bp;
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(1, bp.queueLength(0));
   EXPECT_EQ(1, bp.queueLength(1));
   EXPECT_EQ(2, bp.p()->nWorkBatches) << "but the plan-wide count sums both";
@@ -2247,8 +2979,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentEpoch_ForcesNewBatch) {
   // batching uniform across ranks and prevents hangs.
   BatchPlanComm bp(/*nNodes=*/4);  // >2 so the per-batch cap is the epoch size
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/NCCL_MAX_DEV_WORK_P2P_PER_BATCH, true);
   EXPECT_EQ(2, bp.queueLength()) << "cross-epoch p2ps must not fuse";
 }
@@ -2259,8 +2991,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pSameEpochDifferentRounds_MayShareABatch
   // Without this, "always makes a new batch" would pass the other two.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "same epoch, different rounds -> one batch";
   EXPECT_EQ(2, bp.chan()->wipBatch.nP2ps);
@@ -2272,8 +3004,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pTwoNodesOrFewer_CapsAtOnePerBatch) {
   // which differs ONLY in nNodes.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength()) << "nNodes<=2 allows only one p2p per batch";
 }
@@ -2289,8 +3021,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pRecordsRoundAndBatchEligibility) {
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;      // first round of an epoch
   const int r1 = r0 + 1;                                   // same epoch
   ASSERT_EQ(r0 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH, r1 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r1, true);
   EXPECT_TRUE(bp.chan()->wipBatch.batchP2P);
   ASSERT_EQ(2, bp.chan()->wipBatch.nP2ps);
   EXPECT_EQ(r0, bp.chan()->wipBatch.p2pRounds[0]);
@@ -2310,8 +3042,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pEligibleAfterIneligible_ForcesNewBatch)
   // and lets a mutant that drops :227 survive.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, /*batchP2P=*/false);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, /*batchP2P=*/false);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1,
                      /*batchP2P=*/true);
   EXPECT_EQ(2, bp.queueLength()) << "an ineligible batch must not absorb an eligible op";
 }
@@ -2321,12 +3053,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_CountsP2pBatchesSeparately) {
   // because it derives a proxyOpCount that fused ops must share.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1, true);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p);
 
   // A coll batch must NOT bump the p2p counter.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p) << "coll work must not count as p2p";
 }
 
@@ -2339,7 +3071,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   const int kItems = 6;
   for (int i = 0; i < kItems; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(i * ws),
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(i * ws),
                        /*p2pRound=*/i, true);
   }
   int bits = 0;
@@ -2349,6 +3081,32 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   EXPECT_EQ(kItems, bits) << "every call must set exactly one slot bit";
   EXPECT_EQ(bp.queueLength(), bp.p()->nWorkBatches)
       << "plan->nWorkBatches must track the queue length";
+}
+
+// ===========================================================================
+// ncclTasksRegAndEnqueue (enqueue.cc:414)
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, TasksRegAndEnqueue_UnresolvableRegVariantId_IsInvalidUsage) {
+  // nccl_stubs.cc leaves ncclDevFuncNameToId empty, so the reg-variant arm's
+  // ncclDevFuncId returns -1 by construction. Unchecked it would dispatch as a funcId.
+  BatchPlanComm bp;
+  ScopedHook reg(g_ncclRegisterCollBuffers,
+                 [](struct ncclComm*, struct ncclTaskColl*, void**, void**,
+                    struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>*,
+                    bool* needConnect) {
+                   if (needConnect) *needConnect = false;
+                   return ncclSuccess;
+                 });
+
+  ncclTaskColl task = {};
+  task.func = ncclFuncAllReduce;      // in ll128_reg_variant_colls
+  task.protocol = NCCL_PROTO_LL128;   // ...and LL128, so the reg-variant arm runs
+  task.algorithm = NCCL_ALGO_RING;    // not NVLS: those skip the arm entirely
+  ncclIntruQueueEnqueue(&bp.c()->planner.collTaskQueue, &task);
+
+  EXPECT_EQ(ncclInvalidUsage, ncclTasksRegAndEnqueue(bp.c()));
+  EXPECT_EQ(1, reg.calls);
 }
 
 // ===========================================================================
@@ -2391,7 +3149,7 @@ struct FinishComm {
   void addBatches(int c, int n, int funcIdBase) {
     for (int i = 0; i < n; ++i) {
       addWorkBatchToPlan(this->c(), p(), c, ncclDevWorkTypeColl,
-                         funcIdBase + i, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
+                         funcIdBase + i, /*progressSlot=*/0, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
     }
     markChannel(c);
   }
@@ -2912,16 +3670,16 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentFuncId_ForcesNewBatch_Isolated
   // Same epoch, distinct rounds, contiguous offsets, within budget: every OTHER
   // guard is satisfied, so only the funcId difference can open a new batch.
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8, /*progressSlot=*/0,
                      uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(2, bp.queueLength()) << "a different funcId must force a new batch";
 
   // Control: identical call with the SAME funcId shares a batch. Without this
   // pair the assertion above could also be satisfied by an unconditional split.
   BatchPlanComm same(/*nNodes=*/4);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r0 + 1, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(1, same.queueLength()) << "same funcId must still share";
 }
 
@@ -2938,8 +3696,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDuplicateRoundSameEpoch_ForcesNewBatch_
   const int r = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;  // first round of an epoch
   // Identical round twice: same epoch, so the epoch rule CANNOT fire. Only the
   // duplicate-round guard can split these.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r, true);
   EXPECT_EQ(2, bp.queueLength())
       << "two p2ps of the SAME round use the same connections and must not fuse";
 }
@@ -3110,6 +3868,13 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   // a lie: deleting either call site was invisible.
   EXPECT_EQ(1, g_rcclOverrideAlgorithmCalls) << "rcclOverrideAlgorithm (:2733)";
   EXPECT_EQ(1, g_rcclOverrideProtocolCalls) << "rcclOverrideProtocol (:2734)";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveAlgorithmCalls) << "rcclUpdateCollectiveAlgorithm";
+  EXPECT_TRUE(g_rcclUpdateCollectiveAlgorithmBeforeProtocol)
+      << "rcclUpdateCollectiveAlgorithm must run before rcclUpdateCollectiveProtocol picks the Tree protocol";
+  EXPECT_EQ(1, g_rcclUpdateRemoteFlushAlgoProtoCalls) << "rcclUpdateRemoteFlushAlgoProto";
+  EXPECT_TRUE(g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol)
+      << "rcclUpdateRemoteFlushAlgoProto must run after rcclUpdateCollectiveProtocol so its choice stands";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
 // LATENT BUG (enqueue.cc:2659): rcclOverrideChannels returns ncclResult_t, but
@@ -3150,6 +3915,26 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_OverrideChannelsCanChangeTheChannelCoun
   EXPECT_EQ(3, task.nMaxChannels) << "the override's channel count must reach the task";
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RemoteFlushChannelsSetTheCountCappedByComm) {
+  // A positive rcclUpdateRemoteFlushAlgoProto return replaces the Ring/Tree channel count, capped at comm->nChannels.
+  for (int commChannels : {64, 32}) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = commChannels;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;  // left empty: the RING/SIMPLE fallback is taken
+    g_rcclUpdateRemoteFlushAlgoProtoChannels = 48;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(std::min(48, commChannels), task.nMaxChannels) << "comm->nChannels=" << commChannels;
+  }
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 64;
+  auto task = CostTask(ncclFuncAllReduce);
+  CostTable tbl;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+  EXPECT_EQ(64, task.nMaxChannels) << "0 keeps RCCL's own count";
+}
+
 // The NCCL_MIN_NCHANNELS floor at :2652-2656. Left undriven, g_paramMinNchannels
 // defaults to 0 and the whole clamp degenerates: `nc > minNChannels` becomes
 // `nc > 0` and `std::max(minNChannels, X)` becomes `X`, so mutating both
@@ -3185,6 +3970,34 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_MinNchannelsIsAFloorOnTheShrink) {
       << "NCCL_MIN_NCHANNELS must floor the shrink; unclamped was " << unclamped;
 }
 
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatMaxNchannelsClampsTheChannelCount) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = 3;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(3, task.nMaxChannels) << "positive NCCL_MAX_NCHANNELS must clamp PAT's channel count";
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_PatUnsetMaxNchannelsDoesNotClamp) {
+  AlgoInfoComm cc;
+  cc.get()->nChannels = 8;
+  auto task = CostTask(ncclFuncAllGather);
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_PAT][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_paramMaxNchannels = -2;
+
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, /*nBytes=*/2 << 20, tbl.ptr(),
+                                         /*simInfo=*/nullptr));
+  EXPECT_EQ(NCCL_ALGO_PAT, task.algorithm);
+  EXPECT_EQ(8, task.nMaxChannels) << "the production -2 sentinel must leave PAT's channel count alone";
+}
+
 // Guards the fix for the &tablePtr defect: topoGetAlgoInfo must read the cost
 // table it was handed. updateCollCostTable is driven first because it owns the
 // only ncclTopoGetAlgoTime call site (:2539), so it is what makes the scripted
@@ -3217,7 +4030,7 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_SelectsTheCheapestScriptedCell) {
 // ===========================================================================
 // Seams whose comments promised a tested rejection path. Driving them here so
 // the promise holds; the remaining declared-but-undriven seams are marked in
-// enqueue_fakes.h as link-floor-only rather than left to imply coverage.
+// enqueue_test_deps.h as link-floor-only rather than left to imply coverage.
 // ===========================================================================
 
 TEST_F(EnqueueMicrotest, RedOpCreate_CommNotReady_IsRejected) {
@@ -3248,4 +4061,1193 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
   EXPECT_EQ(ncclInternalError,
             ncclRedOpCreatePreMulSum_impl(&op, &s, ncclFloat32,
                                           ncclScalarHostImmediate, rc.get()));
+}
+// ===========================================================================
+// collTaskAppend -- symkExtract tag (enqueue.cc:3508-3511)
+//
+// collTaskAppend is static inside enqueue.cc and in scope here via the
+// ENQUEUE_CC_PATH textual include. The two cases below pin that a
+// non-symmetric decision writes RCCL_SYMK_EXTRACT_DENY and RCCL_SYMMETRIC
+// writes RCCL_SYMK_EXTRACT_ALLOW. A third case pins decisionValid=false →
+// RCCL_SYMK_EXTRACT_NONE. The consumer (ncclMakeSymmetricTaskList) is a
+// fail-loud stub in test/host/fakes/sched_stubs.cc and is not reachable here;
+// only the tag written onto the task is checked.
+// ===========================================================================
+
+// Minimal comm that satisfies collTaskAppend without entering the Broadcast /
+// AllGatherV branch and without GPU allocation.
+struct CollTaskComm {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  CollTaskComm() { storage->nRanks = 4; }
+  ncclComm* get() { return storage.get(); }
+};
+
+static ncclInfo MakeCollInfo(ncclComm* comm, bool decisionValid, int algo) {
+  ncclInfo info{};
+  info.comm          = comm;
+  info.coll          = ncclFuncAllReduce;
+  info.op            = ncclSum;
+  info.datatype      = ncclFloat32;
+  info.count         = static_cast<size_t>(comm->nRanks);
+  info.chunkSteps    = 1;
+  info.sliceSteps    = 1;
+  info.decisionValid = decisionValid;
+  info.decision.algo = algo;
+  return info;
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NonSymmetricDecision_WritesDeny) {
+  // decisionValid=true, algo != RCCL_SYMMETRIC → symkExtract must be DENY so
+  // ncclMakeSymmetricTaskList does not extract the task even when buffers are
+  // registered.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_DENY, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_SymmetricDecision_WritesAllow) {
+  // decisionValid=true, algo == RCCL_SYMMETRIC → symkExtract must be ALLOW so
+  // ncclMakeSymmetricTaskList can extract the task.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_SYMMETRIC);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_ALLOW, t->symkExtract);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
+  // decisionValid=false → symkExtract must stay NONE so the extractor uses
+  // window inspection rather than a stale/absent selector result.
+  CollTaskComm cc;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  ASSERT_EQ(1, cc.get()->planner.nTasksColl);
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
+}
+
+// ===========================================================================
+// ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
+// ===========================================================================
+
+// Comm ready for ceCollTaskAppend: CE initialized, out of every group; leaves the thread's group heads clean.
+struct CeAppendScene {
+  CollTaskComm cc;
+  CeAppendScene() {
+    ClearGroupHeads();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      cc.get()->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    cc.get()->ceColl.initialized = true;
+  }
+  ~CeAppendScene() { ClearGroupHeads(); }
+  static void ClearGroupHeads() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      ncclGroupCommHead[type] = nullptr;
+    }
+  }
+  ncclResult_t Append(ncclFunc_t func) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_CE_REGISTERED);
+    info.coll = func;
+    return ceCollTaskAppend(cc.get(), &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{});
+  }
+  bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
+};
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceAlreadyPending_StillJoinsSymRegister) {
+  CeAppendScene scene;
+  scene.cc.get()->ceColl.stagingPending = true;  // left by a group that failed before its SymRegister job ran
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithStaging_QueuesNoSetup) {
+  CeAppendScene scene;
+  uint8_t staging = 0;
+  scene.cc.get()->ceColl.ceARTmpBuf = &staging;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllGather_QueuesNoSetup) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+// ===========================================================================
+// addP2pToPlan (enqueue.cc:1334) -- gfx1250 SendRecv protocol selection.
+// GPU SendRecvTests skip off gfx1250, so host CI never reached this planner.
+// These tests fake cudaArch=1250 / nRanks=4 and inspect the emitted
+// ncclDevWorkP2p plus the kernel funcId (LL vs LL128).
+// ===========================================================================
+
+#if !defined(ENABLE_LL128)
+#error "rccl-UnitTestsMicroEnqueue must compile ENABLE_LL128 so addP2pToPlan's gfx1250 window is in this binary"
+#endif
+
+namespace {
+void InstallSendRecvDevFuncIds() {
+  auto key = [](int reg) -> uint64_t {
+    return (uint64_t(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+           (uint64_t(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+  };
+  ncclDevFuncNameToId[key(0)] = 100;  // legacy LL kernel
+  ncclDevFuncNameToId[key(1)] = 101;  // LL128 kernel
+}
+
+struct Gfx1250AddP2pScene {
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/1250};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char ll128Buf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+  ncclTaskP2p recvTask{};
+  ncclTaskP2p sendTask{};
+  int planTotalTasks[2]{1, 1};
+
+  Gfx1250AddP2pScene() {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 4;
+    c->nNodes = 1;
+    c->cudaArch = 1250;
+    c->p2pnChannels = 4;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 128 << 10;
+    c->ll128LineElems = 16;
+    c->ll128DataElems = 15;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->p2pLl128BuffSize = c->buffSizes[NCCL_PROTO_LL128];
+    SetSingleGpuArch(topo.get(), "gfx1250");
+    topo->ll128Enabled = true;
+    c->topo = topo.get();
+
+    peers.resize(4);
+    peerSlots.resize(4);
+    for (int i = 0; i < 4; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
+    }
+    for (int ch = 0; ch < 4; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    recvTask.collAPI = ncclFuncRecv;
+    recvTask.func = ncclFuncRecv;
+    sendTask.collAPI = ncclFuncSend;
+    sendTask.func = ncclFuncSend;
+  }
+
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+    struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  int p2pWorkCount() {
+    int n = 0;
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) ++n;
+    }
+    return n;
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
+  // Argus hang: 2 KiB + 8 KiB used to be LL+LL128 and split into recv-then-send.
+  // ENABLE=1 windows start at 0, so both dirs stay LL128 in one work item.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount()) << "mixed round must not split into two work items";
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ScaledCollectiveLl128Buffer_P2pStepKeepsTheP2pSize) {
+  // With the 4x collective LL128 buffer, send/recv LL128 steps must still come from p2pLl128BuffSize: the net
+  // transport allocates send/recv LL128 buffers at that size.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ncclComm* c = sc.bp.c();
+  c->p2pLl128BuffSize = 1 << 20;
+  c->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/8192));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  ASSERT_EQ(1, work->sendProtoLL);
+  ASSERT_EQ(1, work->recvProtoLL);
+  auto dataChunk = [&](int buffSize) {
+    return u32fp8Decode(u32fp8Encode((uint32_t)(buffSize / NCCL_STEPS / c->ll128LineElems * c->ll128DataElems)));
+  };
+  ASSERT_NE(dataChunk(1 << 20), dataChunk(4 << 20));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->sendChunkSize_u32fp8));
+  EXPECT_EQ(dataChunk(1 << 20), u32fp8Decode(work->recvChunkSize_u32fp8));
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {
+  // Default ENABLE=-1: below P2P_LL_THRESHOLD stays legacy LL, not LL128.
+  SetParam("P2P_LL128_ENABLE", -1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId) << "default must not select the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
+  // 4-rank cap is 1 MiB. Above it ENABLE=1 is SIMPLE (protoLL=0) and the LL kernel.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/(1 << 20) + 1, /*recvBytes=*/(1 << 20) + 1));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(0, work->sendProtoLL);
+  EXPECT_EQ(0, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+// ===========================================================================
+// rawTaskAppend / ncclCeInitJob (the NCCL_ENQUEUE_REARCH_ENABLE=1 path), then argument validation arms.
+// ===========================================================================
+
+namespace {
+const hipStream_t kRawStream = reinterpret_cast<hipStream_t>(0x5100);
+
+struct RawTaskScene : CeAppendScene {
+  RawTaskScene() {
+    cc.get()->config.numRmaCtx = 2;
+    cc.get()->config.numRmaSig = 3;
+  }
+  ncclInfo Info(ncclFunc_t func) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+    info.coll = func;
+    info.stream = kRawStream;
+    return info;
+  }
+  ncclResult_t Append(ncclInfo& info, std::string* log = nullptr) {
+    ncclResult_t rc = ncclSuccess;
+    std::string captured = RcclUnitTesting::CaptureLog([&] { rc = rawTaskAppend(cc.get(), &info); });
+    if (log != nullptr) {
+      *log = captured;
+    }
+    return rc;
+  }
+  ncclRawTask* Generic() { return ncclIntruQueueHead(&cc.get()->rawTaskQueue.genericQueue); }
+  ncclRawTask* Bcast() { return ncclIntruQueueHead(&cc.get()->rawTaskQueue.bcastQueue); }
+  bool JoinedRawTaskGroup() { return ncclGroupCommHead[ncclGroupTaskTypeRawTask] == cc.get(); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_SendAndRecv_CopyTheP2pArgsAndJoinTheRawTaskGroup) {
+  for (ncclFunc_t func : {ncclFuncSend, ncclFuncRecv}) {
+    RawTaskScene sc;
+    double buf = 0;
+    ncclInfo info = sc.Info(func);
+    info.recvbuff = &buf;
+    info.count = 10;
+    info.datatype = ncclFloat64;
+    info.root = 3;
+    ASSERT_EQ(ncclSuccess, sc.Append(info));
+    ncclRawTask* t = sc.Generic();
+    ASSERT_NE(nullptr, t);
+    EXPECT_EQ(ncclTaskKindSendRecv, t->kind);
+    EXPECT_EQ(func, t->sendRecv.func);
+    EXPECT_EQ(func, t->sendRecv.collAPI);
+    EXPECT_EQ(&buf, t->sendRecv.buff);
+    EXPECT_EQ(10u, t->sendRecv.count);
+    EXPECT_EQ(ncclFloat64, t->sendRecv.datatype);
+    EXPECT_EQ(3, t->sendRecv.peer);
+    EXPECT_EQ(80u, t->sendRecv.bytes);
+    EXPECT_EQ(kRawStream, t->sendRecv.stream);
+    EXPECT_TRUE(sc.JoinedRawTaskGroup());
+  }
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_PutSignalAndSignal_CopyEveryArgument) {
+  RawTaskScene sc;
+  int src = 0;
+  ncclInfo info = sc.Info(ncclFuncPutSignal);
+  info.sendbuff = &src;
+  info.count = 7;
+  info.datatype = ncclInt32;
+  info.root = 2;
+  info.peerWin = reinterpret_cast<ncclWindow_t>(0x7700);
+  info.peerWinOffset = 48;
+  info.sigIdx = 2;
+  info.ctx = 1;
+  info.flags = 5;
+  ASSERT_EQ(ncclSuccess, sc.Append(info));
+  ncclRawTask* t = sc.Generic();
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(ncclTaskKindRma, t->kind);
+  EXPECT_EQ(ncclFuncPutSignal, t->rma.func);
+  const ncclRawTaskPutSignal& put = t->rma.rmaOp.putSignal;
+  EXPECT_EQ(&src, put.localbuff);
+  EXPECT_EQ(7u, put.count);
+  EXPECT_EQ(ncclInt32, put.datatype);
+  EXPECT_EQ(2, put.peer);
+  EXPECT_EQ(info.peerWin, put.peerWin);
+  EXPECT_EQ(48u, put.peerWinOffset);
+  EXPECT_EQ(2, put.sigIdx);
+  EXPECT_EQ(1, put.ctx);
+  EXPECT_EQ(5u, put.flags);
+  EXPECT_EQ(kRawStream, put.stream);
+  EXPECT_TRUE(sc.JoinedRawTaskGroup());
+  RawTaskScene sigScene;
+  ncclInfo sigInfo = sigScene.Info(ncclFuncSignal);
+  sigInfo.count = 0;
+  sigInfo.root = 3;
+  sigInfo.sigIdx = 1;
+  sigInfo.ctx = 1;
+  sigInfo.flags = 6;
+  ASSERT_EQ(ncclSuccess, sigScene.Append(sigInfo));
+  ASSERT_NE(nullptr, sigScene.Generic());
+  EXPECT_EQ(ncclFuncSignal, sigScene.Generic()->rma.func);
+  const ncclRawTaskSignal& sig = sigScene.Generic()->rma.rmaOp.signal;
+  EXPECT_EQ(3, sig.peer);
+  EXPECT_EQ(1, sig.sigIdx);
+  EXPECT_EQ(1, sig.ctx);
+  EXPECT_EQ(6u, sig.flags);
+  EXPECT_EQ(kRawStream, sig.stream);
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_BadRmaContextOrSignalCount_IsRejectedBeforeQueueing) {
+  struct {
+    ncclFunc_t func;
+    int ctx;
+    size_t count;
+    std::string warn;
+  } const cases[] = {{ncclFuncPutSignal, -1, 0, "invalid context -1 (must be in [0, 2))"},
+                     {ncclFuncPutSignal, 2, 0, "invalid context 2 (must be in [0, 2))"},
+                     {ncclFuncSignal, 2, 0, "invalid context 2 (must be in [0, 2))"},
+                     {ncclFuncSignal, 0, 1, "ncclSignal: count must be 0"}};
+  for (const auto& c : cases) {
+    RawTaskScene sc;
+    ncclInfo info = sc.Info(c.func);
+    info.ctx = c.ctx;
+    info.count = c.count;
+    std::string log;
+    EXPECT_EQ(ncclInvalidArgument, sc.Append(info, &log)) << c.warn;
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, c.warn.c_str())) << log;
+    EXPECT_EQ(nullptr, sc.Generic());
+    EXPECT_FALSE(sc.JoinedRawTaskGroup());
+  }
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_WaitSignal_DeepCopiesTheDescriptors) {
+  RawTaskScene sc;
+  ncclWaitSignalDesc_t descs[2] = {{/*opCnt=*/1, /*peer=*/3, /*sigIdx=*/2, /*ctx=*/1}, {4, 0, 0, 0}};
+  ncclInfo info = sc.Info(ncclFuncWaitSignal);
+  info.nDesc = 2;
+  info.signalDescs = descs;
+  ASSERT_EQ(ncclSuccess, sc.Append(info));
+  ncclRawTask* t = sc.Generic();
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(ncclTaskKindRma, t->kind);
+  EXPECT_EQ(ncclFuncWaitSignal, t->rma.func);
+  const ncclRawTaskWaitSignal& wait = t->rma.rmaOp.waitSignal;
+  EXPECT_EQ(2, wait.nDesc);
+  EXPECT_EQ(kRawStream, wait.stream);
+  ASSERT_NE(descs, wait.signalDescs);
+  EXPECT_EQ(0, std::memcmp(descs, wait.signalDescs, sizeof(descs)));
+  descs[1].opCnt = 9;
+  EXPECT_EQ(4, wait.signalDescs[1].opCnt);
+  EXPECT_TRUE(sc.JoinedRawTaskGroup());
+}
+
+namespace {
+struct BadWaitSignal {
+  int nDesc;
+  bool nullDescs;
+  ncclWaitSignalDesc_t second;
+  const char* warn;
+};
+
+// The bad descriptor sits second, behind a valid one, so the per-descriptor loop must reach it.
+const BadWaitSignal kBadWaitSignals[] = {
+    {0, false, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
+    {-1, false, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
+    {2, true, {1, 0, 0, 0}, "ncclWaitSignal: invalid arguments"},
+    {2, false, {0, 0, 0, 0}, "descriptor 1 has invalid opCnt 0"},
+    {2, false, {1, 0, 3, 0}, "descriptor 1 has invalid sigIdx 3 (must be in [0, 3))"},
+    {2, false, {1, 0, -1, 0}, "descriptor 1 has invalid sigIdx -1"},
+    {2, false, {1, 0, 0, 2}, "descriptor 1 has invalid context 2 (must be in [0, 2))"},
+    {2, false, {1, 0, 0, -1}, "descriptor 1 has invalid context -1"},
+    {2, false, {1, 4, 0, 0}, "descriptor 1 has invalid peer 4 (must be in [0, 4))"},
+    {2, false, {1, -1, 0, 0}, "descriptor 1 has invalid peer -1"},
+};
+
+void PointAtBadWaitSignal(const BadWaitSignal& c, ncclWaitSignalDesc_t (&descs)[2], ncclInfo* info) {
+  descs[0] = {1, 1, 1, 1};
+  descs[1] = c.second;
+  info->coll = ncclFuncWaitSignal;
+  info->nDesc = c.nDesc;
+  info->signalDescs = c.nullDescs ? nullptr : descs;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_WaitSignalWithABadDescriptor_IsRejected) {
+  for (const BadWaitSignal& c : kBadWaitSignals) {
+    RawTaskScene sc;
+    ncclWaitSignalDesc_t descs[2];
+    ncclInfo info = sc.Info(ncclFuncWaitSignal);
+    PointAtBadWaitSignal(c, descs, &info);
+    std::string log;
+    EXPECT_EQ(ncclInvalidArgument, sc.Append(info, &log)) << c.warn;
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, c.warn)) << log;
+    EXPECT_EQ(nullptr, sc.Generic()) << c.warn;
+  }
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_Collective_CopiesItsArgumentsIntoTheGenericQueue) {
+  RawTaskScene sc;
+  float send = 0;
+  float recv = 0;
+  ncclInfo info = sc.Info(ncclFuncAllReduce);
+  info.sendbuff = &send;
+  info.recvbuff = &recv;
+  info.count = 12;
+  info.root = 2;
+  info.op = ncclProd;
+  ASSERT_EQ(ncclSuccess, sc.Append(info));
+  ncclRawTask* t = sc.Generic();
+  ASSERT_NE(nullptr, t);
+  EXPECT_EQ(ncclTaskKindColl, t->kind);
+  EXPECT_EQ(ncclFuncAllReduce, t->coll.func);
+  EXPECT_EQ(&send, t->coll.sendbuff);
+  EXPECT_EQ(&recv, t->coll.recvbuff);
+  EXPECT_EQ(12u, t->coll.count);
+  EXPECT_EQ(2, t->coll.root);
+  EXPECT_EQ(ncclFloat32, t->coll.datatype);
+  EXPECT_EQ(ncclProd, t->coll.opHost);
+  EXPECT_EQ(ncclDevProd, t->coll.opDev.op);
+  EXPECT_EQ(kRawStream, t->coll.stream);
+  EXPECT_TRUE(sc.JoinedRawTaskGroup());
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_BroadcastGoesToTheBcastQueueAndAnEmptyCollectiveIsDropped) {
+  RawTaskScene sc;
+  ncclInfo info = sc.Info(ncclFuncBroadcast);
+  info.root = 1;
+  ASSERT_EQ(ncclSuccess, sc.Append(info));
+  EXPECT_EQ(nullptr, sc.Generic());
+  ASSERT_NE(nullptr, sc.Bcast());
+  EXPECT_EQ(1, sc.Bcast()->coll.root);
+
+  RawTaskScene empty;
+  ncclInfo none = empty.Info(ncclFuncAllReduce);
+  none.count = 0;
+  ASSERT_EQ(ncclSuccess, empty.Append(none));
+  EXPECT_EQ(nullptr, empty.Generic());
+  EXPECT_FALSE(empty.JoinedRawTaskGroup());
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_SingleRankCollective_LaunchesInPlaceOfQueueing) {
+  RawTaskScene sc;
+  sc.cc.get()->nRanks = 1;
+  float send = 0;
+  float recv = 0;
+  ncclInfo info = sc.Info(ncclFuncAllReduce);
+  info.sendbuff = &send;
+  info.recvbuff = &recv;
+  info.count = 5;
+  ScopedHook launch(g_ncclLaunchOneRank, [&](void* dst, void const* src, size_t n, ncclDevRedOpFull op,
+                                             ncclDataType_t, hipStream_t stream, hipEvent_t, void const*) {
+    EXPECT_EQ(&recv, dst);
+    EXPECT_EQ(&send, src);
+    EXPECT_EQ(5u, n);
+    EXPECT_EQ(ncclDevSum, op.op);
+    EXPECT_EQ(kRawStream, stream);
+    return ncclSuccess;
+  });
+  ASSERT_EQ(ncclSuccess, sc.Append(info));
+  EXPECT_EQ(1, launch.calls);
+  EXPECT_EQ(nullptr, sc.Generic());
+  EXPECT_FALSE(sc.JoinedRawTaskGroup());
+}
+
+TEST_F(EnqueueMicrotest, RawTaskAppend_Fp8ReductionBelowSm90_IsRejectedButFp8CopiesAreNot) {
+  struct {
+    ncclFunc_t func;
+    int minCompCap;
+    bool rejected;
+  } const cases[] = {{ncclFuncAllReduce, 89, true}, {ncclFuncReduce, 89, true}, {ncclFuncReduceScatter, 89, true},
+                     {ncclFuncAllGather, 89, false}, {ncclFuncAllReduce, 90, false}};
+  for (ncclDataType_t fp8 : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+    for (const auto& c : cases) {
+      RawTaskScene sc;
+      sc.cc.get()->minCompCap = c.minCompCap;
+      ncclInfo info = sc.Info(c.func);
+      info.datatype = fp8;
+      std::string log;
+      EXPECT_EQ(c.rejected ? ncclInvalidArgument : ncclSuccess, sc.Append(info, &log)) << c.func << " " << fp8;
+      EXPECT_EQ(c.rejected, RcclUnitTesting::LogHas(log, "FP8 reduction support begins with sm90")) << log;
+      EXPECT_EQ(c.rejected, sc.Generic() == nullptr) << c.func << " " << fp8;
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_RearchEnabled_RoutesSendThroughTheRawTaskQueue) {
+  SetParam("ENQUEUE_REARCH_ENABLE", 1);
+  RawTaskScene sc;
+  ncclInfo info = sc.Info(ncclFuncSend);
+  info.count = 4;
+  info.root = 1;
+  ASSERT_EQ(ncclSuccess, taskAppend(sc.cc.get(), &info));
+  ASSERT_NE(nullptr, sc.Generic());
+  EXPECT_EQ(ncclTaskKindSendRecv, sc.Generic()->kind);
+  EXPECT_EQ(1, sc.Generic()->sendRecv.peer);
+  EXPECT_EQ(0, sc.cc.get()->planner.nTasksP2p);
+}
+
+namespace {
+// CE not yet initialized and the rearch path on, so ceCollTaskAppend hands its init job to the management queue.
+// The hook mirrors ncclMgmtTaskEnqueue's ownership: it keeps the job on success and frees it on failure.
+struct RearchCeInitScene : CeAppendScene {
+  ncclAsyncJob* job = nullptr;
+  ncclResult_t (*jobFn)(ncclAsyncJob*) = nullptr;
+  void (*jobFree)(void*) = nullptr;
+  ncclComm* jobComm = nullptr;
+  ncclResult_t enqueueResult = ncclSuccess;
+  ScopedHook<ncclResult_t(ncclAsyncJob*, ncclResult_t (*)(ncclAsyncJob*), void (*)(void*), ncclComm*)> enqueue{
+      g_ncclMgmtTaskEnqueue,
+      [this](ncclAsyncJob* j, ncclResult_t (*fn)(ncclAsyncJob*), void (*d)(void*), ncclComm* comm) {
+        job = j;
+        jobFn = fn;
+        jobFree = d;
+        jobComm = comm;
+        if (enqueueResult != ncclSuccess && d != nullptr) {
+          d(j);
+        }
+        return enqueueResult;
+      }};
+  RearchCeInitScene() {
+    SetParam("ENQUEUE_REARCH_ENABLE", 1);
+    cc.get()->ceColl.initialized = false;
+    cc.get()->cudaDev = 5;
+  }
+  ~RearchCeInitScene() {
+    if (jobFree != nullptr && enqueueResult == ncclSuccess) {
+      jobFree(job);
+    }
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_RearchUninitialized_EnqueuesTheCeInitJobOnce) {
+  RearchCeInitScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_EQ(1, scene.enqueue.calls);
+  EXPECT_EQ(scene.cc.get(), scene.jobComm);
+  ASSERT_NE(nullptr, scene.job);
+  EXPECT_TRUE(scene.cc.get()->ceColl.initialized);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene.cc.get()->ceInitTaskQueue));
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_EQ(1, scene.enqueue.calls) << "an initialized CE must not enqueue a second init job";
+}
+
+TEST_F(EnqueueMicrotest, CeInitJob_SetsTheDeviceThenInitializesCeAndClearsInitializedOnFailure) {
+  struct {
+    hipError_t setDevice;
+    ncclResult_t ceInit;
+    ncclResult_t rc;
+    int ceInitCalls;
+  } const cases[] = {{hipSuccess, ncclSuccess, ncclSuccess, 1},
+                     {hipSuccess, ncclSystemError, ncclSystemError, 1},
+                     {hipErrorInvalidDevice, ncclSuccess, ncclUnhandledCudaError, 0}};
+  for (const auto& c : cases) {
+    RearchCeInitScene scene;
+    ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+    int device = -1;
+    ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+      device = dev;
+      return c.setDevice;
+    });
+    ScopedHook ceInit(g_ncclCeInit, [&](ncclComm* comm) {
+      EXPECT_EQ(5, device) << "the device is set before CE init";
+      EXPECT_EQ(scene.cc.get(), comm);
+      return c.ceInit;
+    });
+    EXPECT_EQ(c.rc, scene.jobFn(scene.job));
+    EXPECT_EQ(c.ceInitCalls, ceInit.calls);
+    EXPECT_EQ(c.rc == ncclSuccess, scene.cc.get()->ceColl.initialized);
+  }
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_RearchEnqueueFailure_LeavesCeUninitializedAndQueuesNoTask) {
+  RearchCeInitScene scene;
+  scene.enqueueResult = ncclInternalError;
+  EXPECT_EQ(ncclInternalError, scene.Append(ncclFuncAllGather));
+  EXPECT_EQ(1, scene.enqueue.calls);
+  EXPECT_FALSE(scene.cc.get()->ceColl.initialized);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+}
+
+namespace {
+constexpr int kRmaRegistered = 0x100;
+ncclWindow_t const kPeerWinHandle = reinterpret_cast<ncclWindow_t>(0x9900);
+
+// A PutSignal that passes every check; each case breaks exactly one input.
+struct RmaArgsScene : RawTaskScene {
+  ncclDevrWindow peerWin{};
+  ncclDevrWindow srcWin{};
+  ncclWindow_vidmem peerVidmem{};
+  char srcBuf[64]{};
+  ScopedHook<ncclResult_t(ncclShadowPool*, void*, void**)> toHost{
+      g_shadowPoolToHost, [this](ncclShadowPool*, void* dev, void** host) {
+        *host = dev == kPeerWinHandle ? &peerVidmem : nullptr;
+        return ncclSuccess;
+      }};
+  ScopedHook<bool(int, ncclDevrRegisterCapability)> regEnabled{
+      g_devrWinRegEnabled,
+      [](int flags, ncclDevrRegisterCapability cap) { return cap == ncclDevrRegisterRma && (flags & kRmaRegistered); }};
+  ScopedHook<ncclResult_t(ncclComm*, void const*, ncclDevrWindow**)> findWindow{
+      g_devrFindWindow, [this](ncclComm*, void const* ptr, ncclDevrWindow** win) {
+        *win = (ptr >= srcBuf && ptr < srcBuf + sizeof(srcBuf)) ? &srcWin : nullptr;
+        return ncclSuccess;
+      }};
+  std::vector<ncclIntruQueue<ncclTaskRma, &ncclTaskRma::next>> rmaQueues{2};
+  ncclInfo info;
+  RmaArgsScene() : info(Info(ncclFuncPutSignal)) {
+    cc.get()->hostRmaSupport = true;
+    cc.get()->planner.rmaTaskQueues = rmaQueues.data();
+    for (auto& queue : rmaQueues) {
+      ncclIntruQueueConstruct(&queue);
+    }
+    peerVidmem.winHost = &peerWin;
+    peerWin.size = 4096;
+    peerWin.winFlags = kRmaRegistered;
+    srcWin.userPtr = srcBuf;
+    srcWin.winFlags = kRmaRegistered | NCCL_WIN_COLL_SYMMETRIC;
+    info.peerWin = kPeerWinHandle;
+    info.sendbuff = srcBuf + 8;
+    info.count = 0;
+  }
+  ncclResult_t Run(std::string* log) {
+    ncclResult_t rc = ncclSuccess;
+    *log = RcclUnitTesting::CaptureLog([&] { rc = rmaTaskAppend(cc.get(), &info); });
+    return rc;
+  }
+};
+
+struct BadRmaCase {
+  const char* warn;
+  std::function<void(RmaArgsScene&)> breakIt;
+  ncclResult_t rc = ncclInvalidArgument;
+  int findWindowCalls = -1;
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_ValidPutSignal_QueuesOneTaskOnItsContext) {
+  for (int symmetric : {0, 1}) {
+    RmaArgsScene sc;
+    sc.cc.get()->symmetricSupport = symmetric;
+    sc.info.count = 4;
+    sc.info.root = 2;
+    sc.info.ctx = 1;
+    sc.info.sigIdx = 2;
+    sc.info.peerWinOffset = 64;
+    std::string log;
+    ASSERT_EQ(ncclSuccess, sc.Run(&log)) << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&sc.rmaQueues[0]));
+    ncclTaskRma* t = ncclIntruQueueHead(&sc.rmaQueues[1]);
+    ASSERT_NE(nullptr, t);
+    EXPECT_EQ(nullptr, t->next);
+    EXPECT_EQ(ncclFuncPutSignal, t->func);
+    EXPECT_EQ(static_cast<const void*>(sc.srcBuf + 8), t->srcBuff);
+    EXPECT_EQ(8u, t->srcWinOffset);
+    EXPECT_EQ(&sc.srcWin, t->srcWinHost);
+    EXPECT_EQ(4u, t->count);
+    EXPECT_EQ(ncclFloat32, t->datatype);
+    EXPECT_EQ(16u, t->bytes);
+    EXPECT_EQ(1, t->ctx);
+    EXPECT_EQ(2, t->signalIdx);
+    EXPECT_EQ(2, t->peer);
+    EXPECT_EQ(64u, t->peerWinOffset);
+    EXPECT_EQ(&sc.peerWin, t->peerWinHost);
+    EXPECT_EQ(NCCL_SIGNAL, t->signalMode);
+    EXPECT_EQ(1, sc.cc.get()->planner.nTasksRma);
+    EXPECT_EQ(sc.cc.get(), ncclGroupCommHead[ncclGroupTaskTypeCollective]);
+  }
+}
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_ValidWaitSignal_QueuesOneTaskPerContext) {
+  RmaArgsScene sc;
+  ScopedHook rmaReady(g_rmaInitialized, [](ncclComm*) { return true; });
+  ncclWaitSignalDesc_t descs[3] = {{/*opCnt=*/2, /*peer=*/1, /*sigIdx=*/0, /*ctx=*/1},
+                                   {5, 3, 2, 0},
+                                   {7, 2, 1, 1}};
+  sc.info.coll = ncclFuncWaitSignal;
+  sc.info.nDesc = 3;
+  sc.info.signalDescs = descs;
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Run(&log)) << log;
+  EXPECT_EQ(2, sc.cc.get()->planner.nTasksRma);
+  struct {
+    int ctx;
+    std::vector<int> peers;
+    std::vector<int> nsignals;
+    std::vector<int> signalIdxs;
+  } const want[] = {{0, {3}, {5}, {2}}, {1, {1, 2}, {2, 7}, {0, 1}}};
+  for (const auto& w : want) {
+    ncclTaskRma* t = ncclIntruQueueHead(&sc.rmaQueues[w.ctx]);
+    ASSERT_NE(nullptr, t) << w.ctx;
+    EXPECT_EQ(nullptr, t->next) << w.ctx;
+    EXPECT_EQ(ncclFuncWaitSignal, t->func);
+    EXPECT_EQ(w.ctx, t->ctx);
+    EXPECT_EQ(NCCL_SIGNAL, t->signalMode);
+    ASSERT_EQ(static_cast<int>(w.peers.size()), t->npeers) << w.ctx;
+    EXPECT_EQ(w.peers, std::vector<int>(t->peers, t->peers + t->npeers)) << w.ctx;
+    EXPECT_EQ(w.nsignals, std::vector<int>(t->nsignals, t->nsignals + t->npeers)) << w.ctx;
+    EXPECT_EQ(w.signalIdxs, std::vector<int>(t->signalIdxs, t->signalIdxs + t->npeers)) << w.ctx;
+  }
+}
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_EachInvalidArgument_IsRejectedWithItsOwnWarning) {
+  const char* const kNeedsRma = "ncclPutSignal requires a window registered for RMA";
+  const BadRmaCase cases[] = {
+      {"host RMA is not supported", [](RmaArgsScene& s) { s.cc.get()->hostRmaSupport = false; }},
+      {"Context 2 is invalid (must be in [0, 2))", [](RmaArgsScene& s) { s.info.ctx = 2; }},
+      {"Context -1 is invalid", [](RmaArgsScene& s) { s.info.ctx = -1; }},
+      {"Signal index 3 is invalid (must be in [0, 3))", [](RmaArgsScene& s) { s.info.sigIdx = 3; }},
+      {"Signal index -1 is invalid", [](RmaArgsScene& s) { s.info.sigIdx = -1; }},
+      {"Flags 1 is invalid (must be 0)", [](RmaArgsScene& s) { s.info.flags = 1; }},
+      {"ncclPutSignal: peerWin is NULL", [](RmaArgsScene& s) { s.info.peerWin = nullptr; }},
+      {kNeedsRma, [](RmaArgsScene& s) { s.peerWin.winFlags = 0; }, ncclInvalidArgument, 0},
+      {"ncclPutSignal: srcBuff is NULL", [](RmaArgsScene& s) { s.info.sendbuff = nullptr; }},
+      {"peerWinOffset 4096 is greater than peerWin size 4096", [](RmaArgsScene& s) { s.info.peerWinOffset = 4096; }},
+      {"srcBuff is not inside a registered ncclWindow", [](RmaArgsScene& s) { s.info.sendbuff = &s; }},
+      {"srcWinHost is not in a valid symmetric window",
+       [](RmaArgsScene& s) {
+         s.cc.get()->symmetricSupport = 1;
+         s.srcWin.winFlags = kRmaRegistered;
+       }},
+      {kNeedsRma, [](RmaArgsScene& s) { s.srcWin.winFlags = 0; }, ncclInvalidArgument, 1},
+      {"multiple physical cuMem segments",
+       [](RmaArgsScene& s) {
+         s.cc.get()->symmetricSupport = 1;
+         g_devrWindowIsMultiSegmentValue = true;
+       }},
+      {"host-backed cuMem segments",
+       [](RmaArgsScene& s) {
+         s.cc.get()->symmetricSupport = 1;
+         g_devrWindowHasSysmemSegmentValue = true;
+       }},
+      {"ncclSignal: count must be 0",
+       [](RmaArgsScene& s) {
+         s.info.coll = ncclFuncSignal;
+         s.info.count = 1;
+       }},
+      {"called before RMA is initialized", [](RmaArgsScene& s) { s.info.coll = ncclFuncSignal; }, ncclInvalidUsage},
+  };
+  for (const BadRmaCase& c : cases) {
+    RmaArgsScene sc;
+    c.breakIt(sc);
+    std::string log;
+    EXPECT_EQ(c.rc, sc.Run(&log)) << c.warn;
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, c.warn)) << c.warn << "\nactual log:\n" << log;
+    EXPECT_EQ(nullptr, ncclGroupCommHead[ncclGroupTaskTypeCollective]) << c.warn;
+    if (c.findWindowCalls >= 0) {
+      EXPECT_EQ(c.findWindowCalls, sc.findWindow.calls) << c.warn;
+    }
+    g_devrWindowIsMultiSegmentValue = false;
+    g_devrWindowHasSysmemSegmentValue = false;
+  }
+}
+
+TEST_F(EnqueueMicrotest, RmaTaskAppend_WaitSignalWithABadDescriptor_IsRejected) {
+  for (const BadWaitSignal& c : kBadWaitSignals) {
+    RmaArgsScene sc;
+    ncclWaitSignalDesc_t descs[2];
+    PointAtBadWaitSignal(c, descs, &sc.info);
+    std::string log;
+    EXPECT_EQ(ncclInvalidArgument, sc.Run(&log)) << c.warn;
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, c.warn)) << log;
+  }
+}
+
+TEST_F(EnqueueMicrotest, HostToDevRedOp_UserOpWithAnotherDatatype_IsRejected) {
+  RedOpComm rc;
+  ncclRedOp_t op;
+  float scalar = 2.0f;
+  ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, &scalar, ncclFloat32, ncclScalarHostImmediate, rc.get()));
+  ncclDevRedOpFull full = MakeRedOpOut();
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(ncclInvalidArgument, hostToDevRedOp(&full, op, ncclFloat64, rc.get())); });
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Data type supplied to user-created ncclRedOp_t does not match")) << log;
+  ASSERT_EQ(ncclSuccess, hostToDevRedOp(&full, op, ncclFloat32, rc.get()));
+  EXPECT_EQ(ncclDevPreMulSum, full.op);
+}
+
+TEST_F(EnqueueMicrotest, PlannerSetCapturingGraph_StreamsFromDifferentGraphs_AreRejected) {
+  const hipStream_t kCaptured = reinterpret_cast<hipStream_t>(0xA2);
+  ScopedHook graphs(g_cudaGetCapturingGraph, [&](ncclCudaGraph* graph, hipStream_t stream, int mode) {
+    *graph = ncclCudaGraphNone(mode);
+    if (stream == kCaptured) {
+      graph->graph = reinterpret_cast<hipGraph_t>(0xB0);
+      graph->graphId = 7;
+    }
+    return ncclSuccess;
+  });
+  RawTaskScene sc;
+  ncclGroupCommJoin(sc.cc.get(), ncclGroupTaskTypeCollective);
+  ncclInfo info = sc.Info(ncclFuncAllReduce);
+  for (uintptr_t uncaptured : {0xA1, 0xA3}) {
+    info.stream = reinterpret_cast<hipStream_t>(uncaptured);
+    ASSERT_EQ(ncclSuccess, ncclPlannerSetCapturingGraph(sc.cc.get(), &info));
+  }
+  EXPECT_EQ(2, sc.cc.get()->planner.numStreams);
+
+  info.stream = kCaptured;
+  ncclResult_t rc = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { rc = ncclPlannerSetCapturingGraph(sc.cc.get(), &info); });
+  EXPECT_EQ(ncclInvalidUsage, rc);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "must either be all uncaptured or all captured by the same graph")) << log;
+  EXPECT_EQ(2, sc.cc.get()->planner.numStreams);
+  EXPECT_FALSE(ncclCudaGraphValid(sc.cc.get()->planner.capturingGraph));
+}
+
+namespace {
+// Rank 0 of two with one p2p task queued to itself; round 0 pairs rank 0 with itself.
+struct SelfP2pScene {
+  CollTaskComm cc;
+  std::vector<ncclKernelPlanner::Peer> peers{2};
+  std::vector<std::remove_pointer_t<decltype(ncclComm::p2pSchedule)>> schedule{2};
+  ncclTaskP2p task{};
+  ncclKernelPlan plan{};
+  ncclKernelPlanBudget budget{};
+  SelfP2pScene() {
+    ncclComm* c = cc.get();
+    c->nRanks = 2;
+    c->p2pnChannels = 2;
+    c->p2pnChannelsPerPeer = 1;
+    c->planner.peers = peers.data();
+    c->planner.nTasksP2p = 1;
+    schedule[1] = {1, 1};
+    c->p2pSchedule = schedule.data();
+    plan.kernelSpecialized = true;
+  }
+  ncclResult_t Run(std::string* log) {
+    int epoch = 0;
+    int round = 0;
+    ncclResult_t rc = ncclSuccess;
+    *log = RcclUnitTesting::CaptureLog([&] { rc = scheduleP2pTasksToPlan(cc.get(), &epoch, &round, &plan, &budget); });
+    return rc;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_UnpairedSelfSendOrRecv_IsInvalidUsage) {
+  for (bool send : {true, false}) {
+    SelfP2pScene sc;
+    ncclIntruQueueEnqueue(send ? &sc.peers[0].sendQueue : &sc.peers[0].recvQueue, &sc.task);
+    std::string log;
+    EXPECT_EQ(ncclInvalidUsage, sc.Run(&log));
+    const char* warn = send ? "Trying to send to self without a matching recv"
+                            : "Trying to recv to self without a matching send";
+    EXPECT_TRUE(RcclUnitTesting::LogHas(log, warn)) << log;
+  }
+}
+
+// ===========================================================================
+// Topology, arch, tuner, NVLS and CollNet arms of topoGetAlgoInfo, getAlgoInfo, updateCollCostTable, calcCollChunking.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCutoffThenRingSimple) {
+  // Each case seeds the opposite pick as cheapest, so the override must replace both fields.
+  struct {
+    size_t nBytes;
+    int algo;
+    int proto;
+    int nMaxChannels;
+  } const cases[] = {{2200008, NCCL_ALGO_TREE, NCCL_PROTO_LL, 24}, {2200009, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, 32}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 32;
+    cc.base.topo().pivotA2ANumBiRings = 3;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;
+    const bool wantTree = c.algo == NCCL_ALGO_TREE;
+    tbl.t[wantTree ? NCCL_ALGO_RING : NCCL_ALGO_TREE][wantTree ? NCCL_PROTO_SIMPLE : NCCL_PROTO_LL] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, c.nBytes, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(c.algo, task.algorithm) << c.nBytes;
+    EXPECT_EQ(c.proto, task.protocol) << c.nBytes;
+    EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.nBytes;
+  }
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_TreeDefinedAllReduce_ForcesTreeCappedAtSixtyFourChannels) {
+  for (int treeDefined : {0, 1}) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 80;
+    cc.base.topo().treeDefined = treeDefined;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;
+    tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(treeDefined ? NCCL_ALGO_TREE : NCCL_ALGO_RING, task.algorithm);
+    EXPECT_EQ(treeDefined ? 64 : 80, task.nMaxChannels);
+  }
+}
+
+namespace {
+// Scripts updateCollCostTable so (algo, proto) is the cheapest cell; getAlgoInfo then runs its no-tuner overrides.
+void ScriptCheapest(int algo, int proto) {
+  g_topoGetAlgoTime = [algo, proto](ncclComm*, int, int a, int p, size_t, int, float* time) {
+    *time = (a == algo && p == proto) ? 1.0f : 5.0f;
+    return ncclSuccess;
+  };
+}
+
+ncclTaskColl NoTunerTask(size_t count) {
+  ncclTaskColl task = CostTask(ncclFuncAllReduce);
+  task.count = count;
+  return task;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerGfx950SingleNodeAllReduce_UsesTreeLlInsideItsWindow) {
+  struct {
+    size_t bytes;
+    int nNodes;
+    bool overridden;
+  } const cases[] = {{60, 1, false}, {64, 1, true}, {262144, 1, true}, {262148, 1, false}, {1024, 2, false}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nNodes = c.nNodes;
+    SetSingleGpuArch(&cc.base.topo(), "gfx950");
+    ScriptCheapest(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    ncclTaskColl task = NoTunerTask(c.bytes / sizeof(float));
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+    EXPECT_EQ(c.overridden ? NCCL_ALGO_TREE : NCCL_ALGO_RING, task.algorithm) << c.bytes;
+    EXPECT_EQ(c.overridden ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE, task.protocol) << c.bytes;
+  }
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerNaviSingleNodeAllReduce_UsesRing) {
+  for (const char* gcn : {"gfx1200", "gfx1201", "gfx942"}) {
+    AlgoInfoComm cc;
+    SetSingleGpuArch(&cc.base.topo(), gcn);
+    ScriptCheapest(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
+    ncclTaskColl task = NoTunerTask(1 << 20);
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+    const bool navi = std::strcmp(gcn, "gfx942") != 0;
+    EXPECT_EQ(navi ? NCCL_ALGO_RING : NCCL_ALGO_TREE, task.algorithm) << gcn;
+  }
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowWidensWithNodeCount) {
+  struct {
+    int nNodes;
+    size_t nBytes;
+    bool written;
+  } const cases[] = {{6, (32 << 10) - 1, false}, {6, 32 << 10, true},         {6, 4 << 20, true},
+                     {6, (4 << 20) + 1, false},  {16, 32 << 20, true},        {16, (32 << 20) + 1, false}};
+  for (const auto& c : cases) {
+    CostComm cc(/*nRanks=*/8 * c.nNodes, c.nNodes);
+    CostTable tbl;
+    auto task = CostTask(ncclFuncAllGather);
+    ScriptAllTimes(1.0f);
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, c.nBytes, 0, 0, 1, /*userAlgoInput=*/0, tbl.ptr()));
+    EXPECT_EQ(c.written, tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE)) << c.nNodes << " nodes, " << c.nBytes;
+  }
+}
+
+namespace {
+size_t g_tunerChunkSize = 0;
+ncclResult_t ScriptedTunerChunkSize(void*, ncclFunc_t, size_t, int, int, int, size_t* chunkSize) {
+  *chunkSize = g_tunerChunkSize;
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_TunerChunkSize_IsUsedUpToTheBufferMaximum) {
+  ChunkComm cc(/*protoSimpleBuf=*/1 << 20);
+  ncclTuner_t tuner{};
+  tuner.getChunkSize = ScriptedTunerChunkSize;
+  cc.comm.tuner = &tuner;
+  const uint32_t bufferMax = (1 << 20) / NCCL_STEPS;
+  for (size_t asked : {size_t(bufferMax / 2), size_t(bufferMax) * 4}) {
+    g_tunerChunkSize = asked;
+    auto t = MakeTask(ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    auto r = RunChunking(cc, t, 4, size_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, r.rc);
+    EXPECT_EQ(std::min<size_t>(asked, bufferMax), r.chunkSize) << asked;
+  }
+}
+
+namespace {
+uint8_t g_netRegSend[8];
+uint8_t g_netRegRecv[8];
+void* const kSendMhandle = reinterpret_cast<void*>(0x5E);
+void* const kRecvMhandle = reinterpret_cast<void*>(0x6E);
+
+ncclTaskColl NetRegTask(ncclFunc_t func, int algo) {
+  ncclTaskColl t = MakeTask(func, algo, NCCL_PROTO_SIMPLE);
+  t.regBufType = NCCL_NET_REG_BUFFER;
+  t.count = 1024;
+  t.sendbuff = g_netRegSend;
+  t.recvbuff = g_netRegRecv;
+  t.sendMhandle = kSendMhandle;
+  t.recvMhandle = kRecvMhandle;
+  return t;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegOneRpn_SendsTheUserBufferInOneStep) {
+  for (int algo : {NCCL_ALGO_COLLNET_DIRECT, NCCL_ALGO_NVLS, NCCL_ALGO_COLLNET_CHAIN}) {
+    ChunkComm cc;
+    cc.comm.isOneRPN = true;
+    auto t = NetRegTask(ncclFuncAllReduce, algo);
+    auto r = RunChunking(cc, t, 2, 1 << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << algo;
+    EXPECT_EQ(1, r.proxyOp.reg);
+    EXPECT_EQ(1, r.proxyOp.nsteps) << algo;
+    EXPECT_EQ(g_netRegSend, r.proxyOp.sendbuff) << algo;
+    EXPECT_EQ(kSendMhandle, r.proxyOp.sendMhandle) << algo;
+    EXPECT_EQ(g_netRegRecv, r.proxyOp.recvbuff) << algo;
+    EXPECT_EQ(kRecvMhandle, r.proxyOp.recvMhandle) << algo;
+    EXPECT_EQ(size_t(1) << 20, r.proxyOp.nbytes) << algo;
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegMultiRpn_PicksTheSendBufferPerCollective) {
+  struct {
+    ncclFunc_t func;
+    void* sendbuff;
+    void* sendMhandle;
+  } const cases[] = {{ncclFuncAllGather, g_netRegSend, kSendMhandle},
+                     {ncclFuncReduceScatter, nullptr, nullptr},
+                     {ncclFuncAllReduce, g_netRegRecv, kRecvMhandle}};
+  for (const auto& c : cases) {
+    ChunkComm cc;
+    auto t = NetRegTask(c.func, NCCL_ALGO_COLLNET_DIRECT);
+    auto r = RunChunking(cc, t, 2, 1 << 20);
+    ASSERT_EQ(ncclSuccess, r.rc) << c.func;
+    EXPECT_EQ(c.sendbuff, r.proxyOp.sendbuff) << c.func;
+    EXPECT_EQ(c.sendMhandle, r.proxyOp.sendMhandle) << c.func;
+    EXPECT_EQ(g_netRegRecv, r.proxyOp.recvbuff) << c.func;
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegRing_WiresTheRecvSideAndLeavesSendUnset) {
+  const size_t nBytes = 1 << 20;
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncAllReduce}) {
+    ChunkComm cc;
+    cc.comm.isOneRPN = true;
+    auto t = NetRegTask(func, NCCL_ALGO_RING);
+    auto r = RunChunking(cc, t, /*nChannels=*/2, nBytes);
+    ASSERT_EQ(ncclSuccess, r.rc) << func;
+    EXPECT_EQ(1, r.proxyOp.reg) << func;
+    EXPECT_EQ(g_netRegRecv, r.proxyOp.recvbuff) << func;
+    EXPECT_EQ(kRecvMhandle, r.proxyOp.recvMhandle) << func;
+    EXPECT_EQ(nBytes, r.proxyOp.nbytes) << func;
+    EXPECT_EQ(nullptr, r.proxyOp.sendbuff) << func;
+    EXPECT_EQ(nullptr, r.proxyOp.sendMhandle) << func;
+  }
+}
+
+TEST_F(EnqueueMicrotest, CalcCollChunking_NetRegWithTree_IsAnInternalError) {
+  ChunkComm cc;
+  auto t = NetRegTask(ncclFuncAllReduce, NCCL_ALGO_TREE);
+  ChunkResult r{};
+  const std::string log = RcclUnitTesting::CaptureLog([&] { r = RunChunking(cc, t, 2, 1 << 20); });
+  EXPECT_EQ(ncclInternalError, r.rc);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Net registration invalid algorithm TREE")) << log;
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_CollnetDirect_ShedsChannelsForSmallMessages) {
+  struct {
+    size_t nBytes;
+    int nMaxChannels;
+  } const cases[] = {{1, 1}, {262144, 23}, {size_t(1) << 30, 32}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 32;
+    cc.get()->channels[0].collnetDirect.nHeads = 1;
+    cc.get()->threadThresholds[NCCL_ALGO_COLLNET_DIRECT][NCCL_PROTO_SIMPLE] = 64;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;
+    tbl.t[NCCL_ALGO_COLLNET_DIRECT][NCCL_PROTO_SIMPLE] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, c.nBytes, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(NCCL_ALGO_COLLNET_DIRECT, task.algorithm);
+    EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.nBytes;
+  }
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyForMultiNodeNvls) {
+  struct {
+    int algo;
+    int nNodes;
+    int nMaxChannels;
+  } const cases[] = {{NCCL_ALGO_NVLS, 2, 8}, {NCCL_ALGO_NVLS, 1, 12}, {NCCL_ALGO_NVLS_TREE, 2, 12}};
+  for (const auto& c : cases) {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 8;
+    cc.get()->nvlsChannels = 12;
+    cc.get()->nNodes = c.nNodes;
+    auto task = CostTask(ncclFuncAllReduce);
+    CostTable tbl;
+    tbl.t[c.algo][NCCL_PROTO_SIMPLE] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
+    EXPECT_EQ(c.algo, task.algorithm);
+    EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
+  }
 }

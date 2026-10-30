@@ -325,9 +325,9 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
-  hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                           const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                           const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+  hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                           const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
+                           uint16_t num_rects, hsa_amd_copy_direction_t dir,
                            std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
 
   // @brief Override from core::Agent.
@@ -342,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -402,6 +403,9 @@ class GpuAgent : public GpuAgentInt {
     return properties_;
   }
 
+  // @brief True when this node supports the native SDMA user queue AND it is enabled.
+  __forceinline bool sdma_native() const { return sdma_native_; }
+
   // @brief set rec_sdma_eng_override_
   __forceinline void SetRecSdmaEngOverride(bool flag) override { rec_sdma_eng_override_ = flag; }
 
@@ -443,6 +447,11 @@ class GpuAgent : public GpuAgentInt {
   // @brief returns true if agent uses MES scheduler
   __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
+  // @brief returns true for gfx12.5+ parts (used by the PC sampling drain path)
+  __forceinline bool is_gfx1250() const {
+    return supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5;
+  }
+
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
   __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
@@ -456,6 +465,13 @@ class GpuAgent : public GpuAgentInt {
 
   /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
+  /// @brief This GPU's memory is reached over PCIe, so stores to it pass through HDP and need
+  /// a flush.
+  __forceinline bool PcieStoresNeedFlush() const { return !xgmi_cpu_gpu_; }
+  /// @brief Host atomics on this GPU's memory are atomic with respect to the GPU.
+  __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
+  /// @brief The CP firmware consumes completion signal handle hints.
+  bool SignalHintsSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -474,9 +490,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
-      _mm_sfence();
+      store_fence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
-      _mm_mfence();
+      memory_fence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }
@@ -696,6 +712,10 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
+  // @brief Hint support is read from the utility queue's caps once, on first query.
+  mutable std::once_flag signal_hints_once_;
+  mutable bool signal_hints_supported_ = false;
+
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;
 
@@ -775,6 +795,10 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
+
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
 
   // @brief Create internal queues and blits.
   void InitDma();
@@ -864,7 +888,9 @@ class GpuAgent : public GpuAgentInt {
       const hsa_agent_t* dst_agent_list,
       const size_t* size_list,
       uint32_t coord_engine = 0,
-      uint32_t max_engines = 0);
+      uint32_t max_engines = 0,
+      // Optional per-entry dst-side swap sizes (null = symmetric).
+      const size_t* dst_size_list = nullptr);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
@@ -987,7 +1013,7 @@ class GpuAgent : public GpuAgentInt {
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC's flush thread
-    uint32_t which_buffer;                    // Current buffer selector (0 or 1)
+    std::atomic<uint32_t> which_buffer{0};    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
     uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
@@ -996,7 +1022,7 @@ class GpuAgent : public GpuAgentInt {
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
     std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
 
-    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    /* PM4 drain resources (per-XCC to avoid races when multiple XCC threads submit concurrently) */
     uint64_t* old_val;                        // Staging area for PM4 atomic return value
     uint32_t* cmd_data;                       // PM4 command buffer
     size_t cmd_data_sz;                       // PM4 command buffer size
@@ -1057,7 +1083,7 @@ class GpuAgent : public GpuAgentInt {
                                                   pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
 
-  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  // @brief Flush device buffers using PM4 commands on the command processor (fallback for non-large-BAR systems)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
                                                       pcs::PcsRuntime::PcSamplingSession& session,
                                                       uint32_t xcc_id);
@@ -1076,6 +1102,9 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
+  //!< True when SDMA copies go through the native WDDM SDMA user queue.
+  bool sdma_native_;
+
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};
@@ -1085,6 +1114,14 @@ class GpuAgent : public GpuAgentInt {
 
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
+
+  // Serializes PM4 submit-and-wait sequences on queues_[QueuePCSampling].
+  // AqlQueue::ExecutePM4 stages commands in a single per-queue indirect buffer that it
+  // reuses as soon as it returns, so only one asynchronous PM4 submission may be in
+  // flight on that queue at a time. The per-XCC flush threads and PcSamplingFlush all
+  // share the queue, as do the hosttrap and stochastic sessions.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
 
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
@@ -1099,6 +1136,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
 
   std::atomic<bool> accelerator_ready_{false};
 

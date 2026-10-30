@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/host_target.h"
 
 #include <gtest/gtest.h>
 
@@ -170,11 +171,11 @@ ModeStats time_mode(BenchFixture &fx, Instruction *inst, uint64_t seed, bool san
   fx.seed_inputs(seed, sanitize_finite);
   // Warmup.
   for (int i = 0; i < 100; ++i)
-    fx.cu->execute_instruction(inst, *fx.wf);
+    (void)fx.cu->execute_instruction(inst, *fx.wf);
   fx.seed_inputs(seed, sanitize_finite);
   auto t0 = Clock::now();
   for (int i = 0; i < ITERATIONS; ++i)
-    fx.cu->execute_instruction(inst, *fx.wf);
+    (void)fx.cu->execute_instruction(inst, *fx.wf);
   auto t1 = Clock::now();
   ModeStats s;
   s.total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -814,7 +815,7 @@ TEST(VAddSimdBenchmark, Cdna4_VFrexpExpI32F32_Vop3) {
 
 // Diagnostic: report whether the SIMD fast path is compiled in.
 TEST(VAddSimdBenchmark, SimdCompileTimeReport) {
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
   using simd_u32 = std::experimental::native_simd<uint32_t>;
   std::printf("\n  util::has_stdx_simd=true, native_simd<uint32_t>::size() = %zu\n",
               simd_u32::size());

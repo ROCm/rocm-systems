@@ -113,7 +113,7 @@ The following sample command profiles the ``vcopy`` workload.
       INFO Target: MI325X
       INFO Command: ./sample/vcopy -n 1048576 -b 256
       INFO Kernel Selection: None
-      INFO Dispatch Selection: None
+      INFO Kernel Iteration Range: None
       INFO Filtered sections: All
       INFO
       INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -236,7 +236,7 @@ an Instinct MI210 vs an Instinct MI250.
    total 408
    -rw-r--r-- 1 auser agroup   55771 Mar 21 23:49 log.txt
    drwxr-xr-x 1 auser agroup    4096 Mar 21 23:47 perfmon
-   -rw-r--r-- 1 auser agroup  348790 Mar 21 23:48 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   15017 Mar 21 23:48 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup    1119 Mar 21 23:47 profiling_config.yaml
    -rw-r--r-- 1 auser agroup    1684 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup     899 Mar 21 23:47 sysinfo.csv
@@ -250,7 +250,7 @@ directory is derived from ``--name`` and the target system information:
 * Without MPI rank detection, the default is ``./workloads/<name>/<gpu_model>``.
 * With MPI rank detection, the default is ``./workloads/<name>/<rank>``.
 
-You can override the output directory with ``--output-directory``. When
+You can override the output directory with ``-d``, ``--output-directory``. When
 ``--output-directory`` is explicitly provided, ``--name`` is ignored.
 
 The output directory can be parameterized with the following keywords:
@@ -330,7 +330,7 @@ Examples:
     └── sysinfo.csv
 
 The output files use ``rocpd`` format. See :ref:`profiling-output-format` for
-details on when the final ``pmc_perf.csv`` is created.
+details on when the final ``pmc_perf.csv.gz`` is created.
 
 * Profiling with MPI at host ``amd-ryzen``:
 
@@ -387,7 +387,7 @@ Raw performance counter data produced by the underlying
 (SQLite) format:
 
 * The rocpd database files are converted to gzip-compressed CSV files (``results_pmc_perf_0.csv.gz``, ``results_pmc_perf_SQ_*.csv.gz``, etc.) for each profiling run, after which the database files are removed.
-* These files are merged into a single ``pmc_perf.csv`` file when running ``rocprof-compute analyze``.
+* These files are merged into a single gzip-compressed ``pmc_perf.csv.gz`` file when running ``rocprof-compute analyze``.
 * Use ``--retain-rocpd-output`` to preserve the ``rocpd`` database(s) in the workload folder for custom analysis.
 
 .. note::
@@ -417,8 +417,8 @@ Filtering options
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
 
-``-d``, ``--dispatch <dispatch-id>``
-   Allows for dispatch iteration filtering. See :ref:`profiling-dispatch-filtering`.
+``--kernel-iteration-range <iteration>``
+   Allows for kernel iteration filtering. See :ref:`profiling-kernel-iteration-range`.
 
 ``--set <metric-set>``
    Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
@@ -430,8 +430,8 @@ Filtering options
    Be cautious when combining different profiling filters in the same call.
    Conflicting filters may result in error.
 
-   For example, filtering a dispatch, but that dispatch doesn't match your
-   kernel name filter.
+   For example, filtering a kernel iteration, but that iteration doesn't match
+   your kernel name filter.
 
 .. _profiling-hw-component-filtering:
 
@@ -466,7 +466,7 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['10', '7']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -495,7 +495,7 @@ The following example only collects the counters required to calculate ``Total V
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['11.1.1', '12.1.1']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -594,7 +594,7 @@ substring ``vecCopy``.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: ['vecCopy']
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -602,23 +602,23 @@ substring ``vecCopy``.
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
 
-.. _profiling-dispatch-filtering:
+.. _profiling-kernel-iteration-range:
 
-Dispatch filtering
-^^^^^^^^^^^^^^^^^^
+Kernel iteration filtering
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Dispatch filtering selects which iterations of each kernel to profile.
-Indices are 1-based, so the first dispatch of a kernel is ``1``. Each
+Kernel iteration filtering selects which iterations of each kernel to profile.
+Indices are 1-based, so the first iteration of a kernel is ``1``. Each
 value is a positive integer or a range with ``start <= end``, written as
 either ``start:end`` or ``start-end`` (for example, ``1``, ``3:5``, or
 ``3-5``).
 
-The following example profiles the first dispatch of each kernel in the
+The following example profiles the first iteration of each kernel in the
 application.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute profile --name vcopy -d 1 -- ./vcopy -n 1048576 -b 256
+   $ rocprof-compute profile --name vcopy --kernel-iteration-range 1 -- ./vcopy -n 1048576 -b 256
 
                                     __                                       _
     _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
@@ -633,7 +633,7 @@ application.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: ['1']
+   INFO Kernel Iteration Range: ['1']
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -667,7 +667,7 @@ This option cannot be used with ``--roof-only`` and ``--block``.
    INFO Target: MI325X
    INFO Command: ./vcopy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['11.2.2', '11.2.3', '11.2.4', '11.2.5']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -735,15 +735,17 @@ b) Otherwise, profile mode runs microbenchmarks and collects roofline performanc
 Profile mode generates ``roofline.csv`` containing microbenchmark data. To generate
 roofline HTML plots, use ``rocprof-compute analyze`` on a profiling output directory
 that contains both ``roofline.csv`` and application performance counters
-(see :doc:`../analyze/mode`). Visualization options (``--sort``, ``--mem-level``,
-``--roofline-data-type``) are available in analyze mode.
+(see :doc:`../analyze/mode`).
 
 .. note::
    Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
+
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
-   Additionally, the cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+   CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
+
+   The cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
 
 Roofline options (profile)
 --------------------------
@@ -782,7 +784,7 @@ The following example demonstrates profiling roofline data only:
    INFO Target: MI325X
    INFO Command: ./tests/occupancy -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: ['4']
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -810,7 +812,7 @@ successfully.
    $ ls workloads/occupancy/MI325X
    total 48
    drwxr-xr-x 1 auser agroup     0 Mar 21 23:49 perfmon
-   -rw-r--r-- 1 auser agroup  1101 Mar 21 23:49 pmc_perf.csv
+   -rw-r--r-- 1 auser agroup   412 Mar 21 23:49 pmc_perf.csv.gz
    -rw-r--r-- 1 auser agroup  1715 Mar 21 23:49 roofline.csv
    -rw-r--r-- 1 auser agroup   650 Mar 21 23:49 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar 21 23:49 timestamps.csv
@@ -897,12 +899,40 @@ which operators contribute to specific performance counter values.
    markers that map the collected kernel performance counters to their originating PyTorch
    operators.
 
+.. _torch-trace-requirements:
+
 Requirements
 ------------
 
-* Valid PyTorch installation in the profiling environment.
+* PyTorch in the profiling environment. PyTorch 2.13 or 2.14 gets the full
+  operator trace; other versions get the reduced trace described below.
 * PyTorch application must be run as a Python script or a Python command.
-* Workload’s Python version must match roctx’s Python version.
+
+``--torch-trace`` records PyTorch operators in one of two ways:
+
+* The **collector** is a small shared library that registers a callback inside
+  PyTorch itself. The callback runs on every thread, so the trace includes the
+  operators that autograd runs on its own worker threads during the backward
+  pass. This is used for PyTorch 2.13 and 2.14.
+* ``TorchDispatchMode`` is a PyTorch hook that calls back into Python around
+  each operator. It works on any PyTorch version, but it only sees the thread
+  it was entered on, so backward-pass operators are missed. This is used for
+  every other PyTorch version, and whenever the collector cannot be loaded.
+
+Profiling never stops because of this. When the collector is unavailable,
+``--torch-trace`` prints a warning and continues with ``TorchDispatchMode``.
+
+.. important::
+
+   PyTorch must be installed together with ROCm from the TheRock package index.
+   Loading two different ROCm installations in one process aborts at startup.
+
+   Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
+   ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
+   packages
+   <https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-pytorch-python-packages>`_
+   for the index URL, the supported ``device-*`` extras, and the PyTorch version
+   compatibility matrix.
 
 Usage
 -----
@@ -928,7 +958,7 @@ option when profiling a PyTorch workload:
    INFO Command: python train.py
    INFO Torch Trace: Enabled
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Hardware Blocks: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -953,86 +983,35 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 
    $ ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS=0 rocprof-compute profile --experimental --torch-trace --name mnist_torch -- python train.py
 
+Torch trace collector
+---------------------
+
+rocprofiler-compute ships one collector library, ``torch_trace_collector.so``.
+It does not need PyTorch development packages and works with any Python
+version.
+
+The collector depends on how a specific PyTorch version stores its data
+internally, so it runs only with PyTorch 2.13 and 2.14. Other PyTorch versions
+use ``TorchDispatchMode`` instead, which misses backward-pass operators.
+
 Output
 ------
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``ml_api_trace`` prefix. These correlate PyTorch operators
-with GPU kernels and performance counters. When you run analyze (e.g. with
-``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``ml_api_trace/consolidated.csv``; the source marker and counter files are
-**retained** in the workload directory and are not deleted.
+the ``ml_api_trace`` prefix. The source marker and counter files are **retained**
+in the workload directory.
 
-``ml_api_trace/`` directory
-The ``ml_api_trace/`` directory contains ``consolidated.csv`` with all
-operator/kernel data. The columns include:
+Analyze reads those files and prints an operator call tree and a per-operator
+summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
 
-   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
-   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+Performance counter data
+------------------------
 
-The consolidated CSV is generated automatically on the first analysis run that
-requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
-subsequent runs.
-
-Sample rows from ``ml_api_trace/consolidated.csv`` (from profiling an mnist model).
-
-.. list-table::
-   :header-rows: 1
-   :widths: 16 14 42 22 12 14 14 14 14
-
-   * - Operator_Name
-     - Context_Id
-     - Kernel_Name
-     - Counter_Name
-     - Counter_Value
-     - Start_Timestamp_function
-     - End_Timestamp_function
-     - Start_Timestamp_kernel
-     - End_Timestamp_kernel
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_BUSY
-     - 23004
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_IDLE
-     - 0
-     - 6789210204040073
-     - 6789210223815845
-     - 6789210223810274
-     - 6789210223811914
-
-   * - torch.ones_like
-     - 1@__init__.py:231
-     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
-     - CPC_CPC_STAT_STALL
-     - 6715
-     - 6789281060081123
-     - 6789281079930585
-     - 6789281079932564
-     - 6789281079934204
-
-Performance counter data file
------------------------------
-
-The ``pmc_perf.csv`` file contains the standard performance counter data (same as non-torch profiling). This data enables analysis such as:
-
-* Identifying which PyTorch operators executed which GPU kernels
-* Aggregating performance counter values by operator
-* Correlating operator-level timing with kernel-level hardware metrics
-* Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
+The ``ml_api_trace_*_counter_collection.csv.gz`` files hold the same
+performance counters as a profile without Torch trace. In analyze mode,
+``--torch-operator`` and ``--triton-operator`` show the usual metric tables
+for the kernels that the matching operators launched.
 
 .. _torch-trace-limitations:
 
@@ -1045,11 +1024,22 @@ The Torch trace feature currently has the following limitations:
 
 * The ``--torch-trace`` option requires the application to be a Python command or Python script.
 
-* A valid PyTorch installation must be available in the environment where the workload runs.
-
-* The workload’s Python version must match the Python version used by ``roctx``.
+* The workload's Python version must match the Python version used by ``roctx``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
+
+If PyTorch and ROCm come from different installations, the workload aborts while
+loading ROCm libraries and profiling fails with output such as:
+
+.. code-block:: text
+
+   : CommandLine Error: Option 'spirv-expand-step' registered more than once!
+   LLVM ERROR: inconsistency in registered CommandLine options
+   ERROR The workload and the profiler loaded two different ROCm installations in the same
+   process. Duplicate ROCm libraries abort at startup. Install PyTorch and rocm[profiler]
+   from the same package index: <link to the requirements above>
+
+This means the install requirement above was not met.
 
 
 .. _torch-operator-profiling:
@@ -1057,18 +1047,14 @@ The Torch trace feature currently has the following limitations:
 Hierarchical operator names
 ----------------------------
 
-PyTorch operators are captured with full module hierarchy when available (e.g.,
-``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
-operator occurs in your PyTorch application:
+Analyze shows each operator under the operator that called it. The operator
+summary writes this call path with ``/`` between operators:
 
 .. code-block:: text
 
-   nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d
+   nn.Module.Net.forward/nn.Module.Conv2d.forward/aten::convolution
    nn.Module.MyModel.forward/nn.Module.Linear.forward
-   torch.nn.functional.relu
-
-The ``Operator_Name`` column in ``ml_api_trace/consolidated.csv`` contains
-the full operator hierarchy.
+   aten::relu
 
 This hierarchical information enables:
 
@@ -1076,7 +1062,7 @@ This hierarchical information enables:
 * **Debugging**: Identify performance issues in specific model components.
 * **Optimization**: Focus tuning efforts on bottleneck operators.
 
-Example with hierarchical naming:
+Example:
 
 .. code-block:: python
 
@@ -1087,14 +1073,15 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-           x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
-           x = self.decoder(x)  # Same hierarchy; both appear in consolidated.csv under Operator_Name
+           x = self.encoder(x)  # Linear.forward appears under MyModel.forward
+           x = self.decoder(x)  # A second Linear.forward under MyModel.forward
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
-``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
+(``--torch-operator``) accepts shell-style glob patterns that match an operator
+name or its call path (for example ``*relu*`` or ``*/aten::addmm``). To select
+all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 
 Combining Torch operator with other options
@@ -1120,10 +1107,13 @@ Triton trace
 ============
 
 In addition to PyTorch, ROCm Compute Profiler can map performance counters to
-Triton kernels (including Triton kernels launched by ``torch.compile`` /
-Inductor). This is enabled with the ``--triton-trace`` option and shares the
-same ``ml_api_trace`` output, ``Backend`` attribution, and analysis flow as Torch
-trace.
+the Triton kernels that your code launches, such as ``@triton.jit`` functions.
+Enable it with the ``--triton-trace`` option. It writes the same
+``ml_api_trace`` output as Torch trace and is analyzed the same way.
+
+``--triton-trace`` does not capture the Triton kernels that ``torch.compile``
+generates, because PyTorch launches those kernels itself. Use ``--torch-trace``
+for them. They appear under the ``torch.compile`` call in the operator tree.
 
 .. warning::
 
@@ -1136,8 +1126,8 @@ Requirements
 ------------
 
 Triton trace has the same requirements and limitations as Torch trace (see
-:ref:`torch-trace-limitations`), with a valid Triton installation required in
-place of PyTorch.
+:ref:`torch-trace-requirements` and :ref:`torch-trace-limitations`), with a
+valid Triton installation required in place of PyTorch.
 
 Usage
 -----
@@ -1156,10 +1146,9 @@ frameworks in a single run:
 
    $ rocprof-compute profile --experimental --torch-trace --triton-trace --name compiled_model -- python train.py
 
-Each captured marker records its originating framework in the ``Backend`` column
-of ``ml_api_trace/consolidated.csv``, so each framework can be analyzed
-independently. To enable all supported backends at once, use
-:ref:`--ml-api-trace <ml-api-trace>`.
+Each captured operator records which framework it came from, so you can
+analyze each framework separately. To enable all supported backends at once,
+use :ref:`--ml-api-trace <ml-api-trace>`.
 
 To analyze the captured Triton kernels, use the ``--list-triton-operators`` and
 ``--triton-operator`` options in analyze mode (see :doc:`../analyze/cli`).
@@ -1182,8 +1171,8 @@ single option.
    $ rocprof-compute profile --experimental --ml-api-trace --name model -- python train.py
 
 The output is identical to enabling each framework's trace flag individually.
-Captured kernels are attributed in the ``Backend`` column and analyzed with the
-corresponding per-framework operator options (see :doc:`../analyze/cli`).
+Each kernel is attributed to the framework that launched it. Analyze each
+framework with its own operator options (see :doc:`../analyze/cli`).
 
 .. _profile-vllm-workloads:
 
@@ -1305,7 +1294,7 @@ The following example demonstrates how to use iteration multiplexing with the
    INFO Target: MI325X
    INFO Command: ./vcopy -i 20 -n 1048576 -b 256
    INFO Kernel Selection: None
-   INFO Dispatch Selection: None
+   INFO Kernel Iteration Range: None
    INFO Filtered sections: All
    INFO
    INFO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

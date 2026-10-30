@@ -227,13 +227,13 @@ __device__ __forceinline__ void ginIntraGpuCtaBarrier(uint32_t* bar, unsigned nC
   if (threadIdx.x == 0) {
     __threadfence();
 #if defined(__HIP_DEVICE_COMPILE__)
-    const uint32_t s = __hip_atomic_load(sense, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-    const uint32_t prev = __hip_atomic_fetch_add(arrived, 1u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    const uint32_t s = __scoped_atomic_load_n(sense, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    const uint32_t prev = __scoped_atomic_fetch_add(arrived, 1u, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     if (prev + 1u == nCtas) {
-      __hip_atomic_store(arrived, 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      __hip_atomic_store(sense, 1u - s, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      __scoped_atomic_store_n(arrived, 0u, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+      __scoped_atomic_store_n(sense, 1u - s, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
     } else {
-      while (__hip_atomic_load(sense, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) == s) {
+      while (__scoped_atomic_load_n(sense, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) == s) {
         __builtin_amdgcn_s_sleep(1);
       }
     }
@@ -317,12 +317,13 @@ __launch_bounds__(512)
     ncclBarrierSession<ncclCoopCta> ginBar{cta, ncclTeamTagWorld(), gin, blockIdx.x};
     ginBar.sync(cta, cuda::memory_order_acquire, ncclGinFenceLevel::None);
 
+    // Weak: one put per peer, each carrying its own signal, counted by the wait.
     for (int dst = static_cast<int>(threadIdx.x); dst < nRanks; dst += static_cast<int>(blockDim.x)) {
       gin.put(world, dst, recvWin, sliceRecvByteOff, recvWin, sliceRecvByteOff, chunkBytes,
-              ncclGin_SignalInc{signalIndex});
+              ncclGin_WeakSignalInc{signalIndex});
     }
     gin.waitSignal(cta, signalIndex, signalValue + static_cast<uint64_t>(nRanks));
-  
+
     gin.flush(cta);
 
     ginBar.sync(cta, cuda::memory_order_release, ncclGinFenceLevel::None);

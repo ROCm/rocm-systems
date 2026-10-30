@@ -706,6 +706,14 @@ __host__ void rocshmem_query_thread(int *provided) {
   *provided = ROCSHMEM_THREAD_MULTIPLE;
 }
 
+__host__ size_t rocshmem_query_tdm_lds_bytes() {
+#if defined(USE_TDM)
+  return tdm::lds_bytes_for_tile(backend->tdm_resolved_tile_bytes);
+#else
+  return 0;
+#endif
+}
+
 __host__ void rocshmem_global_exit(int status) {
   VERIFY_BACKEND();
   backend->global_exit(status);
@@ -828,10 +836,10 @@ __host__ int rocshmem_team_split_strided(
   return 0;
 }
 
-__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
-                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
-                                    rocshmem_team_t *xaxis_team, 
-                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange,
+                                    const rocshmem_team_config_t *xaxis_config, long xaxis_mask,
+                                    rocshmem_team_t *xaxis_team,
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask,
                                     rocshmem_team_t *yaxis_team)
 {
   VERIFY_BACKEND();
@@ -871,10 +879,10 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
       LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
       return ROCSHMEM_ERROR;
     }
-    
+
     start += _xrange;
 
-    if (my_xteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_xteam != ROCSHMEM_TEAM_INVALID)
       *xaxis_team = my_xteam;
   }
 
@@ -884,7 +892,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
     rocshmem_team_t my_yteam;
     int ysize = yrange;
     if (remainder && i < remainder) ysize += 1;
-    
+
     ret = rocshmem_team_split_strided(parent_team, start, _xrange, ysize, yaxis_config,
                                       yaxis_mask, &my_yteam);
 
@@ -895,7 +903,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, con
 
     start += 1;
 
-    if (my_yteam != ROCSHMEM_TEAM_INVALID) 
+    if (my_yteam != ROCSHMEM_TEAM_INVALID)
       *yaxis_team = my_yteam;
   }
   return ROCSHMEM_SUCCESS;

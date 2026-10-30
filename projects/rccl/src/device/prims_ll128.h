@@ -6,7 +6,18 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "tdm/tdmCopy.h"
+#include "ll128Layout.h"
+
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
+
+// gfx1250 tensor-data-mover path for the LL128 user buffers; see tdm/ll128Tdm.h.
+// Built in with --enable-tdm-prim-ll128, then selected per comm with RCCL_TDM_LL128_ENABLE=1.
+#ifndef ENABLE_TDM_PRIM_LL128
+#define ENABLE_TDM_PRIM_LL128 0
+#endif
+
+#define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
@@ -16,18 +27,13 @@
 #endif
 #endif
 
-// Non-temporal 128-bit load/store for LL128 communication (FIFO) buffers.
-// Comm buffers are already allocated uncached, so there is no cache to bypass;
-// using the plain non-temporal path here (the pre-cache-bypass behavior) avoids
-// the extra register pressure that the system-scope global_load/store_b128
-// builtins introduce in the LL128 reduce kernels. The cache-bypassing load128/
-// store128 remain in use for user buffers (loadRegsBegin/storeRegs).
-//
-// The uncached premise above holds only for the legacy IPC allocator. A cuMem/VMM
-// FIFO is cacheable to the reader, so the load needs system scope there. See
-// RCCL_LL_FIFO_SYS_SCOPE_LOAD in rccl_ptr.h.
+// 128-bit load for FIFO and non-registered user buffers. On gfx1250, sibling
+// P2P into a cacheable comm FIFO is not coherent under a nontemporal load; use
+// system-scope b128 there. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h (default
+// hipMalloc / cuMem hung; uncached did not). For registered user buffers, use
+// load128 which bypasses the cache.
 inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1) {
-#if RCCL_LL_FIFO_SYS_SCOPE_LOAD
+#if RCCL_LL_FIFO_SYS_SCOPE
   union {
     v4u v;
     uint64_t u64[2];
@@ -41,23 +47,9 @@ inline __device__ void load128NT(const uint64_t* ptr, uint64_t& v0, uint64_t& v1
 #endif
 }
 
-// Plain (cacheable) 128-bit store. This is the pre-cache-bypass February store
-// behavior: comm-FIFO writes and non-registered user-buffer writes go through
-// the normal cache with ordinary global_store_dwordx4, which delivers higher
-// store throughput and lower register pressure than the non-temporal or
-// system-scope variants. Reads remain non-temporal (load128NT) so the LL128
-// flag poll never observes a stale cache line.
-//
-// The width is correctness-load-bearing, not just a throughput choice: the LL128
-// reader re-checks only the flag word, so the data words must become visible no
-// later than their flag. A single 128-bit vector store keeps data+flag in one
-// instruction and one memory transaction, guaranteeing that ordering rather than
-// leaving it to backend coalescing of two scalar stores (which two separate
-// `*u64` writes rely on, and which is especially fragile with gfx1250 ordering
-// still to be revisited). Emit the b128 vector store explicitly here.
-//
-// Stays plain on the cuMem path too. Only the reader's poll needs bypass, and a
-// system-scope store here measured no better than plain on gfx1250.
+// Plain (cacheable) 128-bit store. Used for non-registered user buffers, and off
+// gfx1250 it is also where store128Fifo sends the LL128 comm FIFO. Width is one
+// b128 so data and flag stay in a single transaction.
 inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   union {
     v4u v;
@@ -66,6 +58,24 @@ inline __device__ void store128Plain(uint64_t* ptr, uint64_t v0, uint64_t v1) {
   u.u64[0] = v0;
   u.u64[1] = v1;
   *((v4u_gptr)ptr) = u.v;
+}
+
+// LL128 comm-FIFO store. Same 128-bit width as store128Plain (data+flag one
+// transaction). On gfx1250 the store is system-scope: a plain store to a
+// cacheable FIFO can retire in the writer's cache and never reach a sibling
+// partition's poll. See RCCL_LL_FIFO_SYS_SCOPE in rccl_ptr.h.
+inline __device__ void store128Fifo(uint64_t* ptr, uint64_t v0, uint64_t v1) {
+#if RCCL_LL_FIFO_SYS_SCOPE
+  union {
+    v4u v;
+    uint64_t u64[2];
+  } u;
+  u.u64[0] = v0;
+  u.u64[1] = v1;
+  __builtin_amdgcn_global_store_b128((v4u_gptr)ptr, u.v, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  store128Plain(ptr, v0, v1);
+#endif
 }
 
 template <typename T, typename RedOp, typename Fan, int Direct, int P2p, bool isNetOffload, int Metadata, int Pipeline,
@@ -89,19 +99,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   Fan fan;
   T* userBufs[3];
   bool userRegUsed = false; // runtime: user buffers registered (cacheable) -> need cache-bypass
+  // No two NULL-initialized members may be adjacent. MemCpyOpt merges adjacent null stores
+  // into a memset on this scratch-resident object, and the LL128 loops then reload these
+  // pointers from scratch.
   struct ncclConnInfo* recvConn = NULL;
-  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
-
-  struct ncclConnInfo* sendConn = NULL;
-  volatile struct ncclConnFifo* sendConnFifo = NULL;
-  volatile uint64_t* sendConnTailPtr = NULL;
+  volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t sendConnTail;
-  volatile uint64_t* sendConnHeadPtr = NULL;
+  struct ncclConnInfo* sendConn = NULL;
   uint64_t sendConnHead;
+  volatile struct ncclConnFifo* sendConnFifo = NULL;
   uint64_t sendConnHeadCache; // Cache last seen value
-
+  volatile uint64_t* sendConnTailPtr = NULL;
   uint64_t recvStep[MaxRecv];
+  volatile uint64_t* sendConnHeadPtr = NULL;
+
   uint64_t sendStep[MaxSend];
   uint64_t* recvBuff[MaxRecv];
   uint64_t* sendBuff[MaxSend];
@@ -128,11 +140,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+#if TDM_LL128_ON
+  // Read from shmem once here, not per slice: the hot path tests a register.
+  bool tdmEnable = false;
+#endif
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
-#if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)
+#if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
       barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
 #else
       barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
@@ -178,7 +194,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     if (sendConnTailPtr) {
       if (skip_fence) {
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
-#if defined(__gfx1250__)
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__))
         // To be revisited for correctness and performance on gfx1250
         asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0");
 #else
@@ -237,6 +253,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
+#if TDM_LL128_ON
+#include "tdm/ll128Tdm.h"  // member functions; included inside the class body on purpose
+#endif
+
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
     constexpr int EltPer16B = 16 / sizeof(T);
@@ -245,12 +265,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // LINEELEMS/2 for the 64-byte-line case; gfx1250 doubles LINEELEMS
     // (128-byte non-tearing line) so the stride and flag-subgroup width
     // both double accordingly.
-    constexpr int LineElems = NCCL_LL128_LINEELEMS;
-    constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
     int ix[WordPerThread / 2];
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      ix[g] = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+      ix[g] = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
     }
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
@@ -267,6 +285,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         }
       }
     } else {
+#if TDM_LL128_ON
+      // This fallback stages through the same per-warp scratch the TDM store leg
+      // hands the mover, so drain the previous slice's store before clobbering it.
+      tdmDrain();
+#endif
       // Not aligned. Stage the smallest 16 byte aligned region subsuming the
       // buffer into shmem.
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
@@ -313,15 +336,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g - 1] = regs[2 * g];
     }
+#if TDM_LL128_ON
+    if (tdmStoreRegs<WordPerThread>(dst, regs, eltN)) return;
+#endif
 
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
     uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
-    constexpr int LineElems = NCCL_LL128_LINEELEMS;
-    constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+      int ix = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
       if (!flagThread || g % 2 == 0) {
         if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
           storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
@@ -438,14 +462,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         uint64_t* ptr = sendPtr(i) + ll128Offset;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          store128Plain(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+          store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
         }
       }
       uint64_t flag = sendFlag(0);
       uint64_t* ptr = sendPtr(0) + ll128Offset;
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-        store128Plain(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+        store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
       }
     }
     /********************** End Send ************************/
@@ -498,6 +522,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       dstPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
     }
+#if TDM_LL128_ON
+    tdmDrain();
+#endif
 
     barrier();
 
@@ -549,7 +576,8 @@ public:
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
     : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE), /*compiler warnings*/
-      stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)), warp(tid / WARP_SIZE),
+      stepSize(stepSize_ > 0 ? stepSize_ : ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)),
+      warp(tid / WARP_SIZE),
       warpInBlock(threadIdx.x / WARP_SIZE),
       flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)), group(group),
       threadsPerBlock(blockDim.x) {
@@ -577,6 +605,9 @@ public:
     loadSendSync();
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
+#if TDM_LL128_ON
+    tdmEnable = ncclShmem.comm.tdmLl128Enable;
+#endif
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
@@ -586,12 +617,15 @@ public:
 #endif
   }
 
+  // stepSize_ is the Simple-protocol chunk the send/recv kernel passes for every protocol; LL128 send/recv uses its
+  // own buffer, which can be smaller than the one collectives use.
   __forceinline__ __device__ Primitives(int tid, int nthreads, int const* recvPeers, int const* sendPeers,
                                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group,
                                         uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
                                         struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault)
     : Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv,
-                 connIndexSend, collWork) {}
+                 connIndexSend, collWork, false, false,
+                 p2pWork != nullptr ? ncclShmem.comm.p2pLl128BuffSize / NCCL_STEPS / (int)sizeof(uint64_t) : 0) {}
 
   __device__ ~Primitives() {
     // Save steps for the next operation

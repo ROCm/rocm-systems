@@ -163,6 +163,7 @@ ROCm Compute Profiler uses [Ruff](https://docs.astral.sh/ruff/) for linting and 
 | Topic | Source of Truth |
 |-------|-----------------|
 | Function design, naming, code organization | [Python Coding Style Guidelines](PYTHON_CODING_STYLE.md) |
+| C++ and CMake conventions | [C++ Coding Style Guidelines](CPP_CODING_STYLE.md) |
 | Ruff configuration (enforced rules, ignores, formatting) | [`pyproject.toml`](pyproject.toml) |
 | YAML metric equation formatting | [YAML Metric Equation Formatting](#yaml-metric-equation-formatting) |
 
@@ -186,7 +187,6 @@ implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 **Scope.** Equation formatting applies to YAML files under:
 
 - `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
-- `src/rocprof_compute_tui/utils/gfx*/*.yaml`
 
 Template files (`*_template.yaml`) and build artifacts are excluded. Only values
 under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
@@ -226,15 +226,27 @@ python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx95
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
+## Writing for Users
+
+Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.
+
+- Write short, complete sentences in plain English. Say what the user sees and what to do.
+- Leave out internals such as marker formats, class names, and processing steps. Put those in `docs/design/`.
+- Add a changelog entry only for a change users can notice: a new or changed option, output, or requirement, or a fixed bug they could hit. Skip tests, samples, refactors, and dropped support for older workloads.
+
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
+If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:
 
 1. Edit the relevant panel YAMLs.
 2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
 3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
+
+## Memory Chart Layouts
+
+The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
 
 ## Analysis Database Schema Diagrams
 
@@ -251,6 +263,21 @@ This requires the Graphviz `dot` binary (`apt install graphviz`). The tool reads
 the ORM metadata for the schema diagram, and materializes the views in a
 throwaway database to read back their real columns for the views diagram, so
 neither diagram can drift from the code. Do not edit the PNGs by hand.
+
+## Instruction Execution Pipeline Table
+
+[`src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml`](src/rocprof_compute_soc/analysis_configs/instruction_pipelines.yaml)
+is generated, not written by hand. Rerun the generator when a new GPU family
+needs support, or when an instruction shows up with an empty type in analyze,
+and commit the regenerated file as is:
+
+```bash
+./tools/instruction_pipeline_generator.py
+```
+
+This requires `llvm-tblgen` and `llvm-objdump` from ROCm (set `ROCM_PATH` if
+they are not under `/opt/rocm`) and network access. Do not edit the YAML by
+hand.
 
 ## Vendoring External Dependencies
 
@@ -288,7 +315,7 @@ Profile mode uses only stdlib to:
 - CI uses Python 3.10+ to ensure full enforcement coverage
 
 Enforcement is automatically done for tests which execute profile pipeline using main
-function instead of subprocess (unlike tests using --call-binary and multi mpi rank tests).
+function instead of subprocess (unlike multi mpi rank tests).
 These tests are automatically protected by guards in `tests/conftest.py` when testing with Python 3.10 and above.
 The guard intercepts ALL imports (direct, nested, dynamic) and fails tests immediately if
 non-stdlib packages are imported.
@@ -311,7 +338,7 @@ non-stdlib packages are imported.
 These are forbidden in profile mode
 
 **External packages**:
-- `pandas`, `yaml`, `numpy`, `plotly`, `dash`, `textual`, etc.
+- `pandas`, `yaml`, `numpy`, `plotly`, etc.
 - Anything from `requirements.txt`
 
 ### Common Mistakes

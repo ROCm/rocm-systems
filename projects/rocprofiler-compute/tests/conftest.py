@@ -24,7 +24,6 @@ class ProfileModeImportGuard:
         "rocprof_compute_profile",
         "rocprof_compute_analyze",
         "rocprof_compute_soc",
-        "rocprof_compute_tui",
         "pc_sampling",
         "utils",
         "vendored",
@@ -130,13 +129,6 @@ class ProfileModeImportGuard:
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--call-binary",
-        action="store_true",
-        default=False,
-        help="Call standalone binary instead of main function during tests",
-    )
-
-    parser.addoption(
         "--rocprofiler-sdk-tool-path",
         type=str,
         default=str(
@@ -155,6 +147,10 @@ def pytest_addoption(parser):
     parser.addoption(
         "--coverage-n",
         type=int,
-        default=100,
-        help="Random ATen sample budget (default 100).",
+        default=20,
+        help=(
+            "Number of operators test_torch_trace_coverage samples, split evenly "
+            "between ATen and structural operators (default 20). "
+            "Use 100 for a nightly run."
+        ),
     )

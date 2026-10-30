@@ -12,7 +12,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # BSD sysexits.h codes — portable across platforms (os.EX_* is POSIX-only)
 EXIT_OK = 0
@@ -133,7 +133,7 @@ def validate_text_output(filepath: Path) -> bool:
     return True
 
 
-def load_json_output(filepath: Path) -> Optional[dict[str, Any]]:
+def load_json_output(filepath: Path) -> dict[str, Any] | None:
     """Load a unified-memory JSON output file."""
     try:
         with open(filepath, encoding="utf-8") as f:
@@ -255,9 +255,12 @@ def validate_json_data(data: dict[str, Any]) -> bool:
     return True
 
 
-def resolve_perfetto_trace(output_dir: Path) -> Optional[Path]:
+def resolve_perfetto_trace(output_dir: Path) -> Path | None:
     """Resolve a Perfetto trace in output_dir when one was generated."""
-    matches = sorted(output_dir.glob("perfetto-trace*.proto"))
+    matches = sorted(output_dir.glob("perfetto-trace*.pftrace"))
+    if not matches:
+        matches = sorted(output_dir.glob("perfetto*.pftrace"))
+    # this script is also run standalone against older output directories
     if not matches:
         matches = sorted(output_dir.glob("perfetto*.proto"))
 
@@ -353,7 +356,7 @@ def validate_perfetto_fault_only_trace(output_dir: Path, data: dict[str, Any]) -
     return True
 
 
-def resolve_from_dir(output_dir: Path) -> tuple[Optional[Path], Optional[Path]]:
+def resolve_from_dir(output_dir: Path) -> tuple[Path | None, Path | None]:
     """
     Resolve unified_memory*.txt and unified_memory*.json in output_dir.
     Single-level lookup only (no recursion). Used for tests where the PID-suffixed

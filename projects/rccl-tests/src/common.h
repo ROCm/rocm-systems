@@ -20,6 +20,14 @@
     || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
+// For a GIN put that carries its own signal, where the receiver counts one
+// signal per put. Legacy ncclGin_SignalInc follows ginStrongSignalsRequired
+// (strong by default), which on Anvil SDMA drains every queue to the peer.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,30,7)
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_WeakSignalInc{sig}
+#else
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_SignalInc{sig}
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <cstring>
@@ -102,6 +110,25 @@ typedef enum {
     return r;                                       \
   }                                                 \
 } while(0)
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_GIN_BACKEND_MASK_ALL)
+// NCCL_GIN_BACKEND_MASK_ALL depends on per-target defines (ENABLE_ROCSHMEM_GIN),
+// so it must expand in the translation unit that compiles the GIN kernels: keep
+// this static. A backend missing from the mask is not caught on the device; its
+// context is dispatched as another backend's and faults.
+static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
+  if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
+  if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
+  fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
+                  "was built without that backend (compiled-in backend mask 0x%x). "
+                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need the CMake "
+                  "build with -DENABLE_ROCSHMEM_GIN=ON; the Makefile build (install.sh) does not "
+                  "support them.\n",
+          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
+          (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
+  return testInvalidUsage;
+}
+#endif
 
 struct testColl {
   const char name[20];
@@ -454,18 +481,30 @@ testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
 #define SPECIALIZE_KERNEL(kernel, type, op) nullptr
 #endif
 
+// Must match librccl's internal ncclFunc_t (src/include/nccl_common.h): these
+// values cross the rcclGetAlgoInfo / rcclSymKGetInfo / rcclGetCollImplInfo ABI,
+// so a renumbering here silently mislabels results instead of failing to build.
 typedef enum {
   ncclFuncBroadcast = 0,
   ncclFuncReduce = 1,
   ncclFuncAllGather = 2,
   ncclFuncReduceScatter = 3,
   ncclFuncAllReduce = 4,
-  ncclFuncAllReduceWithBias = 5,
-  ncclFuncSendRecv = 6,
-  ncclFuncSend = 7,
-  ncclFuncRecv = 8,
-  ncclFuncAllToAllPivot = 9,
-  ncclNumFuncs = 10
+  ncclFuncSendRecv = 5,
+  ncclFuncSend = 6,
+  ncclFuncRecv = 7,
+  ncclFuncAlltoAll = 8,
+  ncclFuncScatter = 9,
+  ncclFuncGather = 10,
+  ncclFuncAllToAllPivot = 11,
+  ncclFuncAlltoAllGda = 12,
+  ncclFuncAlltoAllvGda = 13,
+  ncclFuncAllGatherV = 14,
+  ncclFuncPutSignal = 15,
+  ncclFuncSignal = 16,
+  ncclFuncWaitSignal = 17,
+  ncclFuncAlltoAllv = 18,
+  ncclNumFuncs = 19
 } ncclFunc_t;
 
 typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,

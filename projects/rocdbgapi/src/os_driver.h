@@ -65,13 +65,18 @@ enum elf_amdgpu_machine_t : uint32_t
   EF_AMDGPU_MACH_AMDGCN_GFX1151 = 0x04a,
   EF_AMDGPU_MACH_AMDGCN_GFX1152 = 0x055,
   EF_AMDGPU_MACH_AMDGCN_GFX1153 = 0x058,
+  EF_AMDGPU_MACH_AMDGCN_GFX1170 = 0x05d,
+  EF_AMDGPU_MACH_AMDGCN_GFX1171 = 0x05e,
+  EF_AMDGPU_MACH_AMDGCN_GFX1172 = 0x05c,
   EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x048,
   EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x04e,
   EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x049,
+  EF_AMDGPU_MACH_AMDGCN_GFX1250_STRICT = 0x0EB,
   EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC = 0x051,
   EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC = 0x052,
   EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC = 0x053,
   EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC = 0x054,
+  EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC = 0x062,
   EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC = 0x059,
   EF_AMDGPU_MACH_AMDGCN_GFX9_4_GENERIC = 0x05f
 };
@@ -136,6 +141,8 @@ struct os_agent_info_t
   bool precise_memory_supported{ false };
   /* indicates if precise ALU operations reporting is supported.  */
   bool precise_alu_exceptions_supported{ false };
+  /* indicates if LDS out-of-range accesses reporting is supported.  */
+  bool lds_exception_supported{ false };
   /* indicates that the command process firmware is supported.  */
   bool firmware_supported{ false };
   /* indicates that the trap temporaries are always set up.  */
@@ -433,7 +440,8 @@ enum class os_wave_launch_mode_t : uint32_t
 enum class os_process_flags_t : uint32_t
 {
   precise_memory = 1 << 0,
-  precise_alu_exceptions = 1 << 1
+  precise_alu_exceptions = 1 << 1,
+  report_lds_exception = 1 << 2,
 };
 template <> struct is_flag<os_process_flags_t> : std::true_type
 {

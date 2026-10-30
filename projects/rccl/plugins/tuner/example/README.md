@@ -17,7 +17,7 @@ This example plugin shows a practical example of a CSV file-based tuning approac
 make
 ```
 
-This will create `libnccl-tuner-example.so` that can be loaded by NCCL.
+This will create `librccl-tuner-example.so` that can be loaded by NCCL.
 
 ## Configuration File Format
 

@@ -19,8 +19,9 @@
 ///
 /// The encoding format of a family is stable across generations, but the opcodes
 /// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
-/// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
-/// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The s_delay_alu builder
+/// and SOPP layout builder return failure for an unsupported arch; other builders
+/// currently throw util::UnimplementedInst. Scalar-operand codes
 /// (VCC, EXEC, M0) and inline constants come from the generated operand tables
 /// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
 /// scalar_operand_exec_lo.
@@ -73,6 +74,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -115,8 +117,11 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Build a SOPP word using the generated layout for @p arch.
-[[nodiscard]] inline constexpr uint32_t build_sopp_encoding(rj_code_arch_t arch, uint16_t op,
-                                                            uint16_t simm16) {
+/// @returns Failure for a non-AMDGPU architecture.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+inline constexpr util::FailureOr<uint32_t>
+build_sopp_encoding(rj_code_arch_t arch, uint16_t op, uint16_t simm16,
+                    const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
     return cdna1::build_sopp(op, {.simm16 = simm16})[0];
@@ -139,7 +144,8 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::build_sopp(op, {.simm16 = simm16})[0];
   default:
-    throw util::UnimplementedInst("SOPP builder for target architecture");
+    return error != nullptr ? error->emit() << "unsupported target architecture for SOPP encoding"
+                            : util::Result::failure();
   }
 }
 
@@ -675,7 +681,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Get the s_delay_alu opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_delay_alu(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t> sopp_op_delay_alu(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
     return rdna3::kSDelayAluSopp;
@@ -686,7 +692,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSDelayAluSopp;
   default:
-    throw util::UnimplementedInst("s_delay_alu for target architecture");
+    return util::Result::failure();
   }
 }
 
@@ -734,7 +740,9 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @param arch           Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_branch(int16_t offset_dwords, rj_code_arch_t arch) {
-  return build_sopp_encoding(arch, sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
+  // Opcode selection rejects architectures without a generated SOPP layout.
+  const uint32_t op = sopp_op_branch(arch);
+  return build_sopp_encoding(arch, op, static_cast<uint16_t>(offset_dwords)).value();
 }
 
 /// @brief Encode an s_getpc_b64 instruction for the given target ISA.
@@ -796,7 +804,9 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t
 build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
-  return build_sopp_encoding(arch, sopp_op_nop(arch), cycles);
+  // Opcode selection rejects architectures without a generated SOPP layout.
+  const uint32_t op = sopp_op_nop(arch);
+  return build_sopp_encoding(arch, op, cycles).value();
 }
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
@@ -804,19 +814,33 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 /// @param arch    Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
-  return build_sopp_encoding(arch, sopp_op_endpgm(arch), 0);
+  // Opcode selection rejects architectures without a generated SOPP layout.
+  const uint32_t op = sopp_op_endpgm(arch);
+  return build_sopp_encoding(arch, op, 0).value();
 }
 
 /// @brief Encode an s_trap instruction for the given target ISA.
 ///
 /// @details The immediate is a caller-defined trap code, not a printable message.
 [[nodiscard]] inline constexpr uint32_t build_s_trap(rj_code_arch_t arch, uint16_t simm16 = 0) {
-  return build_sopp_encoding(arch, sopp_op_trap(arch), simm16);
+  // Opcode selection rejects architectures without a generated SOPP layout.
+  const uint32_t op = sopp_op_trap(arch);
+  return build_sopp_encoding(arch, op, simm16).value();
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch) {
-  return build_sopp_encoding(arch, sopp_op_delay_alu(arch), simm16);
+/// @returns Failure when the target ISA has no s_delay_alu encoding.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t>
+build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
+                  const util::DiagnosticEmitter *error = nullptr) {
+  const auto op = sopp_op_delay_alu(arch);
+  if (op.failed()) {
+    if (error != nullptr)
+      return error->emit() << "s_delay_alu for target architecture";
+    return util::Result::failure();
+  }
+  return pack_sopp(op.value(), simm16);
 }
 
 /// @brief Encode `s_wait_xcnt 0` for the given target ISA.
@@ -826,7 +850,7 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 [[nodiscard]] inline constexpr std::optional<uint32_t> build_s_wait_xcnt(rj_code_arch_t arch) {
   if (arch != ROCJITSU_CODE_ARCH_CDNA5)
     return std::nullopt;
-  return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0);
+  return build_sopp_encoding(arch, cdna5::kSWaitXcntSopp, 0).value();
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.

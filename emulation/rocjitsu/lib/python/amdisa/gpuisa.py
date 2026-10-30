@@ -139,6 +139,12 @@ class Operand:
         order: Order of the operand.
         data_format_name: ISA data format name from the XML operand signature.
         fieldless: True if the operand has no ``<FieldName>`` in the MR ISA.
+        wave_mask: True if the MR ISA data format is ``FMT_NUM_M64``, a lane
+            mask that is one SGPR in Wave32 and an SGPR pair in Wave64. Set on
+            every ISA, but the CDNA1-4 XMLs tag some lane masks
+            ``FMT_NUM_B64`` (the ``V_CMP*`` VOP3 destination), so a false flag
+            on CDNA does not rule out a lane mask. Codegen emits the C++ flag
+            only for Wave32-capable profiles.
     """
 
     name: str
@@ -151,6 +157,7 @@ class Operand:
     order: int
     data_format_name: str = ''
     fieldless: bool = False
+    wave_mask: bool = False
 
 
 @dataclass
@@ -313,6 +320,7 @@ class Instruction(InstBase):
         self.name = name
         self.opcode = opcode
         self.operands = operands
+        self.required_flat_segment: int | None = None
         self.available_encodings = available_encodings
         self.source_addition = source_addition
         # Populated by an optional ISA-variant manifest after the base XML and

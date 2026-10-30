@@ -1,0 +1,243 @@
+{
+  "topology": {
+    "links": [
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "i"
+          },
+          {
+            "end": 4,
+            "start": 0,
+            "var_name": "j"
+          },
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "k"
+          }
+        ],
+        "latency": 1,
+        "pattern": "xcd[i].cp.req_[j*8+k] -> xcd[i].se[j].cu[k].cpl",
+        "src": "",
+        "weight": 2,
+        "where_expr": ""
+      },
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "i"
+          },
+          {
+            "end": 4,
+            "start": 0,
+            "var_name": "j"
+          },
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "k"
+          }
+        ],
+        "latency": 1,
+        "pattern": "xcd[i].se[j].cu[k].req -> xcd[i].l2.cpl_[j*8+k]",
+        "src": "",
+        "weight": 10,
+        "where_expr": ""
+      },
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "i"
+          }
+        ],
+        "latency": 1,
+        "pattern": "xcd[i].l2.req -> iod[i/4].msc.cpl_[i%4]",
+        "src": "",
+        "weight": 3,
+        "where_expr": ""
+      },
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 2,
+            "start": 0,
+            "var_name": "i"
+          },
+          {
+            "end": 2,
+            "start": 0,
+            "var_name": "j"
+          }
+        ],
+        "latency": 1,
+        "pattern": "iod[i].peer_req -> iod[j].peer_cpl",
+        "src": "",
+        "weight": 1,
+        "where_expr": "i != j"
+      },
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "i"
+          },
+          {
+            "end": 4,
+            "start": 0,
+            "var_name": "j"
+          },
+          {
+            "end": 7,
+            "start": 0,
+            "var_name": "k"
+          }
+        ],
+        "latency": 1,
+        "pattern": "xcd[i].se[j].cu[k].adj_req -> xcd[i].se[j].cu[k+1].adj_cpl",
+        "src": "",
+        "weight": 2,
+        "where_expr": ""
+      },
+      {
+        "dst": "",
+        "for_ranges": [
+          {
+            "end": 8,
+            "start": 0,
+            "var_name": "i"
+          },
+          {
+            "end": 4,
+            "start": 0,
+            "var_name": "j"
+          },
+          {
+            "end": 7,
+            "start": 0,
+            "var_name": "k"
+          }
+        ],
+        "latency": 1,
+        "pattern": "xcd[i].se[j].cu[k+1].adj_req_r -> xcd[i].se[j].cu[k].adj_cpl_r",
+        "src": "",
+        "weight": 2,
+        "where_expr": ""
+      }
+    ],
+    "root": {
+      "children": [
+        {
+          "name": "vram",
+          "type": "gpu_memory"
+        },
+        {
+          "config": [
+            {
+              "key": "num_hbm_stacks",
+              "value": "4"
+            }
+          ],
+          "name": "iod[0:2]",
+          "type": "iod"
+        },
+        {
+          "children": [
+            {
+              "name": "l2",
+              "type": "l2_cache"
+            },
+            {
+              "name": "cp",
+              "type": "command_processor"
+            },
+            {
+              "children": [
+                {
+                  "config": [
+                    {
+                      "key": "num_wf_slots",
+                      "value": "32"
+                    },
+                    {
+                      "key": "sgprs_per_wf",
+                      "value": "104"
+                    },
+                    {
+                      "key": "vgprs_per_wf",
+                      "value": "512"
+                    },
+                    {
+                      "key": "lds_size_kb",
+                      "value": "160"
+                    }
+                  ],
+                  "name": "cu[0:8]",
+                  "type": "compute_unit"
+                }
+              ],
+              "name": "se[0:4]",
+              "type": "shader_engine"
+            }
+          ],
+          "name": "xcd[0:8]",
+          "type": "xcd"
+        }
+      ],
+      "name": "soc",
+      "type": "soc"
+    }
+  },
+  "vm": {
+    "arch": "cdna4",
+    "gpu": {
+      "device": {
+        "device_id": 5892,
+        "drm_render_minor": 128,
+        "family_id": 160,
+        "gfx_target_version": 90500,
+        "gpu_id": 38144,
+        "l1_assoc": 0,
+        "l1_line_size": 0,
+        "l1_size_kb": 0,
+        "l2_assoc": 0,
+        "l2_line_size": 0,
+        "l2_size_kb": 4096,
+        "lds_size_kb": 160,
+        "local_mem_size": 309237645312,
+        "marketing_name": "AMD Instinct MI350X",
+        "max_engine_clk_fcompute": 2700,
+        "max_slots_scratch_cu": 0,
+        "max_waves_per_simd": 8,
+        "mem_clk_max": 1600,
+        "mem_width": 8192,
+        "num_cp_queues": 128,
+        "num_cu_per_sh": 4,
+        "num_sdma_engines": 5,
+        "num_sdma_xgmi_engines": 12,
+        "num_shader_arrays_per_engine": 2,
+        "num_shader_engines": 4,
+        "simd_count": 1024,
+        "simd_per_cu": 4,
+        "unique_id": 5929628898254127105,
+        "vendor_id": 4098,
+        "wave_front_size": 64
+      },
+      "num_gpus": 1,
+      "num_iods": 0,
+      "num_xcds": 0
+    }
+  }
+}

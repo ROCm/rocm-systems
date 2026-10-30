@@ -3,8 +3,6 @@
 
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
-#include "rocjitsu/vm/amdgpu/mem_state.h"
-
 #include <algorithm>
 #include <format>
 #include <memory>
@@ -14,10 +12,6 @@ namespace rocjitsu::plugins::throughput {
 namespace {
 
 constexpr size_t family_index(InstructionFamily family) { return static_cast<size_t>(family); }
-
-bool has_prefix(std::string_view mnemonic, std::string_view prefix) {
-  return mnemonic.starts_with(prefix);
-}
 
 std::string json_escape(std::string_view value) {
   std::string escaped;
@@ -72,6 +66,12 @@ double nanoseconds_to_seconds(uint64_t nanoseconds) {
   return static_cast<double>(nanoseconds) / 1.0e9;
 }
 
+InstructionFamily count_instruction(ThroughputWavefrontState &state, const Instruction &inst) {
+  const InstructionFamily family = ThroughputPlugin::classify(inst);
+  ++state.counts[family_index(family)];
+  return family;
+}
+
 } // namespace
 
 ThroughputPlugin::ThroughputPlugin(const char * /*config_json*/) : ExecutionPlugin("throughput") {}
@@ -79,44 +79,11 @@ ThroughputPlugin::ThroughputPlugin(const char * /*config_json*/) : ExecutionPlug
 ThroughputPlugin::~ThroughputPlugin() { onShutdown(); }
 
 InstructionFamily ThroughputPlugin::classify(const Instruction &inst) {
-  const std::string_view mnemonic = inst.mnemonic();
-
-  if (inst.is_mfma() || has_prefix(mnemonic, "v_mfma_") || has_prefix(mnemonic, "v_smfmac_") ||
-      has_prefix(mnemonic, "v_wmma_") || has_prefix(mnemonic, "v_swmmac_"))
-    return InstructionFamily::Matrix;
-
-  if (inst.is_memory_op()) {
-    if (const auto *state = inst.data()) {
-      if (state->tag() == amdgpu::LOCAL_MEM)
-        return InstructionFamily::Lds;
-      if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::SCALAR_MEM)
-        return InstructionFamily::Global;
-    }
-
-    // These fallbacks keep synthetic/model-only instructions useful even when
-    // they do not carry execution-pipeline state.
-    if (has_prefix(mnemonic, "ds_"))
-      return InstructionFamily::Lds;
-    return InstructionFamily::Global;
-  }
-
-  constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
-                                     PROGRAM_TERMINATOR | WAITCNT | BARRIER;
-  if ((inst.flags() & control_flags) != 0 || has_prefix(mnemonic, "s_nop") ||
-      has_prefix(mnemonic, "s_sleep") || has_prefix(mnemonic, "s_delay"))
-    return InstructionFamily::Control;
-  if (has_prefix(mnemonic, "s_"))
-    return InstructionFamily::Scalar;
-  if (has_prefix(mnemonic, "v_"))
-    return InstructionFamily::Vector;
-  return InstructionFamily::Other;
+  return classify_instruction(inst);
 }
 
 std::string_view ThroughputPlugin::family_name(InstructionFamily family) {
-  constexpr std::array<std::string_view, kInstructionFamilyCount> names = {
-      "scalar", "vector", "matrix", "lds", "global", "control", "other"};
-  const size_t index = family_index(family);
-  return index < names.size() ? names[index] : "other";
+  return instruction_family_name(family);
 }
 
 uint64_t ThroughputPlugin::total(const InstructionCounts &counts) {
@@ -160,13 +127,19 @@ void ThroughputPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                         amdgpu::Wavefront &wf) {
   auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
-  const InstructionFamily family = classify(inst);
-  ++state->counts[family_index(family)];
+  const InstructionFamily family = count_instruction(*state, inst);
   state->active_family = family;
   // Start after classification and accounting so their profiler cost is not
   // charged to the simulated instruction.
   state->instruction_begin = Clock::now();
   state->instruction_active = true;
+}
+
+void ThroughputPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
+                                                      amdgpu::Wavefront &wf) {
+  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  const size_t family = family_index(count_instruction(*state, inst));
+  ++state->untimed_instructions[family];
 }
 
 void ThroughputPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/,
@@ -185,6 +158,7 @@ void ThroughputPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   auto &dispatch = dispatches_[wf.dispatch_id()];
   add(dispatch.counts, state->counts);
   add(dispatch.execution_nanoseconds, state->execution_nanoseconds);
+  add(dispatch.untimed_instructions, state->untimed_instructions);
 }
 
 void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
@@ -195,10 +169,12 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
 
   DispatchState &state = iter->second;
   const double wall_seconds = state.begun ? seconds_between(state.begin, end) : 0.0;
-  emit_record("dispatch", &state.info, state.counts, state.execution_nanoseconds, wall_seconds);
+  emit_record("dispatch", &state.info, state.counts, state.execution_nanoseconds,
+              state.untimed_instructions, wall_seconds);
 
   add(aggregate_counts_, state.counts);
   add(aggregate_execution_nanoseconds_, state.execution_nanoseconds);
+  add(aggregate_untimed_instructions_, state.untimed_instructions);
   dispatch_seconds_sum_ += wall_seconds;
   ++completed_dispatches_;
   if (!have_active_window_) {
@@ -216,13 +192,14 @@ void ThroughputPlugin::onShutdown() {
     return;
   summary_emitted_ = true;
   const double wall_seconds = have_active_window_ ? seconds_between(first_begin_, last_end_) : 0.0;
-  emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_, wall_seconds,
-              dispatch_seconds_sum_);
+  emit_record("summary", nullptr, aggregate_counts_, aggregate_execution_nanoseconds_,
+              aggregate_untimed_instructions_, wall_seconds, dispatch_seconds_sum_);
 }
 
 void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatchInfo *info,
                                    const InstructionCounts &counts,
                                    const InstructionNanoseconds &execution_nanoseconds,
+                                   const UntimedInstructions &untimed_instructions,
                                    double wall_seconds, double dispatch_seconds_sum) {
   const uint64_t instruction_count = total(counts);
   std::string output =
@@ -248,11 +225,15 @@ void ThroughputPlugin::emit_record(std::string_view record, const KernelDispatch
     if (i != 0)
       output += ',';
     const double execution_seconds = nanoseconds_to_seconds(execution_nanoseconds[i]);
-    output +=
-        std::format("\"{}\":{{\"instructions\":{},\"execution_seconds\":{:.9g},"
-                    "\"execution_mips\":{:.9g},\"dispatch_mips\":{:.9g}}}",
-                    family_name(static_cast<InstructionFamily>(i)), counts[i], execution_seconds,
-                    mips(counts[i], execution_seconds), mips(counts[i], wall_seconds));
+    const bool complete = untimed_instructions[i] == 0;
+    output += std::format(
+        "\"{}\":{{\"instructions\":{},\"untimed_instructions\":{},"
+        "\"execution_timing_valid\":{},\"execution_seconds\":{},"
+        "\"execution_mips\":{},\"dispatch_mips\":{:.9g}}}",
+        family_name(static_cast<InstructionFamily>(i)), counts[i], untimed_instructions[i],
+        complete, complete ? std::format("{:.9g}", execution_seconds) : "null",
+        complete ? std::format("{:.9g}", mips(counts[i], execution_seconds)) : "null",
+        mips(counts[i], wall_seconds));
   }
   output += "}}\n";
   sink().write(output);

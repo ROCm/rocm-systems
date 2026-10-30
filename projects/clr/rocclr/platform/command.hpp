@@ -308,6 +308,24 @@ class GraphKernelArgManager {
   virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
 };
 
+struct GraphKernargSlot {
+  address addr;
+  size_t size;
+  int devId;
+};
+
+struct GraphPacketCaptureContext {
+  std::vector<uint8_t*>* gpuPackets = nullptr;  //!< Receives the captured GPU packets
+  std::vector<uint8_t*>* gpuMetadataPackets = nullptr;  //!< Metadata packets (parallel to gpuPackets); null disables metadata capture
+  std::vector<uint8_t*>* reusableGpuPackets = nullptr;  //!< Prior capture's packets eligible for buffer reuse
+  std::vector<uint8_t*>* reusableGpuMetadataPackets = nullptr;
+  std::vector<GraphKernargSlot>* kernargSlots = nullptr;  //!< Per-node kernarg slot cache
+  size_t* kernargSlotIndex = nullptr;  //!< Next slot to consume in kernargSlots
+  bool reuseKernargSlots = true;  //!< Reuse matching kernarg slots instead of allocating fresh
+  GraphKernelArgManager* kernArgMgr = nullptr;  //!< KernelMgr for graph
+  const std::string** capturedKernelName = nullptr;  //!< Kernel under capture
+};
+
 /*! \brief An operation that is submitted to a command queue.
  *
  *  %Command is the abstract base type of all OpenCL operations
@@ -326,11 +344,8 @@ class Command : public Event {
   const Event* waitingEvent_;  //!< Waiting event associated with the marker
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
-  std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
-  std::vector<uint8_t*>* gpuMetadataPackets_ = nullptr;  //!< Metadata packets (parallel to gpuPackets_)
-  GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
+  GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -375,31 +390,33 @@ class Command : public Event {
   }
   bool getPktCapturingState() const { return packetCapturing_; }
 
-  //! Sets AQL capture state, aql packet to capture and where to copy kernArgs.
-  //! |metadataPacket|, when non-null, also enables capturing the metadata-prefetch
-  //! packet that parallels each captured AQL packet.
-  void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
-                            amd::GraphKernelArgManager* graphKernArgMgr,
-                            const std::string** capturedKernelName,
-                            std::vector<uint8_t*>* metadataPackets = nullptr) {
+  //! Sets AQL capture state and context; a non-null ctx->gpuMetadataPackets also captures metadata packets.
+  void setPktCapturingState(bool state, GraphPacketCaptureContext* ctx) {
     packetCapturing_ = state;
-    gpuPackets_ = packet;
-    gpuMetadataPackets_ = metadataPackets;
-    graphKernArgMgr_ = graphKernArgMgr;
-    capturedKernelName_ = capturedKernelName;
+    graphCapture_ = ctx;
   }
 
   //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
-    if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = &kernelName;
+    if (graphCapture_ != nullptr && graphCapture_->capturedKernelName != nullptr) {
+      *graphCapture_->capturedKernelName = &kernelName;
     }
   }
 
   //! Returns the graph executable object command belongs to.
   const uint8_t* getAqlPacket() const {
-    uint8_t* packet = new uint8_t[64];
-    gpuPackets_->push_back(packet);
+    std::vector<uint8_t*>& gpuPackets = *graphCapture_->gpuPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = gpuPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[64];
+    }
+    gpuPackets.push_back(packet);
     return packet;
   }
 
@@ -407,21 +424,54 @@ class Command : public Event {
   //! Returns nullptr if metadata capture is not enabled.
   //! The buffer is initialized with HSA_PACKET_TYPE_INVALID
   uint8_t* getMetadataPacket() const {
-    if (gpuMetadataPackets_ == nullptr) {
+    if (graphCapture_ == nullptr || graphCapture_->gpuMetadataPackets == nullptr) {
       return nullptr;
     }
-    uint8_t* packet = new uint8_t[256]();
+    std::vector<uint8_t*>& metadataPackets = *graphCapture_->gpuMetadataPackets;
+    std::vector<uint8_t*>* reusablePackets = graphCapture_->reusableGpuMetadataPackets;
+    uint8_t* packet = nullptr;
+    const size_t packetIndex = metadataPackets.size();
+    if (reusablePackets != nullptr && packetIndex < reusablePackets->size()) {
+      packet = (*reusablePackets)[packetIndex];
+      (*reusablePackets)[packetIndex] = nullptr;
+    }
+    if (packet == nullptr) {
+      packet = new uint8_t[256];
+    }
+    memset(packet, 0, 256);
     static constexpr size_t kHdrOff[4] = {0, 64, 128, 192};
     static constexpr uint32_t kInvalidMetadataHeader = 1;  // HSA_PACKET_TYPE_INVALID
     for (size_t h = 0; h < 4; ++h) {
       memcpy(packet + kHdrOff[h], &kInvalidMetadataHeader, sizeof(kInvalidMetadataHeader));
     }
-    gpuMetadataPackets_->push_back(packet);
+    metadataPackets.push_back(packet);
     return packet;
   }
 
   address getGraphKernArg(int size, int alignment, int devId) {
-    return graphKernArgMgr_->AllocKernArg(size, alignment, devId);
+    std::vector<GraphKernargSlot>* kernargSlots = graphCapture_->kernargSlots;
+    size_t* kernargSlotIndex = graphCapture_->kernargSlotIndex;
+    if (kernargSlots == nullptr || kernargSlotIndex == nullptr) {
+      return graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    }
+
+    const size_t slotIndex = (*kernargSlotIndex)++;
+    if (graphCapture_->reuseKernargSlots && slotIndex < kernargSlots->size()) {
+      GraphKernargSlot& slot = (*kernargSlots)[slotIndex];
+      if (slot.addr != nullptr && slot.devId == devId && slot.size >= static_cast<size_t>(size) &&
+          reinterpret_cast<uintptr_t>(slot.addr) % alignment == 0) {
+        return slot.addr;
+      }
+    }
+
+    address addr = graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
+    GraphKernargSlot slot{addr, static_cast<size_t>(size), devId};
+    if (slotIndex < kernargSlots->size()) {
+      (*kernargSlots)[slotIndex] = slot;
+    } else {
+      kernargSlots->push_back(slot);
+    }
+    return addr;
   }
 
   //! Overload new/delete for fast commands allocation/destruction
@@ -1185,12 +1235,13 @@ struct BatchCopyOp {
   size_t srcOffset;        //!< Offset in source buffer
   size_t dstOffset;        //!< Offset in destination buffer
   size_t size;             //!< Size of the copy in bytes
+  size_t sizeB{0};         //!< Swap dst-side size (0 = symmetric)
   CopyMetadata metadata;   //!< Copy metadata for this operation
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
-              size_t sz, CopyMetadata meta = CopyMetadata())
+              size_t sz, CopyMetadata meta = CopyMetadata(), size_t szB = 0)
       : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
-        dstOffset(dstOff), size(sz), metadata(meta) {}
+        dstOffset(dstOff), size(sz), sizeB(szB), metadata(meta) {}
 };
 
 //! Structure to hold pageable host-to-device write operation info for batch
@@ -1227,6 +1278,23 @@ struct BatchReadMemoryOp {
         src_offset(src_offset_arg),
         size(size_arg),
         metadata(metadata_arg) {}
+};
+
+//! Structure to hold one pitched box copy for batch rectangular copies
+struct BatchCopyRectOp {
+  Memory* src_memory;   //!< Source memory object
+  Memory* dst_memory;   //!< Destination memory object
+  BufferRect src_rect;  //!< Source origin, row pitch and slice pitch
+  BufferRect dst_rect;  //!< Destination origin, row pitch and slice pitch
+  Coord3D size;         //!< Box width in bytes, height and depth
+
+  BatchCopyRectOp(Memory* src_memory_arg, Memory* dst_memory_arg, const BufferRect& src_rect_arg,
+                  const BufferRect& dst_rect_arg, const Coord3D& size_arg)
+      : src_memory(src_memory_arg),
+        dst_memory(dst_memory_arg),
+        src_rect(src_rect_arg),
+        dst_rect(dst_rect_arg),
+        size(size_arg) {}
 };
 
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
@@ -1269,6 +1337,43 @@ class BatchCopyMemoryCommand : public Command {
     }
     return true;
   }
+};
+
+/*! \brief  A batch copy memory command for multiple pitched buffer-to-buffer box copies
+ *
+ *  \details Copies within a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryRectCommand : public Command {
+ public:
+  BatchCopyMemoryRectCommand(HostQueue& queue, cl_command_type cmd_type,
+                             const EventWaitList& event_wait_list,
+                             std::vector<BatchCopyRectOp>&& copy_ops)
+      : Command(queue, cmd_type, event_wait_list), copy_ops_(std::move(copy_ops)) {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->retain();
+        op.dst_memory->retain();
+      }
+    }
+  }
+
+  void releaseResources() override {
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const BatchCopyRectOp& op : copy_ops_) {
+        op.src_memory->release();
+        op.dst_memory->release();
+      }
+    }
+    Command::releaseResources();
+  }
+
+  void submit(device::VirtualDevice& device) override { device.SubmitBatchCopyMemoryRect(*this); }
+
+  const std::vector<BatchCopyRectOp>& CopyOps() const { return copy_ops_; }
+
+ private:
+  std::vector<BatchCopyRectOp> copy_ops_;  //!< Vector of box copy operations
 };
 
 /*! \brief  A batch write memory command for multiple pageable host-to-device
@@ -1518,12 +1623,6 @@ class NDRangeKernelCommand : public Command {
   //! Return the kernel NDRange.
   const NDRangeContainer& sizes() const { return sizes_; }
 
-  //! updates kernel NDRange.
-  void setSizes(const size_t* globalWorkOffset, const size_t* globalWorkSize,
-                const size_t* localWorkSize) {
-    sizes_.update(3, globalWorkOffset, globalWorkSize, localWorkSize);
-  }
-
   //! Return the shared memory size
   uint32_t sharedMemBytes() const { return sharedMemBytes_; }
 
@@ -1560,9 +1659,6 @@ class NDRangeKernelCommand : public Command {
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
-
-  //! Set the local work size.
-  void setLocalWorkSize(const NDRange& local) { sizes_.local() = local; }
 
   //! Set the number of workgroups
   void setNumWorkgroups() {
@@ -1685,11 +1781,14 @@ class AccumulateCommand : public Command {
     uint32_t queue_index;
     uint64_t start_ns;
     uint64_t end_ns;
+    //! Set for a BARRIER_AND/OR packet rather than a kernel dispatch, so the slot
+    //! is reported under the barrier operation id and named accordingly.
+    bool is_barrier;
   };
 
  private:
-  //! Graph kernel dispatches in AQL packet order. Non-dispatch packets are
-  //! omitted; an unprocessed or invalid signal leaves its slot timing at zero.
+  //! Graph dispatches and barriers in AQL packet order. An unprocessed or invalid
+  //! signal leaves its slot timing at zero.
   std::vector<KernelDispatch> kernel_dispatches_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1728,10 +1827,17 @@ class AccumulateCommand : public Command {
   //! them across launches instead.
   void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
-  //! Reserve one graph kernel dispatch slot and return its index. |name| must
-  //! not be nullptr — use "<unknown>" when it cannot be resolved.
+  //! Reserve one graph dispatch slot and return its index. |name| must not be
+  //! nullptr for a kernel — use "<unknown>" when it cannot be resolved.
   uint32_t addKernelDispatch(const char* name, uint32_t queue_index) {
-    kernel_dispatches_.push_back({name, queue_index, 0, 0});
+    kernel_dispatches_.push_back({name, queue_index, 0, 0, false});
+    return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
+  }
+
+  //! Reserve one slot for a barrier packet, which carries no kernel name and is
+  //! reported under OP_ID_BARRIER.
+  uint32_t addBarrierDispatch(uint32_t queue_index) {
+    kernel_dispatches_.push_back({nullptr, queue_index, 0, 0, true});
     return static_cast<uint32_t>(kernel_dispatches_.size() - 1);
   }
 
@@ -2291,14 +2397,19 @@ class VirtualMapCommand : public Command {
   const void* ptr_;  //!< Virtual address to map to the memory
 
  protected:
-  Memory* memory_;  //!< Memory to map, nullptr means unmap
-  size_t size_;     //!< Size of the mapping in bytes
+  Memory* memory_;     //!< Memory to map, nullptr means unmap
+  size_t size_;        //!< Size of the mapping in bytes
+  bool trackMapping_;  //!< Create a memory object for the mapped range and add it to MemObjMap
 
  public:
   //! Construct a new VirtualMapCommand
   VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* ptr, size_t size,
-                    Memory* memory)
-      : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
+                    Memory* memory, bool trackMapping = true)
+      : Command(queue, 1, eventWaitList),
+        ptr_(ptr),
+        memory_(memory),
+        size_(size),
+        trackMapping_(trackMapping) {
     // Sanity checks
     assert(size > 0 && "invalid");
     if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
@@ -2321,6 +2432,8 @@ class VirtualMapCommand : public Command {
   size_t size() const { return size_; }
   //! Read the pointer
   const void* ptr() const { return ptr_; }
+  //! Returns true if the mapping is tracked with a memory object in MemObjMap
+  bool trackMapping() const { return trackMapping_; }
 };
 
 //! Union used in memory suballocator, must be updated with the new commands

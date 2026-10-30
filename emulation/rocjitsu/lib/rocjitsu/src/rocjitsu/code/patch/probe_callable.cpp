@@ -110,12 +110,55 @@ template <typename T>
 [[nodiscard]] bool is_scratch_access(std::string_view m) {
   return m.starts_with("scratch_") || m.starts_with("s_scratch_");
 }
+// RDNA4 image instructions (VIMAGE / VSAMPLE). Their decoders do not name every
+// register they access: no address VGPR is reported, vdata is four registers
+// whatever dmask selects (so a load can appear to write registers it does not),
+// an atomic's data is reported only as written, and a tfe status register is not
+// reported. The live-in and clobber analyses would get those registers wrong, so
+// admitting these instructions is deferred until the decoder models the fields.
+[[nodiscard]] bool is_unmodeled_image_access(rj_code_arch_t arch, std::string_view m) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 && m.starts_with("image_");
+}
 
 } // namespace
 
+RegisterSet arg_registers(const ProbeAbi &abi) {
+  RegisterSet regs;
+  if (!is_valid_probe_abi(abi) || abi.num_arg_vgprs == 0)
+    return regs;
+  // Guarded above rather than left to expand(), which floors a zero width at one
+  // and would report v[arg_vgpr_base] for a probe passed no arguments at all.
+  regs.expand(RegisterRef{RegClass::VGPR, abi.arg_vgpr_base, abi.num_arg_vgprs});
+  return regs;
+}
+
+RegisterSet supplied_registers(const ProbeAbi &abi) {
+  RegisterSet regs;
+  // Report nothing rather than guess: a live-in subtraction that excused a
+  // register this ABI never committed to writing would excuse the probe reading
+  // it cold.
+  if (!is_valid_probe_abi(abi))
+    return regs;
+  regs.expand(probe_link_pair(abi));
+  regs |= arg_registers(abi);
+  return regs;
+}
+
 std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, std::string *error_out) {
+                                                  rj_code_arch_t arch, uint8_t num_arg_dwords,
+                                                  std::string *error_out) {
+  // Screened before the body is read so an unsupported count is reported as
+  // such, rather than as whatever the body scan trips over first.
+  const std::optional<ProbeAbi> abi =
+      derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31, num_arg_dwords);
+  if (!abi) {
+    report(error_out, ("probe cannot be passed " + std::to_string(num_arg_dwords) +
+                       " argument dwords; the limit is " + std::to_string(kMaxProbeArgVgprs))
+                          .c_str());
+    return std::nullopt;
+  }
+
   const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(probe_obj.image_data()),
                                        probe_obj.image_size());
 
@@ -157,10 +200,9 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Copy the body into an aligned word buffer. One extra zero word of slack so
-  // the decoder succeeds in the event of a malformed input
+  // Copy the body into an aligned word buffer for the decoder.
   const size_t num_words = sym.body_size / sizeof(uint32_t);
-  std::vector<uint32_t> words(num_words + 1, 0);
+  std::vector<uint32_t> words(num_words);
   std::memcpy(words.data(), image.data() + sym.body_file_offset, sym.body_size);
 
   const auto &registry = default_isa_target_registry();
@@ -183,10 +225,15 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   std::string_view last_mnemonic;
   std::string last_src0_name;
   bool last_has_src0 = false;
+  const std::span<const uint32_t> body(words);
   size_t w = 0;
   while (w < num_words) {
     util::StringDiagnostic decode_error;
-    DecodeResult decoded = decoder->decode(&words[w], decode_error.emitter());
+    // The window bounds both the decoder's reads and the decoded size by the
+    // words left in the body, so an instruction running past the end fails here
+    // as truncated.
+    DecodeResult decoded =
+        decoder->decode_window(body.subspan(w), w * sizeof(uint32_t), decode_error.emitter());
     if (decoded.failed()) {
       const std::string message = "probe body failed to decode at word " + std::to_string(w) +
                                   ": " + decode_error.message();
@@ -194,23 +241,24 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
       return std::nullopt;
     }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
-    const int size = inst->size();
-    if (size != 4 && size != 8) {
-      report(error_out, "probe body has an unsupported instruction size");
-      return std::nullopt;
-    }
-    const size_t inst_words = static_cast<size_t>(size) / sizeof(uint32_t);
-    if (w + inst_words > num_words) {
-      report(error_out, "probe body's last instruction is truncated");
-      return std::nullopt;
-    }
+    const size_t inst_words = static_cast<size_t>(inst->size()) / sizeof(uint32_t);
     const std::string_view m = inst->mnemonic();
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        (m.starts_with("s_setreg") || m.starts_with("s_set_vgpr_msb"))) {
+      report(error_out, "probe body may change the VGPR bank state required by its call ABI");
+      return std::nullopt;
+    }
     if (is_call(*inst)) {
       report(error_out, "probe body contains a call and is not self-contained");
       return std::nullopt;
     }
     if (is_scratch_access(m)) {
       report(error_out, "probe body accesses scratch / private segment");
+      return std::nullopt;
+    }
+    if (is_unmodeled_image_access(arch, m)) {
+      report(error_out, "probe body has an RDNA4 image instruction, whose registers the decoder "
+                        "does not fully model");
       return std::nullopt;
     }
     last_mnemonic = m;
@@ -221,7 +269,8 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   }
 
   // Must return through the s[30:31] link pair
-  if (last_mnemonic != "s_setpc_b64" || !last_has_src0 || last_src0_name != "s[30:31]") {
+  if ((last_mnemonic != "s_setpc_b64" && last_mnemonic != "s_set_pc_i64") || !last_has_src0 ||
+      last_src0_name != "s[30:31]") {
     report(error_out, "probe body does not return via s_setpc_b64 s[30:31]");
     return std::nullopt;
   }
@@ -230,8 +279,11 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
   callable.symbol = sym.name;
   callable.arch = arch;
   callable.target = target;
-  callable.body_words.assign(words.begin(), words.begin() + num_words);
-  callable.cc = ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31;
+  callable.body_words = std::move(words);
+  // The body was just verified to return through s[30:31]; the argument count
+  // was screened on entry. Whether the body agrees with that count is
+  // analyze_probe_live_ins()'s to decide.
+  callable.abi = *abi;
   // output_text_offset stays 0 — assigned by the later layout step.
   return callable;
 }

@@ -30,6 +30,7 @@ from amdisa.isa_profile import (
     Cdna5Profile,
     DppOpcodeRule,
     DppCtrlDialect,
+    FloatDotAccumulation,
     MatrixLayout,
     MemoryCoherencyModel,
     Rdna1Profile,
@@ -133,6 +134,26 @@ def test_compute_tmpring_wavesize_properties(profile, granule, bits):
 )
 def test_descriptor_sgpr_count_encoded(profile, expected):
     assert profile.descriptor_sgpr_count_encoded is expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'vmcnt_capacity', 'lgkmcnt_capacity'),
+    [
+        (Cdna1Profile(), 63, 15),
+        (Cdna2Profile(), 63, 15),
+        (CdnaProfile(), 63, 15),
+        (Cdna4Profile(), 63, 15),
+        (Rdna1Profile(), 63, 63),
+        (Rdna2Profile(), 63, 63),
+        (Rdna3Profile(), 63, 63),
+        (Rdna3_5Profile(), 63, 63),
+        (Rdna4Profile(), 0, 0),
+        (Cdna5Profile(), 0, 0),
+    ],
+)
+def test_wait_counter_capacities(profile, vmcnt_capacity, lgkmcnt_capacity):
+    assert profile.vmcnt_capacity == vmcnt_capacity
+    assert profile.lgkmcnt_capacity == lgkmcnt_capacity
 
 
 @pytest.mark.parametrize(
@@ -373,7 +394,14 @@ def test_dpp_control_range_capabilities(profile, wave, row_bcast, row_xmask):
         (Rdna3Profile(), 'ENC_VOP3P', 'V_WMMA_F32_16X16X16_F16', DppOpcodeRule.FORBID),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_FMA_MIX_F32', DppOpcodeRule.ALLOW),
         (Rdna3Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
-        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_F16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT2_F32_BF16', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_FP8_FP8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_F32_BF8_BF8', DppOpcodeRule.ALLOW),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT4_I32_IU8', DppOpcodeRule.FORBID),
+        (Rdna4Profile(), 'ENC_VOP3P', 'V_DOT8_U32_U4', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP3', 'V_MUL_LO_U32', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_NOP', DppOpcodeRule.FORBID),
         (Rdna4Profile(), 'ENC_VOP1', 'V_PIPEFLUSH', DppOpcodeRule.ALLOW),
@@ -458,7 +486,7 @@ def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
     ('profile', 'enc_name', 'expected'),
     [
         (CdnaProfile(), 'ENC_FLAT', '0x7F'),
-        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7C'),
         (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
         (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
         (Cdna5Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
@@ -472,6 +500,26 @@ def test_saddr_null_selector_is_encoding_specific(profile, enc_name, expected):
 def test_saddr_null_selector_rejects_unrelated_encodings():
     assert Rdna3Profile().saddr_null_selector_expr('ENC_VOP3') is None
     assert Rdna4Profile().saddr_null_selector_expr('ENC_VSCRATCH') is None
+
+
+@pytest.mark.parametrize(
+    ('profile', 'expected'),
+    [
+        (Cdna1Profile(), FloatDotAccumulation.HOST_F32),
+        (Cdna2Profile(), FloatDotAccumulation.HOST_F32),
+        (CdnaProfile(), FloatDotAccumulation.HOST_F32),
+        (Cdna4Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna1Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna2Profile(), FloatDotAccumulation.HOST_F32),
+        (Rdna3Profile(), FloatDotAccumulation.GFX11),
+        (Rdna3_5Profile(), FloatDotAccumulation.GFX11),
+        (Rdna4Profile(), FloatDotAccumulation.GFX12),
+        (Cdna5Profile(), FloatDotAccumulation.HOST_F32),
+    ],
+)
+def test_float_dot_accumulation_policy(profile, expected):
+    # CDNA5 inherits RDNA4 encoding machinery, but not its measured arithmetic.
+    assert profile.float_dot_accumulation is expected
 
 
 def test_isa_properties_codegen_uses_profile_values(tmp_path):
@@ -490,6 +538,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t compute_tmpring_wavesize_bits = 0;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint8_t vmcnt_capacity = 0;' in output
+    assert 'uint8_t lgkmcnt_capacity = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
@@ -501,11 +551,14 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = true,\n'
         '        .uses_ttmp_workgroup_ids = false,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
         '        .wave_state_layout = WaveStateLayout::Legacy,\n'
         '        .compute_tmpring_wavesize_granule = 1024,\n'
         '        .compute_tmpring_wavesize_bits = 13,\n'
         '        .wave_size = 64,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 63,\n'
+        '        .lgkmcnt_capacity = 15,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
@@ -519,11 +572,14 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = false,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::Gfx12,\n'
         '        .wave_state_layout = WaveStateLayout::Gfx12,\n'
         '        .compute_tmpring_wavesize_granule = 256,\n'
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
@@ -537,11 +593,14 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .descriptor_sgpr_count_encoded = false,\n'
         '        .uses_ttmp_workgroup_ids = true,\n'
         '        .uses_cluster_ttmp_workgroup_ids = true,\n'
+        '        .float_dot_accumulation = FloatDotAccumulation::HostF32,\n'
         '        .wave_state_layout = WaveStateLayout::Gfx12_5,\n'
         '        .compute_tmpring_wavesize_granule = 256,\n'
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 32,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
@@ -629,7 +688,9 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert 'rocjitsu/isa/arch/amdgpu/cdna5/isa.h' in operand_h
     assert 'rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h' in operand_h
     assert 'ROCJITSU_ISA_ARCH_AMDGPU_CDNA5_OPERAND_H_' in operand_h
-    assert 'class Operand : public IsaOperand<Isa>' in operand_h
+    assert 'class Operand final : public IsaOperand<Isa>' in operand_h
+    assert 'static constexpr bool kStaticRegisterAccess = true;' in operand_h
+    assert 'friend class amdgpu::RegisterAccess;' in operand_h
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_h
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
@@ -708,7 +769,7 @@ def test_rdna4_operand_execution_backend_is_split_from_model_source(tmp_path):
     operand_cpp = (tmp_path / 'rdna4' / 'operand.cpp').read_text()
     operand_exec_cpp = (tmp_path / 'rdna4' / 'operand_exec.cpp').read_text()
 
-    assert 'class Operand : public IsaOperand<Isa>' in operand_h
+    assert 'class Operand final : public IsaOperand<Isa>' in operand_h
     assert 'uint32_t Operand::read_scalar' in operand_cpp
     assert 'uint32_t Operand::read_scalar_exec' in operand_exec_cpp
     assert 'rocjitsu/vm/amdgpu/wavefront.h' not in operand_cpp
@@ -831,19 +892,19 @@ class TestCdna4Profile:
 
 
 class TestCdna1Profile:
-    """Cdna1Profile: no AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
+    """Cdna1Profile: separate AccVGPR, GFX9_GLC coherency, sgpr_pair scratch."""
 
     def setup_method(self):
         self.p = Cdna1Profile()
 
-    def test_has_acc_vgpr_false(self):
-        assert self.p.has_acc_vgpr is False
+    def test_has_acc_vgpr_true(self):
+        assert self.p.has_acc_vgpr is True
 
-    def test_acc_vgpr_encoding_base_zero(self):
-        assert self.p.acc_vgpr_encoding_base == 0
+    def test_acc_vgpr_encoding_base(self):
+        assert self.p.acc_vgpr_encoding_base == 768
 
-    def test_max_acc_vgprs_zero(self):
-        assert self.p.max_acc_vgprs == 0
+    def test_max_acc_vgprs(self):
+        assert self.p.max_acc_vgprs == 256
 
     def test_coherency_model(self):
         assert self.p.coherency_model == MemoryCoherencyModel.GFX9_GLC
@@ -1386,3 +1447,68 @@ class TestMemoryCoherencyModelEnum:
     def test_values_are_distinct(self):
         vals = [m.value for m in MemoryCoherencyModel]
         assert len(vals) == len(set(vals))
+
+
+@pytest.mark.parametrize(
+    ('profile', 'supported'),
+    [
+        (Cdna1Profile(), True),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), True),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), False),
+    ],
+)
+@pytest.mark.parametrize(
+    'encoding',
+    [
+        'ENC_VOP1',
+        'ENC_VOP2',
+        'ENC_VOP3',
+        'ENC_VOPC',
+        'ENC_VOP3P',
+        'VOP3_SDST_ENC',
+        'VOP3P_MFMA',
+        'ENC_MUBUF',
+        'ENC_MTBUF',
+        'ENC_MIMG',
+        'ENC_DS',
+        'ENC_FLAT',
+        'ENC_EXP',
+        'ENC_VINTRP',
+    ],
+)
+def test_vskip_vector_encodings(profile, supported, encoding):
+    assert profile.vskip_affected_encoding(encoding) is supported
+
+
+@pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
+def test_vskip_does_not_suppress_scalar_encodings(encoding):
+    assert not CdnaProfile().vskip_affected_encoding(encoding)
+
+
+@pytest.mark.parametrize(
+    ('profile', 'preserves_half', 'bf16_f32_carrier'),
+    [
+        (Cdna1Profile(), False, False),
+        (Cdna2Profile(), False, False),
+        (CdnaProfile(), False, False),
+        (Cdna4Profile(), False, False),
+        (Rdna1Profile(), True, False),
+        (Rdna2Profile(), True, False),
+        (Rdna3Profile(), False, False),
+        (Rdna3_5Profile(), False, False),
+        (Rdna4Profile(), False, False),
+        (Cdna5Profile(), False, True),
+    ],
+)
+def test_valu16_destination_and_bf16_inline_policies(
+    profile, preserves_half, bf16_f32_carrier
+):
+    assert profile.valu16_preserves_unwritten_half is preserves_half
+    assert profile.bf16_inline_uses_f32_carrier is bf16_f32_carrier

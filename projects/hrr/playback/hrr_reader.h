@@ -1,0 +1,317 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <unordered_map>
+
+// hrr_api_args.h — HRR_API_* enum values and hrr_api_names[] string table
+#include "hrr/hrr_api_args.h"
+#include "hrr_replay_limits.h"  // kDefaultMaxEvents
+
+// HRR Archive Reader — reads .hrr trace archives produced by the in-tree
+// capture layer (HIP_HRR_CAPTURE_OUTPUT).
+//
+// Binary format (v5):
+//   events.bin:
+//     [0..7]   hrr_file_header  { HRR_MAGIC, HRR_VERSION, reserved }
+//     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
+//   blobs/<2hex>/  — content-addressed raw buffers (FNV-1a-128 hash)
+//   code_objects/  — .hsaco ELFs keyed by hash
+// Format constants (HRR_MAGIC, HRR_VERSION, hrr_file_header, hrr_event_header)
+// are defined in hrr_api_args.h (included above).
+
+namespace hrr {
+
+// ---------------------------------------------------------------------------
+// Typed payload structs — populated by load_archive for fast replay access.
+// All handle fields are raw runtime pointers cast to uint64_t.
+// ---------------------------------------------------------------------------
+
+struct MallocEvent {
+  uint64_t ptr_handle;  // device pointer returned by hipMalloc
+  uint64_t size;
+};
+
+struct MemcpyEvent {
+  uint64_t dst_addr;
+  uint64_t src_addr;
+  uint64_t size;
+  int32_t  kind;        // hipMemcpyKind
+  uint64_t hash_lo;     // blob hash (non-zero for H2D with captured data)
+  uint64_t hash_hi;
+};
+
+struct ModuleLoadEvent {
+  uint64_t hash_lo;        // code object hash
+  uint64_t hash_hi;
+  uint64_t module_handle;  // raw hipModule_t pointer
+};
+
+struct MallocAsyncEvent {
+  uint64_t ptr_handle;     // device pointer
+  uint64_t size;
+  uint64_t stream_handle;  // raw hipStream_t pointer
+};
+
+struct FreeAsyncEvent {
+  uint64_t ptr_handle;
+  uint64_t stream_handle;
+};
+
+struct StreamCreateEvent {
+  uint64_t stream_handle;  // raw hipStream_t pointer (the created stream)
+  uint32_t flags;
+  int32_t  priority;
+};
+
+struct EventRecordEvent {
+  uint64_t event_handle;
+  uint64_t stream_handle;
+};
+
+struct StreamWaitEventEvent {
+  uint64_t stream_handle;
+  uint64_t event_handle;
+  uint32_t flags;
+};
+
+// Kernel argument (value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
+// 3=scalar/struct with embedded gpu pointer(s) at ptr_offsets)
+struct KernelArg {
+  uint8_t  value_kind;
+  uint16_t size;
+  std::vector<uint8_t> data;
+  std::vector<uint16_t> ptr_offsets;  // only for value_kind == 3
+};
+
+// Pinned host snapshot (v10): the blob replay writes to [offset, offset +
+// length) of the pinned allocation recorded at ptr_handle before the launch.
+struct BufferSnapshot {
+  uint64_t ptr_handle;
+  uint64_t offset;
+  uint64_t length;
+  uint64_t hash_lo;
+  uint64_t hash_hi;
+  uint8_t  direction;
+};
+
+// Parsed kernel launch event
+struct KernelLaunchEvent {
+  std::string              kernel_name;
+  uint64_t                 co_hash_lo   = 0;
+  uint64_t                 co_hash_hi   = 0;
+  uint32_t                 grid[3]      = {};
+  uint32_t                 block[3]     = {};
+  uint32_t                 shared_mem   = 0;
+  std::vector<KernelArg>       args;
+  std::vector<BufferSnapshot>  snapshots;
+};
+
+// ---------------------------------------------------------------------------
+// Single event
+// ---------------------------------------------------------------------------
+
+struct Event {
+  // raw_payload is the single source of truth: header(32) + fields.
+  // Cast data() directly to hrr_args_* for field access.
+  // Full struct bytes: header(32) + fields. Cast data() directly to hrr_args_*.
+  std::vector<uint8_t> raw_payload;
+
+  const hrr_event_header& header() const {
+    return *reinterpret_cast<const hrr_event_header*>(raw_payload.data());
+  }
+
+  // Stream handle for kernel launch events (raw hipStream_t pointer)
+  uint64_t stream_handle = 0;
+
+  // Generic single-handle field: stream, event, or module depending on event_type
+  uint64_t handle64 = 0;
+
+  // Typed payload (set based on event_type)
+  MallocEvent          malloc_ev{};
+  MemcpyEvent          memcpy_ev{};
+  ModuleLoadEvent      module_load_ev{};
+  MallocAsyncEvent     malloc_async_ev{};
+  FreeAsyncEvent       free_async_ev{};
+  StreamCreateEvent    stream_create_ev{};
+  EventRecordEvent     event_record_ev{};
+  StreamWaitEventEvent stream_wait_ev{};
+
+  // Heap-allocated for kernel launches (variable-length binary payload)
+  KernelLaunchEvent* kernel_launch = nullptr;
+
+  ~Event()                       { delete kernel_launch; }
+  Event()                        = default;
+  Event(Event&& o) noexcept;
+  Event& operator=(Event&& o) noexcept;
+  Event(const Event&)            = delete;
+  Event& operator=(const Event&) = delete;
+};
+
+// ---------------------------------------------------------------------------
+// Full loaded archive
+// ---------------------------------------------------------------------------
+
+struct Archive {
+  std::string path;
+  uint16_t    version = 0;        // format version from hrr_file_header
+  uint16_t    flags = 0;          // HRR_FILE_FLAG_* bits from hrr_file_header
+  std::vector<Event> events;
+
+  // Crash-resilience status, set by load_archive:
+  //   complete  — the clean-shutdown trailer (hrr_eof_record) was found and
+  //               counts the records before it, so the capturing process
+  //               exited normally and the archive is whole.
+  //   truncated — a torn trailing record was detected and discarded; all
+  //               complete records before it were recovered. Replay still works.
+  // A capture interrupted by a crash typically has complete=false; it may also
+  // have truncated=true if the final record was only partially written.
+  bool complete  = false;
+  bool truncated = false;
+  // The trailer was found and how many events it counts. trailer && !complete
+  // means the count disagrees with the records before it.
+  bool     trailer        = false;
+  uint64_t trailer_events = 0;
+  // Whole records found after the trailer. They are not replayed, and the
+  // trailer's event count must match the records before it for complete=true.
+  size_t skipped_after_trailer = 0;
+
+  // Content-addressed blobs: hash_hex -> file path
+  std::unordered_map<std::string, std::string> blobs;
+  // Code objects: hash_hex -> file path
+  std::unordered_map<std::string, std::string> code_objects;
+
+  size_t event_count       = 0;
+  size_t kernel_count      = 0;
+  size_t blob_count        = 0;
+  size_t code_object_count = 0;
+
+  // Distinct thread IDs that appear in the archive, in first-seen order.
+  // Populated during load_archive — no extra scan needed by the replayer.
+  std::vector<uint64_t> threads;
+};
+
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+
+// Load an archive from disk. Returns false on error, including a load that
+// would take `bytes` past its cap; the diagnostic names --max-host-bytes.
+//
+// The archive chooses how many records it holds and how big each is (up to
+// kMaxRecordBytes), so the loader charges what it retains against a byte budget
+// instead of trusting the archive to fit: each record's raw bytes, what is
+// parsed out of a kernel launch (name, arguments, snapshots), the event
+// vector's capacity, the sort's scratch buffer and the blob and code-object
+// maps. Null: a private budget of kDefaultMaxHostBytes. A budget the caller
+// passes keeps the bytes of a successful load charged, since the archive still
+// holds them; a failed load gives back what it charged. Time is not limited
+// here: the caller's wall-clock watchdog ends the process.
+bool load_archive(const std::string& path, Archive& archive,
+                  ByteBudget* bytes = nullptr);
+
+// The pid in the name of a per-process archive directory, "pid-<decimal pid>",
+// or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
+// later process with the same pid starts capturing, is not one of them.
+uint64_t pid_from_archive_dir_name(const std::string& name);
+
+// Whether load_archive would find the archive in `archive_dir` complete: a
+// trailer whose total_events counts the records before it. Walks the record
+// headers and seeks over the payloads, so it costs a fraction of a load.
+bool has_clean_trailer(const std::string& archive_dir);
+
+// ---------------------------------------------------------------------------
+// Record-stream primitives
+//
+// events.bin and the external-region sidecars (regions/*.hrrr, see
+// hrr_regions.h) share one on-disk shape: an 8-byte hrr_file_header followed by
+// self-delimiting hrr_event_header + payload records. These primitives are that
+// shared framing, so both readers get the same torn-tail recovery.
+// ---------------------------------------------------------------------------
+
+// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
+// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// smaller (the writer buffers 256 KiB and spills larger records to a direct
+// write); 64 MiB is well above any legitimate record. A longer record is torn.
+constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
+
+enum class RecordStatus {
+  Ok,           // a complete record was read into the output buffer
+  EndOfStream,  // clean EOF exactly at a record boundary
+  Torn,         // partial record at the tail; everything before it is intact
+  OverBudget    // the record would not fit the budget; nothing was allocated
+};
+
+// Read one framed record into `out` (resized to the record's full length,
+// header included). Only the final record of a stream can ever be Torn, because
+// the writer appends whole records. With `budget`, the record's length is
+// charged before `out` grows to it: a record that does not fit returns
+// OverBudget without allocating it, and one that is read keeps its charge
+// (a torn one gives it back).
+RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
+                             ByteBudget* budget = nullptr);
+
+// Open a record stream and validate its 8-byte header. `expected_magic` selects
+// the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region
+// sidecar). On success returns the open FILE* positioned at the first record
+// and stores the file's format version in *version and its header flags in
+// *flags (either may be null); returns nullptr and logs on a missing file, bad
+// magic, or version mismatch.
+FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
+                         uint16_t expected_version, uint16_t* version,
+                         uint16_t* flags = nullptr);
+
+// Sidecar region streams for a resolved archive directory: every
+// <archive_dir>/regions/*.hrrr, sorted by name for a deterministic merge order.
+// Returns an empty vector when the directory does not exist, which is the
+// normal case for a capture with no external producer.
+std::vector<std::string> find_region_streams(const std::string& archive_dir);
+
+// Largest file read_file_capped() and the readers below will load whole. A blob
+// or code object above it is refused instead of allocated; the archive chose
+// the size, so the replayer must not. Default kDefaultMaxFileBytes (4 GiB);
+// 0 refuses every file. Set once at start-up, before any reader thread runs.
+constexpr uint64_t kDefaultMaxFileBytes = 4ull << 30;
+uint64_t max_file_bytes();
+void set_max_file_bytes(uint64_t bytes);
+
+// Most events load_archive() will hold. It stops at the first record past the
+// cap and fails, naming the count and the cap, so an archive cannot make the
+// reader allocate without bound. Default kDefaultMaxEvents (hrr_replay_limits.h). Set once at
+// start-up, before any reader thread runs.
+uint64_t max_events();
+void set_max_events(uint64_t events);
+
+// Read a whole file into `data`, refusing one larger than max_file_bytes().
+// Returns false if the file cannot be opened or read, or is too large; *error
+// (when given) then says which, naming the path and, for a refusal, the size.
+// An empty `data` with a true return is a zero-byte file. *refused (when given)
+// is set when the file exists but was not read for a resource reason, the cap
+// or an allocation failure, as opposed to being missing or unreadable.
+bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
+                      std::string* error = nullptr, bool* refused = nullptr);
+
+// Read a blob's bytes given its hash. Returns false if not found.
+bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
+               std::vector<uint8_t>& data);
+
+// Read a code object (.hsaco) given its hash. Returns false if not found.
+bool read_code_object(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
+                      std::vector<uint8_t>& data);
+
+// Format a 128-bit hash as a 32-character hex string.
+std::string hash_hex(uint64_t lo, uint64_t hi);
+
+// Human-readable API name for an event_type (uses hrr_api_names[]).
+const char* event_type_name(uint16_t type);
+
+}  // namespace hrr

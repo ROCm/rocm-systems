@@ -146,20 +146,14 @@ View the help menu of ``rocprof-sys-sample`` with the ``-h`` / ``--help`` option
                                     Policy for new data when the buffer size limit is reached:
                                           - discard     : new data is ignored
                                           - ring_buffer : new data overwrites oldest data (count: 1)
-      --trace-wait                   Set the wait time (in seconds) before collecting trace and/or profiling data(in seconds). By default, the duration is
-                                    in seconds of realtime but that can changed via --trace-clock-id. (count: 1)
+      --trace-wait                   Set the wait time (in seconds) before collecting trace and/or profiling data. By default, the duration is in seconds
+                                    of realtime but that can be changed via --trace-clock-id. (count: 1)
       --trace-duration               Set the duration of the trace and/or profile data collection (in seconds). By default, the duration is in seconds of
-                                    realtime but that can changed via --trace-clock-id. (count: 1)
-      --trace-periods                More powerful version of specifying trace delay and/or duration. Format is one or more groups of: <DELAY>:<DURATION>,
-                                    <DELAY>:<DURATION>:<REPEAT>, and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>. (min: 1)
-      --trace-clock-id [ 0 (realtime|CLOCK_REALTIME)
-                        1 (monotonic|CLOCK_MONOTONIC)
-                        2 (cputime|CLOCK_PROCESS_CPUTIME_ID)
-                        4 (monotonic_raw|CLOCK_MONOTONIC_RAW)
-                        5 (realtime_coarse|CLOCK_REALTIME_COARSE)
-                        6 (monotonic_coarse|CLOCK_MONOTONIC_COARSE)
-                        7 (boottime|CLOCK_BOOTTIME) ]
-                                    Set the default clock ID for for trace delay/duration. Note: "cputime" is the *process* CPU time and might need to be
+                                    realtime but that can be changed via --trace-clock-id. (count: 1)
+      --trace-periods                More powerful version of specifying trace delay and/or duration. Format is one or more groups of: <DELAY>:<DURATION>
+                                    or <DELAY>:<DURATION>:<REPEAT>. (min: 1)
+      --trace-clock-id [ cputime | realtime ]
+                                    Set the default clock ID for trace delay/duration. Note: "cputime" is the *process* CPU time and might need to be
                                     scaled based on the number of threads, i.e. 4 seconds of CPU-time for an application with 4 fully active threads would
                                     equate to ~1 second of realtime. If this proves to be difficult to handle in practice, please file a feature request
                                     for rocprof-sys to auto-scale based on the number of threads. (count: 1)
@@ -401,7 +395,7 @@ Here is the full output from the previous
    [rocprof-sys][1785877][0][rocprofsys_finalize] rocprof-sys/process/1785877/thread/4 : 0.212029 sec wall_clock, 0.211694 sec thread_cpu_clock,   99.8 % thread_cpu_util,    1.152 MB peak_rss [laps: 1]
    [rocprof-sys][1785877][0][rocprofsys_finalize]
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalizing perfetto...
-   [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.proto' (39.12 KB / 0.04 MB / 0.00 GB)... Done
+   [rocprof-sys][1785877][perfetto]> Outputting '/home/user/code/rocprofiler-systems/build-release/rocprofiler-systems-output/2024-07-15_16.21/parallel-overhead-locksperfetto-trace-1785877.pftrace' (39.12 KB / 0.04 MB / 0.00 GB)... Done
    [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.json'
    [rocprof-sys][1785877][wall_clock]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-lockswall_clock-1785877.txt'
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'

@@ -1,0 +1,11 @@
+# HIP and ROCr synchronize device-memory ownership in uninstrumented shared
+# libraries. These rules are applied only to HIP integration-test processes.
+called_from_lib:libhsa-runtime64.so
+called_from_lib:libamdhip64.so
+
+# The runtime's uninstrumented wait path is absent from the unwound stack, so
+# TSan sees libstdc++ release a mutex whose matching lock it could not observe.
+mutex:std::condition_variable::wait
+
+# ROCr retains this process-lifetime worker after short-lived clients finish.
+thread:rocr::os::os_thread

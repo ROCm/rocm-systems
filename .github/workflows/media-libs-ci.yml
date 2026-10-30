@@ -53,7 +53,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 648a501e56a1e0919976d6f540b7853e63d44998 # 2026-09-02
+          ref: b063323dfed92047c0067097b4da6d597986f102 # 2026-10-27
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -109,8 +109,6 @@ jobs:
         -DTHEROCK_ENABLE_SYSDEPS_AMD_MESA=ON
         -DTHEROCK_ENABLE_ROCDECODE=ON
         -DTHEROCK_ENABLE_ROCJPEG=ON
-      projects_to_test: ""
-      test_runs_on: ""
 
   therock-test-linux:
     name: "Test Media Libs"

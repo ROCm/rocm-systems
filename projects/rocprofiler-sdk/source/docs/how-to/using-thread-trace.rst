@@ -110,6 +110,9 @@ The following table lists the parameters relevant to thread tracing:
 | att-buffer-size             | Bytes   | 1MB-2GB | 96MB      | Specifies the trace buffer size. This is shared for all SEs. |
 |                             |         |         |           | Increase this value if the buffer tends to get full.         |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-resource-mode           | String  |         |code-object| Selects when thread trace resources are allocated per GPU.   |
+|                             |         |         |           | Values: default, hsa, code-object. See below for details.    |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-serialize-all           | Bool    |         | False     | If set to "True", turns on serialization for untraced kernels|
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-no-detail               | Bool    |         | False     | Collects occupancy data without instruction-level detail.    |
@@ -142,6 +145,20 @@ The following table lists the parameters relevant to thread tracing:
 |                             |         |         |           | --selected-regions.                                          |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
+Use ``--att-resource-mode`` to choose when thread trace queues, signals, and memory are allocated for each GPU. It applies to both dispatch tracing and device-wide tracing, including ``--att-no-intercept``. Supported values are:
+
+- ``default``: Lets the profiler select the mode; currently equivalent to ``code-object``.
+- ``hsa``: Allocates resources during HSA initialization for configured GPUs visible to ROCr.
+- ``code-object``: Defers allocation until a code object is registered for each configured GPU. GPUs that never load a code object do not allocate thread trace resources, even when ``ROCR_VISIBLE_DEVICES`` is unset. This is used when neither the option nor the environment variable is set.
+
+For example:
+
+.. code-block:: bash
+
+  rocprofv3 --att --att-resource-mode code-object -- <application_path>
+
+In JSON or YAML input, set ``att_resource_mode`` to the same string value. The equivalent environment variable is ``ROCPROF_ATT_PARAM_RESOURCE_MODE``; an explicit command-line or input-file value overrides it. For resource lifetime and deferred device-trace starts, see :ref:`thread-trace`.
+
 For AMD Instinct accelerators, enable perfmon streaming using:
 
 .. code-block:: bash
@@ -153,6 +170,29 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
 .. code-block:: bash
 
   rocprofv3 --att --att-simd-select 0x0 -- <application_path>
+
+
+Thread trace environment variables
+==================================
+
+The following environment variables control advanced thread trace behavior:
+
+.. list-table::
+  :header-rows: 1
+  :widths: 35 15 50
+
+  * - Variable
+    - Default
+    - Description
+  * - ``ROCPROFILER_SQTT_FORCE_HSA``
+    - ``false``
+    - Forces thread trace to use an HSA queue, HSA signals, and HSA-managed
+      memory instead of KFD resources.
+
+ROCprofiler-SDK prefers KFD resources for thread trace. If they are unavailable,
+including when a direct SDMA queue cannot be created, it falls back to the ROCr/HSA
+backend and emits a warning. Selecting the HSA backend explicitly does not emit the
+fallback warning.
 
 
 Using input file

@@ -337,6 +337,7 @@ class Parser:
         )
         self.addition_xmls = tuple(addition_xmls)
         self._addition_by_id = {}
+        self._unique_flat_segment_opcodes: dict[str, set[int]] = {}
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)
@@ -355,6 +356,7 @@ class Parser:
             addition.identifier: addition
             for addition in self.isa_spec.applied_additions
         }
+        self._unique_flat_segment_opcodes = self._find_unique_flat_segment_opcodes()
         self.parse_encodings()
         self.parse_insts()
         self._validate_addition_decode_reachability()
@@ -387,9 +389,9 @@ class Parser:
                 condition = xs.get_node_text(
                     xs.get_node(inst_enc_node, xs.ENCODING_COND)
                 )
-                if self.profile.skip_inst_encoding(enc_name, condition):
-                    continue
                 opcode = int(xs.get_node_text(xs.get_node(inst_enc_node, xs.OPCODE)))
+                if self._skip_inst_encoding(enc_name, condition, opcode):
+                    continue
                 pointers = self.isa_spec.encoding_map[enc_name].primary_dt_ptrs
                 if (
                     pointers is None
@@ -414,9 +416,10 @@ class Parser:
             for enc_node in encodings:
                 enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
                 enc_cond = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_COND))
-                if (
-                    enc_name in self.profile.skip_encodings
-                    or self.profile.skip_inst_encoding(enc_name, enc_cond)
+                if enc_name in self.profile.skip_encodings or self._skip_inst_encoding(
+                    enc_name,
+                    enc_cond,
+                    int(xs.get_node_text(xs.get_node(enc_node, xs.OPCODE))),
                 ):
                     continue
 
@@ -432,7 +435,12 @@ class Parser:
                     reads |= opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
                     writes |= opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
 
-                key = (inst_name, enc_name)
+                key_encoding = (
+                    self.profile.derive_parent_enc_name(enc_name)
+                    if self._unique_flat_segment_opcodes.get(enc_name)
+                    else enc_name
+                )
+                key = (inst_name, key_encoding)
                 previous_reads, previous_writes = accesses.get(key, (False, False))
                 accesses[key] = (previous_reads or reads, previous_writes or writes)
 
@@ -1121,7 +1129,10 @@ class Parser:
                     dte.sub_decode_table = f'sub_decode_{inst_enc.fmt_enc_name}'.lower()
                     if dte.sub_decode_funcs is None:
                         dte.is_primary = False
-                        dte.sub_decode_funcs = list(sub_decode_funcs)
+                        # Prefixes of one encoding share the same opcode table.
+                        # A private copy loses high opcodes when code generation
+                        # emits the first table with this encoding's name.
+                        dte.sub_decode_funcs = sub_decode_funcs
                     for j in range(1, dte.num_dupe_entries):
                         dt[i + j] = dte
 
@@ -1198,13 +1209,43 @@ class Parser:
                     inst_enc.is_implied_literal_enc = True
                     self.isa_spec.alt_encs_with_implied_literal.add(enc_name)
 
-            if not is_alt or not self.profile.skip_inst_encoding(enc_name, 'default'):
+            if (
+                not is_alt
+                or not self.profile.skip_inst_encoding(enc_name, 'default')
+                or self._unique_flat_segment_opcodes.get(enc_name)
+            ):
                 self.parse_encoding_identifers(enc_node, inst_enc, parent_enc)
 
             self.isa_spec.inst_encodings.append(inst_enc)
             if enc_name in self.isa_spec.encoding_map:
                 raise KeyError(f'Duplicate encoding found: {enc_name}')
             self.isa_spec.encoding_map[enc_name] = inst_enc
+
+    def _skip_inst_encoding(self, enc_name: str, condition: str, opcode: int) -> bool:
+        return self.profile.skip_inst_encoding(
+            enc_name,
+            condition,
+            unique_segment_opcode=opcode
+            in self._unique_flat_segment_opcodes.get(enc_name, set()),
+        )
+
+    def _find_unique_flat_segment_opcodes(self) -> dict[str, set[int]]:
+        """Retain segment-only opcodes that have no generic FLAT decode entry."""
+        opcodes: dict[str, set[int]] = {}
+        for inst_node in self.insts_node:
+            for form in xs.get_node(inst_node, xs.INST_ENCODINGS):
+                name = xs.get_node_text(xs.get_node(form, xs.ENCODING_NAME))
+                condition = xs.get_node_text(xs.get_node(form, xs.ENCODING_COND))
+                if condition == 'default' and name not in self.profile.skip_encodings:
+                    opcodes.setdefault(name, set()).add(
+                        int(xs.get_node_text(xs.get_node(form, xs.OPCODE)))
+                    )
+        primary = opcodes.get('ENC_FLAT', set())
+        return {
+            name: values - primary
+            for name, values in opcodes.items()
+            if self.profile.unique_flat_segment(name) is not None
+        }
 
     def parse_insts(self) -> None:
         """Parse instructions and populate the decode table.
@@ -1242,9 +1283,13 @@ class Parser:
                 if enc_name in self.profile.skip_encodings:
                     continue
                 enc_cond = xs.get_node_text(enc_cond_node)
-                if self.profile.skip_inst_encoding(enc_name, enc_cond):
-                    continue
                 opcode = int(xs.get_node_text(opcode_node))
+                retain_segment = (
+                    enc_cond == 'default'
+                    and opcode in self._unique_flat_segment_opcodes.get(enc_name, set())
+                )
+                if self._skip_inst_encoding(enc_name, enc_cond, opcode):
+                    continue
                 opnds = []
                 for opnd in operands_node:
                     is_in = opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
@@ -1284,6 +1329,13 @@ class Parser:
                         opnd_name = synthesize_fieldless_name(opnd_type)
                         data_format_name = ''
                         is_fieldless = True
+                    # Read from the node rather than data_format_name, which is
+                    # blank for fieldless operands: a VOPC's fieldless VCC
+                    # destination becomes an SGPR under SDWA sd=1.
+                    is_wave_mask = (
+                        data_format_name_node is not None
+                        and xs.get_node_text(data_format_name_node) == 'FMT_NUM_M64'
+                    )
                     opnds.append(
                         Operand(
                             opnd_name,
@@ -1296,12 +1348,33 @@ class Parser:
                             order,
                             data_format_name,
                             is_fieldless,
+                            is_wave_mask,
                         )
                     )
                 opnds.sort(key=lambda x: x.order)
                 _uniquify_fieldless_names(opnds)
 
                 enc = self.isa_spec.encoding_map[enc_name]
+                if retain_segment:
+                    previous = next(
+                        (
+                            item
+                            for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
+                            if item.opcode == opcode
+                            and item.required_flat_segment
+                            == self.profile.unique_flat_segment(enc_name)
+                        ),
+                        None,
+                    )
+                    if previous is not None:
+                        # RDNA3 repeats identical default GLOBAL forms in the XML.
+                        if previous.name != inst_name or [
+                            vars(o) for o in previous.operands
+                        ] != [vars(o) for o in opnds]:
+                            raise ValueError(
+                                f'Conflicting segment instruction at {enc_name} opcode {opcode}'
+                            )
+                        continue
                 is_implied_literal = (
                     enc_name in self.isa_spec.alt_encs_with_implied_literal
                 )
@@ -1315,6 +1388,14 @@ class Parser:
                     source_addition,
                 )
 
+                if retain_segment:
+                    # Reuse the FLAT layout and address machinery, retaining the
+                    # segment restriction for the generated decoder factory.
+                    inst.enc_name = 'ENC_FLAT'
+                    inst.required_flat_segment = self.profile.unique_flat_segment(
+                        enc_name
+                    )
+
                 # Implied-literal instructions go to the parent encoding's
                 # insts list (they represent the same instruction class with
                 # a literal constant). All others go to their own encoding.
@@ -1326,6 +1407,8 @@ class Parser:
                         enc, parent_enc
                     )
                     parent_enc.implied_literal_ops[str(inst.opcode)] = extension_words
+                elif retain_segment:
+                    self.isa_spec.encoding_map['ENC_FLAT'].insts.append(inst)
                 else:
                     enc.insts.append(inst)
 
@@ -1339,6 +1422,15 @@ class Parser:
                     if dt_ptr == -1:
                         continue
                     decode_func = f'decode{inst.fmt_name}'
+                    if (
+                        retain_segment
+                        and sum(
+                            item.opcode == opcode
+                            for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
+                        )
+                        > 1
+                    ):
+                        decode_func = f'decodeFlatSegment{opcode}'
                     if enc.is_primary_decode:
                         dt[dt_ptr].decode_func = decode_func
                         dt[dt_ptr].inst_name = inst.fmt_name

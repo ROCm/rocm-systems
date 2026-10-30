@@ -3,47 +3,25 @@
 
 """Assemble the interactive standalone roofline HTML document."""
 
-import functools
 import html
-import json
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Final, List, Optional
 
 import plotly.graph_objects as go
 
-from roofline.roofline_frame import (
-    FRAME_MIN_DECADES,
-    FRAME_PAD,
-    FRAME_SLOPE_SKEW,
-)
 from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
+from utils.html_report.report_shell import build_document, read_asset
 
 ALL_PEAKS_VALUE = "all"
+LIMITING_PEAK_VALUE = "limiting"
 
 ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
 
 _PLOT_DIV_ID = "roofline-plot"
-
-
-@functools.lru_cache(maxsize=None)
-def _read_asset(name: str) -> str:
-    """Read a bundled asset file, cached for repeated calls in one run."""
-    return (Path(__file__).parent / "assets" / name).read_text(encoding="utf-8")
-
-
-def _json_safe(value: object) -> object:
-    """Replace non-finite floats with None for browser-safe JSON."""
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    return value
+_ASSETS_DIR: Final[Path] = Path(__file__).parent / "assets"
 
 
 @dataclass
@@ -58,10 +36,13 @@ class RooflineViewModel:
     roofline_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_traces: List[Dict[str, Any]] = field(default_factory=list)
     compute_overlay_traces: List[Dict[str, Any]] = field(default_factory=list)
+    precisions: List[str] = field(default_factory=list)
+    default_precisions: List[str] = field(default_factory=list)
+    frame: Optional[Dict[str, List[float]]] = None
 
-    def to_json(self) -> str:
-        """Serialize the model for embedding in a <script> tag."""
-        payload = {
+    def to_payload(self) -> Dict[str, Any]:
+        """Return the model values for the shared document builder."""
+        return {
             "divId": _PLOT_DIV_ID,
             "peaks": self.peaks,
             "peakColors": self.peak_colors,
@@ -71,14 +52,14 @@ class RooflineViewModel:
             "rooflineTraces": self.roofline_traces,
             "computeTraces": self.compute_traces,
             "computeOverlayTraces": self.compute_overlay_traces,
+            "precisions": self.precisions,
+            "defaultPrecisions": self.default_precisions,
+            "frame": self.frame,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
-            "framePad": FRAME_PAD,
-            "frameMinDecades": FRAME_MIN_DECADES,
-            "frameSlopeSkew": FRAME_SLOPE_SKEW,
+            "limitingPeakValue": LIMITING_PEAK_VALUE,
             "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
-        return json.dumps(_json_safe(payload), allow_nan=False).replace("</", "<\\/")
 
 
 def build_interactive_document(
@@ -100,21 +81,27 @@ def build_interactive_document(
         },
     )
 
-    page_template = Template(_read_asset("roofline_plot.html"))
-    return page_template.substitute(
-        TITLE=html.escape(title),
+    body_template = Template(read_asset(_ASSETS_DIR, "roofline_plot.html"))
+    body_html = body_template.substitute(
         PEAK_TITLE=html.escape(
             "Plot each kernel at its arithmetic intensity for this memory level, "
             "matching the (AI axis) marker in the Bandwidth rooflines panel. "
-            "All peaks plots every level at once."
+            "'All peaks' plots every level at once. "
+            "'Limited by' plots the limiting memory-level point, or the "
+            "leftmost point when no memory-level limiter is available."
         ),
         RUNTIME_TITLE=html.escape(
             "Show only the heaviest kernels whose combined percent of GPU "
             "resident time reaches this cutoff. The rightmost stop shows every "
             "plotted kernel."
         ),
-        CSS=_read_asset("roofline_plot.css"),
         PLOT_FRAGMENT=fragment,
-        MODEL_JSON=view_model.to_json(),
-        JS=_read_asset("roofline_plot.js"),
+    )
+    return build_document(
+        title=title,
+        body_html=body_html,
+        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css"),
+        page_js=read_asset(_ASSETS_DIR, "roofline_plot.js"),
+        model_id="roofline-model",
+        model=view_model.to_payload(),
     )

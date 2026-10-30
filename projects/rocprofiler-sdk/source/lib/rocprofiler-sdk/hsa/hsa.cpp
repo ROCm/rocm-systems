@@ -27,13 +27,14 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -559,8 +560,17 @@ hsa_init_refcnt_impl()
         scoped_dtor() = default;
         ~scoped_dtor() { ++hsa_reference_count_value; }
     };
-    auto _dtor = scoped_dtor{};
-    return get_core_table()->hsa_init_fn();
+    auto _dtor   = scoped_dtor{};
+    auto _status = get_core_table()->hsa_init_fn();
+
+    // Start the monitor after hsa_init_fn and only when it succeeded: creating the wake signal
+    // needs an open runtime. Starting again is harmless, since start_completion_monitor returns
+    // early when the monitor is already running. Without this, interception stays off for the
+    // rest of the process once a full shutdown has stopped the monitor.
+    if(_status == HSA_STATUS_SUCCESS)
+        ::rocprofiler::hsa::queue_interposition::start_completion_monitor();
+
+    return _status;
 }
 
 hsa_status_t
@@ -571,15 +581,15 @@ hsa_shut_down_refcnt_impl()
         --hsa_reference_count_value;
         if(hsa_reference_count_value == 0)
         {
-            // Last HSA reference is about to drop.  Stop and join any running
-            // thread-trace producer/consumer threads *before* ROCR tears down
-            // SDMA engines and signal pools in Runtime::Unload().
-            thread_trace::flush_and_stop();
             // F24 terminal fail-closed fence: after real hsa_shut_down the runtime
             // frees SDMA/signal state, so no callback-capable signal-less completion
             // may survive. On timeout abandon+disable process-wide. No-op with the
             // feature off.
             ::rocprofiler::kfd::signal_less_fence_completions();
+            // The completion monitor's thread waits on signals owned by the runtime that
+            // hsa_shut_down_fn tears down below. Stop and join it here, while those
+            // signals are still valid.
+            ::rocprofiler::hsa::queue_interposition::stop_completion_monitor();
         }
         return get_core_table()->hsa_shut_down_fn();
     }
@@ -822,6 +832,50 @@ check_hsa_timing_functions()
     std::call_once(_once, check_hsa_timing_functions_impl);
 }
 }  // namespace
+
+bool
+needs_high_precision_timestamps(const context::context* ctx)
+{
+    return ctx != nullptr &&
+           (ctx->dispatch_counter_collection || ctx->dispatch_spm || ctx->dispatch_thread_trace ||
+            ctx->device_thread_trace || ctx->pc_sampler ||
+            ctx->is_tracing_one_of(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                   ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                   ROCPROFILER_CALLBACK_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_EVENT,
+                                   ROCPROFILER_BUFFER_TRACING_HIP_GRAPH,
+                                   ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY));
+}
+
+bool
+enable_high_precision_timestamps(hsa_amd_ext_table_t* table)
+{
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02 && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    constexpr auto required_size =
+        offsetof(hsa_amd_ext_table_t, hsa_amd_enable_high_precision_timestamps_fn) +
+        sizeof(table->hsa_amd_enable_high_precision_timestamps_fn);
+    if(!table || table->version.major_id != HSA_AMD_EXT_API_TABLE_MAJOR_VERSION ||
+       table->version.minor_id < required_size)
+        return false;
+
+    auto enable = table->hsa_amd_enable_high_precision_timestamps_fn;
+    if(!enable) return false;
+
+    auto status = enable();
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "hsa_amd_enable_high_precision_timestamps failed with status " << status;
+        return false;
+    }
+    ROCP_INFO << "Enabled high-precision GPU timestamps in ROCr";
+    return true;
+#else
+    (void) table;
+    return false;
+#endif
+}
 
 std::string_view
 get_hsa_status_string(hsa_status_t _status)

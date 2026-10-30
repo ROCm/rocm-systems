@@ -10,7 +10,8 @@ ROCprofiler-SDK documentation
 
 ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software.
 It supports application tracing to provide a big picture of the GPU application execution and kernel counter collection to provide low-level hardware details from the performance counters.
-The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging.
+The ROCprofiler-SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging. To learn more, see
+:doc:`What is ROCprofiler-SDK? <what-is-rocprofiler-sdk>`
 
 You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing HIP applications on ROCm software.
 
@@ -34,7 +35,6 @@ The documentation is structured as follows:
 
    .. grid-item-card:: Quick Reference
 
-      * :ref:`rocprofiler-sdk-at-a-glance`
       * :ref:`quick-guide`
       * :ref:`cli-options`
 
@@ -45,6 +45,7 @@ The documentation is structured as follows:
       * :ref:`kernel-naming-filtering`
       * :ref:`rocprofv3-io-options`
       * :ref:`using-rocprofv3-avail`
+      * :ref:`using-rocprofv3-doctor`
       * :ref:`rocprofv3-process-attachment`
       * :ref:`using-rocpd-output-format`
       * :ref:`using-rocprofiler-sdk-roctx`
@@ -53,6 +54,7 @@ The documentation is structured as follows:
       * :ref:`using-pc-sampling`
       * :ref:`cdna3-cdna4-pc-sampling`
       * :ref:`using-thread-trace`
+      * :ref:`using-rocprofv3-on-wsl`
       * :ref:`using-spm`
       * :ref:`using-kernel-replay`
       * :ref:`using-kernel-replay-rocprofv3`

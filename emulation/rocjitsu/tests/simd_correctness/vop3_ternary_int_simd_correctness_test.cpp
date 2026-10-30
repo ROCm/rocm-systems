@@ -11,11 +11,15 @@
 /// identical inputs/EXEC -- and the two 64-lane result arrays are asserted equal
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must keep the sentinel.
+/// CDNA5 integer minmax instructions also have scalar and SIMD golden-result
+/// coverage for signed and unsigned inputs.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -61,9 +65,8 @@ struct Case {
 
 // cdna4-decodable 3-source integer ops; v_xor3_b32 is RDNA-only so omitted here
 // even though the SIMD probe ships for cross-ISA correctness. The min3/max3/med3
-// family (i16/i32/u16/u32) is included: the scalar bodies use std::max/min (and
-// the int minmax/maxmin use std::fmax/fmin on integers, order-preserving) so the
-// integer SIMD min/max is bit-identical for every input.
+// family (i16/i32/u16/u32) is included: the scalar bodies use integer
+// std::max/min, so the integer SIMD min/max is bit-identical for every input.
 const std::array<Case, 26> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
@@ -146,7 +149,7 @@ struct Fixture {
 
   std::array<uint32_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
@@ -219,6 +222,45 @@ TEST(Vop3TernaryIntSimdCorrectness, PartialExec) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
 }
 
+TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
+  struct GoldenCase {
+    uint16_t opcode;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t src2;
+    uint32_t expected;
+  };
+  constexpr std::array cases = {
+      GoldenCase{cdna5::kVMaxminI32Vop3, static_cast<uint32_t>(-5), static_cast<uint32_t>(-3),
+                 static_cast<uint32_t>(-2), static_cast<uint32_t>(-3)},
+      GoldenCase{cdna5::kVMinmaxI32Vop3, static_cast<uint32_t>(-5), static_cast<uint32_t>(-3),
+                 static_cast<uint32_t>(-2), static_cast<uint32_t>(-2)},
+      GoldenCase{cdna5::kVMaxminU32Vop3, 0xffffffffu, 0x80000000u, 0x70000000u, 0x70000000u},
+      GoldenCase{cdna5::kVMinmaxU32Vop3, 0xffffffffu, 0x80000000u, 0xffffffffu, 0xffffffffu},
+  };
+
+  ForceScalarGuard gate_guard;
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &test_case : cases) {
+      Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      const auto words = cdna5::build_vop3(
+          test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      const uint32_t base = fixture.wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        fixture.cu->write_vgpr(base, lane, test_case.src0);
+        fixture.cu->write_vgpr(base + 1, lane, test_case.src1);
+        fixture.cu->write_vgpr(base + 2, lane, test_case.src2);
+      }
+      fixture.wf->set_exec(~uint64_t{0});
+      ASSERT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(base + kDstVgpr, 0), test_case.expected);
+    }
+  }
+}
+
 TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
   struct GoldenCase {
     const char *name;
@@ -263,7 +305,7 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
       fx.cu->write_vgpr(base + 2, 0, golden.src2);
       fx.cu->write_vgpr(base + kDstVgpr, 0, DST_SENTINEL);
       fx.cu->write_vgpr(base + kDstVgpr, 1, DST_SENTINEL);
-      fx.cu->execute_instruction(inst.get(), *fx.wf);
+      EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
 
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 0), golden.expected);
       EXPECT_EQ(fx.cu->read_vgpr(base + kDstVgpr, 1), DST_SENTINEL);

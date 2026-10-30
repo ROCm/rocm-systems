@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -19,12 +20,6 @@
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -50,7 +45,7 @@ constexpr uint32_t TOTAL_CUS = TOTAL_XCDS * CUS_PER_XCD;
 
 // AMDGPU kernel descriptor (HSA code object v3, 64 bytes).
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 // CPU golden reference.
 
@@ -114,7 +109,8 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
@@ -314,7 +310,7 @@ void run_matmul_stress(const char *kernel_name, unsigned N, uint32_t num_threads
   cpu_matmul(A.data(), B.data(), C_expected.data(), N);
 
   KernelExecFixture fx;
-  fx.setup(kernel_name, num_threads);
+  ASSERT_NO_FATAL_FAILURE(fx.setup(kernel_name, num_threads));
   fx.load_matrices(A.data(), B.data(), N);
   fx.write_kernargs(N);
 
@@ -366,23 +362,27 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
+  // Single-threaded counterpart to the _MultiThreaded test below; pin one worker
+  // rather than taking the config's one-partition-per-XCD default.
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
   engine->create();
 
   // Write a kernel descriptor + s_endpgm to GPU memory.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
   memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);
@@ -417,7 +417,8 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
@@ -428,14 +429,14 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, TOTAL_XCDS));
   engine->create();
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1)); // CDNA4 VGPR granularity is 8
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
   memory->write32(KD_ADDR + sizeof(kernel_descriptor_t), SOPP_S_ENDPGM);

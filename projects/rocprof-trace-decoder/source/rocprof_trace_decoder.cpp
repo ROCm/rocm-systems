@@ -53,7 +53,7 @@ static_assert(
     sizeof(rocprofiler_thread_trace_decoder_event_t) == 40, "Unexpected rocprofiler_thread_trace_decoder_event_t size"
 );
 static_assert(
-    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 80,
+    sizeof(rocprofiler_thread_trace_decoder_dispatch_t) == 88,
     "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
 );
 
@@ -345,7 +345,17 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!se_data_callback || !trace_callback || !isa_callback)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    // Same guard as the handle-based rocprof_trace_decoder_parse(): this is a C ABI, so an
+    // escaping exception is undefined behaviour for the caller. The decode paths throw bare
+    // std::exception() on malformed input (e.g. gfx9token.h wave-id checks).
+    try
+    {
+        return parse_data_impl(se_data_callback, trace_callback, isa_callback, userdata);
+    }
+    catch (...)
+    {
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
+    }
 }
 
 // V2 API: handle-based with built-in code object management

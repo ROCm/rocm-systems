@@ -59,6 +59,14 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 using namespace rocjitsu::dbi_test;
 
+// ROCR's async-event pool is protected by an uninstrumented HybridMutex, so
+// TSan can report its allocator reuse as a race during HSA initialization.
+// Suppress only accesses originating in that external runtime.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
+
 namespace {
 
 using test::kernel_hsaco_path;
@@ -69,14 +77,18 @@ using test::kernel_path;
 bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, uint64_t offset,
                              std::string_view mnemonic, size_t max_insts) {
   uint64_t cur = offset;
+  std::vector<rj_code_binary_inst_t> word_buf(decoder.max_instruction_words());
   for (size_t i = 0; i < max_insts && cur + sizeof(uint32_t) <= text.size(); ++i) {
-    rj_code_binary_inst_t word_buf[2] = {0, 0};
-    const size_t avail = std::min<size_t>(sizeof(word_buf), text.size() - cur);
-    std::memcpy(word_buf, text.data() + cur, avail);
-    auto decoded = decoder.decode(word_buf);
+    std::fill(word_buf.begin(), word_buf.end(), 0);
+    const size_t avail =
+        std::min<size_t>(word_buf.size() * sizeof(rj_code_binary_inst_t), text.size() - cur);
+    std::memcpy(word_buf.data(), text.data() + cur, avail);
+    FailureOr<std::unique_ptr<Instruction>> decoded = decoder.decode(word_buf.data());
     if (decoded.failed())
       return false;
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    if (inst->size() <= 0 || static_cast<size_t>(inst->size()) > avail)
+      return false;
     if (inst->mnemonic() == mnemonic)
       return true;
     cur += static_cast<uint64_t>(inst->size());
@@ -86,6 +98,11 @@ bool decodes_mnemonic_within(Decoder &decoder, std::span<const uint8_t> text, ui
 
 constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
                                        "vector_add_probe_gfx90a", "rj_nop_probe_gfx90a", "gfx90a"};
+constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
+                                       "vector_add_probe_gfx950", "rj_nop_probe_gfx950", "gfx950"};
+constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+                                       "vector_add_probe_gfx1201", "rj_nop_probe_gfx1201",
+                                       "gfx1201"};
 
 } // namespace
 
@@ -130,7 +147,8 @@ protected:
     std::string err;
     const auto resolved = resolve_probe_symbol(*probe_co, "rj_nop_probe", &err);
     ASSERT_TRUE(resolved.has_value()) << "resolve_probe_symbol(rj_nop_probe) failed: " << err;
-    const auto callable = build_probe_callable(*probe_co, *resolved, params_.arch, &err);
+    const auto callable =
+        build_probe_callable(*probe_co, *resolved, params_.arch, /*num_arg_dwords=*/0, &err);
     ASSERT_TRUE(callable.has_value()) << "build_probe_callable failed: " << err;
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
@@ -175,6 +193,7 @@ protected:
         anchor_offset_ = off;
         patched_elf_bytes_ = std::move(result.elf_bytes);
         patches_ = std::move(result.patches);
+        sites_ = std::move(result.sites);
         break;
       }
       last_patch_error_ = result.errors.front();
@@ -196,6 +215,7 @@ protected:
   std::vector<uint8_t> patched_elf_bytes_;
   std::vector<uint32_t> probe_body_words_;
   std::vector<InstrumentationPatch> patches_;
+  std::vector<InstrumentedSite> sites_;
   uint64_t anchor_offset_ = 0;
   std::string last_patch_error_;
 };
@@ -267,13 +287,21 @@ void HsaDbiNopProbeFixture::run_patched_elf_contains_probe_call_instrumentation(
                                       probe_body_words_.size()))
       << "Copied probe body should return via s_setpc_b64";
 
-  // (f) The trampoline contains the s_swappc_b64 call into the probe. The
-  //     call sits within the before-region envelope at the head of the
-  //     trampoline; scan a small bounded window from trampoline_offset.
-  EXPECT_TRUE(decodes_mnemonic_within(*decoder, text_bytes, patch.trampoline_offset, "s_swappc_b64",
-                                      /*max_insts=*/12))
+  // (f) Require the call inside this site's actual before-region, bounded by
+  // the relocated guest instruction. Architecture-specific guards may grow it.
+  ASSERT_EQ(sites_.size(), 1u);
+  const InstrumentedSite &site = sites_.front();
+  ASSERT_EQ(site.instrumentation_offset, patch.trampoline_offset);
+  ASSERT_LE(site.instrumentation_offset, text_bytes.size());
+  ASSERT_LE(site.instrumentation_size, text_bytes.size() - site.instrumentation_offset);
+  ASSERT_EQ(site.instrumentation_offset + site.instrumentation_size, site.guest_offset);
+  ASSERT_LE(site.guest_offset, text_bytes.size());
+  const std::span<const uint8_t> envelope =
+      text_bytes.subspan(site.instrumentation_offset, site.instrumentation_size);
+  EXPECT_TRUE(decodes_mnemonic_within(*decoder, envelope, 0, "s_swappc_b64",
+                                      envelope.size() / sizeof(uint32_t)))
       << "Trampoline at offset " << patch.trampoline_offset
-      << " should contain an s_swappc_b64 call to the probe";
+      << " should contain an s_swappc_b64 call before the relocated guest instruction";
 }
 
 // "Sabotage" verification: overwrite the first word of the COPIED probe body
@@ -362,6 +390,56 @@ TEST_F(HsaDbiNopProbeCdna2Hardware, PatchedKernelDispatchMatchesOriginal) {
 }
 
 TEST_F(HsaDbiNopProbeCdna2Hardware, ProbeBodyIsActuallyCalledByGpu) {
+  run_probe_body_is_actually_called_by_gpu();
+}
+
+// gfx950 / CDNA4.
+
+class HsaDbiNopProbeCdna4Static : public HsaDbiNopProbeFixture {
+protected:
+  HsaDbiNopProbeCdna4Static() : HsaDbiNopProbeFixture(kCdna4Params) {}
+};
+
+class HsaDbiNopProbeCdna4Hardware : public HsaDbiNopProbeHardwareBase<kCdna4Params> {};
+
+TEST_F(HsaDbiNopProbeCdna4Static, PatchedElfContainsProbeCallInstrumentation) {
+  run_patched_elf_contains_probe_call_instrumentation();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopProbeCdna4Hardware, ProbeBodyIsActuallyCalledByGpu) {
+  run_probe_body_is_actually_called_by_gpu();
+}
+
+// gfx1201 / RDNA4.
+
+class HsaDbiNopProbeRdna4Static : public HsaDbiNopProbeFixture {
+protected:
+  HsaDbiNopProbeRdna4Static() : HsaDbiNopProbeFixture(kRdna4Params) {}
+};
+
+class HsaDbiNopProbeRdna4Hardware : public HsaDbiNopProbeHardwareBase<kRdna4Params> {};
+
+TEST_F(HsaDbiNopProbeRdna4Static, PatchedElfContainsProbeCallInstrumentation) {
+  run_patched_elf_contains_probe_call_instrumentation();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, PatchedElfLoadsAndValidatesInHsaExecutable) {
+  run_patched_elf_loads_and_validates();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, PatchedKernelDispatchMatchesOriginal) {
+  run_patched_kernel_dispatch_matches_original();
+}
+
+TEST_F(HsaDbiNopProbeRdna4Hardware, ProbeBodyIsActuallyCalledByGpu) {
   run_probe_body_is_actually_called_by_gpu();
 }
 

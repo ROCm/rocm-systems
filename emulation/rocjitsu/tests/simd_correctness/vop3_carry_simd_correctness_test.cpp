@@ -175,7 +175,7 @@ template <int WaveSize> struct WaveFixture {
   Result run(Instruction *inst, uint64_t seed, uint64_t exec, uint64_t vcc_in, uint64_t sdst_in,
              uint32_t sdst_sgpr, uint64_t cin_word, uint32_t cin_sgpr_pair) {
     seed_inputs(seed, exec, vcc_in, sdst_in, sdst_sgpr, cin_word, cin_sgpr_pair);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     Result res;
     uint32_t vbase = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WaveSize; ++lane)
@@ -337,7 +337,7 @@ void check_rdna4_wave64_carry_in_oracle() {
     fx.wf->set_exec(~0ULL);
     fx.cu->write_sgpr(cin_pair, static_cast<uint32_t>(kCarryIn));
     fx.cu->write_sgpr(cin_pair + 1u, static_cast<uint32_t>(kCarryIn >> 32));
-    fx.cu->execute_instruction(inst.get(), *fx.wf);
+    EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
 
     for (uint32_t lane = 0; lane < 64; ++lane) {
       const uint32_t expected = static_cast<uint32_t>((kCarryIn >> lane) & 1u);

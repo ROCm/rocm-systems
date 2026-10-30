@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -33,6 +34,7 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -226,8 +228,7 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           AMDSMI_MAX_STRING_LENGTH, false);
 
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "[Before correction] "
-     << "Returning status = AMDSMI_STATUS_SUCCESS"
+  ss << __PRETTY_FUNCTION__ << "[Before correction] " << "Returning status = AMDSMI_STATUS_SUCCESS"
      << " | model_number_path = |" << model_number_path << "|\n"
      << "; info->model_number: |" << info->model_number << "|\n"
      << "; ret_mod = " << ret_mod << "|\n"
@@ -241,8 +242,8 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
      << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
      << "; ret_man = " << ret_man << "|\n"
      << "\n product_name_path = |" << product_name_path << "|\n"
-     << "; info->product_name: |" << info->product_name << "|"
-     << "; ret_prod = " << ret_prod << "|\n";
+     << "; info->product_name: |" << info->product_name << "|" << "; ret_prod = " << ret_prod
+     << "|\n";
   LOG_INFO(ss);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -332,6 +333,82 @@ bool smi_amdgpu_parse_od_clk_range(std::istream& od_stream, amdsmi_clk_type_t do
   return true;
 }
 
+// Finish smi_amdgpu_get_ranges() from an already-open pp_dpm_* stream: fold the
+// dpm levels (and the optional "S:" sleep line) into the SmiAmdgpuClkRanges
+// output. Split out as a library-local test seam (see amd_smi_clk_testing.h) so
+// the folding and the bounds guard can be exercised over in-memory streams.
+//
+// od_range carries the pp_od_clk_voltage range the caller parsed; when it is not
+// present, min/max are derived from the dpm levels instead. A domain with no
+// minimum level or no sleep state keeps its UINT_MAX "unavailable" sentinel,
+// which callers surface as the unavailable marker; only genuinely out-of-range
+// (> INT_MAX and not the sentinel) values are rejected.
+amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
+                                            const SmiAmdgpuOdClkRange& od_range,
+                                            SmiAmdgpuClkRanges& ranges) {
+  unsigned int max = od_range.present ? od_range.max : 0;
+  unsigned int min = od_range.present ? od_range.min : UINT_MAX;
+  unsigned int dpm = 0;
+  unsigned int sleep_freq = UINT_MAX;
+  unsigned int current_freq = 0;
+  char str[10];
+  char single_char;
+  for (std::string line; getline(dpm_stream, line);) {
+    unsigned int dpm_level, freq;
+
+    char firstChar = line[0];
+    if (firstChar == 'S') {
+      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
+        return AMDSMI_STATUS_NO_DATA;
+      }
+    } else {
+      /**
+       * if the first line contains '*', then
+       * we are saving that value as current_freq then checking
+       * for other dpm levels if none are found then we
+       * set min and max to current_freq as per Driver
+       * We then skip to the next line to avoid getting
+       * incorrect min value.
+       */
+
+      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
+        return AMDSMI_STATUS_IO;
+      }
+
+      char lastChar = line.back();
+      if (lastChar == '*') {
+        current_freq = freq;
+      }
+
+      // Domains without an OD range derive min/max from the dpm levels here.
+      if (!od_range.present) {
+        max = freq > max ? freq : max;
+        min = freq < min ? freq : min;
+      }
+      dpm = dpm_level > dpm ? dpm_level : dpm;
+    }
+  }
+  if (dpm == 0 && current_freq > 0) {
+    // if the dpm level is 0, then the current frequency is the min/max frequency
+    max = current_freq;
+    min = current_freq;
+  }
+  // Reject genuinely out-of-range values, but let the UINT_MAX "unavailable"
+  // sentinel through: a domain with no minimum level or no sleep state keeps it,
+  // and callers (e.g. amdsmi_get_clock_info) surface it as the unavailable marker.
+  if ((dpm != UINT_MAX && dpm > static_cast<unsigned int>(INT_MAX)) ||
+      (max != UINT_MAX && max > static_cast<unsigned int>(INT_MAX)) ||
+      (min != UINT_MAX && min > static_cast<unsigned int>(INT_MAX)) ||
+      (sleep_freq != UINT_MAX && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+  ranges.max_freq = static_cast<int>(max);
+  ranges.min_freq = static_cast<int>(min);
+  ranges.num_dpm = static_cast<int>(dpm);
+  ranges.sleep_state_freq = static_cast<int>(sleep_freq);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_clk_type_t domain,
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
@@ -381,85 +458,32 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  unsigned int max, min, dpm, sleep_freq, current_freq;
-  char str[10];
-  char single_char;
-  max = 0;
-  min = UINT_MAX;
-  dpm = 0;
-  sleep_freq = UINT_MAX;
-  current_freq = 0;
+  SmiAmdgpuOdClkRange od_range;
   // GFX/MEM/DF expose a user-defined range in pp_od_clk_voltage; when it omits
   // this domain's section (e.g. no OD_FCLK on MI45x) fall back to the pp_dpm_*
-  // levels below.
+  // levels parsed by smi_amdgpu_parse_dpm_ranges().
   if (use_od_range) {
     std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
-    if (!smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &max, &min)) {
-      use_od_range = false;
-    }
+    od_range.present =
+        smi_amdgpu_parse_od_clk_range(smclk_ranges, domain, &od_range.max, &od_range.min);
   }
-  // obtain rest of info from regular pp_dpm_* files.
-  for (std::string line; getline(ranges, line);) {
-    unsigned int dpm_level, freq;
-
-    char firstChar = line[0];
-    if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %u%9s", &single_char, &sleep_freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_NO_DATA;
-      }
-    } else {
-      /**
-       * if the first line contains '*', then
-       * we are saving that value as current_freq then checking
-       * for other dpm levels if none are found then we
-       * set min and max to current_freq as per Driver
-       * We then skip to the next line to avoid getting
-       * incorrect min value.
-       */
-
-      if (sscanf(line.c_str(), "%u: %u%c", &dpm_level, &freq, str) <= 2) {
-        ranges.close();
-        return AMDSMI_STATUS_IO;
-      }
-
-      char lastChar = line.back();
-      if (lastChar == '*') {
-        current_freq = freq;
-      }
-
-      // Domains without an OD range derive min/max from the dpm levels here.
-      if (!use_od_range) {
-        max = freq > max ? freq : max;
-        min = freq < min ? freq : min;
-      }
-      dpm = dpm_level > dpm ? dpm_level : dpm;
-    }
+  SmiAmdgpuClkRanges parsed;
+  amdsmi_status_t status = smi_amdgpu_parse_dpm_ranges(ranges, od_range, parsed);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
   }
-  if (dpm == 0 && current_freq > 0) {
-    // if the dpm level is 0, then the current frequency is the min/max frequency
-    max = current_freq;
-    min = current_freq;
-  }
-  if ((num_dpm && dpm > static_cast<unsigned int>(INT_MAX)) ||
-      (max_freq && max > static_cast<unsigned int>(INT_MAX)) ||
-      (min_freq && min > static_cast<unsigned int>(INT_MAX)) ||
-      (sleep_state_freq && sleep_freq > static_cast<unsigned int>(INT_MAX))) {
-    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
-  }
-  if (num_dpm) *num_dpm = static_cast<int>(dpm);
-  if (max_freq) *max_freq = static_cast<int>(max);
-  if (min_freq) *min_freq = static_cast<int>(min);
-  if (sleep_state_freq) *sleep_state_freq = static_cast<int>(sleep_freq);
-
-  ranges.close();
+  if (max_freq) *max_freq = parsed.max_freq;
+  if (min_freq) *min_freq = parsed.min_freq;
+  if (num_dpm) *num_dpm = parsed.num_dpm;
+  if (sleep_state_freq) *sleep_state_freq = parsed.sleep_state_freq;
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::string fullpath =
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -475,14 +499,28 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;
-
-  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
   f.close();
 
-  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  // strtoul() alone can't tell "parsed 0" from "parsed nothing" -- both leave
+  // the result at 0 -- so confirm real hex digits were consumed via endptr. A
+  // cleanly-parsed 0 is a legitimate "no blocks enabled" mask, not a failure.
+  // ULONG_MAX stays a failure sentinel regardless: no real ASIC defines all 64
+  // mask bits (see AMDSMI_GPU_BLOCK_LAST), so a full set of 1s means a garbled
+  // read, not a plausible value.
+  char* endptr = nullptr;
+  unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
+  bool parse_failed = endptr == tmp_str.c_str() || *endptr != '\0';
+  if (parse_failed || parsed == ULONG_MAX) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""
+       << "; parsed token: \"" << tmp_str << "\""
+       << "; reason: " << (parse_failed ? "unparsable token" : "implausible all-bits-set value")
+       << "; returning AMDSMI_STATUS_API_FAILED";
+    LOG_DEBUG(ss);
     return AMDSMI_STATUS_API_FAILED;
   }
 
+  *enabled_blocks = parsed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -635,6 +673,17 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   }
 
   return status;
+}
+
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature) {
+  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  *temperature = metrics.temperature_vrsoc;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed) {
@@ -1455,4 +1504,15 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info) {
   info->physical_acc_id = std::numeric_limits<uint32_t>::max();
   info->chip_rev_id = std::numeric_limits<uint32_t>::max();
   info->external_rev_id = std::numeric_limits<uint32_t>::max();
+}
+
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
+  if (drm_date == "0") {
+    return {};
+  }
+  if (drm_date.size() == 8) {
+    return std::string{drm_date.substr(0, 4)} + "/" + std::string{drm_date.substr(4, 2)} + "/" +
+           std::string{drm_date.substr(6, 2)} + " 00:00";
+  }
+  return std::string{drm_date};
 }

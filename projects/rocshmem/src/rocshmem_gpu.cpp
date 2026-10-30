@@ -142,6 +142,21 @@ __device__ void rocshmem_query_thread(int *provided) {
 #endif
 }
 
+__device__ size_t rocshmem_query_tdm_lds_bytes() {
+#if ROCSHMEM_TDM_ENABLED
+  return tdm::lds_bytes_for_tile(constmem.tdm_tile_bytes);
+#else
+  return 0;
+#endif
+}
+
+__device__ void rocshmem_set_tdm_lds([[maybe_unused]] void *lds,
+                                     [[maybe_unused]] size_t lds_bytes) {
+#if ROCSHMEM_TDM_ENABLED
+  tdm::set_lds(lds, lds_bytes);
+#endif
+}
+
 __device__ void rocshmem_wg_finalize() {}
 
 
@@ -651,7 +666,7 @@ __device__ __forceinline__ void *direct_ctx_shmem_ptr(rocshmem_ctx_t ctx,
  * collective synchronization implementation (internal_sync/
  * internal_direct_barrier/internal_atomic_barrier, plus a quiet() call) --
  * inlining that into shared test kernels that call multiple of the
- * regular/wave/wg variants from one kernel body grows resource usage enough 
+ * regular/wave/wg variants from one kernel body grows resource usage enough
  * to drop occupancy by a full wave (5->4 waves/SIMD, confirmed via gfx950
  * all_backends resource-usage comparison). This happened even without
  * __forceinline__: because these helpers now live in the same translation
@@ -680,7 +695,7 @@ ROCSHMEM_DIRECT_CTX_SYNC_HELPER(sync_all_wave, NUM_SYNC_ALL_WAVE, sync_all_wave)
 
 #undef ROCSHMEM_DIRECT_CTX_SYNC_HELPER
 
-__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx, 
+__device__ __noinline__ void direct_ctx_barrier(rocshmem_ctx_t ctx,
                                                 rocshmem_team_t team) {
   get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_BARRIER);
   ROCSHMEM_DIRECT_BACKEND_DISPATCH(ctx, barrier(team));
@@ -1148,6 +1163,13 @@ __device__ __forceinline__ void direct_ctx_wait_until(rocshmem_ctx_t ctx,
   get_base_internal_ctx(ctx)->wait_until(ivars, cmp, val);
 }
 
+__device__ __forceinline__ uint64_t direct_ctx_signal_wait_until(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, int cmp, uint64_t cmp_value) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SIGNAL_WAIT_UNTIL);
+  return get_base_internal_ctx(ctx)->signal_wait_until(sig_addr, cmp,
+                                                       cmp_value);
+}
+
 template <typename T>
 __device__ __forceinline__ void direct_ctx_wait_until_all(
     rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
@@ -1300,6 +1322,9 @@ __device__ __forceinline__ void direct_destroy_ctx(rocshmem_ctx_t *ctx) {
 
 __device__ int rocshmem_wg_ctx_create(long options, rocshmem_ctx_t *ctx) {
   LOGD_API("device::wg_ctx_create (options=%ld)", options);
+#if ROCSHMEM_TDM_ENABLED
+  tdm::set_lds(nullptr, 0);
+#endif
   bool result{true};
   if (get_flat_block_id() == 0) {
     ctx->team_opaque = reinterpret_cast<TeamInfo *>(ROCSHMEM_CTX_DEFAULT.team_opaque);
@@ -1756,6 +1781,10 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
                                                            const void *source,
                                                            size_t size) {
+  // rocSHMEM owns this launch (see alltoallmem_on_stream in host.cpp), so it
+  // can safely claim the kernel's whole dynamic LDS for the TDM fast path
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   rocshmem_ctx_alltoall_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest,
                                  (const char *) source, (int) size);
 }
@@ -1797,6 +1826,10 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
     int pe_root) {
+  // rocSHMEM owns this launch (see broadcastmem_on_stream in host.cpp), so it
+  // can safely claim the kernel's whole dynamic LDS for the TDM fast path --
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   rocshmem_broadcast_wg<char>(ROCSHMEM_CTX_DEFAULT, team, (char *) dest, (const char *) source,
                               (int) nelems, pe_root);
 }
@@ -1804,6 +1837,12 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
 __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
                                                       const void *source,
                                                       size_t nelems, int pe) {
+  // rocSHMEM owns this launch (see putmem_on_stream/getmem_on_stream in
+  // host.cpp), so it can safely claim the kernel's whole dynamic LDS for the
+  // TDM fast path -- this is the same opt-in rocshmem_set_tdm_lds() API any
+  // user kernel would call, just wired up internally here.
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   // Use work-group collective getmem with default context
   rocshmem_getmem_wg(dest, source, nelems, pe);
 }
@@ -1811,6 +1850,8 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
 __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
                                                       const void *source,
                                                       size_t nelems, int pe) {
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   // Use work-group collective putmem with default context
   rocshmem_putmem_wg(dest, source, nelems, pe);
 }
@@ -1818,6 +1859,8 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
 __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
+  extern __shared__ uint8_t lds[];
+  rocshmem_set_tdm_lds(lds, rocshmem_query_tdm_lds_bytes());
   // Use work-group collective putmem_signal with default context
   rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
@@ -2297,6 +2340,26 @@ ROCSHMEM_SIGNAL_FETCH_DEF()
 ROCSHMEM_SIGNAL_FETCH_DEF(_wg)
 ROCSHMEM_SIGNAL_FETCH_DEF(_wave)
 
+#define ROCSHMEM_SIGNAL_OP_DEF(OP)                                           \
+  __device__ void rocshmem_ctx_signal_##OP(                                  \
+      rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe) {     \
+    rocshmem_ctx_uint64_atomic_##OP(ctx, sig_addr, signal, pe);              \
+  }                                                                          \
+                                                                             \
+  __device__ void rocshmem_signal_##OP(                                      \
+      uint64_t *sig_addr, uint64_t signal, int pe) {                         \
+    rocshmem_uint64_atomic_##OP(sig_addr, signal, pe);                       \
+  }
+
+ROCSHMEM_SIGNAL_OP_DEF(add)
+ROCSHMEM_SIGNAL_OP_DEF(set)
+
+__device__ uint64_t rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp,
+                                                uint64_t cmp_value) {
+  return direct_ctx_signal_wait_until(ROCSHMEM_CTX_DEFAULT, sig_addr, cmp,
+                                      cmp_value);
+}
+
 /******************************************************************************
  ****************************** Teams Interface *******************************
  *****************************************************************************/
@@ -2557,8 +2620,8 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \
       int nreduce) {                                                              \
     return rocshmem_reduce_wave<T, Op>(ctx, team, dest, source, nreduce);         \
-  }    
-    
+  }
+
 #define REDUCE_SCATTER_DEF_GEN(T, TNAME, Op_API, Op)                              \
   __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_scatter_wg(             \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,         \

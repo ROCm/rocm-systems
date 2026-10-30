@@ -14,6 +14,16 @@ add_library(
     environ_cache.cpp
     input_parameters.h
     input_parameters.cpp
+    kernel_name.h
+    kernel_name.cpp
+    output_registry.h
+    output_registry.cpp
+    dispatch_writer.h
+    dispatch_writer.cpp
+    kernel_symbols_writer.h
+    kernel_symbols_writer.cpp
+    agent_writer.h
+    agent_writer.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
     pc_sampling_feature.h
@@ -24,22 +34,8 @@ target_include_directories(${target} PUBLIC .)
 # compression is PRIVATE: not exposed in public headers.
 target_link_libraries(
     ${target}
-    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert pc-sampling-collector
+    PUBLIC rocprofiler-sdk::rocprofiler-sdk gsl_assert pc-sampling-collector csv
     PRIVATE compression
-)
-
-# TheRock stamps INSTALL_RPATH on every shared library relative to lib/, but
-# this one installs to lib/rocprofiler-compute/, so its lib/rocm_sysdeps/lib
-# entry lands one directory short and librocm_sysdeps_z.so.1 goes unresolved.
-# Opt out of the stamping and spell out the rpath for the real install dir.
-# Drop this once TheRock's post_hook_rocprofiler-compute.cmake sets
-# THEROCK_INSTALL_RPATH_ORIGIN for this target, the way the SDK hook already
-# does for librocprofiler-sdk-tool.so.
-set_target_properties(
-    ${target}
-    PROPERTIES
-        THEROCK_NO_INSTALL_RPATH ON
-        INSTALL_RPATH "$ORIGIN:$ORIGIN/..:$ORIGIN/../rocm_sysdeps/lib"
 )
 
 if(ENABLE_TESTS)

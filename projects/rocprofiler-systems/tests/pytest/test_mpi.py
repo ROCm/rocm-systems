@@ -6,8 +6,10 @@ MPI tests.
 """
 
 from __future__ import annotations
-import pytest
+
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.mpi]
@@ -96,12 +98,12 @@ class TestMPI(RocprofsysTest):
             "0",
         ]
         BINARY_REWRITE_PASS_REGEX = [
-            r"perfetto-trace-0\.proto",
+            r"perfetto-trace-0\.pftrace",
             r"wall_clock-0\.txt",
             r"Enabling MPI support\.\.\.",
         ]
         BINARY_REWRITE_FAIL_REGEX = [
-            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
+            r"Outputting.*(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+\.(json|txt|proto|pftrace)"
         ]
         ENV = {"ROCPROFSYS_VERBOSE": "1"}
 
@@ -134,7 +136,7 @@ class TestMPI(RocprofsysTest):
             "--min-instructions",
             "0",
         ]
-        BINARY_REWRITE_PASS_REGEX = [r"merged\.proto"]
+        BINARY_REWRITE_PASS_REGEX = [r"merged\.pftrace"]
         BINARY_REWRITE_FAIL_REGEX = ["Script not found", "Failed to execute"]
         ENV = {
             "ROCPROFSYS_VERBOSE": "1",
@@ -154,7 +156,7 @@ class TestMPI(RocprofsysTest):
             binary_rewrite_pass_regex=BINARY_REWRITE_PASS_REGEX,
             binary_rewrite_fail_regex=BINARY_REWRITE_FAIL_REGEX,
         )
-        self.assert_perfetto(result, perfetto_file="merged.proto")
+        self.assert_perfetto(result, perfetto_file="merged.pftrace")
 
 
 class TestMPIP(RocprofsysTest):

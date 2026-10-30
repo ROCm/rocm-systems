@@ -31,10 +31,15 @@ struct ncclStrongStreamCapture {
 static ncclCudaContext* cxtListHead = nullptr;
 static std::mutex cxtListMutex;
 
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
+static int launchOrderImplicitEffective(int launchOrderImplicit) {
+  return launchOrderImplicit == 1 ? 1 : 0;
+}
+
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int launchOrderImplicit, uint64_t commHash) {
   ncclResult_t result = ncclSuccess;
   int hcontext;
   CUCHECK(hipGetDevice(&hcontext));
+  int launchOrderImplicitEnabled = launchOrderImplicitEffective(launchOrderImplicit);
 
   std::lock_guard<std::mutex> lock(cxtListMutex);
   struct ncclCudaContext* p = cxtListHead;
@@ -43,12 +48,22 @@ ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
       p = new ncclCudaContext{};
       p->refCount = 1;
       p->hcontext = hcontext;
+      p->launchOrderImplicitEverEnabled = launchOrderImplicitEnabled;
+      p->launchOrderImplicitEverDisabled = !launchOrderImplicitEnabled;
       p->next = cxtListHead;
       cxtListHead = p;
       NCCLCHECKGOTO(ncclStrongStreamConstruct(&p->launchOrder), result, leave);
       break;
     }
     if (p->hcontext == hcontext) {
+      if (launchOrderImplicitEnabled ? p->launchOrderImplicitEverDisabled : p->launchOrderImplicitEverEnabled) {
+        INFO(NCCL_INIT,
+             "commHash 0x%lx uses config launchOrderImplicit=%d after this CUDA context used the opposite value. "
+             "Only overlap communication with communicators that share the same launchOrderImplicit settings.",
+             (unsigned long)commHash, launchOrderImplicitEnabled ? 1 : 0);
+      }
+      p->launchOrderImplicitEverEnabled |= launchOrderImplicitEnabled;
+      p->launchOrderImplicitEverDisabled |= !launchOrderImplicitEnabled;
       p->refCount += 1;
       break;
     }
@@ -108,6 +123,7 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   CUDACHECK(cudaStreamCreateWithFlags(&ss->liveStream, cudaStreamNonBlocking));
 #if ROCM_VERSION >= 60100
   ss->everCaptured = false;
+  ss->graphOriginCaptured = false;
   ss->captureHead = nullptr;
   CUDACHECK(cudaEventCreateWithFlags(&ss->serialEvent, cudaEventDisableTiming));
 #endif
@@ -351,6 +367,40 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
   return ncclSuccess;
 }
 
+ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source) {
+  cudaStreamCaptureStatus status;
+  cudaGraphNode_t const* nodes = nullptr;
+  size_t count = 0;
+#if CUDART_VERSION >= 13000
+  cudaError_t res = hipStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, nullptr, &count);
+#else
+  cudaError_t res = hipStreamGetCaptureInfo_v2(source, &status, nullptr, nullptr, &nodes, &count);
+#endif
+
+#if CUDART_VERSION >= 12030
+  if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
+    cudaGraphEdgeData const* edges;
+    CUDACHECK(cudaStreamGetCaptureInfo_v3(source, &status, nullptr, nullptr, &nodes, &edges, &count));
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
+                                                     cudaStreamSetCaptureDependencies));
+  }
+#else
+  if (false) {
+  }
+#endif
+  else {
+    CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
+#if CUDART_VERSION >= 13000
+    CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
+                                                     cudaStreamSetCaptureDependencies));
+#else
+    CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
+                                                  cudaStreamSetCaptureDependencies));
+#endif
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e) {
   if (g.graphId == ULLONG_MAX) {
     CUDACHECK(cudaStreamWaitEvent(s, e, 0));
@@ -358,38 +408,7 @@ ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cu
     cudaStream_t tmp;
     CUDACHECK(cudaStreamCreateWithFlags(&tmp, cudaStreamNonBlocking));
     CUDACHECK(cudaStreamWaitEvent(tmp, e, 0));
-
-    cudaStreamCaptureStatus status;
-    cudaGraphNode_t const* nodes;
-    size_t count = 0;
-#if CUDART_VERSION >= 13000
-    cudaError_t res = hipStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, nullptr, &count);
-#else
-    cudaError_t res = hipStreamGetCaptureInfo_v2(tmp, &status, nullptr, nullptr, &nodes, &count);
-#endif
-
-#if CUDART_VERSION >= 12030
-    if (res == cudaErrorLossyQuery) { // CUDA is telling us the dependencies have edge annotations.
-      cudaGraphEdgeData const* edges;
-      CUDACHECK(cudaStreamGetCaptureInfo_v3(tmp, &status, nullptr, nullptr, &nodes, &edges, &count));
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, edges, count,
-                                                       cudaStreamSetCaptureDependencies));
-    }
-#else
-    if (false) {
-    }
-#endif
-    else {
-      CUDACHECK(res /* = cudaStreamGetCaptureInfo_v2(...)*/);
-#if CUDART_VERSION >= 13000
-      CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(s, (cudaGraphNode_t*)nodes, nullptr, count,
-                                                       cudaStreamSetCaptureDependencies));
-#else
-      CUDACHECK(cudaStreamUpdateCaptureDependencies(s, (cudaGraphNode_t*)nodes, count,
-                                                    cudaStreamSetCaptureDependencies));
-#endif
-    }
-
+    NCCLCHECK(ncclStreamAdvanceToStream(s, tmp));
     CUDACHECK(cudaStreamDestroy(tmp));
   }
   return ncclSuccess;

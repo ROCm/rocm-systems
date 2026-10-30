@@ -106,7 +106,14 @@ impl EmulatorBackend for Hotswap {
 
     fn shutdown(&self, _ctx: &SessionContext) {}
 
-    fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+    fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
+        // HotSwap runs the workload on a real GPU through its own
+        // intercept and takes no synthesised configuration, so an extra
+        // field under `emulator` has nothing here to reach. Say so
+        // rather than accept it: `EmulatorDef::extra` exists for
+        // rocjitsu's config passthrough, and the profile parser cannot
+        // tell which backend a key was meant for.
+        def.emulator.reject_extra("HotSwap")?;
         // HotSwap is not bundled or built by mirage; it must be
         // installed separately. Surface actionable guidance now, at
         // profile-creation time, rather than only when a session is
@@ -616,6 +623,32 @@ mod tests {
         assert_eq!(status.location.is_found(), status.location.path().is_some());
     }
 
+    /// `EmulatorDef::extra` is rocjitsu's config passthrough, and the
+    /// profile parser cannot tell which backend a stray key was meant
+    /// for. HotSwap has no configuration to forward it to, so it says
+    /// so at import rather than starting a session with the default the
+    /// key was written to change.
+    #[test]
+    fn an_unknown_field_under_the_emulator_is_refused_at_import() {
+        let profile: ProfileDef = serde_json::from_value(serde_json::json!({
+            "name": "p",
+            "emulator": {
+                "emulator": "hotswap",
+                "topology": "t",
+                "vm": {"gpu": {"num_xcds": 8}},
+                "exec_mode_": "clocked"
+            }
+        }))
+        .unwrap();
+        let message = Hotswap.validate_profile(&profile).unwrap_err();
+        assert!(message.contains("\"vm\""), "{message}");
+        assert!(message.contains("\"exec_mode_\""), "{message}");
+        assert!(message.contains("HotSwap"), "{message}");
+        // And the check comes first, so it is the answer on a machine
+        // with no HotSwap install as much as on one with it.
+        assert!(!message.contains("HOTSWAP_HOME"), "{message}");
+    }
+
     #[test]
     fn search_targets_the_intercept_lib() {
         let s = lib_search();
@@ -700,6 +733,7 @@ mod tests {
                 name: "hotswap-test".to_string(),
                 description: None,
                 emulator: mirage_core::emulator::EmulatorDef {
+                    extra: Default::default(),
                     emulator: "hotswap".to_string(),
                     plugins: Default::default(),
                     exec_mode: mirage_core::emulator::ExecMode::Functional,

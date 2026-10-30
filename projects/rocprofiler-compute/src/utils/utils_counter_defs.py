@@ -8,6 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
+from typing import Any
 
 from utils.logger import console_error
 
@@ -89,6 +90,12 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
             "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
         },
     }
+    if gpu_series == "GFX1250_SERIES":
+        # gfx1250 exposes GUI-active cycles summed across XCD dimensions. Divide
+        # the explicit sum by the visible num_xcd to preserve per-XCD semantics.
+        build_in_vars["cdna"]["GRBM_GUI_ACTIVE_PER_XCD"] = (
+            "GRBM_GUI_ACTIVE_sum / $num_xcd"
+        )
 
     if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
@@ -102,7 +109,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Block remapping — SQC and SP counters belong to the SQ IP block
+# Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
 BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
@@ -113,12 +120,35 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 
 
-def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
-    """Extract HW counter names and ``$variable`` names from formula *text*.
+def metric_value_keys(table: dict[str, Any]) -> set[str]:
+    """Metric keys whose values are columns of a metric_table: the header's
+    keys except metric and expr."""
+    return set(table["header"]) - {"metric", "expr"}
 
-    Returns ``(hw_counters, variables)`` where *variables* are the names
-    without the leading ``$``.  Matches that look like variables are removed
-    from the HW counter set.
+
+def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:
+    """Return the expressions of one metric of a metric_table.
+
+    simple_box tables keep their one expression in expr; other tables use
+    metric_value_keys. Empty and "None" values are left out.
+    """
+    if table.get("cli_style") == "simple_box":
+        keys = {"expr"}
+    else:
+        keys = metric_value_keys(table)
+    return [
+        value
+        for key, value in metric.items()
+        if key in keys and isinstance(value, str) and value and value != "None"
+    ]
+
+
+def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
+    """Extract HW counter names and $variable names from formula text.
+
+    Returns (hw_counters, variables) where variables are the names without
+    the leading $. Matches that look like variables are removed from the HW
+    counter set.
     """
     hw_counter_matches = set(HW_COUNTER_RE.findall(text))
     variable_matches = set(VARIABLE_RE.findall(text))
@@ -128,18 +158,24 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
 
 
 def extract_counters_and_variables(
-    text: str, gpu_series: str
+    text: str, gpu_series: str, include_supported_denom: bool = True
 ) -> tuple[set[str], set[str]]:
     """Return (hw_counters, builtin_vars) referenced by text, with transitive
     resolution. Recognizes both $var and ammolite__var forms.
+
+    Profiling must collect the SUPPORTED_DENOM counters too, because every
+    metric is implicitly divided by its unit denominator. Pass
+    include_supported_denom=False to get only the counters a formula names
+    itself, which is what deciding perfmon bucket membership needs.
     """
     hw, variables = parse_counters_text(text)
     variables.update(AMMOLITE_VAR_RE.findall(text))
 
-    for formula in SUPPORTED_DENOM.values():
-        hw_d, var_d = parse_counters_text(formula)
-        hw.update(hw_d)
-        variables.update(var_d)
+    if include_supported_denom:
+        for formula in SUPPORTED_DENOM.values():
+            hw_d, var_d = parse_counters_text(formula)
+            hw.update(hw_d)
+            variables.update(var_d)
 
     build_in_vars = get_build_in_vars(gpu_series)
     builtin_vars: set[str] = set()
@@ -159,7 +195,7 @@ def extract_counters_and_variables(
 
 
 def counter_to_block(counter: str) -> str:
-    """Map a counter name to its IP block, applying :data:`BLOCK_REMAP`."""
+    """Map a counter name to its IP block, applying the BLOCK_REMAP table."""
     if counter.startswith("GC_CANE_"):
         return "GC_CANE"
     if counter.startswith("GC_EA_SE_"):

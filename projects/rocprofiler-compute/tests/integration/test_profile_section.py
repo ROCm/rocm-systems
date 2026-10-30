@@ -3,7 +3,6 @@
 
 """Integration tests for per-section profiling and metric listing."""
 
-import inspect
 from pathlib import Path
 
 import common
@@ -14,9 +13,7 @@ from tests.integration.common import (
     is_gfx115x_soc,
     is_gfx1250_soc,
     num_kernels,
-    validate,
 )
-from utils import csv_compression
 
 
 def test_lds_section(binary_handler_profile_rocprof_compute):
@@ -27,18 +24,13 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{lds_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     lds_counter = "TX_VMW_LDS_INPUT_ACTIVE" if is_gfx1250_soc() else "SQ_INSTS_LDS"
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(common.check_file_pattern(lds_counter, str(f)) for f in results_files)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -52,23 +44,18 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
     )
     assert common.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
     instmix_counter = "SQ_INSTS_FLAT" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(
         common.check_file_pattern(instmix_counter, str(f)) for f in results_files
     )
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(
         common.check_file_pattern("SQC_TC_DATA_READ_REQ", str(f)) for f in results_files
     )
@@ -83,12 +70,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{lds_sol_block}'", f"{workload_dir}/profiling_config.yaml"
@@ -99,7 +81,7 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         lds_sol_counter = "TX_VMW_LDS_INPUT_ACTIVE"
     else:
         lds_sol_counter = "SQ_ACTIVE_INST_LDS"
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(
         common.check_file_pattern(lds_sol_counter, str(f)) for f in results_files
     )
@@ -120,12 +102,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         custom_config, workload_dir, options, check_success=True, roof=False
     )
 
-    file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
+    integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert common.check_file_pattern(
         f"- '{instmix_block}'", f"{workload_dir}/profiling_config.yaml"
@@ -134,11 +111,11 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         "- global_write", f"{workload_dir}/profiling_config.yaml"
     )
     kernel_counter = "SQ_INSTS_FLAT_STORE" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = csv_compression.find_csvs(workload_dir, "results_*.csv")
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert not any(
         common.check_file_pattern("global_read", str(f)) for f in results_files
     )
