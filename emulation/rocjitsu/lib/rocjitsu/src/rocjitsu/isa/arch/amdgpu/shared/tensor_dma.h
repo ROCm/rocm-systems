@@ -310,11 +310,12 @@ private:
 
 /// @brief Count the elements materialized by a tensor DMA instruction.
 /// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
-/// every iteration. Arithmetic overflow and empty dense tile dimensions return
-/// std::nullopt.
+/// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
+/// higher tile dimensions (CDNA5 ISA, Table 80). Arithmetic overflow and a zero
+/// higher dimension below the rank return std::nullopt.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
-  if (layout.rank() == 0)
+  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
     return uint64_t{0};
   if (desc.gather)
     return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
@@ -345,10 +346,7 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
-    if (desc.tile_dims[0] == 0) [[unlikely]]
-      return util::Result::failure();
-    if (desc.valid_indices == 0) [[unlikely]]
-      return util::Result::failure();
+    // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
     if (desc.valid_indices > max_indices) [[unlikely]]
       return util::Result::failure();
