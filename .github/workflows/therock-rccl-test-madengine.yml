@@ -151,11 +151,19 @@ jobs:
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ inputs.candidate_sha }}
-          sparse-checkout: |
-            projects/rccl/ci/scripts
-            projects/rccl/tuner/rccl_tuner_gfx950.csv
+          sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
+
+      # Driver code must come from the workflow ref: an intentionally reused
+      # older artifact SHA may predate candidate_provenance.py and its CLI.
+      # Only the version-coupled tuner input comes from the candidate source.
+      - name: Checkout candidate tuner config
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          sparse-checkout: projects/rccl/tuner/rccl_tuner_gfx950.csv
+          sparse-checkout-cone-mode: false
+          path: candidate-source
 
       - name: Validate arch
         run: |
@@ -303,7 +311,7 @@ jobs:
             --candidate-sha "${CANDIDATE_SHA}" \
             --artifact-provenance "${WORK_DIR}/candidate-artifact-run.json" \
             --candidate-tuner-config \
-              "rocm-systems/projects/rccl/tuner/rccl_tuner_gfx950.csv" \
+              "candidate-source/projects/rccl/tuner/rccl_tuner_gfx950.csv" \
             "${NOTIFY_ARGS[@]}"
 
       # Cancelling a run does not signal the driver: the runner kills this
@@ -357,7 +365,7 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/manifest.json
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.out
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
-            ${{ env.WORK_DIR }}/ab/*/slurm_output/run_logs/*/*.log
+            ${{ env.WORK_DIR }}/ab/*/verified_run_logs/**/*.log
           retention-days: 30
 
       # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:

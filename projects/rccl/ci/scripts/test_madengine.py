@@ -35,10 +35,13 @@ import json
 import logging
 import math
 import os
+import pwd
 import re
+import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -736,6 +739,7 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
 
 
 CANDIDATE_TUNER_PATH = "/opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv"
+BIND_MOUNT_TUNER_PATH = "/tmp/rccl-candidate-tuner-gfx950.csv"
 FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 CANDIDATE_PROVENANCE = "candidate-provenance.json"
 
@@ -821,7 +825,37 @@ def write_candidate_provenance(work_dir: Path, manifest: dict) -> None:
 _LOG_SPAM_RE = re.compile(rb"NCCL WARN Please note that (\w+) is deprecated")
 
 
-def squash_log_spam(run_dir: Path) -> int:
+def _trusted_server_log_dir(run_dir: Path, slurm_job_id: str) -> Path | None:
+    """The launcher's exact job directory, never a symlink or wildcard match."""
+    if not re.fullmatch(r"[1-9][0-9]*", slurm_job_id):
+        return None
+    run_logs = run_dir / "slurm_output" / "run_logs"
+    if run_logs.is_symlink() or not run_logs.is_dir():
+        return None
+    private_roots = sorted(
+        path for path in run_logs.iterdir()
+        if re.fullmatch(r"run-[0-9a-f]{32}", path.name)
+        and path.is_dir() and not path.is_symlink()
+    )
+    # Unit/local fixtures from before the private mount root use run_logs
+    # directly. CI always has exactly one random root created by the runner.
+    if len(private_roots) > 1:
+        return None
+    mount_root = private_roots[0] if private_roots else run_logs
+    job_logs = mount_root / slurm_job_id
+    if job_logs.is_symlink() or not job_logs.is_dir():
+        return None
+    if private_roots:
+        try:
+            nobody_uid = pwd.getpwnam("nobody").pw_uid
+        except KeyError:
+            return None
+        if job_logs.stat(follow_symlinks=False).st_uid != nobody_uid:
+            return None
+    return job_logs
+
+
+def squash_log_spam(run_dir: Path, slurm_job_id: str = "") -> int:
     """Drop the repeats of _LOG_SPAM_RE lines from one phase's logs, in place.
 
     The first occurrence of each stays where it was, and one line at the end
@@ -832,15 +866,33 @@ def squash_log_spam(run_dir: Path) -> int:
     if not log_dir.is_dir():
         return 0
     saved = 0
-    for path in sorted(
-        p for p in log_dir.rglob("*")
-        if p.suffix in (".out", ".err", ".log") and p.is_file()
-    ):
+    paths = []
+    for path in log_dir.rglob("*"):
+        if path.suffix not in (".out", ".err", ".log"):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            under_run_logs = path.is_relative_to(log_dir / "run_logs")
+        except AttributeError:  # pragma: no cover - Python < 3.9 compatibility
+            under_run_logs = (log_dir / "run_logs") in path.parents
+        # Container-owned shared logs are copied with O_NOFOLLOW first; only
+        # the runner-owned snapshot is rewritten.
+        if under_run_logs:
+            continue
+        paths.append(path)
+    verified = run_dir / "verified_run_logs"
+    if verified.is_dir() and not verified.is_symlink():
+        paths.extend(
+            path for path in verified.rglob("*")
+            if path.suffix == ".log" and path.is_file() and not path.is_symlink()
+        )
+    for path in sorted(paths):
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
         try:
             before = path.stat().st_size
-            with path.open("rb") as src, tmp.open("wb") as dst:
+            with path.open("rb") as src, tmp.open("xb") as dst:
                 for line in src:
                     m = _LOG_SPAM_RE.search(line)
                     if m:
@@ -867,7 +919,42 @@ def squash_log_spam(run_dir: Path) -> int:
     return saved
 
 
-def rccl_banner_logs(work_dir: Path) -> list[Path]:
+def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> Path | None:
+    """Copy regular logs from the exact Slurm job into a runner-owned artifact dir."""
+    source = _trusted_server_log_dir(run_dir, slurm_job_id)
+    if source is None:
+        return None
+    destination = run_dir / "verified_run_logs"
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(mode=0o700)
+    for path in sorted(source.rglob("*.log")):
+        try:
+            src_fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
+            continue
+        try:
+            if not stat.S_ISREG(os.fstat(src_fd).st_mode):
+                continue
+            target = destination / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            dst_fd = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            try:
+                with os.fdopen(src_fd, "rb", closefd=False) as src, \
+                        os.fdopen(dst_fd, "wb", closefd=False) as dst:
+                    shutil.copyfileobj(src, dst)
+            finally:
+                os.close(dst_fd)
+        finally:
+            os.close(src_fd)
+    return destination
+
+
+def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
     """One log per node of a phase, the one its RCCL version banner lands in.
 
     madengine's per-node logs, unless the phase has sglang server logs: that
@@ -877,28 +964,57 @@ def rccl_banner_logs(work_dir: Path) -> list[Path]:
     log_dir = work_dir / "slurm_output"
     if not log_dir.is_dir():
         return []
+    snapshot = work_dir / "verified_run_logs"
+    exact_dir = _trusted_server_log_dir(work_dir, slurm_job_id)
+    if (
+        slurm_job_id
+        and snapshot.is_dir()
+        and not snapshot.is_symlink()
+    ):
+        candidates = snapshot.rglob("*_NODE*.log")
+    elif exact_dir is not None:
+        candidates = exact_dir.glob("*_NODE*.log")
+    elif slurm_job_id:
+        candidates = ()
+    else:
+        # Local/unit callers without an allocation ID retain the old discovery
+        # behavior, but symlinks are never trusted.
+        candidates = log_dir.glob("run_logs/*/*_NODE*.log")
     server_logs = sorted(
-        p for p in log_dir.glob("run_logs/*/*_NODE*.log")
+        p for p in candidates
         if p.name.startswith(("prefill_", "decode_"))
+        and p.is_file() and not p.is_symlink()
     )
-    return server_logs or sorted(log_dir.glob("*node_*.out"))
+    if server_logs:
+        return server_logs
+    node_out_pattern = (
+        f"*_{slurm_job_id}_node_*.out" if re.fullmatch(r"[1-9][0-9]*", slurm_job_id)
+        else "*node_*.out" if not slurm_job_id
+        else ""
+    )
+    if not node_out_pattern:
+        return []
+    return sorted(
+        p for p in log_dir.glob(node_out_pattern)
+        if p.is_file() and not p.is_symlink()
+    )
 
 
-def runtime_rccl_versions(work_dir: Path) -> list[str]:
+def runtime_rccl_versions(work_dir: Path, slurm_job_id: str = "") -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
     versions: list[str] = []
-    for log_file in rccl_banner_logs(work_dir):
+    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
     return versions
 
 
-def runtime_tuner_sources(work_dir: Path) -> list[str]:
+def runtime_tuner_sources(work_dir: Path, slurm_job_id: str = "") -> list[str]:
     """Distinct CSV tuner sources reported by RCCL in this phase."""
     sources: list[str] = []
     pattern = re.compile(r"TUNER/CsvTuner: Loaded \d+ tuning configurations from (\S+)")
-    for log_file in rccl_banner_logs(work_dir):
+    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
         for source in pattern.findall(log_file.read_text(errors="replace")):
             if source not in sources:
                 sources.append(source)
@@ -909,9 +1025,10 @@ def verify_candidate_tuner(
     work_dir: Path,
     nodes: int,
     expected_source: str = CANDIDATE_TUNER_PATH,
+    slurm_job_id: str = "",
 ) -> tuple[bool, str]:
     """Require every candidate node to report only the SHA-pinned candidate CSV."""
-    node_logs = rccl_banner_logs(work_dir)
+    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
     if not node_logs:
         return False, "No node logs found — cannot verify tuner source"
     by_node: dict[int, list[str]] = {}
@@ -960,7 +1077,7 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    node_logs = rccl_banner_logs(work_dir)
+    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
     logged = {
@@ -1696,6 +1813,7 @@ def generate_manifest(
     nodes: int,
     work_dir: Path,
     rccl_lib: Path | None = None,
+    candidate_tuner_config: Path | None = None,
     run_dir: Path | None = None,
     pull_only: bool = False,
     dockerfile_name: str = OVERLAY_DOCKERFILE,
@@ -1792,10 +1910,16 @@ def generate_manifest(
         # candidate is verified by, to /run_logs/$SLURM_JOB_ID. Both phases
         # share one job id, so each gets its own directory. It must be shared
         # storage and world-writable: Docker runs as root, which a
-        # root-squashed NFS maps to nobody.
-        run_logs = (run_dir or work_dir) / "slurm_output" / "run_logs"
-        run_logs.mkdir(parents=True, exist_ok=True)
-        run_logs.chmod(0o777)
+        # root-squashed NFS maps to nobody. Keep the runner-owned parent
+        # unlistable, then mount a random sticky child: host root can traverse
+        # 0711, container nobody can write the child, and another cluster user
+        # cannot discover/pre-create its $SLURM_JOB_ID directory.
+        run_logs_parent = (run_dir or work_dir) / "slurm_output" / "run_logs"
+        run_logs_parent.mkdir(parents=True, exist_ok=True)
+        run_logs_parent.chmod(0o711)
+        run_logs = run_logs_parent / f"run-{secrets.token_hex(16)}"
+        run_logs.mkdir()
+        run_logs.chmod(0o1777)
         docker_run_opts += f" -v {run_logs}:/run_logs"
         # Read-only: run.sh downloads the weights into MODEL_PATH when they
         # look incomplete, and that must fail rather than fill shared storage.
@@ -1817,7 +1941,12 @@ def generate_manifest(
                 + workload_config["base_image"] + ", and Docker would silently "
                 "mount empty directories over nothing. Build the overlay."
             )
+        if candidate_tuner_config is None or not candidate_tuner_config.is_file():
+            raise RuntimeError(
+                "--skip-overlay-build requires the exact candidate tuner config"
+            )
         host_so = str(rccl_lib.resolve())
+        host_tuner = str(candidate_tuner_config.resolve())
         sdk_lib = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"
         sdk_dev = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"
         docker_run_opts += (
@@ -1830,10 +1959,24 @@ def generate_manifest(
         if not kpack_dir.is_dir():
             kpack_dir = rccl_lib.resolve().parent / ".kpack"
         if kpack_dir.is_dir():
-            sdk_kpack = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"
+            sdk_kpack_lib = (
+                "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"
+            )
+            sdk_kpack_dev = (
+                "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/.kpack"
+            )
             for kp in kpack_dir.glob("rccl*.kpack"):
-                docker_run_opts += f" -v {kp}:{sdk_kpack}/{kp.name}:ro"
+                docker_run_opts += (
+                    f" -v {kp}:{sdk_kpack_lib}/{kp.name}:ro"
+                    f" -v {kp}:{sdk_kpack_dev}/{kp.name}:ro"
+                )
             log.info("Bind-mounting RCCL kpack from %s", kpack_dir)
+        docker_run_opts += f" -v {host_tuner}:{BIND_MOUNT_TUNER_PATH}:ro"
+        docker_env_vars.update({
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET,TUNING",
+            "NCCL_TUNER_CONFIG_FILE": BIND_MOUNT_TUNER_PATH,
+        })
         log.info("Bind-mounting CI-built RCCL: %s", host_so)
 
     slurm_config = {
@@ -1965,7 +2108,14 @@ def generate_manifest(
     }
 
     manifest_path = (run_dir or work_dir) / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2))
+    manifest_fd = os.open(
+        manifest_path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        0o600,
+    )
+    os.fchmod(manifest_fd, 0o600)
+    with os.fdopen(manifest_fd, "w") as stream:
+        json.dump(manifest, stream, indent=2)
     log.info("Manifest written to: %s", manifest_path)
     return manifest_path
 
@@ -2039,7 +2189,7 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
     for model in out.get("built_models", {}).values():
         if "additional_docker_run_options" in model:
             model["additional_docker_run_options"] = re.sub(
-                r"-v \S+/slurm_output/run_logs:/run_logs",
+                r"-v \S+/slurm_output/run_logs(?:/run-[0-9a-f]{32})?:/run_logs",
                 "-v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs",
                 model["additional_docker_run_options"],
             )
@@ -2154,7 +2304,7 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 
 - The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
   of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
-- An sglang-disagg run also needs `mkdir -m 0777 -p slurm_output/run_logs` in
+- An sglang-disagg run also needs `mkdir -m 1777 -p slurm_output/run_logs` in
   each copy before `salloc`, and the weights under `/models` as the manifest
   mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
@@ -2339,6 +2489,11 @@ def verify_image_identities(
         return False, f"candidate image mismatch across nodes: {rows}", ""
     image_id = ids.pop()
     return True, f"candidate image verified on {nodes} node(s): {image_id}", image_id
+
+
+def candidate_image_verification_target(overlay_image: str, skip_overlay_build: bool) -> str:
+    """Image to inspect, or empty when exact candidate assets are bind-mounted."""
+    return "" if skip_overlay_build else overlay_image
 
 
 def _raise_on_term(signum, frame):  # noqa: ARG001 - signal handler signature
@@ -3311,6 +3466,11 @@ def main() -> None:
             "policy": "stock/previous-good image, independent of candidate develop tip",
         },
     })
+    if args.skip_overlay_build:
+        candidate_manifest["candidate_image"]["verification"] = (
+            "not applicable: exact candidate assets are read-only bind mounts"
+        )
+        candidate_manifest["tuner"]["expected_runtime_source"] = BIND_MOUNT_TUNER_PATH
     write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 4: Generate one manifest per A/B phase
@@ -3331,6 +3491,11 @@ def main() -> None:
             # run the candidate; the baseline must keep the image's own copy.
             rccl_lib=(
                 rccl_lib if args.skip_overlay_build and phase == CANDIDATE else None
+            ),
+            candidate_tuner_config=(
+                args.candidate_tuner_config
+                if args.skip_overlay_build and phase == CANDIDATE
+                else None
             ),
             run_dir=run_dir,
             pull_only=pull_only,
@@ -3376,14 +3541,25 @@ def main() -> None:
             ([] if args.skip_overlay_build else [overlay_image])
             + ([] if baseline_pull_only else [baseline_image])
         ),
-        candidate_image=overlay_image,
+        # In skip mode the candidate assets are read-only bind mounts over a
+        # helper image, so that image neither contains nor identifies them.
+        candidate_image=candidate_image_verification_target(
+            overlay_image, args.skip_overlay_build
+        ),
         candidate_tuner_sha256=candidate_manifest["tuner"]["source_sha256"],
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
+    # Non-empty invalid value makes server-log selection fail closed if the
+    # allocation did not record its Slurm ID; an empty value enables only the
+    # local/unit-test discovery fallback.
+    log_job_id = allocation["job_id"] or "invalid"
 
     # Step 5a: Shrink the node logs before anything reads or uploads them.
     for phase, run_dir in phases:
-        saved = squash_log_spam(run_dir)
+        # Snapshot container-owned logs without following links. Verification,
+        # squashing and upload all consume this runner-owned copy.
+        snapshot_server_logs(run_dir, log_job_id)
+        saved = squash_log_spam(run_dir, log_job_id)
         if saved:
             log.info("%s: dropped %.1f MB of repeated RCCL warnings from the node logs",
                      phase, saved / 1e6)
@@ -3401,6 +3577,7 @@ def main() -> None:
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
+            slurm_job_id=log_job_id,
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -3409,10 +3586,17 @@ def main() -> None:
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
-    tuner_sources = runtime_tuner_sources(phase_dirs[CANDIDATE])
-    if family == "sglang-disagg":
+    expected_tuner_source = (
+        BIND_MOUNT_TUNER_PATH if args.skip_overlay_build else CANDIDATE_TUNER_PATH
+    )
+    tuner_sources = runtime_tuner_sources(
+        phase_dirs[CANDIDATE], log_job_id
+    )
+    if family == "sglang-disagg" or args.skip_overlay_build:
         tuner_ok, tuner_msg = verify_candidate_tuner(
             phase_dirs[CANDIDATE], args.nodes,
+            expected_source=expected_tuner_source,
+            slurm_job_id=log_job_id,
         )
         if tuner_ok:
             log.info("RCCL tuner verification: %s", tuner_msg)
@@ -3426,11 +3610,17 @@ def main() -> None:
         "verification": allocation["candidate_image_message"],
     })
     candidate_manifest["runtime"] = {
-        "rccl_versions": runtime_rccl_versions(phase_dirs[CANDIDATE]),
-        "baseline_rccl_versions": runtime_rccl_versions(phase_dirs[BASELINE]),
+        "rccl_versions": runtime_rccl_versions(
+            phase_dirs[CANDIDATE], log_job_id
+        ),
+        "baseline_rccl_versions": runtime_rccl_versions(
+            phase_dirs[BASELINE], log_job_id
+        ),
         "tuner_sources": tuner_sources,
         "tuner_expected": (
-            CANDIDATE_TUNER_PATH if family == "sglang-disagg" else "not asserted"
+            expected_tuner_source
+            if family == "sglang-disagg" or args.skip_overlay_build
+            else "not asserted"
         ),
     }
     write_candidate_provenance(work_dir, candidate_manifest)
@@ -3617,7 +3807,7 @@ def main() -> None:
         nodelist=allocation["nodelist"],
         job_id=allocation["job_id"],
         phase_rccl={
-            phase: ", ".join(runtime_rccl_versions(run_dir))
+            phase: ", ".join(runtime_rccl_versions(run_dir, log_job_id))
             for phase, run_dir in phases
         },
         unit=workload_config.get("metric_unit", "tok/s/GPU"),

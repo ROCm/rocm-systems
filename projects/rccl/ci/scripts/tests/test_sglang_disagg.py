@@ -93,9 +93,23 @@ class GenerateManifestTest(TempWork):
         for phase in (tm.BASELINE, tm.CANDIDATE):
             opts = self.manifest(phase)["built_models"]["overlay"][
                 "additional_docker_run_options"]
-            run_logs = self.work / "ab" / phase / "slurm_output" / "run_logs"
-            self.assertIn(f"-v {run_logs}:/run_logs", opts)
-            self.assertEqual(stat.S_IMODE(run_logs.stat().st_mode), 0o777)
+            match = re.search(r"-v (\S+/run_logs/run-[0-9a-f]{32}):/run_logs", opts)
+            self.assertIsNotNone(match, opts)
+            run_logs = Path(match.group(1))
+            self.assertEqual(stat.S_IMODE(run_logs.parent.stat().st_mode), 0o711)
+            self.assertEqual(stat.S_IMODE(run_logs.stat().st_mode), 0o1777)
+            self.assertEqual(
+                stat.S_IMODE(
+                    (self.work / "ab" / phase / "manifest.json").stat().st_mode
+                ),
+                0o600,
+            )
+            # A directory planted by the runner/another normal user is not the
+            # root-squashed container's nobody-owned job directory.
+            (run_logs / "42").mkdir()
+            self.assertIsNone(
+                tm._trusted_server_log_dir(self.work / "ab" / phase, "42")
+            )
             mounts[phase] = run_logs
         self.assertNotEqual(mounts[tm.BASELINE], mounts[tm.CANDIDATE])
 
@@ -177,17 +191,56 @@ class BannerLogsTest(unittest.TestCase):
                              ["decode_NODE2.log", "decode_NODE3.log",
                               "prefill_NODE0.log", "prefill_NODE1.log"])
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertTrue(ok, msg)
             (logs / "decode_NODE3.log").write_text("died before init\n")
             ok, _ = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
             (logs / "decode_NODE3.log").unlink()
             ok, msg = tm.verify_rccl_replacement(
-                run_dir, {"version": "2.32.3-develop:2b88119"}, 4)
+                run_dir, {"version": "2.32.3-develop:2b88119"}, 4, "79405")
             self.assertFalse(ok)
             self.assertIn("node(s) 3 of 4", msg)
+
+    def test_only_exact_job_regular_logs_are_trusted_and_snapshotted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            root = run_dir / "slurm_output" / "run_logs"
+            exact = root / "42"
+            rogue = root / "99"
+            exact.mkdir(parents=True)
+            rogue.mkdir()
+            banner = "NCCL INFO RCCL version : 2.32.3-develop:2b88119\n"
+            for node in range(4):
+                (exact / f"prefill_NODE{node}.log").write_text(banner)
+                (rogue / f"prefill_NODE{node}.log").write_text("forged " + banner)
+            (exact / "decode_NODE9.log").symlink_to(rogue / "prefill_NODE0.log")
+
+            logs = tm.rccl_banner_logs(run_dir, "42")
+            self.assertEqual(len(logs), 4)
+            self.assertTrue(all(path.parent == exact for path in logs))
+            snapshot = tm.snapshot_server_logs(run_dir, "42")
+            self.assertIsNotNone(snapshot)
+            copied = sorted(snapshot.rglob("*.log"))
+            self.assertEqual(len(copied), 4)
+            self.assertTrue(all(not path.is_symlink() for path in copied))
+            (exact / "prefill_NODE0.log").write_text("changed after snapshot\n")
+            verified = tm.rccl_banner_logs(run_dir, "42")
+            self.assertTrue(all(path.is_relative_to(snapshot) for path in verified))
+            self.assertNotIn("changed after snapshot", verified[0].read_text())
+
+    def test_node_out_fallback_is_scoped_to_exact_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            output = run_dir / "slurm_output"
+            output.mkdir()
+            (output / "madengine-x_42_node_0.out").write_text("exact\n")
+            (output / "madengine-x_99_node_0.out").write_text("other job\n")
+            self.assertEqual(
+                [p.name for p in tm.rccl_banner_logs(run_dir, "42")],
+                ["madengine-x_42_node_0.out"],
+            )
 
 
 class AllocationScriptTest(TempWork):
