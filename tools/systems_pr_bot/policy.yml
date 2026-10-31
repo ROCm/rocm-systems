@@ -151,6 +151,9 @@ checks:
   # (Do NOT include therock-pr-bot here to avoid circular dependency.)
   required_check_runs:
     - pre-commit
+    - pre-commit / runtimes
+    - pre-commit / cuid
+    - pre-commit / rocprofiler-compute
 
   failure_comments:
     pre-commit:
