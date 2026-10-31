@@ -2865,8 +2865,19 @@ int SimulatedKfd::get_available_memory_ioctl(KfdProcess &proc, void *arg) {
     for (auto &[handle, alloc] : proc.allocations_)
       allocated += alloc.size;
   }
-  constexpr uint64_t kVramBytes = 64ULL << 30;
-  args->available = kVramBytes - std::min(allocated, kVramBytes);
+  // Report against the configured VRAM size, as the VFIO guest path already
+  // does. A fixed size here contradicts the total this same device advertises
+  // through sysfs, and callers that compare the two -- vLLM refuses to start
+  // when free < gpu_memory_utilization * total -- see a device that looks
+  // mostly full before anything has allocated on it.
+  constexpr uint64_t kDefaultVramBytes = 64ULL << 30;
+  uint64_t vram_bytes = kDefaultVramBytes;
+  for (const auto &info : gpu_infos_)
+    if (info.gpu_id == args->gpu_id && info.local_mem_size) {
+      vram_bytes = info.local_mem_size;
+      break;
+    }
+  args->available = vram_bytes - std::min(allocated, vram_bytes);
   return 0;
 }
 
