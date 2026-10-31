@@ -46,9 +46,10 @@ constexpr uint32_t kLdsBytes = 64 * 1024;
 uint32_t seed_word(uint32_t index) { return index * 0x9E3779B9u ^ 0x5A5A0F0Fu; }
 
 /// @brief Lane addresses: distinct and permuted, all lanes equal, partly past
-/// the allocation so both paths take their bounds handling, or consecutive
-/// lanes S bytes apart, across the wave or within permuted 16-lane groups, so
-/// loads of S bytes per lane read their groups in place.
+/// the allocation so both paths take their bounds handling, consecutive lanes
+/// S bytes apart, across the wave or within permuted 16-lane groups, so loads
+/// of S bytes per lane read their groups in place, or near 2^32 so that adding
+/// the instruction offset wraps.
 enum class Addresses {
   Permuted,
   Broadcast,
@@ -58,12 +59,13 @@ enum class Addresses {
   Contiguous16,
   Segments4,
   Segments8,
-  Segments16
+  Segments16,
+  Wrapping
 };
 constexpr Addresses kAllAddresses[] = {
-    Addresses::Permuted,    Addresses::Broadcast,   Addresses::PastEnd,
-    Addresses::Contiguous4, Addresses::Contiguous8, Addresses::Contiguous16,
-    Addresses::Segments4,   Addresses::Segments8,   Addresses::Segments16};
+    Addresses::Permuted,    Addresses::Broadcast,    Addresses::PastEnd,   Addresses::Contiguous4,
+    Addresses::Contiguous8, Addresses::Contiguous16, Addresses::Segments4, Addresses::Segments8,
+    Addresses::Segments16,  Addresses::Wrapping};
 
 uint32_t lane_address(Addresses addresses, uint32_t lane) {
   switch (addresses) {
@@ -85,6 +87,8 @@ uint32_t lane_address(Addresses addresses, uint32_t lane) {
     return 64 + ((lane / 16) * 3 % 4) * 1024 + (lane % 16) * 8;
   case Addresses::Segments16:
     return 64 + ((lane / 16) * 3 % 4) * 1024 + (lane % 16) * 16;
+  case Addresses::Wrapping: // address + offset wraps 2^32 into the LDS for every lane
+    return 0xFFFF'FF00u + lane * 16;
   }
   return 0;
 }
@@ -164,13 +168,17 @@ template <typename Build>
 std::pair<unsigned, unsigned> compare_every_ds_opcode(Target target, Build build) {
   auto decoder = Decoder::create(target.arch);
   unsigned compared = 0, inline_completions = 0;
-  // Ordinary operands, then data and destination registers at the end of the
-  // allocation, so multi-register forms reach past it.
+  // Ordinary operands; data and destination registers at the end of the
+  // allocation, so multi-register forms reach past it; a destination that is
+  // the address register itself, so a two-address load must read both accesses
+  // before writing either back, with only a two-address store's second payload
+  // at the end of the allocation.
   struct Operands {
     uint8_t data0, data1, vdst;
   };
   for (uint16_t op = 0; op < 256; ++op)
-    for (const Operands operands : {Operands{1, 2, 8}, Operands{255, 255, 255}}) {
+    for (const Operands operands :
+         {Operands{1, 2, 8}, Operands{255, 255, 255}, Operands{3, 255, 0}}) {
       const std::array<uint32_t, 2> words =
           build(op, operands.data0, operands.data1, operands.vdst);
       DecodeResult decoded = decoder->decode(words.data());

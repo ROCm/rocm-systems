@@ -9348,6 +9348,44 @@ class CodeGenerator:
             '    return;',
         ]
 
+    def _ds_inline_request2(
+        self, sem: InstructionSemantics, is_load: bool, stride_scale: str
+    ) -> list[str]:
+        """Complete a two-address DS load or store without building state.
+
+        The two accesses share the address lanes; the offsets are pre-scaled
+        exactly as the state-based body below scales them, and the registers
+        use the same expressions, so both paths address the same bytes.
+        """
+        esz = sem.elem_size
+        fields = [
+            f"  .addr_vgpr = {self._vgpr_base_expr('addr', use_acc=False)},",
+            f'  .offset = static_cast<uint32_t>(inst_.offset0) * {stride_scale},',
+            f'  .offset2 = static_cast<uint32_t>(inst_.offset1) * {stride_scale},',
+        ]
+        if is_load:
+            fields.append(f"  .dst_vgpr = {self._vgpr_base_expr('vdst')},")
+            entry = (
+                'amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat'
+                f'{{.elem_size = {esz}, .num_elems = 1}}>'
+            )
+        else:
+            fields[3:3] = [
+                f"  .data_vgpr = {self._vgpr_base_expr('data0')},",
+                f"  .data2_vgpr = {self._vgpr_base_expr('data1')},",
+            ]
+            entry = (
+                'amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat'
+                f'{{.elem_size = {esz}, .num_elems = 1}}>'
+            )
+        fields += [f'  .elem_size = {esz},', '  .num_elems = 1,']
+        return [
+            f'  if ({entry}(*this, amdgpu::LdsAccessRequest{{',
+            *('  ' + f for f in fields),
+            '      }, wf))',
+            '    return;',
+        ]
+
     def _gen_ds_append_consume(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
@@ -9978,6 +10016,7 @@ class CodeGenerator:
         else:
             stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request2(sem, is_load=True, stride_scale=stride_scale))
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
@@ -10047,6 +10086,7 @@ class CodeGenerator:
         else:
             stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request2(sem, is_load=False, stride_scale=stride_scale))
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(

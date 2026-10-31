@@ -24,7 +24,9 @@ class Wavefront;
 struct LdsAccessRequest {
   uint32_t addr_vgpr = 0;   ///< Physical address VGPR.
   uint32_t offset = 0;      ///< Byte offset, (offset1 << 8) | offset0.
+  uint32_t offset2 = 0;     ///< Two-address forms: the second access's byte offset.
   uint32_t data_vgpr = 0;   ///< Stores: first payload VGPR.
+  uint32_t data2_vgpr = 0;  ///< Two-address stores: the second access's first payload VGPR.
   uint32_t dst_vgpr = 0;    ///< Loads: first destination VGPR.
   uint8_t elem_size = 0;    ///< 1, 2, 4 or 8 bytes.
   uint8_t num_elems = 0;    ///< Elements per lane.
@@ -66,15 +68,33 @@ public:
   template <lds_store::StoreFormat F>
   static bool store(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 
+  /// @brief Two-address load (ds_read2* / ds_load_2addr*) of format @p F: two
+  /// loads from the same address lanes at @p req.offset and @p req.offset2,
+  /// into @p req.dst_vgpr and the registers right after it.
+  template <lds_writeback::DstFormat F>
+  static bool load2(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
+
+  /// @brief Two-address store (ds_write2* / ds_store_2addr*) of format @p F:
+  /// @p req.data_vgpr at @p req.offset for every lane, then @p req.data2_vgpr
+  /// at @p req.offset2, so the second wins where they overlap.
+  template <lds_store::StoreFormat F>
+  static bool store2(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
+
   /// @brief Every other DS form: run the routed path's access code on @p d.
   static bool complete(const Instruction &inst, VectorMemState &d, Wavefront &wf);
 
 private:
-  /// Steps 1-6 of a plain load, in lds_inline_access_steps.h. It stops before
-  /// the writeback, with its data read through @p load.group and its
-  /// destination in @p load.
+  /// Steps 1-6 of a plain load, or both loads of a two-address one, in
+  /// lds_inline_access_steps.h. It stops before the writeback, with access a's
+  /// data read through @p load[a].group (staging: @p staging + a * 64 *
+  /// kMaxLaneBytes) and its destination in @p load[a].
+  template <bool Dual>
   static bool read(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf,
-                   uint8_t *staging, LdsStagedLoad &load);
+                   uint8_t *staging, LdsStagedLoad *load);
+
+  /// The plain or two-address store, in lds_inline_access_steps.h.
+  template <lds_store::StoreFormat F, bool Dual>
+  static bool write(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf);
 };
 
 } // namespace amdgpu
