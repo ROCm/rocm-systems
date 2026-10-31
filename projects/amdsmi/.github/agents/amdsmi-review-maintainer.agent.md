@@ -474,14 +474,19 @@ Prefer running a check to asserting it.
   library `amdsmi_wrapper` finds (often a bundled or installed one), so run
   each pass with `AMDSMI_LIB_OVERRIDE=<that build>/src/libamd_smi.so` and check
   `amdsmi_wrapper._loaded_lib_path`. If the reverse patch does not apply,
-  reverse only the hunk under test.
+  reverse only the hunk under test. If the tree has uncommitted changes, say
+  this check was not run. Never run tests with `sudo` or as root; for root-only
+  tests (C++ `*ReadWrite*`, Python `amdsmi_set_*`/`amdsmi_reset_*`), list them
+  under **Run as root (user)** with the exact `sudo` command for each run.
 
   ```bash
-  git worktree add --detach "${TMPDIR:-/tmp}/amdsmi-agent-mutation" <head-sha>
-  cd "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
+  git worktree prune
+  WT=$(mktemp -d "${TMPDIR:-/tmp}/amdsmi-agent-mutation-XXXX")
+  git worktree add --detach "$WT" <head-sha>
+  cd "$WT"
   git diff origin/develop...<head-sha> -- projects/amdsmi ':!projects/amdsmi/tests' | git apply -R
   # after both runs:
-  git worktree remove --force "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
+  git worktree remove --force "$WT"
   ```
 
 - **Overlap (BR4)** — List every open PR that touches `projects/amdsmi` (no

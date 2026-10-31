@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-build
 description: "Build system review subagent. Checks CMake, packaging, install targets, dependencies. Use when: build review, CMake check, packaging, RPM/DEB."
-tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal
+tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal
 model: "Claude Sonnet 5.5"
 user-invocable: false
 ---
@@ -12,7 +12,7 @@ You review CMake configuration, packaging, install targets, and build system pat
 
 ## Project Layout
 
-Project structure and build/packaging paths are stored in repo memories.
+Project structure and build/packaging paths are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Key Build Artifacts & Packaging
 
@@ -33,7 +33,7 @@ Project structure and build/packaging paths are stored in repo memories.
 
 ## Your Job
 
-0. **Build & Install first** — Load the `amdsmi-build-install` skill and execute it (clean build, package, uninstall previous, install, verify). Capture build time, warnings, and install verification output. If the build fails, report the failure as ❌ BLOCKING and stop — do not continue to the review steps below.
+0. **Build & install** via `amdsmi-build-install` (skip if `no-build`/review-only). Fail → ❌ BLOCKING, stop. `sudo` password → stop, user enters it in terminal.
 1. Verify CMake changes follow project conventions (lowercase commands, `UPPER_CASE` variables, `snake_case` functions)
 2. Check install targets are correct and complete (headers, libraries, configs, Python files)
 3. Verify packaging scripts (RPM/DEB) stay in sync with CMake install

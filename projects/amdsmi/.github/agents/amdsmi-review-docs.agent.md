@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-docs
 description: "Documentation review subagent. Checks docs, comments, help text, docstrings. Use when: documentation review, docs check, help text."
-tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
+tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal
 model: "Claude Sonnet 5.5"
 user-invocable: false
 ---
@@ -12,7 +12,7 @@ You review documentation, comments, help text, and docstrings for the amd-smi pr
 
 ## Project Layout
 
-Project structure and API cascade path are stored in repo memories.
+Project structure and API cascade path are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Your Job
 
@@ -21,7 +21,7 @@ Project structure and API cascade path are stored in repo memories.
 3. Check that comments explain *why*, not *what*
 4. Identify stale or misleading docs/comments in changed code
 5. Verify docs are updated when APIs are renamed or added (architecture subagent owns the full cascade — you only check the docs leg: CLI help text, docstrings, `docs/` content)
-6. **Load `amdsmi-changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
+6. **Load `amdsmi-changelog-automation` skill** — check `CHANGELOG.md` has an entry for user-visible changes, under an allowed heading, in the correct release section (run the skill's audit). Use only read-only `git`/`gh` commands. If `gh` can't reach TheRock, say placement is unverified.
 
 ## Severity
 

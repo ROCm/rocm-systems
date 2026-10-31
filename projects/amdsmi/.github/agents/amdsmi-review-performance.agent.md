@@ -12,7 +12,7 @@ You review performance and efficiency for the amd-smi project.
 
 ## Project Layout
 
-Project structure is stored in repo memories.
+Project structure is in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## High-Churn Hotspots
 
