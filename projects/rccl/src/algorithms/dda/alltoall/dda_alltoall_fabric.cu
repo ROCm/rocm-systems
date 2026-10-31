@@ -27,24 +27,21 @@
 #include <utility>
 
 // Push model: each rank writes its chunks into peers' scratch instead of reading from them.
-// Env: RCCL_DDA_A2A_PUSH. RCCL_DDA_A2A_TDM=1 moves that exchange through the tensor data mover
-// when the pointers and the per-rank byte count are 256-byte aligned. RCCL_DDA_A2A_TDM_TILE_KB
-// is 4, 8, or 16 (default 8).
-RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 0);
-RCCL_PARAM(DdaA2ATdm, "DDA_A2A_TDM", 0);
-RCCL_PARAM(DdaA2ATdmTileKB, "DDA_A2A_TDM_TILE_KB", 8);
-// RCCL_DDA_A2A_PUSH_PEER=1 (with RCCL_DDA_A2A_PUSH=1): peer-major vector push. Each block works on a single peer
-// and the grid is nRanks * blocksPerPeer. Out of place only.
-RCCL_PARAM(DdaA2APushPeer, "DDA_A2A_PUSH_PEER", 0);
-// RCCL_DDA_A2A_PUSH_PEER_PIPE: 1 (default) cuts each block's share into pieces (see ddaAllToAllFabricPeerPieces) so
-// a drain overlaps the next push; 0 = a single piece.
-RCCL_PARAM(DdaA2APushPeerPipe, "DDA_A2A_PUSH_PEER_PIPE", 1);
-// RCCL_DDA_A2A_PUSH_PEER_PIECES > 0 forces the piece count of the peer-major pushes; 0 (default) = automatic.
+// Env: RCCL_DDA_A2A_PUSH, 1 (default) = push, 0 = pull (stage sendbuff into the own scratch, peers read it).
+// RCCL_DDA_A2A_TDM: 1 (default) moves that exchange through the tensor data mover on gfx1250 when the pointers and
+// the per-rank byte count are 256-byte aligned (8 KiB tiles); otherwise, or with 0, the vector push runs.
+RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 1);
+RCCL_PARAM(DdaA2ATdm, "DDA_A2A_TDM", 1);
+// RCCL_DDA_A2A_PUSH_PEER=1 (default, with RCCL_DDA_A2A_PUSH=1): peer-major push.
+// Each block works on a single peer and the grid is nRanks * blocksPerPeer. Out of place only.
+RCCL_PARAM(DdaA2APushPeer, "DDA_A2A_PUSH_PEER", 1);
+// RCCL_DDA_A2A_PUSH_PEER_PIECES: 0 (default) or negative = automatic; 1 = a single piece (no pipelining).
+// Values > 1 request that many pieces (capped at 64) for both vector and TDM peer-major pushes.
 RCCL_PARAM(DdaA2APushPeerPieces, "DDA_A2A_PUSH_PEER_PIECES", 0);
-// RCCL_DDA_A2A_PUSH_PEER_DRAIN: dedicated drain blocks copy the received data out of the scratch, so the push blocks only
-// push. D > 0: D drain blocks per source offset (nRanks - 1 offsets). 0 (default): no drain blocks. -1: auto, half of
-// the blocks are drain blocks (see ddaAllToAllFabricPeerDrain). All ranks must use the same value.
-RCCL_PARAM(DdaA2APushPeerDrain, "DDA_A2A_PUSH_PEER_DRAIN", 0);
+// RCCL_DDA_A2A_PUSH_PEER_DRAIN: D > 0 requests D dedicated drain blocks per non-self source offset.
+// 0 disables dedicated drains. -1 (default): TDM reserves about half the block budget for drains; vector uses 0.
+// Dedicated drains copy received data from local scratch to recvbuff. All ranks must use the same value.
+RCCL_PARAM(DdaA2APushPeerDrain, "DDA_A2A_PUSH_PEER_DRAIN", -1);
 
 namespace {
 
@@ -56,10 +53,9 @@ static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t
   return dda::common::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
 }
 
-// Pieces of a peer-major push: one per MiB of the chunk per peer, 1..maxPieces (1 if the pipeline is off), or
-// RCCL_DDA_A2A_PUSH_PEER_PIECES (<= 64) if set. The vector push stops at 16 pieces, the TDM push at 32.
+// Automatic pieces: one per MiB of the chunk per peer, clamped to 1..maxPieces (vector: 16, TDM: 32).
+// Positive RCCL_DDA_A2A_PUSH_PEER_PIECES overrides this, capped at 64; 1 disables piece pipelining.
 static inline unsigned ddaAllToAllFabricPeerPieces(size_t chunkBytes, unsigned maxPieces) {
-  if (!rcclParamDdaA2APushPeerPipe()) return 1;
   const int64_t forced = rcclParamDdaA2APushPeerPieces();
   if (forced > 0) return static_cast<unsigned>(std::min<int64_t>(forced, 64));
   return static_cast<unsigned>(std::clamp<size_t>(chunkBytes >> 20, 1, maxPieces));
@@ -96,17 +92,22 @@ static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t wa
           static_cast<int>(bpp)};
 }
 
-// Drain blocks per source offset from RCCL_DDA_A2A_PUSH_PEER_DRAIN: D > 0 as given (at most 64), 0 none, < 0 auto. Auto
-// gives the drain blocks half of the barrier's blocks, spread over the nRanks - 1 source offsets, and leaves the push
-// blocks the rest. It depends only on the CVAR, nRanks and the init-time cap, so every rank gets the same value; the
-// caller still limits it to blocksPerPeer.
-static inline unsigned ddaAllToAllFabricPeerDrain(ncclComm* comm) {
+// Drain blocks per source offset: D > 0 as given (at most 64), 0 none, < 0 selects the kernel's default.
+// TDM auto reserves about half the barrier block budget for drains across nRanks - 1 source offsets; vector uses none.
+// The result depends only on the CVAR, kernel type, nRanks and init-time cap, so all ranks get the same value.
+// The caller still limits it to blocksPerPeer.
+static inline unsigned ddaAllToAllFabricPeerDrain(ncclComm* comm, bool tdm) {
   const int64_t param = rcclParamDdaA2APushPeerDrain();
   if (param >= 0) return static_cast<unsigned>(std::min<int64_t>(param, 64));
-  if (comm->nRanks < 2) return 0;
+  if (!tdm || comm->nRanks < 2) return 0;
   const size_t half = static_cast<size_t>(comm->ddaFabricMaxBlocks) / 2;
   return static_cast<unsigned>(std::min<size_t>(half / static_cast<size_t>(comm->nRanks - 1), 64));
 }
+
+// The TDM pushes use 8 KiB tiles, two per wave window. The kernels keep the <TileBytes, UnrollPeers> template so
+// other tile shapes can be instantiated again later.
+constexpr int kA2ATdmTileBytes = 8 << 10;
+constexpr int kA2ATdmUnrollPeers = dda::common::kDdaA2ATdmWindowBytes / kA2ATdmTileBytes;
 
 // One warp per window of UnrollPeers tiles. The block count stays inside the
 // barrier's flag allocation.
@@ -128,8 +129,6 @@ static bool ddaAllToAllFabricTdmEligible(ncclComm* comm, const void* sendbuff, c
       !IsArchMatch(comm->archName, "gfx1250")) {
     return false;
   }
-  const int tileKB = rcclParamDdaA2ATdmTileKB();
-  if (tileKB != 4 && tileKB != 8 && tileKB != 16) return false;
   if ((bytesPerRank % dda::common::kDdaA2ATdmAlign) != 0) return false;
   auto aligned = [](const void* p) {
     return (reinterpret_cast<uintptr_t>(p) % dda::common::kDdaA2ATdmAlign) == 0;
@@ -183,15 +182,18 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const char* unroll = (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)";
+  if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff == recvbuff) {
+    INFO(NCCL_COLL, "DDA fabric AllToAll: peer-major push does not support in-place buffers; using the all-peer push");
+  }
   // Peer-major TDM push (RCCL_DDA_A2A_PUSH_PEER=1 with RCCL_DDA_A2A_TDM=1): each block works on exactly one peer.
   // Out of place only, like the vector peer-major push. Falls through to the all-peer TDM push when there are more
   // peers than blocks.
   if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff &&
       ddaAllToAllFabricTdmEligible(comm, sendbuff, recvbuff, count)) {
-    const int tileBytes = rcclParamDdaA2ATdmTileKB() << 10;
+    constexpr int tileBytes = kA2ATdmTileBytes;
     const size_t tilesPerWave = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
     const size_t tiles = (count + tileBytes - 1) / tileBytes;
-    unsigned drain = ddaAllToAllFabricPeerDrain(comm);
+    unsigned drain = ddaAllToAllFabricPeerDrain(comm, /*tdm=*/true);
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, (tiles + tilesPerWave - 1) / tilesPerWave,
                                                         dda::common::kDdaA2ATdmMaxWarpsPerBlock,
                                                         /*balanceRounds=*/true,
@@ -203,18 +205,8 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
       const uint8_t* sendBytes = static_cast<const uint8_t*>(sendbuff);
       uint8_t* recvBytes = static_cast<uint8_t*>(recvbuff);
       uint8_t* const* scratch = reinterpret_cast<uint8_t* const*>(d_ipcbuffs);
-      ncclResult_t prep = ncclSuccess;
-      switch (tileBytes) {
-      case 4 << 10:
-        prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPushPeer<4 << 10, 4>>();
-        break;
-      case 16 << 10:
-        prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPushPeer<16 << 10, 1>>();
-        break;
-      default:
-        prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPushPeer<8 << 10, 2>>();
-        break;
-      }
+      const ncclResult_t prep = ddaAllToAllFabricTdmPrepare<
+          dda::common::ddaAllToAllFabricTdmPushPeer<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
       if (prep == ncclSuccess) {
         const unsigned pieces = ddaAllToAllFabricPeerPieces(count, 32);
         INFO(NCCL_COLL,
@@ -222,26 +214,10 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
              "block=%u blocksPerPeer=%d smem=%d pieces=%u drain=%u",
              nRanks, count, tileBytes, peerGrid.x, pg.block.x, pg.blocksPerPeer, smemBytes, pieces, drain);
         const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-        switch (tileBytes) {
-        case 4 << 10:
-          hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPushPeer<4 << 10, 4>), peerGrid, pg.block, smemBytes,
-                                stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes,
-                                sendBytes, count, comm->rank, nRanks, pg.blocksPerPeer, pieces, drain,
-                                barrierHost);
-          break;
-        case 16 << 10:
-          hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPushPeer<16 << 10, 1>), peerGrid, pg.block,
-                                smemBytes, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch,
-                                recvBytes, sendBytes, count, comm->rank, nRanks, pg.blocksPerPeer, pieces, drain,
-                                barrierHost);
-          break;
-        default:
-          hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPushPeer<8 << 10, 2>), peerGrid, pg.block, smemBytes,
-                                stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes,
-                                sendBytes, count, comm->rank, nRanks, pg.blocksPerPeer, pieces, drain,
-                                barrierHost);
-          break;
-        }
+        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPushPeer<kA2ATdmTileBytes, kA2ATdmUnrollPeers>),
+                              peerGrid, pg.block, smemBytes, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+                              scratch, recvBytes, sendBytes, count, comm->rank, nRanks, pg.blocksPerPeer, pieces, drain,
+                              barrierHost);
         CUDACHECK(cudaGetLastError());
         return ncclSuccess;
       }
@@ -249,7 +225,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   }
 
   if (rcclParamDdaA2APush() && ddaAllToAllFabricTdmEligible(comm, sendbuff, recvbuff, count)) {
-    const int tileBytes = rcclParamDdaA2ATdmTileKB() << 10;
+    constexpr int tileBytes = kA2ATdmTileBytes;
     auto tdmGridBlock = ddaAllToAllFabricTdmGeom(comm, count, tileBytes);
     const auto& tdmGrid = tdmGridBlock.first;
     const auto& tdmBlock = tdmGridBlock.second;
@@ -259,40 +235,16 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     uint8_t* recvBytes = static_cast<uint8_t*>(recvbuff);
     uint8_t* const* scratch = reinterpret_cast<uint8_t* const*>(d_ipcbuffs);
 
-    ncclResult_t prep = ncclSuccess;
-    switch (tileBytes) {
-    case 4 << 10:
-      prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<4 << 10, 4>>();
-      break;
-    case 16 << 10:
-      prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<16 << 10, 1>>();
-      break;
-    default:
-      prep = ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<8 << 10, 2>>();
-      break;
-    }
+    const ncclResult_t prep =
+        ddaAllToAllFabricTdmPrepare<dda::common::ddaAllToAllFabricTdmPush<kA2ATdmTileBytes, kA2ATdmUnrollPeers>>();
     if (prep == ncclSuccess) {
       INFO(NCCL_COLL,
            "DDA fabric AllToAll: launching TDM push kernel: nRanks=%d count=%zu tile=%d grid=%u block=%u smem=%d",
            nRanks, count, tileBytes, tdmGrid.x, tdmBlock.x, smemBytes);
       const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-      switch (tileBytes) {
-      case 4 << 10:
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<4 << 10, 4>), tdmGrid, tdmBlock, smemBytes,
-                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
-                              count, comm->rank, nRanks, barrierHost);
-        break;
-      case 16 << 10:
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<16 << 10, 1>), tdmGrid, tdmBlock, smemBytes,
-                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
-                              count, comm->rank, nRanks, barrierHost);
-        break;
-      default:
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<8 << 10, 2>), tdmGrid, tdmBlock, smemBytes,
-                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
-                              count, comm->rank, nRanks, barrierHost);
-        break;
-      }
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<kA2ATdmTileBytes, kA2ATdmUnrollPeers>), tdmGrid,
+                            tdmBlock, smemBytes, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch,
+                            recvBytes, sendBytes, count, comm->rank, nRanks, barrierHost);
       CUDACHECK(cudaGetLastError());
       return ncclSuccess;
     }
@@ -302,7 +254,7 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   // that other blocks of this rank may still be reading from sendbuff, so in-place calls take the all-peer push.
   if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff) {
     const size_t vecWaves = (count * sizeof(T) / sizeof(uint4) + 31) / 32;
-    unsigned drain = ddaAllToAllFabricPeerDrain(comm);
+    unsigned drain = ddaAllToAllFabricPeerDrain(comm, /*tdm=*/false);
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, vecWaves, 8, /*balanceRounds=*/false,
                                                         static_cast<size_t>(drain) * (nRanks - 1));
     if (pg.blocksPerPeer > 0) {

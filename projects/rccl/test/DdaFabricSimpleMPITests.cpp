@@ -60,8 +60,9 @@ constexpr char kAllGatherNeedle[] =
     "DDA fabric AllGather: launching kernel";
 constexpr char kReduceScatterNeedle[] =
     "DDA fabric ReduceScatter: launching kernel";
+// Both pull and push use this SIMPLE launch prefix; LL and LL128 have different markers.
 constexpr char kAllToAllNeedle[] =
-    "DDA fabric AllToAll: launching kernel";
+    "DDA fabric AllToAll: launching ";
 } // namespace
 
 class DdaFabricSimpleMPITest : public MPITestBase

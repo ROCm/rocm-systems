@@ -16,6 +16,8 @@
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
 
+#include "fakes/param_redirect.h"
+
 #include DDA_ALLTOALL_FABRIC_CC_PATH
 
 #undef hipExtLaunchKernelGGL
@@ -39,6 +41,8 @@ const void* Kernel() {
 class DdaAlltoallFabricMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    // These tests exercise the pull kernel and its staging copy.
+    g_loadParam = ParamOverride({{"RCCL_DDA_A2A_PUSH", 0}});
     g_hipGetLastError = [] { return hipSuccess; };
     RecordDdaCopies(&copies_);
     comm().ddaFabricBarrierState = barrier_;
@@ -49,6 +53,7 @@ class DdaAlltoallFabricMicrotest : public ::testing::Test {
   void TearDown() override {
     ResetDdaCollSeams();
     ResetHipFakes();
+    ResetNcclFakes();
   }
 
   ncclComm& comm() { return mock_.comm; }
