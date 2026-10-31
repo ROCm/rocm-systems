@@ -6,7 +6,8 @@
 
 // 8-GPU litmus for ipc_gpu_barrier.h fences; rounds repeat inside one kernel so kernel boundaries cannot hide them.
 // FlatSync_FourRanks reruns the flat shape on a 4-GPU clique whose barriers carry nRanks = 4.
-// AbortedBarrierStaysSilent needs one GPU and checks that a barrier gives up for good once it sees the abort flag.
+// AbortedBarrierStaysSilent needs one GPU and checks that a barrier gives up for good once it sees the abort flag;
+// its _FourRanks variant repeats that with nRanks = 4 and checks the four unused lanes are never signaled.
 
 #include <hip/hip_runtime.h>
 
@@ -168,9 +169,10 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
 
 // One rank with its abort flag raised and no live peers: barrier 1 gives up, then late peers drain its flags.
 // Barrier 2 must signal nothing, or a late peer would pair with it and read a shard this rank never produced.
-__global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self) {
+// Only the nRanks live peers drain, so a signal on a lane at or above nRanks survives for the host to see.
+__global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self, int nRanks) {
   bar.syncOnSameBlockIdx<true, true>();
-  if (threadIdx.x < kRanks) {
+  if (threadIdx.x < static_cast<unsigned>(nRanks)) {
     __atomic_store_n(flags[threadIdx.x] + blockIdx.x * kRanks + self, 0u, __ATOMIC_RELAXED);
   }
   __syncthreads();
@@ -332,7 +334,8 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice, int nRanks 
 }
 
 // All eight mailboxes live on one GPU, so no peer access is needed and the other "ranks" never run.
-void runStickyAbortTest() {
+// With nRanks < kRanks the barrier still holds all eight, as unused-lane decoys a correct barrier never touches.
+void runStickyAbortTest(int nRanks = kRanks) {
   constexpr int kSelf = 0;
   HIP_CHECK(hipSetDevice(0));
   const size_t flagBytes = static_cast<size_t>(kRanks) * kBlocks * sizeof(uint32_t);
@@ -351,19 +354,21 @@ void runStickyAbortTest() {
   HIP_CHECK(hipMemcpy(dFlags, flags.data(), kRanks * sizeof(uint32_t*), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(abortedBarrierStaysSilent, dim3(kBlocks), dim3(64), 0, nullptr,
-                     makeBarrier(kSelf, mailboxes, DdaKernelParams{abortFlag}), dFlags, kSelf);
+                     makeBarrier(kSelf, mailboxes, DdaKernelParams{abortFlag}, nRanks), dFlags, kSelf, nRanks);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   int signaled = 0;
+  int strayed = 0;
   std::vector<uint32_t> host(static_cast<size_t>(kRanks) * kBlocks);
   for (int p = 0; p < kRanks; ++p) {
     HIP_CHECK(hipMemcpy(host.data(), flags[p], flagBytes, hipMemcpyDeviceToHost));
     for (int b = 0; p != kSelf && b < kBlocks; ++b) {
-      signaled += host[static_cast<size_t>(b) * kRanks + kSelf] != 0;
+      (p < nRanks ? signaled : strayed) += host[static_cast<size_t>(b) * kRanks + kSelf] != 0;
     }
   }
   EXPECT_EQ(signaled, 0) << "an aborted block signaled a barrier after giving up on an earlier one";
+  EXPECT_EQ(strayed, 0) << "a barrier with nRanks = " << nRanks << " signaled a lane at or above nRanks";
 
   HIP_EXPECT(hipFree(dFlags));
   HIP_EXPECT(hipFree(abortFlag));
@@ -455,9 +460,24 @@ TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent) {
     GTEST_SKIP() << "needs a GPU";
   }
   RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("DdaIpcGpuBarrierOrdering.AbortedBarrierStaysSilent",
-                                                           runStickyAbortTest)
+                                                           []() { runStickyAbortTest(); })
                        .withTimeout(std::chrono::seconds(60))
                        .withNumGpus(1));
+}
+
+// nRanks = 4 with all eight mailboxes valid: the barrier must still give up and stay silent, and only its four live
+// lanes may ever signal, so a barrier that walks all eight would leave a flag in an unused lane's mailbox.
+TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent_FourRanks) {
+  int n = 0;
+  if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr &&
+      (hipGetDeviceCount(&n) != hipSuccess || n < 1)) {
+    GTEST_SKIP() << "needs a GPU";
+  }
+  RUN_ISOLATED_TESTS(
+    ProcessIsolatedTestRunner::TestConfig("DdaIpcGpuBarrierOrdering.AbortedBarrierStaysSilent_FourRanks",
+                                          []() { runStickyAbortTest(kPartialRanks); })
+      .withTimeout(std::chrono::seconds(60))
+      .withNumGpus(1));
 }
 
 } // namespace RcclUnitTesting
