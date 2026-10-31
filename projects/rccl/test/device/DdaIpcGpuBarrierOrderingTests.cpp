@@ -8,6 +8,7 @@
 // FlatSync_FourRanks reruns the flat shape on a 4-GPU clique whose barriers carry nRanks = 4.
 // AbortedBarrierStaysSilent needs one GPU and checks that a barrier gives up for good once it sees the abort flag;
 // its _FourRanks variant repeats that with nRanks = 4 and checks the four unused lanes are never signaled.
+// AbortVoteIsBlockWide lets one peer arrive before the abort, so the give-up must be one vote across the lanes.
 
 #include <hip/hip_runtime.h>
 
@@ -335,7 +336,9 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice, int nRanks 
 
 // All eight mailboxes live on one GPU, so no peer access is needed and the other "ranks" never run.
 // With nRanks < kRanks the barrier still holds all eight, as unused-lane decoys a correct barrier never touches.
-void runStickyAbortTest(int nRanks = kRanks) {
+// arrivedPeer >= 0 pre-sets that peer's flag in this rank's mailbox for every block, as if it reached barrier 1 first;
+// its lane's wait then succeeds while the absent lanes give up on the abort flag.
+void runStickyAbortTest(int nRanks = kRanks, int arrivedPeer = -1) {
   constexpr int kSelf = 0;
   HIP_CHECK(hipSetDevice(0));
   const size_t flagBytes = static_cast<size_t>(kRanks) * kBlocks * sizeof(uint32_t);
@@ -344,6 +347,15 @@ void runStickyAbortTest(int nRanks = kRanks) {
   for (int r = 0; r < kRanks; ++r) {
     flags[r] = static_cast<uint32_t*>(allocZeroed(flagBytes, Alloc::kUncached));
     mailboxes[r] = makeMailbox(flags[r]);
+  }
+  // Flags are a bare 0/1 handshake (putFlag CASes 0 -> 1, waitFlag 1 -> 0) with no epoch, so 1 is exactly what the
+  // first barrier's wait on mailbox[self] slot (block, arrivedPeer) consumes.
+  std::vector<uint32_t> host(static_cast<size_t>(kRanks) * kBlocks);
+  if (arrivedPeer >= 0) {
+    for (int b = 0; b < kBlocks; ++b) {
+      host[static_cast<size_t>(b) * kRanks + arrivedPeer] = 1;
+    }
+    HIP_CHECK(hipMemcpy(flags[kSelf], host.data(), flagBytes, hipMemcpyHostToDevice));
   }
   uint32_t* abortFlag = nullptr;
   const uint32_t raised = 1;
@@ -358,16 +370,26 @@ void runStickyAbortTest(int nRanks = kRanks) {
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
+  if (arrivedPeer >= 0) {
+    // The test only means something if that lane's wait really succeeded and consumed the pre-set flag.
+    int unconsumed = 0;
+    HIP_CHECK(hipMemcpy(host.data(), flags[kSelf], flagBytes, hipMemcpyDeviceToHost));
+    for (int b = 0; b < kBlocks; ++b) {
+      unconsumed += host[static_cast<size_t>(b) * kRanks + arrivedPeer] != 0;
+    }
+    EXPECT_EQ(unconsumed, 0) << "barrier 1 never consumed the flag of peer " << arrivedPeer << ", which had arrived";
+  }
+
   int signaled = 0;
   int strayed = 0;
-  std::vector<uint32_t> host(static_cast<size_t>(kRanks) * kBlocks);
   for (int p = 0; p < kRanks; ++p) {
     HIP_CHECK(hipMemcpy(host.data(), flags[p], flagBytes, hipMemcpyDeviceToHost));
     for (int b = 0; p != kSelf && b < kBlocks; ++b) {
       (p < nRanks ? signaled : strayed) += host[static_cast<size_t>(b) * kRanks + kSelf] != 0;
     }
   }
-  EXPECT_EQ(signaled, 0) << "an aborted block signaled a barrier after giving up on an earlier one";
+  EXPECT_EQ(signaled, 0) << "an aborted block signaled a barrier after giving up on an earlier one"
+                         << (arrivedPeer >= 0 ? "; the lane whose peer arrived must give up with the rest" : "");
   EXPECT_EQ(strayed, 0) << "a barrier with nRanks = " << nRanks << " signaled a lane at or above nRanks";
 
   HIP_EXPECT(hipFree(dFlags));
@@ -478,6 +500,32 @@ TEST(DdaIpcGpuBarrierOrdering, AbortedBarrierStaysSilent_FourRanks) {
                                           []() { runStickyAbortTest(kPartialRanks); })
       .withTimeout(std::chrono::seconds(60))
       .withNumGpus(1));
+}
+
+// Peer 1 arrives at barrier 1 and the rest never do: the abort vote must cover every signaling lane, so lane 1 stays
+// silent on barrier 2 too. A per-lane vote lets lane 1 signal peer 1 again, which reads a shard never produced.
+TEST(DdaIpcGpuBarrierOrdering, AbortVoteIsBlockWide) {
+  int n = 0;
+  if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr &&
+      (hipGetDeviceCount(&n) != hipSuccess || n < 1)) {
+    GTEST_SKIP() << "needs a GPU";
+  }
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("DdaIpcGpuBarrierOrdering.AbortVoteIsBlockWide",
+                                                           []() { runStickyAbortTest(kRanks, 1); })
+                       .withTimeout(std::chrono::seconds(60))
+                       .withNumGpus(1));
+}
+
+TEST(DdaIpcGpuBarrierOrdering, AbortVoteIsBlockWide_FourRanks) {
+  int n = 0;
+  if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr &&
+      (hipGetDeviceCount(&n) != hipSuccess || n < 1)) {
+    GTEST_SKIP() << "needs a GPU";
+  }
+  RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("DdaIpcGpuBarrierOrdering.AbortVoteIsBlockWide_FourRanks",
+                                                           []() { runStickyAbortTest(kPartialRanks, 1); })
+                       .withTimeout(std::chrono::seconds(60))
+                       .withNumGpus(1));
 }
 
 } // namespace RcclUnitTesting
