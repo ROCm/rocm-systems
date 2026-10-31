@@ -171,6 +171,29 @@ rocprofiler_add_integration_execute_test(
     PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+set(rocattach-redaction-test-env
+    "ROCP_TOOL_ATTACH=1"
+    "ROCPROFILER_REGISTER_LOG_LEVEL=warning"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCATTACH_LOG_LEVEL=trace"
+    "ROCPROF_EXTRA_COUNTERS_CONTENTS=rocattach-sensitive-extra-counter-contents"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-extra-counters-redaction-test-execute
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool-configured>
+    DEPENDS rocattach-parallel-attach-test
+    TIMEOUT 45
+    LABELS "attachment"
+    ENVIRONMENT "${rocattach-redaction-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "ROCPROF_EXTRA_COUNTERS_CONTENTS \\([0-9]+ bytes, redacted\\)"
+    FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}|rocattach-sensitive-extra-counter-contents")
+
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>

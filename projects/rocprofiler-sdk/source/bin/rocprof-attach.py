@@ -48,10 +48,14 @@ ATTACH_THREAD_NAME = "rocp-bg-attach"
 
 TOOL_SUBDIR = "rocprofiler-sdk"
 TOOL_BASENAME = "librocprofiler-sdk-tool.so"
+EXTRA_COUNTERS_FILE_ENV = "ROCPROF_EXTRA_COUNTERS_FILE"
+EXTRA_COUNTERS_CONTENTS_ENV = "ROCPROF_EXTRA_COUNTERS_CONTENTS"
+REGISTER_SCOPED_ENVIRONMENT_MARKER = b"ROCPROFILER_REGISTER_SCOPED_ATTACH_ENVIRONMENT_V1"
 
 _SDK_LIBRARY_RE = re.compile(
     r"^(?P<name>librocprofiler-sdk(?:-attach|-tool)?)\.so(?P<suffix>(?:\.\d+)*)$"
 )
+_REGISTER_LIBRARY_RE = re.compile(r"^librocprofiler-register\.so(?P<suffix>(?:\.\d+)*)$")
 
 
 class AttachError(RuntimeError):
@@ -98,6 +102,7 @@ class TargetSdk:
         self.attach_libs = []
         self.core_libs = []
         self.tool_libs = []
+        self.register_libs = []
 
     @property
     def libdir(self):
@@ -149,6 +154,13 @@ def find_target_sdk(pid):
     maps = read_target_maps(pid)
     sdk = TargetSdk(maps_readable=maps is not None)
     for path, deleted in maps or []:
+        register_match = _REGISTER_LIBRARY_RE.match(os.path.basename(path))
+        if register_match:
+            sdk.register_libs.append(
+                MappedLibrary(path, deleted, register_match.group("suffix"))
+            )
+            continue
+
         m = _SDK_LIBRARY_RE.match(os.path.basename(path))
         if not m:
             continue
@@ -228,6 +240,97 @@ def _contains_bytes(fname, needle, chunk_size=1 << 20):
             tail = chunk[-overlap:]
 
 
+def materialize_extra_counters():
+    """Replace an extra-counter file path with contents for target injection.
+
+    rocprofv3 starts this helper with only the small path in its environment. Reading the
+    file here avoids execve's environment-string limit, and forwarding the contents avoids
+    requiring the target process to see or have permission to read the attaching process's
+    path. The empty FILE value deliberately clears a path retained in the target environment
+    by an earlier attachment.
+    """
+    path = os.environ.get(EXTRA_COUNTERS_FILE_ENV)
+    if not path:
+        return
+
+    try:
+        with open(path, "r") as ifs:
+            contents = ifs.read()
+    except (OSError, UnicodeError) as error:
+        detail = getattr(error, "strerror", None) or str(error)
+        raise AttachError(
+            f"failed to read extra counter definition file '{path}': {detail}"
+        ) from error
+
+    try:
+        # Set contents first so a failure cannot leave this process with only a cleared path.
+        os.environ[EXTRA_COUNTERS_CONTENTS_ENV] = contents
+        os.environ[EXTRA_COUNTERS_FILE_ENV] = ""
+    except (OSError, ValueError) as error:
+        raise AttachError(
+            f"failed to prepare extra counter definition file '{path}' for attachment: {error}"
+        ) from error
+
+
+def max_environment_entry_bytes():
+    try:
+        return int(os.sysconf("SC_PAGESIZE")) * 32
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 128 * 1024
+
+
+def environment_entry_bytes(name, value):
+    return len(os.fsencode(f"{name}={value}")) + 1
+
+
+def target_register_supports_scoped_environment(pid, sdk):
+    if not sdk.maps_readable:
+        return (False, "its memory maps are not readable")
+    if not sdk.register_libs:
+        return (False, "no mapped rocprofiler-register library was found")
+
+    for library in sdk.register_libs:
+        if library.deleted:
+            return (False, f"{library.path} has been deleted")
+        try:
+            if not _contains_bytes(
+                _target_view(pid, library.path), REGISTER_SCOPED_ENVIRONMENT_MARKER
+            ):
+                return (False, f"{library.path} predates scoped attach environments")
+        except OSError as error:
+            return (False, f"{library.path} could not be inspected: {error}")
+    return (True, None)
+
+
+def check_extra_counter_environment_compatibility(pid, sdk):
+    contents = os.environ.get(EXTRA_COUNTERS_CONTENTS_ENV)
+    if contents is None:
+        return
+
+    supported, reason = target_register_supports_scoped_environment(pid, sdk)
+    if supported:
+        return
+
+    entry_size = environment_entry_bytes(EXTRA_COUNTERS_CONTENTS_ENV, contents)
+    entry_limit = max_environment_entry_bytes()
+    if entry_size > entry_limit:
+        raise AttachError(
+            f"PID {pid} uses a rocprofiler-register that cannot restore the temporary "
+            f"{EXTRA_COUNTERS_CONTENTS_ENV} value ({reason}). Refusing to inject a "
+            f"{entry_size}-byte environment entry because it would prevent later exec calls "
+            f"in the target. Update the target ROCm installation; the safe single-entry "
+            f"limit is {entry_limit} bytes"
+        )
+
+    _warning(
+        f"PID {pid} uses a rocprofiler-register that cannot restore or redact temporary "
+        f"extra-counter contents ({reason}). The {entry_size}-byte entry is below the "
+        f"{entry_limit}-byte exec limit, but it may remain in the target environment and may "
+        "be logged when rocprofiler-register INFO logging is enabled. Update the target ROCm "
+        "installation to remove this limitation"
+    )
+
+
 def has_attach_thread(pid):
     """Mirrors resolve_attach_tid in rocprofiler-sdk-rocattach."""
     task_dir = os.path.join(PROC_DIR, f"{pid}", "task")
@@ -244,6 +347,30 @@ def has_attach_thread(pid):
         if name == ATTACH_THREAD_NAME.encode():
             return True
     return False
+
+
+def collect_process_tree(root_pid):
+    result = []
+    pending = [root_pid]
+    seen = set()
+    while pending:
+        pid = pending.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        result.append(pid)
+        task_dir = os.path.join(PROC_DIR, f"{pid}", "task")
+        try:
+            tids = os.listdir(task_dir)
+        except OSError:
+            continue
+        for tid in tids:
+            try:
+                with open(os.path.join(task_dir, tid, "children"), "r") as children:
+                    pending.extend(int(child) for child in children.read().split())
+            except (OSError, ValueError):
+                continue
+    return result
 
 
 def check_attachable(pid, sdk, attach_children):
@@ -591,6 +718,8 @@ def attach(
     if pid is None:
         raise RuntimeError("rocprof-attach called with no PID specified")
 
+    materialize_extra_counters()
+
     user_tool_libraries = os.environ.pop("ROCP_TOOL_LIBRARIES", None)
     if user_tool_libraries is not None:
         _warning(
@@ -599,6 +728,13 @@ def attach(
         )
 
     sdk = find_target_sdk(pid)
+    check_extra_counter_environment_compatibility(pid, sdk)
+    if attach_children and os.environ.get(EXTRA_COUNTERS_CONTENTS_ENV) is not None:
+        for descendant in collect_process_tree(pid)[1:]:
+            if has_attach_thread(descendant):
+                check_extra_counter_environment_compatibility(
+                    descendant, find_target_sdk(descendant)
+                )
     check_attachable(pid, sdk, attach_children)
 
     if attach_tool_library:

@@ -1253,6 +1253,12 @@ in the ``extra_counters.yaml`` file, use the ``-E`` / ``--extra-counters`` optio
 
 Where the option ``--pmc`` is used to specify the extra counters to be collected.
 
+When ``--rocm-root`` selects an older tool that doesn't support path-based
+definitions, ``rocprofv3`` uses the legacy inline-content transport only when
+the definition safely fits Linux's single-environment-entry limit. A larger
+definition is rejected before launching the application; use a newer ROCm tool
+or a smaller definition file.
+
 Kernel counter collection output
 +++++++++++++++++++++++++++++++++
 
