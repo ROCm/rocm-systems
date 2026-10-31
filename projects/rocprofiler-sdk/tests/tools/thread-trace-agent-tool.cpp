@@ -166,7 +166,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
             buffer_size_bytes = 255ul << 20;  // gfx11 limitation
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {1}});
+        parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {static_cast<uint64_t>(-1)}});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_size_bytes}});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0x3}});

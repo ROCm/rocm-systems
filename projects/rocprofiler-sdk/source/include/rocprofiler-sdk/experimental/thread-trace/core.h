@@ -42,7 +42,7 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef enum rocprofiler_thread_trace_parameter_type_t
 {
-    ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU = 0,       ///< Select the Target CU or WGP
+    ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU = 0,       ///< Target CU or WGP. Negative: auto
     ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK,  ///< Bitmask of shader engines.
     ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE,         ///< Size of combined GPU buffer for ATT
     ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT,        ///< Bitmask (GFX9) or ID (Navi) of SIMDs
