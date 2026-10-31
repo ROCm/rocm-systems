@@ -19,9 +19,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 
 #include "nccl.h"
@@ -29,6 +31,7 @@
 #include "nccl_gin.h"
 #include "plugin.h"
 
+#include "../common/ScopedEnv.hpp"
 #include "fakes/nccl_fakes.h"
 
 #ifdef ENABLE_ROCSHMEM_GIN
@@ -71,6 +74,8 @@ const char* ncclGetPluginLibName(ncclPluginType) { return ""; }
 #include "fakes/gin_vtable_fake.h"
 
 namespace {
+
+using RcclUnitTesting::ScopedEnv;
 
 class GinPluginInitTest : public ::testing::Test {
  protected:
@@ -245,6 +250,90 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
   EXPECT_TRUE(ginState->supported);
   EXPECT_EQ(ginState->numActiveBackends, 1);
   EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
+// AICOMRCCL-3418: with NCCL_GIN_TYPE unset, a backend whose type is not listed in
+// NCCL_GIN_TYPES is not registered on the comm.
+TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  bool isAssigned = true;
+  {
+    ScopedEnv list("NCCL_GIN_TYPES", "6,7");
+    ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+    EXPECT_FALSE(isAssigned);
+    EXPECT_EQ(ginState->numActiveBackends, 0);
+  }
+  {
+    ScopedEnv list("NCCL_GIN_TYPES", "6,2");
+    ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+    EXPECT_TRUE(isAssigned);
+    ASSERT_EQ(ginState->numActiveBackends, 1);
+    EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
+  }
+}
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// AICOMRCCL-3418: every registration order sorts to Anvil SDMA, then rocSHMEM GDA, then the proxy.
+TEST_F(GinFinalizeTest, SetDefaultBackend_OrdersSdmaThenGdaThenProxy) {
+  ncclGinType_t order[] = {NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_ANVIL_SDMA};
+  const uint64_t all = BIT(NCCL_GIN_TYPE_PROXY) | BIT(NCCL_GIN_TYPE_ROCSHMEM_GDA) | BIT(NCCL_GIN_TYPE_ANVIL_SDMA);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  std::sort(std::begin(order), std::end(order));
+  do {
+    ginState->numActiveBackends = 0;
+    for (ncclGinType_t type : order) {
+      addActiveBackend(nullptr);
+      ginState->backends[ginState->numActiveBackends - 1].ginType = type;
+    }
+    ASSERT_EQ(ncclGinSetDefaultBackend(&comm_, all), ncclSuccess);
+    ASSERT_EQ(ginState->numActiveBackends, 3);
+    EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_ANVIL_SDMA);
+    EXPECT_EQ(ginState->backends[1].ginType, NCCL_GIN_TYPE_ROCSHMEM_GDA);
+    EXPECT_EQ(ginState->backends[2].ginType, NCCL_GIN_TYPE_PROXY);
+  } while (std::next_permutation(std::begin(order), std::end(order)));
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+#endif
+
+TEST(GinTypeListTest, ParsesCommaSeparatedTypes) {
+  uint64_t mask = ~0ull;
+  EXPECT_TRUE(ncclGinParseTypeList("6,7", &mask));
+  EXPECT_EQ(mask, BIT(6) | BIT(7));
+  EXPECT_TRUE(ncclGinParseTypeList(" 2 , 6 ", &mask));
+  EXPECT_EQ(mask, BIT(2) | BIT(6));
+  EXPECT_TRUE(ncclGinParseTypeList("", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+TEST(GinTypeListTest, FlagsInvalidEntriesAndKeepsValidOnes) {
+  uint64_t mask = 0;
+  EXPECT_FALSE(ncclGinParseTypeList("6,x,7", &mask));
+  EXPECT_EQ(mask, BIT(6) | BIT(7));
+  EXPECT_FALSE(ncclGinParseTypeList("0,64,-1,6x,,", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+TEST(GinTypeListTest, GinTypeWinsOverGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("NCCL_GIN_TYPES", nullptr);
+  EXPECT_FALSE(ncclGinTypeEnabled(6, /*enabledByDefault=*/false));
+  EXPECT_TRUE(ncclGinTypeEnabled(7, /*enabledByDefault=*/true));
+  {
+    ScopedEnv gdaAndProxy("NCCL_GIN_TYPES", "6,2");
+    EXPECT_TRUE(ncclGinTypeEnabled(6, false));
+    EXPECT_FALSE(ncclGinTypeEnabled(7, true));
+    ScopedEnv sdmaOnly("NCCL_GIN_TYPE", "7");
+    EXPECT_FALSE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
+  {
+    // A list with no valid entry is ignored, so the defaults apply.
+    ScopedEnv noValidEntry("NCCL_GIN_TYPES", "x");
+    EXPECT_FALSE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
 }
 
 // Success path: keep the context, mark the plugin enabled, do not finalize.

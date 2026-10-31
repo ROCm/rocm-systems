@@ -50,6 +50,7 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 |----------|---------|-------------|
 | `NCCL_GIN_ENABLE` | `1` | Enable/disable GIN (all backends) |
 | `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `2`=IB proxy, `6`=rocSHMEM GDA, `7`=Anvil SDMA. **Not value-compatible with 2.30.7** (see below). |
+| `NCCL_GIN_TYPES` | (unset) | RCCL-only. Comma-separated backend types that may be active together, e.g. `6,7` (GDA and SDMA) or `6,2` (GDA and IB proxy). Ignored when `NCCL_GIN_TYPE` is set. See [Mixing backends](#mixing-backends). |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
 | `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind (LSA team only; skipped under `NCCL_GIN_CONNECTION_RAIL`); set exactly `0` to bypass |
@@ -85,6 +86,27 @@ docker run -it --rm --shm-size 64G \
 ```
 
 To use the rocSHMEM GDA backend instead, set `NCCL_GIN_TYPE=6`.
+
+### Mixing backends
+
+With `NCCL_GIN_TYPE` unset, Anvil SDMA and the IB proxy are both active by
+default, and rocSHMEM GDA is off. `NCCL_GIN_TYPES` replaces that default set
+with the listed types, so one communicator can host DevComms on different
+backends:
+
+| `NCCL_GIN_TYPES` | Active backends | Default (`backends[0]`) |
+|------------------|-----------------|-------------------------|
+| `6,7` | rocSHMEM GDA, Anvil SDMA | Anvil SDMA |
+| `6,2` | rocSHMEM GDA, IB proxy | rocSHMEM GDA |
+| `6,7,2` | all three | Anvil SDMA |
+
+The default order is Anvil SDMA, then rocSHMEM GDA, then the IB proxy. A
+DevComm that leaves `ncclDevCommRequirements::ginType` as
+`NCCL_GIN_TYPE_NONE` gets the first backend that can serve it; set `ginType`
+to `NCCL_GIN_TYPE_ROCSHMEM_GDA` (or `NCCL_GIN_TYPE_ANVIL_SDMA`,
+`NCCL_GIN_TYPE_PROXY`) to pick one. Each backend still needs its own platform
+requirements below, and a backend that fails to initialize is dropped from the
+set.
 
 ### Platform requirements
 
