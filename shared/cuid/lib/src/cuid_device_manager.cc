@@ -32,18 +32,11 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   for (const auto& subsystem : subsystems) {
     std::vector<DevicePtr> found;
     const auto status = subsystem.discover(found);
-    // Absence of an entire subsystem is expected. A returned component whose
-    // identity cannot be constructed is handled separately by the strict index.
-    if (found.empty() &&
-        (status == AMDCUID_STATUS_SUCCESS || status == AMDCUID_STATUS_UNSUPPORTED ||
-         status == AMDCUID_STATUS_DEVICE_NOT_FOUND)) {
+    // A subsystem that cannot be read costs only its own components.
+    if (status != AMDCUID_STATUS_SUCCESS) {
       LOG(DEBUG, "CUID discovery: no " << subsystem.name << " components ("
                                        << amdcuid_status_to_string(status) << ")");
       continue;
-    }
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      shutdown();
-      return status;
     }
     discovered_devices.insert(discovered_devices.end(), found.begin(), found.end());
   }
@@ -119,7 +112,11 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
   std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   const auto status = get_devices_on_system();
   if (status != AMDCUID_STATUS_SUCCESS) return status;
-  return build_cuid_index();
+  // A device list without an index would answer the next call as if discovery
+  // had succeeded and found nothing.
+  const auto indexed = build_cuid_index();
+  if (indexed != AMDCUID_STATUS_SUCCESS) shutdown();
+  return indexed;
 }
 
 amdcuid_status_t CuidDeviceManager::shutdown() {
