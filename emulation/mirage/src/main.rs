@@ -21,8 +21,6 @@ use mirage_ctl::CtlCmd;
 // crate object - and therefore its registration - even though no symbol
 // is used directly. Each is gated on its feature so a backend can be
 // dropped from the build entirely.
-#[cfg(feature = "hotswap")]
-extern crate mirage_hotswap as _;
 #[cfg(feature = "rocjitsu")]
 extern crate mirage_rocjitsu as _;
 
