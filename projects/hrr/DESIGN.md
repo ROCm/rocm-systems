@@ -780,8 +780,10 @@ The reader (`hrr_reader.cpp`) sorts all events by `sequence_id` after loading to
 restore causal ordering within each thread.
 
 Cross-thread causal ordering (e.g. a stream created by thread A before thread B calls
-BeginCapture on it) may still be violated if the writes race. The playback handles
-missing stream handles by creating a temporary stream.
+BeginCapture on it) may still be violated if the writes race. Replay then stops at
+the first call on the stream it has not created. With `--lossy-streams` it runs that
+work on the null stream instead, and `hipStreamBeginCapture` creates a temporary
+stream to capture on.
 
 ## HIP Graph Capture / Replay
 

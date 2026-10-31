@@ -104,6 +104,7 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_refusals_test.cc
     hrr_blob_refusal_test.cc
     hrr_access_policy_window_test.cc
+    hrr_stream_resolve_test.cc
     hrr_capture_state_test.cc
     hrr_unmapped_note_test.cc
     hrr_kernel_args_signature_test.cc

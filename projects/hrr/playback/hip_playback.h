@@ -212,6 +212,11 @@ struct AllocEntry {
     AllocKind kind = AllocKind::Device;
 };
 
+// Thrown by PlaybackContext::translate_stream for a recorded stream that has no
+// live counterpart. dispatch_event catches it and ends the replay through
+// hrr_report_unmapped_stream, so a handler never has to check.
+struct hrr_unmapped_stream { uint64_t rec; };
+
 struct PlaybackContext {
     std::string archive_dir;
 
@@ -283,6 +288,12 @@ struct PlaybackContext {
     // it on to survey a whole archive — which API fails, and what the ones
     // after it do — rather than to reproduce a fault.
     bool continue_on_error = false;
+    // --lossy-streams: run work recorded on a stream replay never created on
+    // the null stream instead of ending the replay there.
+    // Also lets hipStreamBeginCapture make a stand-in stream to capture on.
+    // The result is not a faithful reproduction, even when its bytes match.
+    bool lossy_streams = false;
+    mutable std::atomic<bool> lossy_stream_warned{false};
     std::atomic<size_t> events_failed{0};
     std::atomic<size_t> code_objects_failed{0};
     // Sync watchdog: max wall-clock ms to wait for a device synchronize before
@@ -792,8 +803,25 @@ struct PlaybackContext {
     }
 
     // ---- Handle resolution (shared lock — concurrent reads safe) ----
+    // 0, hipStreamLegacy and hipStreamPerThread pass through as themselves;
+    // HIP resolves hipStreamPerThread on the calling replay thread. Any other
+    // handle is the stream replay created for it, or throws hrr_unmapped_stream
+    // unless --lossy-streams substitutes the null stream.
     hipStream_t   translate_stream  (uint64_t rec) const {
         if (rec == 0) return nullptr;
+        if (rec == reinterpret_cast<uint64_t>(hipStreamLegacy))    return hipStreamLegacy;
+        if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread)) return hipStreamPerThread;
+        if (hipStream_t s = find_stream(rec)) return s;
+        if (!lossy_streams) throw hrr_unmapped_stream{rec};
+        if (!lossy_stream_warned.exchange(true))
+            fprintf(stderr, "[HRR] --lossy-streams: recorded stream 0x%llx has no live "
+                    "stream; running its work on the null stream (reported once)\n",
+                    (unsigned long long)rec);
+        return nullptr;
+    }
+    // The live stream created for `rec`, or nullptr. No special handles and no
+    // throw: for the callers that only clean up after a stream.
+    hipStream_t   find_stream       (uint64_t rec) const {
         std::shared_lock lk(map_mutex);
         auto it = stream_map.find(rec); return it != stream_map.end() ? it->second : nullptr;
     }
@@ -1103,6 +1131,13 @@ void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
 // recorded against. A recording that used a null context keeps one, so a call
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
+
+// ---------------------------------------------------------------------------
+// hrr_report_unmapped_stream — end the replay over a recorded stream that has
+// no live counterpart (see hrr_unmapped_stream), naming the event, the API and
+// the recorded handle. Sets ctx.fatal_error and returns hipErrorInvalidHandle.
+hipError_t hrr_report_unmapped_stream(PlaybackContext& ctx, uint64_t tid, size_t idx,
+                                      const char* api, uint64_t rec);
 
 // Replaces the srcArray and dstArray handles of a recorded hipMemcpy3DParms with
 // the live arrays replay created for them. A handle replay never created is an
