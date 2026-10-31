@@ -1636,11 +1636,14 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
 
   if (originalDeviceMemory_ == nullptr) {
     originalDeviceMemory_ = dev().hostAlloc(alloc_size, 1, Device::MemorySegment::kNoAtomics);
-    if (originalDeviceMemory_ != nullptr) {
-      kind_ = MEMORY_KIND_HOST;
-      if (dev().settings().apuSystem_) {
-        const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
-      }
+    if (originalDeviceMemory_ == nullptr) {
+      LogPrintfError("Fail to allocate image memory of size 0x%zx in device or host memory",
+                     alloc_size);
+      return false;
+    }
+    kind_ = MEMORY_KIND_HOST;
+    if (dev().settings().apuSystem_) {
+      const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
     }
   } else {
     const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
