@@ -7418,10 +7418,8 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_WrongRequestSize_ReturnsInterna
 TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes)
 {
     RUN_ISOLATED_TEST("P2p_SendProxySetup_MemcpyEnabled_AllocatesCeStateAndPublishes", []() {
-        // A fork inherits the parent's one-shot CE latch. Set the policy directly and
-        // force the observable legacy-allocation seam instead of the cuMem path.
+        // Set the file-local CE policy directly; the re-exec may have primed its one-shot latch.
         ScopedUseMemcpy ceMode(1);
-        ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
 
         // ncclCudaHostCalloc swaps the stream-capture mode via the async-ops
         // seam; enable it so the host allocation succeeds.
@@ -7440,10 +7438,10 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxySetup_MemcpyEnabled_AllocatesCeStat
         constexpr size_t kCeStep = 4 * 1024 * 1024;
         std::vector<char> ceBuffer(NCCL_STEPS * kCeStep);
         size_t allocatedBytes = 0;
-        ScopedHook deviceAlloc(g_hipExtMallocWithFlags, [&](void** ptr, size_t bytes, unsigned) {
+        ScopedHook deviceAlloc(g_fakeCudaCallocAsync, [&](void** ptr, size_t bytes, hipStream_t) {
             allocatedBytes = bytes;
             *ptr = ceBuffer.data();
-            return hipSuccess;
+            return ncclSuccess;
         });
 
         ncclProxyConnection conn{};
