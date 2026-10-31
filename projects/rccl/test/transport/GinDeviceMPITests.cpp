@@ -7628,10 +7628,9 @@ struct RsSymDtype {
   int            maxExactSum;
 };
 
-// float covers loadMem's 4/16-byte branches; half/bf16 and fp8 cover alignof 2 and 1.
+// float covers loadMem's 4/16-byte branches; bf16 and fp8 cover alignof 2 and 1.
 const RsSymDtype kRsSymDtypes[] = {
     {ncclFloat32, "f32", 0},
-    {ncclFloat16, "f16", 2048},
     {ncclBfloat16, "bf16", 256},
     {ncclFloat8e4m3, "f8e4m3", 16},
 };
@@ -7639,11 +7638,6 @@ const RsSymDtype kRsSymDtypes[] = {
 // Host encode/decode of exact integer values in the device's native format.
 void rsSymEncode(ncclDataType_t type, float v, bool fp8Fnuz, uint8_t* out) {
   switch (type) {
-  case ncclFloat16: {
-    __half h = __float2half(v);
-    std::memcpy(out, &h, sizeof(h));
-    break;
-  }
   case ncclBfloat16: {
     uint32_t u;
     std::memcpy(&u, &v, sizeof(u));
@@ -7662,11 +7656,6 @@ void rsSymEncode(ncclDataType_t type, float v, bool fp8Fnuz, uint8_t* out) {
 
 float rsSymDecode(ncclDataType_t type, const uint8_t* in, bool fp8Fnuz) {
   switch (type) {
-  case ncclFloat16: {
-    __half h;
-    std::memcpy(&h, in, sizeof(h));
-    return __half2float(h);
-  }
   case ncclBfloat16: {
     uint16_t b;
     std::memcpy(&b, in, sizeof(b));
