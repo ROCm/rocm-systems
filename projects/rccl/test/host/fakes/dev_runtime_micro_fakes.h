@@ -58,6 +58,9 @@ extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapS
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
+// ncclDevrCommCreateInternal calls this after it has swapped the thread into
+// relaxed stream-capture mode. The default succeeds; a test that needs GIN
+// setup to fail installs its own so the capture-mode restore can be observed.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
                                   uint32_t)>
     g_devrGinDevCommSetup;

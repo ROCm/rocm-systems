@@ -33,7 +33,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
-#include "fakes/signature-drift.h"
+#include "signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -302,12 +302,16 @@ std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinC
 
 ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
 // Seam: reached only for a devComm that requests a GIN connection.
+// ncclDevrCommCreateInternal calls this after swapping the thread into relaxed
+// stream-capture mode. The default succeeds; a test that needs GIN setup to fail
+// installs its own so the capture-mode restore can be observed.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
                                            struct ncclDevComm*, uint32_t) {
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
     g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
                                  struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
@@ -509,25 +513,34 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
+// ncclDevrCommCreateInternal assigns .next after each builder returns. The
+// fields it then reads off these stack objects are bufferAlign, bufferSize,
+// and the outBufferHandle / outGinSignalStart / outGinCounterStart pointers.
+// Zero them so that walk does not store through an uninitialized pointer.
+static void ZeroDevResourceReq(ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = ncclDevResourceRequirements{};
+}
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
                                                         ncclDevResourceRequirements_t* req) {
-  if (req != nullptr) *req = {};
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 
 // ncclRmaProxyEnabled is no longer faked here: the real predicate is linked into
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
+
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // The enqueue-rearch job path: collective_stubs.cc pins
 // ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task

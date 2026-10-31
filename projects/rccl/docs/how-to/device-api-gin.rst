@@ -199,6 +199,16 @@ Do not issue a strong action from a device communicator created with
 deprecated. Their strength is selected globally by
 ``ginStrongSignalsRequired``; new code should use an explicit type.
 
+Stream capture
+==============
+
+``ncclDevCommCreate`` switches the calling thread to relaxed stream-capture
+mode while it builds the device communicator, then restores the mode the
+application had set. That restore also runs when GIN setup fails, so a failed
+create does not leave the thread's HIP stream-capture mode changed. On failure
+the device communicator was not created; check the returned ``ncclResult_t``
+and leave the capture mode alone.
+
 Use world-team barriers and timeouts
 ====================================
 

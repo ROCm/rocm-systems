@@ -13,8 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
-* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
-* Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
+* Fixed the calling thread's HIP stream-capture mode remaining relaxed when device-communicator GIN setup fails. `ncclDevCommCreate` still switches to relaxed mode while it builds the device communicator, and a failed `ncclGinDevCommSetup` now returns through the same cleanup path that restores the mode the application had set. Matches upstream NCCL 2.31.2 (PR 2229).
 
 ### Known issues
 
