@@ -168,6 +168,8 @@ jobs:
           chmod a+x \
             "${GITHUB_WORKSPACE}/hipfile-build-dir/test/hipfile_system_tests" \
             "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/batch_mt" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/hipfile-fastpath-gate" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/hipfileread-cpu-visibility" \
             "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/state_mt" \
             "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp" \
             "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/bufregister-write" \
