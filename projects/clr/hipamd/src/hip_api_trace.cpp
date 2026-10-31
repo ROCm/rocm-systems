@@ -9,6 +9,9 @@
 
 #include "hip_internal.hpp"
 #include "platform/activity.hpp"
+#if defined(HIP_HRR_CAPTURE_ENABLED)
+#include "hrr/hip_capture.h"
+#endif
 
 #include <atomic>
 #include <cstdint>
@@ -1622,7 +1625,13 @@ std::atomic<bool> hip_tools_dispatch_registered{false};
 #define NO_VECTORIZE
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
-  return GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
+  const HipDispatchTable* table = GetDispatchTableImpl<HipDispatchTable>(hip_dispatch_registered);
+#if defined(HIP_HRR_CAPTURE_ENABLED)
+  // HRR capture installs its shims before an exported entry point reads a slot,
+  // so the API call that runs hip::init() is recorded too.
+  if (!g_capture_bootstrapped.load(std::memory_order_acquire)) hip_capture_bootstrap();
+#endif
+  return table;
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
   return GetDispatchTableImpl<HipCompilerDispatchTable>(hip_compiler_dispatch_registered);
