@@ -215,3 +215,7 @@ Omit this section entirely if there are no unresolved comments.
 | PR Split | Status | ❌ | ⚠️ | 💡 | 📋 | Unresolved Comments |
 |----------|--------|-----|-----|-----|-----|---------------------|
 | ✂️ RECOMMEND SPLIT / ✅ SINGLE PR OK | [Status Symbol] [STATUS] | N | N | N | N | N |
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "reading".

@@ -69,3 +69,7 @@ or the skipped note. Then findings as a markdown list:
 - Spec says: "[quoted spec line]"
 - Diff does: [what the code does]
 - **Fix:** [fix] or **Option A/B** with recommendation
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "sensor".
