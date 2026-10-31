@@ -459,6 +459,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  // AllGather LL128: 256 threads for totals of 4M to 32M, at most 75 blocks for 1M to 32M (DPX).
+  .ddaAgLL128Threads = 256,
+  .ddaAgLL128ThreadsMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128ThreadsMaxBytes = 32ULL*1024*1024,
+  .ddaAgLL128MaxBlocks = 75,
+  .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
+  .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
