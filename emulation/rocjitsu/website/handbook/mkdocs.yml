@@ -74,6 +74,7 @@ nav:
   - User guide:
       - Build from source: building.md
       - Command-line interface: rocjitsu-cli.md
+      - Python execution API: python-api.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
       - Race detection: race-detector.md

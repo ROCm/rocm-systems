@@ -26,6 +26,7 @@ set(TEST_SOURCE_FILES
     hipfile-stats.cpp
     fallback.cpp
     fastpath.cpp
+    host.cpp
     main.cpp
     mountinfo.cpp
     stats.cpp

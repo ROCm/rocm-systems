@@ -162,7 +162,8 @@ instruction, and this plugin copies each mnemonic on first sight rather than
 storing the view. A plugin that keys a long-lived map on the view will read
 freed memory;
 `InstructionMixPluginTest.OwnsMnemonicStorageWhenTheSourceIsNotStatic` pins the
-behaviour.
+behaviour. See [Retaining instruction information](#retaining-instruction-information)
+for the other borrowed parts of an `Instruction`.
 
 ### Kernel Logging Plugin
 
@@ -568,6 +569,63 @@ before publishing the group to simulation components. `add()` is not
 thread-safe, and the group must remain immutable while callbacks may dispatch
 concurrently.
 
+### Retaining instruction information
+
+The `Instruction` passed to instruction and memory hooks is borrowed and is
+valid only during the callback. So are the views it returns: `raw_encoding()`
+points to encoding words owned by the decoder or the instruction, and
+`mnemonic()` can view a member of the instruction (see the note on mnemonic
+storage above). Copy anything you keep before the callback returns.
+`Instruction::disassemble()` is different: it formats a new `std::string` on
+each call, and the caller owns the result, so a plugin may keep it.
+
+Formatting text for every executed instruction is expensive when little of it
+is ever printed. A plugin that needs text only when it reports something can
+instead copy the instruction's PC and encoding as it executes, and disassemble
+the copy when the report is written. Validate the encoding before copying it:
+`raw_encoding()` is null when the instruction has no encoding, and the copy
+needs `size()` to be a positive multiple of four bytes that fits the buffer.
+An encoding is at most four words (the CU's 16-byte fetch window). The example
+rejects anything else at capture, as the race detector does, so every stored
+copy can be disassembled.
+
+```cpp
+// Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
+struct LastInstruction : WavefrontState {
+  uint64_t pc = 0;
+  std::array<uint32_t, 4> words{};
+  size_t word_count = 0; // Zero until the wave executes an instruction.
+};
+
+void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override {
+  auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
+  const int bytes = inst.size();
+  if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
+      static_cast<size_t>(bytes) > sizeof(last.words))
+    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
+  last.pc = pc;
+  last.word_count = bytes / sizeof(uint32_t);
+  std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
+}
+
+// Later, when a report about this wave needs text:
+if (last.word_count != 0) {
+  std::string text = wf.disassemble_instruction(
+      std::span(last.words).first(last.word_count), last.pc);
+  // ...
+}
+```
+
+`Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
+decoder, so a standalone plugin module can use it without linking the
+simulator. Call it on the CU execution thread, for example from one of that
+wave's synchronous hooks. It throws `std::logic_error` if the encoding is empty,
+truncated, or cannot be decoded. Because the text comes from the copied bytes,
+it describes the instruction that executed even if the code was later
+overwritten or unmapped. The race detector formats its instruction traces this
+way.
+
 ## Adding a new plugin
 
 1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
@@ -596,6 +654,8 @@ concurrently.
    hooks. Keep the default `false` for ordered event state or complete
    architectural snapshots. One non-opted-in plugin disables async execution
    for the entire group.
+9. Copy any instruction data that the plugin keeps beyond a callback; see
+   [Retaining instruction information](#retaining-instruction-information).
 
 ## Asynchronous arithmetic
 

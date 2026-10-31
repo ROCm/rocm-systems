@@ -3329,6 +3329,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroGinHost",
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroDda",
+                       "rccl-UnitTestsMicroHostDispatch",
                        "rccl-UnitTestsMicroTopo",
                        "rccl-UnitTestsMicroNetIbCastInit",
                        "rccl-UnitTestsMicroNetIbCastDataPath",

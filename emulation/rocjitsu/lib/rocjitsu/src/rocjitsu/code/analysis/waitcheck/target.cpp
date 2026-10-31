@@ -49,7 +49,8 @@ WaitcheckTarget::normalized_hardware_event_kind(WaitCounterKind counter, WaitEve
       return WaitEventKind::Ds;
     return kind;
   case WaitCounterKind::Store:
-    if (kind == WaitEventKind::GlobalWb)
+    // Generic FLAT and ordinary VMEM stores share the store-completion event.
+    if (kind == WaitEventKind::GlobalWb || kind == WaitEventKind::FlatStore)
       return WaitEventKind::VmemStore;
     return kind;
   case WaitCounterKind::X:
@@ -294,7 +295,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
                       (inst.raw_encoding() != nullptr && inst.size() >= 8 &&
                        (inst.raw_encoding()[0] & (1u << gds_bit)) != 0));
     events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
-    if (gds)
+    // CDNA4 retains the legacy wait encoding, but EXPCNT is unused (ISA 3.1/4.4).
+    if (gds && arch != ROCJITSU_CODE_ARCH_CDNA4)
       events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
                         false, true, true});
     if (expert)

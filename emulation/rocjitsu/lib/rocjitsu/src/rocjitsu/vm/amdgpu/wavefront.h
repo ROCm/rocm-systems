@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -361,6 +362,16 @@ public:
   /// exposing the owning compute unit or reclassifying the address through the
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
+
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// Standalone plugin modules do not link the simulator, so they reach the CU's
+  /// decoder through this virtual call. It is pure virtual because an out-of-line
+  /// definition would become Wavefront's key function, and plugins could then no
+  /// longer emit Wavefront's type information themselves.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
+  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                              uint64_t pc) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -1299,6 +1310,9 @@ public:
   IsaWavefront(ComputeUnitCore &cu, uint32_t wf_id)
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
+
+  std::string disassemble_instruction(std::span<const uint32_t> encoding,
+                                      uint64_t pc) const override;
 };
 
 } // namespace amdgpu
