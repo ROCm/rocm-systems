@@ -325,9 +325,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // it on, and they would then diverge at the first collective instead. The
   // enable/disable decision has to be unanimous, so agree one last time.
   //
-  // (A failure *inside* mallocAndInit, before its own internal exchange, can
-  // still strand peers in that exchange; that is internal to IpcGpuBarrier and
-  // predates this path.)
+  // A failure inside mallocAndInit cannot strand peers either: it agrees on its
+  // own rank-local setup before its internal handle exchange.
   if (!ddaIpcAllRanksReady(comm, localReady)) {
     barrierPair.first.reset();
     delete barrierState;

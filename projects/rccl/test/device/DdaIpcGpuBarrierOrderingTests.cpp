@@ -48,6 +48,7 @@ struct MailboxImage {
 struct BarrierImage {
   int nBlocks;
   int selfRank;
+  int nRanks;  // live peer count; the barrier signals only lanes below it
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
   bool aborted;
@@ -65,7 +66,7 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {}) {
-  BarrierImage img{kBlocks, selfRank, {}, params, false};
+  BarrierImage img{kBlocks, selfRank, kRanks, {}, params, false};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
