@@ -114,23 +114,25 @@ struct condition
 
 struct schema_param
 {
-    std::string                    id;
-    std::string                    name;
-    std::string                    description;
-    std::string                    category;
-    param_level                    level = param_level::basic;
-    param_type                     type  = param_type::string;
-    std::optional<std::string>     default_value;
-    std::optional<double>          min;
-    std::optional<double>          max;
-    std::string                    units;
-    path_kind                      path = path_kind::any;
-    std::vector<choice>            choices;
-    bool                           allow_custom = false;
-    std::optional<std::string>     pattern;
-    bool                           required = false;
-    std::optional<env_spec>        env;
-    std::optional<arg_spec>        arg;
+    std::string                id;
+    std::string                name;
+    std::string                description;
+    std::string                category;
+    param_level                level = param_level::basic;
+    param_type                 type  = param_type::string;
+    std::optional<std::string> default_value;
+    std::optional<double>      min;
+    std::optional<double>      max;
+    std::string                units;
+    path_kind                  path = path_kind::any;
+    std::vector<choice>        choices;
+    bool                       allow_custom = false;
+    std::optional<std::string> pattern;
+    bool                       required = false;
+    std::optional<env_spec>    env;
+    std::optional<arg_spec>    arg;
+    /// Name of a value_provider that supplies dynamic choices, when set.
+    std::optional<std::string>     value_provider;
     std::optional<param_condition> depends_on;
     std::vector<std::string>       mutually_exclusive_with;
     std::vector<std::string>       prerequisites;
@@ -167,7 +169,8 @@ public:
 
     /**
      * @return false, leaving the schema unchanged, if the id, environment variable, or
-     *         CLI argument name is already registered.
+     *         CLI argument name is already registered, or value_provider is empty or set
+     *         on a type other than string or enum.
      */
     [[nodiscard]] bool add_param(schema_param param);
 
