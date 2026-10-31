@@ -64,6 +64,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `rocprof-compute analyze -p <workload> --list-metrics` lists only the blocks that the workload profiled.
   * Per-channel metrics are no longer listed.
 
+* Analyze mode no longer needs the `tabulate` Python package. rocprofiler-compute now ships it.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
