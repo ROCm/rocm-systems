@@ -59,13 +59,22 @@ bool fileHasContent(const std::string& path) {
   return f.peek() != std::ifstream::traits_type::eof();
 }
 
-// The stub is built and installed beside the test binary, so it is always one step
-// away from wherever this executable is running from -- build tree or install.
+// In the build tree the stub sits beside the test binary; in an install it is in
+// the library directory. Check both so the test runs from either layout.
 std::string stubPluginPath() {
   std::error_code ec;
   std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   if (ec) return "";
-  return (exe.parent_path() / RCCL_TEST_PROFILER_STUB_NAME).string();
+  const std::filesystem::path dir = exe.parent_path();
+  const std::filesystem::path candidates[] = {
+    dir / RCCL_TEST_PROFILER_STUB_NAME,                        // build tree
+    dir.parent_path() / "lib" / RCCL_TEST_PROFILER_STUB_NAME,  // install tree
+  };
+  for (const std::filesystem::path& candidate : candidates) {
+    std::error_code exists_ec;
+    if (std::filesystem::exists(candidate, exists_ec)) return candidate.string();
+  }
+  return "";
 }
 
 // Returns the reason this host cannot run the test, or "" when it can.
