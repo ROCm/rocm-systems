@@ -83,7 +83,7 @@ repos:
         name: Metric library validation
         entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_metric_library.py'
         language: system
-        files: (analysis_configs/gfx.*/\d{4}_.*\.yaml|metric_library/.*\.yaml|sets/gfx.*_sets\.yaml|utils/mi_gpu_spec\.(yaml|py)|utils/(metric_library|yaml_inherit_loader|utils_counter_defs|utils_common)\.py|soc_base\.py|tools/(validate_metric_library|format_yaml)\.py)$
+        files: (analysis_configs/gfx.*/\d{4}_.*\.yaml|metric_library/.*\.yaml|sets/gfx.*_sets\.yaml|utils/mi_gpu_spec\.(yaml|py)|utils/(equation_format|metric_library|yaml_inherit_loader|utils_counter_defs|utils_common)\.py|soc_base\.py|tools/(validate_metric_library|format_yaml)\.py)$
         pass_filenames: false
         stages: [pre-commit]
 

@@ -51,13 +51,11 @@ from typing import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils import metric_library
+from utils.equation_format import normalize_equation
 from utils.metric_library import (
     SETS_FILENAME,
     VARIABLES_FILENAME,
