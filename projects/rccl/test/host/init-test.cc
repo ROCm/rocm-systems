@@ -9811,6 +9811,7 @@ struct Tr_AllGatherInfo {
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
+  bool ddaNranksRelax;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -10518,6 +10519,34 @@ TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesRanksD
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
   EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusValue0);
+}
+
+// The two above only see rank 0's answer from a rank-0 comm, so a lambda that
+// indexed allGather3Data by the self rank instead of its argument would still
+// pass them. Here every peer gathers a distinct relax value and hostname, self
+// is not rank 0, and the check must be handed each peer's own row in order.
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesEachPeersRow) {
+  constexpr int kSelf = 1;
+  g_ncclDdaNranksRelaxEnabled = true;  // self's own row, left as the real read wrote it
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/kSelf);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+    if (r == kSelf) return;
+    row.ddaNranksRelax = r == 3;  // ranks 0 and 2 disagree with self, rank 3 agrees
+    std::snprintf(row.hostname, sizeof(row.hostname), "dda-peer-%d", r);
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  ASSERT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_EQ(4, g_ncclDdaNranksRelaxConsensusNranks);
+  EXPECT_EQ((std::vector<bool>{false, true, false, true}), g_ncclDdaNranksRelaxConsensusValues);
+  ASSERT_EQ(4u, g_ncclDdaNranksRelaxConsensusHosts.size());
+  EXPECT_EQ("dda-peer-0", g_ncclDdaNranksRelaxConsensusHosts[0]);
+  EXPECT_EQ("dda-peer-2", g_ncclDdaNranksRelaxConsensusHosts[2]);
+  EXPECT_EQ("dda-peer-3", g_ncclDdaNranksRelaxConsensusHosts[3]);
+  // Self's slot carries the real getHostName() result, which the test cannot
+  // predict; it only has to be its own, not a copy of some peer's.
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusHosts[kSelf].empty());
+  EXPECT_NE(0u, g_ncclDdaNranksRelaxConsensusHosts[kSelf].rfind("dda-peer-", 0));
 }
 
 // nRanks == kDdaNranks (8): ncclDdaIpcNranksSupported() returns true regardless

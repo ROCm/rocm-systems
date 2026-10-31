@@ -256,6 +256,8 @@ int g_ncclCheckDdaNranksRelaxConsensusCalls = 0;
 int g_ncclDdaNranksRelaxConsensusNranks = -1;
 bool g_ncclDdaNranksRelaxConsensusValue0 = false;
 std::string g_ncclDdaNranksRelaxConsensusHost0;
+std::vector<bool> g_ncclDdaNranksRelaxConsensusValues;
+std::vector<std::string> g_ncclDdaNranksRelaxConsensusHosts;
 ncclResult_t ncclCheckDdaNranksRelaxConsensus(int nranks, std::function<bool(int)> getDdaNranksRelax,
                                               std::function<const char*(int)> getHostname) {
   g_ncclCheckDdaNranksRelaxConsensusCalls++;
@@ -263,6 +265,16 @@ ncclResult_t ncclCheckDdaNranksRelaxConsensus(int nranks, std::function<bool(int
   if (nranks > 0) {
     g_ncclDdaNranksRelaxConsensusValue0 = getDdaNranksRelax(0);
     g_ncclDdaNranksRelaxConsensusHost0 = getHostname(0);
+  }
+  // Every rank's answer, in rank order: the real check compares all of them, so
+  // a call site whose lambdas ignore their argument (e.g. index by self rank)
+  // must be visible here, not just at index 0.
+  g_ncclDdaNranksRelaxConsensusValues.clear();
+  g_ncclDdaNranksRelaxConsensusHosts.clear();
+  for (int r = 0; r < nranks; r++) {
+    g_ncclDdaNranksRelaxConsensusValues.push_back(getDdaNranksRelax(r));
+    const char* host = getHostname(r);
+    g_ncclDdaNranksRelaxConsensusHosts.emplace_back(host ? host : "");
   }
   return g_ncclCheckDdaNranksRelaxConsensusResult;
 }
@@ -318,6 +330,8 @@ void ResetTopoStubs() {
   g_ncclDdaNranksRelaxConsensusNranks = -1;
   g_ncclDdaNranksRelaxConsensusValue0 = false;
   g_ncclDdaNranksRelaxConsensusHost0.clear();
+  g_ncclDdaNranksRelaxConsensusValues.clear();
+  g_ncclDdaNranksRelaxConsensusHosts.clear();
   g_ncclTreeBasePostsetResult = ncclSuccess;
   g_ncclTreeBasePostsetCalls = 0;
   g_ncclTreeBasePostsetGraph = nullptr;
