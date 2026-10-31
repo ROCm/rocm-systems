@@ -20,6 +20,9 @@ extern std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cu
 // Fail loud by default like the rest of this floor; the addon capture cases in
 // enqueue-test.cc install hooks.
 extern std::function<ncclResult_t(struct ncclCudaGraph, hipStream_t, hipEvent_t)> g_ncclStreamAdvanceToEvent;
+extern std::function<ncclResult_t(hipStream_t, hipStream_t)> g_ncclStreamAdvanceToStream;
+extern std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*)>
+    g_ncclStrongStreamAcquiredWorkStream;
 extern std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent;
 
 extern ncclResult_t g_ncclStrongStreamResult;

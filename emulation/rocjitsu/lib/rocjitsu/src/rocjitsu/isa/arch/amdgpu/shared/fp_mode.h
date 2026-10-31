@@ -640,6 +640,15 @@ inline uint16_t packed_mul_bf16(float a, float b, bool fp16_ovfl) {
 enum class ScalarAtomicOp { FADD, FMIN, FMAX, FCMPSWAP };
 
 /// @brief Execute scalar floating atomics with explicit ISA policy and bit-preserving selection.
+/// @details FCMPSWAP flushes only comparison inputs and selects the original source or memory
+/// bits. RDNA3/3.5 ISA 13.2 and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 instead specify flushing
+/// the CompareStore result. Captures on gfx1010/gfx1030/gfx1100 LDS (F32/F64) and gfx1100
+/// global F32 contradict that rule on those paths. CDNA1-4 and RDNA3.5 LDS F32/F64,
+/// RDNA1/2 cache F32/F64, RDNA3.5 cache F32, and gfx1100 FLAT/BUFFER F32 inherit this policy
+/// without equivalent captures. CDNA5/RDNA4 expose no FCMPSWAP instructions in this tree.
+/// Every capture used FP_DENORM 0 or 3, endpoints that cannot separate input-controlled
+/// from output-controlled flushing. Denormal memory compared against +0 with a normal
+/// replacement would, under FP_DENORM 1 or 2: this policy swaps only in mode 2.
 template <typename Bits>
 Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bits compare_bits,
                    uint32_t denorm_mode, bool legacy_minmax, bool source_nan_first = false) {
@@ -660,10 +669,12 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
   const Bits compare_input = (denorm_mode & 1u) ? compare_bits : flush(compare_bits);
   if (operation == ScalarAtomicOp::FCMPSWAP) {
     // Integer equality implements finite IEEE equality except for signed zero;
-    // classify NaNs explicitly so equal payloads never cause a swap.
+    // classify NaNs explicitly so equal payloads never cause a swap. Denormal
+    // flushing applies only to the comparison; selection preserves the original
+    // source bits on a match and original memory bits on a mismatch.
     const bool equal =
         old_input == compare_input || ((old_input & ~kSign) == 0 && (compare_input & ~kSign) == 0);
-    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_input : old_input;
+    return !is_nan(old_input) && !is_nan(compare_input) && equal ? source_bits : old_bits;
   }
   if (operation == ScalarAtomicOp::FADD) {
     // DS and cache ADD use fixed RNE, independent of both MODE.round and the host.
@@ -683,6 +694,9 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     const Bits result = std::bit_cast<Bits>(static_cast<Float>(old_value + source_value));
     return (denorm_mode & 2u) ? result : flush(result);
   }
+
+  assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
+         "unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
@@ -1143,8 +1157,12 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
+/// returned without entering the host floating-point environment.
 inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
                            bool clamp_nan_to_zero) {
+  if (omod == 0 && !clamp)
+    return value;
   double result;
   {
     detail::ScopedFenv environment(round_mode);

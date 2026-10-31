@@ -4,8 +4,10 @@
 /// @file wave_debug_test.cpp
 /// @brief Wave-level KFD debugger groundwork, exercised through the compute unit.
 
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -47,11 +49,12 @@ struct WaveDebugFixture {
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit WaveDebugFixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4,
+                            uint32_t num_wf_slots = 1)
       : gpu_mem("wave_debug_mem"), l2("wave_debug_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
-    cfg.num_wf_slots = 1;
+    cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
@@ -65,6 +68,111 @@ struct WaveDebugFixture {
     return wf;
   }
 };
+
+TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) {
+  const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    using ComputeUnit = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+    const auto *cu = dynamic_cast<const ComputeUnit *>(fx.cu.get());
+    ASSERT_NE(cu, nullptr);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_GT(wave->sgpr_alloc().base, first_wave->sgpr_alloc().base);
+    ASSERT_GT(wave->vgpr_alloc().base, first_wave->vgpr_alloc().base);
+    const auto last_sgpr = wave->num_sgprs() - 1;
+    const auto last_vgpr = wave->num_vgprs() - 1;
+    const auto last_lane = wave->wf_size() - 1;
+    fx.cu->write_sgpr(wave->sgpr_alloc().base + last_sgpr, 42);
+    fx.cu->write_vgpr(wave->vgpr_alloc().base + last_vgpr, last_lane, 43);
+    fx.cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 44);
+
+    EXPECT_EQ(wave->debug_read_sgpr(last_sgpr), 42u);
+    EXPECT_EQ(wave->debug_read_vgpr(last_vgpr, last_lane), 43u);
+
+    const auto second_wave_sgpr =
+        wave->sgpr_alloc().base - first_wave->sgpr_alloc().base + last_sgpr;
+    const auto second_wave_vgpr =
+        wave->vgpr_alloc().base - first_wave->vgpr_alloc().base + last_vgpr;
+    EXPECT_EQ(first_wave->debug_read_sgpr(second_wave_sgpr), 42u);
+    EXPECT_EQ(first_wave->debug_read_vgpr(second_wave_vgpr, last_lane), 43u);
+
+    const auto sgpr_end = fx.cu->sgpr_file().total_regs() - wave->sgpr_alloc().base;
+    const auto vgpr_end = cu->vgpr_file().total_regs() - wave->vgpr_alloc().base;
+    EXPECT_EQ(wave->debug_read_sgpr(sgpr_end), 0u);
+    EXPECT_EQ(wave->debug_read_sgpr(sgpr_end + 1), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(vgpr_end, 0), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(vgpr_end + 1, 0), 0u);
+    EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+    EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+  };
+  check.operator()<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
+  check.operator()<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 2);
+    auto *first_wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(first_wave, nullptr);
+    auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4);
+    ASSERT_NE(wave, nullptr);
+    ASSERT_EQ(wave->num_sgprs(), 16u);
+    ASSERT_EQ(wave->num_vgprs(), 4u);
+    ASSERT_GT(wave->sgpr_alloc().base, first_wave->sgpr_alloc().base);
+    ASSERT_GT(wave->vgpr_alloc().base, first_wave->vgpr_alloc().base);
+    const auto sbase = wave->sgpr_alloc().base;
+    const auto vbase = wave->vgpr_alloc().base;
+    const auto last_lane = fx.cu->vgpr_storage_lane_count() - 1;
+    fx.cu->write_sgpr(sbase + 32, 42);
+    fx.cu->write_sgpr(sbase + 33, 43);
+    fx.cu->write_vgpr(vbase + 8, last_lane, 44);
+
+    EXPECT_EQ(fx.cu->read_sgpr(sbase + 32), 42u);
+    EXPECT_EQ(fx.cu->read_sgpr(sbase + 33), 43u);
+    EXPECT_EQ(fx.cu->read_vgpr(vbase + 8, last_lane), 44u);
+    EXPECT_EQ(wave->debug_read_sgpr(32), 42u);
+    EXPECT_EQ(wave->debug_read_sgpr(33), 43u);
+    EXPECT_EQ(wave->debug_read_vgpr(8, last_lane), 44u);
+  }
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  ASSERT_EQ(fx.cu->vgpr_storage_lane_count(), 64u);
+  const auto vbase = wave->vgpr_alloc().base;
+  fx.cu->write_vgpr(vbase, 32, 42);
+  fx.cu->write_vgpr(vbase, 63, 43);
+  fx.cu->write_vgpr(vbase + 1, 0, 44);
+
+  EXPECT_EQ(fx.cu->read_vgpr(vbase, 32), 42u);
+  EXPECT_EQ(fx.cu->read_vgpr(vbase, 63), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, 32), 42u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, 63), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+}
+
+TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
+  ASSERT_NE(wave, nullptr);
+  ASSERT_EQ(wave->wf_size(), 32u);
+  ASSERT_EQ(fx.cu->vgpr_storage_lane_count(), 32u);
+  const auto vbase = wave->vgpr_alloc().base;
+  fx.cu->write_vgpr(vbase, 31, 43);
+  fx.cu->write_vgpr(vbase + 1, 0, 44);
+
+  EXPECT_EQ(wave->debug_read_vgpr(0, 31), 43u);
+  EXPECT_EQ(wave->debug_read_vgpr(1, 0), 44u);
+  EXPECT_EQ(wave->debug_read_vgpr(0, fx.cu->vgpr_storage_lane_count()), 0u);
+}
 
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;
@@ -241,7 +349,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
 
   uint64_t fault_address = 0;
   fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
         EXPECT_EQ(&faulting_wave, wf);
         EXPECT_FALSE(is_write);
         fault_address = address;
@@ -281,7 +389,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
 
   uint64_t fault_address = ~uint64_t{0};
   fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
         EXPECT_EQ(&faulting_wave, wave);
         EXPECT_FALSE(is_write);
         fault_address = address;
@@ -731,8 +839,9 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   std::memcpy(data_page.data(), &kExpectedValue, sizeof(kExpectedValue));
 
   bool handler_called = false;
-  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool) {
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t issue_pc) {
     handler_called = true;
+    EXPECT_EQ(issue_pc, kKernelAddr);
     return false; // no debug session for this wave's process
   });
 
@@ -802,7 +911,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
 
   uint64_t fault_address = ~uint64_t{0};
   fx.cu->set_memory_violation_handler(
-      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write, uint64_t) {
         EXPECT_EQ(&faulting_wave, wave);
         EXPECT_FALSE(is_write);
         fault_address = address;
@@ -859,7 +968,7 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
   fx.cu->write_sgpr(sbase + 3, 0);
 
   unsigned violations = 0;
-  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool) {
+  fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &, uint64_t, bool, uint64_t) {
     ++violations;
     return true;
   });
@@ -1209,7 +1318,7 @@ struct ParsedWave {
 // Walk the CWSR area exactly as rocm-dbgapi's control_stack_iterate +
 // register_address do, asserting the contiguity invariants dbgapi enforces.
 std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint64_t base,
-                                   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4) {
+                                   uint32_t lds_granule) {
   auto rd = [&](uint64_t va) -> uint32_t {
     auto it = mem.find(va);
     return it == mem.end() ? 0u : it->second;
@@ -1244,9 +1353,7 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint32_t vgpr_count = (accum + 1) * 4;
     const uint32_t acc = (vgprs_field + 1) * 8 - vgpr_count;
     const uint32_t sgpr_count = (sgprs_field + 1) * 16 - 16;
-    // gfx942 inherits gfx90a's 512-byte unit; gfx950 overrides it to 1280.
-    const uint32_t lds_size =
-        ((state >> 9) & 0xFF) * (arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512u : 1280u);
+    const uint32_t lds_size = ((state >> 9) & 0xFF) * lds_granule;
 
     const uint64_t save = last_wave_area - 64;
     const uint64_t register_area_end = save - ((rl & (1u << 17)) ? lds_size : 0);
@@ -1319,6 +1426,40 @@ kmd::CwsrWaveState make_wave(uint64_t id, uint64_t pc) {
     for (uint32_t l = 0; l < 64; ++l)
       w.vgprs[r * 64 + l] = (r << 16) | l;
   return w;
+}
+
+TEST(WaveDebugTest, CwsrRejectsUnmodelledTargetsWithoutAccessingMemory) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<kmd::CwsrWaveState> waves = {make_wave(0xAA01, 0x4000)};
+    waves[0].is_first_in_group = waves[0].is_last_in_group = true;
+    waves[0].lds.resize(512, 0xA5);
+    bool accessed_memory = false;
+    EXPECT_FALSE(
+        kmd::serialize_queue_cwsr(
+            kCtxBase, kAreaSize, waves, [&](uint64_t, uint32_t) { accessed_memory = true; }, arch)
+            .ok);
+    EXPECT_FALSE(kmd::serialize_queue_cwsr_bulk(
+                     kCtxBase, kAreaSize, waves,
+                     [&](uint64_t, std::span<const uint8_t>) { accessed_memory = true; }, arch)
+                     .ok);
+    EXPECT_FALSE(kmd::deserialize_queue_cwsr(
+        kCtxBase, kAreaSize, waves,
+        [&](uint64_t) {
+          accessed_memory = true;
+          return 0u;
+        },
+        arch));
+    EXPECT_FALSE(kmd::deserialize_queue_cwsr_bulk(
+        kCtxBase, kAreaSize, waves, [&](uint64_t, std::span<uint8_t>) { accessed_memory = true; },
+        arch));
+    EXPECT_FALSE(accessed_memory);
+  }
 }
 
 TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
@@ -1452,6 +1593,76 @@ TEST(WaveDebugTest, Gfx1250CwsrAcceptsTheFullAddressableVgprFile) {
   EXPECT_TRUE(mem.empty());
 }
 
+TEST(WaveDebugTest, CwsrHonorsTheRuntimeControlStackBoundary) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000, kControlCapacity = 4096;
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    auto wave = make_wave(0x1234, 0x98765432);
+    std::map<uint64_t, uint32_t> memory;
+    auto write32 = [&](uint64_t address, uint32_t value) { memory[address] = value; };
+    const auto layout =
+        kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, {wave}, write32, arch, kControlCapacity);
+    ASSERT_TRUE(layout.ok);
+    EXPECT_EQ(layout.control_stack_offset + layout.control_stack_size, kControlCapacity);
+    EXPECT_EQ(layout.wave_state_offset - layout.wave_state_size, kControlCapacity);
+    std::vector<kmd::CwsrWaveState> restored = {wave};
+    restored[0].pc = 0;
+    EXPECT_TRUE(kmd::deserialize_queue_cwsr(
+        kCtxBase, kAreaSize, restored, [&](uint64_t address) { return memory[address]; }, arch,
+        kControlCapacity));
+    EXPECT_EQ(restored[0].pc, wave.pc);
+    EXPECT_FALSE(
+        kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, {wave}, write32, arch, sizeof(uint32_t)).ok);
+  }
+}
+
+TEST(WaveDebugTest, CwsrRetainsTheShaderEngineAndScratchSlot) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t engine = 0; engine < 4; ++engine) {
+      auto wave = make_wave(0xAA01, 0x2000);
+      wave.shader_engine_id = engine;
+      wave.scratch_scoreboard_id = 173;
+      std::map<uint64_t, uint32_t> memory;
+      auto layout = kmd::serialize_queue_cwsr(
+          kCtxBase, kAreaSize, {wave},
+          [&](uint64_t address, uint32_t value) { memory[address] = value; }, arch);
+      ASSERT_TRUE(layout.ok);
+      uint32_t word = memory[kCtxBase + layout.control_stack_offset + 3 * sizeof(uint32_t)];
+      EXPECT_EQ((word >> 9) & 3u, engine);
+      EXPECT_EQ(word & 0x1ffu, 173u);
+    }
+  }
+}
+
+TEST(WaveDebugTest, CwsrLdsUsesTheTargetAbiGranularity) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    const uint32_t granule = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512 : 1280;
+    for (const uint32_t bytes : {1u, 512u, 513u, 1280u, 1291u}) {
+      SCOPED_TRACE(static_cast<int>(arch));
+      SCOPED_TRACE(bytes);
+      auto wave = make_wave(0x1234, 0x98765432);
+      wave.is_first_in_group = wave.is_last_in_group = true;
+      wave.lds.resize(bytes, 0xA5);
+      std::map<uint64_t, uint32_t> memory;
+      auto layout = kmd::serialize_queue_cwsr(
+          kCtxBase, kAreaSize, {wave},
+          [&](uint64_t address, uint32_t value) { memory[address] = value; }, arch);
+      ASSERT_TRUE(layout.ok);
+      auto parsed = parse_cwsr(memory, kCtxBase, granule);
+      ASSERT_EQ(parsed.size(), 1u);
+      EXPECT_EQ(parsed[0].pc, wave.pc);
+      EXPECT_EQ(parsed[0].wave_id, wave.wave_id);
+      EXPECT_EQ(parsed[0].lds.size(), ((bytes + granule - 1) / granule) * granule);
+      EXPECT_TRUE(std::equal(wave.lds.begin(), wave.lds.end(), parsed[0].lds.begin()));
+    }
+  }
+}
+
 TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x40000; // 256 KiB
@@ -1477,7 +1688,7 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
       kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(layout.ok);
 
-  std::vector<ParsedWave> parsed = parse_cwsr(mem, kCtxBase);
+  std::vector<ParsedWave> parsed = parse_cwsr(mem, kCtxBase, /*lds_granule=*/1280);
   ASSERT_EQ(parsed.size(), waves.size());
 
   for (size_t i = 0; i < waves.size(); ++i) {
@@ -1560,7 +1771,8 @@ TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
     const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
     EXPECT_EQ(layout.control_stack_size, (2 + 2 * state_words + waves.size()) * sizeof(uint32_t));
     if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
-      const auto parsed = parse_cwsr(mem, kCtxBase, arch);
+      const auto parsed =
+          parse_cwsr(mem, kCtxBase, arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512u : 1280u);
       ASSERT_EQ(parsed.size(), waves.size());
       EXPECT_EQ(parsed[0].lds.size(), arch == ROCJITSU_CODE_ARCH_CDNA3 ? 4096u : 5120u);
       EXPECT_TRUE(parsed[1].lds.empty());
@@ -1571,6 +1783,57 @@ TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
     EXPECT_TRUE(waves[1].lds.empty());
     EXPECT_TRUE(waves[2].lds.empty());
     EXPECT_EQ(waves[0].lds[0], 0x5a);
+  }
+}
+
+TEST(WaveDebugTest, GroupLdsChangesPreserveRuntimeContextBoundaries) {
+  constexpr uint64_t kCtxBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 64 * 1024;
+  constexpr uint32_t kControlStackCapacity = 4096;
+  const std::array<uint32_t, 6> runtime_fields{128 * 1024, 4096, 0x1234, 0x5678, 42, 0xA5A5};
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    std::vector<kmd::CwsrWaveState> waves = {make_wave(1, 0x1000), make_wave(2, 0x2000),
+                                             make_wave(3, 0x3000)};
+    for (size_t i = 0; i < waves.size(); ++i)
+      waves[i].group_ids[0] = static_cast<uint32_t>(i + 1);
+    waves[0].lds.assign(5121, 0x5A);
+    waves[1].lds.clear();
+    waves[2].lds.assign(129, 0x7C);
+    std::map<uint64_t, uint32_t> mem;
+    for (size_t i = 0; i < runtime_fields.size(); ++i)
+      mem[kCtxBase + 16 + i * sizeof(uint32_t)] = runtime_fields[i];
+    auto write32 = [&](uint64_t address, uint32_t value) { mem[address] = value; };
+    auto read32 = [&](uint64_t address) { return mem.at(address); };
+    const auto layout =
+        kmd::serialize_queue_cwsr(kCtxBase, kAreaSize, waves, write32, arch, kControlStackCapacity,
+                                  kmd::CwsrDebugRegion{runtime_fields[0], runtime_fields[1]});
+    ASSERT_TRUE(layout.ok);
+    const uint32_t state_words = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 2 : 1;
+    EXPECT_EQ(layout.control_stack_size, (2 + waves.size() * (state_words + 1)) * sizeof(uint32_t));
+    EXPECT_EQ(layout.control_stack_offset + layout.control_stack_size, kControlStackCapacity);
+    EXPECT_EQ(layout.wave_state_offset - layout.wave_state_size, kControlStackCapacity);
+    for (size_t i = 0; i < runtime_fields.size(); ++i)
+      EXPECT_EQ(read32(kCtxBase + 16 + i * sizeof(uint32_t)), runtime_fields[i]);
+    if (arch != ROCJITSU_CODE_ARCH_CDNA5) {
+      const uint32_t granule = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 512 : 1280;
+      const auto parsed = parse_cwsr(mem, kCtxBase, granule);
+      ASSERT_EQ(parsed.size(), waves.size());
+      for (size_t i = 0; i < waves.size(); ++i)
+        EXPECT_EQ(parsed[i].lds.size(), (waves[i].lds.size() + granule - 1) / granule * granule);
+    }
+    auto restored = waves;
+    for (auto &wave : restored) {
+      wave.pc = 0;
+      std::ranges::fill(wave.lds, 0);
+    }
+    ASSERT_TRUE(kmd::deserialize_queue_cwsr(kCtxBase, kAreaSize, restored, read32, arch,
+                                            kControlStackCapacity));
+    for (size_t i = 0; i < waves.size(); ++i) {
+      EXPECT_EQ(restored[i].pc, waves[i].pc);
+      EXPECT_EQ(restored[i].lds, waves[i].lds);
+    }
   }
 }
 
@@ -1798,6 +2061,68 @@ TEST(WaveDebugTest, CwsrBulkCodecMatchesDwordCodecAndPublishesHeaderLast) {
     std::memcpy(&actual, bulk_image.data() + offset, sizeof(actual));
     auto expected = dwords.find(kCtxBase + offset);
     EXPECT_EQ(actual, expected == dwords.end() ? 0u : expected->second) << "offset " << offset;
+  }
+}
+
+TEST(WaveDebugTest, CwsrPublicationPreservesRuntimeFieldsAndDebuggerMemory) {
+  constexpr uint64_t kBase = 0x400000000ULL;
+  constexpr uint32_t kAreaSize = 0x40000;
+  const kmd::CwsrDebugRegion debug{kAreaSize - 256, 256};
+  const std::array<uint32_t, 6> owned = {debug.offset, debug.size, 0x76543210u,
+                                         0x1234u,      83u,        0xA5A5u};
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    for (bool bulk : {false, true}) {
+      SCOPED_TRACE(bulk);
+      auto wave = make_wave(0xAA01, 0x6000);
+      wave.is_first_in_group = wave.is_last_in_group = true;
+      wave.lds.resize(513, 0x5A);
+      std::vector<uint8_t> image(kAreaSize, 0xA5);
+      std::memcpy(image.data() + 16, owned.data(), sizeof(owned));
+      auto write_block = [&](uint64_t address, std::span<const uint8_t> bytes) {
+        ASSERT_GE(address, kBase);
+        ASSERT_LE(address - kBase + bytes.size(), image.size());
+        if (address == kBase) {
+          EXPECT_EQ(bytes.size(), 16u);
+        }
+        std::memcpy(image.data() + (address - kBase), bytes.data(), bytes.size());
+      };
+      const auto layout =
+          bulk ? kmd::serialize_queue_cwsr_bulk(kBase, kAreaSize, {wave}, write_block, arch, 0,
+                                                debug)
+               : kmd::serialize_queue_cwsr(
+                     kBase, kAreaSize, {wave},
+                     [&](uint64_t address, uint32_t value) {
+                       EXPECT_FALSE(address >= kBase + 16 && address < kBase + 40);
+                       std::memcpy(image.data() + (address - kBase), &value, sizeof(value));
+                     },
+                     arch, 0, debug);
+      ASSERT_TRUE(layout.ok);
+      EXPECT_EQ(layout.debug_offset, debug.offset);
+      EXPECT_EQ(layout.debug_size, debug.size);
+      EXPECT_EQ(std::memcmp(image.data() + 16, owned.data(), sizeof(owned)), 0);
+      EXPECT_TRUE(std::ranges::all_of(std::span(image).subspan(debug.offset, debug.size),
+                                      [](uint8_t value) { return value == 0xA5; }));
+      std::vector<kmd::CwsrWaveState> restored{wave};
+      ASSERT_TRUE(kmd::deserialize_queue_cwsr_bulk(
+          kBase, kAreaSize, restored,
+          [&](uint64_t address, std::span<uint8_t> bytes) {
+            ASSERT_GE(address, kBase);
+            ASSERT_LE(address - kBase + bytes.size(), image.size());
+            std::memcpy(bytes.data(), image.data() + (address - kBase), bytes.size());
+          },
+          arch));
+      EXPECT_EQ(restored[0].pc, wave.pc);
+      EXPECT_EQ(restored[0].vgprs, wave.vgprs);
+      bool wrote = false;
+      EXPECT_FALSE(kmd::serialize_queue_cwsr_bulk(
+                       kBase, kAreaSize, {wave},
+                       [&](uint64_t, std::span<const uint8_t>) { wrote = true; }, arch, 0,
+                       kmd::CwsrDebugRegion{512, 64})
+                       .ok);
+      EXPECT_FALSE(wrote);
+    }
   }
 }
 

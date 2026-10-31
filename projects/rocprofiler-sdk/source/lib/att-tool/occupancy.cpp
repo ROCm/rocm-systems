@@ -92,6 +92,7 @@ dispatch_to_json(const dispatch_t&                                   dispatch,
         {"dispatch_pkt_addr", dispatch.dispatch_pkt_addr},
         {"byte_offset", dispatch.byte_offset},
         {"flags", dispatch.flags},
+        {"dispatch_id", dispatch.dispatch_id},
     };
 }
 
@@ -145,7 +146,8 @@ OccupancyFile(const Fspath&                                       dir,
                                 "pipe_id",
                                 "is_ext",
                                 "workgroup_id",
-                                "cluster_id"};
+                                "cluster_id",
+                                "dispatch_id"};
 
     for(const auto& [se, eventlist] : occ)
     {
@@ -164,6 +166,7 @@ OccupancyFile(const Fspath&                                       dir,
             json_event.push_back(event.is_ext);
             json_event.push_back(event.workgroup_id);
             json_event.push_back(event.cluster_id);
+            json_event.push_back(event.dispatch_id);
             list.push_back(json_event);
         }
         jocc[std::to_string(se)] = list;

@@ -8,6 +8,8 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
+#include "rocjitsu/kmd/linux/syscall_compat.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -55,19 +57,6 @@ RJ_DIAGNOSTIC_POP
 #include <sys/wait.h>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
-#endif
-// pidfd_open(2) landed in Linux 5.3. The build hosts are older than their
-// kernels here -- gcc-toolset-13 on the CI base image ships sanitized headers
-// that predate it -- so the wrapper and even __NR_pidfd_open can be missing
-// while the running kernel implements it fine. 434 is the number on every
-// architecture ROCm targets; the syscall was added after new numbers began
-// being allocated identically across arches.
-#ifndef SYS_pidfd_open
-#ifdef __NR_pidfd_open
-#define SYS_pidfd_open __NR_pidfd_open
-#else
-#define SYS_pidfd_open 434
-#endif
 #endif
 #ifndef SYS_clone3
 #ifdef __NR_clone3
@@ -244,7 +233,7 @@ namespace {
 /// it reaches this lock, so widening the region would invert the two orders.
 void *safe_mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
   auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-  return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
+  return map_memory_backing(addr, length, prot, flags, fd, offset);
 }
 
 /// @brief munmap via the real libc, with the mapping layout held still.
@@ -578,7 +567,7 @@ private:
 /// is_drm()). Routing through the passthrough table keeps "the driver never
 /// re-enters the interposer" total and avoids acquiring fd_mutex_ under a held
 /// per-process lock (alloc_mutex_/etc.).
-int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd, st); }
+int safe_fstat(int fd, struct stat *st) { return stat_memory_backing(fd, st); }
 
 /// @brief fcntl via the real libc, bypassing the interposer.
 /// @details The interposer's fcntl hook takes fd_mutex_ on F_DUPFD paths; calling
@@ -586,7 +575,7 @@ int safe_fstat(int fd, struct stat *st) { return libc_passthrough().fstat_fn(fd,
 /// inversion. The passthrough table's fcntl is variadic; the int-arg forms
 /// (F_DUPFD_CLOEXEC, F_ADD_SEALS, F_GETFL/no-arg) used here forward cleanly.
 template <typename... Args> int safe_fcntl(int fd, int cmd, Args... args) {
-  return libc_passthrough().fcntl(fd, cmd, args...);
+  return fcntl_memory_backing(fd, cmd, args...);
 }
 
 constexpr auto kDebugNotificationWriteTimeout = std::chrono::milliseconds(250);
@@ -973,7 +962,7 @@ std::shared_ptr<GemObject> SimulatedKfd::retain_bo_state(const struct stat &st,
   std::lock_guard<std::mutex> lock(proc->alloc_mutex_);
   std::vector<KfdProcess::GpuAllocation *> backed;
   for (auto &[handle, alloc] : proc->allocations_) {
-    const int backing = alloc.memfd >= 0 ? alloc.memfd : alloc.dmabuf_fd;
+    const int backing = alloc.backing_fd >= 0 ? alloc.backing_fd : alloc.dmabuf_fd;
     struct stat backing_st {};
     if (backing >= 0 && safe_fstat(backing, &backing_st) == 0 && backing_st.st_dev == st.st_dev &&
         backing_st.st_ino == st.st_ino) {
@@ -988,7 +977,7 @@ std::shared_ptr<GemObject> SimulatedKfd::retain_bo_state(const struct stat &st,
   std::vector<IpcObject *> shared;
   for (auto &[key, object] : ipc_store_) {
     struct stat backing_st {};
-    if (object.backing_memfd >= 0 && safe_fstat(object.backing_memfd, &backing_st) == 0 &&
+    if (object.backing_fd >= 0 && safe_fstat(object.backing_fd, &backing_st) == 0 &&
         backing_st.st_dev == st.st_dev && backing_st.st_ino == st.st_ino) {
       shared.push_back(&object);
       if (object.bo_state)
@@ -1042,13 +1031,13 @@ void SimulatedKfd::release_allocation_mappings(KfdProcess &proc, KfdProcess::Gpu
   for (const auto &view : alloc.client_views)
     if (view.kind == MappingKind::DriverView)
       safe_munmap(view.ptr, view.size);
-  if (alloc.memfd >= 0) {
+  if (alloc.backing_fd >= 0) {
     {
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(alloc.memfd);
+      owned_fds_.erase(alloc.backing_fd);
     }
-    libc_passthrough().close(alloc.memfd);
-    alloc.memfd = -1;
+    libc_passthrough().close(alloc.backing_fd);
+    alloc.backing_fd = -1;
   }
 }
 
@@ -1465,6 +1454,9 @@ void SimulatedKfd::init_command_processors_locked() {
           }
         });
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
+      // Tests register synthetic queues directly with these CPs without the
+      // KFD queue ABI. Only those queues use these backing hooks;
+      // runtime-created queues obtain their allocation from ROCr's amd_queue_t.
       cp->set_scratch_backing_resolver([this](uint32_t process_id) -> uint64_t {
         std::lock_guard<std::mutex> plk(process_mutex_);
         for (auto &[fd, proc] : processes_) {
@@ -1520,8 +1512,8 @@ void SimulatedKfd::init_command_processors_locked() {
         cu->set_alu_exception_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
         cu->set_memory_violation_handler(
-            [this](amdgpu::Wavefront &wf, uint64_t address, bool is_write) {
-              return on_wave_memory_violation(wf, address, is_write);
+            [this](amdgpu::Wavefront &wf, uint64_t address, bool is_write, uint64_t issue_pc) {
+              return on_wave_memory_violation(wf, address, is_write, issue_pc);
             });
       }
     });
@@ -1663,7 +1655,7 @@ uint32_t SimulatedKfd::open_process(pid_t client_pid) {
     std::lock_guard<std::mutex> lk(process_mutex_);
     // Create the backing fd under process_mutex_ so both entry points
     // (open()/open_process()) serialize fd creation and never publish two
-    // different memfds; ensure_fd_created() itself CASes so it is also safe from
+    // different backings; ensure_fd_created() itself CASes so it is also safe from
     // any lock-free caller.
     if (!ensure_fd_created())
       return 0;
@@ -1969,17 +1961,17 @@ int SimulatedKfd::close(uint32_t process_id) {
   // release the GPU and CPU mappings outside the lock.
   for (size_t ord = 0; ord < proc.gpu_state_.size(); ++ord) {
     auto &gs = proc.gpu_state_[ord];
-    int doorbell_memfd;
+    int doorbell_backing_fd;
     void *doorbell_monitor_page;
     size_t doorbell_page_size;
     std::vector<KfdProcess::PerGpuState::DoorbellView> doorbell_views;
     {
       std::lock_guard<std::mutex> alk(proc.alloc_mutex_);
-      doorbell_memfd = gs.doorbell_memfd;
+      doorbell_backing_fd = gs.doorbell_backing_fd;
       doorbell_monitor_page = gs.doorbell_monitor_page;
       doorbell_page_size = gs.doorbell_page_size;
       doorbell_views = std::move(gs.doorbell_views);
-      gs.doorbell_memfd = -1;
+      gs.doorbell_backing_fd = -1;
       gs.doorbell_monitor_page = nullptr;
       gs.doorbell_page_size = 0;
     }
@@ -1992,12 +1984,12 @@ int SimulatedKfd::close(uint32_t process_id) {
     }
     if (doorbell_monitor_page && doorbell_page_size)
       safe_munmap(doorbell_monitor_page, doorbell_page_size);
-    if (doorbell_memfd >= 0) {
+    if (doorbell_backing_fd >= 0) {
       {
         std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-        owned_fds_.erase(doorbell_memfd);
+        owned_fds_.erase(doorbell_backing_fd);
       }
-      libc_passthrough().close(doorbell_memfd);
+      libc_passthrough().close(doorbell_backing_fd);
     }
   }
 
@@ -2119,6 +2111,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       return unmap_memory_ioctl(proc, arg);
     case AMDKFD_IOC_CREATE_QUEUE:
       return create_queue_ioctl(proc, arg);
+    case AMDKFD_IOC_GET_QUEUE_WAVE_STATE:
+      return get_queue_wave_state_ioctl(proc, arg);
     case AMDKFD_IOC_UPDATE_QUEUE:
       return update_queue_ioctl(proc, arg);
     case AMDKFD_IOC_DESTROY_QUEUE:
@@ -2135,7 +2129,7 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     // variable and must not hold the per-process op lock), so it never reaches
     // this switch.
     case AMDKFD_IOC_SET_XNACK_MODE:
-      return set_xnack_mode_ioctl(arg);
+      return set_xnack_mode_ioctl(proc, arg);
     case AMDKFD_IOC_SET_MEMORY_POLICY:
       return set_memory_policy_ioctl(proc, arg);
     case AMDKFD_IOC_ALLOC_QUEUE_GWS:
@@ -2253,13 +2247,13 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     {
       std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
       auto &gs = proc.gpu(ord);
-      doorbell_fd = gs.doorbell_memfd;
+      doorbell_fd = gs.doorbell_backing_fd;
       monitor_ptr = gs.doorbell_monitor_page;
       published_size = gs.doorbell_page_size;
       if (doorbell_fd < 0) {
         for (auto &[handle, alloc] : proc.allocations_) {
           if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) && alloc.gpu_id == db_gpu_id) {
-            source_doorbell_fd = alloc.memfd;
+            source_doorbell_fd = alloc.backing_fd;
             break;
           }
         }
@@ -2275,7 +2269,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       if (source_doorbell_fd < 0) {
         // Local-mode ROCr can request a doorbell mmap without first allocating a
         // KFD doorbell object. Give that path the same persistent shared backing.
-        created_source.reset(memfd_create("rocjitsu_doorbell", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+        created_source.reset(create_memory_backing(length));
         if (!created_source)
           return MAP_FAILED;
         source_doorbell_fd = created_source.get();
@@ -2305,14 +2299,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       return MAP_FAILED;
     }
 
-    off_t cur_size = 0;
-    {
-      struct stat st {};
-      if (safe_fstat(doorbell_fd, &st) == 0)
-        cur_size = st.st_size;
-    }
-    if (static_cast<off_t>(length) > cur_size &&
-        ftruncate(doorbell_fd, static_cast<off_t>(length)) != 0) {
+    if (check_memory_backing_size(doorbell_fd, length) != 0) {
       int saved_errno = errno;
       new_doorbell_fd.reset();
       errno = saved_errno;
@@ -2332,7 +2319,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       // freshly-mapped region. Writing through a separate PROT_WRITE
       // mapping forces page allocation before the client mapping is published. Keeping this
       // alias gives the simulated CP a stable device-side view even while the
-      // runtime is creating or replacing its own mapping of the same memfd.
+      // runtime is creating or replacing its own mapping of the same backing descriptor.
       void *new_monitor = MAP_FAILED;
       void *forced_monitor_addr =
           next_doorbell_monitor_mmap_addr_.exchange(nullptr, std::memory_order_acq_rel);
@@ -2399,14 +2386,14 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
       auto &gs = proc.gpu(ord);
       if (new_doorbell_fd) {
-        assert(gs.doorbell_memfd < 0);
-        gs.doorbell_memfd = new_doorbell_fd.release();
+        assert(gs.doorbell_backing_fd < 0);
+        gs.doorbell_backing_fd = new_doorbell_fd.release();
         {
           std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-          owned_fds_.insert(gs.doorbell_memfd);
+          owned_fds_.insert(gs.doorbell_backing_fd);
         }
       } else {
-        assert(gs.doorbell_memfd == doorbell_fd);
+        assert(gs.doorbell_backing_fd == doorbell_fd);
       }
       assert(!gs.doorbell_monitor_page || gs.doorbell_monitor_page == monitor_ptr);
       if (std::ranges::none_of(gs.doorbell_views,
@@ -2436,7 +2423,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     // different fds to different callers -- leaving one polling an object that
     // never receives event updates -- besides racing the field itself.
     const int events_fd = proc.event_state_.ensure_backing(length, [&](size_t size) -> int {
-      auto raw_events_fd = memfd_create("rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+      auto raw_events_fd = create_memory_backing(size);
       if (raw_events_fd < 0)
         return -1;
       int backing = safe_fcntl(raw_events_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
@@ -2448,17 +2435,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
         owned_fds_.insert(backing);
       }
-      if (ftruncate(backing, static_cast<off_t>(size)) != 0) {
-        const int ftruncate_errno = errno; // preserve across close() below
-        {
-          std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-          owned_fds_.erase(backing);
-        }
-        libc_passthrough().close(backing);
-        errno = ftruncate_errno;
-        return -1;
-      }
-      fallocate(backing, 0, 0, static_cast<off_t>(size));
       {
         auto *init_ptr =
             static_cast<uint8_t *>(safe_mmap(nullptr, size, PROT_WRITE, MAP_SHARED, backing, 0));
@@ -2468,7 +2444,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           safe_munmap(init_ptr, size);
         }
       }
-      safe_fcntl(backing, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW);
       return backing;
     });
     if (events_fd < 0)
@@ -2493,7 +2468,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   auto &alloc = it->second;
 
-  if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
+  if (daemon_mode_ && alloc.backing_fd >= 0 && alloc.host_ptr != nullptr)
     return alloc.host_ptr;
 
   const auto mapped_span = rounded_host_mapping_length(length);
@@ -2583,9 +2558,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   void *host_ptr;
   MappingKind host_mapping_kind = MappingKind::DriverView;
 
-  if (alloc.memfd >= 0) {
+  if (alloc.backing_fd >= 0) {
     if (*mapped_span > alloc.size) {
-      if (ftruncate(alloc.memfd, static_cast<off_t>(*mapped_span)) != 0) {
+      if (check_memory_backing_size(alloc.backing_fd, *mapped_span) != 0) {
         errno = ENOMEM;
         return restore_replaced_backing();
       }
@@ -2602,7 +2577,7 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         auto mc_rc = mincore(addr, length, page_resident.data());
 
         auto *temp_mapping = static_cast<uint8_t *>(
-            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, alloc.memfd, 0));
+            safe_mmap(nullptr, length, PROT_WRITE, MAP_SHARED, alloc.backing_fd, 0));
         if (temp_mapping != MAP_FAILED) {
           if (mc_rc == 0) {
             auto *source = static_cast<uint8_t *>(addr);
@@ -2626,9 +2601,11 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     // mapping, so keep it accessible when the caller asked for PROT_NONE, the
     // way the anonymous path's mprotect did.
     const int host_prot = alloc.user_va ? (prot | PROT_READ | PROT_WRITE) : prot;
-    host_ptr = safe_mmap(addr, length, host_prot, mflags, alloc.memfd, 0);
+    host_ptr = safe_mmap(addr, length, host_prot, mflags, alloc.backing_fd, 0);
     if (host_ptr == MAP_FAILED)
       return restore_replaced_backing();
+    if (kmd::is_device_memory_backing(alloc.backing_fd))
+      libc_passthrough().madvise(host_ptr, length, MADV_DONTDUMP);
   } else {
     bool reuse_pages = false;
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
@@ -2683,9 +2660,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
 
   util::Logger::vm([&](auto &os) {
     os << std::format("mmap: gpu_va={:#x} host_ptr={:#x} size={} flags={:#x}"
-                      " MAP_FIXED={} user_va={} memfd={}",
+                      " MAP_FIXED={} user_va={} backing_fd={}",
                       alloc.gpu_va, reinterpret_cast<uintptr_t>(host_ptr), length, alloc.flags,
-                      bool(flags & MAP_FIXED), alloc.user_va, alloc.memfd);
+                      bool(flags & MAP_FIXED), alloc.user_va, alloc.backing_fd);
   });
   // mmap and KFD BOs cover whole pages, including the last partial page.
   map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes,
@@ -2962,6 +2939,19 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(arg);
   if (args->size == 0 || args->size > UINT64_MAX - 0xFFF)
     return -EINVAL;
+  // Standalone frontends can allocate before publishing topology. Only device
+  // backing with a published topology has a render identity; USERPTR backing
+  // carries no such identity.
+  std::string backing_name = "rocjitsu_alloc";
+  if ((args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0) {
+    backing_name = "rocjitsu_userptr";
+  } else if ((args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) == 0 && !gpu_infos_.empty()) {
+    const uint32_t ordinal = gpu_ordinal(args->gpu_id);
+    if (find_gpu(args->gpu_id) == nullptr || ordinal >= gpu_infos_.size())
+      return -EINVAL;
+    backing_name = std::string(kmd::kDeviceBackingNamePrefix) +
+                   std::to_string(gpu_infos_[ordinal].drm_render_minor);
+  }
   // The kernel creates a PAGE_ALIGN(size) BO. LLVM can legally widen a scalar
   // load within its mapped tail page even when the logical tensor is smaller.
   const uint64_t allocation_size = (args->size + 0xFFF) & ~uint64_t(0xFFF);
@@ -2997,42 +2987,34 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   } else if (!is_doorbell) {
     // Every allocation on this path retains one backing descriptor, even if
     // it is never exported. Fail allocation if that backing cannot be created
-    // or sized. Caller-VA backing stays sparse until first touch.
-    const bool sparse_backing = !daemon_mode_ && user_provided_va;
-    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    // with its full size. Caller-VA backing stays sparse until first touch.
+    auto raw_fd =
+        create_memory_backing(alloc.size, daemon_mode_ || !user_provided_va, backing_name.c_str());
     if (raw_fd < 0)
       return -errno;
-    if (ftruncate(raw_fd, static_cast<off_t>(alloc.size)) != 0) {
-      const int error = errno;
-      libc_passthrough().close(raw_fd);
-      return -error;
-    }
-    alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-    if (alloc.memfd < 0)
-      alloc.memfd = raw_fd;
+    alloc.backing_fd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (alloc.backing_fd < 0)
+      alloc.backing_fd = raw_fd;
     else
       libc_passthrough().close(raw_fd);
     {
       std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.insert(alloc.memfd);
+      owned_fds_.insert(alloc.backing_fd);
     }
-    if (!sparse_backing)
-      fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-    safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
     // Private VRAM can acquire a client view later. Keep a simulator-owned
     // mapping as GPU backing for the whole BO regardless of that view.
     const bool private_vram = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0 &&
                               (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC) == 0;
     if (daemon_mode_ || private_vram) {
       auto *mapped =
-          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.backing_fd, 0);
       if (mapped == MAP_FAILED) {
         const int error = errno;
         {
           std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-          owned_fds_.erase(alloc.memfd);
+          owned_fds_.erase(alloc.backing_fd);
         }
-        libc_passthrough().close(alloc.memfd);
+        libc_passthrough().close(alloc.backing_fd);
         return -error;
       }
       alloc.host_ptr = mapped;
@@ -3060,8 +3042,8 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   });
   util::Logger::vm([&](auto &os) {
     os << std::format(
-        "ALLOC pid={} handle={} gpu_va={:#x} size={} flags={:#x} memfd={} host_ptr={}",
-        proc.process_id(), alloc.handle, va, args->size, args->flags, alloc.memfd,
+        "ALLOC pid={} handle={} gpu_va={:#x} size={} flags={:#x} backing_fd={} host_ptr={}",
+        proc.process_id(), alloc.handle, va, args->size, args->flags, alloc.backing_fd,
         reinterpret_cast<uintptr_t>(alloc.host_ptr));
   });
   return 0;
@@ -3118,45 +3100,13 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
     missing.emplace_back(cursor, static_cast<size_t>(end - cursor));
 
   for (const auto &[range_va, range_size] : missing) {
-    auto raw_fd = memfd_create("rocjitsu_scratch", MFD_CLOEXEC);
-    if (raw_fd < 0)
+    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE,
+                               MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (host_ptr == MAP_FAILED)
       return false;
-
-    int memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-    if (memfd < 0)
-      memfd = raw_fd;
-    else
-      libc_passthrough().close(raw_fd);
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.insert(memfd);
-    }
-
-    if (ftruncate(memfd, static_cast<off_t>(range_size)) != 0) {
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.erase(memfd);
-      }
-      libc_passthrough().close(memfd);
-      return false;
-    }
-    auto *host_ptr = safe_mmap(nullptr, range_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
-    if (host_ptr == MAP_FAILED) {
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.erase(memfd);
-      }
-      libc_passthrough().close(memfd);
-      return false;
-    }
-    {
-      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-      owned_fds_.erase(memfd);
-    }
-    libc_passthrough().close(memfd);
     std::memset(host_ptr, 0, range_size);
     // Driver-owned for the same reason as the allocation path: the backing is a
-    // memfd this function created and mapped read-write.
+    // private region this function created and mapped read-write.
     proc->map_pages(range_va, host_ptr, range_size, amdgpu::Mtype::RW,
                     KfdProcess::HostExtentOwner::Driver);
 
@@ -3169,7 +3119,7 @@ bool SimulatedKfd::allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va
       alloc.host_mapping_kind = KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
       alloc.host_mapping_size = range_size;
       alloc.handle = proc->next_handle_++;
-      alloc.memfd = -1;
+      alloc.backing_fd = -1;
       proc->allocations_[alloc.handle] = alloc;
     }
 
@@ -3207,8 +3157,8 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
       for (auto ipc_it = ipc_store_.begin(); ipc_it != ipc_store_.end();) {
         if (ipc_it->second.source_process_id == freed_process_id &&
             ipc_it->second.source_alloc_handle == freed_handle) {
-          if (ipc_it->second.backing_memfd >= 0)
-            libc_passthrough().close(ipc_it->second.backing_memfd);
+          if (ipc_it->second.backing_fd >= 0)
+            libc_passthrough().close(ipc_it->second.backing_fd);
           ipc_it = ipc_store_.erase(ipc_it);
         } else {
           ++ipc_it;
@@ -3263,7 +3213,7 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto it = proc.allocations_.find(args->handle);
   if (it != proc.allocations_.end()) {
     // UNMAP only tears down GPU page-table mappings; the allocation record
-    // (and its backing memfd/dmabuf_fd) stays tracked until FREE_MEMORY_OF_GPU
+    // (and its backing descriptor) stays tracked until FREE_MEMORY_OF_GPU
     // releases it. Erasing here would leak those fds and make a later FREE a
     // no-op for this handle.
     auto &alloc = it->second;
@@ -3316,7 +3266,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
 
   // Build the HW queue and reserve all per-process state under alloc_mutex_, then
   // register it with the CommandProcessor with the lock RELEASED. The CP thread
-  // takes alloc_mutex_ under hw_queue_mutex_ (allocate_scratch_backing), so holding
+  // can take alloc_mutex_ under hw_queue_mutex_ for test-registered queue backing,
+  // so holding
   // alloc_mutex_ across register_queue() — which takes hw_queue_mutex_ — would be
   // an alloc_mutex_->hw_queue_mutex_ inversion against that thread and can deadlock.
   // op_mutex_ already serializes all ioctls for this process, so no concurrent
@@ -3495,8 +3446,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .read_pointer_address = args->read_pointer_address,
         .ctx_save_restore_address = args->ctx_save_restore_address,
         .ctx_save_restore_area_size = args->ctx_save_restore_size,
+        .control_stack_capacity = args->ctl_stack_size,
         .ring_size = args->ring_size,
         .queue_type = args->queue_type,
+        .scheduling_percentage = scheduling_percentage,
         .gpu_id = args->gpu_id,
         .xcc_id = kmd::cwsr_area_for_xcc(gpu->soc->arch(), target_xcc_id),
         .has_runtime_exception_signal = queue_request.exception_status_address != 0,
@@ -3642,6 +3595,7 @@ int SimulatedKfd::alloc_queue_gws_ioctl(KfdProcess &proc, void *arg) {
 }
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
+  std::lock_guard context_lock(proc.queue_context_mutex_);
   auto *args = static_cast<kfd_ioctl_update_queue_args *>(arg);
   // Decode scheduling independently of the native PM4 placement field.
   const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
@@ -3700,11 +3654,99 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
     assert(snapshot != proc.queue_snapshot_map_.end());
     snapshot->second.ring_base_address = args->ring_base_address;
     snapshot->second.ring_size = *ring_size;
+    snapshot->second.scheduling_percentage = effective_percentage;
   }
+
+  return 0;
+}
+
+int SimulatedKfd::get_queue_wave_state_ioctl(KfdProcess &proc, void *arg) {
+  std::lock_guard context_lock(proc.queue_context_mutex_);
+  auto *args = static_cast<kfd_ioctl_get_queue_wave_state_args *>(arg);
+  KfdProcess::QueueSnapshotInfo info;
+  {
+    std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+    const auto queue = proc.queue_snapshot_map_.find(args->queue_id);
+    if (queue == proc.queue_snapshot_map_.end() ||
+        (queue->second.scheduling_percentage != 0 && !queue->second.debug_suspended))
+      return -EINVAL;
+    info = queue->second;
+  }
+  if (!debug_stop_publishable(info.gpu_id))
+    return -EOPNOTSUPP;
+  if (info.ctx_save_restore_address == 0 || info.ctx_save_restore_area_size == 0 ||
+      args->ctl_stack_address == 0)
+    return -EFAULT;
+  // Suspension freezes waves. Materialize their image only when requested,
+  // keeping routine ROCr scratch-reclaim pauses free of core-dump work.
+  // A debugger instead owns its existing CWSR edits until debugger resume.
+  auto *gpu = find_gpu(info.gpu_id);
+  if (queue_wave_state_hook_for_testing_)
+    queue_wave_state_hook_for_testing_();
+  if (!info.debugger_owns_cwsr) {
+    // Pausing instruction issue leaves no runnable wave to drive retained
+    // memory on a single-queue CU. Settle only the queue owned by this ioctl.
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        cu->retry_paused_queue_memory(proc.process_id(), args->queue_id);
+    });
+    if (!serialize_queue_debug_waves(proc.process_id(), args->queue_id, info.gpu_id,
+                                     info.ctx_save_restore_address, info.ctx_save_restore_area_size,
+                                     true))
+      return -EIO;
+  }
+  const auto access = gpu->soc->gpu_vm().snapshot_vmid(proc.process_id());
+  if (!access)
+    return -EFAULT;
+  const uint64_t total_bytes = uint64_t{info.ctx_save_restore_area_size} * gpu->soc->num_xcds();
+  if (args->ctl_stack_address > std::numeric_limits<uint64_t>::max() - total_bytes)
+    return -EFAULT;
+  uint32_t first_control_size = 0, first_wave_size = 0;
+  for (uint32_t xcc = 0; xcc < gpu->soc->num_xcds(); ++xcc) {
+    const uint64_t offset = uint64_t{xcc} * info.ctx_save_restore_area_size;
+    const uint64_t source = info.ctx_save_restore_address + offset;
+    // KFD copies only wave-state fields; the caller owns the remaining header.
+    std::array<uint32_t, 4> header{};
+    if (access->read(source, std::as_writable_bytes(std::span(header))) !=
+        amdgpu::VmAccessOutcome::Complete)
+      return -EFAULT;
+    if (header[0] > info.ctx_save_restore_area_size ||
+        header[1] > info.ctx_save_restore_area_size - header[0] ||
+        header[2] > info.ctx_save_restore_area_size || header[3] > header[2])
+      return -EIO;
+    if (xcc == 0) {
+      // KFD returns XCC0 sizes; consumers inspect each area's own header.
+      first_control_size = header[1];
+      first_wave_size = header[3];
+    }
+    if (args->ctl_stack_address != info.ctx_save_restore_address) {
+      const uint64_t destination = args->ctl_stack_address + offset;
+      std::vector<std::byte> stack(header[1]);
+      auto write_user = [&](uint64_t address, std::span<const std::byte> bytes) {
+        if (bytes.empty())
+          return true;
+        UniqueDriverFd target_mem = duplicate_debug_target_mem(proc.client_pid());
+        if (target_mem.get() >= 0)
+          return pwrite(target_mem.get(), bytes.data(), bytes.size(),
+                        static_cast<off_t>(address)) == static_cast<ssize_t>(bytes.size());
+        iovec local{const_cast<std::byte *>(bytes.data()), bytes.size()};
+        iovec remote{reinterpret_cast<void *>(address), bytes.size()};
+        return process_vm_writev(proc.client_pid(), &local, 1, &remote, 1, 0) ==
+               static_cast<ssize_t>(bytes.size());
+      };
+      if (access->read(source + header[0], stack) != amdgpu::VmAccessOutcome::Complete ||
+          !write_user(destination, std::as_bytes(std::span(header))) ||
+          !write_user(destination + header[0], stack))
+        return -EFAULT;
+    }
+  }
+  args->ctl_stack_used_size = first_control_size;
+  args->save_area_used_size = first_wave_size;
   return 0;
 }
 
 int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
+  std::lock_guard context_lock(proc.queue_context_mutex_);
   auto *args = static_cast<kfd_ioctl_destroy_queue_args *>(arg);
   std::optional<KfdProcess::QueueDoorbellInfo> queue;
   {
@@ -3804,15 +3846,14 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
     return -EPERM;
   if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)
     return -EINVAL;
-  const int backing = alloc.memfd >= 0 ? alloc.memfd : (alloc.imported ? alloc.dmabuf_fd : -1);
+  const int backing =
+      alloc.backing_fd >= 0 ? alloc.backing_fd : (alloc.imported ? alloc.dmabuf_fd : -1);
   if (backing < 0)
     return -EINVAL;
   // IPC may retain a writable private alias for a read-only public dma-buf.
-  const int exported =
-      alloc.export_access_mode >= 0
-          ? libc_passthrough().openat(AT_FDCWD, std::format("/proc/self/fd/{}", backing).c_str(),
-                                      alloc.export_access_mode | O_CLOEXEC, 0)
-          : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
+  const int exported = alloc.export_access_mode >= 0
+                           ? reopen_memory_backing(backing, alloc.export_access_mode | O_CLOEXEC)
+                           : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
   if (exported < 0)
     return -errno;
   // Publish the KFD sharing policy only after retaining the export succeeds.
@@ -3823,6 +3864,10 @@ int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAlloc
 }
 
 int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
+  // The daemon protocol does not transfer this export yet. Reject it before
+  // retaining a descriptor or publishing the allocation's sharing policy.
+  if (daemon_mode_)
+    return -EOPNOTSUPP;
   auto *args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
 
   std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -3858,7 +3903,7 @@ int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
 
   IpcObject obj{};
   std::memcpy(obj.share_handle, key.words, sizeof(key.words));
-  obj.backing_memfd = dup_fd;
+  obj.backing_fd = dup_fd;
   obj.bo_state = alloc.bo_state;
   obj.allocation_size = alloc.size;
   obj.allocation_flags = alloc.flags;
@@ -3902,7 +3947,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     bo_state = it->second.bo_state;
     if (args->gpu_id != 0 && args->gpu_id != source_gpu_id)
       return -EINVAL;
-    backing = UniqueDriverFd(safe_fcntl(it->second.backing_memfd, F_DUPFD_CLOEXEC, 0));
+    backing = UniqueDriverFd(safe_fcntl(it->second.backing_fd, F_DUPFD_CLOEXEC, 0));
   }
   if (!backing)
     return -errno;
@@ -3911,8 +3956,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     return -errno;
   const int public_mode = original_flags & O_ACCMODE;
   if (public_mode != O_RDWR) {
-    const auto path = std::format("/proc/self/fd/{}", backing.get());
-    const int writable = libc_passthrough().openat(AT_FDCWD, path.c_str(), O_RDWR | O_CLOEXEC, 0);
+    const int writable = reopen_memory_backing(backing.get(), O_RDWR | O_CLOEXEC);
     if (writable < 0)
       return -errno;
     backing = UniqueDriverFd(writable);
@@ -3946,7 +3990,7 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = host_ptr;
     alloc.host_mapping_kind = KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
     alloc.host_mapping_size = alloc_size;
-    alloc.memfd = dup_fd;
+    alloc.backing_fd = dup_fd;
     alloc.bo_state = std::move(bo_state);
     alloc.export_access_mode = public_mode;
     alloc.gpu_id = source_gpu_id;
@@ -4159,11 +4203,16 @@ uint32_t internal_trapsts_from_gfx1250(const kmd::CwsrWaveState &state) {
   return amdgpu::update_trapsts_from_gfx12_excp_flag_user(trapsts, state.excp_flag_user);
 }
 
-kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch) {
+kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch,
+                                         bool runtime_save = false) {
   kmd::CwsrWaveState state;
   const bool gfx12_5 = kmd::cwsr_layout_kind(arch) == kmd::CwsrLayoutKind::Gfx12_5;
   const uint32_t raw_status = wf.status_raw();
   state.pc = wf.pc;
+  if (runtime_save && wf.in_trap_handler() && wf.fatal_exception_pending()) {
+    const uint32_t pc_hi_mask = gfx12_5 ? 0x01FFFFFFu : 0x0000FFFFu;
+    state.pc = wf.ttmp(0) | (static_cast<uint64_t>(wf.ttmp(1) & pc_hi_mask) << 32);
+  }
   // A wave frozen inside the trap handler has the HANDLER's EXEC live, not the
   // application's: the handler runs with its own mask and parks 0x80000000 (and
   // then a doorbell id) in EXEC_LO around MSG_GET_DOORBELL. Publishing that
@@ -4199,7 +4248,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   // that window rewrites the application's saved HALT with the handler's.
   const bool handler_context = wf.in_trap_handler() || wf.trap_interrupt_sent();
   state.saved_status_halt = ((handler_context ? wf.trap_saved_status() : raw_status) >> 13) & 1u;
-  state.wave_stopped = wf.debug_halted();
+  state.wave_stopped = wf.debug_halted() || (runtime_save && wf.fatal_exception_pending());
   // The published STATUS shadows on the narrower predicate, the same one EXEC
   // uses: only while the handler is actually running is the live register the
   // handler's rather than the application's. Once s_rfe has run, the live value
@@ -4225,7 +4274,7 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   state.wave_id = wf.debug_wave_id();
   state.group_ids = wf.wg_coord();
   state.wave_in_group = wf.wave_in_group();
-  state.queue_packet_id = wf.aql_packet_id() & 0x1FFFFFFu;
+  state.queue_packet_id = wf.queue_packet_id() & 0x1FFFFFFu;
   state.scratch_scoreboard_id = wf.scratch_scoreboard_id();
   state.shader_engine_id = wf.shader_engine_id();
   state.spi_ttmps_setup = true;
@@ -4277,7 +4326,7 @@ void prepare_cwsr_wave_states(std::vector<kmd::CwsrWaveState> &waves) {
 
 bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t queue_id,
                                                uint32_t gpu_id, uint64_t ctx_base,
-                                               uint32_t ctx_size) {
+                                               uint32_t ctx_size, bool runtime_save) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || ctx_base == 0)
     return false;
@@ -4291,29 +4340,62 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
 
   const uint32_t area_count = kmd::cwsr_area_count(gpu->soc->arch(), gpu->soc->num_xcds());
   std::vector<std::vector<kmd::CwsrWaveState>> waves_by_area(area_count);
+  bool memory_pending = false;
   auto collect = [&](amdgpu::CommandProcessor *cp, uint32_t area) {
     for (auto *cu : cp->compute_units()) {
       cu->with_wave_state_locked([&] {
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           auto *wave = cu->wf(i);
-          if (wave && wave->debug_stopped() && wave->process_id() == process_id &&
-              wave->queue_id() == queue_id)
-            waves_by_area[area].push_back(build_cwsr_wave_state(*wave, gpu->soc->arch()));
+          if (wave && (wave->debug_stopped() || (runtime_save && wave->runtime_suspended())) &&
+              wave->process_id() == process_id && wave->queue_id() == queue_id) {
+            // Pausing instruction issue does not cancel retained memory work.
+            // Counters remain held through deferred architectural writeback;
+            // refuse a snapshot until every paused wave has settled.
+            if (!wave->wait_counters().empty()) {
+              memory_pending = true;
+              continue;
+            }
+            waves_by_area[area].push_back(
+                build_cwsr_wave_state(*wave, gpu->soc->arch(), runtime_save));
+          }
         }
       });
     }
   };
   for (uint32_t xcc_id = 0; xcc_id < area_count; ++xcc_id)
     collect(gpu->soc->xcd(xcc_id)->command_processor(), xcc_id);
+  if (memory_pending)
+    return false;
+  if (runtime_save) {
+    gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      for (auto *cu : cp->compute_units())
+        cu->with_wave_state_locked([&] { cu->flush_l1(process_id); });
+    });
+    for (uint32_t xcc = 0; xcc < gpu->soc->num_xcds(); ++xcc)
+      if (gpu->soc->xcd(xcc)->l2_cache()->flush_all(process_id) !=
+          amdgpu::VmAccessOutcome::Complete)
+        return false;
+    for (uint32_t iod = 0; iod < gpu->soc->num_iods(); ++iod)
+      if (gpu->soc->iod(iod)->msc()->flush_all() != amdgpu::VmAccessOutcome::Complete)
+        return false;
+  }
   size_t wave_count = 0;
   for (const auto &waves : waves_by_area)
     wave_count += waves.size();
-  if (wave_count == 0)
+  if (wave_count == 0 && !runtime_save)
     return false;
 
   auto proc = find_process(process_id);
   if (!proc)
     return false;
+  uint32_t control_stack_capacity = 0;
+  {
+    std::lock_guard lock(proc->alloc_mutex_);
+    const auto queue = proc->queue_snapshot_map_.find(queue_id);
+    if (queue == proc->queue_snapshot_map_.end())
+      return false;
+    control_stack_capacity = queue->second.control_stack_capacity;
+  }
   const std::optional<amdgpu::GpuVmAccess> vm_access = gpu->soc->gpu_vm().snapshot_vmid(process_id);
   if (!vm_access)
     return false;
@@ -4341,8 +4423,9 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
     }
   };
   bool layouts_ok = true;
-  constexpr size_t kCwsrHeaderBytes = 10 * sizeof(uint32_t);
-  const std::array<uint8_t, kCwsrHeaderBytes> empty_header{};
+  // Wave-state publication owns only the first four header words. libhsakmt
+  // owns DebugOffset/DebugSize, ErrorReason/ErrorEventId and the reserved tail.
+  const std::array<uint8_t, 4 * sizeof(uint32_t)> empty_header{};
   for (uint32_t area = 0; area < area_count; ++area) {
     const uint64_t area_base = ctx_base + static_cast<uint64_t>(area) * ctx_size;
     auto &waves = waves_by_area[area];
@@ -4350,39 +4433,27 @@ bool SimulatedKfd::serialize_queue_debug_waves(uint32_t process_id, uint32_t que
       write_block(area_base, empty_header);
       continue;
     }
+    std::array<uint32_t, 2> debug_region{};
+    const uint64_t debug_fields_address = area_base + 4 * sizeof(uint32_t);
+    if (target_mem.get() >= 0) {
+      if (pread(target_mem.get(), debug_region.data(), sizeof(debug_region),
+                static_cast<off_t>(debug_fields_address)) != sizeof(debug_region))
+        return false;
+    } else if (vm_access->read(debug_fields_address,
+                               std::as_writable_bytes(std::span(debug_region))) !=
+               amdgpu::VmAccessOutcome::Complete) {
+      return false;
+    }
     prepare_cwsr_wave_states(waves);
     layouts_ok &=
-        kmd::serialize_queue_cwsr_bulk(area_base, ctx_size, waves, write_block, gpu->soc->arch())
+        kmd::serialize_queue_cwsr_bulk(area_base, ctx_size, waves, write_block, gpu->soc->arch(),
+                                       control_stack_capacity,
+                                       kmd::CwsrDebugRegion{debug_region[0], debug_region[1]})
             .ok;
   }
   if (!layouts_ok || !publish_ok)
     return false;
 
-  uint64_t oldest_packet = UINT64_MAX;
-  for (const auto &waves : waves_by_area)
-    for (const auto &wave : waves)
-      oldest_packet = std::min<uint64_t>(oldest_packet, wave.queue_packet_id);
-  uint64_t read_pointer = 0;
-  uint64_t write_pointer = 0;
-  {
-    std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
-    auto queue = proc->queue_snapshot_map_.find(queue_id);
-    if (queue == proc->queue_snapshot_map_.end())
-      return false;
-    read_pointer = queue->second.read_pointer_address;
-    write_pointer = queue->second.write_pointer_address;
-  }
-  if (read_pointer != 0 && write_pointer != 0) {
-    const amdgpu::AtomicLoadResult write_index =
-        vm_access->atomic_load(write_pointer, sizeof(uint64_t));
-    if (write_index.outcome != amdgpu::VmAccessOutcome::Complete)
-      return false;
-    if (oldest_packet < write_index.value &&
-        vm_access->atomic_store(read_pointer, sizeof(uint64_t), oldest_packet) !=
-            amdgpu::VmAccessOutcome::Complete) {
-      return false;
-    }
-  }
   return true;
 }
 
@@ -4967,7 +5038,7 @@ bool SimulatedKfd::debug_stop_publishable(uint32_t gpu_id) {
   auto *gpu = find_gpu(gpu_id);
   if (gpu == nullptr || gpu->soc == nullptr)
     return false;
-  // The codec reproduces the gfx9.4 CWSR layout only (kmd/linux/cwsr.h), and
+  // The codec reproduces the gfx9.4 and gfx12.5 CWSR layouts (kmd/linux/cwsr.h), and
   // the differences elsewhere are not confined to one field -- the control
   // stack, the COMPUTE_RELAUNCH bits, the wave64 VGPR stride, the SGPR alias
   // slots and the dispatch-identity TTMPs all move. rocm-dbgapi would decode
@@ -5129,6 +5200,12 @@ bool SimulatedKfd::defer_wave_exception_to_runtime(
     bool clear_debug_stop_on_success, bool runtime_already_reserved,
     bool runtime_failure_debuggable, amdgpu::QueueExceptionDeliveryPolicy delivery_policy,
     bool retain_wave) {
+  // An unpublished stop cannot be claimed by a debugger after runtime
+  // delivery fails. ROCr acknowledges only its first fatal report per queue,
+  // so all wave-stop rejection paths transfer ownership on publication.
+  if (!runtime_failure_debuggable &&
+      delivery_policy == amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment)
+    delivery_policy = amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail;
   auto proc = find_process(wave.process_id());
   if (proc && !runtime_already_reserved)
     reserve_runtime_queue_exception(proc, wave.queue_id(), exception_mask);
@@ -5393,19 +5470,22 @@ bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave, bool retai
       retain_wave);
 }
 
-bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool) {
+bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool,
+                                            uint64_t issue_pc) {
+  constexpr uint32_t kTrapstsXnackError = 1u << 28;
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
+  bool debugger_attached;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(proc->client_pid());
-    if (session == debug_sessions_.end() || !session->second.enabled)
-      return false;
+    debugger_attached = session != debug_sessions_.end() && session->second.enabled;
   }
   uint64_t ctx_base = 0;
   uint32_t ctx_size = 0;
   uint32_t gpu_id = 0;
+  bool has_runtime_signal = false;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
@@ -5414,20 +5494,37 @@ bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, b
     ctx_base = queue->second.ctx_save_restore_address;
     ctx_size = queue->second.ctx_save_restore_area_size;
     gpu_id = queue->second.gpu_id;
+    has_runtime_signal = queue->second.has_runtime_exception_signal;
   }
-  if (ctx_base == 0)
-    return false;
-  if (!debug_stop_publishable(gpu_id))
-    return false;
-  constexpr uint32_t kTrapstsXnackError = 1u << 28;
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  if (!debugger_attached || ctx_base == 0 || !debug_stop_publishable(gpu_id)) {
+    if (!has_runtime_signal)
+      return false;
+    if (proc->xnack_enabled_.load(std::memory_order_relaxed))
+      wave.pc = issue_pc;
+    wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
+    // ROCr removes its async handler after acknowledging the first fault on
+    // a queue. Later waves transfer ownership on publication, without waiting
+    // for another acknowledgment or retaining a stop for an absent debugger.
+    return defer_wave_exception_to_runtime(wave, kException,
+                                           /*suspend_while_pending=*/true,
+                                           /*clear_debug_stop_on_success=*/false,
+                                           /*runtime_already_reserved=*/false,
+                                           /*runtime_failure_debuggable=*/false,
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+  }
   const auto saved = wave.debug_stop_state();
+  if (proc->xnack_enabled_.load(std::memory_order_relaxed))
+    wave.pc = issue_pc;
   wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
   wave.debug_trap(0);
-  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   bool runtime_failure_debuggable = false;
   if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
                            /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
     wave.restore_debug_stop_state(saved);
+    // Roll back the debugger stop without losing the runtime-owned fault's reason.
+    if (has_runtime_signal)
+      wave.set_trapsts(wave.trapsts() | kTrapstsXnackError);
     return defer_wave_exception_to_runtime(wave, kException,
                                            /*suspend_while_pending=*/true,
                                            /*clear_debug_stop_on_success=*/false,
@@ -5499,6 +5596,7 @@ void SimulatedKfd::release_debuggee_state(pid_t target_pid, KfdProcess *target_p
     return;
   }
 
+  std::lock_guard context_lock(target_proc->queue_context_mutex_);
   std::vector<std::pair<uint32_t, uint32_t>> queues;
   {
     std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
@@ -5648,7 +5746,7 @@ void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWa
     wave.set_gfx1250_xnack_mask_raw(state.xnack_mask);
   }
   wave.set_debug_wave_id(state.wave_id);
-  wave.set_aql_packet_id(state.queue_packet_id);
+  wave.set_queue_packet_id(state.queue_packet_id);
   const uint32_t stack_pointer = wave.debug_read_sgpr(32);
   const uint32_t stack_frame = wave.debug_read_sgpr(33);
   // rocm-dbgapi may submit a lightweight control-state update with no register
@@ -5698,6 +5796,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
     uint32_t queue_id = 0;
     uint64_t base = 0;
     uint32_t size = 0;
+    uint32_t control_stack_capacity = 0;
     uint32_t gpu_id = 0;
   };
   std::vector<QueueContext> queues;
@@ -5720,7 +5819,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         continue;
       }
       queues.push_back({index, queue_id, info.ctx_save_restore_address,
-                        info.ctx_save_restore_area_size, info.gpu_id});
+                        info.ctx_save_restore_area_size, info.control_stack_capacity, info.gpu_id});
     }
   } else {
     for (uint32_t index = 0; index < num_queues; ++index)
@@ -5754,12 +5853,8 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
         });
       }
     };
-    if (per_xcc_areas) {
-      for (uint32_t xcc_id = 0; xcc_id < area_count; ++xcc_id)
-        collect(gpu->soc->xcd(xcc_id)->command_processor(), xcc_id);
-    } else {
-      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) { collect(cp, 0); });
-    }
+    for (uint32_t xcc_id = 0; xcc_id < gpu->soc->num_xcds(); ++xcc_id)
+      collect(gpu->soc->xcd(xcc_id)->command_processor(), per_xcc_areas ? xcc_id : 0u);
     bool restored = stopped.empty();
     if (!stopped.empty() && context.base != 0) {
       const std::optional<amdgpu::GpuVmAccess> vm_access =
@@ -5803,8 +5898,9 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
           continue;
         prepare_cwsr_wave_states(area_states);
         const uint64_t area_base = context.base + static_cast<uint64_t>(area) * context.size;
-        restored &= kmd::deserialize_queue_cwsr_bulk(area_base, context.size, area_states,
-                                                     read_block, gpu->soc->arch());
+        restored &=
+            kmd::deserialize_queue_cwsr_bulk(area_base, context.size, area_states, read_block,
+                                             gpu->soc->arch(), context.control_stack_capacity);
         states.insert(states.end(), std::make_move_iterator(area_states.begin()),
                       std::make_move_iterator(area_states.end()));
       }
@@ -5823,7 +5919,7 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
             const auto *candidate = stopped[index];
             if (by_wave_id ? state.wave_id != 0 && candidate->debug_wave_id() == state.wave_id
                            : candidate->debug_wave_id() == 0 &&
-                                 candidate->aql_packet_id() == state.queue_packet_id &&
+                                 candidate->queue_packet_id() == state.queue_packet_id &&
                                  candidate->wg_coord() == state.group_ids &&
                                  candidate->wave_in_group() == state.wave_in_group)
               return index;
@@ -5903,6 +5999,18 @@ int SimulatedKfd::resume_debug_queues(KfdProcess *proc, uint32_t *queue_ids, uin
       cp->set_queue_debug_suspended(context.queue_id, proc->process_id(), keep_dispatch_suspended,
                                     saw_runtime_exception && !unresolved_runtime_exception);
     });
+    {
+      // A failed restore also releases ordinary waves. Its image is no longer
+      // authoritative once execution can continue.
+      std::lock_guard lock(proc->alloc_mutex_);
+      if (auto queue = proc->queue_snapshot_map_.find(context.queue_id);
+          queue != proc->queue_snapshot_map_.end()) {
+        queue->second.debugger_owns_cwsr = false;
+        // The explicit debugger suspension ends even when a halted/fatal wave
+        // keeps the launch gate closed. Other waves may now be running.
+        queue->second.debug_suspended = false;
+      }
+    }
     for (auto *cu : wake)
       cu->schedule_work_async();
     if (restored)
@@ -5989,6 +6097,12 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
         });
       }
     });
+    if (needs_serialization) {
+      gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+        for (auto *cu : cp->compute_units())
+          cu->retry_paused_queue_memory(process_id, queue.queue_id, /*replay_loads=*/true);
+      });
+    }
     bool serialized = !needs_serialization;
     if (needs_serialization && queue.info.ctx_save_restore_address != 0)
       serialized = serialize_queue_debug_waves(process_id, queue.queue_id, queue.info.gpu_id,
@@ -5998,6 +6112,15 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
       if (needs_serialization)
         for (auto &[cu, wave] : runtime_frozen)
           cu->with_wave_state_locked([wave] { wave->set_fatal_exception_cwsr_valid(true); });
+      {
+        std::lock_guard lock(proc->alloc_mutex_);
+        if (auto record = proc->queue_snapshot_map_.find(queue.queue_id);
+            record != proc->queue_snapshot_map_.end()) {
+          record->second.debug_suspended = true;
+          if (needs_serialization)
+            record->second.debugger_owns_cwsr = true;
+        }
+      }
       ++suspended;
       continue;
     }
@@ -6007,6 +6130,14 @@ int SimulatedKfd::suspend_debug_queues(KfdProcess *proc, uint32_t *queue_ids, ui
     gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_queue_debug_suspended(queue.queue_id, process_id, false);
     });
+    {
+      std::lock_guard lock(proc->alloc_mutex_);
+      if (auto record = proc->queue_snapshot_map_.find(queue.queue_id);
+          record != proc->queue_snapshot_map_.end()) {
+        record->second.debugger_owns_cwsr = false;
+        record->second.debug_suspended = false;
+      }
+    }
     amdgpu::ComputeUnitCore *woken = nullptr;
     for (auto &[cu, wave] : newly_suspended) {
       cu->with_wave_state_locked([w = wave] { w->set_debug_suspended(false); });
@@ -6067,7 +6198,9 @@ void SimulatedKfd::clear_completed_debug_queues(KfdProcess *proc, const uint32_t
       for (uint32_t area = 0; area < area_count; ++area) {
         const uint64_t area_base = queue.ctx_save_restore_address +
                                    static_cast<uint64_t>(area) * queue.ctx_save_restore_area_size;
-        for (uint64_t offset = 0; offset < 40; offset += sizeof(uint32_t)) {
+        // Completed queues have no wave image, but still retain the runtime's
+        // displaced-stepping reservation and exception channel.
+        for (uint64_t offset = 0; offset < 4 * sizeof(uint32_t); offset += sizeof(uint32_t)) {
           const uint32_t zero = 0;
           if (vm_access->write(area_base + offset, std::as_bytes(std::span(&zero, 1))) !=
               amdgpu::VmAccessOutcome::Complete) {
@@ -6833,6 +6966,9 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     // Engine callbacks enter with a CU's wave-state lock and briefly acquire
     // debug_sessions_mutex_. Do not invert that order while freezing CUs.
     lk.unlock();
+    std::unique_lock<std::mutex> context_lock;
+    if (target_proc)
+      context_lock = std::unique_lock(target_proc->queue_context_mutex_);
     const int result = suspend_debug_queues(target_proc, queue_ids, args->suspend_queues.num_queues,
                                             args->suspend_queues.exception_mask);
     clear_completed_debug_queues(target_proc, queue_ids, args->suspend_queues.num_queues);
@@ -6844,6 +6980,9 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
     auto *queue_ids =
         reinterpret_cast<uint32_t *>(static_cast<uintptr_t>(args->resume_queues.queue_array_ptr));
     lk.unlock();
+    std::unique_lock<std::mutex> context_lock;
+    if (target_proc)
+      context_lock = std::unique_lock(target_proc->queue_context_mutex_);
     return resume_debug_queues(target_proc, queue_ids, args->resume_queues.num_queues);
   }
   default:
@@ -6982,9 +7121,25 @@ int SimulatedKfd::debug_queue_snapshot(KfdProcess *target,
   return 0;
 }
 
-int SimulatedKfd::set_xnack_mode_ioctl(void *arg) {
+int SimulatedKfd::set_xnack_mode_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_set_xnack_mode_args *>(arg);
-  args->xnack_enabled = 0;
+  std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  if (args->xnack_enabled < 0) {
+    args->xnack_enabled = proc.xnack_enabled_.load(std::memory_order_relaxed);
+    return 0;
+  }
+  if (!proc.active_queue_ids_.empty())
+    return -EBUSY;
+  if (args->xnack_enabled != 0) {
+    for (const auto &gpu : gpus_) {
+      const auto arch = gpu.soc->arch();
+      if (arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
+          arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+          arch != ROCJITSU_CODE_ARCH_CDNA5)
+        return -EPERM;
+    }
+  }
+  proc.xnack_enabled_.store(args->xnack_enabled != 0, std::memory_order_relaxed);
   return 0;
 }
 
@@ -7017,18 +7172,18 @@ bool SimulatedKfd::owns_reserved_fd(int fd) const {
          fd < reserved_fd_base_ + kReservedFdCount;
 }
 
-int SimulatedKfd::get_mmap_memfd(off_t offset) const {
-  return get_mmap_memfd(local_process_id_, offset);
+int SimulatedKfd::get_mmap_backing(off_t offset) const {
+  return get_mmap_backing(local_process_id_, offset);
 }
 
-int SimulatedKfd::get_mmap_memfd(uint32_t process_id, off_t offset) const {
+int SimulatedKfd::get_mmap_backing(uint32_t process_id, off_t offset) const {
   auto p = find_process(process_id);
   if (!p)
     return -1;
-  return dispatch_get_mmap_memfd(*p, offset);
+  return dispatch_get_mmap_backing(*p, offset);
 }
 
-int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const {
+int SimulatedKfd::dispatch_get_mmap_backing(KfdProcess &proc, off_t offset) const {
   uint64_t type = static_cast<uint64_t>(offset) & KFD_MMAP_TYPE_MASK;
 
   if (type == KFD_MMAP_TYPE_EVENTS)
@@ -7042,21 +7197,23 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
       return -1;
     std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
     const auto &gs = proc.gpu(gpu_ordinal(db_gpu_id));
-    if (gs.doorbell_memfd >= 0) {
-      util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(),
-                       " DOORBELL canonical gpu_id=", db_gpu_id, " memfd=", gs.doorbell_memfd);
-      return gs.doorbell_memfd;
+    if (gs.doorbell_backing_fd >= 0) {
+      util::Logger::cp("BACKING_LOOKUP: pid=", proc.process_id(),
+                       " DOORBELL canonical gpu_id=", db_gpu_id,
+                       " backing_fd=", gs.doorbell_backing_fd);
+      return gs.doorbell_backing_fd;
     }
     // Compatibility fallback for callers that query the backing before the
     // mmap path has published the canonical descriptor.
     for (auto &[handle, alloc] : proc.allocations_) {
       if ((alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) && alloc.gpu_id == db_gpu_id) {
-        util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(), " DOORBELL match handle=", handle,
-                         " gpu_id=", db_gpu_id, " memfd=", alloc.memfd);
-        return alloc.memfd;
+        util::Logger::cp("BACKING_LOOKUP: pid=", proc.process_id(),
+                         " DOORBELL match handle=", handle, " gpu_id=", db_gpu_id,
+                         " backing_fd=", alloc.backing_fd);
+        return alloc.backing_fd;
       }
     }
-    util::Logger::cp("MEMFD_LOOKUP: pid=", proc.process_id(),
+    util::Logger::cp("BACKING_LOOKUP: pid=", proc.process_id(),
                      " DOORBELL NO MATCH gpu_id=", db_gpu_id,
                      " allocations=", proc.allocations_.size());
     return -1;
@@ -7066,7 +7223,7 @@ int SimulatedKfd::dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const 
   std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
   auto it = proc.allocations_.find(handle);
   if (it != proc.allocations_.end())
-    return it->second.memfd;
+    return it->second.backing_fd;
 
   return -1;
 }

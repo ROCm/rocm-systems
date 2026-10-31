@@ -3,7 +3,7 @@
 
 // Host CPU/OS feature detection and public CPU-level names.
 
-#include "common/internal.h"
+#include "common/cpu_decode.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>

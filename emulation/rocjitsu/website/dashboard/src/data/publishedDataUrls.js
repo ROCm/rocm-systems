@@ -12,7 +12,6 @@ export function resolvePublishedDataUrls({
   const directory = new URL(withTrailingSlash(relative), baseURI);
   return {
     dataBaseUrl: directory.href,
-    metadataUrl: new URL('metadata.json', directory).href,
     indexUrl: new URL('index.json', directory).href,
   };
 }
