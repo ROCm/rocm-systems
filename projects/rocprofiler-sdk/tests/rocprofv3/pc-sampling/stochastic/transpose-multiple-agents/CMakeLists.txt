@@ -41,6 +41,9 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 # To ensure we sample all agents, use 16 threads each assigned to one agent in a round
 # robin manner. To keep the job per device reasonable, each thread offloads 100 instances
 # of a transpose kernel.
+#
+# Leave ROCPROFILER_PC_SAMPLING_BETA_ENABLED unset. The GFX9 stochastic JSON checks are
+# not ready for this workload, so these tests stay skipped.
 set(TRANSPOSE_NUM_THREADS 16)
 set(TRANSPOSE_NUM_ITERATIONS 100)
 
