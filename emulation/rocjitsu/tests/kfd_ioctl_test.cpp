@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -2403,7 +2404,7 @@ struct InstructionRejectionCase {
   bool polling = false;
   bool acknowledge = true;
   bool status_mapped = true;
-  uint32_t faulting_waves = 1;
+  uint32_t workgroups_per_xcd = 1;
 };
 
 class KfdInstructionRejectionTest : public KfdIoctlTest,
@@ -2416,7 +2417,30 @@ protected:
 };
 
 TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
+  class RejectionLifecyclePlugin final : public rocjitsu::ExecutionPlugin {
+  public:
+    RejectionLifecyclePlugin() : ExecutionPlugin("rejection_lifecycle") {}
+    std::vector<rocjitsu::amdgpu::Wavefront *> waves;
+    std::vector<rocjitsu::amdgpu::InstructionExecutionError> errors;
+    std::vector<uint64_t> failure_pcs;
+    uint32_t halts = 0;
+    uint32_t completions = 0;
+    void onAmdgpuWavefrontDispatched(rocjitsu::amdgpu::Wavefront &wave) override {
+      waves.push_back(&wave);
+      // Let every XCD admit its shard before the test releases execution.
+      wave.set_debug_suspended(true);
+    }
+    void onAmdgpuWavefrontCancelled(rocjitsu::amdgpu::Wavefront &wave) override {
+      EXPECT_FALSE(wave.is_halted());
+      errors.push_back(wave.instruction_execution_error());
+      failure_pcs.push_back(wave.pc);
+    }
+    void onAmdgpuWavefrontHalted(rocjitsu::amdgpu::Wavefront &) override { ++halts; }
+    void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completions; }
+  };
   constexpr uint64_t kKernelAddress = 0x600000000ULL;
+  constexpr uint64_t kCompletionSignal = kKernelAddress + 1024;
+  constexpr uint64_t kBarrierSignal = kKernelAddress + 1088;
   const uint32_t exception_event_id = GetParam().polling ? 0 : 37;
   constexpr uint64_t kWaveIllegalInstruction = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
   constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
@@ -2471,7 +2495,7 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
   if (!GetParam().status_mapped)
     process->unmap_pages(kExceptionStatusAddress, exception_page.size());
-  if (!GetParam().acknowledge || GetParam().faulting_waves > 1) {
+  if (!GetParam().acknowledge || GetParam().workgroups_per_xcd > 1) {
     soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
       cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
     });
@@ -2479,15 +2503,20 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
   std::mutex interrupt_mutex;
   std::atomic<uint64_t> delivered_status{0};
   std::atomic<uint32_t> deliveries{0};
-  struct QueueGuard {
-    rocjitsu::SimulatedKfd *driver;
-    uint32_t queue_id;
+  class QueueGuard {
+  public:
+    QueueGuard(rocjitsu::SimulatedKfd *driver, uint32_t queue_id)
+        : driver_(driver), queue_id_(queue_id) {}
     ~QueueGuard() {
-      driver->set_interrupt_callback_for_testing(nullptr);
+      driver_->set_interrupt_callback_for_testing(nullptr);
       kfd_ioctl_destroy_queue_args destroy{};
-      destroy.queue_id = queue_id;
-      driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+      destroy.queue_id = queue_id_;
+      driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
     }
+
+  private:
+    rocjitsu::SimulatedKfd *driver_;
+    uint32_t queue_id_;
   } guard{driver_, create.queue_id};
 
   driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
@@ -2513,52 +2542,114 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
 
   // Cover decode errors, unsupported operands, and decoded instructions with no
   // implementation. Only decode errors represent an illegal GPU instruction.
-  std::array<uint32_t, 3> words{0xffffffffu, 0, 0};
-  auto expected_error = rocjitsu::amdgpu::InstructionExecutionError::None;
+  std::array<uint32_t, 3> words{rocjitsu::test::kUndecodableInstruction, 0, 0};
+  auto expected_error = rocjitsu::amdgpu::InstructionExecutionError::DecodeFailure;
   if (GetParam().kind == RejectionKind::Operand) {
     words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnsupportedOperandValue;
   } else if (GetParam().kind == RejectionKind::Unimplemented) {
-    words = {0x95800000u, 0, 0}; // s_rfe_restore_b64 on CDNA4.
+    words = {rocjitsu::test::kUnimplementedInstruction, 0, 0};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnimplementedInstruction;
   }
-  std::memcpy(code_page.data(), words.data(), sizeof(words));
+  using namespace rocjitsu::amdhsa;
+  kernel_descriptor_t descriptor{};
+  descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+  const uint32_t wave_size = GetParam().kind == RejectionKind::Unimplemented ? 64u : 32u;
+  RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                     KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, wave_size == 32);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 11);
+  std::memcpy(code_page.data(), &descriptor, sizeof(descriptor));
+  std::memcpy(code_page.data() + sizeof(descriptor), words.data(), sizeof(words));
+  const uint64_t initial_signal_value = 1;
+  std::memcpy(code_page.data() + 1024 + 8, &initial_signal_value, sizeof(initial_signal_value));
+  std::memcpy(code_page.data() + 1088 + 8, &initial_signal_value, sizeof(initial_signal_value));
+  const uint64_t entry_pc = kKernelAddress + sizeof(descriptor);
+  auto lifecycle = std::make_unique<RejectionLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  soc_->set_plugin_group(group);
   auto *cu = soc_->xcd(0)->command_processor()->compute_units().front();
-  auto *wave = cu->dispatch_wf(0, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
-  ASSERT_NE(wave, nullptr);
-  wave->set_process_id(driver_->local_process_id());
-  wave->set_queue_id(GetParam().registered ? create.queue_id : create.queue_id + 1);
-  if (GetParam().kind == RejectionKind::Operand)
-    cu->write_sgpr(wave->sgpr_alloc().base, 2u); // Unsupported TDM active descriptor count.
-  auto *peer_cu = soc_->xcd(1)->command_processor()->compute_units().front();
-  auto *peer = peer_cu->dispatch_wf(1, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
-  ASSERT_NE(peer, nullptr);
-  peer->set_process_id(driver_->local_process_id());
-  peer->set_queue_id(create.queue_id);
-
-  std::vector<rocjitsu::amdgpu::Wavefront *> extra_waves;
-  for (uint32_t i = 1; i < GetParam().faulting_waves; ++i) {
-    auto *extra = cu->dispatch_wf(i + 1, kKernelAddress, /*sgprs=*/96, /*vgprs=*/4);
-    ASSERT_NE(extra, nullptr);
-    extra->set_process_id(driver_->local_process_id());
-    extra->set_queue_id(create.queue_id);
-    if (GetParam().kind == RejectionKind::Operand)
-      cu->write_sgpr(extra->sgpr_alloc().base, 2u);
-    extra_waves.push_back(extra);
+  if (GetParam().registered) {
+    void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   static_cast<off_t>(create.doorbell_offset));
+    ASSERT_NE(doorbell, MAP_FAILED);
+    const uint32_t workgroups = soc_->num_xcds() * GetParam().workgroups_per_xcd;
+    hsa_kernel_dispatch_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
+    packet.setup = 1;
+    packet.workgroup_size_x = wave_size;
+    packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.grid_size_x = workgroups * wave_size;
+    packet.grid_size_y = packet.grid_size_z = 1;
+    packet.kernel_object = kKernelAddress;
+    packet.completion_signal.handle = kCompletionSignal;
+    std::memcpy(ring.data(), &packet, sizeof(packet));
+    hsa_barrier_and_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+    barrier.completion_signal.handle = kBarrierSignal;
+    std::memcpy(ring.data() + sizeof(packet), &barrier, sizeof(barrier));
+    std::atomic_ref<uint64_t>(const_cast<uint64_t &>(queue_descriptor.write_dispatch_id))
+        .store(2, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
+        .store(1, std::memory_order_release);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (observed->waves.size() < workgroups && std::chrono::steady_clock::now() < deadline) {
+      ASSERT_TRUE(engine_->step());
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    ASSERT_EQ(observed->waves.size(), workgroups);
+    soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+      for (auto *candidate : cp->compute_units())
+        if (candidate->wf(observed->waves.front()->wf_id()) == observed->waves.front())
+          cu = candidate;
+    });
+    EXPECT_TRUE(cu->command_processor()->has_dispatch_for_test(
+        create.queue_id, driver_->local_process_id(), observed->waves.front()->dispatch_id()));
+  } else {
+    auto *unregistered = cu->dispatch_wf(0, entry_pc, /*sgprs=*/96, /*vgprs=*/4);
+    ASSERT_NE(unregistered, nullptr);
+    unregistered->set_process_id(driver_->local_process_id());
+    unregistered->set_queue_id(create.queue_id + 1);
+    group->onAmdgpuWavefrontDispatched(*unregistered);
   }
+  ASSERT_FALSE(observed->waves.empty());
+  auto *wave = observed->waves.front();
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    for (auto *candidate : cp->compute_units())
+      candidate->with_wave_state_locked([&] {
+        for (uint32_t slot = 0; slot < candidate->num_wf_slots(); ++slot) {
+          auto *resident = candidate->wf(slot);
+          if (!resident || resident->is_halted())
+            continue;
+          resident->set_debug_suspended(false);
+          if (GetParam().kind == RejectionKind::Operand)
+            candidate->write_sgpr(resident->sgpr_alloc().base, 2u);
+        }
+      });
+  });
   cu->step();
-  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().status_mapped;
+  // Fatal engine exit can precede peer events. Production shutdown drains these
+  // inboxes after workers join; this foreground test drains them explicitly.
+  if (!GetParam().debugger || GetParam().kind != RejectionKind::Decode)
+    soc_->for_each_cp(
+        [](rocjitsu::amdgpu::CommandProcessor *cp) { cp->drain_fanout_inbox_for_test(); });
+  EXPECT_EQ(vm_read64(kCompletionSignal + 8, driver_->local_process_id()), 1u);
+  EXPECT_EQ(vm_read64(kBarrierSignal + 8, driver_->local_process_id()), 1u);
+  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().debugger ||
+                             !GetParam().runtime_signal || !GetParam().status_mapped;
   EXPECT_EQ(engine_->last_exit().code, engine_failed ? 1 : 0);
   if (!GetParam().runtime_signal || !GetParam().registered) {
     EXPECT_EQ(deliveries.load(), 0u);
     EXPECT_TRUE(wave->is_halted());
-    EXPECT_FALSE(peer->debug_suspended());
+    EXPECT_EQ(std::ranges::count(observed->errors, expected_error), 1);
     return;
   }
-  EXPECT_EQ(wave->instruction_execution_error(), expected_error);
-  EXPECT_EQ(wave->trapsts(),
-            GetParam().debugger && GetParam().kind == RejectionKind::Decode ? 1u << 11 : 0u);
   if (debugger_notifier != -1 && GetParam().kind == RejectionKind::Decode) {
+    EXPECT_EQ(wave->instruction_execution_error(),
+              rocjitsu::amdgpu::InstructionExecutionError::None);
+    EXPECT_EQ(wave->trapsts(), 1u << 11);
     EXPECT_EQ(deliveries.load(), 0u);
     uint64_t notification = 0;
     EXPECT_EQ(::read(debugger_notifier, &notification, sizeof(notification)), sizeof(notification));
@@ -2573,6 +2664,14 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     forward.send_runtime_event.queue_id = create.queue_id;
     forward.send_runtime_event.exception_mask = expected_status;
     ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &forward), 0);
+    EXPECT_FALSE(wave->is_halted());
+    EXPECT_TRUE(wave->fatal_exception_pending());
+    EXPECT_TRUE(wave->debug_suspended());
+    EXPECT_EQ(wave->pc, entry_pc);
+    EXPECT_TRUE(observed->errors.empty());
+    EXPECT_EQ(deliveries.load(), 1u);
+    EXPECT_EQ(delivered_status.load(), expected_status);
+    return;
   }
   if (debugger_notifier != -1 && GetParam().kind != RejectionKind::Decode) {
     // dbgapi needs an architectural stop reason to surface an exception. A
@@ -2580,44 +2679,35 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     uint64_t notification = 0;
     EXPECT_EQ(::read(debugger_notifier, &notification, sizeof(notification)), -1);
     EXPECT_EQ(errno, EAGAIN);
-    EXPECT_FALSE(wave->debug_halted());
   }
-  EXPECT_EQ(deliveries.load(), GetParam().status_mapped ? GetParam().faulting_waves : 0u);
+  EXPECT_EQ(deliveries.load(), GetParam().status_mapped ? 1u : 0u);
   EXPECT_EQ(delivered_status.load(), GetParam().status_mapped ? expected_status : 0u);
-  EXPECT_EQ(wave->pc, kKernelAddress);
-  EXPECT_FALSE(wave->is_halted());
-  EXPECT_TRUE(wave->fatal_exception_pending());
-  EXPECT_TRUE(wave->debug_suspended());
-  EXPECT_TRUE(peer->fatal_exception_pending());
-  EXPECT_TRUE(peer->debug_suspended());
-  for (auto *extra : extra_waves) {
-    EXPECT_TRUE(extra->fatal_exception_pending());
-    EXPECT_TRUE(extra->debug_suspended());
-    EXPECT_EQ(extra->pc, kKernelAddress);
-  }
-  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
-    EXPECT_TRUE(
-        cp->queue_exception_suspended_for_test(create.queue_id, driver_->local_process_id()));
-  });
-  cu->step();
-  peer_cu->step();
-  EXPECT_EQ(deliveries.load(), GetParam().status_mapped ? GetParam().faulting_waves : 0u);
-  EXPECT_EQ(wave->pc, kKernelAddress);
-  EXPECT_EQ(peer->pc, kKernelAddress);
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_EQ(wave->trap_runtime_exception_status(), 0u);
+  EXPECT_EQ(std::ranges::count(observed->errors, expected_error), 1);
+  EXPECT_TRUE(
+      std::ranges::all_of(observed->failure_pcs, [](uint64_t pc) { return pc == entry_pc; }));
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_EQ(observed->completions, 0u);
+  EXPECT_EQ(observed->errors.size(), observed->waves.size());
+  for (auto *resident : observed->waves)
+    EXPECT_TRUE(resident->is_halted());
+  EXPECT_TRUE(cu->command_processor()->queue_faulted_for_test(create.queue_id,
+                                                              driver_->local_process_id()));
 }
 
 INSTANTIATE_TEST_SUITE_P(
     InstructionFailures, KfdInstructionRejectionTest,
     ::testing::Values(
-        InstructionRejectionCase{.name = "DecodeWithOneAcknowledgmentForFourWaves",
+        InstructionRejectionCase{.name = "DecodeCancelsFourWorkgroupsPerXcd",
                                  .kind = RejectionKind::Decode,
-                                 .faulting_waves = 4},
-        InstructionRejectionCase{.name = "OperandWithOneAcknowledgmentForFourWaves",
+                                 .workgroups_per_xcd = 4},
+        InstructionRejectionCase{.name = "OperandCancelsFourWorkgroupsPerXcd",
                                  .kind = RejectionKind::Operand,
-                                 .faulting_waves = 4},
-        InstructionRejectionCase{.name = "UnimplementedWithOneAcknowledgmentForFourWaves",
+                                 .workgroups_per_xcd = 4},
+        InstructionRejectionCase{.name = "UnimplementedCancelsFourWorkgroupsPerXcd",
                                  .kind = RejectionKind::Unimplemented,
-                                 .faulting_waves = 4},
+                                 .workgroups_per_xcd = 4},
         InstructionRejectionCase{.name = "DecodeWithoutAcknowledgment",
                                  .kind = RejectionKind::Decode,
                                  .acknowledge = false},
@@ -6325,6 +6415,72 @@ void serve_one_handshake(int fd, int32_t result) {
 
 } // namespace
 
+TEST(RemoteDriverDisconnectTest, ReportsPeerExitWithoutAnotherRpc) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  const util::UniqueHandle server_closer{sv[1]};
+  std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+  std::mutex mutex;
+  std::condition_variable cv;
+  unsigned notifications = 0;
+  rocjitsu::RemoteDriver driver(sv[0], [&] {
+    std::lock_guard lock(mutex);
+    ++notifications;
+    cv.notify_all();
+  });
+  const int kfd = driver.open();
+  ASSERT_GE(kfd, 0);
+  const util::UniqueHandle kfd_closer{kfd};
+  server.join();
+
+  ASSERT_EQ(shutdown(sv[1], SHUT_WR), 0);
+  {
+    std::unique_lock lock(mutex);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return notifications != 0; }));
+  }
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+  EXPECT_EQ(driver.close(), 0);
+  EXPECT_EQ(notifications, 1u);
+}
+
+TEST(RemoteDriverDisconnectTest, GracefulCloseAndDestructionStopTheMonitor) {
+  for (bool explicit_close : {false, true}) {
+    SCOPED_TRACE(explicit_close);
+    int sv[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+    const util::UniqueHandle server_closer{sv[1]};
+    std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+    std::atomic<unsigned> notifications{0};
+    {
+      rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+      const int kfd = driver.open();
+      ASSERT_GE(kfd, 0);
+      const util::UniqueHandle kfd_closer{kfd};
+      server.join();
+      if (explicit_close) {
+        EXPECT_EQ(driver.close(), 0);
+      }
+    }
+    EXPECT_EQ(notifications.load(), 0u);
+  }
+}
+
+TEST(RemoteDriverDisconnectTest, FailedHandshakeDoesNotStartTheMonitor) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, -EPROTO);
+    close(fd);
+  });
+  std::atomic<unsigned> notifications{0};
+  {
+    rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+    EXPECT_LT(driver.open(), 0);
+  }
+  EXPECT_EQ(notifications.load(), 0u);
+}
+
 // Both ends of a socketpair belong to this process, so SO_PEERCRED reports this
 // PID -- which is what makes the launcher's PID the only variable here.
 TEST(RemoteDriverPtracerGrantTest, AuthorizesOnlyTheDaemonItsLauncherStarted) {
@@ -9793,6 +9949,10 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   (void)vm_write32(kKernelAddress, kSTrapBreakpoint, driver_->local_process_id());
   for (uint32_t offset = 0; offset < peer_page.size(); offset += sizeof(uint32_t))
     (void)vm_write32(kPeerAddress + offset, kSNop, driver_->local_process_id());
+  // The CWSR restore below edits the PC past this handler. Keep that continuation
+  // valid so resuming the wave tests restoration without a decode failure.
+  for (uint32_t offset = 0; offset < trap_handler_page.size(); offset += sizeof(uint32_t))
+    (void)vm_write32(kTrapHandlerAddress + offset, kSNop, driver_->local_process_id());
   const uint32_t trap_handler[] = {
       0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
       0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0

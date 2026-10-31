@@ -77,12 +77,13 @@ public:
   /// The conservative default preserves the historical behavior. A plugin may
   /// return false after its wavefront-dispatch callback has decided that the
   /// wave is outside its observation scope. The group samples the decision once
-  /// after every plugin's wavefront-dispatch callback and reuses it until halt.
-  /// Reentrant hooks during dispatch/halt, hooks without a wavefront, and hooks
-  /// on a resident wave after live plugin-group replacement use a live query,
+  /// after every plugin's wavefront-dispatch callback and reuses it until halt
+  /// or cancellation, including rollback before a retry in the same slot.
+  /// Reentrant hooks during dispatch, halt or cancellation, hooks without a
+  /// wavefront, and hooks after live plugin-group replacement use a live query,
   /// so this method must remain lock-free and thread-safe. The decision must be
-  /// stable between dispatch completion and the matching halt. Lifecycle and
-  /// dispatch/workgroup/wavefront callbacks are unaffected.
+  /// stable between dispatch completion and the matching halt or cancellation.
+  /// Lifecycle and dispatch/workgroup/wavefront callbacks are unaffected.
   virtual bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront * /*wf*/) const {
     return true;
   }
@@ -223,6 +224,8 @@ public:
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) {}
 
   /// Called when all workgroups of a dispatch have completed execution.
+  /// Cancelled dispatches do not receive this callback, even if
+  /// onAmdgpuDispatchExecutionBegin was called.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
@@ -235,7 +238,8 @@ public:
                                            uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
-  /// Called when the last wavefront of a workgroup has halted.
+  /// Called when the last wavefront of a workgroup has completed normally.
+  /// Cancelled workgroups do not receive this callback.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) {}
 
@@ -243,9 +247,21 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called when a wavefront halts, before its resources are freed.
+  /// Called when a wavefront terminates normally, before its resources are freed.
+  /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called once when a dispatched wave incarnation is cancelled, while its
+  /// registers and plugin state are still available. The wave's instruction-execution
+  /// error, if present, is still available. May precede its first instruction.
+  /// Cancellation also covers committed cluster placements rolled back after
+  /// a later peer fails setup. That dispatch may retry and complete normally;
+  /// cancellation alone does not imply permanent dispatch failure.
+  /// This is a terminal notification for this incarnation, not successful
+  /// workgroup or dispatch completion; it does not also call onAmdgpuWavefrontHalted.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuWavefrontCancelled(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a VGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.

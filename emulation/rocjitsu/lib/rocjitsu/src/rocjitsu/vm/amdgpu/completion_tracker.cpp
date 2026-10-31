@@ -61,6 +61,8 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     qs.publication_retry_pending = false;
 
   for (auto &qs : queues) {
+    // A faulted queue still retires work that its fault did not cancel. Queue
+    // cancellation removes the entries it cancels, so they cannot publish here.
     const bool idle_generation_stale =
         qs.idle_publication.active() &&
         (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation);

@@ -378,6 +378,7 @@ endif()
 
 add_executable(
     rocjitsu_tests
+    sanitizer_diagnostic_test.cpp
     rvsim_test.cpp
     amdgpu_vm_test.cpp
     gpu_queue_registry_test.cpp
@@ -4023,6 +4024,27 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipVectorAddTest.CorrectResult"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        if(RJ_HIP_TEST_ARCH MATCHES "^(gfx942|gfx950)$")
+            rj_add_hip_test(
+                hip_instruction_failure_test
+                ARCH ${RJ_HIP_TEST_ARCH}
+                DEPENDENCIES
+                    instruction_failure_test_util.h
+                    sanitizer_diagnostic_test_util.h
+            )
+            rj_add_hip_test_case(
+                hip_instruction_failure_test
+                "HipInstructionFailureTest.UnsupportedInstructionExitsWithFailure"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                TIMEOUT 20
+            )
+            rj_add_hip_test_case(
+                hip_instruction_failure_test
+                "HipInstructionFailureTest.DecodeFailureExitsWithFailure"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                TIMEOUT 20
+            )
+        endif()
 
         # --- Daemon RPC tests (gtest-driven) ---
         # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
@@ -4077,6 +4099,7 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test_path(daemon_test RJ_HIP_VECTOR_ADD_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test")
         rj_add_test_path(daemon_test RJ_HIP_MEMCPY_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test")
         rj_add_test_path(daemon_test RJ_HIP_RCCL_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test")
+        rj_add_test_path(daemon_test RJ_HIP_INSTRUCTION_FAILURE_BIN "${CMAKE_CURRENT_BINARY_DIR}/hip_instruction_failure_test")
         rj_add_test_path(daemon_test RJ_INTERPOSER_DUP_BIN "$<TARGET_FILE:interposer_dup_test>")
         rj_add_test_path(daemon_test RJ_DAEMON_LOGGING_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json")
         rj_add_test_path(daemon_test RJ_INSTALLED_DAEMON_BIN "${_rj_installed_rocjitsu_bin}")
@@ -4086,6 +4109,7 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test_path(daemon_test RJ_INSTALLED_HIP_VECTOR_ADD_BIN "hip_vector_add_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_HIP_MEMCPY_BIN "hip_memcpy_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_HIP_RCCL_BIN "hip_rccl_test")
+        rj_add_test_path(daemon_test RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN "hip_instruction_failure_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_INTERPOSER_DUP_BIN "interposer_dup_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_DAEMON_LOGGING_CONFIG "${_rj_installed_daemon_logging_config}")
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
@@ -4107,6 +4131,20 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipMemcpyDeviceToDevice
             DaemonTest.TwoIndependentClients
         )
+        set(RJ_DAEMON_FAILURE_TESTS)
+        if(TARGET hip_instruction_failure_test_target)
+            target_compile_definitions(
+                daemon_test
+                PRIVATE RJ_HAS_INSTRUCTION_FAILURE_TEST
+            )
+            add_dependencies(daemon_test hip_instruction_failure_test_target)
+            set(RJ_DAEMON_FAILURE_TESTS
+                DaemonTest.HipUnsupportedInstructionExitsWithFailure
+                DaemonTest.HipDecodeFailureExitsWithFailure
+                DaemonTest.HipFatalDecodeDisconnectsValidClient
+            )
+            list(APPEND RJ_DAEMON_HSA_TESTS ${RJ_DAEMON_FAILURE_TESTS})
+        endif()
         set(RJ_DAEMON_TESTS
             ${RJ_DAEMON_HSA_TESTS}
             DaemonTest.ForkserverChildrenInitializeIndependentBackends
@@ -4137,19 +4175,49 @@ if(RJ_ENABLE_HIP_TESTS)
                 DaemonTest.HipMemcpyRoundTripPageableAbovePinThreshold
             )
         endif()
+        # The harness passes these options to HIP clients without applying
+        # runtime suppressions to the daemon's simulator threads.
+        string(
+            REPLACE
+            "TSAN_OPTIONS="
+            "ROCJITSU_TEST_HIP_TSAN_OPTIONS="
+            _daemon_hip_tsan_env
+            "${RJ_HIP_TSAN_ENV}"
+        )
+        string(
+            REPLACE
+            "TSAN_OPTIONS="
+            "ROCJITSU_TEST_HIP_TSAN_OPTIONS="
+            _daemon_hip_tsan_install_env
+            "${RJ_HIP_TSAN_INSTALL_ENV}"
+        )
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             set(_daemon_test_env)
+            set(_daemon_test_install_env)
+            set(_daemon_test_timeout 120)
+            if(TC IN_LIST RJ_DAEMON_FAILURE_TESTS)
+                set(_daemon_test_timeout 20)
+            endif()
             if(TC IN_LIST RJ_DAEMON_HSA_TESTS)
-                list(APPEND _daemon_test_env ${RJ_HIP_ASAN_ENV})
+                list(
+                    APPEND _daemon_test_env
+                    ${RJ_HIP_ASAN_ENV}
+                    ${_daemon_hip_tsan_env}
+                )
+                list(
+                    APPEND _daemon_test_install_env
+                    ${RJ_HIP_ASAN_ENV}
+                    ${_daemon_hip_tsan_install_env}
+                )
             endif()
             rj_add_test(
                 NAME ${TC}
                 COMMAND daemon_test --gtest_filter=${TC}
-                TIMEOUT 120
+                TIMEOUT ${_daemon_test_timeout}
                 LABELS daemon
                 ENVIRONMENT ${_daemon_test_env}
                 INSTALL_COMMAND "bin/daemon_test" "--gtest_filter=${TC}"
-                INSTALL_ENVIRONMENT ${_daemon_test_env}
+                INSTALL_ENVIRONMENT ${_daemon_test_install_env}
             )
         endforeach()
 
@@ -4160,11 +4228,11 @@ if(RJ_ENABLE_HIP_TESTS)
                 --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
             TIMEOUT 120
             LABELS daemon
-            ENVIRONMENT ${RJ_HIP_ASAN_ENV}
+            ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${_daemon_hip_tsan_env}
             INSTALL_COMMAND
                 "bin/daemon_test"
                 "--gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged"
-            INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV}
+            INSTALL_ENVIRONMENT ${RJ_HIP_ASAN_ENV} ${_daemon_hip_tsan_install_env}
         )
 
         # --- RCCL collective test ---
