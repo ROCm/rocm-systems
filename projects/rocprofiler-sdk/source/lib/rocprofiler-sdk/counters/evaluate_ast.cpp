@@ -697,16 +697,16 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
 
 namespace
 {
-using property_function_t = int64_t (*)(const rocprofiler_agent_t&);
+using property_function_t = uint64_t (*)(const rocprofiler_agent_t&);
 #define GEN_MAP_ENTRY(name, value)                                                                 \
     {                                                                                              \
         name, property_function_t([](const rocprofiler_agent_t& agent_info) {                      \
-            return static_cast<int64_t>(value);                                                    \
+            return static_cast<uint64_t>(value);                                                   \
         })                                                                                         \
     }
 }  // namespace
 
-int64_t
+uint64_t
 get_agent_property(std::string_view property, const rocprofiler_agent_t& agent)
 {
     using map_t = std::unordered_map<std::string_view, property_function_t>;
@@ -743,7 +743,7 @@ get_agent_property(std::string_view property, const rocprofiler_agent_t& agent)
         GEN_MAP_ENTRY("max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute),
     });
 
-    return CHECK_NOTNULL(_props)->wlock([&property, &agent](map_t& props) -> int64_t {
+    return CHECK_NOTNULL(_props)->wlock([&property, &agent](map_t& props) -> uint64_t {
         if(const auto* func = rocprofiler::common::get_val(props, property))
         {
             return (*func)(agent);
