@@ -311,6 +311,8 @@ if(BUILD_TESTS)
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    device/DdaReduceScatterFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -411,6 +413,7 @@ if(BUILD_TESTS)
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaReduceScatterFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp

@@ -439,10 +439,33 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because `misc/param.cc` defines `ncclGetEnv`, `initEnv` and `ncclLoadParam`, which
   the shared fakes in `rccl-UnitTestsMicro` also define.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
-  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
-  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  `gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
+  point. Covers every function in the file: type
+  negotiation, signal-requirement validation, `ncclGinConnectOnce` (including
+  NVIDIA/nccl#2279 `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment and the
+  strided team a rail-only comm connects), devComm setup (per-backend version
+  tables, stride validation, failure cleanup) and free, finalize, window
+  registration, and last-error queries, plus the proxy-thread CPU affinity pin.
+  A scripted `ncclGin_t` in the test file stands in for the plugin, so every
+  failure arm is reachable by failing a chosen call. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+  Every line and every function in `gin_host.cc` is covered (100% of both);
+  branch coverage is 74%. The residue is in three groups, none of them a
+  source-level decision the tests skip:
+  - the debug-level gate inside `INFO` / `INFO_LOC`, which host tests run with
+    logging off (4 call sites);
+  - the `while (1)` headers of the two progress loops, where `llvm-cov` records
+    an exit edge a literal `1` can never take (2 sites);
+  - `NCCLCHECK`-family call sites (21). At 13 of them the check's own failure
+    arm *is* driven and only the `WARN` inside the macro is left; at the other
+    8 the failure arm is undriven, and five of those are `ncclCalloc` sites
+    that would need an allocation injector this binary does not have.
+
+  Re-derive rather than trusting those numbers: `BRDA` records for the file in
+  `build/coverage/rccl-UnitTestsMicroGinHost/coverage.lcov` give the per-line
+  breakdown, and note that lcov and `llvm-cov` count branches differently, so
+  the two totals will not agree.
 - **`rccl-UnitTestsMicroPlugin`** — `plugin/net.cc`, `plugin/plugin_open.cc` and the
   `plugin/net/net_v6.cc` to `net_v12.cc` shims (via `PLUGIN_NET_CC_PATH`,
   `PLUGIN_OPEN_CC_PATH` and `NET_V<N>_CC_PATH`, one test TU each); suite `Plugin*`. Its
@@ -690,7 +713,9 @@ test:
    `ScopedHook` helper in `ScopedHook.h` (see
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
    which installs the hook, counts calls, and restores the previous behaviour
-   automatically on scope exit.
+   automatically on scope exit. Reach for the other
+   [shared test-side helpers](#shared-test-side-helpers) before hand-rolling a
+   failure counter, a wait loop, or a scope guard.
    A death test takes `DEATH_BY_SEGV`, `DisableCoreDumpsForExpectedCrash()` and
    `ScopedDeathTestStyle` from `ExpectedCrash.h`. If the crash needs a NULL, hide it
    from the optimizer with `asm volatile("" : "+r"(p))`, or it may drop the crash.
@@ -752,6 +777,7 @@ symbol.
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
+| `src/debug.cc` (`ncclDebugLog`, `ncclDebugLevelMask`, `ncclSetThreadName`, ...) | `fakes/nccl_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
 | `src/enqueue/mgmt_task_enq.cc` (targets that do not compile the real file) | `fakes/mgmt_task_enq_fakes.cc` |
 | `src/init.cc` comm lifecycle, CTA/channel params, `allocTracker` | `fakes/comm_fakes.cc`; `rccl-UnitTestsMicroRmaProxy` keeps a local `allocTracker` because that isolated target does not link the broader comm fake |
@@ -774,6 +800,7 @@ symbol.
 | `src/misc/socket.cc` | `fakes/socket_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/nccl_device/core.cc` host `ncclTeam*` accessors | `fakes/nccl_device_core_fakes.cc` (except `ncclTeamLsa`; see below) |
 | `src/os/linux.cc` (including socket close) | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/profiler.cc` (`ncclProfilerProxyTraceDumpIfAny`, recorded) | `fakes/profiler_fakes.cc` |
@@ -820,13 +847,24 @@ owns one driven seam, and `os_fakes.cc` holds working implementations with no se
 read the suffix as a guarantee; read the file's header comment, which states what it owns. If you
 add a file, pick the suffix matching its majority content and say so at the top.
 
+**Recorders a production thread can reach.** Most fakes are touched only by the test's own thread,
+so their counters and recording vectors are plain `int`s and `std::vector`s. A fake reached from a
+thread the unit under test spawns needs more: `os_fakes.cc`'s affinity pair is the current example
+(`gin_host.cc`'s proxy progress workers call `ncclOsCpuCount` / `ncclOsSetAffinity` from their own
+threads), so its counter is a `std::atomic<int>` and its mask vectors are written under
+`g_ncclOsAffinityMutex` and read through `ncclOs*MasksSnapshot()`. If you seam something a
+spawned thread reaches, do the same, and keep a direct-read path for the single-threaded suites
+rather than churning them. Note that joining the worker and reading safely are two different
+problems: the join is what makes the write have happened, the snapshot is what makes the read
+safe.
+
 **`// UNDRIVEN`.** A seam carrying this marker is declared so the binary links and so an accidental
 call is visible, NOT because its path is covered. It is a link-floor entry with a chosen default,
 and that default silently selects which production arm runs. Driving a seam means deleting its
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Four things do NOT follow the TU-per-file rule, deliberately:
+These do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -848,6 +886,12 @@ Four things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
+- `ncclTeamLsa` stays in `fakes/devcomm_fakes.cc` rather than moving to
+  `fakes/nccl_device_core_fakes.cc` with the other `src/nccl_device/core.cc`
+  accessors: its default silently satisfies the `nRanks ==
+  comm->nRanks` comparison every `devcomm-test.cc` filter makes, and the trap
+  comment warning about that is what keeps those tests honest. Moving the hook
+  without moving the readers that depend on the warning is how it would get lost.
 
 An aggregation header includes the per-TU headers a unit's tests use and
 declares the reset that chains their per-TU resets, and defines no seams itself.
@@ -999,6 +1043,28 @@ version's arm so the test passes regardless of the toolchain — see
 `ForceLegacyCudaRegister` in `p2p-test.cc` + `ForceLegacyIpcCapable` in
 `fakes/hip_fakes.h`.
 
+## Shared test-side helpers
+
+The scaffolding a test needs on *its* side of the seam — scripting a fake's
+failure, waiting for a worker thread, cleaning up on the fatal-assert path — is
+the same in every binary, so it lives in a header next to the tests rather than
+being re-invented per TU. Each is one small header named after the type it
+declares:
+
+| Header | Use it for |
+|---|---|
+| `ScopedHook.h` | Install behaviour on a `std::function` seam, count the calls, restore the previous behaviour on scope exit. See [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook). |
+| `ScriptedFailure.h` | "Fail call N of this entry point." A fake holds one per entry point and asks `at(++calls)` what to return; the test writes `fake_.failConnect = {ncclSystemError, 2}`. Replaces the `g_fooCalls` + `g_failFooCall` pair that otherwise grows per seam. |
+| `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
+| `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
+| `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
+
+When a test grows a helper that is not specific to its unit under test, promote
+it here rather than leaving it in the TU — a per-TU copy is how four tests end
+up with four slightly different "wait for the thread" loops. Helpers that *are*
+specific to one unit stay with it (`TaskPrepScene.h` for the task-prep scene,
+`fakes/ras_*_test_support.h` for the RAS fixtures).
+
 ## Dealing with each kind of dependency
 
 When the link fails with `undefined symbol: foo`, find `foo` and
@@ -1014,8 +1080,9 @@ triage it into the right bucket:
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself.
 - **It's a logging or env-param helper** → already covered by
-  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (no-op). If a new
-  logging primitive
+  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (parses the value
+  `SetMicroEnv` scripted for that name, and the param's compile-time default
+  when the name is unmapped). If a new logging primitive
   appears, follow the same pattern.
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`
   function** → add a return-failure stub. If a future test will need
@@ -1133,6 +1200,120 @@ make -j $(nproc) rccl-UnitTestsMicro
 
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
 ```
+
+### `rccl-UnitTestsHostAll` — one front door for every host binary
+
+The host tree builds many small binaries on purpose (see
+[Why a separate test binary](#why-a-separate-test-binary)), and every new unit
+under test tends to add another. Anything outside this directory that wants to
+*run* them therefore ends up keeping its own copy of the binary list, and those
+copies drift: a new binary silently goes unrun, and its coverage silently goes
+unreported.
+
+`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the lists. It is not
+a test binary; it is a gtest-shaped front door that discovers its
+`rccl-UnitTestsMicro*` siblings **at run time** and forks the ones that own a
+selected case:
+
+```bash
+# Everything, as one report:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_output=xml:host.xml
+
+# What it can run (the union of every binary's cases):
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_list_tests
+
+# One suite, wherever it lives:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_filter='*RmaCeInitTest.*'
+```
+
+Case names are qualified with the owning binary's suffix — 
+`MicroInitUncached/InitMicrotest.Case` — because the multi-arm binaries
+(`-uncached`, `-faultinj`, `-devlinker`, `-roctx`) publish identical
+`Suite.Case` names and would otherwise collide into one identity when they all
+report through one front door. The dashes are folded away (`MicroInitUncached`,
+not `MicroInit-uncached`) because gtest splits a `--gtest_filter` at its first
+`-`, so a qualifier carrying one could never be named by a positive pattern.
+
+The qualifier is part of the name a filter has to match, so a pattern written
+against one binary does **not** carry over unchanged: `P2pMicrotest.*` (as in
+`test_categories_micro.yaml`) matches nothing here, because every published name
+begins `<Qualifier>/`. Lead with `*` to mean "in whichever binary owns it", or
+name the qualifier to mean one arm:
+
+```bash
+# Wherever it lives:
+--gtest_filter='*P2pMicrotest.*'
+# Only the uncached arm's copy:
+--gtest_filter='MicroInitUncached/InitMicrotest.*'
+```
+
+A filter that selects nothing is not an error — gtest exits 0 for one too, and
+the shared categories yaml depends on that, since each binary is handed every
+category's patterns and most match none of them. The front door prints the
+qualification rule when it happens, so a pattern that silently selected nothing
+says why.
+
+The filter itself is resolved by **gtest**, not by the dispatcher: it registers
+the qualified names as empty tests and reads back `should_run()`. gtest exposes
+no matcher any other way (`UnitTestOptions::FilterMatchesTest` is declared only
+in `src/gtest-internal-inl.h`, which is not installed), and a reimplementation
+drifts — the first one here selected `DISABLED_` cases that gtest would not have
+run.
+
+Each child is then handed an **exact `:`-joined list of its own case names**,
+never the caller's pattern: the pattern is written against qualified names, and
+in a multi-arm binary (`rccl-UnitTestsMicroInit*`) it would also match the
+identically named cases of the arm it was meant to exclude. Two exceptions keep
+that list manageable — when every case a binary could run is selected it is sent
+`*` instead, which is shorter in the logs and is why its `DISABLED_` cases do
+not force a list; and a list longer than ~60,000 characters is split across
+several invocations of that binary, because the kernel caps one argv entry at
+`MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
+which the biggest binary's 2,199 case names would exceed.
+
+### What the children inherit
+
+gtest configures itself from `GTEST_*` variables as well as from flags, and that
+is dangerous in a dispatcher, because this process reads them too. Every such
+variable is one of two things:
+
+- **Consumed** — the dispatcher acts on it and re-expresses the decision as an
+  explicit per-child flag, so the children never see the variable. A child that
+  saw it would decide the same question a *second* time, over a case list that
+  has already been narrowed, and exit 0 having run a fraction of it.
+  `GTEST_FILTER` (resolved over the qualified names), `GTEST_OUTPUT` (becomes
+  the merged report), `GTEST_ALSO_RUN_DISABLED_TESTS` (decides the selection)
+  and the three `GTEST_*SHARD*` variables (sharding happens once) are consumed.
+- **Forwarded** — it means the same thing in a child and changes nothing about
+  which cases run: `GTEST_COLOR`, `GTEST_BRIEF`, `GTEST_REPEAT`,
+  `GTEST_DEATH_TEST_STYLE` and the like.
+
+An **unknown** `GTEST_*` variable is consumed and named on stderr. That is the
+safe default of the two: a variable a future gtest adds costs a redundant strip
+and a line of output, where inheriting it could silently cost coverage. Nothing
+here has to be updated for gtest to stay *correct* — the table in
+`host_test_dispatch.cc` only buys back the forwarding of variables we have
+decided are harmless. Non-`GTEST_` variables are never touched.
+
+The strip happens **in each child, between `fork()` and `exec()`**, not in the
+dispatcher. Two reasons: the dispatcher goes on using the originals after the
+first fork (it shards over them), and putting it at the fork sites means there
+is no ordering in `main()` to get right and a fork site added later inherits the
+guarantee by construction.
+
+For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
+`.profraw` as usual. What a harness cannot know is which binaries those
+profiles came from — `llvm-cov` needs an `--object` per binary and silently
+discards a profile whose object is missing — so the dispatcher appends every
+binary it ran to `coverage-objects.txt` in the profile directory. That file,
+not a list maintained in the harness, is the object set.
+
+Adding a host test binary therefore needs no change outside this directory.
+
+`run_host_tests.sh` keeps driving the binaries individually: it writes each
+one's profiles into its own `coverage/<binary>/` subdirectory to produce the
+per-binary reports CI publishes, which a single shared profile directory could
+not reconstruct.
 
 ## Standalone host-only build (no full librccl build)
 

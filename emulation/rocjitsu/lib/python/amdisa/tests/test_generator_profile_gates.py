@@ -5152,10 +5152,12 @@ def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
         'IMAGE_BVH_INTERSECT_RAY': 4,
         'IMAGE_BVH64_INTERSECT_RAY': 4,
     }
-    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == {
+    fixed_bvh_vaddr_words = {
         'IMAGE_BVH_INTERSECT_RAY': (11, 8),
         'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
     }
+    assert rdna3.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
+    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
     assert rdna3_5.gfx11_mimg_nsa_group_words == {
         'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
         'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
@@ -5217,6 +5219,114 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
         and 'true, true);' in v_swap_ctor
         and '& 0x7fu' not in v_swap_ctor
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5'])
+def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
+    amdgpu_generated_root: Path, arch: str
+):
+    mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
+    assert 'amdgpu::image_coordinate_count(dim)' in mimg
+    assert 'static constexpr uint8_t coords[]' not in mimg
+    for class_name in ('ImageLoadMimg', 'ImageStoreMimg'):
+        constructor = _generated_constructor_body(mimg, class_name)
+        assert (
+            'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in constructor
+        )
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in constructor
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
+            constructor
+        )
+    image_sample = _generated_constructor_body(mimg, 'ImageSampleMimg')
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+        _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+        _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
+    )
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_load_tracks_d16_destination_preservation(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    source = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.cpp'
+    ).read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"' in source
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"' not in source
+    image_load_uses = _generated_function_body(
+        source, f'void ImageLoad{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' in image_load_uses
+    preservation_uses = _generated_function_body(
+        source, f'bool ImageLoad{suffix}::implicit_preservation_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' in preservation_uses
+    assert 'inst_.d16 && (components & 1u)' in preservation_uses
+    assert 'r->index + components / 2' in preservation_uses
+    assert 'image_coordinate_register_count' in preservation_uses
+    assert 'registers[index] == preserved.index' in preservation_uses
+    assert 'return true' in preservation_uses
+    image_store_uses = _generated_function_body(
+        source, f'void ImageStore{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' not in image_store_uses
+
+    header = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.h'
+    ).read_text()
+    modifiers = _generated_inline_method_body(
+        header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask}) & 1u' in modifiers
+    assert 'modifiers.memory_result_last_bytes = 0x3' in modifiers
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_execution_passes_dim_and_tfe(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    execution = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}_exec.cpp'
+    ).read_text()
+    image_load = _generated_function_body(
+        execution, f'void ImageLoad{suffix}::execute_impl'
+    )
+    assert '.dim = inst_.dim' in image_load
+    assert '.tfe = bool(inst_.tfe)' in image_load
+
+
+def test_gfx11_image_metadata_does_not_leak_when_derived_semantics_are_missing(
+    tmp_path: Path,
+) -> None:
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna3.xml'), Rdna3Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    semantics.instructions.pop('IMAGE_STORE_MIP')
+
+    CodeGenerator(spec, str(tmp_path), semantics).gen_insts()
+
+    mimg = (tmp_path / 'rdna3' / 'mimg.cpp').read_text()
+    assert 'void ImageStoreMimg::implicit_uses' in mimg
+    assert 'bool ImageStoreMimg::tracks_explicit_source' in mimg
+    assert 'void ImageStoreMipMimg::implicit_uses' not in mimg
+    assert 'bool ImageStoreMipMimg::tracks_explicit_source' not in mimg
 
 
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
