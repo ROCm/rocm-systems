@@ -302,31 +302,38 @@ namespace RcclUnitTesting
 
   // The graphs launched on healthy children wait on a child that failed to launch
   // its own, so no later command could complete: LaunchGraphs must stop every worker.
+  // A lone failing child owes no other reply, so only StopAlways stops it.
   TEST(Teardown, FailedGraphLaunchStopsAllWorkers)
   {
-    TestBed testBed;
-    LimitParentWaitsToOneSecond(testBed);
-    std::vector<pid_t> pids;
-    for (int const status : {static_cast<int>(TEST_FAIL), static_cast<int>(TEST_SUCCESS)})
+    std::vector<int> const fail = {TEST_FAIL};
+    std::vector<int> const failThenAck = {TEST_FAIL, TEST_SUCCESS};
+    for (auto const* statuses : {&fail, &failThenAck})
     {
-      auto child = ForkHungChild(testBed.NumActiveChildren(), status);
-      if (child != nullptr) pids.push_back(testBed.AdoptChild(std::move(child))->pid);
-    }
-    ASSERT_EQ(testBed.NumActiveChildren(), 2);
-    testBed.numGroupCalls = 1;
+      SCOPED_TRACE(std::to_string(statuses->size()) + " children");
+      TestBed testBed;
+      LimitParentWaitsToOneSecond(testBed);
+      std::vector<pid_t> pids;
+      for (int const status : *statuses)
+      {
+        auto child = ForkHungChild(testBed.NumActiveChildren(), status);
+        if (child != nullptr) pids.push_back(testBed.AdoptChild(std::move(child))->pid);
+      }
+      ASSERT_EQ(testBed.NumActiveChildren(), static_cast<int>(statuses->size()));
+      testBed.numGroupCalls = 1;
 
-    ::testing::TestPartResultArray failures;
-    CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
+      ::testing::TestPartResultArray failures;
+      CaptureFailures(failures, [&]() { testBed.LaunchGraphs(0); });
 
-    EXPECT_EQ(failures.size(), 1);
-    EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
-    EXPECT_TRUE(testBed.childList.empty());
-    EXPECT_EQ(testBed.NumActiveRanks(), 0);
-    for (pid_t const pid : pids)
-    {
-      errno = 0;
-      EXPECT_EQ(waitpid(pid, nullptr, WNOHANG), -1);
-      EXPECT_EQ(errno, ECHILD);
+      EXPECT_EQ(failures.size(), 1);
+      EXPECT_TRUE(AnyFailureMentions(failures, "Child 0 reported failure"));
+      EXPECT_TRUE(testBed.childList.empty());
+      EXPECT_EQ(testBed.NumActiveRanks(), 0);
+      for (pid_t const pid : pids)
+      {
+        errno = 0;
+        EXPECT_EQ(waitpid(pid, nullptr, WNOHANG), -1);
+        EXPECT_EQ(errno, ECHILD);
+      }
     }
   }
 
