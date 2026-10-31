@@ -4321,6 +4321,43 @@ hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
     return r;
 }
 
+hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
+                                         const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(pl);
+    float ms = 0.f;
+    hipEvent_t start = ctx.translate_event(a->start);
+    hipEvent_t stop  = ctx.translate_event(a->stop);
+    hipError_t r = hipEventElapsedTime(&ms, start, stop);
+    if (r == hipSuccess) return hipSuccess;
+    // HIP returns hipErrorInvalidHandle when either event has no marker.
+    // hipExtModuleLaunchKernel sets those markers inside the runtime. An
+    // archive recorded before that side effect was stored has no
+    // hipEventRecord for the pair, and the captured call still succeeded.
+    // Both handles resolving means the events are still live, so this is not
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            fprintf(stderr,
+                    "[HRR] hipEventElapsedTime: no marker on a live pair "
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
+        }
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
+    if (hrr_replayed_recorded_error(ctx, "hipEventElapsedTime", a->ret, r))
+        return hipSuccess;
+    return r;
+}
+
 hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
                                     const uint8_t* pl) {
     const auto* a  = reinterpret_cast<const hrr_args_hipEventDestroy*>(pl);
