@@ -133,6 +133,10 @@ namespace rdna4 = rocjitsu::rdna4;
 constexpr uint16_t kGfx1250WmmaCompletionWaitImmediate = 0x0f9f;
 constexpr auto kGfx1250WmmaCompletionWait =
     cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kGfx1250WmmaCompletionWaitImmediate});
+constexpr uint16_t kGfx1250TensorMaskSdstWaitImmediate = 0xff9e;
+constexpr auto kGfx1250TensorMaskSdstWait =
+    cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kGfx1250TensorMaskSdstWaitImmediate});
+static_assert(kGfx1250TensorMaskSdstWait[0] == 0xBF88FF9Eu);
 
 /// @brief Build explicit gfx1250 revision options without partial aggregate
 /// initializers, which are rejected by the test suite's warning policy.
@@ -11817,7 +11821,8 @@ TEST(BinaryTranslatorE2E, Gfx1250Iu8WmmaDoesNotCreditVNopsAcrossBlockBoundary) {
 TEST(BinaryTranslatorE2E, Gfx1250TensorLoadAlwaysClearsDynamicMulticastMask) {
   // Multicast is selected dynamically by D# group-1 bits [15:0], not by an
   // instruction bit. A0 must therefore clear the runtime mask for every tensor
-  // load and restore the descriptor word after the instruction.
+  // load and restore the descriptor word after the instruction. SCHED_MODE 1
+  // disables the SA_SDST interlock, so both descriptor writes need a wait.
   constexpr auto source_tensor =
       cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
                           {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
@@ -11836,7 +11841,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadAlwaysClearsDynamicMulticastMask) {
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_GE(translated.text_sections()[0]->size(), 8 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 10 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   // D0 occupies s[8:11] and D1 occupies s[0:7], so the first dead ordinary
@@ -11849,17 +11854,54 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadAlwaysClearsDynamicMulticastMask) {
   EXPECT_EQ(target_words[0], dependency_barrier[0]);
   EXPECT_EQ(target_words[1], save_d1[0]);
   EXPECT_EQ(target_words[2], clear_mask[0]);
-  EXPECT_EQ(target_words[3], source_tensor[0]);
-  EXPECT_EQ(target_words[4], source_tensor[1]);
-  EXPECT_EQ(target_words[5], source_tensor[2]);
-  EXPECT_EQ(target_words[6], restore_d1[0]);
-  EXPECT_EQ(target_words[7], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[3], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[4], source_tensor[0]);
+  EXPECT_EQ(target_words[5], source_tensor[1]);
+  EXPECT_EQ(target_words[6], source_tensor[2]);
+  EXPECT_EQ(target_words[7], restore_d1[0]);
+  EXPECT_EQ(target_words[8], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[9], kGfx1250SEndpgm);
 
   auto second_result = translator.translate(translated);
   ASSERT_TRUE(second_result.ok()) << (second_result.diagnostics.empty()
                                           ? ""
                                           : second_result.diagnostics.front().message);
   EXPECT_EQ(second_result.elf_bytes, result.elf_bytes);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250TensorLoadWaitsForRestoreBeforeGuestSgprRead) {
+  constexpr auto source_tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
+  constexpr auto read_descriptor =
+      cdna5::build_sop2(cdna5::kSAddCoU32Sop2, {.ssrc0 = 0, .ssrc1 = 8, .sdst = 0});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+      {source_tensor[0], source_tensor[1], source_tensor[2], read_descriptor[0], kGfx1250SEndpgm});
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  ASSERT_EQ(translated.text_sections()[0]->size(), 11 * sizeof(uint32_t));
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  constexpr auto restore_d1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 12, .sdst = 0});
+  EXPECT_EQ(target_words[7], restore_d1[0]);
+  EXPECT_EQ(target_words[8], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[9], read_descriptor[0]);
+  EXPECT_EQ(target_words[10], kGfx1250SEndpgm);
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250TensorLoadUsesHighDeadSgprUnderCompilerPressure) {
@@ -11891,7 +11933,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadUsesHighDeadSgprUnderCompilerPressure
                 decoded, [](const auto &inst) { return inst->mnemonic() == "tensor_load_to_lds"; }),
             1);
 
-  ASSERT_GE(translated.text_sections()[0]->size(), 7 * sizeof(uint32_t));
+  ASSERT_GE(translated.text_sections()[0]->size(), 9 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   // The generic 102-SGPR ceiling leaves s102/s103 dead, but gfx1250 scratch
@@ -11906,10 +11948,12 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadUsesHighDeadSgprUnderCompilerPressure
   EXPECT_EQ(target_words[0], dependency_barrier[0]);
   EXPECT_EQ(target_words[1], save_d1[0]);
   EXPECT_EQ(target_words[2], clear_mask[0]);
-  EXPECT_EQ(target_words[3], source_tensor[0]);
-  EXPECT_EQ(target_words[4], source_tensor[1]);
-  EXPECT_EQ(target_words[5], source_tensor[2]);
-  EXPECT_EQ(target_words[6], restore_d1[0]);
+  EXPECT_EQ(target_words[3], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[4], source_tensor[0]);
+  EXPECT_EQ(target_words[5], source_tensor[1]);
+  EXPECT_EQ(target_words[6], source_tensor[2]);
+  EXPECT_EQ(target_words[7], restore_d1[0]);
+  EXPECT_EQ(target_words[8], kGfx1250TensorMaskSdstWait[0]);
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
@@ -11988,9 +12032,45 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadFailsClosedWhenEverySgprIsLive) {
       "gfx1250 tensor-load mask rule could not allocate scalar scratch"));
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250TensorLoadReusesGuestClearFollowedByWaitIdleUnderSgprPressure) {
+  constexpr auto source_clear =
+      cdna5::build_sop2(cdna5::kSPackHhB32B16Sop2, {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0});
+  constexpr auto source_wait_idle = cdna5::build_sopp(cdna5::kSWaitIdleSopp);
+  constexpr auto source_tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
+  constexpr std::array<uint32_t, 5> prefix_words = {
+      source_clear[0], source_wait_idle[0], source_tensor[0], source_tensor[1], source_tensor[2]};
+  // All ordinary SGPRs are live after the load, so adding a wrapper would
+  // fail scratch allocation. S_WAIT_IDLE already drains the guest clear.
+  auto image =
+      rocjitsu::make_gfx1250_image_with_live_sgprs(prefix_words, rocjitsu::REGISTER_SET_MAX_SGPRS);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_FALSE(translated.text_sections().empty());
+  ASSERT_EQ(translated.text_sections()[0]->size(),
+            (prefix_words.size() + rocjitsu::REGISTER_SET_MAX_SGPRS + 1u) * sizeof(uint32_t));
+  const auto *target_words =
+      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+  EXPECT_TRUE(std::equal(prefix_words.begin(), prefix_words.end(), target_words));
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250TensorLoadPreservesGuestMaskClearWithoutRestore) {
-  // An immediately preceding clear in the same block already guarantees the
-  // A0 mask invariant. Preserve the guest's choice not to restore the mask.
+  // A guest clear still needs an SA_SDST wait in SCHED_MODE 1. Preserve the
+  // guest's choice not to restore the mask or allocate a scratch register.
   constexpr auto source_clear =
       cdna5::build_sop2(cdna5::kSPackHhB32B16Sop2, {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0});
   constexpr auto source_tensor =
@@ -12014,20 +12094,74 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadPreservesGuestMaskClearWithoutRestore
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_EQ(translated.text_sections()[0]->size(), 5 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 6 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[0], source_clear[0]);
-  EXPECT_EQ(target_words[1], source_tensor[0]);
-  EXPECT_EQ(target_words[2], source_tensor[1]);
-  EXPECT_EQ(target_words[3], source_tensor[2]);
-  EXPECT_EQ(target_words[4], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[1], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[2], source_tensor[0]);
+  EXPECT_EQ(target_words[3], source_tensor[1]);
+  EXPECT_EQ(target_words[4], source_tensor[2]);
+  EXPECT_EQ(target_words[5], kGfx1250SEndpgm);
 
   auto second_result = translator.translate(translated);
   ASSERT_TRUE(second_result.ok()) << (second_result.diagnostics.empty()
                                           ? ""
                                           : second_result.diagnostics.front().message);
   EXPECT_EQ(second_result.elf_bytes, result.elf_bytes);
+}
+
+TEST(BinaryTranslatorE2E, Gfx1250TensorLoadChecksSaSdstFieldInGuestWait) {
+  constexpr auto source_clear =
+      cdna5::build_sop2(cdna5::kSPackHhB32B16Sop2, {.ssrc0 = 128, .ssrc1 = 0, .sdst = 0});
+  constexpr auto source_tensor =
+      cdna5::build_vimage(cdna5::kTensorLoadToLdsVimage,
+                          {.vaddr4 = 124, .vaddr0 = 8, .vaddr1 = 0, .vaddr2 = 124, .vaddr3 = 124});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  struct GuestWaitCase {
+    const char *name;
+    uint16_t immediate;
+    bool drains_sa_sdst;
+  };
+  constexpr std::array guest_wait_cases = {
+      GuestWaitCase{"0xffff leaves SA_SDST unwaited", 0xffffu, false},
+      GuestWaitCase{"0xfffe drains SA_SDST", 0xfffeu, true},
+      GuestWaitCase{"0xfffc drains SA_SDST and another field", 0xfffcu, true},
+      GuestWaitCase{"0xff9e is gfx1250 depctr_sa_sdst(0)", 0xff9eu, true},
+  };
+  for (const GuestWaitCase &test_case : guest_wait_cases) {
+    SCOPED_TRACE(test_case.name);
+    const auto source_wait =
+        cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = test_case.immediate});
+    auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+        {source_clear[0], source_wait[0], source_tensor[0], source_tensor[1], source_tensor[2],
+         kGfx1250SEndpgm});
+    rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+    rocjitsu::BinaryTranslator translator(
+        ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+        gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                                 rocjitsu::ProcessorRevision::Gfx1250A0));
+    const auto result = translator.translate(source);
+    ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                            : result.diagnostics.front().message);
+
+    rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_FALSE(translated.text_sections().empty());
+    std::vector<uint32_t> expected = {source_clear[0], source_wait[0]};
+    if (!test_case.drains_sa_sdst)
+      expected.push_back(kGfx1250TensorMaskSdstWait[0]);
+    expected.insert(expected.end(), source_tensor.begin(), source_tensor.end());
+    expected.push_back(kGfx1250SEndpgm);
+    ASSERT_EQ(translated.text_sections()[0]->size(), expected.size() * sizeof(uint32_t));
+    const auto *target_words =
+        reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+    EXPECT_EQ(std::vector<uint32_t>(target_words, target_words + expected.size()), expected);
+
+    const auto second = translator.translate(translated);
+    ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                            : second.diagnostics.front().message);
+    EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+  }
 }
 
 TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseNonzeroMaskWrite) {
@@ -12051,6 +12185,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseNonzeroMaskWrite) {
   rocjitsu::AmdGpuCodeObject translated(first.elf_bytes.data(), first.elf_bytes.size());
   ASSERT_TRUE(translated.is_valid());
   ASSERT_FALSE(translated.text_sections().empty());
+  ASSERT_EQ(translated.text_sections()[0]->size(), 11 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto save_d1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 12});
@@ -12062,11 +12197,13 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseNonzeroMaskWrite) {
   EXPECT_EQ(target_words[1], dependency_barrier[0]);
   EXPECT_EQ(target_words[2], save_d1[0]);
   EXPECT_EQ(target_words[3], clear_mask[0]);
-  EXPECT_EQ(target_words[4], source_tensor[0]);
-  EXPECT_EQ(target_words[5], source_tensor[1]);
-  EXPECT_EQ(target_words[6], source_tensor[2]);
-  EXPECT_EQ(target_words[7], restore_d1[0]);
-  EXPECT_EQ(target_words[8], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[4], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[5], source_tensor[0]);
+  EXPECT_EQ(target_words[6], source_tensor[1]);
+  EXPECT_EQ(target_words[7], source_tensor[2]);
+  EXPECT_EQ(target_words[8], restore_d1[0]);
+  EXPECT_EQ(target_words[9], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[10], kGfx1250SEndpgm);
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
@@ -12098,12 +12235,14 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseClearOfDifferentDescripto
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_EQ(translated.text_sections()[0]->size(), 9 * sizeof(uint32_t));
+  ASSERT_EQ(translated.text_sections()[0]->size(), 11 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   EXPECT_EQ(target_words[0], clear_s4[0]);
   EXPECT_EQ(target_words[1], dependency_barrier[0]);
   EXPECT_EQ(target_words[3], clear_s0[0]);
+  EXPECT_EQ(target_words[4], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[9], kGfx1250TensorMaskSdstWait[0]);
 
   const auto second = translator.translate(translated);
   ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
@@ -12140,7 +12279,7 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseMaskPrefixBypassedByBranc
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
   ASSERT_FALSE(translated.text_sections().empty());
-  ASSERT_GE(translated.text_sections()[0]->size(), 10 * sizeof(uint32_t));
+  ASSERT_GE(translated.text_sections()[0]->size(), 12 * sizeof(uint32_t));
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
   constexpr auto relocated_branch = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0});
@@ -12151,12 +12290,14 @@ TEST(BinaryTranslatorE2E, Gfx1250TensorLoadDoesNotReuseMaskPrefixBypassedByBranc
   EXPECT_EQ(target_words[1], dependency_barrier[0]);
   EXPECT_EQ(target_words[2], generated_save[0]);
   EXPECT_EQ(target_words[3], source_clear[0]);
-  EXPECT_EQ(target_words[4], source_tensor[0]);
-  EXPECT_EQ(target_words[5], source_tensor[1]);
-  EXPECT_EQ(target_words[6], source_tensor[2]);
-  EXPECT_EQ(target_words[7], generated_restore[0]);
-  EXPECT_EQ(target_words[8], source_restore[0]);
-  EXPECT_EQ(target_words[9], kGfx1250SEndpgm);
+  EXPECT_EQ(target_words[4], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[5], source_tensor[0]);
+  EXPECT_EQ(target_words[6], source_tensor[1]);
+  EXPECT_EQ(target_words[7], source_tensor[2]);
+  EXPECT_EQ(target_words[8], generated_restore[0]);
+  EXPECT_EQ(target_words[9], kGfx1250TensorMaskSdstWait[0]);
+  EXPECT_EQ(target_words[10], source_restore[0]);
+  EXPECT_EQ(target_words[11], kGfx1250SEndpgm);
 
   auto second_result = translator.translate(translated);
   ASSERT_TRUE(second_result.ok()) << (second_result.diagnostics.empty()
