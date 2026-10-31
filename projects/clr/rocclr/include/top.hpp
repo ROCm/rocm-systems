@@ -162,8 +162,19 @@ class ReferenceCountedObject {
  public:
   ReferenceCountedObject() : referenceCount_(1) {}
 
+  // size-only new hides ::operator new(size, align_val_t); over-aligned
+  // subclasses (VirtualGPU alignas(64) AQL packets) need these overloads.
   void* operator new(size_t size) { return ::operator new(size); }
+  void* operator new(size_t size, std::align_val_t align) {
+    return ::operator new(size, align);
+  }
   void operator delete(void* p) { return ::operator delete(p); }
+  void operator delete(void* p, std::align_val_t align) {
+    return ::operator delete(p, align);
+  }
+  void operator delete(void* p, size_t, std::align_val_t align) {
+    return ::operator delete(p, align);
+  }
   void* operator new(size_t size, size_t extSize) {
     return ReferenceCountedObject::operator new(size + extSize);
   };
