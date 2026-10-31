@@ -158,6 +158,17 @@ std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
              : Decoder::create(default_isa_target_registry(), config.target);
 }
 
+std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding,
+                                                     uint64_t pc) const {
+  Instruction::ScopedHeapAllocation heap_allocation;
+  util::StringDiagnostic error;
+  auto decoded = decoder_->decode_window(encoding, pc, error.emitter());
+  if (decoded.failed())
+    throw std::logic_error(std::format("cannot disassemble captured instruction at PC {:#x}: {}",
+                                       pc, error.message()));
+  return decoded.value()->disassemble();
+}
+
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
