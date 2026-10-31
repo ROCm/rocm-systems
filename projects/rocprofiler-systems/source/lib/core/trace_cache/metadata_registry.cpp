@@ -8,11 +8,13 @@
 #include "core/config.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 #include <fstream>
 
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -77,8 +79,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
-    p.start   = _json["start"].get<std::int32_t>();
-    p.end     = _json["end"].get<std::int32_t>();
+    p.start   = _json["start"].get<std::uint64_t>();
+    p.end     = _json["end"].get<std::uint64_t>();
     return p;
 }
 
@@ -136,7 +138,7 @@ to_json(const info::thread& thread)
     nlohmann::json result;
     result["parent_process_id"] = thread.parent_process_id;
     result["process_id"]        = thread.process_id;
-    result["thread_id"]         = static_cast<std::int32_t>(thread.thread_id);
+    result["thread_id"]         = thread.thread_id;
     result["start"]             = thread.start;
     result["end"]               = thread.end;
     result["extdata"]           = thread.extdata;
@@ -149,9 +151,9 @@ from_json_thread(const nlohmann::json& _json)
     info::thread t;
     t.parent_process_id = _json["parent_process_id"].get<std::int32_t>();
     t.process_id        = _json["process_id"].get<std::int32_t>();
-    t.thread_id         = _json["thread_id"].get<std::int32_t>();
-    t.start             = _json["start"].get<std::int32_t>();
-    t.end               = _json["end"].get<std::int32_t>();
+    t.thread_id         = _json["thread_id"].get<std::uint64_t>();
+    t.start             = _json["start"].get<std::uint64_t>();
+    t.end               = _json["end"].get<std::uint64_t>();
     t.extdata           = _json["extdata"].get<std::string>();
     return t;
 }
@@ -163,7 +165,7 @@ to_json(const info::track& track)
     result["track_name"] = track.track_name;
     if(track.thread_id.has_value())
     {
-        result["thread_id"] = static_cast<std::int32_t>(track.thread_id.value());
+        result["thread_id"] = track.thread_id.value();
     }
     else
     {
@@ -184,7 +186,7 @@ from_json_track(const nlohmann::json& _json)
     }
     else
     {
-        t.thread_id = _json["thread_id"].get<std::int32_t>();
+        t.thread_id = _json["thread_id"].get<std::uint64_t>();
     }
     t.extdata = _json["extdata"].get<std::string>();
     return t;
@@ -408,12 +410,12 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("threads", [&_registry](const auto& item) {
         auto const thread = from_json_thread(item);
-        _registry.add_thread_info(thread);
+        _registry.ensure_thread(thread.thread_id, [&thread] { return thread; });
     });
 
     fill_from_json("tracks", [&_registry](const auto& item) {
         auto const track = from_json_track(item);
-        _registry.add_track(track);
+        _registry.ensure_track(track.track_name, track.thread_id, track.extdata);
     });
 
     fill_from_json("queues", [&_registry](const auto& item) {
@@ -463,73 +465,37 @@ metadata_registry::set_process(const info::process& process)
 void
 metadata_registry::add_pmc_info(const info::pmc& pmc_info)
 {
-    m_pmc_infos.wlock([&pmc_info](auto& _data) {
-        if(_data.count(pmc_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(pmc_info);
-    });
+    detail::insert_if_absent(m_pmc_infos, pmc_info);
 }
 
 void
-metadata_registry::add_thread_info(const info::thread& thread_info)
+metadata_registry::ensure_track(std::string_view           name,
+                                std::optional<std::size_t> thread_id,
+                                std::string_view           extdata)
 {
-    m_threads.wlock([&thread_info](auto& _data) {
-        if(_data.count(thread_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(thread_info);
-    });
-}
-
-void
-metadata_registry::add_track(const info::track& track_info)
-{
-    m_tracks.wlock([&track_info](auto& _data) {
-        if(_data.count(track_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(track_info);
+    detail::insert_if_absent(m_tracks, name, [&] {
+        return info::track{ .track_name = std::string{ name },
+                            .thread_id  = thread_id,
+                            .extdata    = std::string{ extdata } };
     });
 }
 
 void
 metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
-    m_queues.wlock([&queue_handle](auto& _data) {
-        if(_data.count(queue_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(queue_handle);
-    });
+    detail::insert_if_absent(m_queues, queue_handle);
 }
 
 void
 metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
-    m_streams.wlock([&stream_handle](auto& _data) {
-        if(_data.count(stream_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(stream_handle);
-    });
+    detail::insert_if_absent(m_streams, stream_handle);
 }
 
 void
 metadata_registry::add_string(const std::string_view string_value)
 {
-    m_strings.wlock([&string_value](auto& _data) {
-        std::string str{ string_value };
-        if(_data.count(str) == 0)
-        {
-            _data.emplace(std::move(str));
-        }
-    });
+    detail::insert_if_absent(m_strings, string_value);
 }
 
 info::process
@@ -545,14 +511,6 @@ metadata_registry::get_pmc_info(const std::string_view& unique_name) const
 {
     return get_type_info<info::pmc>(m_pmc_infos, [&unique_name](const info::pmc& val) {
         return val.name == unique_name;
-    });
-}
-
-std::optional<info::thread>
-metadata_registry::get_thread_info(const std::uint32_t& thread_id) const
-{
-    return get_type_info<info::thread>(m_threads, [&thread_id](const info::thread& val) {
-        return val.thread_id == thread_id;
     });
 }
 
@@ -649,13 +607,7 @@ void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-    m_code_objects.wlock([&code_object](auto& _data) {
-        if(_data.count(code_object) > 0)
-        {
-            return;
-        }
-        _data.emplace(code_object);
-    });
+    detail::insert_if_absent(m_code_objects, code_object);
 }
 
 void
@@ -663,13 +615,7 @@ metadata_registry::add_kernel_symbol(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
         kernel_symbol)
 {
-    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
-        if(_data.count(kernel_symbol) > 0)
-        {
-            return;
-        }
-        _data.emplace(kernel_symbol);
-    });
+    detail::insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
@@ -709,144 +655,6 @@ metadata_registry::get_kernel_symbol_list() const
         result;
     m_kernel_symbols.rlock(assign_set_to_vector(result));
     return result;
-}
-
-// As the underlying implementation of callback_name_info_t resizes the category
-// storage during emplace, this special method is required
-void
-metadata_registry::overwrite_callback_names(
-    std::initializer_list<
-        std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
-        rename_table)
-{
-    if(rename_table.size() == 0)
-    {
-        return;
-    }
-
-    using callback_kind_t   = rocprofiler_callback_tracing_kind_t;
-    using operation_names_t = std::vector<std::string_view>;
-
-    auto category_names = std::vector<std::string_view>{};
-    auto modified_ops   = std::map<callback_kind_t, operation_names_t>{};
-
-    auto const extract_operations = [&](callback_kind_t cat) -> operation_names_t {
-        auto        items           = m_callback_tracing_info.items();
-        const auto* target_category = items[static_cast<size_t>(cat)];
-
-        auto const        operations_data = target_category->items();
-        operation_names_t operation_names;
-        operation_names.reserve(operations_data.size());
-
-        for(const auto& [op_idx, op_name] : operations_data)
-        {
-            operation_names.push_back(*op_name);
-        }
-
-        return operation_names;
-    };
-
-    // Store category names
-    category_names.resize(ROCPROFILER_CALLBACK_TRACING_LAST);
-    for(callback_kind_t i = ROCPROFILER_CALLBACK_TRACING_NONE;
-        i < ROCPROFILER_CALLBACK_TRACING_LAST;
-        i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
-    {
-        category_names[i] = m_callback_tracing_info.at(i);
-    }
-
-    // Process list
-    for(const auto& category_info : rename_table)
-    {
-        auto const callback_kind = category_info.first;
-        // Store operations of all following categories
-        //  as they will be deleted
-        for(callback_kind_t i =
-                static_cast<callback_kind_t>(static_cast<int>(callback_kind) + 1);
-            i < ROCPROFILER_CALLBACK_TRACING_LAST;
-            i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
-        {
-            if(modified_ops.contains(i))
-            {
-                break;
-            }
-            modified_ops[i] = extract_operations(i);
-        }
-
-        if(modified_ops.contains(callback_kind))
-        {
-            throw std::runtime_error(
-                "Overwriting a previously overwritten entry is forbidden");
-        }
-
-        if(!modified_ops.empty() && callback_kind >= modified_ops.begin()->first)
-        {
-            throw std::runtime_error(
-                "Category must have a larger enum value than all previously "
-                "modified_ops categories");
-        }
-
-        // Overwrite desired category
-        auto operation_names = extract_operations(callback_kind);
-        for(const auto& [index, new_value] : category_info.second)
-        {
-            if((index < 0 || static_cast<size_t>(index) >= operation_names.size()))
-            {
-                throw std::runtime_error("Index is invalid");
-            }
-            operation_names[index] = new_value;
-        }
-        modified_ops[callback_kind] = std::move(operation_names);
-    }
-    if(modified_ops.empty())
-    {
-        return;
-    }
-
-    // Emplace the changed category operations
-    for(callback_kind_t i = modified_ops.begin()->first;
-        i < ROCPROFILER_CALLBACK_TRACING_LAST;
-        i = static_cast<callback_kind_t>(static_cast<int>(i) + 1))
-    {
-        auto const renaming_entry = modified_ops.find(i);
-
-        if(renaming_entry == modified_ops.end())
-        {
-            throw std::runtime_error("A category that needs to be emplaced is missing");
-        }
-
-        const auto& operations_vec = renaming_entry->second;
-        m_callback_tracing_info.emplace(i, category_names.at(i).data());
-        for(size_t op_idx = 0; op_idx < operations_vec.size(); ++op_idx)
-        {
-            m_callback_tracing_info.emplace(
-                i, static_cast<rocprofiler_tracing_operation_t>(op_idx),
-                operations_vec[op_idx].data());
-        }
-    }
-}
-
-rocprofiler::sdk::buffer_name_info_t<const char*>
-metadata_registry::get_buffer_name_info() const
-{
-    return m_buffered_tracing_info;
-}
-
-rocprofiler::sdk::callback_name_info_t<const char*>
-metadata_registry::get_callback_tracing_info() const
-{
-    return m_callback_tracing_info;
-}
-
-metadata_registry::metadata_registry()
-{
-    overwrite_callback_names({
-#if(ROCPROFILER_VERSION >= 600)
-        { ROCPROFILER_CALLBACK_TRACING_OMPT,
-          { { ROCPROFILER_OMPT_ID_parallel_begin, "omp_parallel" },
-            { ROCPROFILER_OMPT_ID_parallel_end, "omp_parallel" } } }
-#endif
-    });
 }
 
 bool

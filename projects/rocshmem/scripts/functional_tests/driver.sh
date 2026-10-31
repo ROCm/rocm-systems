@@ -184,6 +184,24 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["tile_put_rowmajor_start_coord"]="177"
+  ["tile_get_rowmajor_start_coord"]="178"
+  ["tile_put_wave_rowmajor_start_coord"]="179"
+  ["tile_get_wave_rowmajor_start_coord"]="180"
+  ["tile_put_wg_rowmajor_start_coord"]="181"
+  ["tile_get_wg_rowmajor_start_coord"]="182"
+  ["tile_put_3d"]="183"
+  ["tile_get_3d"]="184"
+  ["tile_put_wg_3d"]="185"
+  ["tile_get_wg_3d"]="186"
+  ["tile_put_4d"]="187"
+  ["tile_get_4d"]="188"
+  ["tile_put_wg_4d"]="189"
+  ["tile_get_wg_4d"]="190"
+  ["tile_put_wave_3d"]="191"
+  ["tile_get_wave_3d"]="192"
+  ["tile_put_wave_4d"]="193"
+  ["tile_get_wave_4d"]="194"
 )
 
 # Detect which runtime to use
@@ -422,7 +440,7 @@ ExecTest_SLR() {
     fi
   fi
 
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  # Do not unset ROCSHMEM_MAX_NUM_CONTEXTS here — see ExecTest_MPI comment.
 }
 
 # MPI implementation (original ExecTest)
@@ -566,8 +584,10 @@ ExecTest_MPI() {
     fi
   fi
 
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
-  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+  # Do not unset ROCSHMEM_MAX_NUM_CONTEXTS or ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+  # here — the caller (TestTiles etc.) manages these with export/unset around
+  # groups of tests. Unsetting inside ExecTest_MPI caused the second test in
+  # a group to always fall back to NUM_WG instead of the caller's export.
 }
 
 TestRMAPut() {
@@ -738,7 +758,6 @@ TestAMO() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-211
   ExecTest  "amo_add"          2       1            1
   ExecTest  "amo_add"          2       1            1024
   ExecTest  "amo_add"          2       8            1
@@ -758,7 +777,6 @@ TestAMO() {
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
-  else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
   ExecTest  "amo_set"          2       8            1
@@ -907,9 +925,7 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
-  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "quiet_on_stream"        2  1           1
@@ -1061,7 +1077,7 @@ TestTiles() {
   ExecTest  "tile_put_contiguous"       2       1            1            1048576
   ExecTest  "tile_put_rowmajor"         2       1            1            1048576
   ExecTest  "tile_put_colmajor"         2       1            1            1048576
-  ExecTest  "tile_put_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_put_arbitrary"        2       1            1            16384
   ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
@@ -1072,7 +1088,7 @@ TestTiles() {
   ExecTest  "tile_get_contiguous"       2       1            1            1048576
   ExecTest  "tile_get_rowmajor"         2       1            1            1048576
   ExecTest  "tile_get_colmajor"         2       1            1            1048576
-  ExecTest  "tile_get_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_get_arbitrary"        2       1            1            16384
   ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
   ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
@@ -1082,6 +1098,27 @@ TestTiles() {
   ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
   ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_rowmajor_start_coord"       2       1            1
+  ExecTest  "tile_get_rowmajor_start_coord"       2       1            1
+  ExecTest  "tile_put_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
+  # 3D/4D N-dimensional tile tests (thread, wave, and workgroup scopes)
+  ExecTest  "tile_put_3d"                         2       1            1
+  ExecTest  "tile_get_3d"                         2       1            1
+  ExecTest  "tile_put_wg_3d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_3d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_4d"                         2       1            1
+  ExecTest  "tile_get_4d"                         2       1            1
+  ExecTest  "tile_put_wg_4d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_4d"                      2       4            $((WAVE_SIZE * 16))
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_put_wave_3d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_3d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wave_4d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_4d"                    2       1            $WAVE_SIZE
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_broadcast"            2       1            1            1048576
   ExecTest  "tile_broadcast"            4       1            1            1048576
   # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF

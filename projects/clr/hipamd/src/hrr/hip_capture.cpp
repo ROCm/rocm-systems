@@ -31,10 +31,12 @@
 
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
+#include "hip_capture_scrub.h"
 #include "hip_capture_writer.h"
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
 #include "hrr/hrr_api_args.h"
+#include "hrr/hrr_host_rect.h"
 
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
@@ -56,12 +58,15 @@
 #include <atomic>
 #include <cctype>
 #include <climits>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <string>
 #include <map>
+#include <memory>
+#include <new>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -85,6 +90,7 @@ std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
 
 HipCompilerDispatchTable g_real_compiler_table{};
+static HipCompilerDispatchTable g_cap_compiler_table{};  // the shims, kept for uninstall
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
 // TLS dims saved by __hipPushCallConfiguration — used only as a fallback by
@@ -126,10 +132,20 @@ const char* hip_capture_output_dir() {
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
 // destination is logged so a kernel pointer arg can be matched to the copy that
-// filled it. Routed through the CLR flags registry (flags.hpp) like every other
-// HRR flag, so it is discoverable and honors AMD_LOG_LEVEL log routing.
+// filled it. The flag stays a release() flag in flags.hpp, but only a Debug
+// build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
+// release() there) honours it; any other build ignores it, because the dumps put
+// a second copy of the workload's kernel arguments in the log, where log
+// collection picks them up. HIP_HRR_HOST_SNAPSHOTS and
+// HIP_HRR_HOST_SNAPSHOT_MAX_MB are not in flags.hpp: they only tune capture, so
+// they are read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes)
+// and stay with the HRR code and its reviewers.
 static bool hrr_dbg_args_enabled() {
+#if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;
+#else
+  return false;
+#endif
 }
 
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
@@ -159,6 +175,175 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 }
 
 // ---------------------------------------------------------------------------
+// Pinned host snapshots
+//
+// A kernel can read pinned host memory the host filled with plain stores, which
+// no HIP call records. Before each launch, the 8-byte-aligned words of its
+// arguments are looked up in the tracked pinned allocations (hipHostMalloc,
+// hipHostRegister). Each allocation hit is written whole as a
+// blob, and named by a record in the launch event unless its hash and stream
+// equal those of the last record for it. Replay copies the blob back when the
+// stream reaches the launch. The copy is taken at enqueue, without waiting for
+// the stream: bytes that queued GPU work has yet to write are restored as they
+// were before it. See DESIGN.md, "Pinned host snapshots".
+// ---------------------------------------------------------------------------
+
+namespace {
+struct PinnedAlloc {
+  size_t           size = 0;
+  hrr_cap::Hash128 last{};  // blob of the last record, {0,0} before the first
+  hipStream_t      last_stream = nullptr;  // and its launch stream
+};
+struct HostSnap {
+  uint64_t         base = 0, size = 0;
+  hrr_cap::Hash128 hash{}, last{};
+  hipStream_t      last_stream = nullptr;
+  bool             record = false;  // contents or stream differ from the last record
+  std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
+};
+std::mutex                       g_pinned_mu;  // also held while a snapshot copies
+std::map<uintptr_t, PinnedAlloc> g_pinned;
+std::atomic<size_t>              g_pinned_count{0};
+// The pinned allocations the launch this thread is making points into.
+thread_local std::vector<HostSnap> t_snaps;
+}  // namespace
+
+static void pinned_track(void* p, size_t size) {
+  if (!p || size == 0) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  g_pinned[reinterpret_cast<uintptr_t>(p)] = PinnedAlloc{size, {}};
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+}
+
+// Called before the memory is released, so no snapshot reads it afterwards.
+static void pinned_untrack(void* p) {
+  if (!p || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  g_pinned.erase(reinterpret_cast<uintptr_t>(p));
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+}
+
+// fork() takes g_pinned_mu before the writer's locks, the order a launch takes
+// them in, so a child never inherits it held by a snapshot on a thread it does
+// not have. Registered after writer::open() registers the writer's handlers:
+// prepare handlers run in reverse order of registration.
+static void pinned_install_atfork() {
+#ifndef _WIN32
+  static std::once_flag once;
+  std::call_once(once, [] {
+    pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
+                   [] { g_pinned_mu.unlock(); });
+  });
+#endif
+}
+
+// HIP_HRR_HOST_SNAPSHOTS, on unless set to something other than "true" or a
+// non-zero number, and HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set. Parsed as
+// the CLR flags registry parses a bool and a uint, and read once: every launch
+// asks.
+static bool hrr_host_snapshots_enabled() {
+  static const bool on = [] {
+    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOTS");
+    return !v || std::strcmp(v, "true") == 0 || std::atoi(v) != 0;
+  }();
+  return on;
+}
+
+static size_t hrr_host_snapshot_cap_bytes() {
+  static const size_t cap = [] {
+    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOT_MAX_MB");
+    const unsigned int mb = v ? static_cast<unsigned int>(std::atoi(v)) : 64u;
+    return static_cast<size_t>(mb) << 20;
+  }();
+  return cap;
+}
+
+static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
+  const size_t cap = hrr_host_snapshot_cap_bytes();
+  for (size_t j = 0; bytes && j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
+    uint64_t v;
+    std::memcpy(&v, bytes + j, sizeof(v));
+    auto it = g_pinned.upper_bound(static_cast<uintptr_t>(v));
+    if (it == g_pinned.begin()) continue;
+    --it;
+    if (v - it->first >= it->second.size ||
+        std::any_of(t_snaps.begin(), t_snaps.end(),
+                    [&](const HostSnap& s) { return s.base == it->first; }))
+      continue;
+    HostSnap s;
+    s.base = it->first;
+    s.size = it->second.size;
+    if (s.size > cap) {
+      hrr_cap::writer::note_unreplayable(
+          "pinned host snapshot",
+          "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not recorded");
+    } else {
+      // Hashed and written from the copy, after the lock, so the blob holds
+      // the bytes its hash names.
+      s.copy.reset(new (std::nothrow) uint8_t[s.size]);
+      if (s.copy) {
+        std::memcpy(s.copy.get(), reinterpret_cast<const void*>(s.base), s.size);
+        s.last        = it->second.last;
+        s.last_stream = it->second.last_stream;
+      } else {
+        hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                           "no memory to copy a pinned allocation");
+      }
+    }
+    t_snaps.push_back(std::move(s));
+  }
+}
+
+// Takes the snapshot of one launch before the real call and drops it after,
+// whether or not the launch was recorded.
+struct PinnedSnapshot {
+  PinnedSnapshot(hipFunction_t f, void** params, void** extra,
+                 const void* kbuf = nullptr, size_t ksz = 0) {
+    t_snaps.clear();
+    if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
+      return;
+    if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
+    const amd::KernelSignature& sig = hip::asKernel(f)->signature();
+    std::unique_lock<std::mutex> lk(g_pinned_mu);
+    uint32_t param_idx = 0;
+    for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
+      const auto& d = sig.at(i);
+      if (d.info_.hidden_) continue;
+      const uint8_t* bytes = nullptr;
+      if (kbuf && d.offset_ + d.size_ <= ksz)
+        bytes = static_cast<const uint8_t*>(kbuf) + d.offset_;
+      else if (!kbuf && params)
+        bytes = static_cast<const uint8_t*>(params[param_idx]);
+      param_idx++;
+      if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
+    }
+    lk.unlock();
+    for (HostSnap& s : t_snaps) {
+      if (!s.copy) continue;
+      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
+      s.copy.reset();
+      s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != s.last.lo || s.hash.hi != s.last.hi);
+    }
+  }
+  ~PinnedSnapshot() { t_snaps.clear(); }
+};
+
+// The kernel behind a host stub, looked up before the launch only when there
+// is pinned memory to snapshot, without changing the application's last error.
+static hipFunction_t pinned_stub_fn(const void* stub) {
+  if (!hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0 ||
+      !g_real_table.hipGetFuncBySymbol_fn)
+    return nullptr;
+  const hipError_t saved_cmd = hip::tls.last_command_error_;
+  const hipError_t saved_err = hip::tls.last_error_;
+  hipFunction_t f = nullptr;
+  if (g_real_table.hipGetFuncBySymbol_fn(&f, stub) != hipSuccess) f = nullptr;
+  hip::tls.last_command_error_ = saved_cmd;
+  hip::tls.last_error_         = saved_err;
+  return f;
+}
+
+// ---------------------------------------------------------------------------
 // Kernel launch event serialization
 //
 // Binary layout of KERNEL_LAUNCH payload (matches hrr_reader.cpp parse_kernel_launch):
@@ -172,7 +357,7 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //   u32[3] block
 //   u32  shared_mem
 //   u16  num_args
-//   u16  num_snapshots (always 0)
+//   u16  num_snapshots
 //   for each arg:
 //     u8   value_kind  (0=scalar, 1=pointer/gpu addr, 2=hidden,
 //                       3=scalar/struct with embedded gpu pointer(s))
@@ -180,7 +365,14 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //     u8[] data (size bytes)
 //     if value_kind == 3:
 //       u16   n_ptrs
-//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr)
+//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr,
+//             or pointer into a pinned allocation in t_snaps)
+//   for each snapshot (v10):
+//     u64  ptr_handle (capture-time base of the pinned allocation)
+//     u64  offset (0), u64 length (the allocation size)
+//     u64  hash_lo, u64 hash_hi (blob with the bytes before the launch)
+//     u8   direction (0)
+//   u32  num_attrs, u32 attr stride, num_attrs * stride bytes
 // ---------------------------------------------------------------------------
 
 // Locate device pointers embedded inside a by-value kernel argument.
@@ -372,7 +564,12 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  push_u16(0);  // num_snapshots
+  // Replay restores a record on its launch's stream, so a launch on another
+  // stream than the last record's needs its own.
+  for (HostSnap& s : t_snaps)
+    if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
+  push_u16(static_cast<uint16_t>(std::count_if(
+      t_snaps.begin(), t_snaps.end(), [](const HostSnap& s) { return s.record; })));
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -398,6 +595,17 @@ static void serialize_kernel_launch(
     }
     std::vector<uint16_t> offs;
     scan_embedded_ptr_offsets(func_key, idx, bytes, sz, offs);
+    // Words pointing into a pinned allocation this launch reads, so replay
+    // translates them too.
+    for (size_t j = 0; bytes && !t_snaps.empty() && j + 8 <= sz; j += 8) {
+      uint64_t v;
+      std::memcpy(&v, bytes + j, 8);
+      if (std::any_of(t_snaps.begin(), t_snaps.end(),
+                      [&](const HostSnap& s) { return v - s.base < s.size; }) &&
+          std::find(offs.begin(), offs.end(), j) == offs.end())
+        offs.push_back(static_cast<uint16_t>(j));
+    }
+    std::sort(offs.begin(), offs.end());
     uint8_t kind = offs.empty() ? 0 : 3;
     push_u8(kind); push_u16(sz);
     if (bytes) push_bytes(bytes, sz);
@@ -461,6 +669,12 @@ static void serialize_kernel_launch(
     }
   }
 
+  for (const HostSnap& s : t_snaps) {
+    if (!s.record) continue;
+    push_u64(s.base); push_u64(0); push_u64(s.size);
+    push_u64(s.hash.lo); push_u64(s.hash.hi); push_u8(0);
+  }
+
   // Launch-attribute tail. Written for every launch so the payload has one
   // shape: a plain launch records a count of zero. The stride lets replay
   // reject a recording made against a different hipLaunchAttribute layout
@@ -490,9 +704,25 @@ static void serialize_kernel_launch(
     hrr_cap::writer::mark_incomplete(reason);
     return;
   }
+  // A record becomes the allocation's last only once its event is written, in
+  // the same order as the events. Replay restores nothing for a launch into a
+  // stream capture, so a record written for one does not become the last.
+  hipStream_t cs = stream;
+  hip::getStreamPerThread(cs);
+  const bool capturing = cs && cs != hipStreamLegacy &&
+      reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
+  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
+  if (!t_snaps.empty()) lk.lock();
   hrr_cap::writer::write_event_raw(api_id,
                                    reinterpret_cast<hrr_event_header*>(payload.data()),
                                    static_cast<uint32_t>(payload.size()));
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (s.record && !capturing && it != g_pinned.end()) {
+      it->second.last        = s.hash;
+      it->second.last_stream = stream;
+    }
+  }
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
@@ -1072,6 +1302,7 @@ hipError_t capture_hipModuleLaunchKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra) {
+  PinnedSnapshot snap(f, kernelParams, extra);
   hipError_t r = g_real_table.hipModuleLaunchKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1093,6 +1324,7 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
     unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ,
     unsigned int sharedMemBytes, hipStream_t stream,
     void** kernelParams) {
+  PinnedSnapshot snap(f, kernelParams, nullptr);
   hipError_t r = g_real_table.hipModuleLaunchCooperativeKernel_fn(
       f, gridDimX, gridDimY, gridDimZ,
          blockDimX, blockDimY, blockDimZ,
@@ -1113,6 +1345,7 @@ hipError_t capture_hipExtModuleLaunchKernel(
     size_t sharedMemBytes, hipStream_t stream,
     void** kernelParams, void** extra,
     hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags) {
+  PinnedSnapshot snap(f, kernelParams, extra);
   hipError_t r = g_real_table.hipExtModuleLaunchKernel_fn(
       f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
          localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
@@ -1142,6 +1375,7 @@ hipError_t capture_hipLaunchKernel(const void* function_address,
                                            dim3 numBlocks, dim3 dimBlocks,
                                            void** args, size_t sharedMemBytes,
                                            hipStream_t stream) {
+  PinnedSnapshot snap(pinned_stub_fn(function_address), args, nullptr);
   hipError_t r = g_real_table.hipLaunchKernel_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
@@ -1168,6 +1402,7 @@ hipError_t capture_hipLaunchKernel_spt(const void* function_address,
                                        dim3 numBlocks, dim3 dimBlocks,
                                        void** args, size_t sharedMemBytes,
                                        hipStream_t stream) {
+  PinnedSnapshot snap(pinned_stub_fn(function_address), args, nullptr);
   hipError_t r = g_real_table.hipLaunchKernel_spt_fn(
       function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream);
   if (r == hipSuccess) {
@@ -1192,6 +1427,7 @@ hipError_t capture_hipLaunchCooperativeKernel(const void* f,
                                               void** kernelParams,
                                               unsigned int sharedMemBytes,
                                               hipStream_t stream) {
+  PinnedSnapshot snap(pinned_stub_fn(f), kernelParams, nullptr);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_fn(
       f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream);
   if (r == hipSuccess) {
@@ -1213,6 +1449,7 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
                                                   void** kernelParams,
                                                   uint32_t sharedMemBytes,
                                                   hipStream_t hStream) {
+  PinnedSnapshot snap(pinned_stub_fn(f), kernelParams, nullptr);
   hipError_t r = g_real_table.hipLaunchCooperativeKernel_spt_fn(
       f, gridDim, blockDim, kernelParams, sharedMemBytes, hStream);
   if (r == hipSuccess) {
@@ -1243,6 +1480,7 @@ hipError_t capture_hipLaunchCooperativeKernel_spt(const void* f,
 hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
                                         hipFunction_t f, void** params,
                                         void** extra) {
+  PinnedSnapshot snap(config ? f : nullptr, params, extra);
   hipError_t r = g_real_table.hipDrvLaunchKernelEx_fn(config, f, params, extra);
   if (r == hipSuccess && config) {
     record_launch(f,
@@ -1256,6 +1494,7 @@ hipError_t capture_hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config,
 
 hipError_t capture_hipLaunchKernelExC(const hipLaunchConfig_t* config,
                                       const void* fPtr, void** args) {
+  PinnedSnapshot snap(config ? pinned_stub_fn(fPtr) : nullptr, args, nullptr);
   hipError_t r = g_real_table.hipLaunchKernelExC_fn(config, fPtr, args);
   if (r == hipSuccess && config) {
     // fPtr is a host stub address, not a hipFunction_t: the same resolution
@@ -1331,6 +1570,8 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
     kargs  = e.arguments_;  // copy (not move) to leave arguments_ intact for the real launch
   }
 
+  PinnedSnapshot snap(kargs.empty() ? nullptr : pinned_stub_fn(func), nullptr, nullptr,
+                      kargs.data(), kargs.size());
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess) {
     // func is a host stub pointer — resolve to real hipFunction_t first
@@ -1365,9 +1606,10 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // hipModuleLoadData, making all kernel names resolvable.
 // ---------------------------------------------------------------------------
 
-// Compute the total byte size of a clang offload bundle blob.
-// Supports both uncompressed ("__CLANG_OFFLOAD_BUNDLE__") and compressed ("CCOB") formats.
-// Returns 0 if the format is unrecognised.
+// Byte size of a clang offload bundle, or 0 when the header is not one or fails
+// the checks HIP applies to it. HIP receives a registered fat binary as a bare
+// pointer, so it knows no image bound (image_bound in hip_fatbin.cpp) and these
+// checks are all that stands between the header and the read.
 static size_t compute_bundle_size(const void* blob) {
   if (!blob) return 0;
   const char* p = static_cast<const char*>(blob);
@@ -1375,7 +1617,16 @@ static size_t compute_bundle_size(const void* blob) {
   // Compressed format: magic "CCOB", header contains totalSize at byte 8.
   if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
                   hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
+    constexpr size_t kHeaderSize =
+        offsetof(hip::symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
     const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleCompressedHeader*>(blob);
+    if (hdr->totalSize < kHeaderSize) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: compressed bundle "
+          "totalSize %u is smaller than its %zu-byte header",
+          blob, static_cast<unsigned>(hdr->totalSize), kHeaderSize);
+      return 0;
+    }
     return static_cast<size_t>(hdr->totalSize);
   }
 
@@ -1388,30 +1639,47 @@ static size_t compute_bundle_size(const void* blob) {
   uint64_t n = hdr->numOfCodeObjects;
   if (n == 0) return 0;
 
-  // Walk entries to find the last offset + size (that is the blob end).
-  // Guard against corrupt bundles: bundleEntryIdSize is read from untrusted
-  // memory (fires at static-init before any error handler is installed).
-  // A sane bundle ID is never > 4 KB; anything larger indicates corruption.
-  static constexpr uint64_t kMaxBundleIdSize = 4096;
-  static constexpr uint64_t kMaxEntries      = 4096;
-  size_t end = 0;
-  const uint8_t* cur = reinterpret_cast<const uint8_t*>(&hdr->desc[0]);
-  uint64_t safe_n = (n < kMaxEntries) ? n : kMaxEntries;
-  for (uint64_t i = 0; i < safe_n; i++) {
-    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(cur);
-    if (entry->bundleEntryIdSize > kMaxBundleIdSize) {
-      LogPrintfWarning("[HRR capture] compute_bundle_size: bundleEntryIdSize %llu too large"
-                       " — stopping walk at entry %llu",
-                       (unsigned long long)entry->bundleEntryIdSize,
-                       (unsigned long long)i);
-      break;
+  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
+  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
+  // no length, so this bound is also what keeps the walk below in range.
+  constexpr size_t kEntryTableLimit = 4096;
+  constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
+  size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
+  uint64_t end = 0;
+  for (uint64_t i = 0; i < n; i++) {
+    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(p + pos);
+    if (kEntryTableLimit - pos < kEntryHeaderSize ||
+        entry->bundleEntryIdSize > kEntryTableLimit - pos - kEntryHeaderSize) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu ends "
+          "past the first %zu bytes, where HIP looks for it",
+          blob, static_cast<unsigned long long>(i), kEntryTableLimit);
+      return 0;
     }
-    size_t entry_end = static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size);
+    pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
+    // HIP makes this check only for the code objects it picks for this host's GPUs.
+    // Every entry counts towards the end here, so capture checks them all.
+    const uint64_t entry_end = entry->offset + entry->size;
+    if (entry_end < entry->offset) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu has "
+          "an offset and size that overflow",
+          blob, static_cast<unsigned long long>(i));
+      return 0;
+    }
     if (entry_end > end) end = entry_end;
-    // Advance past this entry: three uint64_t fields + bundleEntryIdSize bytes
-    cur += 3 * sizeof(uint64_t) + entry->bundleEntryIdSize;
   }
-  return end;
+  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
+  return static_cast<size_t>(end);
+}
+
+// Stores a fat binary with the .comment and debug sections of its code
+// objects zeroed; the application's own copy is left alone.
+static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
+  std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
+                                static_cast<const uint8_t*>(blob) + blob_size);
+  hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
+  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size());
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
@@ -1425,13 +1693,24 @@ void** capture___hipRegisterFatBinary(const void* data) {
   const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
                                    wrapper->magic == 0x4B504948u /*HIPK*/))
                      ? wrapper->binary : nullptr;
+  // PlatformState is initialized before this shim is installed, so HIP has already
+  // digested the bundle, and no handle means it could not load it on this host: a bad
+  // header or, more often, no code object for any GPU here. Then no launch from it can
+  // succeed and be recorded, so replay never needs the blob.
+  if (blob && !r) {
+    LogPrintfWarning(
+        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
+        "(no code object for any GPU here, or a bad header)",
+        blob);
+    blob = nullptr;
+  }
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
 
   hrr_args___hipRegisterFatBinary a{};
   a.ret      = reinterpret_cast<uint64_t>(r);
   a.blob_size = static_cast<uint64_t>(blob_size);
   if (blob && blob_size > 0) {
-    auto h = hrr_cap::writer::write_blob(blob, blob_size);
+    auto h = write_fat_binary_blob(blob, blob_size);
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
   }
@@ -1482,11 +1761,13 @@ hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int
       std::lock_guard<std::mutex> lk(g_pinned_reg_mu);
       g_pinned_reg_map[hostPtr] = sizeBytes;
     }
+    pinned_track(hostPtr, sizeBytes);
   }
   return r;
 }
 
 hipError_t capture_hipHostUnregister(void* hostPtr) {
+  pinned_untrack(hostPtr);
   hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
   if (r == hipSuccess) {
     hrr_args_hipHostUnregister a{};
@@ -1499,6 +1780,47 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
     }
   }
   return r;
+}
+
+// hipHostMalloc, hipMallocHost and the frees are recorded by generated shims.
+// These wrappers sit in front of them in g_cap_table and keep g_pinned current;
+// hipFree can release pinned memory too. hipHostAlloc and hipMemAllocHost are
+// not tracked: replay makes no buffer for them.
+namespace {
+decltype(HipDispatchTable::hipHostMalloc_fn) g_next_hipHostMalloc = nullptr;
+decltype(HipDispatchTable::hipMallocHost_fn) g_next_hipMallocHost = nullptr;
+decltype(HipDispatchTable::hipHostFree_fn)   g_next_hipHostFree   = nullptr;
+decltype(HipDispatchTable::hipFreeHost_fn)   g_next_hipFreeHost   = nullptr;
+decltype(HipDispatchTable::hipFree_fn)       g_next_hipFree       = nullptr;
+}  // namespace
+
+static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
+  hipError_t r = g_next_hipHostMalloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
+  hipError_t r = g_next_hipMallocHost(ptr, size);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipHostFree(void* p) { pinned_untrack(p); return g_next_hipHostFree(p); }
+static hipError_t pinned_hipFreeHost(void* p) { pinned_untrack(p); return g_next_hipFreeHost(p); }
+static hipError_t pinned_hipFree(void* p)     { pinned_untrack(p); return g_next_hipFree(p); }
+
+static void pinned_wrap_table() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+#define HRR_PINNED_WRAP(api) \
+  g_next_##api = g_cap_table.api##_fn; \
+  g_cap_table.api##_fn = pinned_##api;
+  HRR_PINNED_WRAP(hipHostMalloc)
+  HRR_PINNED_WRAP(hipMallocHost)
+  HRR_PINNED_WRAP(hipHostFree)
+  HRR_PINNED_WRAP(hipFreeHost)
+  HRR_PINNED_WRAP(hipFree)
+#undef HRR_PINNED_WRAP
 }
 
 // ---------------------------------------------------------------------------
@@ -1556,6 +1878,13 @@ static bool memcpy3d_byte_count(const struct hipMemcpy3DParms* p, size_t* bytes)
   return true;
 }
 
+// Defined with the driver-copy helpers below. The runtime widens a hipMemcpy3D
+// to the same HIP_MEMCPY3D, so its host side is the same rect.
+static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
+                                             size_t pitch_height, size_t x, size_t y,
+                                             size_t z, size_t width, size_t height,
+                                             size_t depth);
+
 // Helper shared by all four 3D variants.
 // Writes H2D blob (src host data) and D2H expected blob (dst host data after copy),
 // then emits the event record.
@@ -1583,15 +1912,25 @@ static void capture_memcpy3d_impl(
     return;
   }
 
-  if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0) {
-    // H2D: host source is valid at call time — no stream sync needed.
-    auto h = hrr_cap::writer::write_blob(p->srcPtr.ptr, byte_count);
+  if (p->kind == hipMemcpyHostToDevice && p->srcPtr.ptr && byte_count > 0 &&
+      a.ret == hipSuccess) {
+    // H2D: host source is valid at call time, so no stream sync is needed.
+    // The blob holds the copied rows of the source rect, as the driver copies'
+    // does, and replay copies from it with the host side made dense.
+    auto h = write_host_rect_blob(p->srcPtr.ptr, p->srcPtr.pitch, p->srcPtr.ysize,
+                                  p->srcPos.x, p->srcPos.y, p->srcPos.z, p->extent.width,
+                                  p->extent.height, p->extent.depth);
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
-  } else if (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr && byte_count > 0) {
+  } else if (p->kind == hipMemcpyDeviceToHost && p->dstPtr.ptr && byte_count > 0 &&
+             a.ret == hipSuccess) {
     // D2H: real call already completed (sync API) or stream sync done below;
     // host buffer now holds GPU result — capture it as the expected output.
-    if (is_async && stream) {
+    // The blob holds the copied rows of the destination rect, so replay can
+    // compare exactly those rows. A rejected copy is skipped: nothing validated
+    // its rect, and reading it can reach past the caller's buffer. The null
+    // stream is synchronised too, as in the driver 3D path below.
+    if (is_async) {
       hipError_t sync_r = sync_for_d2h_snapshot(stream);
       if (sync_r != hipSuccess) {
         LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 3D blob skipped",
@@ -1600,7 +1939,9 @@ static void capture_memcpy3d_impl(
         return;
       }
     }
-    auto h = hrr_cap::writer::write_blob(p->dstPtr.ptr, byte_count);
+    auto h = write_host_rect_blob(p->dstPtr.ptr, p->dstPtr.pitch, p->dstPtr.ysize,
+                                  p->dstPos.x, p->dstPos.y, p->dstPos.z, p->extent.width,
+                                  p->extent.height, p->extent.depth);
     a.d2h_hash_lo = h.lo;
     a.d2h_hash_hi = h.hi;
   }
@@ -1644,7 +1985,10 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
   hrr_args_hipMemcpy3DAsync_spt a{};
   a.ret    = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
-  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p, stream, true);
+  // The null stream of an _spt call is this thread's default stream, and that
+  // is the one the D2H blob has to wait for.
+  capture_memcpy3d_impl(a, HRR_API_HIPMEMCPY3DASYNC_SPT, p,
+                        stream ? stream : hipStreamPerThread, true);
   return r;
 }
 
@@ -1655,33 +1999,53 @@ hipError_t capture_hipMemcpy3DAsync_spt(const struct hipMemcpy3DParms* p, hipStr
 // blob. Keyed off srcMemoryType/dstMemoryType (no single "kind" field).
 // ---------------------------------------------------------------------------
 
-// Defined with the hipMemcpy2D helpers below: pitch*(height-1)+width.
-static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height);
-
-// Byte footprint of the host side of a driver-style copy, measured from the host
-// base pointer (srcHost / dstHost).
+// The host side of a driver-style copy is a pitched rect measured from the host
+// base pointer (srcHost / dstHost), as the runtime addresses it
+// (amd::BufferRect). hrr/hrr_host_rect.h does the arithmetic, and replay
+// includes the same header, so both sides agree on the footprint. A copy whose
+// footprint does not fit in size_t is not recorded: hrr_host_rect_extent()
+// returns SIZE_MAX for it, so the caller still reaches write_host_rect_blob,
+// which records the loss.
 //
-// The runtime addresses the host buffer as a pitched rect (amd::BufferRect):
-//   row   = pitch ? pitch : width
-//   slice = pitch*pitch_height ? pitch*pitch_height : row*height
-//   first byte = z*slice + y*row + x
-//   last byte  = first + (depth-1)*slice + (height-1)*row + width - 1
-// so the blob must hold `first + relative_end` bytes. Replay substitutes the
-// blob for srcHost while keeping the recorded pitches and offsets, so a blob
-// sized by the naive width*height*depth volume makes the runtime stride off its
-// end whenever pitch > width, height > 1 or an offset is non-zero. The volume is
-// only correct for a fully dense rect, which is also why this never shrinks a
-// blob: for a copy the runtime accepted, footprint >= width*height*depth.
-static size_t drvmemcpy_host_byte_count(size_t pitch, size_t pitch_height,
-                                        size_t x, size_t y, size_t z,
-                                        size_t width, size_t height, size_t depth) {
-  if (width == 0 || height == 0 || depth == 0) return 0;
-  size_t row = (pitch != 0) ? pitch : width;
-  if (row < width) row = width;  // defensive: degenerate pitch
-  size_t slice = pitch * pitch_height;
-  if (slice < row * height) slice = row * height;  // 0 => runtime default
-  size_t first = z * slice + y * row + x;          // offset of the first byte
-  return first + (depth - 1) * slice + memcpy2d_host_byte_count(row, width, height);
+// Blob of a host rect: its copied rows packed end to end, width*height*depth
+// bytes whatever the pitches and offsets, so capture costs what the copy moves.
+// The bytes before the first row and between rows and slices are never read:
+// the copy does not touch them, they can hold unrelated data or lie on an
+// unmapped guard page, and a sparse pitch can put two rows gigabytes apart.
+// The archive header carries HRR_FILE_FLAG_PACKED_HOST_RECTS, and replay reads
+// the blob with the host side made dense: pitch == width and no offsets.
+static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
+                                             size_t pitch_height, size_t x, size_t y,
+                                             size_t z, size_t width, size_t height,
+                                             size_t depth) {
+  const HrrHostRect r = hrr_host_rect(pitch, pitch_height, x, y, z, width, height, depth);
+  if (!r.ok) {
+    LogPrintfWarning("[HRR capture] host copy rect %zux%zux%zu at pitch %zu overflows size_t",
+                     width, height, depth, pitch);
+    hrr_cap::writer::mark_incomplete("pitched host copy not recorded");
+    return {0, 0};
+  }
+  if (r.extent == 0) return {0, 0};
+  // Neither product wraps: both are at most r.extent, which fits.
+  const size_t n = width * height * depth;
+  const auto* src = static_cast<const uint8_t*>(base) + r.first;
+  if (hrr_host_rect_dense(&r)) {
+    return hrr_cap::writer::write_blob(src, n);  // dense: the rows are one run
+  }
+  std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[n]);
+  if (!buf) {
+    LogPrintfWarning("[HRR capture] cannot allocate %zu bytes to snapshot a pitched host copy",
+                     n);
+    hrr_cap::writer::mark_incomplete("pitched host copy not recorded");
+    return {0, 0};
+  }
+  uint8_t* out = buf.get();
+  for (size_t k = 0; k < depth; ++k) {
+    for (size_t j = 0; j < height; ++j, out += width) {
+      std::memcpy(out, src + k * r.slice + j * r.row, width);
+    }
+  }
+  return hrr_cap::writer::write_blob(buf.get(), n);
 }
 
 template <typename T>
@@ -1690,22 +2054,22 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
   if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
   std::memcpy(a.drv3d_bytes, p, sizeof(HIP_MEMCPY3D));
   if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost) {
-    size_t n = drvmemcpy_host_byte_count(p->srcPitch, p->srcHeight, p->srcXInBytes,
-                                         p->srcY, p->srcZ, p->WidthInBytes,
-                                         p->Height, p->Depth);
+    size_t n = hrr_host_rect_extent(p->srcPitch, p->srcHeight, p->srcXInBytes,
+                                    p->srcY, p->srcZ, p->WidthInBytes,
+                                    p->Height, p->Depth);
     if (n > 0) {
-      auto h = hrr_cap::writer::write_blob(p->srcHost, n);
+      auto h = write_host_rect_blob(p->srcHost, p->srcPitch, p->srcHeight, p->srcXInBytes,
+                                    p->srcY, p->srcZ, p->WidthInBytes, p->Height, p->Depth);
       a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
     }
   } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
              p->srcMemoryType != hipMemoryTypeArray) {
-    // D2H expected output. Replay does a flat readback of the copied volume
-    // (it never substitutes dstHost), so the blob stays the flat volume to keep
-    // the two sides the same shape. A pitched destination rect is therefore not
-    // validated faithfully; that is a fidelity gap, not a replay over-read.
+    // D2H expected output, the copied rows of the destination rect.
     // An array source is skipped because playback declines array-typed rects,
     // so the blob would be an expected output nothing ever validates.
-    size_t n = p->WidthInBytes * p->Height * p->Depth;
+    size_t n = hrr_host_rect_extent(p->dstPitch, p->dstHeight, p->dstXInBytes,
+                                    p->dstY, p->dstZ, p->WidthInBytes,
+                                    p->Height, p->Depth);
     if (n > 0) {
       // The null stream needs the sync too: hipDrvMemcpy3DAsync(p, nullptr) is
       // still asynchronous, so skipping it can snapshot dstHost before the copy
@@ -1721,7 +2085,8 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
           return;
         }
       }
-      auto h = hrr_cap::writer::write_blob(p->dstHost, n);
+      auto h = write_host_rect_blob(p->dstHost, p->dstPitch, p->dstHeight, p->dstXInBytes,
+                                    p->dstY, p->dstZ, p->WidthInBytes, p->Height, p->Depth);
       a.d2h_hash_lo = h.lo; a.d2h_hash_hi = h.hi;
     }
   }
@@ -1729,7 +2094,8 @@ static void capture_drvmemcpy3d_impl(T& a, hrr_api_id_t api_id,
 }
 
 template <typename T>
-static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy2D* p) {
+static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy2D* p,
+                                     bool dst_ready = true) {
   if (!p) { hrr_cap::writer::write_event_raw(api_id, &a.hdr, sizeof(a)); return; }
   std::memcpy(a.drv2d_bytes, p, sizeof(hip_Memcpy2D));
   // hip_Memcpy2D is widened to a HIP_MEMCPY3D by the runtime with Depth == 1,
@@ -1737,18 +2103,23 @@ static void capture_drvmemcpy2d_impl(T& a, hrr_api_id_t api_id, const hip_Memcpy
   // that falls back to x + WidthInBytes. See hip::getDrvMemcpy3DDesc().
   if (p->srcMemoryType == hipMemoryTypeHost && p->srcHost) {
     size_t pitch = p->srcPitch ? p->srcPitch : p->srcXInBytes + p->WidthInBytes;
-    size_t n = drvmemcpy_host_byte_count(pitch, /*pitch_height=*/0, p->srcXInBytes,
-                                         p->srcY, /*z=*/0, p->WidthInBytes,
-                                         p->Height, /*depth=*/1);
+    size_t n = hrr_host_rect_extent(pitch, /*pitch_height=*/0, p->srcXInBytes,
+                                    p->srcY, /*z=*/0, p->WidthInBytes,
+                                    p->Height, /*depth=*/1);
     if (n > 0) {
-      auto h = hrr_cap::writer::write_blob(p->srcHost, n);
+      auto h = write_host_rect_blob(p->srcHost, pitch, /*pitch_height=*/0, p->srcXInBytes,
+                                    p->srcY, /*z=*/0, p->WidthInBytes, p->Height, /*depth=*/1);
       a.blob_hash_lo = h.lo; a.blob_hash_hi = h.hi;
     }
-  } else if (p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
+  } else if (dst_ready && p->dstMemoryType == hipMemoryTypeHost && p->dstHost &&
              p->srcMemoryType != hipMemoryTypeArray) {
-    size_t n = p->WidthInBytes * p->Height;  // flat volume; see the 3D note above
+    size_t pitch = p->dstPitch ? p->dstPitch : p->dstXInBytes + p->WidthInBytes;
+    size_t n = hrr_host_rect_extent(pitch, /*pitch_height=*/0, p->dstXInBytes,
+                                    p->dstY, /*z=*/0, p->WidthInBytes,
+                                    p->Height, /*depth=*/1);
     if (n > 0) {
-      auto h = hrr_cap::writer::write_blob(p->dstHost, n);
+      auto h = write_host_rect_blob(p->dstHost, pitch, /*pitch_height=*/0, p->dstXInBytes,
+                                    p->dstY, /*z=*/0, p->WidthInBytes, p->Height, /*depth=*/1);
       a.d2h_hash_lo = h.lo; a.d2h_hash_hi = h.hi;
     }
   }
@@ -1807,10 +2178,18 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
   a.ret = static_cast<int32_t>(r);
   a.stream = reinterpret_cast<uint64_t>(stream);
   // A D2H blob taken before the copy lands would record a stale expected
-  // output, the same reason the async 3D spelling synchronises first.
-  if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost && stream)
-    (void)sync_for_d2h_snapshot(stream);
-  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy);
+  // output, the same reason the async 3D spelling synchronises first. The null
+  // stream is asynchronous too, and a failed sync leaves no blob to take.
+  bool dst_ready = true;
+  if (pCopy && pCopy->dstMemoryType == hipMemoryTypeHost) {
+    hipError_t sync_r = sync_for_d2h_snapshot(stream);
+    if (sync_r != hipSuccess) {
+      LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d): D2H param 2D blob skipped",
+                       sync_r);
+      dst_ready = false;
+    }
+  }
+  capture_drvmemcpy2d_impl(a, HRR_API_HIPMEMCPYPARAM2DASYNC, pCopy, dst_ready);
   return r;
 }
 
@@ -1824,12 +2203,6 @@ hipError_t capture_hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy,
 // (capture-time, untranslatable) host VA, and validate D2H output.
 // ---------------------------------------------------------------------------
 
-static size_t memcpy2d_host_byte_count(size_t pitch, size_t width, size_t height) {
-  if (height == 0 || width == 0) return 0;
-  if (pitch < width) pitch = width;  // defensive: degenerate pitch
-  return pitch * (height - 1) + width;
-}
-
 // Shared blob logic for both 2D variants. Writes the H2D source blob or the D2H
 // expected-output blob into `a`, then emits the event.
 template <typename T>
@@ -1838,17 +2211,17 @@ static void capture_memcpy2d_impl(
     const void* src, size_t spitch, size_t width, size_t height,
     hipMemcpyKind kind, hipStream_t stream, bool is_async) {
   if (kind == hipMemcpyHostToDevice && src) {
-    size_t n = memcpy2d_host_byte_count(spitch, width, height);
+    size_t n = hrr_host_rect_extent(spitch, 0, 0, 0, 0, width, height, 1);
     if (n > 0) {
-      auto h = hrr_cap::writer::write_blob(src, n);
+      auto h = write_host_rect_blob(src, spitch, 0, 0, 0, 0, width, height, 1);
       a.blob_hash_lo = h.lo;
       a.blob_hash_hi = h.hi;
       hrr_trace_h2d(is_async ? "hipMemcpy2DAsync" : "hipMemcpy2D", dst, n);
     }
   } else if (kind == hipMemcpyDeviceToHost && dst) {
-    size_t n = memcpy2d_host_byte_count(dpitch, width, height);
+    size_t n = hrr_host_rect_extent(dpitch, 0, 0, 0, 0, width, height, 1);
     if (n > 0) {
-      if (is_async && stream) {
+      if (is_async) {
         hipError_t sync_r = sync_for_d2h_snapshot(stream);
         if (sync_r != hipSuccess) {
           LogPrintfWarning("[HRR capture] hipStreamSynchronize failed (%d) — D2H 2D blob skipped",
@@ -1857,7 +2230,7 @@ static void capture_memcpy2d_impl(
           return;
         }
       }
-      auto h = hrr_cap::writer::write_blob(dst, n);
+      auto h = write_host_rect_blob(dst, dpitch, 0, 0, 0, 0, width, height, 1);
       a.d2h_hash_lo = h.lo;
       a.d2h_hash_hi = h.hi;
     }
@@ -2366,16 +2739,100 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Other threads keep calling through the live dispatch tables while the shims go
+// in and out, so the tables are written one slot at a time with atomic operations
+// and never copied over as a whole. Outside Windows, function-pointer slots are
+// accessed through a may_alias view so the store is well-defined against the typed
+// table fields; MSVC does no type-based alias analysis and clang-cl disables it by
+// default.
+template <typename Table> constexpr size_t kDispatchSlots =
+    (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
+
+#if IS_WINDOWS
+struct DispatchSlot {
+  void* value;
+};
+
+void store_slot(DispatchSlot* slot, void* value) {
+  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
+      expected, desired, std::memory_order_release, std::memory_order_relaxed);
+}
+#elif defined(__GNUC__) || defined(__clang__)
+struct DispatchSlot {
+  void* value;
+} __attribute__((__may_alias__));
+
+void store_slot(DispatchSlot* slot, void* value) {
+  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
+                              __ATOMIC_RELAXED);
+}
+#else
+#error "Outside Windows, HRR dispatch slots need GCC or Clang"
+#endif
+
+template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
+  static_assert(sizeof(void (*)()) == sizeof(void*),
+                "dispatch slot atomics need function pointers the size of void*");
+  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
+                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
+                "layout must match HIP dispatch tables: size_t size then void* slots");
+  static_assert(sizeof(DispatchSlot) == sizeof(void*), "DispatchSlot must be a single pointer");
+  return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
+}
+
+// Unlike uninstall this does not compare first: a slot that changed since the
+// snapshot still gets its shim, or the archive would silently miss that API.
+template <typename Table>
+void install_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) store_slot(&slot[i], shim[i].value);
+  }
+}
+
+// A slot that another component changed after install keeps its new value.
+template <typename Table>
+void uninstall_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) replace_slot(&slot[i], shim[i].value, orig[i].value);
+  }
+}
+
+}  // namespace
+
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_cap_table, sizeof(HipDispatchTable));
+  install_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
 }
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_real_table, sizeof(HipDispatchTable));
+  uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  // The compiler shims go as well, or a capture refused at init or in a forked
+  // child keeps running them with capture off. Shutdown leaves them.
+  if (g_compiler_installed.exchange(false))
+    uninstall_shims(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
+                    g_real_compiler_table);
+}
+
+void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
+  g_cap_compiler_table = shims;
+  install_shims(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
 }
 
 // ---------------------------------------------------------------------------
@@ -2384,6 +2841,9 @@ void hip_capture_uninstall() {
 
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
 // blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
+// These were registered before HIP initialized and are not digested yet, so
+// unlike the live shim there is no HIP verdict to check, only the header, and a
+// bundle with no code object for this host is still recorded.
 static void record_fat_binary_blob(const void* blob_ptr) {
   if (!blob_ptr) return;
   size_t blob_size = compute_bundle_size(blob_ptr);
@@ -2392,7 +2852,7 @@ static void record_fat_binary_blob(const void* blob_ptr) {
   hrr_args___hipRegisterFatBinary a{};
   a.ret      = 0;  // handle not meaningful at init time
   a.blob_size = static_cast<uint64_t>(blob_size);
-  auto h = hrr_cap::writer::write_blob(blob_ptr, blob_size);
+  auto h = write_fat_binary_blob(blob_ptr, blob_size);
   a.blob_hash_lo = h.lo;
   a.blob_hash_hi = h.hi;
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
@@ -2476,33 +2936,46 @@ void hip_capture_init() {
       return;
     }
 
-    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-    // level to LOG_INFO (never lower an already-higher level) so enabling
-    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
-    // went through raw fprintf(stderr).
-    if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
-      AMD_LOG_LEVEL = amd::LOG_INFO;
-      LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
-                    "to %d (LOG_INFO) so argument traces are visible",
-                    static_cast<int>(amd::LOG_INFO));
-    }
-
     // Snapshot the fully-initialized dispatch table and install runtime shims here
     // only (see comment above — no static-init capture hook).
     if (!g_installed) {
       hip_capture_build_table();
+      pinned_wrap_table();
       hip_capture_install();
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    // A refused open leaves capture off, so take the shims out of the dispatch
-    // table too rather than leave every call going through them for nothing.
+    // A refused open leaves capture off. Without a writer the shims would only
+    // cost time, and the D2H ones still synchronize streams, so take them out
+    // of the dispatch table again.
     if (!hrr_cap::writer::open(hip_capture_output_dir())) {
       hip_capture_uninstall();
       return;
     }
+    pinned_install_atfork();
+
+    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+    // level to LOG_INFO (never lower an already-higher level) so enabling
+    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces. Say so on stderr
+    // whatever the log level, since the traces carry argument bytes. This runs
+    // only once the writer is open, so a refused open claims nothing.
+    if (hrr_dbg_args_enabled()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
+              "host-to-device copy destinations are also written to the log\n");
+      if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
+    }
+#if !defined(DEBUG)
+    // A release runtime ignores the flag, so tell whoever set it why no
+    // traces appear rather than leave them looking.
+    else if (!amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS").empty()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS ignored: only a Debug build of the "
+              "HIP runtime reads it\n");
+    }
+#endif
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());
@@ -2544,7 +3017,10 @@ void hip_capture_init() {
 }
 
 void hip_capture_shutdown() {
-  hip_capture_uninstall();
+  // Only the runtime shims: the compiler table keeps its shims, so a fat binary
+  // unregistered after this still goes through them, and the writer drops it.
+  if (g_installed.exchange(false))
+    uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

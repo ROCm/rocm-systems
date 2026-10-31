@@ -31,8 +31,7 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank
 constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // LL128 flat all-reduce kernel. One warp owns one slice at a time; the grid is
@@ -40,13 +39,13 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 //
 // Phase 1 (publish): pack this rank's slice into registers once, then push it
 // onto the wire in every peer's scratch at slot selfRank, flag word embedded.
-// Phase 2 (reduce): for each peer, poll that peer's slot in our own scratch and
-// fold the arriving words into an accumulator seeded with our own payload, then
-// unpack the accumulator into recvbuff. Flag polling supplies the cross-rank
-// ordering, so no GPU barrier is used.
+// Phase 2 (reduce): for each rank in rank order, poll that rank's slot in our own
+// scratch and fold the arriving words into an accumulator, then unpack the
+// accumulator into recvbuff. Flag polling supplies the cross-rank ordering, so
+// no GPU barrier is used.
 //
-// Self does not round-trip through scratch; its contribution seeds the
-// accumulator straight from sendbuff. Scratch is double buffered: bank = flag & 1.
+// Self does not round-trip through scratch; its contribution is packed straight
+// from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -59,7 +58,8 @@ __launch_bounds__(512)
                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
-                                        size_t bankSize) { // scratch bank size (from host)
+                                        size_t bankSize, // scratch bank size (from host)
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -72,7 +72,7 @@ __launch_bounds__(512)
 
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 16B, so it is always a whole
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
   // number of 8B words and the slot stride below is a whole number of slices.
   const size_t slotWords = ddaLL128ArSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
@@ -113,22 +113,29 @@ __launch_bounds__(512)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
-    // Seed with our own payload; peers are folded on top.
+    // Fold every rank's payload in rank order, so each rank rounds the same
+    // partial sums and all get the same result. Our own payload is packed from
+    // sendbuff into the same register layout the wire delivers.
     uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, srcBytes + dataByte, eltInSlice, lane, flagLane);
-
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-      uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    for (int peer = 0; peer < nRanks; ++peer) {
+      uint64_t vr[kDdaLL128WordsPerThread] = {};
+      if (peer == selfRank) {
+        ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
+      } else {
+        const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
+        if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                              params)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
+          return;
+        }
+      }
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
       // than predicating the loop.
 #pragma unroll
       for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-        acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        acc[u] = peer == 0 ? vr[u] : ddaLL128AddWord<T>(acc[u], vr[u]);
       }
     }
 

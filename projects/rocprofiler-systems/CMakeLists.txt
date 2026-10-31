@@ -259,8 +259,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
-    OFF
+rocprofiler_systems_add_tristate_option(
+    ROCPROFSYS_BUILD_LIBIBERTY
+    "Build libiberty from binutils sources (ON: always, OFF: require system copy, AUTO: system copy, else build)"
+    "OFF"
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
     "Build libunwind from submodule" ON
@@ -582,6 +584,18 @@ install(
     FILES "${PROJECT_SOURCE_DIR}/source/bin/common/presets/schema.json"
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/presets
     COMPONENT setup
+)
+
+# Agent skills (see skills/)
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/skills
+    COMPONENT setup
+    USE_SOURCE_PERMISSIONS
+    PATTERN "evals" EXCLUDE
+    PATTERN "run_evals.py" EXCLUDE
+    PATTERN "test_run_evals.py" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
 )
 
 # ------------------------------------------------------------------------------#

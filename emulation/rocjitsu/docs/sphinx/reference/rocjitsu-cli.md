@@ -15,15 +15,16 @@ For details on how KMD emulation and the interposer layer work, see [GPU virtual
 
 ``` text
 rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
-rocjitsu --config <config.json> --vfio-socket <path>
+rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 | --- | --- |
 | `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
-| `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
+| `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The socket count must match the selected node's local GPU count, and paths must be distinct. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
@@ -53,7 +54,7 @@ rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
 
 A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
 
-GPU memory allocations are backed by `memfd` objects and shared between the daemon and client processes via `SCM_RIGHTS`. Both sides map every `memfd` at the same virtual address (`MAP_FIXED`), so GPU virtual addresses resolve correctly in both processes without translation.
+GPU memory allocations use backing descriptors shared between the daemon and client processes via `SCM_RIGHTS`. These descriptors are ordinary memfds, or socket tokens retaining System V shared RAM when an allocation exceeds the private memory helper's inherited hard file-size limit. Both sides use rocjitsu's mapping adapters to map the backing at the same virtual address (`MAP_FIXED`), so GPU virtual addresses resolve correctly in both processes without translation.
 
 This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-process workloads such as PyTorch, `torchrun`, `torch.distributed`, and RCCL.
 
@@ -70,9 +71,14 @@ Connects to an already-running daemon. The socket path is resolved using the env
 ``` bash
 rocjitsu --config configs/gfx1250_mi455x.json \
   --vfio-socket /tmp/rocjitsu-vfio/vfio-user.sock
+
+# Argument-order example: this fixture has synthetic PCI IDs and is not a guest profile
+rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu0.sock \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu1.sock
 ```
 
-rocJITsu exposes the configured gfx1250 GPU as a PCI function to an external
+rocJITsu exposes each configured local GPU as a PCI function to an external
 VMM. The guest AMDGPU driver owns queue setup through BAR and DMA operations;
 the PCI adapter routes that state into the same GPU VM, command processor, MES,
 SDMA scheduler, and compute units used by the other front ends. See
@@ -119,7 +125,7 @@ Daemon mode uses a fixed 16-byte message header followed by an opcode-specific p
 
 ### RPC opcodes
 
-| Opcode | Direction | Payload | Memfd |
+| Opcode | Direction | Payload | Backing descriptor |
 | --- | --- | --- | --- |
 | `RPC_HANDSHAKE` | C→D→C | `RpcHandshakeResponse` + topology path | No |
 | `RPC_CLOSE` | C→D→C | None | No |
@@ -127,17 +133,17 @@ Daemon mode uses a fixed 16-byte message header followed by an opcode-specific p
 | `RPC_MUNMAP` | C→D→C | `RpcMunmapRequest` | No |
 | `RPC_IOCTL` | C→D→C | `RpcIoctlRequest` + raw args + inlined arrays | Optional |
 
-File descriptors (`memfd` handles) are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data. Two operations carry `memfd` handles:
+Backing descriptors (memfds or fallback socket tokens) are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data. Two RPC response forms carry backing descriptors with different lifetimes:
 
--   `RPC_IOCTL` (`ALLOC_MEMORY` response) --- allocation backing `memfd`
--   `RPC_MMAP` (response) --- doorbell and event page `memfd` handles
+-   `RPC_IOCTL` (`ALLOC_MEMORY` and `IPC_IMPORT_HANDLE` responses): the client stores the allocation or import descriptor until free or driver cleanup.
+-   `RPC_MMAP` responses: temporary aliases of allocation, doorbell, or event-page backing. `RemoteDriver::mmap` closes the received alias on every exit, including size-check and mapping failures. If the reply has no descriptor, it borrows the stored allocation or import descriptor and leaves that descriptor open.
 
 ## Daemon startup and shutdown sequence
 
 ### Startup
 
 1.  `rocjitsu --daemon` forks a child process.
-2.  The child creates the VM with `RJ_VM_MODE_DAEMON`, which initializes the simulation engine, topology, driver, and `memfd`-backed GPU memory.
+2.  The child creates the VM with `RJ_VM_MODE_DAEMON`, which initializes the simulation engine, topology, driver, and shared GPU memory backing.
 3.  The child creates a listening Unix domain socket at the resolved socket path.
 4.  The child begins accepting client connections and dispatching RPC messages.
 5.  The parent sets `LD_PRELOAD` and `execve`'s the target application (if one was specified with `--`).

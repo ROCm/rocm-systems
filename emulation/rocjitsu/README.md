@@ -88,6 +88,29 @@ HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when `hipcc` or `libhsa-runtime64` is
 not found.
 
+Floating-point mode tests run in 16 batches to share process startup and
+GoogleTest registration. Per-case fixtures and assertions are unchanged.
+Run all batches with:
+
+```bash
+ctest --test-dir build -L '^fp-mode$' --output-on-failure
+```
+
+Each batch writes per-case GoogleTest results under `build/tests/gtest-results/`.
+Installed tests use the same batches and write results under `gtest-results/`
+in the installed test directory. The launcher removes each batch's previous XML
+before starting GoogleTest to avoid stale results after a crash or timeout.
+Cleanup errors fail the batch before GoogleTest starts.
+If the launcher cannot start or finish cleanup, an older report may remain;
+use CTest's status alongside the XML.
+CTest batches ignore an inherited `GTEST_FILTER` and suppress passing-case output;
+failure diagnostics and per-case XML are retained. To select individual cases or
+a family, run the dedicated executable with a GoogleTest filter:
+
+```bash
+build/tests/rocjitsu_fp_mode_tests --gtest_filter='BinaryF32/ValuFpModeTest.*'
+```
+
 ## Running HIP workloads
 
 ```bash
@@ -132,6 +155,7 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
 | [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
+| [Two-node RCCL NET smoke](docs/rccl-scaleout.md) | Reproduce an unqualified gfx1250 daemon-mode control |
 | [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |

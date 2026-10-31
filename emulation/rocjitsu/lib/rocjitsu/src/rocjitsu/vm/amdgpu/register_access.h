@@ -23,6 +23,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 #define ROCJITSU_VM_AMDGPU_REGISTER_ACCESS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -963,8 +964,8 @@ public:
   }
   explicit RegisterAccess(const Wavefront &wf) : RegisterAccess(wf.cu()) { wf_ = &wf; }
 
-  /// Resolve a destination for dependency tracking without reading its value or
-  /// notifying observers. Use the execution resolver for dynamic VGPR indexing.
+  /// @brief Resolve a destination without reading its value or notifying observers.
+  /// @details Use the execution resolver for dynamic VGPR indexing.
   [[nodiscard]] std::optional<RegisterRef> destination_register(const Operand &op) const {
     auto reg = op.to_register_ref();
     if (!reg) {
@@ -972,18 +973,39 @@ public:
         return RegisterRef{*special, 0, static_cast<uint8_t>(std::max(1, op.size_bits() / 32))};
       return std::nullopt;
     }
-    if (reg->cls == RegClass::VGPR) {
+    if (reg->cls == RegClass::VGPR || reg->cls == RegClass::ACC_VGPR) {
       auto &wf = mutable_wavefront();
       auto base = op.simd_vgpr_base_mut(wf);
       if (!base || !cu_->owns_vgpr_range(wf, *base, reg->width))
         return std::nullopt;
+      reg->cls = RegClass::VGPR;
       reg->index = static_cast<uint16_t>(*base - wf.vgpr_alloc().base);
     }
     return reg;
   }
 
-  /// Resolve a replay source using the execution bank and scalar selector.
-  [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op) const;
+  /// @brief Resolve a source using the execution bank and scalar selector.
+  /// @param wordwise Preserve the backed prefix for emitters that validate each dword.
+  [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
+                                                           bool wordwise = false) const;
+
+  /// Resolve one block data word: unowned destinations are ignored, while
+  /// unowned sources use this wave's VGPR0, independently of the other words.
+  [[nodiscard]] std::optional<RegisterRef> block_data_register(const Operand &op, uint32_t word,
+                                                               bool write) const;
+
+  /// Physical source for a block-store word, including the architectural VGPR0 fallback.
+  [[nodiscard]] uint32_t block_store_source_vgpr(uint32_t physical_reg) const {
+    return owns_vgpr_range(physical_reg, 1) ? physical_reg : wavefront().vgpr_alloc().base;
+  }
+
+  /// @brief Resolve consumed buffer descriptor words without reading their values.
+  /// @details Vector descriptors require complete backing. Scalar loads validate
+  /// the base pair first, then read word 2 (and word 3 on CDNA5) independently.
+  /// Scalar stores currently consume only the base pair.
+  /// Preserve backed inputs even if a later scalar word has no backing.
+  [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
+  buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
 
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
@@ -1103,6 +1125,11 @@ public:
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      write_lane_masked(op, lane, value, mask);
+      return;
+    }
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
@@ -1114,6 +1141,11 @@ public:
     requires OperandT::kStaticRegisterAccess
   void write_lane(const OperandT &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      write_lane_masked(op, lane, value, mask);
+      return;
+    }
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
@@ -1183,6 +1215,14 @@ public:
   void write_chunk(const Operand &op, uint32_t lane_base, uint32_t count, const uint32_t *values,
                    uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      for (uint32_t lane = 0; lane < count; ++lane) {
+        if (lane_mask & (uint64_t{1} << lane))
+          write_lane_masked(op, lane_base + lane, values[lane], mask);
+      }
+      return;
+    }
     uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
     if (op.simd_capable()) {
       auto base = op.simd_vgpr_base_mut(wf);
@@ -1245,6 +1285,7 @@ public:
   write_operand(const Operand &op, uint64_t lane_mask,
                 uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
+    byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
     const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
@@ -1286,6 +1327,7 @@ public:
   readwrite_operand(const Operand &op, uint64_t lane_mask, uint8_t byte_mask = 0xF,
                     uint8_t write_byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
+    write_byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
     const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
@@ -1507,6 +1549,18 @@ public:
   }
 
 private:
+  friend class MemoryWaitScoreboard;
+
+  /// Only explicitly qualified destinations preserve bytes outside their mask.
+  [[nodiscard]] static uint8_t operand_write_byte_mask(const Operand &op) {
+    return op.preserve_unwritten_bytes() ? op.register_byte_mask()
+                                         : rocjitsu::ExecutionPlugin::kFullByteMask;
+  }
+  /// Read an encoding-selected control word while planning an instruction's
+  /// accesses. This does not constitute an executed register access.
+  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
+  std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
+
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {
     if (wf_)
       return wf_->wf_size();

@@ -70,9 +70,10 @@ struct QueueSemaphoreCreateInfo
             /// For DX12 native fence, the flag needs to be consistent with
             /// D3DDDI_SYNCHRONIZATIONOBJECT_FLAGS.NoSignalMaxValueOnTdr given by DX runtime.
             uint32 noSignalOnDeviceLost   :  1;
-            /// For native fence only. If it's 0x0, the native fence type is D3DDDI_NATIVEFENCE_TYPE_DEFAULT.
-            /// If it's 0x1, native fence type is D3DDDI_NATIVEFENCE_TYPE_INTRA_GPU.
-            /// For DX12, the value is determined by runtime. DXCP needs to set it by reading D3DDDI_NATIVEFENCEINFO.
+            /// gpuOnly is an optimization hint that a semaphore will never need to be synchronized with the CPU.
+            /// Restricted to DX12 native fence and/or gpuFence semaphore creation.
+            /// For native fences, determines if the fence is created with D3DDDI_NATIVEFENCE_TYPE_INTRA_GPU.
+            /// For gpu fences, skips any overhead for synchronizing the gpuFence to the CPU.
             uint32 gpuOnly                :  1;
             /// This queue semaphore will be a monitored fence if this flag set, even if OS supports native fence.
             uint32 forceUseMonitoredFence :  1;

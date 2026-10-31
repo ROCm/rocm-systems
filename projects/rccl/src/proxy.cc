@@ -720,13 +720,13 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       } while (ps.last != 2);
       for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
-          int sendNode = (nodeId + (1 << i)) % nNodes;
+          int sendNode = patSendPeer(nodeId, nNodes, i, /*mirrored=*/false);
           int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_up);
         }
         if (nstepsRecv[i]) {
-          int recvNode = (nodeId - (1 << i) + nNodes) % nNodes;
+          int recvNode = patRecvPeer(nodeId, nNodes, i, /*mirrored=*/false);
           int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_up);
@@ -764,13 +764,13 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
       for (int i = 0; i < log2Up(nNodes); i++) {
         if (nstepsSend[i]) {
           // When sharing, these match ncclPatternPatUp so AllGather and ReduceScatter use one connection set.
-          int sendNode = sharedConns ? (nodeId + (1 << i)) % nNodes : (nodeId - (1 << i) + nNodes) % nNodes;
+          int sendNode = patSendPeer(nodeId, nNodes, i, /*mirrored=*/!sharedConns);
           int sendPeer = nvlsDensePeer(comm, sendNode, denseLocalRank);
           op->nsteps = nstepsSend[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxySend, sendPeer, op, 0, justInquire), result, exit_pat_down);
         }
         if (nstepsRecv[i]) {
-          int recvNode = sharedConns ? (nodeId - (1 << i) + nNodes) % nNodes : (nodeId + (1 << i)) % nNodes;
+          int recvNode = patRecvPeer(nodeId, nNodes, i, /*mirrored=*/!sharedConns);
           int recvPeer = nvlsDensePeer(comm, recvNode, denseLocalRank);
           op->nsteps = nstepsRecv[i];
           NCCLCHECKGOTO(SaveProxy(comm, channel, proxyRecv, recvPeer, op, 0, justInquire), result, exit_pat_down);
@@ -1926,7 +1926,8 @@ void* ncclProxyService(void* _args) {
   // RCCL: log the proxy listening socket address (diagnostic).
   {
     char line[SOCKET_NAME_MAXLEN + 1];
-    INFO(NCCL_INIT, "proxy listening socket at %s", ncclSocketToString(&proxyState->listenSock->addr, line));
+    INFO(NCCL_INIT, "proxy listening socket at %s",
+         ncclSocketToString(&proxyState->listenSock->addr, line, sizeof(line)));
   }
 
   while (stop == PROXY_RUNNING || npeers > 0) {
@@ -2262,6 +2263,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
     proxyState->profilerContext = comm->profilerContext;
     proxyState->directMode = comm->directMode;
     memcpy(proxyState->buffSizes, comm->buffSizes, sizeof(comm->buffSizes));
+    proxyState->p2pLl128BuffSize = comm->p2pLl128BuffSize;
     // [RCCL] Host side mirrors of device side NCCL_LL128_LINEELEMS & NCCL_LL128_DATAELEMS
     proxyState->ll128LineElems = comm->ll128LineElems;
     proxyState->ll128DataElems = comm->ll128DataElems;

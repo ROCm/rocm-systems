@@ -76,3 +76,16 @@ Configuration::asyncBufferSize() const noexcept
     }()};
     return async_buffer_size_env;
 }
+
+bool
+Configuration::host() const noexcept
+{
+    static bool host_env{Environment::host().value_or(true)};
+    return m_host_override.value_or(host_env);
+}
+
+void
+Configuration::host(bool enabled) noexcept
+{
+    m_host_override = enabled;
+}
