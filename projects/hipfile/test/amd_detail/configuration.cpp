@@ -10,10 +10,12 @@
 #include "mhip.h"
 #include "msys.h"
 
+#include <cerrno>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <optional>
 #include <string>
+#include <system_error>
 
 using namespace hipFile;
 using namespace testing;
@@ -24,6 +26,8 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 struct HipFileConfiguration : public Test {
     StrictMock<MSys> msys;
     StrictMock<MHip> mhip;
+
+    static constexpr int dxg_fd{42};
 
     void expect_configuration_fastpath(const char *hipfile_force_compat_mode,
                                        void       *hipAmdFileRead  = reinterpret_cast<void *>(0xDEADBEEF),
@@ -36,6 +40,26 @@ struct HipFileConfiguration : public Test {
             .WillOnce(Return(hipAmdFileRead));
         EXPECT_CALL(mhip, hipGetProcAddress(StrEq("hipAmdFileWrite"), _, _, _))
             .WillOnce(Return(hipAmdFileWrite));
+    }
+
+    void expect_configuration_dxg_detection(const char *hsa_enable_dxg_detection)
+    {
+        EXPECT_CALL(msys, getenv(StrEq("HSA_ENABLE_DXG_DETECTION")))
+            .WillOnce(Return(const_cast<char *>(hsa_enable_dxg_detection)));
+    }
+
+    void expect_configuration_not_wsl(int dxg_open_errno = ENOENT)
+    {
+        expect_configuration_dxg_detection(nullptr);
+        EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _))
+            .WillOnce(Throw(std::system_error(dxg_open_errno, std::generic_category())));
+    }
+
+    void expect_configuration_wsl(const char *hsa_enable_dxg_detection = nullptr)
+    {
+        expect_configuration_dxg_detection(hsa_enable_dxg_detection);
+        EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _)).WillOnce(Return(dxg_fd));
+        EXPECT_CALL(msys, close(dxg_fd));
     }
 
     void expect_configuration_fallback(const char *hipfile_force_compat_mode,
@@ -68,18 +92,21 @@ struct HipFileConfiguration : public Test {
 
 TEST_F(HipFileConfiguration, FastpathEnabledIfForceCompatModeEnvironmentVariableIsNotSet)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath(nullptr);
     ASSERT_TRUE(Configuration().fastpath());
 }
 
 TEST_F(HipFileConfiguration, FastpathEnabledIfForceCompatModeEnvironmentVariableIsInvalid)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath("not-a-bool");
     ASSERT_TRUE(Configuration().fastpath());
 }
 
 TEST_F(HipFileConfiguration, FastpathEnabledIfForceCompatModeEnvironmentVariableIsFalse)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath("false");
     ASSERT_TRUE(Configuration().fastpath());
 }
@@ -87,6 +114,7 @@ TEST_F(HipFileConfiguration, FastpathEnabledIfForceCompatModeEnvironmentVariable
 TEST_F(HipFileConfiguration, OverrideEnabledFastpathBackend)
 {
     Configuration config{};
+    expect_configuration_not_wsl();
     expect_configuration_fastpath("false");
     ASSERT_TRUE(config.fastpath());
 
@@ -96,18 +124,21 @@ TEST_F(HipFileConfiguration, OverrideEnabledFastpathBackend)
 
 TEST_F(HipFileConfiguration, FastpathDisabledIfForceCompatModeEnvironmentVariableIsTrue)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath("true");
     ASSERT_FALSE(Configuration().fastpath());
 }
 
 TEST_F(HipFileConfiguration, FastpathDisabledIfHipAmdFileReadIsNotFound)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath(nullptr, nullptr);
     ASSERT_FALSE(Configuration().fastpath());
 }
 
 TEST_F(HipFileConfiguration, FastpathDisabledIfHipAmdFileWriteIsNotFound)
 {
+    expect_configuration_not_wsl();
     expect_configuration_fastpath(nullptr, reinterpret_cast<void *>(0x1), nullptr);
     ASSERT_FALSE(Configuration().fastpath());
 }
@@ -115,6 +146,7 @@ TEST_F(HipFileConfiguration, FastpathDisabledIfHipAmdFileWriteIsNotFound)
 TEST_F(HipFileConfiguration, OverrideDisabledFastpathBackend)
 {
     Configuration config{};
+    expect_configuration_not_wsl();
     expect_configuration_fastpath("true");
     ASSERT_FALSE(config.fastpath());
 
@@ -125,6 +157,7 @@ TEST_F(HipFileConfiguration, OverrideDisabledFastpathBackend)
 TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendIfHipAmdFileReadIsNotAvailable)
 {
     Configuration config{};
+    expect_configuration_not_wsl();
     expect_configuration_fastpath(nullptr, nullptr);
     ASSERT_FALSE(config.fastpath());
 
@@ -135,11 +168,61 @@ TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendIfHipAmdFileRead
 TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendIfHipAmdFileWriteIsNotAvailable)
 {
     Configuration config{};
+    expect_configuration_not_wsl();
     expect_configuration_fastpath(nullptr, reinterpret_cast<void *>(0x1), nullptr);
     ASSERT_FALSE(config.fastpath());
 
     config.fastpath(true);
     ASSERT_FALSE(config.fastpath());
+}
+
+TEST_F(HipFileConfiguration, FastpathDisabledOnWsl)
+{
+    expect_configuration_wsl();
+    expect_configuration_fastpath(nullptr);
+    ASSERT_FALSE(Configuration().fastpath());
+}
+
+TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendOnWsl)
+{
+    Configuration config{};
+    expect_configuration_wsl();
+    expect_configuration_fastpath(nullptr);
+    ASSERT_FALSE(config.fastpath());
+
+    config.fastpath(true);
+    ASSERT_FALSE(config.fastpath());
+}
+
+TEST_F(HipFileConfiguration, FastpathEnabledIfDxgCanNotBeOpened)
+{
+    expect_configuration_not_wsl(EACCES);
+    expect_configuration_fastpath(nullptr);
+    ASSERT_TRUE(Configuration().fastpath());
+}
+
+TEST_F(HipFileConfiguration, FastpathDisabledOnWslIfDxgCloseFails)
+{
+    expect_configuration_dxg_detection(nullptr);
+    EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _)).WillOnce(Return(dxg_fd));
+    EXPECT_CALL(msys, close(dxg_fd)).WillOnce(Throw(std::system_error(EIO, std::generic_category())));
+    expect_configuration_fastpath(nullptr);
+    ASSERT_FALSE(Configuration().fastpath());
+}
+
+TEST_F(HipFileConfiguration, FastpathDisabledOnWslIfDxgDetectionIsNotZero)
+{
+    expect_configuration_wsl("1");
+    expect_configuration_fastpath(nullptr);
+    ASSERT_FALSE(Configuration().fastpath());
+}
+
+TEST_F(HipFileConfiguration, FastpathEnabledIfDxgDetectionIsDisabled)
+{
+    // Matches ROCr: HSA_ENABLE_DXG_DETECTION=0 skips the /dev/dxg probe entirely
+    expect_configuration_dxg_detection("0");
+    expect_configuration_fastpath(nullptr);
+    ASSERT_TRUE(Configuration().fastpath());
 }
 
 TEST_F(HipFileConfiguration, FallbackEnabledIfAllowCompatModeEnvironmentVariableIsNotSet)

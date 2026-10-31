@@ -35,6 +35,7 @@
 
 ### Fixed
 
+* On Windows Subsystem for Linux (WSL2), hipFile now sends all I/O to the fallback backend, since the fastpath is not yet implemented on WSL.
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
