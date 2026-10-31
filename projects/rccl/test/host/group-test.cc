@@ -43,6 +43,7 @@
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
+#include "WaitUntil.h"           // bounded poll for what the other thread does
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
@@ -901,19 +902,15 @@ TEST_F(AsyncLaunchTest, DestroyFlagForcesBlockingRegardlessOfConfig) {
   EXPECT_EQ(1, job_.destroyFlag);
 }
 
-// Spins on *job->abortFlag until nonzero or a 5s deadline elapses. Used by the ordering-sensitive
-// TwoOwners case: a job that returns instantly can't distinguish "abortFlag set before the join"
-// from "after". The deadline unwinds a swapped-order mutant (self-reports via ncclSystemError)
-// instead of hanging; the happy path still returns in microseconds.
+// Spins on *job->abortFlag until nonzero or waitUntil's budget elapses. Used by the
+// ordering-sensitive TwoOwners case: a job that returns instantly can't distinguish "abortFlag set
+// before the join" from "after". The budget unwinds a swapped-order mutant (self-reports via
+// ncclSystemError) instead of hanging; the happy path still returns in microseconds.
 ncclResult_t SpinUntilAbortFlagObserved(struct ncclAsyncJob* job) {
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (job->abortFlag && COMPILER_ATOMIC_LOAD(job->abortFlag, std::memory_order_acquire) != 0) {
-      return ncclSuccess;
-    }
-    std::this_thread::sleep_for(std::chrono::microseconds(200));
-  }
-  return ncclSystemError;
+  const bool observed = waitUntil([job] {
+    return job->abortFlag && COMPILER_ATOMIC_LOAD(job->abortFlag, std::memory_order_acquire) != 0;
+  });
+  return observed ? ncclSuccess : ncclSystemError;
 }
 
 // ncclGroupJobAbort mirrors ncclGroupJobComplete but also raises abortFlag before joining. Both
