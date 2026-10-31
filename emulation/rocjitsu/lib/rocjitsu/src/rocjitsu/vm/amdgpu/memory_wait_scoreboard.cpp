@@ -663,6 +663,30 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
 }
 
+namespace {
+// Whether loads producing this event write their results to registers in issue
+// order within their order class, so overwriting a pending result of the same
+// class does not require a wait.
+bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
+  using namespace waitcheck_detail;
+  switch (event.counter) {
+  case WaitCounterKind::Load: {
+    const auto model = waitcnt_model(arch);
+    return model.succeeded() && uses_legacy_waitcnt(model.value());
+  }
+  case WaitCounterKind::Ds:
+    // LDS writeback is in-order on all targets.
+    return event.kind == WaitEventKind::Ds;
+  case WaitCounterKind::Exp:
+    // LDS direct and parameter loads use EXP independently of exports and
+    // indexed LDS accesses.
+    return event.kind == WaitEventKind::LdsDirect && has_ordered_lds_direct_writeback(arch);
+  default:
+    return false;
+  }
+}
+} // namespace
+
 void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefront &wf,
                                                uint64_t vector_lanes,
                                                const RegisterModifiers &modifiers) {
@@ -716,18 +740,10 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     xcnt_group(xevent->kind == WaitEventKind::Smem);
   const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
                                       &ClassifiedEvent::registers);
-  const auto model = waitcnt_model(wf.cu().arch());
-  const bool legacy = model.succeeded() && uses_legacy_waitcnt(model.value());
   const bool has_defs = defs != classified.value().end();
-  // Legacy VMEM loads and qualified direct/parameter LDS loads each preserve
-  // writeback order within their class. The latter use EXP independently of
-  // exports and indexed LDS accesses.
-  const bool ordered_writeback = has_defs && ((legacy && defs->counter == WaitCounterKind::Load) ||
-                                              (has_ordered_lds_direct_writeback(wf.cu().arch()) &&
-                                               defs->counter == WaitCounterKind::Exp &&
-                                               defs->kind == WaitEventKind::LdsDirect));
-  const uint16_t order =
-      ordered_writeback ? ordered_write_order(*defs, wf.cu().arch()) : kUnordered;
+  const uint16_t order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
+                             ? ordered_write_order(*defs, wf.cu().arch())
+                             : kUnordered;
   const bool vector_replay =
       replay && xevent->kind != WaitEventKind::Smem && (wf.mode_raw() & (1u << 25));
   for (unsigned i = 0; i < count; ++i) {
@@ -736,7 +752,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
       access(reg, ~uint64_t{0}, 0xf, true);
       continue;
     }
-    if (defs == classified.value().end())
+    if (!has_defs)
       continue;
     auto check = [&](RegisterRef range, uint8_t bytes) {
       if (vector_replay)
@@ -1178,7 +1194,8 @@ void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8
     // Sharing a counter does not prove ordered writeback. The old result and
     // incoming write must belong to the same FIFO class, even in a mixed queue.
     if (event.reported || (!write && event.counter == WaitCounterKind::X) ||
-        (write && ordered_write_order != kUnordered && event.order == ordered_write_order) ||
+        (write && ordered_write_order != kUnordered && event.order == ordered_write_order &&
+         event.ordered_overwrite) ||
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;
