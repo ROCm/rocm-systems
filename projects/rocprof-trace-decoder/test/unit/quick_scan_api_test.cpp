@@ -175,6 +175,7 @@ void append_mi400_header(BitStreamBuilder& builder)
     header.DSA = kTargetSa;
     header.DWGP = kTargetWgp;
     header.DSIMD = kSimd;
+    header.WSM = 3; // Extended wave starts carry 40-bit workgroup-ID records.
     builder.writeBits(header.raw, 64);
 }
 

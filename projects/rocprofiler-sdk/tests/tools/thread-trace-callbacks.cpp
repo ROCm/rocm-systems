@@ -26,6 +26,7 @@
 #endif
 
 #include "thread-trace-callbacks.hpp"
+#include "thread-trace-exec-mask.hpp"
 
 #include <unistd.h>
 #include <atomic>
@@ -38,6 +39,7 @@ rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
 std::atomic<bool>                     has_sdata{false};
 std::atomic<bool>                     has_excess_detail{false};
+ExecMaskCheck                         exec_mask_check{};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -71,7 +73,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
 void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
-                     rocprofiler_user_data_t /* userdata */)
+                     rocprofiler_user_data_t                userdata)
 {
     assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
     assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
@@ -79,7 +81,9 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
-                    void* /* userdata */) {
+                    void*                                          callback_data) {
+        auto& trace = *static_cast<ExecMaskCheck::Trace*>(callback_data);
+        exec_mask_check.on_record(record_type_id, trace_events, trace);
         if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
         {
             const auto* events =
@@ -90,22 +94,28 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
+        auto* wave_data = static_cast<const uint8_t*>(trace_events);
         for(size_t w = 0; w < trace_size; w++)
         {
             const auto& wave =
-                static_cast<const rocprofiler_thread_trace_decoder_wave_t*>(trace_events)[w];
+                *reinterpret_cast<const rocprofiler_thread_trace_decoder_wave_t*>(wave_data);
+            exec_mask_check.check_wave(wave, trace);
             if(wave.instructions_size > 2) has_excess_detail = true;
             for(size_t i = 0; i < wave.instructions_size; i++)
                 latency += wave.instructions_array[i].duration;
+            // Advance using the runtime ABI, including when an older decoder emits a batch.
+            wave_data += wave.size;
         }
     };
+    ExecMaskCheck::Trace trace{0, userdata.value};
     DECODER_CALL(
-        rocprofiler_trace_decode(decoder, parse, shader_data.data, shader_data.data_size, nullptr));
+        rocprofiler_trace_decode(decoder, parse, shader_data.data, shader_data.data_size, &trace));
 }
 
 void
-init()
+init(bool enable_exec_mask_check)
 {
+    exec_mask_check.set_enabled(enable_exec_mask_check);
     if(rocprofiler_thread_trace_decoder_create(&decoder, "") != ROCPROFILER_STATUS_SUCCESS)
         DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
 }
@@ -127,6 +137,8 @@ finalize(void* /* tool_data */)
         // disabling until new decoder version is picked up
         // if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
     }
+
+    exec_mask_check.finalize(decoder.handle != 0);
 
     rocprofiler_thread_trace_decoder_destroy(decoder);
 }

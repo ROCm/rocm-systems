@@ -55,7 +55,7 @@ gfx10::Token TokenGenerator::next()
     {
         readOne_unsafe();
 
-        if (bIsExt && (current & 1)) // Handle wave_start_ext
+        if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
@@ -77,8 +77,10 @@ gfx10::Token TokenGenerator::next()
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
-            if (real != 0) addRealtime(real);
-            continue;
+            if (real != 0)
+                addRealtime(real);
+            else
+                continue;
         }
 
         auto token = Token{globaltime, current, type};
@@ -99,7 +101,7 @@ gfx10::Token TokenGenerator::next()
     {
         readOne_safe();
 
-        if (bIsExt && (current & 1)) // Handle wave_start_ext
+        if (bIsExt && header.WSM != 3) // Handle wave_start_ext
         {
             bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
@@ -151,10 +153,15 @@ gfx10::Token TokenGenerator::next()
     return Token{0, 0, RdnaType::TIMESTAMP};
 }
 
-TokenGenerator::TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
+TokenGenerator::TokenGenerator(
+    const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time, bool read_header
+) :
 NaviTokenGenerator(_buffer, size, _globaltime, _base_time)
 {
-    if (!_buffer || !size) throw std::exception();
+    if (!_buffer || !size || (read_header && size < sizeof(header_type)))
+        throw std::runtime_error("invalid sqtt pointer");
+
+    if (read_header) memcpy(&header, _buffer, sizeof(header_type));
 }
 
 } // namespace gfx12

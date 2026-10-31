@@ -62,6 +62,9 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
                                                      ///< >= 3 enable the async copy pipeline and
                                                      ///< require a single shader engine.
     ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE,  ///< Enable exec mask population count
+                                                         ///< tracking on gfx12+. Zero (default)
+                                                         ///< disables; nonzero enables.
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE
