@@ -1878,7 +1878,8 @@ class Device : public RuntimeObject {
   cl_device_type type() const { return info().type_ & ~(CL_DEVICE_TYPE_DEFAULT); }
 
   //! Create a new virtual device environment.
-  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL) = 0;
+  virtual device::VirtualDevice* createVirtualDevice(CommandQueue* queue = NULL,
+                                                     bool cooperative = false) = 0;
 
   //! Create a program for device.
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
