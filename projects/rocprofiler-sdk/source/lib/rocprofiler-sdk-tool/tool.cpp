@@ -2887,7 +2887,9 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     // reset config for attach (i.e. re-parse environment variables)
     auto refreshed_config = tool::config{};
-    if(!tool::reuse_extra_counters_snapshot(refreshed_config.extra_counters_file,
+    if(!tool::reuse_extra_counters_snapshot(refreshed_config.extra_counters_file_set,
+                                            refreshed_config.extra_counters_file,
+                                            refreshed_config.extra_counters_contents_set,
                                             refreshed_config.extra_counters_contents,
                                             original_config.extra_counters_file,
                                             original_config.extra_counters_contents))

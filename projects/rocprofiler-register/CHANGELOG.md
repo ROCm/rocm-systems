@@ -8,7 +8,7 @@
 
 ### Resolved issues
 
-  - Attachment environment logging now redacts `ROCPROF_EXTRA_COUNTERS_CONTENTS` while reporting its byte count.
+  - Attachment configuration now applies environment variables only for synchronous tool setup and restores every previous value before returning. Logging redacts `ROCPROF_EXTRA_COUNTERS_CONTENTS` while reporting its byte count.
 
   - Attach mode could load a stale `librocprofiler-sdk-attach` colocated with rocprofiler-register (e.g., from a ROCm install) instead of the one on `LD_LIBRARY_PATH`:
     - The attach library search now prefers the directory of an already-loaded rocprofiler-sdk, then `LD_LIBRARY_PATH` directories containing both the attach library and rocprofiler-sdk, then the rocprofiler-register directory.

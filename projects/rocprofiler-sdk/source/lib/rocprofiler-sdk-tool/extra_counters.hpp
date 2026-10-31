@@ -29,15 +29,24 @@ namespace rocprofiler
 {
 namespace tool
 {
+// The initial configure call owns the loaded definition snapshot. A reattach with no
+// definition variables, or with the same nonempty FILE path retained by an older register,
+// reuses that snapshot. New helper-injected contents are distinguishable because the helper
+// explicitly supplies FILE="" alongside CONTENTS.
 inline bool
-reuse_extra_counters_snapshot(std::string_view refreshed_file,
+reuse_extra_counters_snapshot(bool             refreshed_file_set,
+                              std::string&     refreshed_file,
+                              bool             refreshed_contents_set,
                               std::string&     refreshed_contents,
                               std::string_view original_file,
                               std::string_view original_contents)
 {
-    if(refreshed_file.empty() || refreshed_file != original_file || !refreshed_contents.empty())
-        return false;
+    const auto no_new_definition = !refreshed_file_set && !refreshed_contents_set;
+    const auto same_file_path =
+        refreshed_file_set && !refreshed_file.empty() && refreshed_file == original_file;
+    if(!no_new_definition && !same_file_path) return false;
 
+    refreshed_file     = original_file;
     refreshed_contents = original_contents;
     return true;
 }

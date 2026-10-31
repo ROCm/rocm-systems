@@ -11,6 +11,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Resolved issues
 
 - `rocprofv3 -E/--extra-counters` now forwards the absolute path for normal application launch and loads it in the tool runtime. In attachment mode, the helper reads the file after it starts and transfers the contents directly to the target. Large extra-counter definition files are no longer limited by the operating system's environment-string size, and attached targets don't need access to the definition path.
+- Reattaching can omit `-E` or repeat the original path and reuses the target's immutable definition snapshot without reading the source again. Attachments to older target registration libraries reject unsafe large inline definitions before touching the target.
+- When `--rocm-root` selects a tool that predates path-based extra-counter definitions, small files use the legacy inline transport and files exceeding Linux's per-entry exec limit fail before launch.
 
 ### Known issues
 

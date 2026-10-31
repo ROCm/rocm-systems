@@ -139,6 +139,14 @@ class FakeTarget:
         self.map(attach)
         self.map(core)
 
+    def run_register(self, rocprof_attach, libdir, version="0.7.0", scoped=True):
+        content = b"\x7fELF"
+        if scoped:
+            content += b" " + rocprof_attach.REGISTER_SCOPED_ENVIRONMENT_MARKER
+        path = self.add_file(f"{libdir}/librocprofiler-register.so.{version}", content)
+        self.map(path)
+        return path
+
 
 @pytest.fixture
 def target(rocprof_attach, monkeypatch, tmp_path):
@@ -548,6 +556,7 @@ def test_large_extra_counter_file_is_materialized_for_older_target_tool(
     rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
 ):
     target.run_sdk(OTHER_LIBDIR, version="1.4.1")
+    target.run_register(rocprof_attach, OTHER_LIBDIR, scoped=True)
     target.add_thread(PID + 1, "rocp-bg-attach")
     definitions_file = tmp_path / "large extra counters.yaml"
     contents = "# extra counters\n" + ("x" * (256 * 1024))
@@ -569,6 +578,51 @@ def test_large_extra_counter_file_is_materialized_for_older_target_tool(
     assert fake_rocattach.rocattach_attach.calls == [(PID,)]
     assert fake_rocattach.rocattach_detach.calls == [(PID,)]
     _output(capsys)
+
+
+def test_large_extra_counter_file_rejects_old_target_register_before_rocattach(
+    rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
+):
+    target.run_sdk(OTHER_LIBDIR, version="1.4.1")
+    register_path = target.run_register(
+        rocprof_attach, OTHER_LIBDIR, version="0.6.0", scoped=False
+    )
+    target.add_thread(PID + 1, "rocp-bg-attach")
+    definitions_file = tmp_path / "large.yaml"
+    definitions_file.write_text("#" + ("x" * (256 * 1024)))
+    monkeypatch.setenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, str(definitions_file))
+
+    result = _main(rocprof_attach, "--attach-children=false")
+
+    assert result == 1
+    assert not fake_rocattach.loaded_paths
+    _, err = capsys.readouterr()
+    assert register_path in err
+    assert "Refusing to inject" in err
+    assert "Update the target ROCm installation" in err
+    assert "x" * 100 not in err
+
+
+def test_small_extra_counter_file_warns_for_old_target_register_without_leaking(
+    rocprof_attach, target, fake_rocattach, monkeypatch, tmp_path, capsys
+):
+    target.run_sdk(OTHER_LIBDIR, version="1.4.1")
+    target.run_register(rocprof_attach, OTHER_LIBDIR, version="0.6.0", scoped=False)
+    target.add_thread(PID + 1, "rocp-bg-attach")
+    definitions_file = tmp_path / "small.yaml"
+    contents = "sensitive-inline-counter-definition"
+    definitions_file.write_text(contents)
+    monkeypatch.setenv(rocprof_attach.EXTRA_COUNTERS_FILE_ENV, str(definitions_file))
+    monkeypatch.setenv("ROCPROFILER_REGISTER_LOG_LEVEL", "info")
+
+    result = _main(rocprof_attach, "--attach-children=false")
+
+    assert result == 0
+    assert fake_rocattach.rocattach_attach.calls == [(PID,)]
+    _, err = capsys.readouterr()
+    assert "cannot restore or redact" in err
+    assert "INFO logging is enabled" in err
+    assert contents not in err
 
 
 def test_missing_extra_counter_file_fails_before_rocattach(

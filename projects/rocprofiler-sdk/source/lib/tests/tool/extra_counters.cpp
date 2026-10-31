@@ -31,39 +31,62 @@ namespace
 using rocprofiler::tool::reuse_extra_counters_snapshot;
 }
 
-TEST(extra_counters, same_path_reuses_immutable_snapshot)
+TEST(extra_counters, no_new_variables_reuse_immutable_snapshot)
 {
+    auto refreshed_file     = std::string{};
     auto refreshed_contents = std::string{};
 
-    EXPECT_TRUE(reuse_extra_counters_snapshot(
-        "/definitions.yaml", refreshed_contents, "/definitions.yaml", "original contents"));
+    EXPECT_TRUE(reuse_extra_counters_snapshot(false,
+                                              refreshed_file,
+                                              false,
+                                              refreshed_contents,
+                                              "/definitions.yaml",
+                                              "original contents"));
+    EXPECT_EQ(refreshed_file, "/definitions.yaml");
     EXPECT_EQ(refreshed_contents, "original contents");
 }
 
-TEST(extra_counters, same_path_reuses_empty_snapshot)
+TEST(extra_counters, same_path_reuses_snapshot_and_ignores_stale_contents)
 {
+    auto refreshed_file     = std::string{"/definitions.yaml"};
+    auto refreshed_contents = std::string{"stale contents"};
+
+    EXPECT_TRUE(reuse_extra_counters_snapshot(
+        true, refreshed_file, true, refreshed_contents, "/definitions.yaml", "original contents"));
+    EXPECT_EQ(refreshed_file, "/definitions.yaml");
+    EXPECT_EQ(refreshed_contents, "original contents");
+}
+
+TEST(extra_counters, no_new_variables_reuse_empty_snapshot)
+{
+    auto refreshed_file     = std::string{};
     auto refreshed_contents = std::string{};
 
     EXPECT_TRUE(reuse_extra_counters_snapshot(
-        "/empty-definitions.yaml", refreshed_contents, "/empty-definitions.yaml", ""));
+        false, refreshed_file, false, refreshed_contents, "/empty-definitions.yaml", ""));
+    EXPECT_EQ(refreshed_file, "/empty-definitions.yaml");
     EXPECT_TRUE(refreshed_contents.empty());
 }
 
-TEST(extra_counters, explicit_contents_are_not_replaced)
+TEST(extra_counters, explicit_contents_with_cleared_file_are_not_replaced)
 {
+    auto refreshed_file     = std::string{};
     auto refreshed_contents = std::string{"changed contents"};
 
     EXPECT_FALSE(reuse_extra_counters_snapshot(
-        "", refreshed_contents, "/definitions.yaml", "original contents"));
+        true, refreshed_file, true, refreshed_contents, "/definitions.yaml", "original contents"));
+    EXPECT_TRUE(refreshed_file.empty());
     EXPECT_EQ(refreshed_contents, "changed contents");
     EXPECT_NE(refreshed_contents, "original contents");
 }
 
 TEST(extra_counters, changed_path_is_loaded_normally)
 {
+    auto refreshed_file     = std::string{"/new-definitions.yaml"};
     auto refreshed_contents = std::string{};
 
     EXPECT_FALSE(reuse_extra_counters_snapshot(
-        "/new-definitions.yaml", refreshed_contents, "/definitions.yaml", "original contents"));
+        true, refreshed_file, false, refreshed_contents, "/definitions.yaml", "original contents"));
+    EXPECT_EQ(refreshed_file, "/new-definitions.yaml");
     EXPECT_TRUE(refreshed_contents.empty());
 }

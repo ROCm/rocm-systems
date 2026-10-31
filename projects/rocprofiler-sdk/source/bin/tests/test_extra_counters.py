@@ -25,6 +25,7 @@
 import errno
 import os
 import pickle
+import sys
 
 import pytest
 
@@ -35,6 +36,7 @@ def launch(rocprofv3, monkeypatch):
     monkeypatch.delenv("ROCPROF_EXTRA_COUNTERS_FILE", raising=False)
     monkeypatch.delenv("ROCPROF_EXTRA_COUNTERS_CONTENTS", raising=False)
     monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, args: path)
+    monkeypatch.setattr(rocprofv3, "tool_supports_extra_counters_file", lambda path: True)
     monkeypatch.setattr(
         rocprofv3.os,
         "execvpe",
@@ -52,6 +54,7 @@ def launch(rocprofv3, monkeypatch):
         assert len(environments) == previous_count + 1
         return environments[-1]
 
+    run.environments = environments
     return run
 
 
@@ -79,6 +82,109 @@ def test_large_extra_counter_file_is_not_copied_into_environment(launch, tmp_pat
 
     assert env["ROCPROF_EXTRA_COUNTERS_FILE"] == os.path.abspath(definitions_file)
     assert "ROCPROF_EXTRA_COUNTERS_CONTENTS" not in env
+
+
+def test_tool_file_support_is_detected_from_binary_marker(rocprofv3, tmp_path):
+    old_tool = tmp_path / "old-tool.so"
+    new_tool = tmp_path / "new-tool.so"
+    old_tool.write_bytes(b"\x7fELF legacy tool")
+    new_tool.write_bytes(
+        b"\x7fELF current tool " + rocprofv3.EXTRA_COUNTERS_FILE_ENV.encode()
+    )
+
+    assert not rocprofv3.tool_supports_extra_counters_file(str(old_tool))
+    assert rocprofv3.tool_supports_extra_counters_file(str(new_tool))
+
+
+def test_new_selected_tool_keeps_path_only(launch, rocprofv3, monkeypatch, tmp_path):
+    new_tool = tmp_path / "new-tool.so"
+    new_tool.write_bytes(
+        b"\x7fELF current tool " + rocprofv3.EXTRA_COUNTERS_FILE_ENV.encode()
+    )
+    definitions_file = tmp_path / "extra.yaml"
+    definitions_file.write_text("rocprofiler-sdk:\n  counters: []\n")
+    monkeypatch.setattr(
+        rocprofv3,
+        "resolve_library_path",
+        lambda path, args: (
+            str(new_tool) if path.endswith("librocprofiler-sdk-tool.so") else path
+        ),
+    )
+    monkeypatch.setattr(
+        rocprofv3,
+        "tool_supports_extra_counters_file",
+        lambda path: rocprofv3._file_contains_bytes(
+            path, rocprofv3.EXTRA_COUNTERS_FILE_ENV.encode()
+        ),
+    )
+
+    env = launch("--rocm-root", str(tmp_path / "new-rocm"), "-E", str(definitions_file))
+
+    assert env[rocprofv3.EXTRA_COUNTERS_FILE_ENV] == str(definitions_file)
+    assert rocprofv3.EXTRA_COUNTERS_CONTENTS_ENV not in env
+
+
+def test_old_tool_uses_legacy_contents_for_small_file(
+    launch, rocprofv3, monkeypatch, tmp_path
+):
+    old_tool = tmp_path / "old-tool.so"
+    old_tool.write_bytes(b"\x7fELF legacy tool")
+    definitions_file = tmp_path / "small.yaml"
+    contents = "rocprofiler-sdk:\n  counters: []\n"
+    definitions_file.write_text(contents)
+    monkeypatch.setattr(
+        rocprofv3,
+        "resolve_library_path",
+        lambda path, args: (
+            str(old_tool) if path.endswith("librocprofiler-sdk-tool.so") else path
+        ),
+    )
+    monkeypatch.setattr(
+        rocprofv3,
+        "tool_supports_extra_counters_file",
+        lambda path: rocprofv3._file_contains_bytes(
+            path, rocprofv3.EXTRA_COUNTERS_FILE_ENV.encode()
+        ),
+    )
+
+    env = launch("--rocm-root", str(tmp_path / "old-rocm"), "-E", str(definitions_file))
+
+    assert env["ROCPROF_EXTRA_COUNTERS_CONTENTS"] == contents
+    assert "ROCPROF_EXTRA_COUNTERS_FILE" not in env
+
+
+def test_old_tool_rejects_large_file_before_exec(
+    launch, rocprofv3, monkeypatch, tmp_path, capsys
+):
+    old_tool = tmp_path / "old-tool.so"
+    old_tool.write_bytes(b"\x7fELF legacy tool")
+    definitions_file = tmp_path / "large.yaml"
+    definitions_file.write_text("#" + ("x" * (256 * 1024)))
+    monkeypatch.setattr(
+        rocprofv3,
+        "resolve_library_path",
+        lambda path, args: (
+            str(old_tool) if path.endswith("librocprofiler-sdk-tool.so") else path
+        ),
+    )
+    monkeypatch.setattr(
+        rocprofv3, "tool_supports_extra_counters_file", lambda path: False
+    )
+
+    with pytest.raises(SystemExit) as error:
+        launch(
+            "--rocm-root",
+            str(tmp_path / "old-rocm"),
+            "-E",
+            str(definitions_file),
+        )
+
+    assert error.value.code == 1
+    assert not launch.environments
+    message = capsys.readouterr().err
+    assert str(old_tool) in message
+    assert rocprofv3.EXTRA_COUNTERS_FILE_ENV in message
+    assert "exec limit" in message
 
 
 def test_attach_with_application_preserves_args_and_large_path_only(
@@ -137,6 +243,98 @@ def test_attach_with_application_preserves_args_and_large_path_only(
     for env in (attach_env, app_env):
         assert env["ROCPROF_EXTRA_COUNTERS_FILE"] == os.path.abspath(definitions_file)
         assert "ROCPROF_EXTRA_COUNTERS_CONTENTS" not in env
+
+
+@pytest.mark.parametrize(
+    "source_change,repeat_option",
+    [("modify", True), ("delete", False)],
+)
+def test_reattach_reuses_snapshot_without_reading_source(
+    rocprofv3, monkeypatch, tmp_path, source_change, repeat_option
+):
+    definitions_file = tmp_path / "extra.yaml"
+    definitions_file.write_text("original contents")
+    pid = 987654322 if repeat_option else 987654323
+    cache_file = tmp_path / "attach.pkl"
+    environments = []
+
+    monkeypatch.delenv(rocprofv3.EXTRA_COUNTERS_FILE_ENV, raising=False)
+    monkeypatch.delenv(rocprofv3.EXTRA_COUNTERS_CONTENTS_ENV, raising=False)
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, args: path)
+    monkeypatch.setitem(sys.modules, rocprofv3.__name__, rocprofv3)
+
+    real_open = os.open
+
+    def redirected_open(path, flags, mode=0o600):
+        if path == f"/tmp/rocprofv3_attach_{pid}.pkl":
+            path = cache_file
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(rocprofv3.os, "open", redirected_open)
+    monkeypatch.setattr(
+        rocprofv3.os,
+        "execvpe",
+        lambda executable, argv, env: environments.append(dict(env)),
+    )
+
+    first_args = [
+        "--kernel-trace",
+        "--pid",
+        str(pid),
+        "-E",
+        str(definitions_file),
+    ]
+    rocprofv3.main(first_args)
+
+    if source_change == "modify":
+        definitions_file.write_text("changed contents")
+    else:
+        definitions_file.unlink()
+
+    second_args = ["--kernel-trace", "--pid", str(pid)]
+    if repeat_option:
+        second_args.extend(["-E", str(definitions_file)])
+    rocprofv3.main(second_args)
+
+    assert len(environments) == 2
+    assert environments[0][rocprofv3.EXTRA_COUNTERS_FILE_ENV] == str(definitions_file)
+    assert rocprofv3.EXTRA_COUNTERS_CONTENTS_ENV not in environments[0]
+    assert rocprofv3.EXTRA_COUNTERS_FILE_ENV not in environments[1]
+    assert rocprofv3.EXTRA_COUNTERS_CONTENTS_ENV not in environments[1]
+
+
+def test_reattach_rejects_different_extra_counter_path_before_exec(
+    rocprofv3, monkeypatch, tmp_path
+):
+    first_file = tmp_path / "first.yaml"
+    second_file = tmp_path / "second.yaml"
+    first_file.write_text("first")
+    second_file.write_text("second")
+    pid = 987654324
+    cache_file = tmp_path / "attach.pkl"
+    environments = []
+
+    monkeypatch.setattr(rocprofv3, "resolve_library_path", lambda path, args: path)
+    monkeypatch.setitem(sys.modules, rocprofv3.__name__, rocprofv3)
+    real_open = os.open
+
+    def redirected_open(path, flags, mode=0o600):
+        if path == f"/tmp/rocprofv3_attach_{pid}.pkl":
+            path = cache_file
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(rocprofv3.os, "open", redirected_open)
+    monkeypatch.setattr(
+        rocprofv3.os,
+        "execvpe",
+        lambda executable, argv, env: environments.append(dict(env)),
+    )
+
+    rocprofv3.main(["--kernel-trace", "--pid", str(pid), "-E", str(first_file)])
+    with pytest.raises(RuntimeError, match="extra_counters.*conflicting values"):
+        rocprofv3.main(["--kernel-trace", "--pid", str(pid), "-E", str(second_file)])
+
+    assert len(environments) == 1
 
 
 def test_legacy_inline_contents_are_preserved_without_extra_counter_option(
