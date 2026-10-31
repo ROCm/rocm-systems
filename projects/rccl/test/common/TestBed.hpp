@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <chrono>
+#include <memory>
 
 namespace RcclUnitTesting
 {
@@ -21,7 +22,8 @@ namespace RcclUnitTesting
   {
   public:
     int                        numDevicesAvailable;   // # of devices detected on node
-    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms)
+    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms); owned by ownedChildren or poolChildren
+    std::vector<std::unique_ptr<TestBedChild>> ownedChildren; // Fork-fresh workers of the active config (empty when it uses the pool)
     std::vector<int>           rankToChildMap;        // Child process of each active rank
     std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
     std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
@@ -33,7 +35,7 @@ namespace RcclUnitTesting
     // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
     // the pool-reset boundary (re-forks the pool with the current env).
     bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
-    std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
+    std::vector<std::unique_ptr<TestBedChild>> poolChildren; // persistent pool, index == pinned device id
     // Cold: device code not loaded yet. Warming: a WARMUP reply is still unread,
     // so nothing else may be sent to or read from that worker. Warm: loaded.
     enum class PoolWorkerState { Cold, Warming, Warm };
@@ -43,6 +45,8 @@ namespace RcclUnitTesting
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
+    TestBed(TestBed const&) = delete;
+    TestBed& operator=(TestBed const&) = delete;
 
     int NumActiveChildren() const { return static_cast<int>(childList.size()); }
     int NumActiveRanks() const    { return static_cast<int>(rankToChildMap.size()); }
@@ -143,15 +147,15 @@ namespace RcclUnitTesting
     // No further calls to TestBed should be performed after this call
     void Finalize();
 
-    // Teardown helpers. TeardownOwnedChildList reaps the per-config fork-fresh children
-    // that childList owns (classic / pool-fallback path). TeardownPool reaps the
-    // persistent pool workers. Finalize() is the pool-reset boundary and runs both.
+    // Teardown helpers. TeardownOwnedChildList reaps ownedChildren (classic /
+    // pool-fallback path). TeardownPool reaps the persistent pool workers.
+    // Finalize() is the pool-reset boundary and runs both.
     void TeardownOwnedChildList();
     void TeardownPool();
 
-    // Test hook: makes already-forked children the active fork-fresh config, with
-    // one rank per child (rank i on children[i]), as InitComms would.
-    void AdoptChildren(std::vector<TestBedChild*> const& children);
+    // Test hook: appends an already-forked child to the active fork-fresh config
+    // as its next rank, as InitComms would. Returns the adopted child.
+    TestBedChild* AdoptChild(std::unique_ptr<TestBedChild> child);
 
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();

@@ -13,8 +13,10 @@
 #include "comm.h"
 
 #include <algorithm>
+#include <csignal>
 #include <thread>
 #include <execinfo.h>
+#include <sys/wait.h>
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -90,6 +92,16 @@ namespace RcclUnitTesting
     this->parentReadFd  = -1;
     this->childWriteFd  = -1;
     this->childReadFd   = -1;
+  }
+
+  TestBedChild::~TestBedChild()
+  {
+    if (this->pid > 0)
+    {
+      kill(this->pid, SIGKILL);
+      while (waitpid(this->pid, nullptr, 0) == -1 && errno == EINTR) {}
+    }
+    ClosePipes();
   }
 
   int TestBedChild::InitPipes()
@@ -1559,6 +1571,20 @@ namespace RcclUnitTesting
             }
             this->streams[i][j][k] = nullptr; // Avoid double-destruction
           }
+        }
+      }
+    }
+
+    // Free buffers the test did not release with DeallocateMem. The next
+    // InitComms drops them without freeing, so a pooled worker would leak them.
+    for (auto& groupArgs : this->collArgs)
+    {
+      for (size_t localRank = 0; localRank < groupArgs.size(); ++localRank)
+      {
+        if (localRank < this->deviceIds.size()) (void)hipSetDevice(this->deviceIds[localRank]);
+        for (CollectiveArgs& collArg : groupArgs[localRank])
+        {
+          if (collArg.DeallocateMem() != TEST_SUCCESS) status = TEST_FAIL;
         }
       }
     }

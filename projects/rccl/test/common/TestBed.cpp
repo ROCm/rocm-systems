@@ -350,26 +350,16 @@ namespace RcclUnitTesting
     TEST_ERROR("%s", reason.c_str());
 
     // Surviving workers may be waiting on the lost one inside a collective, so
-    // they cannot be asked to stop. childList either borrows pool workers or
-    // owns its children, and the pool may also hold workers from an earlier
-    // config: collect each worker once.
-    std::set<TestBedChild*> workers(this->poolChildren.begin(), this->poolChildren.end());
-    workers.insert(this->childList.begin(), this->childList.end());
-    workers.erase(nullptr);
-    for (TestBedChild* c : workers)
+    // they cannot be asked to stop. Kill them all first so they die in
+    // parallel; the destructors then reap them and close their pipes.
+    for (auto const* workers : {&this->ownedChildren, &this->poolChildren})
     {
-      if (c->pid > 0) kill(c->pid, SIGKILL);
-    }
-    for (TestBedChild* c : workers)
-    {
-      if (c->pid > 0)
+      for (auto const& c : *workers)
       {
-        while (waitpid(c->pid, nullptr, 0) == -1 && errno == EINTR) {}
+        if (c && c->pid > 0) kill(c->pid, SIGKILL);
       }
-      c->ClosePipes();
-      delete c;
     }
-
+    this->ownedChildren.clear();
     this->poolChildren.clear();
     this->poolWorkerState.clear();
     this->configUsedPool = false;
@@ -384,13 +374,14 @@ namespace RcclUnitTesting
     this->childFailed = false;
   }
 
-  void TestBed::AdoptChildren(std::vector<TestBedChild*> const& children)
+  TestBedChild* TestBed::AdoptChild(std::unique_ptr<TestBedChild> child)
   {
     this->poolMode = false;
     this->configUsedPool = false;
-    ResetActiveConfig();
-    this->childList = children;
-    for (int childId = 0; childId < NumActiveChildren(); ++childId) this->rankToChildMap.push_back(childId);
+    this->rankToChildMap.push_back(NumActiveChildren());
+    this->childList.push_back(child.get());
+    this->ownedChildren.push_back(std::move(child));
+    return this->childList.back();
   }
 
   bool TestBed::SelectRanks(int const rank, std::vector<int>& ranks) const
@@ -485,7 +476,7 @@ namespace RcclUnitTesting
 
   bool TestBed::FinishWarmup(int const worker, std::chrono::steady_clock::time_point const deadline)
   {
-    TestBedChild* const child = this->poolChildren[worker];
+    TestBedChild* const child = this->poolChildren[worker].get();
     this->poolWorkerState[worker] = PoolWorkerState::Warm;
 
     int const timeoutSec = ChildReplyTimeoutSec();
@@ -518,14 +509,7 @@ namespace RcclUnitTesting
                                std::to_string(child->pid) + ") warm-up " + problem;
     TEST_ERROR("%s; removing it from the pool", reason.c_str());
     ADD_FAILURE() << reason;
-    if (child->pid > 0)
-    {
-      kill(child->pid, SIGKILL);
-      while (waitpid(child->pid, nullptr, 0) == -1 && errno == EINTR) {}
-    }
-    child->ClosePipes();
-    delete child;
-    this->poolChildren[worker] = nullptr;
+    this->poolChildren[worker].reset();
     return false;
   }
 
@@ -587,12 +571,12 @@ namespace RcclUnitTesting
         {
           poolSize = detectedGpus;
         }
-        this->poolChildren.assign(poolSize, nullptr);
+        this->poolChildren.resize(poolSize);
         this->poolWorkerState.assign(poolSize, PoolWorkerState::Cold);
         for (int d = 0; d < poolSize; ++d)
         {
-          this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
-          if (!SpawnChildProcess(this->poolChildren[d], memAllocType))
+          this->poolChildren[d] = std::make_unique<TestBedChild>(d, ev.verbose, ev.printValues, ev.useMultithreading);
+          if (!SpawnChildProcess(this->poolChildren[d].get(), memAllocType))
           {
             // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
             // stops instead of indexing an empty childList -> SEGV.
@@ -623,7 +607,7 @@ namespace RcclUnitTesting
         childList.clear();
         for (int const worker : workers)
         {
-          childList.push_back(this->poolChildren[worker]);
+          childList.push_back(this->poolChildren[worker].get());
           this->poolWorkerState[worker] = PoolWorkerState::Warm;
         }
         this->configUsedPool = true;
@@ -634,22 +618,19 @@ namespace RcclUnitTesting
     {
       // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
       // The childList invariant was checked above after any prior teardown.
-      childList.resize(numChildren);
       for (int childId = 0; childId < numChildren; ++childId)
       {
-        childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-        if (!SpawnChildProcess(childList[childId], memAllocType))
+        auto child = std::make_unique<TestBedChild>(childId, ev.verbose, ev.printValues, ev.useMultithreading);
+        if (!SpawnChildProcess(child.get(), memAllocType))
         {
-          // SpawnChildProcess already closed the failed child's pipe descriptors.
-          // Remove the never-started child so teardown does not write to or wait on it.
-          TestBedChild* failedChild = childList[childId];
-          delete failedChild;
-          childList.resize(childId);
+          // The never-started child is dropped here, so teardown does not write to or wait on it.
           // FAIL() only returns from InitComms and callers may carry on, so no
           // rank may still map to a child that was never started.
           this->rankToChildMap.clear();
           FAIL() << "Unable to start child process " << childId;
         }
+        childList.push_back(child.get());
+        this->ownedChildren.push_back(std::move(child));
       }
     }
 
@@ -1304,9 +1285,9 @@ namespace RcclUnitTesting
 
   void TestBed::TeardownOwnedChildList()
   {
-    // Only reaps children that childList OWNS (classic / fork-fresh path). In pool mode
-    // childList holds borrowed pool refs (cleared by DestroyComms), so this is a no-op.
-    if (this->configUsedPool || this->childList.empty())
+    // Only reaps the fork-fresh children of the active config. A pool config
+    // owns none (DestroyComms drops its borrowed refs), so this is a no-op.
+    if (this->ownedChildren.empty())
       return;
 
     InteractiveWait("Starting Finalize");
@@ -1315,10 +1296,8 @@ namespace RcclUnitTesting
     // HIP/RCCL failure. Teardown must still close every pipe, reap every child,
     // and restore the empty-childList invariant.
     int const cmd = TestBedChild::CHILD_STOP;
-    for (TestBedChild* child : childList)
+    for (auto const& child : this->ownedChildren)
     {
-      if (child == nullptr)
-        continue;
       if (child->pid > 0 && child->parentWriteFd >= 0)
         (void)RcclUnitTesting::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
       if (child->parentWriteFd >= 0)
@@ -1331,16 +1310,15 @@ namespace RcclUnitTesting
     // Wait for processes to stop. Children tear down in parallel, so they share one deadline.
     int const timeoutSec = ChildReplyTimeoutSec();
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
-    for (int childId = 0; childId < NumActiveChildren(); ++childId)
+    for (int childId = 0; childId < static_cast<int>(this->ownedChildren.size()); ++childId)
     {
-      TestBedChild* child = childList[childId];
-      if (child == nullptr)
-        continue;
+      TestBedChild* const child = this->ownedChildren[childId].get();
       int returnVal = 0;
       pid_t waitResult = -1;
       if (child->pid > 0)
       {
         waitResult = ReapChild(child->pid, &returnVal, timeoutSec == 0, deadline);
+        child->pid = -1;
       }
       if (waitResult > 0 && WIFSIGNALED(returnVal))
       {
@@ -1350,11 +1328,9 @@ namespace RcclUnitTesting
       {
         TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
       }
-      // Only close the read end AFTER the child process is dead
-      if (child->parentReadFd >= 0)
-        close(child->parentReadFd);
-      delete child;
     }
+    // Only close the read ends AFTER the child processes are dead
+    this->ownedChildren.clear();
 
     ResetActiveConfig();
 
@@ -1380,7 +1356,7 @@ namespace RcclUnitTesting
 
     // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
     int const cmd = TestBedChild::CHILD_STOP;
-    for (TestBedChild* c : this->poolChildren)
+    for (auto const& c : this->poolChildren)
     {
       if (!c)
       {
@@ -1394,7 +1370,7 @@ namespace RcclUnitTesting
     }
     int const timeoutSec = ChildReplyTimeoutSec();
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
-    for (TestBedChild* c : this->poolChildren)
+    for (auto const& c : this->poolChildren)
     {
       if (!c)
       {
@@ -1405,6 +1381,7 @@ namespace RcclUnitTesting
       {
         int returnVal = 0;
         pid_t const waitResult = ReapChild(c->pid, &returnVal, timeoutSec == 0, deadline);
+        c->pid = -1;
         if (waitResult > 0 && WIFSIGNALED(returnVal))
         {
           TEST_ERROR("Pool worker %d killed by signal %d", c->childId, WTERMSIG(returnVal));
@@ -1414,12 +1391,11 @@ namespace RcclUnitTesting
           TEST_ERROR("Pool worker %d exited with code %d", c->childId, WEXITSTATUS(returnVal));
         }
       }
-      delete c;
     }
     this->poolChildren.clear();
     this->poolWorkerState.clear();
     this->configUsedPool = false;
-    ResetActiveConfig();          // childList held borrowed refs only; do not delete
+    ResetActiveConfig();
   }
 
   TestBed::~TestBed()

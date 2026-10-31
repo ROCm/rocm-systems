@@ -125,6 +125,12 @@ namespace RcclUnitTesting
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
+    TestBedChild(TestBedChild const&) = delete;
+    TestBedChild& operator=(TestBedChild const&) = delete;
+
+    // Parent side: kills and reaps a process teardown did not reap (pid > 0),
+    // then closes the pipes. Whoever reaps pid must set it to -1 first.
+    ~TestBedChild();
 
     // Prepare parent/child communication pipes - to be executed by parent process
     int InitPipes();

@@ -12,7 +12,10 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <poll.h>
 #include <sys/wait.h>
@@ -141,7 +144,8 @@ namespace RcclUnitTesting
   TEST(Teardown, AlreadyExitedChildCleanup)
   {
     TestBed testBed;
-    TestBedChild* child = new TestBedChild(0, false, 0, false);
+    auto owned = std::make_unique<TestBedChild>(0, false, 0, false);
+    TestBedChild* const child = owned.get();
     ASSERT_EQ(child->InitPipes(), TEST_SUCCESS);
     child->pid = fork();
     ASSERT_GE(child->pid, 0);
@@ -158,7 +162,7 @@ namespace RcclUnitTesting
     close(child->childReadFd);
     child->childWriteFd = -1;
     child->childReadFd = -1;
-    testBed.AdoptChildren({child});
+    testBed.AdoptChild(std::move(owned));
 
     // Wait until the worker has exited, but leave it for TestBed to reap.
     siginfo_t childInfo{};
@@ -195,16 +199,11 @@ namespace RcclUnitTesting
     // Forks a worker that keeps its pipes open but never answers, as a worker
     // wedged in a collective would. With a status, it first reads one two-int
     // command (such as LaunchGraphs) and answers it as reply number seq.
-    TestBedChild* ForkHungChild(int const childId, std::optional<int> const status = std::nullopt,
-                                uint32_t const seq = 1)
+    std::unique_ptr<TestBedChild> ForkHungChild(int const childId, std::optional<int> const status = std::nullopt,
+                                                uint32_t const seq = 1)
     {
-      TestBedChild* child = new TestBedChild(childId, false, 0, false);
-      if (child->InitPipes() != TEST_SUCCESS)
-      {
-        child->ClosePipes();
-        delete child;
-        return nullptr;
-      }
+      auto child = std::make_unique<TestBedChild>(childId, false, 0, false);
+      if (child->InitPipes() != TEST_SUCCESS) return nullptr;
       child->pid = fork();
       if (child->pid == 0)
       {
@@ -219,12 +218,7 @@ namespace RcclUnitTesting
         }
         while (true) pause();
       }
-      if (child->pid < 0)
-      {
-        child->ClosePipes();
-        delete child;
-        return nullptr;
-      }
+      if (child->pid < 0) return nullptr;
       close(child->childWriteFd);
       close(child->childReadFd);
       child->childWriteFd = -1;
@@ -236,10 +230,9 @@ namespace RcclUnitTesting
     TestBedChild* InstallHungChild(TestBed& testBed)
     {
       LimitParentWaitsToOneSecond(testBed);
-      TestBedChild* const child = ForkHungChild(0);
+      auto child = ForkHungChild(0);
       if (child == nullptr) return nullptr;
-      testBed.AdoptChildren({child});
-      return child;
+      return testBed.AdoptChild(std::move(child));
     }
 
     bool AnyFailureMentions(::testing::TestPartResultArray const& failures, char const* text)
@@ -313,15 +306,13 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
     LimitParentWaitsToOneSecond(testBed);
-    std::vector<TestBedChild*> children;
+    std::vector<pid_t> pids;
     for (int const status : {static_cast<int>(TEST_FAIL), static_cast<int>(TEST_SUCCESS)})
     {
-      TestBedChild* const child = ForkHungChild(static_cast<int>(children.size()), status);
-      if (child != nullptr) children.push_back(child);
+      auto child = ForkHungChild(testBed.NumActiveChildren(), status);
+      if (child != nullptr) pids.push_back(testBed.AdoptChild(std::move(child))->pid);
     }
-    testBed.AdoptChildren(children);
     ASSERT_EQ(testBed.NumActiveChildren(), 2);
-    std::vector<pid_t> const pids = {children[0]->pid, children[1]->pid};
     testBed.numGroupCalls = 1;
 
     ::testing::TestPartResultArray failures;
@@ -346,10 +337,9 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
     LimitParentWaitsToOneSecond(testBed);
-    TestBedChild* const child = ForkHungChild(0, TEST_SUCCESS, /*seq*/ 2);
+    auto child = ForkHungChild(0, TEST_SUCCESS, /*seq*/ 2);
     ASSERT_NE(child, nullptr);
-    testBed.AdoptChildren({child});
-    pid_t const childPid = child->pid;
+    pid_t const childPid = testBed.AdoptChild(std::move(child))->pid;
     testBed.numGroupCalls = 1;
 
     ::testing::TestPartResultArray failures;
@@ -407,6 +397,23 @@ namespace RcclUnitTesting
       return worker;
     }
 
+    // VRAM the KFD driver attributes to pid, summed over its GPUs; -1 if unavailable.
+    long long ProcessVramBytes(pid_t const pid)
+    {
+      std::error_code ec;
+      std::filesystem::directory_iterator it("/sys/class/kfd/kfd/proc/" + std::to_string(pid), ec);
+      if (ec) return -1;
+      long long total = -1;
+      for (auto const& entry : it)
+      {
+        if (entry.path().filename().string().rfind("vram_", 0) != 0) continue;
+        long long bytes = 0;
+        if (!(std::ifstream(entry.path()) >> bytes)) return -1;
+        total = std::max(total, 0LL) + bytes;
+      }
+      return total;
+    }
+
     // A reply the parent never read only fails the next command to that worker;
     // the leftover bytes in the pipe show it right away.
     bool HasUnreadReply(TestBedChild const* worker, int const waitMs)
@@ -425,6 +432,38 @@ namespace RcclUnitTesting
       }
       return status;
     }
+  }
+
+  // A pool worker outlives its config, so DestroyComms must free the buffers a
+  // test left allocated; the next InitComms drops them without freeing.
+  TEST(Teardown, PoolWorkerFreesBuffersLeftAllocated)
+  {
+    TestBed testBed;
+    std::string const skipReason = MultiProcessSkipReason(testBed, /*needPool=*/true);
+    if (!skipReason.empty()) GTEST_SKIP() << skipReason;
+
+    auto const deviceIds = TestBed::GetDeviceIdsList(2, 2, testBed.ev.GetGpuPriorityOrder());
+    int const worker = deviceIds[0][0];
+    size_t const numElements = 64 * 1024 * 1024;
+    long long const bufferBytes = numElements * sizeof(float);
+    long long firstVram = -1;
+    for (int cycle = 0; cycle < 3; ++cycle)
+    {
+      testBed.InitComms(deviceIds);
+      ASSERT_TRUE(testBed.configUsedPool) << "Config was not served from the communicator pool";
+      OptionalColArgs options;
+      options.redOp = ncclSum;
+      testBed.SetCollectiveArgs(ncclCollAllReduce, ncclFloat32, numElements, numElements, options);
+      testBed.AllocateMem(/*inPlace*/ false, /*useManagedMem*/ false);
+      testBed.DestroyComms();
+      ASSERT_FALSE(testing::Test::HasFailure());
+
+      long long const vram = ProcessVramBytes(testBed.poolChildren[worker]->pid);
+      if (vram < 0) GTEST_SKIP() << "Per-process VRAM usage unavailable (/sys/class/kfd/kfd/proc)";
+      if (cycle == 0) firstVram = vram;
+      else EXPECT_LT(vram - firstVram, bufferBytes) << "Pool worker VRAM grew after config " << cycle;
+    }
+    testBed.Finalize();
   }
 
   // Rank 0 gets an out-of-range root, so its ncclBroadcast fails at once, while
@@ -505,7 +544,7 @@ namespace RcclUnitTesting
     EXPECT_EQ(testBed.poolWorkerState[worker], TestBed::PoolWorkerState::Warm);
     for (auto const& deviceIds : twoProcessIds)
     {
-      EXPECT_FALSE(HasUnreadReply(testBed.poolChildren[deviceIds[0]], /*waitMs*/ 1000))
+      EXPECT_FALSE(HasUnreadReply(testBed.poolChildren[deviceIds[0]].get(), /*waitMs*/ 1000))
         << "Pool worker " << deviceIds[0] << " has a reply the parent never read";
     }
     testBed.Finalize();
@@ -517,10 +556,10 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
     LimitParentWaitsToOneSecond(testBed);
-    TestBedChild* const child = ForkHungChild(0);
+    auto child = ForkHungChild(0);
     ASSERT_NE(child, nullptr);
     pid_t const childPid = child->pid;
-    testBed.poolChildren = {child};
+    testBed.poolChildren.push_back(std::move(child));
     testBed.poolWorkerState = {TestBed::PoolWorkerState::Warming};
     ASSERT_EQ(kill(childPid, SIGKILL), 0);
 
@@ -545,9 +584,9 @@ namespace RcclUnitTesting
     int const numWorkers = 3;
     for (int worker = 0; worker < numWorkers; ++worker)
     {
-      TestBedChild* const child = ForkHungChild(worker);
+      auto child = ForkHungChild(worker);
       ASSERT_NE(child, nullptr);
-      testBed.poolChildren.push_back(child);
+      testBed.poolChildren.push_back(std::move(child));
       testBed.poolWorkerState.push_back(TestBed::PoolWorkerState::Warming);
     }
 
@@ -724,7 +763,7 @@ namespace RcclUnitTesting
     CaptureFailures(failures, [&]() { testBed.InitComms(twoProcessIds); });
     EXPECT_EQ(failures.size(), 1);
     EXPECT_TRUE(AnyFailureMentions(failures, "warm-up"));
-    EXPECT_EQ(testBed.poolChildren[worker], nullptr);
+    EXPECT_EQ(testBed.poolChildren[worker].get(), nullptr);
     EXPECT_FALSE(testBed.configUsedPool);
     EXPECT_EQ(testBed.NumActiveChildren(), 2);
     errno = 0;
