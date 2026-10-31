@@ -2547,7 +2547,6 @@ class CodeGenerator:
         vopd3_header_decls = '\n'
         vopd3_model_helpers = ''
         vopd3_f64_helpers = ''
-        vopd3_execute_slot_cases = ''
         vopd3_constructor_branch = ''
         vopd3_constructor_close = ''
         vopd3_validation_branch = ''
@@ -2563,7 +2562,9 @@ class CodeGenerator:
                 if (!(exec & (1ULL << lane)))
                   continue;
                 uint32_t x_result = execute_slot(x_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 uint32_t y_result = execute_slot(y_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
                 amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
               }
@@ -2624,19 +2625,12 @@ class CodeGenerator:
                 return std::bit_cast<uint64_t>(result);
               }
               default:
-                throw util::UnimplementedInst(op_name(slot.op));
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+                return 0;
               }
             }
             ''')
-            vopd3_execute_slot_cases = cpp_block('''
-            @VOPD_FLOAT64_CASES@
-                throw util::UnimplementedInst(
-                    std::string(op_name(slot.op)) +
-                    " (VOPD F64 execution requires 64-bit VGPR pair support)");
-            ''')
-            vopd3_execute_slot_cases = vopd3_execute_slot_cases.replace(
-                '@VOPD_FLOAT64_CASES@', vopd_float64_case_labels
-            )
             vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 format_ = Format::Vopd3;
@@ -2736,9 +2730,13 @@ class CodeGenerator:
                 bool x64 = is_float64_op(x_.op);
                 bool y64 = is_float64_op(y_.op);
                 uint64_t x_result64 = x64 ? execute_slot64(x_, wf, lane) : 0;
+                if (wf.instruction_execution_failed()) return;
                 uint64_t y_result64 = y64 ? execute_slot64(y_, wf, lane) : 0;
+                if (wf.instruction_execution_failed()) return;
                 uint32_t x_result32 = x64 ? 0 : execute_slot(x_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 uint32_t y_result32 = y64 ? 0 : execute_slot(y_, wf, lane);
+                if (wf.instruction_execution_failed()) return;
                 if (x64)
                   amdgpu::RegisterAccess(wf).write_lane64(*x_.dst, lane, x_result64);
                 else
@@ -2753,12 +2751,8 @@ class CodeGenerator:
             f'  if (amdgpu::try_execute_vopd_simd<{str(has_vopd3).lower()}>(x_, y_, wf)) return;\n'
             + execute_impl_body
         )
-        vopd_execute_slot_cases = join_cases(
-            vopd_execute_slot_cases, vopd3_execute_slot_cases
-        )
         vopd_impl_includes = textwrap.dedent('''\
             #include "@GENERATED_ARCH@/vopd.h"
-            #include "util/except.h"
             #include "rocjitsu/vm/amdgpu/wavefront.h"
             #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
             #include <algorithm>
@@ -2771,7 +2765,6 @@ class CodeGenerator:
             vopd_impl_includes = textwrap.dedent('''\
                 #include "@GENERATED_ARCH@/vopd.h"
                 #include "@GENERATED_ARCH@/execution_backend.h"
-                #include "util/except.h"
                 #include <format>
                 #include <string>
                 ''')
@@ -2810,6 +2803,8 @@ class CodeGenerator:
               static Result validate_encoding(const MachineInst *inst,
                                               const util::DiagnosticEmitter &emit_error);
               void execute_impl(amdgpu::Wavefront &wf);
+
+              std::string disassemble() const override;
 
               private:
               enum class Format : uint8_t { VopdXy@VOPD3_FORMAT_ENUM@ };
@@ -2916,7 +2911,9 @@ class CodeGenerator:
               switch (slot.op) {
             @VOPD_EXECUTE_SLOT_CASES@
               default:
-                throw util::UnimplementedInst(op_name(slot.op));
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnimplementedInstruction);
+                return 0;
               }
             }
             ''')
@@ -3181,7 +3178,10 @@ class CodeGenerator:
             @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
               mnemonic_ = mnemonic_storage_;
-              disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
+            }
+
+            std::string Vopd::disassemble() const {
+              return format_slot(x_) + " :: " + format_slot(y_);
             }
 
             void Vopd::init_operands() {
@@ -3306,7 +3306,6 @@ class CodeGenerator:
                 '// AUTO-GENERATED by the amdisa codegen pipeline. DO NOT EDIT.\n'
                 '// See lib/python/amdisa/README.md for regeneration instructions.\n\n'
                 f'#include "{self.config.generated_include(self.generated_dir_name, "vopd.h")}"\n'
-                '#include "util/except.h"\n'
                 '#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"\n'
                 '#include "rocjitsu/vm/amdgpu/register_access.h"\n'
                 '#include "rocjitsu/vm/amdgpu/wavefront.h"\n'

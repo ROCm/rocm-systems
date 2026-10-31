@@ -2,12 +2,14 @@
 
 ## Current implementation
 
-FP16/BF16 WMMA and FP16/FP32 FMA support Wave32 and Wave64, with loose
-and empirical exact results.
-gfx12 FP16 FMA reports FP status in mode 3; gfx11 FMA and FP32 FMA reject
-mode 3. WMMA accepts modes 0–3 and has no FP-status output.
+Dense WMMA supports FP16/BF16, packed accumulators, gfx12 FP8/BF8 and
+integer formats, in both wave sizes. Sparse WMMA adds 2:4 metadata selection
+with tied accumulators. Fused arithmetic includes FP16/FP32, packed halves,
+literals and mixed precision; FP64 arithmetic currently supports loose results only.
+FP status is available for gfx12 FP16 FMA under default guest rounding and denormals.
+WMMA has no FP-status output; mode 3 has the same numeric requirements as mode 2.
 Source/output modifiers and FMA DPP routing are supported. Compatibility selects
-mode 2 for these entry points. CPU implementations are scalar; SIMD is planned.
+the established instruction policy. CPU implementations are scalar, AVX2, AVX-512 and native BF16.
 
 Family headers state each entry point's supported controls.
 

@@ -32,9 +32,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -45,6 +47,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -67,6 +70,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -76,6 +80,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -105,7 +110,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 480u);
 }
 
 TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
@@ -1936,6 +1941,58 @@ make_vopdxy_pair(uint8_t opx, uint8_t opy, uint16_t srcx0 = vopd_src0_vgpr(1), u
   };
 }
 
+TEST(InstructionDisassemblyTest, ConcurrentFormattingReturnsIndependentText) {
+  const struct {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 3> words;
+    const char *expected;
+  } cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, {S_NOP, 0, 0}, "s_nop 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3_5,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       {0xCF455083u, 0x00000086u, 0x0A000001u},
+       "v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0"},
+  };
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch);
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
+    ASSERT_NE(inst, nullptr);
+
+    constexpr size_t thread_count = 4;
+    std::barrier start(thread_count);
+    std::array<std::string, thread_count> text;
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_count; ++i) {
+      threads.emplace_back([&, i] {
+        start.arrive_and_wait();
+        for (int repeat = 0; repeat < 32; ++repeat) {
+          text[i] = inst->disassemble();
+          EXPECT_EQ(text[i], tc.expected);
+        }
+      });
+    }
+    for (auto &thread : threads)
+      thread.join();
+
+    text[0].clear();
+    EXPECT_EQ(inst->disassemble(), tc.expected);
+    inst.reset();
+    decoder.reset();
+    for (size_t i = 1; i < thread_count; ++i)
+      EXPECT_EQ(text[i], tc.expected);
+  }
+}
+
 class RdnaVopdDecodeSmokeTest : public ::testing::TestWithParam<VopdDecodeCase> {};
 
 TEST_P(RdnaVopdDecodeSmokeTest, DecodesDualSlotForms) {
@@ -2443,6 +2500,94 @@ INSTANTIATE_TEST_SUITE_P(
                       RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"}),
     [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
       return std::string(info.param.arch_name);
+    });
+
+class VopdExecutionFailureTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
+  const auto &tc = GetParam();
+  amdgpu::GpuMemory gpu_mem("vopd_failure_mem");
+  amdgpu::L2Cache l2("vopd_failure_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("vopd_failure", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x1000, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << tc.arch_name << " invalid_x=" << invalid_x);
+    const auto words = make_vopdxy_pair(invalid_x ? 14 : 8, invalid_x ? 8 : 14);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+    // Bypass decoder validation deliberately to exercise the execution fallback.
+    const auto *backend = tc.arch == ROCJITSU_CODE_ARCH_RDNA3     ? &rdna3::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rdna3_5::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA4   ? &rdna4::execution_backend()
+                                                                  : &cdna5::execution_backend();
+    ScopedIsaExecutionBackend execution_backend_scope{backend};
+    const auto construct =
+        [&]<typename Vopd, typename MachineInst>() -> std::unique_ptr<Instruction> {
+      return std::make_unique<Vopd>(reinterpret_cast<const MachineInst *>(words.data()));
+    };
+    std::unique_ptr<Instruction> inst;
+    switch (tc.arch) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      inst = construct.operator()<rdna3::Vopd, rdna3::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      inst = construct.operator()<rdna3_5::Vopd, rdna3_5::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      inst = construct.operator()<rdna4::Vopd, rdna4::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      inst = construct.operator()<cdna5::Vopd, cdna5::MachineInst>();
+      break;
+    default:
+      FAIL() << "unexpected VOPD architecture";
+    }
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->execute, nullptr);
+    for (uint64_t exec : {uint64_t{0}, uint64_t{0xAAAA'AAAA}}) {
+      wf->set_exec(exec);
+      wf->set_vcc(0x87654321);
+      wf->write_scc(1);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 5; ++reg)
+          cu->write_vgpr(base + reg, lane, 100u * reg + lane);
+      }
+      wf->clear_instruction_execution_error();
+      ASSERT_NO_THROW(inst->execute(*inst, wf));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
+                     : amdgpu::InstructionExecutionError::None);
+      EXPECT_EQ(wf->exec(), exec);
+      EXPECT_EQ(wf->vcc(), 0x87654321u);
+      EXPECT_EQ(wf->read_scc(), 1u);
+      EXPECT_EQ(wf->pc, 0x1000u);
+      EXPECT_FALSE(wf->is_halted());
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane);
+        EXPECT_EQ(cu->read_vgpr(base + 1, lane), 100u + lane);
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllArchitectures, VopdExecutionFailureTest,
+    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"}),
+    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
+      return info.param.arch_name;
     });
 
 void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sleep_encoding) {
