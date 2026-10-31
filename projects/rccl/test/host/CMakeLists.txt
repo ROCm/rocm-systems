@@ -97,8 +97,16 @@ foreach(_param
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
     "${_param}" "the qp_sharing.cc default")
 endforeach()
-# The net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
+# The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
+  "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+  "transport/net_ib/p2p_resiliency.cc" "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+    "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
   "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
@@ -401,7 +409,8 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     fakes/init_fakes.cc
-    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib (GDR flush flag seams)
+    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc GDR flush flag seams
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -967,6 +976,7 @@ function(rccl_define_micro_source_lists)
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
+    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
     fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
     fakes/transport_net_ib_fakes.cc
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
@@ -1053,17 +1063,33 @@ function(rccl_define_micro_source_lists)
   # under test/host/transport; one binary owns the subsystem's shared socket,
   # network and GDRCopy seams.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
+    transport/net_ib/common-test.cc
+    transport/net_ib/gdr-test.cc
+    transport/net_ib/init-test.cc
+    transport/net_ib/net-ib-gid-inspect-test.cc
+    transport/net_ib/reg-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
     transport/rma-socket-setup-test.cc
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_net_ib_p2p_fakes.cc
+    fakes/transport_net_ib_recovery_fakes.cc
+    fakes/transport_net_ib_resiliency_fakes.cc
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2425,8 +2451,17 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroTransport
   SOURCES ${TEST_MICRO_TRANSPORT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ENABLE_FAULT_INJECTION
+    NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
+    NET_IB_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gdr.cc"
+    # Hipify renames this to *_tmp.cc: src/init.cc keeps the basename.
+    NET_IB_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc"
+    NET_IB_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/net_ib_gid_inspect.cc"
+    NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
