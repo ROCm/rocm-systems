@@ -1,0 +1,103 @@
+view: Efficiency Arbiter (EA)
+legacy_panel_id: 1400
+alias: ea
+tables:
+- id: 1401
+  title: EA Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.util
+    label: Utilization
+    description: Percentage of cycles EA is busy processing memory requests.
+- id: 1402
+  title: EA Traffic Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.dram_rd_bw
+  - metric: ea.dram_wr_bw
+  - metric: ea.io_bw_rd
+    description: PCI-E and other IO read bandwidth from host CPU memory (pinned or mapped)
+      through the EA.
+  - metric: ea.io_bw_wr
+    description: PCI-E and other IO write bandwidth to host CPU memory through the EA.
+  - metric: ea.hdm_bw_rd
+    description: Host Data Memory (unified memory pages) read bandwidth through the EA.
+  - metric: ea.hdm_bw_wr
+    description: Host Data Memory (unified memory pages) write bandwidth through the EA.
+  - metric: ea.gmi_bw_rd
+    description: GMI read bandwidth from peer GPU HBM via Infinity Fabric.
+  - metric: ea.gmi_bw_wr
+    description: GMI write bandwidth to peer GPU HBM via Infinity Fabric.
+- id: 1403
+  title: EA-SDP Interface - Outstanding Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.outstanding_req
+    label: Outstanding Requests
+    legacy_id: 14.3.0
+  - metric: ea.outstanding_req_io_rd
+    label: Outstanding Requests - IO Read
+    legacy_id: 14.3.1
+  - metric: ea.outstanding_req_io_wr
+    label: Outstanding Requests - IO Write
+    legacy_id: 14.3.2
+  - metric: ea.outstanding_req_dram_rd
+    label: Outstanding Requests - DRAM Read
+    legacy_id: 14.3.3
+  - metric: ea.outstanding_req_dram_wr
+    label: Outstanding Requests - DRAM Write
+    legacy_id: 14.3.4
+  - metric: ea.outstanding_req_gmi_rd
+    label: Outstanding Requests - GMI Read
+    legacy_id: 14.3.5
+  - metric: ea.outstanding_req_gmi_wr
+    label: Outstanding Requests - GMI Write
+    legacy_id: 14.3.6
+  - metric: ea.outstanding_req_hdm_rd
+    label: Outstanding Requests - HDM Read
+    legacy_id: 14.3.7
+  - metric: ea.outstanding_req_hdm_wr
+    label: Outstanding Requests - HDM Write
+    legacy_id: 14.3.8
+  - metric: ea.outstanding_req_probe_req
+    label: Outstanding Requests - Probe Request
+    legacy_id: 14.3.9
+  - metric: ea.outstanding_req_probe_response
+    label: Outstanding Requests - Probe Response
+    legacy_id: 14.3.10
+- id: 1404
+  title: EA-SDP Interface - Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ea.stalled_by_sdp
+    description: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline.
+  - metric: ea.stalled_by_sdp_io_rd
+    legacy_id: 14.4.1
+  - metric: ea.stalled_by_sdp_io_wr
+    legacy_id: 14.4.2
+  - metric: ea.stalled_by_sdp_dram
+    legacy_id: 14.4.3
+  - metric: ea.stalled_by_sdp_gmi
+    legacy_id: 14.4.4
+  - metric: ea.stalled_by_sdp_hdm
+    legacy_id: 14.4.5

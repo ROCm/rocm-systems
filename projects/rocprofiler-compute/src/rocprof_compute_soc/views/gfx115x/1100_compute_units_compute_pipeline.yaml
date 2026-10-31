@@ -1,0 +1,89 @@
+view: GL1 Cache (L1)
+legacy_panel_id: 1100
+alias: gl1
+tables:
+- id: 1101
+  title: GL1 Cache Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.busy
+    legacy_id: 11.1.0
+  - metric: gl1.starve
+    legacy_id: 11.1.1
+- id: 1102
+  title: GL1 Cache Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.total_req
+    label: Total Requests
+    unit: (Count + $normUnit)
+    legacy_id: 11.2.0
+  - metric: gl1.rd_req
+    label: Read Requests
+    unit: (Count + $normUnit)
+    legacy_id: 11.2.1
+  - metric: gl1.wr_req
+    label: Write Requests
+    unit: (Count + $normUnit)
+    legacy_id: 11.2.2
+  - metric: gl1.miss_req
+    label: Miss Requests
+    legacy_id: 11.2.3
+- id: 1103
+  title: GL1 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.hit_rate
+    label: Hit Rate
+    description: Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce
+      traffic to GL2 and improve performance. Low hit rates may indicate working sets exceeding
+      GL1 capacity or poor data locality across Workgroup Processors.
+- id: 1104
+  title: GL1-GL2 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_req
+    label: GL2 Read Requests
+    unit: (Count + $normUnit)
+    legacy_id: 11.4.0
+  - metric: gl1.gl2_rd_128b_req
+    unit: (Count + $normUnit)
+    legacy_id: 11.4.1
+  - metric: gl1.gl2_wr_req
+    label: GL2 Write Requests
+    unit: (Count + $normUnit)
+    legacy_id: 11.4.2
+- id: 1105
+  title: GL1 Cache Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_stall
+    legacy_id: 11.5.0
+  - metric: gl1.lfifo_full_stall
+    label: LFIFO Full Stall
+    legacy_id: 11.5.1

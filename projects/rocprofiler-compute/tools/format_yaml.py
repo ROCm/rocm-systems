@@ -30,10 +30,12 @@ METRIC_LIBRARY_PATTERN = "metric_library/gfx"
 INHERIT_KEY = "inherit"
 REMOVE_TAG = "!remove"
 
-# Path patterns that contain metric equations to check (substrings matched against path)
+# Path patterns that contain metric equations to check (substrings matched against
+# path): the panels, the metric library, and the peaks of view rows without a metric
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
     METRIC_LIBRARY_PATTERN,
+    "rocprof_compute_soc/views/",
 ]
 
 # Path suffixes to exclude from equation checking

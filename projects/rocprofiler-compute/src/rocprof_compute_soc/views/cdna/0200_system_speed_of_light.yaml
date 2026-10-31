@@ -1,0 +1,458 @@
+view: System Speed-of-Light
+legacy_panel_id: 200
+alias: sol
+tables:
+- id: 201
+  title: System Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - label: VALU FLOPs
+    archs:
+    - gfx908
+    unit: GFLOP/s
+    peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
+    pct_of_peak: false
+    description: 'The total floating-point operations executed per second on the VALU. This
+      is also presented as a percent of the peak theoretical FLOPs achievable on the specific
+      accelerator. Note: this does not include any floating-point operations from MFMA instructions.'
+  - metric: compute.mfma_flops_bf16
+    archs:
+    - gfx908
+    unavailable: true
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical BF16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f16
+    archs:
+    - gfx908
+    unavailable: true
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical F16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f32
+    archs:
+    - gfx908
+    unavailable: true
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical F32 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f64
+    archs:
+    - gfx908
+    unavailable: true
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical F64 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_iops_int8
+    label: MFMA IOPs (Int8)
+    archs:
+    - gfx908
+    unavailable: true
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical INT8 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.valu_flops
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description: 'The total floating-point operations executed per second on the VALU. This
+      is also presented as a percent of the peak theoretical FLOPs achievable on the specific
+      accelerator. Note: this does not include any floating-point operations from MFMA instructions.'
+    legacy_id: 2.1.0
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx940
+    - gfx942
+    description: The total number of 8-bit floating point MFMA operations executed per second.
+      This is also presented as a percent of the peak theoretical F8 MFMA operations achievable
+      on the specific accelerator. It is supported on AMD Instinct MI300 series and later
+      only.
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx941
+    unit: GFLOPs
+    description: The total number of 8-bit floating point MFMA operations executed per second.
+      This is also presented as a percent of the peak theoretical F8 MFMA operations achievable
+      on the specific accelerator. It is supported on AMD Instinct MI300 series and later
+      only.
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical F8 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_mxf8
+    archs:
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical MXF8 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_bf16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical BF16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical F16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f32
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical F32 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f64
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical F64 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f6f4
+    archs:
+    - gfx950
+    description: null
+  - metric: compute.mfma_iops_int8
+    label: MFMA IOPs (Int8)
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical INT8 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.salu_util
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.6
+      gfx90a: 2.1.6
+      gfx940: 2.1.7
+      gfx941: 2.1.7
+      gfx942: 2.1.7
+      gfx950: 2.1.9
+  - metric: compute.valu_util
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.7
+      gfx90a: 2.1.7
+      gfx940: 2.1.8
+      gfx941: 2.1.8
+      gfx942: 2.1.8
+      gfx950: 2.1.10
+  - label: MFMA Utilization
+    archs:
+    - gfx908
+    unit: Percent
+    peak: 100
+    pct_of_peak: false
+    description: Indicates what percent of the kernel's duration the MFMA unit was busy executing
+      instructions. Computed as the ratio of the total number of cycles the MFMA was busy
+      over the total CU cycles.
+  - label: VMEM Utilization
+    archs:
+    - gfx908
+    unit: Percent
+    peak: 100
+    pct_of_peak: false
+    description: Indicates what percent of the kernel's duration the VMEM unit was busy executing
+      instructions, including both global/generic and spill/scratch operations (see the VMEM
+      instruction count metrics) for more detail). Does not include VALU operations. Computed
+      as the ratio of the total number of cycles spent by the scheduler issuing VMEM instructions
+      over the total CU cycles.
+  - label: Branch Utilization
+    archs:
+    - gfx908
+    unit: Percent
+    peak: 100
+    pct_of_peak: false
+    description: Indicates what percent of the kernel's duration the branch unit was busy
+      executing instructions. Computed as the ratio of the total number of cycles spent by
+      the scheduler issuing branch instructions over the total CU cycles
+  - metric: compute.mfma_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    pct_of_peak: false
+    legacy_id:
+      gfx90a: 2.1.8
+      gfx940: 2.1.9
+      gfx941: 2.1.9
+      gfx942: 2.1.9
+      gfx950: 2.1.11
+  - metric: compute.vmem_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    pct_of_peak: false
+    legacy_id:
+      gfx90a: 2.1.9
+      gfx940: 2.1.10
+      gfx941: 2.1.10
+      gfx942: 2.1.10
+      gfx950: 2.1.12
+  - metric: compute.branch_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    pct_of_peak: false
+    legacy_id:
+      gfx90a: 2.1.10
+      gfx940: 2.1.11
+      gfx941: 2.1.11
+      gfx942: 2.1.11
+      gfx950: 2.1.13
+  - metric: compute.valu_active_threads
+    legacy_id:
+      gfx908: 2.1.11
+      gfx90a: 2.1.11
+      gfx940: 2.1.12
+      gfx941: 2.1.12
+      gfx942: 2.1.12
+      gfx950: 2.1.14
+  - metric: compute.ipc
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id:
+      gfx908: 2.1.12
+      gfx90a: 2.1.12
+      gfx940: 2.1.13
+      gfx941: 2.1.13
+      gfx942: 2.1.13
+      gfx950: 2.1.15
+  - metric: wave.occupancy
+    description_note: This is also presented as a percent of the peak theoretical occupancy
+      achievable on the specific accelerator.
+    legacy_id:
+      gfx908: 2.1.13
+      gfx90a: 2.1.13
+      gfx940: 2.1.14
+      gfx941: 2.1.14
+      gfx942: 2.1.14
+      gfx950: 2.1.16
+  - metric: lds.theoretical_bw
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    description: Indicates the maximum amount of bytes that could have been loaded from, stored
+      to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more
+      detail). This is also presented as a percent of the peak theoretical F64 MFMA operations
+      achievable on the specific accelerator.
+  - metric: lds.theoretical_bw
+    archs:
+    - gfx950
+    description: Indicates the maximum amount of bytes that could have been loaded from, stored
+      to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more
+      detail).
+  - metric: lds.bank_conflicts_access
+    label: LDS Bank Conflicts/Access
+    description: The ratio of the number of cycles spent in the LDS scheduler due to bank
+      conflicts (as determined by the conflict resolution hardware) to the base number of
+      cycles that would be spent in the LDS scheduler in a completely uncontended case. This
+      is also presented in normalized form (i.e., the Bank Conflict Rate).
+    legacy_id:
+      gfx908: 2.1.15
+      gfx90a: 2.1.15
+      gfx940: 2.1.16
+      gfx941: 2.1.16
+      gfx942: 2.1.16
+      gfx950: 2.1.18
+  - metric: vl1d.hit_rate
+    pct_of_peak: false
+    description: The ratio of the number of vL1D cache line requests that hit in vL1D cache
+      over the total number of cache line requests to the vL1D cache RAM.
+  - metric: vl1d.cache_bw
+    label: vL1D Cache BW
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx942
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+  - metric: vl1d.cache_bw_128b
+    label: vL1D Cache BW
+    archs:
+    - gfx940
+    - gfx941
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id: 2.1.18
+  - metric: l2.hit_rate
+    pct_of_peak: false
+  - metric: l2.bw
+    label: L2 Cache BW
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id:
+      gfx908: 2.1.19
+      gfx90a: 2.1.19
+      gfx940: 2.1.20
+      gfx941: 2.1.20
+      gfx942: 2.1.20
+      gfx950: 2.1.22
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx942
+    description: The number of bytes read by the L2 over the Infinity Fabric\u2122 interface
+      per unit time. This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+  - metric: fabric.rd_bw_incl_128b
+    label: L2-Fabric Read BW
+    archs:
+    - gfx940
+    - gfx941
+    description: The number of bytes read by the L2 over the Infinity Fabric\u2122 interface
+      per unit time. This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id: 2.1.21
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+    archs:
+    - gfx950
+    display: fabric_rd_bw_by_request_size
+    description: The number of bytes read by the L2 over the Infinity Fabric\u2122 interface
+      per unit time. This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write BW
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+  - metric: fabric.rd_lat
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.22
+      gfx90a: 2.1.22
+      gfx940: 2.1.23
+      gfx941: 2.1.23
+      gfx942: 2.1.23
+      gfx950: 2.1.25
+  - metric: fabric.wr_lat
+    label: L2-Fabric Write Latency
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.23
+      gfx90a: 2.1.23
+      gfx940: 2.1.24
+      gfx941: 2.1.24
+      gfx942: 2.1.24
+      gfx950: 2.1.26
+  - metric: sl1d.hit_rate_excl_dup
+    label: sL1D Cache Hit Rate
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.24
+      gfx90a: 2.1.24
+      gfx940: 2.1.25
+      gfx941: 2.1.25
+      gfx942: 2.1.25
+      gfx950: 2.1.27
+  - metric: sl1d.bw
+    label: sL1D Cache BW
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id:
+      gfx908: 2.1.25
+      gfx90a: 2.1.25
+      gfx940: 2.1.26
+      gfx941: 2.1.26
+      gfx942: 2.1.26
+      gfx950: 2.1.28
+  - metric: l1i.hit_rate_excl_dup
+    label: L1I Hit Rate
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    pct_of_peak: false
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id:
+      gfx908: 2.1.26
+      gfx90a: 2.1.26
+      gfx940: 2.1.27
+      gfx941: 2.1.27
+      gfx942: 2.1.27
+  - metric: l1i.bw
+    label: L1I BW
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    legacy_id:
+      gfx908: 2.1.27
+      gfx90a: 2.1.27
+      gfx940: 2.1.28
+      gfx941: 2.1.28
+      gfx942: 2.1.28
+  - metric: l1i.hit_rate_excl_dup
+    label: L1I Hit Rate
+    archs:
+    - gfx950
+    pct_of_peak: false
+    legacy_id: 2.1.29
+  - metric: l1i.bw
+    label: L1I BW
+    archs:
+    - gfx950
+    description_note: This is also presented as a percent of the peak theoretical bandwidth
+      achievable on the specific accelerator.
+    legacy_id: 2.1.30
+  - metric: l1i.fetch_lat
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.28
+      gfx90a: 2.1.28
+      gfx940: 2.1.29
+      gfx941: 2.1.29
+      gfx942: 2.1.29
+      gfx950: 2.1.31
+  - metric: compute.cu_util
+    pct_of_peak: false
+    legacy_id:
+      gfx908: 2.1.29
+      gfx90a: 2.1.29
+      gfx940: 2.1.30
+      gfx941: 2.1.30
+      gfx942: 2.1.30
+      gfx950: 2.1.32

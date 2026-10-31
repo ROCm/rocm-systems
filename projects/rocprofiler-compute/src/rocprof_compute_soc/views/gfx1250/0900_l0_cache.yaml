@@ -1,0 +1,274 @@
+view: GL0 Cache and LDS
+legacy_panel_id: 900
+alias: gl0
+tables:
+- id: 901
+  title: WGP Cache Utilization (LDS + GL0)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.util
+    label: Utilization
+    description: Percentage of cycles GL1 has outstanding memory requests.
+- id: 902
+  title: Cache Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.total_req
+    label: Total Requests
+    legacy_id: 9.2.0
+  - metric: gl0.total_req_rd
+    label: Total Requests - Read
+    description: Number of GL0 cache read requests.
+  - metric: gl0.total_req_wr
+    label: Total Requests - Write
+    description: Number of GL0 cache write requests.
+  - metric: gl0.req_stall_rate
+    label: Request Stall Rate
+    legacy_id: 9.2.3
+  - metric: gl0.req_lat
+    label: Request Latency
+    legacy_id: 9.2.4
+  - metric: gl0.total_gl0_sectors
+    legacy_id: 9.2.5
+  - metric: gl0.rd_sectors
+    legacy_id: 9.2.6
+  - metric: gl0.wr_sectors
+    legacy_id: 9.2.7
+- id: 903
+  title: Cache Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.lookup_hit_rate
+    label: Cache Lookup Hit Rate
+    display: gl0_lookup_hit_rate_per_kernel_ratio
+    legacy_id: 9.3.0
+  - metric: gl0.sector_lookup_hit_rate
+    label: Cache Sector Lookup Hit Rate
+    display: gl0_sector_lookup_hit_rate_per_kernel_ratio
+    legacy_id: 9.3.1
+  - metric: gl0.capacity_stall_rate
+    label: Cache Capacity Stall Rate
+    legacy_id: 9.3.2
+  - metric: gl0.total_conflict_stall_rate
+    label: Cache Total Conflict Stall Rate
+    legacy_id: 9.3.3
+  - metric: gl0.lat_fifo_stall_rate
+    label: Latency FIFO Stall Rate
+    legacy_id: 9.3.4
+  - metric: gl0.gl1_memory_req_fifo_stall_rate
+    legacy_id: 9.3.5
+  - metric: gl0.return_queue_pending_stall_rate
+    label: Return Queue Pending Stall Rate
+    legacy_id: 9.3.6
+  - metric: gl0.wr_stall_rate_gl1_rd_return
+    label: Cache Write Stall Rate - GL1 Read Return
+    legacy_id: 9.3.7
+  - metric: gl0.set_conflict_stall_rate_cache_rd
+    label: Set Conflict Stall Rate - Cache Read
+    legacy_id: 9.3.8
+  - metric: gl0.set_conflict_stall_rate_cache_wr
+    label: Set Conflict Stall Rate - Cache Write
+    legacy_id: 9.3.9
+  - metric: gl0.set_conflict_stall_rate_atomics
+    label: Set Conflict Stall Rate - Atomics
+    legacy_id: 9.3.10
+  - metric: gl0.ram_bank_conflict_stall_rate_rd
+    label: Cache RAM Bank Conflict Stall Rate - Read
+    legacy_id: 9.3.11
+  - metric: gl0.ram_bank_conflict_stall_rate_wr
+    label: Cache RAM Bank Conflict Stall Rate - Write
+    legacy_id: 9.3.12
+  - metric: gl0.segment_conflict_stall_rate_cache
+    label: Segment Conflict Stall Rate - Cache
+    legacy_id: 9.3.13
+- id: 904
+  title: LDS Accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.util
+    description: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+  - metric: lds.util_load
+    legacy_id: 9.4.1
+  - metric: lds.util_store
+    legacy_id: 9.4.2
+  - metric: lds.util_atomics
+    legacy_id: 9.4.3
+  - metric: lds.bank_conflict_stall_rate
+    description: Percentage of VMW-busy cycles stalled due to an LDS bank conflict.
+  - metric: lds.bank_conflict_stall_rate_rd
+    legacy_id: 9.4.5
+  - metric: lds.bank_conflict_stall_rate_wr
+    legacy_id: 9.4.6
+  - metric: lds.bank_conflict_stall_rate_atomic
+    legacy_id: 9.4.7
+  - metric: lds.address_conflict_stall_rate
+    legacy_id: 9.4.8
+  - metric: lds.segment_conflict_stall_rate_lds
+    label: Segment Conflict Stall Rate - LDS
+    legacy_id: 9.4.9
+  - metric: lds.stall_rate
+    legacy_id: 9.4.10
+- id: 905
+  title: Set-Slot Dynamics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.slot_replacement_rate
+    label: Slot Replacement Rate
+    legacy_id: 9.5.0
+  - metric: gl0.slot_hit_rate
+    label: Slot Hit Rate
+    legacy_id: 9.5.1
+  - metric: gl0.set_conflict_stall_same_port
+    label: Set Conflict Stall - Same Port
+    legacy_id: 9.5.2
+  - metric: gl0.slot_replacement_stall_same_port
+    label: Slot Replacement Stall - Same Port
+    legacy_id: 9.5.3
+  - metric: gl0.slot_replacement_stall_cross_port
+    label: Slot Replacement Stall - Cross Port
+    legacy_id: 9.5.4
+- id: 906
+  title: GL0-GL1 Interface - Requests and Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_req
+    legacy_id: 9.6.0
+  - metric: gl0.gl1_rd_bw
+  - metric: gl0.gl1_wr_req
+    legacy_id: 9.6.2
+  - metric: gl0.gl1_wr_bw
+  - metric: gl0.gl1_atomic_req_with_return
+    legacy_id: 9.6.4
+  - metric: gl0.gl1_atomic_req_without_return
+    legacy_id: 9.6.5
+  - metric: gl0.gl1_cluster_req
+    legacy_id: 9.6.6
+  - metric: gl0.gl1_prefetch_req_cu_scope
+    legacy_id: 9.6.7
+  - metric: gl0.gl1_prefetch_req_gl2_scope
+    legacy_id: 9.6.8
+- id: 907
+  title: GL0-GL1 Interface - Latency
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_lat
+    legacy_id: 9.7.0
+  - metric: gl0.gl1_wr_lat
+    legacy_id: 9.7.1
+  - metric: gl0.gl1_cluster_req_lat
+    legacy_id: 9.7.2
+- id: 908
+  title: GL0-GL1 Interface - Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_req_stall
+    legacy_id: 9.8.0
+  - metric: gl0.ram_rd_stall_by_gl1_wr
+    legacy_id: 9.8.1
+  - metric: gl0.wr_stall_rate_gl1_rd_return
+    label: GL0 Cache RAM Write Stall by GL1 Return
+    description: Percentage of VMW-busy cycles a GL0 SRAM write is stalled by an incoming
+      GL1 fill.
+- id: 909
+  title: GL0-UTCL0 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_req
+    legacy_id: 9.9.0
+  - metric: gl0.utcl0_thrash_stall_rate
+    legacy_id: 9.9.1
+- id: 910
+  title: UTCL0-UTCL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_utcl1_req
+    legacy_id: 9.10.0
+  - metric: gl0.utcl0_utcl1_req_internal_retry
+    legacy_id: 9.10.1
+  - metric: gl0.utcl0_utcl1_returns
+    legacy_id: 9.10.2
+  - metric: gl0.utcl0_utcl1_returns_permission_fault
+    legacy_id: 9.10.3
+  - metric: gl0.utcl0_utcl1_returns_xnack_retry
+    legacy_id: 9.10.4
+  - metric: gl0.utcl0_utcl1_returns_partial_resident_fault
+    legacy_id: 9.10.5
+  - metric: gl0.utcl0_utcl1_returns_no_retry_fault
+    legacy_id: 9.10.6
+  - metric: gl0.utcl1_req_lat
+    legacy_id: 9.10.7
+  - metric: gl0.utcl1_req_stall
+    legacy_id: 9.10.8
+- id: 911
+  title: UTCL0 Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl0.utcl0_lookup_hit_rate
+    legacy_id: 9.11.0
+  - metric: gl0.utcl0_lookup_hit_on_miss_rate
+    legacy_id: 9.11.1
+  - metric: gl0.utcl0_lookup_lat
+    legacy_id: 9.11.2
+  - metric: gl0.utcl0_lfifo_full_stall
+    legacy_id: 9.11.3
+  - metric: gl0.utcl0_max_inflight_stall
+    legacy_id: 9.11.4
+  - metric: gl0.utcl0_miss_fifo_stall
+    legacy_id: 9.11.5
+  - metric: gl0.utcl0_lfifo_not_present_stall
+    legacy_id: 9.11.6

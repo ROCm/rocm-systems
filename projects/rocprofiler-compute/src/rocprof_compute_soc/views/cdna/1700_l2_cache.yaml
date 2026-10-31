@@ -1,0 +1,616 @@
+view: L2 Cache
+legacy_panel_id: 1700
+alias: l2
+tables:
+- id: 1701
+  title: L2 Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.util
+    label: Utilization
+    legacy_id: 17.1.0
+  - metric: l2.peak_bw
+    label: Peak Bandwidth
+    legacy_id: 17.1.1
+  - metric: l2.hit_rate
+    label: Hit Rate
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write and Atomic BW
+  - metric: fabric.hbm_peak_bw
+    label: HBM Bandwidth
+    legacy_id: 17.1.5
+- id: 1702
+  title: L2-Fabric interface metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_bw_norm
+    label: Read BW
+    archs:
+    - gfx908
+    legacy_id: 17.2.0
+  - metric: fabric.rd_bw
+    label: Read BW
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    unit: Gbps
+    description: The total number of bytes read by the L2 cache from Infinity Fabric divided
+      by total duration.
+  - metric: fabric.hbm_rd_traffic
+    legacy_id: 17.2.1
+  - metric: fabric.remote_rd_traffic
+    label: Remote Read Traffic
+    legacy_id: 17.2.2
+  - metric: fabric.uncached_rd_traffic
+    label: Uncached Read Traffic
+    legacy_id: 17.2.3
+  - metric: fabric.wr_atomic_bw_norm
+    label: Write and Atomic BW
+    archs:
+    - gfx908
+    - gfx90a
+    legacy_id: 17.2.4
+  - metric: fabric.wr_atomic_bw
+    label: Write and Atomic BW
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    unit: Gbps
+    description: The total number of bytes written by the L2 over Infinity Fabric by write
+      and atomic operations divided by total duration. Note that on current CDNA accelerators,
+      such as the MI2XX, requests are only considered atomic by Infinity Fabric if they are
+      targeted at non-write-cacheable memory, for example, fine-grained memory allocations
+      or uncached memory allocations on the MI2XX.
+  - metric: fabric.hbm_wr_atomic_traffic
+    legacy_id: 17.2.5
+  - metric: fabric.remote_wr_atomic_traffic
+    label: Remote Write and Atomic Traffic
+    legacy_id: 17.2.6
+  - metric: fabric.atomic_traffic
+    label: Atomic Traffic
+    legacy_id: 17.2.7
+  - metric: fabric.uncached_wr_atomic_traffic
+    label: Uncached Write and Atomic Traffic
+    legacy_id: 17.2.8
+  - metric: fabric.rd_lat
+    label: Read Latency
+  - metric: fabric.wr_lat
+    label: Write and Atomic Latency
+  - metric: fabric.atomic_lat
+    label: Atomic Latency
+    legacy_id: 17.2.11
+  - metric: fabric.rd_stall
+    label: Read Stall
+    archs:
+    - gfx950
+    legacy_id: 17.2.12
+  - metric: fabric.wr_stall
+    label: Write Stall
+    archs:
+    - gfx950
+    legacy_id: 17.2.13
+- id: 1703
+  title: L2 Cache Accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.bw
+    label: Bandwidth
+    unit: Gbps
+    description: The number of bytes looked up in the L2 cache, divided by total duration.
+      The number of bytes is calculated as the number of cache lines requested multiplied
+      by the cache line size. This value does not consider partial requests, so for example,
+      if only a single value is requested in a cache line, the data movement will still be
+      counted as a full cache line.
+  - metric: l2.rd_bw
+    label: Read Bandwidth
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 17.3.1
+  - metric: l2.wr_bw
+    label: Write Bandwidth
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 17.3.2
+  - metric: l2.atomic_bw
+    label: Atomic Bandwidth
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 17.3.3
+  - metric: l2.req
+    label: Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.1
+      gfx90a: 17.3.1
+      gfx940: 17.3.1
+      gfx941: 17.3.1
+      gfx942: 17.3.1
+      gfx950: 17.3.4
+  - metric: l2.rd_req
+    label: Read Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.2
+      gfx90a: 17.3.2
+      gfx940: 17.3.2
+      gfx941: 17.3.2
+      gfx942: 17.3.2
+      gfx950: 17.3.5
+  - metric: l2.wr_req
+    label: Write Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.3
+      gfx90a: 17.3.3
+      gfx940: 17.3.3
+      gfx941: 17.3.3
+      gfx942: 17.3.3
+      gfx950: 17.3.6
+  - metric: l2.atomic_req
+    label: Atomic Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.4
+      gfx90a: 17.3.4
+      gfx940: 17.3.4
+      gfx941: 17.3.4
+      gfx942: 17.3.4
+      gfx950: 17.3.7
+  - metric: l2.streaming_req
+    label: Streaming Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.5
+      gfx90a: 17.3.5
+      gfx940: 17.3.5
+      gfx941: 17.3.5
+      gfx942: 17.3.5
+      gfx950: 17.3.8
+  - metric: l2.bypass_req
+    label: Bypass Req
+    archs:
+    - gfx950
+    unit: (Req + $normUnit)
+    legacy_id: 17.3.9
+  - metric: l2.probe_req
+    label: Probe Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.6
+      gfx90a: 17.3.6
+      gfx940: 17.3.6
+      gfx941: 17.3.6
+      gfx942: 17.3.6
+      gfx950: 17.3.10
+  - metric: l2.input_buffer_req
+    label: Input Buffer Req
+    archs:
+    - gfx950
+    unit: (Req + $normUnit)
+    legacy_id: 17.3.11
+  - metric: l2.hit_rate
+    label: Cache Hit
+  - metric: l2.hits
+    label: Hits
+    legacy_id:
+      gfx908: 17.3.8
+      gfx90a: 17.3.8
+      gfx940: 17.3.8
+      gfx941: 17.3.8
+      gfx942: 17.3.8
+      gfx950: 17.3.13
+  - metric: l2.misses
+    label: Misses
+    legacy_id:
+      gfx908: 17.3.9
+      gfx90a: 17.3.9
+      gfx940: 17.3.9
+      gfx941: 17.3.9
+      gfx942: 17.3.9
+      gfx950: 17.3.14
+  - metric: l2.writeback
+    label: Writeback
+    legacy_id:
+      gfx908: 17.3.10
+      gfx90a: 17.3.10
+      gfx940: 17.3.10
+      gfx941: 17.3.10
+      gfx942: 17.3.10
+      gfx950: 17.3.15
+  - metric: l2.writeback_internal
+    label: Writeback (Internal)
+    legacy_id:
+      gfx908: 17.3.11
+      gfx90a: 17.3.11
+      gfx940: 17.3.11
+      gfx941: 17.3.11
+      gfx942: 17.3.11
+      gfx950: 17.3.16
+  - metric: l2.writeback_vl1d_req
+    label: Writeback (vL1D Req)
+    legacy_id:
+      gfx908: 17.3.12
+      gfx90a: 17.3.12
+      gfx940: 17.3.12
+      gfx941: 17.3.12
+      gfx942: 17.3.12
+      gfx950: 17.3.17
+  - metric: l2.evict_internal
+    label: Evict (Internal)
+    legacy_id:
+      gfx908: 17.3.13
+      gfx90a: 17.3.13
+      gfx940: 17.3.13
+      gfx941: 17.3.13
+      gfx942: 17.3.13
+      gfx950: 17.3.18
+  - metric: l2.evict_vl1d_req
+    label: Evict (vL1D Req)
+    legacy_id:
+      gfx908: 17.3.14
+      gfx90a: 17.3.14
+      gfx940: 17.3.14
+      gfx941: 17.3.14
+      gfx942: 17.3.14
+      gfx950: 17.3.19
+  - metric: l2.nc_req
+    label: NC Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.15
+      gfx90a: 17.3.15
+      gfx940: 17.3.15
+      gfx941: 17.3.15
+      gfx942: 17.3.15
+      gfx950: 17.3.20
+  - metric: l2.uc_req
+    label: UC Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.16
+      gfx90a: 17.3.16
+      gfx940: 17.3.16
+      gfx941: 17.3.16
+      gfx942: 17.3.16
+      gfx950: 17.3.21
+  - metric: l2.cc_req
+    label: CC Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.17
+      gfx90a: 17.3.17
+      gfx940: 17.3.17
+      gfx941: 17.3.17
+      gfx942: 17.3.17
+      gfx950: 17.3.22
+  - metric: l2.rw_req
+    label: RW Req
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.3.18
+      gfx90a: 17.3.18
+      gfx940: 17.3.18
+      gfx941: 17.3.18
+      gfx942: 17.3.18
+      gfx950: 17.3.23
+- id: 1704
+  title: L2 Cache Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.stalled_on_lat_fifo
+    label: Stalled on Latency FIFO
+    archs:
+    - gfx950
+    description: null
+    legacy_id: 17.4.0
+  - metric: l2.stalled_on_wr_data_fifo
+    label: Stalled on Write Data FIFO
+    archs:
+    - gfx950
+    description: null
+    legacy_id: 17.4.1
+  - metric: l2.input_buffer_stalled_on_l2
+    label: Input Buffer Stalled on L2
+    archs:
+    - gfx950
+    description: null
+    legacy_id: 17.4.2
+- id: 1705
+  title: L2 - Fabric Interface stalls
+  header:
+    metric: Metric
+    type: Type
+    transaction: Transaction
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_pcie_stall
+    label: Read - PCIe Stall
+    archs:
+    - gfx950
+    values:
+      type: PCIe Stall
+      transaction: Read
+    legacy_id: 17.5.0
+  - metric: fabric.rd_infinity_fabric_stall
+    label: Read - Infinity Fabric Stall
+    archs:
+    - gfx950
+    values:
+      type: "Infinity Fabric\u2122 Stall"
+      transaction: Read
+    legacy_id: 17.5.1
+  - metric: fabric.rd_hbm_stall
+    label: Read - HBM Stall
+    archs:
+    - gfx950
+    values:
+      type: HBM Stall
+      transaction: Read
+    legacy_id: 17.5.2
+  - metric: fabric.wr_pcie_stall
+    label: Write - PCIe Stall
+    archs:
+    - gfx950
+    values:
+      type: PCIe Stall
+      transaction: Write
+    legacy_id: 17.5.3
+  - metric: fabric.wr_infinity_fabric_stall
+    label: Write - Infinity Fabric Stall
+    archs:
+    - gfx950
+    values:
+      type: "Infinity Fabric\u2122 Stall"
+      transaction: Write
+    legacy_id: 17.5.4
+  - metric: fabric.wr_hbm_stall
+    label: Write - HBM Stall
+    archs:
+    - gfx950
+    values:
+      type: HBM Stall
+      transaction: Write
+    legacy_id: 17.5.5
+  - metric: fabric.wr_credit_starvation
+    label: Write - Credit Starvation
+    values:
+      type: Credit Starvation
+      transaction: Write
+    legacy_id:
+      gfx908: 17.5.0
+      gfx90a: 17.5.0
+      gfx940: 17.5.0
+      gfx941: 17.5.0
+      gfx942: 17.5.0
+      gfx950: 17.5.6
+- id: 1706
+  title: L2 - Fabric interface detailed metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_32b
+    label: Read (32B)
+    unit: (Req + $normUnit)
+    legacy_id: 17.6.0
+  - metric: fabric.rd_64b
+    label: Read (64B)
+    unit: (Req + $normUnit)
+    legacy_id: 17.6.1
+  - metric: fabric.rd_128b
+    label: Read (128B)
+    archs:
+    - gfx942
+    unit: (Req + $normUnit)
+    legacy_id: 17.6.2
+  - metric: fabric.rd_128b_ea0
+    label: Read (128B)
+    archs:
+    - gfx950
+    unit: (Req + $normUnit)
+    legacy_id: 17.6.2
+  - metric: fabric.rd_uncached
+    label: Read (Uncached)
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.2
+      gfx90a: 17.6.2
+      gfx940: 17.6.2
+      gfx941: 17.6.2
+      gfx942: 17.6.3
+      gfx950: 17.6.3
+  - metric: fabric.hbm_rd
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.3
+      gfx90a: 17.6.3
+      gfx940: 17.6.3
+      gfx941: 17.6.3
+      gfx942: 17.6.4
+  - metric: fabric.remote_rd
+    label: Remote Read
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.4
+      gfx90a: 17.6.4
+      gfx940: 17.6.4
+      gfx941: 17.6.4
+      gfx942: 17.6.5
+  - metric: fabric.pcie_rd_bw
+    label: Read Bandwidth - PCIe
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 read requests due to PCIe traffic, divided
+      by total duration. See docs for more detail.
+  - metric: fabric.xgmi_rd_bw
+    label: "Read Bandwidth - Infinity Fabric\u2122"
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 read requests due to Infinity Fabric traffic,
+      divided by total duration. See docs for more detail.
+  - metric: fabric.hbm_rd_bw
+    label: Read Bandwidth - HBM
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 read requests due to HBM traffic, divided
+      by total duration. See docs for more detail.
+  - metric: fabric.wr_atomic_32b
+    label: Write and Atomic (32B)
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.5
+      gfx90a: 17.6.5
+      gfx940: 17.6.5
+      gfx941: 17.6.5
+      gfx942: 17.6.6
+      gfx950: 17.6.7
+  - metric: fabric.wr_atomic_uncached
+    label: Write and Atomic (Uncached)
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.6
+      gfx90a: 17.6.6
+      gfx940: 17.6.6
+      gfx941: 17.6.6
+      gfx942: 17.6.7
+      gfx950: 17.6.8
+  - metric: fabric.wr_atomic_64b
+    label: Write and Atomic (64B)
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.7
+      gfx90a: 17.6.7
+      gfx940: 17.6.7
+      gfx941: 17.6.7
+      gfx942: 17.6.8
+      gfx950: 17.6.9
+  - metric: fabric.hbm_wr_atomic
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.8
+      gfx90a: 17.6.8
+      gfx940: 17.6.8
+      gfx941: 17.6.8
+      gfx942: 17.6.9
+  - metric: fabric.remote_wr_atomic
+    label: Remote Write and Atomic
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.9
+      gfx90a: 17.6.9
+      gfx940: 17.6.9
+      gfx941: 17.6.9
+      gfx942: 17.6.10
+  - metric: fabric.pcie_wr_bw
+    label: Write Bandwidth - PCIe
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 write requests due to PCIe traffic, divided
+      by total duration. See docs for more detail.
+  - metric: fabric.xgmi_wr_bw
+    label: "Write Bandwidth - Infinity Fabric\u2122"
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 write requests due to Infinity Fabric traffic,
+      divided by total duration. See docs for more detail.
+  - metric: fabric.hbm_wr_bw
+    label: Write Bandwidth - HBM
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 write requests due to HBM traffic, divided
+      by total duration. See docs for more detail.
+  - metric: fabric.atomic
+    label: Atomic
+    unit: (Req + $normUnit)
+    legacy_id:
+      gfx908: 17.6.10
+      gfx90a: 17.6.10
+      gfx940: 17.6.10
+      gfx941: 17.6.10
+      gfx942: 17.6.11
+      gfx950: 17.6.13
+  - metric: fabric.pcie_atomic_bw
+    label: Atomic Bandwidth - PCIe
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided
+      by total duration. See docs for more detail.
+  - metric: fabric.xgmi_atomic_bw
+    label: "Atomic Bandwidth - Infinity Fabric\u2122"
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic,
+      divided by total duration. See docs for more detail.
+  - metric: fabric.hbm_atomic_bw
+    label: Atomic Bandwidth - HBM
+    archs:
+    - gfx950
+    unit: Gbps
+    description: Total number of bytes due to L2 atomic requests due to HBM traffic, divided
+      by total duration. See docs for more detail.

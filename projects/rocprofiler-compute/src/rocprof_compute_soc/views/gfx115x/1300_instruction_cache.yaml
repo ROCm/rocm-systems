@@ -1,0 +1,65 @@
+view: GL2 Cache (L2)
+legacy_panel_id: 1300
+alias: gl2
+tables:
+- id: 1301
+  title: GL2 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.hit_rate
+    description: Percentage of GL2 cache requests serviced from cache without forwarding through
+      GCEA (Graphics Core Efficiency Arbiter). GL2 cache is the GPU's final on-chip cache
+      before accessing system memory. Higher hit rates significantly reduce memory bandwidth
+      pressure and improve performance.
+  - metric: gl2.hits
+    legacy_id: 13.1.1
+  - metric: gl2.misses
+    legacy_id: 13.1.2
+- id: 1302
+  title: GL2 Cache Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.total_req
+    label: Total Requests
+    legacy_id: 13.2.0
+  - metric: gl2.rd_req
+    label: Read Requests
+    legacy_id: 13.2.1
+  - metric: gl2.wr_req
+    label: Write Requests
+    legacy_id: 13.2.2
+  - metric: gl2.atomic_req
+    label: Atomic Requests
+    legacy_id: 13.2.3
+  - metric: gl2.ea_rd_req_dram
+    legacy_id: 13.2.4
+  - metric: gl2.ea_wr_req_dram
+    legacy_id: 13.2.5
+- id: 1303
+  title: GL2 Cache Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.bw
+    label: GL2 Cache Read BW
+    unit: Bytes/s
+    description: Achieved read bandwidth at the GL2 cache level. This represents total read
+      traffic from GL1 caches to GL2. High bandwidth indicates memory-intensive read patterns.
+  - metric: gl2.wr_bw
+    label: GL2 Cache Write BW
+    unit: Bytes/s
+    legacy_id: 13.3.1

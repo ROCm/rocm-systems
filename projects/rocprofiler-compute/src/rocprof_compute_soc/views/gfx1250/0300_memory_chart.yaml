@@ -1,0 +1,346 @@
+view: Memory Chart
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Instruction Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+    label: ICache Requests
+    round: 0
+    legacy_id: 3.1.0
+  - metric: l1i.icache_util
+    round: 0
+    legacy_id: 3.1.1
+  - metric: l1i.hits_per_req
+    label: ICache Hit Rate
+    round: 0
+    legacy_id: 3.1.2
+  - metric: l1i.icache_lat
+    round: 0
+    legacy_id: 3.1.3
+  - metric: l1i.icache_req_stall_rate
+    round: 0
+    legacy_id: 3.1.4
+  - metric: l1i.gl1_rd_bw
+    label: ICache-GL1 Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.1.5
+  - metric: l1i.icache_gl1_req_lat
+    round: 0
+    legacy_id: 3.1.6
+- id: 302
+  title: Scalar Data Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+    label: Dcache Requests
+    round: 0
+    legacy_id: 3.2.0
+  - metric: sl1d.dcache_util
+    round: 0
+    legacy_id: 3.2.1
+  - metric: sl1d.hits_per_req
+    label: Dcache Hit Rate
+    round: 0
+    legacy_id: 3.2.2
+  - metric: sl1d.dcache_lat
+    round: 0
+    legacy_id: 3.2.3
+  - metric: sl1d.dcache_req_stall_rate
+    round: 0
+    legacy_id: 3.2.4
+  - metric: sl1d.req_bw
+    unit: Bytes/s
+    legacy_id: 3.2.5
+  - metric: sl1d.gl1_rd_bw
+    label: Dcache-GL1 Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.2.6
+  - metric: sl1d.dcache_gl1_req_lat
+    round: 0
+    legacy_id: 3.2.7
+- id: 303
+  title: GL0 Cache (Vector L0)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.util
+    round: 0
+    legacy_id: 3.3.0
+  - metric: gl0.total_req_rd
+    label: GL0 Read Requests
+    round: 0
+    legacy_id: 3.3.1
+  - metric: gl0.total_req_wr
+    label: GL0 Write Requests
+    round: 0
+    legacy_id: 3.3.2
+  - metric: gl0.atomic_req
+    round: 0
+    legacy_id: 3.3.3
+  - metric: gl0.hit_rate
+    round: 0
+    display: gl0_hit_rate_times_100
+    legacy_id: 3.3.4
+- id: 304
+  title: LDS (Local Data Share)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: txa.lds_load_insts
+    label: LDS Load Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.0
+  - metric: txa.lds_store_insts
+    label: LDS Store Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.1
+  - metric: txa.lds_atomics_insts
+    label: LDS Atomic Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.2
+  - metric: txa.async_load_inst
+    label: Async Load Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.3
+  - metric: txa.async_store_inst
+    label: Async Store Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.4
+  - metric: lds.util
+    round: 0
+    description: Percentage of VMW-busy cycles the LDS is executing any operation.
+    legacy_id: 3.4.5
+  - metric: lds.bank_conflict_stall_rate
+    round: 0
+    legacy_id: 3.4.6
+  - metric: txa.lds_bw_load
+    label: LDS Load Bandwidth
+    unit: Bytes/s
+    description: Total LDS load bandwidth.
+    legacy_id: 3.4.7
+  - metric: txa.lds_bw_store
+    label: LDS Store Bandwidth
+    unit: Bytes/s
+    description: Total LDS store bandwidth.
+    legacy_id: 3.4.8
+  - metric: txa.lds_bw_atomics
+    label: LDS Atomic Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.4.9
+  - metric: txa.async_load_bw
+    label: Async Load Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.4.10
+  - metric: txa.async_store_bw
+    label: Async Store Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.4.11
+  - metric: txa.tdm_load_bw
+    unit: Bytes/s
+    legacy_id: 3.4.12
+  - metric: txa.tdm_store_bw
+    unit: Bytes/s
+    legacy_id: 3.4.13
+  - metric: txa.tdm_async_load_insts
+    label: TDM Load Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.14
+  - metric: txa.tdm_async_store_insts
+    label: TDM Store Requests
+    unit: (Requests + $normUnit)
+    round: 0
+    legacy_id: 3.4.15
+- id: 305
+  title: GL0-GL1 Interface
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_bw
+    unit: Bytes/s
+    legacy_id: 3.5.0
+  - metric: gl0.gl1_wr_bw
+    unit: Bytes/s
+    legacy_id: 3.5.1
+  - metric: gl0.gl1_atomic_bw
+    unit: Bytes/s
+    legacy_id: 3.5.2
+  - metric: gl1.gl1a_util
+    round: 0
+    description: Percentage of cycles GL1 Arbiter is processing requests from GL0.
+    legacy_id: 3.5.3
+  - metric: gl1.util
+    label: GL1C Utilization
+    round: 0
+    legacy_id: 3.5.4
+  - metric: gl1.gl1c_buffer_full_stall
+    round: 0
+    legacy_id: 3.5.5
+- id: 306
+  title: GLARB (GL1-GL2 Arbiter)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: glarb.glarba_util
+    round: 0
+    legacy_id: 3.6.0
+  - metric: glarb.glarbc_util
+    round: 0
+    legacy_id: 3.6.1
+  - metric: glarb.glarbc_buffer_full_stall
+    round: 0
+    legacy_id: 3.6.2
+  - metric: gl1.gl1c_glarb_rd_bw
+    label: GL1-GLARB Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.6.3
+  - metric: gl1.gl1c_glarb_wr_bw
+    label: GL1-GLARB Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.6.4
+  - metric: glarb.glarbc_req_bw_rd
+    label: GLARB-GL2 Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.6.5
+  - metric: glarb.glarbc_req_bw_wr
+    label: GLARB-GL2 Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.6.6
+  - metric: glarb.gl2_atomic_bw
+    unit: Bytes/s
+    legacy_id: 3.6.7
+- id: 307
+  title: GL2 Cache (L2)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.gl2a_util
+    round: 0
+    legacy_id: 3.7.0
+  - metric: gl2.hit_rate
+    label: GL2C Hit Rate
+    round: 0
+    description: GL2 Cache hit rate.
+    legacy_id: 3.7.1
+  - metric: gl2.ea_hbm_bw_rd
+    label: GL2-EA Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.7.2
+  - metric: gl2.ea_hbm_bw_wr
+    label: GL2-EA Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.7.3
+  - metric: gl2.ea_hbm_bw_atomic
+    label: GL2-EA Atomic Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.7.4
+- id: 308
+  title: EA to HBM
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: ea.util
+    round: 0
+    legacy_id: 3.8.0
+  - metric: ea.dram_rd_bw
+    label: DRAM Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.1
+  - metric: ea.dram_wr_bw
+    label: DRAM Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.2
+  - metric: ea.io_bw_rd
+    label: IO Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.3
+  - metric: ea.io_bw_wr
+    label: IO Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.4
+  - metric: ea.hdm_bw_rd
+    label: HDM Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.5
+  - metric: ea.hdm_bw_wr
+    label: HDM Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.6
+  - metric: ea.gmi_bw_rd
+    label: GMI Read Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.7
+  - metric: ea.gmi_bw_wr
+    label: GMI Write Bandwidth
+    unit: Bytes/s
+    legacy_id: 3.8.8
+  - metric: ea.stalled_by_sdp
+    label: EA Stall Rate
+    round: 0
+    legacy_id: 3.8.9
+- id: 309
+  title: Workgroup Processors (WGPs)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+    legacy_id: 3.9.0
+  - metric: dispatch.vgprs
+    label: VGPR
+    round: 0
+    legacy_id: 3.9.1
+  - metric: dispatch.sgprs
+    label: SGPR
+    round: 0
+    legacy_id: 3.9.2
+  - metric: dispatch.lds_allocation
+    round: 0
+    legacy_id: 3.9.3
+  - metric: dispatch.scratch_allocation_per_wave
+    label: Scratch Allocation
+    unit: KB per Wave
+    round: 3
+    legacy_id: 3.9.4
+  - metric: dispatch.workgroups_per_wgp
+    label: Workgroups
+    round: 1
+    legacy_id: 3.9.5

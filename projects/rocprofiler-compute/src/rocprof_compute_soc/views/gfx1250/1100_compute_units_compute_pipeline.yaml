@@ -1,0 +1,146 @@
+view: GL1 Cache
+legacy_panel_id: 1100
+alias: gl1
+tables:
+- id: 1101
+  title: GL1A Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1a_util
+    description: Percentage of cycles the GL1 Arbiter is processing requests from GL0.
+  - metric: gl1.gl1a_req_bus_util
+    legacy_id: 11.1.1
+  - metric: gl1.gl1a_return_bus_util
+    legacy_id: 11.1.2
+  - metric: gl1.gl1a_req
+    legacy_id: 11.1.3
+  - metric: gl1.gl1a_req_lat
+    description: null
+    legacy_id: 11.1.4
+- id: 1102
+  title: GL1C Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.util
+    label: GL1C Utilization
+  - metric: gl1.gl1c_return_arbitration_lat
+    description: null
+    legacy_id: 11.2.1
+  - metric: gl1.gl1c_buffer_full_stall
+- id: 1103
+  title: GL1C Request
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.total_req
+    label: GL1C Requests
+    legacy_id: 11.3.0
+  - metric: gl1.rd_req
+    label: GL1C Requests - Read
+    legacy_id: 11.3.1
+  - metric: gl1.wr_req
+    label: GL1C Requests - Write
+    legacy_id: 11.3.2
+  - metric: gl1.gl1c_req_atomic_with_return
+    legacy_id: 11.3.3
+  - metric: gl1.gl1c_req_atomic_without_return
+    label: GL1C Requests - Atomic without Return
+    legacy_id: 11.3.4
+- id: 1104
+  title: GL1C Request Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1c_req_bw_rd
+    legacy_id: 11.4.0
+  - metric: gl1.gl1c_req_bw_wr
+    legacy_id: 11.4.1
+- id: 1105
+  title: GL1C Multicast
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl1c_multicast_tracker_depletion_stall
+    legacy_id: 11.5.0
+  - metric: gl1.gl1c_multicast_req_128b
+    legacy_id: 11.5.1
+  - metric: gl1.gl1c_multicast_req_256b
+    legacy_id: 11.5.2
+  - metric: gl1.gl1c_req_bw_multicast
+    legacy_id: 11.5.3
+  - metric: gl1.gl1c_multicast_tracker_0_timeout_rate
+    legacy_id: 11.5.4
+  - metric: gl1.gl1c_multicast_tracker_1_timeout_rate
+    legacy_id: 11.5.5
+  - metric: gl1.gl1c_multicast_tracker_2_timeout_rate
+    legacy_id: 11.5.6
+  - metric: gl1.gl1c_multicast_tracker_3_timeout_rate
+    legacy_id: 11.5.7
+  - metric: gl1.gl1c_multicast_to_unicast_downgrade_rate
+    legacy_id: 11.5.8
+- id: 1106
+  title: GL1C-GLARB Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_req
+    label: GL1C-GLARB Read Requests
+    legacy_id: 11.6.0
+  - metric: gl1.gl1c_glarb_rd_req_32b
+    legacy_id: 11.6.1
+  - metric: gl1.gl1c_glarb_rd_req_64b
+    legacy_id: 11.6.2
+  - metric: gl1.gl2_rd_128b_req
+    label: GL1C-GLARB Read Requests - 128B
+    legacy_id: 11.6.3
+  - metric: gl1.gl1c_glarb_rd_req_256b
+    legacy_id: 11.6.4
+  - metric: gl1.gl2_wr_req
+    label: GL1C-GLARB Write Requests
+    legacy_id: 11.6.5
+  - metric: gl1.gl1c_glarb_wr_req_32b
+    legacy_id: 11.6.6
+  - metric: gl1.gl1c_glarb_wr_req_64b
+    legacy_id: 11.6.7
+  - metric: gl1.gl1c_glarb_wr_req_128b
+    legacy_id: 11.6.8
+  - metric: gl1.gl1c_glarb_wr_req_256b
+    legacy_id: 11.6.9
+  - metric: gl1.gl1c_glarb_rd_lat
+    description: null
+    legacy_id: 11.6.10
+  - metric: gl1.gl1c_glarb_wr_lat
+    description: null
+    legacy_id: 11.6.11
+  - metric: gl1.gl1c_glarb_rd_bw
+    description: Total GL1 to Graphics Level Arbiter read bandwidth.
+  - metric: gl1.gl1c_glarb_wr_bw
+    description: Total GL1 to Graphics Level Arbiter write bandwidth.
+  - metric: gl1.gl1c_glarb_wr_acks
+    legacy_id: 11.6.14

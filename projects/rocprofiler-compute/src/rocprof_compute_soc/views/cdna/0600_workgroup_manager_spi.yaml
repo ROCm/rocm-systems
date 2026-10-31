@@ -1,0 +1,183 @@
+view: Workgroup Manager (SPI)
+legacy_panel_id: 600
+alias: spi
+tables:
+- id: 601
+  title: Workgroup manager utilizations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.schedule_pipe_wave_occupancy
+    archs:
+    - gfx950
+    unit: Wave
+    legacy_id: 6.1.0
+  - metric: spi.accelerator_util
+    legacy_id:
+      gfx908: 6.1.0
+      gfx90a: 6.1.0
+      gfx940: 6.1.0
+      gfx941: 6.1.0
+      gfx942: 6.1.0
+      gfx950: 6.1.1
+  - metric: spi.scheduler_pipe_util
+    legacy_id:
+      gfx908: 6.1.1
+      gfx90a: 6.1.1
+      gfx940: 6.1.1
+      gfx941: 6.1.1
+      gfx942: 6.1.1
+      gfx950: 6.1.2
+  - metric: spi.scheduler_pipe_wave_util
+    archs:
+    - gfx950
+    legacy_id: 6.1.3
+  - metric: spi.workgroup_manager_util
+    legacy_id:
+      gfx908: 6.1.2
+      gfx90a: 6.1.2
+      gfx940: 6.1.2
+      gfx941: 6.1.2
+      gfx942: 6.1.2
+      gfx950: 6.1.4
+  - metric: compute.se_util
+    legacy_id:
+      gfx908: 6.1.3
+      gfx90a: 6.1.3
+      gfx940: 6.1.3
+      gfx941: 6.1.3
+      gfx942: 6.1.3
+      gfx950: 6.1.5
+  - metric: compute.cu_util
+    label: SIMD Utilization
+  - metric: spi.dispatched_workgroups
+    legacy_id:
+      gfx908: 6.1.5
+      gfx90a: 6.1.5
+      gfx940: 6.1.5
+      gfx941: 6.1.5
+      gfx942: 6.1.5
+      gfx950: 6.1.7
+  - metric: spi.dispatched_wavefronts
+    description: The total number of wavefronts, summed over all workgroups, forming this
+      kernel launch.
+    legacy_id:
+      gfx908: 6.1.6
+      gfx90a: 6.1.6
+      gfx940: 6.1.6
+      gfx941: 6.1.6
+      gfx942: 6.1.6
+      gfx950: 6.1.8
+  - metric: spi.vgpr_writes
+    unit: Cycles/wave
+    legacy_id:
+      gfx908: 6.1.7
+      gfx90a: 6.1.7
+      gfx940: 6.1.7
+      gfx941: 6.1.7
+      gfx942: 6.1.7
+      gfx950: 6.1.9
+  - metric: spi.sgpr_writes
+    unit: Cycles/wave
+    legacy_id:
+      gfx908: 6.1.8
+      gfx90a: 6.1.8
+      gfx940: 6.1.8
+      gfx941: 6.1.8
+      gfx942: 6.1.8
+      gfx950: 6.1.10
+- id: 602
+  title: Workgroup Manager - Resource Allocation
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.not_scheduled_rate_workgroup_manager
+    label: Not-scheduled Rate (Workgroup Manager)
+    legacy_id: 6.2.0
+  - metric: spi.not_scheduled_rate_scheduler_pipe
+    label: Not-scheduled Rate (Scheduler-Pipe)
+    legacy_id: 6.2.1
+  - metric: spi.scheduler_pipe_fifo_full_rate
+    archs:
+    - gfx950
+    legacy_id: 6.2.2
+  - metric: spi.scheduler_pipe_stall_rate
+    legacy_id:
+      gfx908: 6.2.2
+      gfx90a: 6.2.2
+      gfx940: 6.2.2
+      gfx941: 6.2.2
+      gfx942: 6.2.2
+      gfx950: 6.2.3
+  - metric: spi.scratch_stall_rate
+    legacy_id:
+      gfx908: 6.2.3
+      gfx90a: 6.2.3
+      gfx940: 6.2.3
+      gfx941: 6.2.3
+      gfx942: 6.2.3
+      gfx950: 6.2.4
+  - metric: spi.insufficient_simd_waveslots
+    legacy_id:
+      gfx908: 6.2.4
+      gfx90a: 6.2.4
+      gfx940: 6.2.4
+      gfx941: 6.2.4
+      gfx942: 6.2.4
+      gfx950: 6.2.5
+  - metric: spi.insufficient_simd_vgprs
+    legacy_id:
+      gfx908: 6.2.5
+      gfx90a: 6.2.5
+      gfx940: 6.2.5
+      gfx941: 6.2.5
+      gfx942: 6.2.5
+      gfx950: 6.2.6
+  - metric: spi.insufficient_simd_sgprs
+    legacy_id:
+      gfx908: 6.2.6
+      gfx90a: 6.2.6
+      gfx940: 6.2.6
+      gfx941: 6.2.6
+      gfx942: 6.2.6
+      gfx950: 6.2.7
+  - metric: spi.insufficient_cu_lds
+    legacy_id:
+      gfx908: 6.2.7
+      gfx90a: 6.2.7
+      gfx940: 6.2.7
+      gfx941: 6.2.7
+      gfx942: 6.2.7
+      gfx950: 6.2.8
+  - metric: spi.insufficient_cu_barriers
+    legacy_id:
+      gfx908: 6.2.8
+      gfx90a: 6.2.8
+      gfx940: 6.2.8
+      gfx941: 6.2.8
+      gfx942: 6.2.8
+      gfx950: 6.2.9
+  - metric: spi.reached_cu_workgroup_limit
+    legacy_id:
+      gfx908: 6.2.9
+      gfx90a: 6.2.9
+      gfx940: 6.2.9
+      gfx941: 6.2.9
+      gfx942: 6.2.9
+      gfx950: 6.2.10
+  - metric: spi.reached_cu_wavefront_limit
+    legacy_id:
+      gfx908: 6.2.10
+      gfx90a: 6.2.10
+      gfx940: 6.2.10
+      gfx941: 6.2.10
+      gfx942: 6.2.10
+      gfx950: 6.2.11

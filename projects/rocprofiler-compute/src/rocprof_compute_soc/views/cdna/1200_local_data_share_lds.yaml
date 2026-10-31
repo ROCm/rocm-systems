@@ -1,0 +1,147 @@
+view: Local Data Share (LDS)
+legacy_panel_id: 1200
+alias: lds
+tables:
+- id: 1201
+  title: LDS Speed-of-Light
+  cli_style: simple_bar
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: lds.util
+    label: Utilization
+    description: Indicates what percent of the kernel's duration the LDS was actively executing
+      instructions (including, but not limited to, load, store, atomic and HIP's __shfl operations).
+      Calculated as the ratio of the total number of cycles LDS was active over the total
+      CU cycles.
+  - metric: lds.access_rate
+    label: Access Rate
+    legacy_id: 12.1.1
+  - metric: lds.theoretical_bw_util
+    label: Theoretical Bandwidth Utilization
+    legacy_id: 12.1.2
+  - metric: lds.bank_conflict_rate
+    label: Bank Conflict Rate
+    legacy_id: 12.1.3
+- id: 1202
+  title: LDS Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.insts
+    description: The total number of LDS instructions (including, but not limited to, read/write/atomics
+      and HIP's __shfl instructions) executed per normalization unit.
+  - metric: lds.load
+    archs:
+    - gfx950
+    description: The total number of LDS load instructions issued per normalization unit.
+  - metric: lds.store
+    archs:
+    - gfx950
+    description: The total number of LDS store instructions issued per normalization unit.
+  - metric: lds.atomic
+    archs:
+    - gfx950
+    description: The total number of LDS atomic instructions issued per normalization unit.
+  - metric: lds.load_bw
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 12.2.4
+  - metric: lds.store_bw
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 12.2.5
+  - metric: lds.atomic_bw
+    archs:
+    - gfx950
+    unit: Gbps
+    legacy_id: 12.2.6
+  - metric: lds.theoretical_bw
+    label: Theoretical Bandwidth
+    unit: Gbps
+    description: Indicates the maximum amount of bytes that could have been loaded from, stored
+      to, or atomically updated in the LDS divided by total duration. Does not take into account
+      the execution mask of the wavefront when the instruction was executed.
+  - metric: lds.lat
+    legacy_id:
+      gfx908: 12.2.2
+      gfx90a: 12.2.2
+      gfx940: 12.2.2
+      gfx941: 12.2.2
+      gfx942: 12.2.2
+      gfx950: 12.2.8
+  - metric: lds.bank_conflicts_access
+    label: Bank Conflicts/Access
+  - metric: lds.index_accesses
+    label: Index Accesses
+    legacy_id:
+      gfx908: 12.2.4
+      gfx90a: 12.2.4
+      gfx940: 12.2.4
+      gfx941: 12.2.4
+      gfx942: 12.2.4
+      gfx950: 12.2.10
+  - metric: lds.atomic_return_cycles
+    label: Atomic Return Cycles
+    legacy_id:
+      gfx908: 12.2.5
+      gfx90a: 12.2.5
+      gfx940: 12.2.5
+      gfx941: 12.2.5
+      gfx942: 12.2.5
+      gfx950: 12.2.11
+  - metric: lds.bank_conflict
+    label: Bank Conflict
+    legacy_id:
+      gfx908: 12.2.6
+      gfx90a: 12.2.6
+      gfx940: 12.2.6
+      gfx941: 12.2.6
+      gfx942: 12.2.6
+      gfx950: 12.2.12
+  - metric: lds.addr_conflict
+    label: Addr Conflict
+    legacy_id:
+      gfx908: 12.2.7
+      gfx90a: 12.2.7
+      gfx940: 12.2.7
+      gfx941: 12.2.7
+      gfx942: 12.2.7
+      gfx950: 12.2.13
+  - metric: lds.unaligned_stall
+    label: Unaligned Stall
+    legacy_id:
+      gfx908: 12.2.8
+      gfx90a: 12.2.8
+      gfx940: 12.2.8
+      gfx941: 12.2.8
+      gfx942: 12.2.8
+      gfx950: 12.2.14
+  - metric: lds.mem_violations
+    label: Mem Violations
+    description: The total number of out-of-bounds accesses made to the LDS, per normalization
+      unit. This is unused and expected to be zero in most configurations for modern CDNA\u2122
+      accelerators.
+    legacy_id:
+      gfx908: 12.2.9
+      gfx90a: 12.2.9
+      gfx940: 12.2.9
+      gfx941: 12.2.9
+      gfx942: 12.2.9
+      gfx950: 12.2.15
+  - metric: lds.command_fifo_full_rate
+    archs:
+    - gfx950
+    legacy_id: 12.2.16
+  - metric: lds.data_fifo_full_rate
+    archs:
+    - gfx950
+    legacy_id: 12.2.17

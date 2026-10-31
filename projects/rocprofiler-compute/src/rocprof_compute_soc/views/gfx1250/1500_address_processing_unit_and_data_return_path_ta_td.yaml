@@ -1,0 +1,122 @@
+view: Central Hub (CH)
+legacy_panel_id: 1500
+alias: ch
+tables:
+- id: 1501
+  title: CHA Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.cha_util
+    label: Utilization
+    legacy_id: 15.1.0
+- id: 1502
+  title: CHA Arbitration
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.req_lat
+    label: Request Latency
+    description: null
+    legacy_id: 15.2.0
+  - metric: ch.cha_chc0_req_stall_rate
+    legacy_id: 15.2.1
+  - metric: ch.cha_chc1_req_stall_rate
+    legacy_id: 15.2.2
+  - metric: ch.cha_req_path_util
+    legacy_id: 15.2.3
+  - metric: ch.cha_return_path_util
+    legacy_id: 15.2.4
+- id: 1503
+  title: CHC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.chc_util
+    label: Utilization
+    legacy_id: 15.3.0
+  - metric: ch.buffer_stall_rate
+    label: Buffer Stall Rate
+    legacy_id: 15.3.1
+- id: 1504
+  title: CHC Requests
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.total_req
+    label: Total Requests
+    legacy_id: 15.4.0
+  - metric: ch.total_req_rd
+    label: Total Requests - Read
+    legacy_id: 15.4.1
+  - metric: ch.total_req_32b_rd
+    label: Total Requests - 32B Read
+    legacy_id: 15.4.2
+  - metric: ch.total_req_64b_rd
+    label: Total Requests - 64B Read
+    legacy_id: 15.4.3
+  - metric: ch.total_req_128b_rd
+    label: Total Requests - 128B Read
+    legacy_id: 15.4.4
+  - metric: ch.total_req_256b_rd
+    label: Total Requests - 256B Read
+    legacy_id: 15.4.5
+  - metric: ch.total_req_wr
+    label: Total Requests - Write
+    legacy_id: 15.4.6
+  - metric: ch.total_req_32b_wr
+    label: Total Requests - 32B Write
+    legacy_id: 15.4.7
+  - metric: ch.total_req_64b_wr
+    label: Total Requests - 64B Write
+    legacy_id: 15.4.8
+  - metric: ch.total_req_128b_wr
+    label: Total Requests - 128B Write
+    legacy_id: 15.4.9
+  - metric: ch.total_req_256b_wr
+    label: Total Requests - 256B Write
+    legacy_id: 15.4.10
+  - metric: ch.total_req_atomic_with_return
+    label: Total Requests - Atomic with Return
+    legacy_id: 15.4.11
+  - metric: ch.total_req_atomic_without_return
+    label: Total Requests - Atomic without Return
+    legacy_id: 15.4.12
+- id: 1505
+  title: CHC Bandwidth and Latency
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ch.chc_bw_rd
+    legacy_id: 15.5.0
+  - metric: ch.chc_bw_wr
+    legacy_id: 15.5.1
+  - metric: ch.chc_gl2_lat_rd
+    description: null
+    legacy_id: 15.5.2
+  - metric: ch.chc_gl2_lat_wr
+    description: null
+    legacy_id: 15.5.3
+  - metric: ch.chc_return_arbitration_lat
+    description: null
+    legacy_id: 15.5.4

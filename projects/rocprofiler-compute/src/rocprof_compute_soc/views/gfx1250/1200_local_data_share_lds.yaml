@@ -1,0 +1,92 @@
+view: GLARB (Graphics Level Arbiter)
+legacy_panel_id: 1200
+alias: glarb
+tables:
+- id: 1201
+  title: GLARBA Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarba_util
+    label: Utilization
+    description: Percentage of GLARBA/GLARBC cycles the Graphics Level Arbiter is actively
+      processing requests.
+  - metric: glarb.glarba_req_bus_util
+    legacy_id: 12.1.1
+  - metric: glarb.glarba_return_bus_util
+    legacy_id: 12.1.2
+  - metric: glarb.glarba_req
+    legacy_id: 12.1.3
+  - metric: glarb.glarba_req_lat
+    description: null
+    legacy_id: 12.1.4
+- id: 1202
+  title: GLARBC Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_util
+    label: Utilization
+  - metric: glarb.glarbc_return_arbitration_lat
+    description: null
+    legacy_id: 12.2.1
+  - metric: glarb.glarbc_buffer_full_stall
+- id: 1203
+  title: GLARBC Request
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_req
+    legacy_id: 12.3.0
+  - metric: glarb.glarbc_req_rd
+    legacy_id: 12.3.1
+  - metric: glarb.glarbc_req_wr
+    legacy_id: 12.3.2
+  - metric: glarb.glarbc_req_atomic_with_return
+    legacy_id: 12.3.3
+  - metric: glarb.glarbc_req_atomic_without_return
+    label: GLARBC Requests - Atomic without Return
+    legacy_id: 12.3.4
+- id: 1204
+  title: GLARBC Request Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_req_bw_rd
+    description: Total Graphics Level Arbiter read bandwidth.
+  - metric: glarb.glarbc_req_bw_wr
+    description: Total Graphics Level Arbiter write bandwidth.
+  - metric: glarb.glarbc_client_wr_acks
+    legacy_id: 12.4.2
+- id: 1205
+  title: GLARBC-GL2 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: glarb.glarbc_gl2_rd_lat
+    legacy_id: 12.5.0
+  - metric: glarb.glarbc_gl2_wr_lat
+    description: null
+    legacy_id: 12.5.1
+  - metric: glarb.glarbc_gl2_wr_acks
+    legacy_id: 12.5.2

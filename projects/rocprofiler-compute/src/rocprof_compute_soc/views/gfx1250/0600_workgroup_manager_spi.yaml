@@ -1,0 +1,104 @@
+view: Workgroup Manager (SPI)
+legacy_panel_id: 600
+alias: spi
+tables:
+- id: 601
+  title: Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.util
+    legacy_id: 6.1.0
+- id: 602
+  title: Wavefront Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.dispatched_workgroups
+    unit: Count
+    legacy_id: 6.2.0
+  - metric: spi.dispatched_wavefronts
+    unit: Count
+    description: Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe
+      scoped and reads zero for gfx1250 compute dispatches).
+    legacy_id: 6.2.1
+  - metric: spi.dispatched_clusters
+    legacy_id: 6.2.2
+  - metric: spi.dispatched_group_groups
+    legacy_id: 6.2.3
+  - metric: spi.wavefront_dispatch_rate
+    legacy_id: 6.2.4
+  - metric: spi.thread_dispatch_rate
+    legacy_id: 6.2.5
+  - metric: spi.per_se_wavefront_occupancy
+    legacy_id: 6.2.6
+  - metric: spi.per_se_wavefront_life
+    legacy_id: 6.2.7
+  - metric: spi.context_save_rate
+    legacy_id: 6.2.8
+  - metric: spi.context_restore_rate
+    legacy_id: 6.2.9
+  - metric: spi.wavefront_dispatch_fifo_full_rate
+    legacy_id: 6.2.10
+- id: 603
+  title: Resource Allocation
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.resource_no_allocation_rate
+    legacy_id: 6.3.0
+  - metric: spi.resource_allocation_rate
+    legacy_id: 6.3.1
+  - metric: spi.alloc_failure_lds_full
+    label: Alloc Failure - LDS Full
+    legacy_id: 6.3.2
+  - metric: spi.alloc_failure_waveslots_full
+    label: Alloc Failure - Waveslots Full
+    legacy_id: 6.3.3
+  - metric: spi.alloc_failure_vgpr_full
+    label: Alloc Failure - VGPR Full
+    legacy_id: 6.3.4
+  - metric: spi.alloc_failure_barrier_full
+    label: Alloc Failure - Barrier Full
+    legacy_id: 6.3.5
+  - metric: spi.alloc_failure_bulky_full
+    label: Alloc Failure - Bulky Full
+    legacy_id: 6.3.6
+  - metric: spi.alloc_failure_named_barriers_full
+    label: Alloc Failure - Named Barriers Full
+    legacy_id: 6.3.7
+  - metric: spi.alloc_failure_temp_space_full
+    label: Alloc Failure - Temp Space Full
+    legacy_id: 6.3.8
+- id: 604
+  title: CPC-SPI Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.per_queue_outstanding_dispatch_req_p0_q0_sum
+    legacy_id: 6.4.0
+  - metric: spi.per_queue_outstanding_dispatch_req_p0_q1_sum
+    legacy_id: 6.4.1
+  - metric: spi.per_queue_outstanding_dispatch_req_p1_q0_sum
+    legacy_id: 6.4.2
+  - metric: spi.per_queue_outstanding_dispatch_req_p1_q1_sum
+    legacy_id: 6.4.3
+  - metric: spi.cpc_pre_alloc_req_stall_rate
+    label: CPC Pre-Alloc Request Stall Rate
+    legacy_id: 6.4.4

@@ -1,0 +1,32 @@
+view: GRBM (Graphics Register Bus Manager)
+legacy_panel_id: 1700
+alias: grbm
+tables:
+- id: 1701
+  title: GRBM Metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: grbm.gpu_active_cycles
+    legacy_id: 17.1.0
+  - metric: grbm.cp_util
+    legacy_id: 17.1.1
+  - metric: spi.workgroup_manager_util
+    label: SPI Utilization
+    legacy_id: 17.1.2
+  - metric: grbm.utcl1_util
+    legacy_id: 17.1.3
+  - metric: grbm.utcl2_util
+    legacy_id: 17.1.4
+  - metric: grbm.gl1_util
+    legacy_id: 17.1.5
+  - metric: grbm.glarb_util
+    legacy_id: 17.1.6
+  - metric: grbm.sdma_util
+    legacy_id: 17.1.7
+  - metric: grbm.ch_util
+    legacy_id: 17.1.8

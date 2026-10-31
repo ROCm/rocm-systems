@@ -1,0 +1,188 @@
+view: L2 Cache (per Channel)
+legacy_panel_id: 1800
+alias: l2_per_channel
+tables:
+- id: 1801
+  title: Aggregate Stats (All channels)
+  header:
+    metric: Metric
+    avg: Avg
+    std dev: Std Dev
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l2.chan_hit_rate_all
+    label: L2 Cache Hit Rate
+    legacy_id: 18.1.0
+- id: 1802
+  title: L2 Cache Hit Rate (Percent)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_hit_rate_per_chan
+    label: Channel ::_1
+    description: null
+    legacy_id: 18.2.0
+- id: 1803
+  title: L2 Requests (per normUnit)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_req_per_normunit
+    label: Channel ::_1
+    legacy_id: 18.3.0
+- id: 1804
+  title: L2 Requests (per normUnit)
+  cli_style: simple_multiple_bar
+  header:
+    metric: Metric
+    read req: L2 Read
+    write req: L2 Write
+    atomic req: L2 Atomic
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metrics:
+      read req: l2.chan_rd
+      write req: l2.chan_wr
+      atomic req: l2.chan_atomic
+    label: Channel ::_1
+    legacy_id: 18.4.0
+- id: 1805
+  title: L2-Fabric Requests (per normUnit)
+  cli_style: simple_multiple_bar
+  header:
+    metric: Metric
+    read req: L2-Fabric Read
+    write req: L2-Fabric Write and Atomic
+    atomic req: L2-Fabric Atomic
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metrics:
+      read req: l2.chan_fabric_rd
+      write req: l2.chan_fabric_wr_atomic
+      atomic req: l2.chan_fabric_atomic
+    label: Channel ::_1
+    legacy_id: 18.5.0
+- id: 1806
+  title: L2-Fabric Read Latency (Cycles)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_fabric_rd_lat_cycles
+    label: Channel ::_1
+    legacy_id: 18.6.0
+- id: 1807
+  title: L2-Fabric Write and Atomic Latency (Cycles)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_fabric_wr_atomic_lat_cycles
+    label: Channel ::_1
+    legacy_id: 18.7.0
+- id: 1808
+  title: L2-Fabric Atomic Latency (Cycles)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_fabric_atomic_lat_cycles
+    label: Channel ::_1
+    legacy_id: 18.8.0
+- id: 1809
+  title: L2-Fabric Read Stall (Cycles per normUnit)
+  cli_style: simple_multiple_bar
+  header:
+    metric: Metric
+    ea read stall - pcie: L2-Fabric Read Stall (PCIe)
+    ea read stall - if: "L2-Fabric Read Stall (Infinity Fabric\u2122)"
+    ea read stall - hbm: L2-Fabric Read Stall (HBM)
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metrics:
+      ea read stall - pcie: null
+      ea read stall - if: null
+      ea read stall - hbm: null
+    label: Channel ::_1
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+  - metrics:
+      ea read stall - pcie: l2.chan_fabric_rd_stall_pcie
+      ea read stall - if: l2.chan_fabric_rd_stall_infinity_fabric
+      ea read stall - hbm: l2.chan_fabric_rd_stall_hbm
+    label: Channel ::_1
+    archs:
+    - gfx950
+    legacy_id: 18.9.0
+- id: 1810
+  title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
+  cli_style: simple_multiple_bar
+  header:
+    metric: Metric
+    ea write stall - pcie: L2-Fabric Write Stall (PCIe)
+    ea write stall - if: "L2-Fabric Write Stall (Infinity Fabric\u2122)"
+    ea write stall - hbm: L2-Fabric Write Stall (HBM)
+    ea write stall - starve: L2-Fabric Write Starve
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metrics:
+      ea write stall - pcie: null
+      ea write stall - if: null
+      ea write stall - hbm: null
+      ea write stall - starve: l2.chan_fabric_wr_starve
+    label: Channel ::_1
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    legacy_id: 18.10.0
+  - metrics:
+      ea write stall - pcie: l2.chan_fabric_wr_stall_pcie
+      ea write stall - if: l2.chan_fabric_wr_stall_infinity_fabric
+      ea write stall - hbm: l2.chan_fabric_wr_stall_hbm
+      ea write stall - starve: l2.chan_fabric_wr_starve
+    label: Channel ::_1
+    archs:
+    - gfx950
+    legacy_id: 18.10.0
+- id: 1812
+  title: L2-Fabric (128B read requests per normUnit)
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  placeholder_range:
+    ::_1: $total_l2_chan
+  metrics:
+  - metric: l2.chan_fabric_128b_rd_req_per_normunit
+    label: Channel ::_1
+    legacy_id: 18.12.0

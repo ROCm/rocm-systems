@@ -5,7 +5,8 @@
 
 normalize_equation() parses an equation and writes it back with constants factored out
 of the aggregation functions and only the parentheses it needs. tools/format_yaml.py
-keeps the YAML files in this form. Standard library only.
+keeps the YAML files in this form, and the analysis views derive their display forms
+with it so they match those files. Standard library only: profile mode imports it.
 """
 
 from dataclasses import dataclass

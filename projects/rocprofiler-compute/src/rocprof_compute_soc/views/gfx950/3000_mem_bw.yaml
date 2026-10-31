@@ -1,0 +1,1303 @@
+view: Memory Bandwidth Analysis
+legacy_panel_id: 3000
+alias: membw_analysis
+tables:
+- id: 3001
+  title: L1 Cache
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.l1_cache_vmem_stalled_by_l1_cache
+    label: L1 Cache - VMEM stalled by L1 Cache
+    description_note: 'Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100)) / SUM(SQ_BUSY_CYCLES)'
+    legacy_id: 30.1.0
+  - metric: ta.l1_cache_ta_coalesce_rate
+    label: L1 Cache - TA coalesce rate
+    description_note: 'Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)'
+    legacy_id: 30.1.1
+  - metric: vl1d.coalescing
+    label: L1 Cache - VL1 coalesce efficiency
+    description: 'Measures how efficiently threads are packed into TCP requests via TA coalescing.
+      Numerator: Total threads processed (64 threads/wavefront * wavefronts). Denominator:
+      Maximum threads that could be served if every TCP request was fully coalesced (4 threads/request).
+      100% = perfect 4:1 coalescing (4 contiguous threads share each cache line access). 25%
+      = no coalescing (each thread requires a separate TCP request). A low rate indicates
+      scattered memory access patterns that defeat coalescing. Equation: SUM(((TA_TOTAL_WAVEFRONTS_sum
+      * 64) * 100)) / SUM((TCP_TOTAL_ACCESSES_sum * 4))'
+  - metric: ta.l1_cache_ta_addr_stalled_by_tcp
+    label: L1 Cache - TA addr stalled by TCP
+    description_note: 'Equation: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)'
+    legacy_id: 30.1.3
+  - metric: ta.l1_cache_ta_addr_stalled_by_td
+    label: L1 Cache - TA addr stalled by TD
+    description_note: 'Equation: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)'
+    legacy_id: 30.1.4
+  - metric: ta.l1_cache_ta_data_stalled_by_tcp
+    label: L1 Cache - TA data stalled by TCP
+    description_note: 'Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)'
+    legacy_id: 30.1.5
+  - metric: ta.l1_cache_ta_addresser_stalled
+    label: L1 Cache - TA addresser stalled
+    description_note: 'Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100)) / SUM(TA_TA_BUSY_sum)'
+    legacy_id: 30.1.6
+  - metric: vl1d.cache_ta_stalled_by_tcp_aggregated
+    label: L1 Cache - TA stalled by TCP (aggregated)
+    description_note: 'Equation: SUM((TCP_TCP_TA_ADDR_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.1.7
+  - metric: vl1d.cache_tcp_hit_rate
+    label: L1 Cache - TCP hit rate
+    description_note: 'Equation: SUM(((TCP_TOTAL_CACHE_ACCESSES_sum - TCP_CACHE_MISS_sum)
+      * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)'
+    legacy_id: 30.1.8
+  - metric: vl1d.cache_tcp_miss_rate
+    label: L1 Cache - TCP miss rate
+    description_note: 'Equation: SUM((TCP_CACHE_MISS_sum * 100)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)'
+    legacy_id: 30.1.9
+  - metric: vl1d.cache_tcp_stalled_by_utcl1
+    label: L1 Cache - TCP stalled by UTCL1
+    description_note: 'Equation: SUM((TCP_UTCL1_STALL_INFLIGHT_MAX_sum * 100)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.1.10
+  - metric: vl1d.cache_tcp_stalled_by_utcl2
+    label: L1 Cache - TCP stalled by UTCL2
+    description_note: 'Equation: SUM((TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum * 100)) /
+      SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.1.11
+  - metric: vl1d.hit_ratio
+    label: L1 Cache - UTCL1 hit rate
+    description: 'Percentage of UTCL1 (TLB) translation requests that hit. Higher is better
+      for address translation performance. Equation: SUM((TCP_UTCL1_TRANSLATION_HIT_sum *
+      100)) / SUM(TCP_UTCL1_REQUEST_sum)'
+  - metric: vl1d.cache_utcl1_miss_rate
+    label: L1 Cache - UTCL1 miss rate
+    description_note: 'Equation: SUM((TCP_UTCL1_TRANSLATION_MISS_sum * 100)) / SUM(TCP_UTCL1_REQUEST_sum)'
+    legacy_id: 30.1.13
+  - metric: vl1d.cache_tcp_stalled_by_td
+    label: L1 Cache - TCP stalled by TD
+    description_note: 'Equation: SUM((TCP_TD_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.1.14
+  - metric: vl1d.cache_tcp_stalled_by_l2
+    label: L1 Cache - TCP stalled by L2
+    description_note: 'Equation: SUM((TCP_TCR_TCP_STALL_CYCLES_sum * 100)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.1.15
+  - metric: vl1d.tag_ram_0_req
+    label: L1 Cache - Tag RAM 0 Req
+    description: null
+  - metric: vl1d.tag_ram_1_req
+    label: L1 Cache - Tag RAM 1 Req
+    description: null
+  - metric: vl1d.tag_ram_2_req
+    label: L1 Cache - Tag RAM 2 Req
+    description: null
+  - metric: vl1d.tag_ram_3_req
+    label: L1 Cache - Tag RAM 3 Req
+    description: null
+- id: 3002
+  title: L1 Traffic
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.vmem_issue_rate
+    label: VMEM issue rate
+    description_note: 'Equation: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)'
+    legacy_id: 30.2.0
+  - metric: ta.total_insts
+    label: L1 inbound traffic (TA_TOTAL_WAVEFRONTS)
+    description: 'The number of wavefronts processed by TA (L1 front-end). Equation: SUM(TA_TOTAL_WAVEFRONTS_sum)
+      / SUM($denom)'
+  - metric: ta.processing_rate
+    label: TA processing rate
+    description_note: 'Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)'
+    legacy_id: 30.2.2
+  - metric: vl1d.cu_l1_throughput
+    label: CU-L1 throughput
+    description_note: 'Equation: SUM(TCP_TOTAL_ACCESSES_sum) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.2.3
+  - metric: vl1d.util
+    label: L1 utilization
+    description: 'Percentage of time TCP is actively processing requests (busy cycles / free-running
+      cycles). Equation: SUM((TCP_GATE_EN2_sum * 100)) / SUM(TCP_GATE_EN1_sum)'
+  - metric: vl1d.average_lat
+    label: L1 average latency
+    description_note: 'Weighted average across all CUs (SUM/SUM gives more weight to CUs with
+      more accesses). Equation: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TOTAL_ACCESSES_sum)'
+    legacy_id: 30.2.5
+  - metric: vl1d.average_lat
+    label: L1 latency
+    display: avg_vl1d_average_lat
+    description: 'Latency to complete memory access, from wave entering to wave leaving TCP.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU). Equation: AVG(TCP_TCP_LATENCY_sum)
+      / AVG(TCP_TOTAL_ACCESSES_sum)'
+  - metric: vl1d.l2_throughput_reads_writes
+    label: L1-L2 throughput (reads + writes)
+    description_note: 'Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.2.7
+  - metric: vl1d.l2_throughput_total
+    label: L1-L2 throughput (total)
+    description_note: 'Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
+      + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_GATE_EN2_sum)'
+    legacy_id: 30.2.8
+  - metric: vl1d.l2_rd_average_lat
+    label: L2 read average latency
+    description_note: 'Weighted average across all CUs (SUM/SUM gives more weight to CUs with
+      more accesses). Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)'
+    legacy_id: 30.2.9
+  - metric: vl1d.l2_rd_average_lat
+    label: L2 read latency
+    display: avg_vl1d_l2_rd_average_lat
+    description: 'Latency to get a read response from L2 (TCC), including reads and atomics
+      with return. Ratio of averages across CUs (AVG/AVG gives equal weight to each CU). Equation:
+      AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)'
+  - metric: vl1d.l2_wr_average_lat
+    label: L2 write average latency
+    description_note: 'Weighted average across all CUs (SUM/SUM gives more weight to CUs with
+      more accesses). Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum)'
+    legacy_id: 30.2.11
+  - metric: vl1d.l2_wr_average_lat
+    label: L2 write latency
+    display: avg_vl1d_l2_wr_average_lat
+    description: 'Latency to get a write acknowledgment from L2 (TCC), including writes and
+      atomics without return. Ratio of averages across CUs (AVG/AVG gives equal weight to
+      each CU). Equation: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)'
+  - metric: vl1d.utcl1_average_lat
+    label: UTCL1 average latency
+    description_note: 'Weighted average across all CUs (SUM/SUM gives more weight to CUs with
+      more accesses). Equation: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM(TCP_UTCL1_REQUEST_sum)'
+    legacy_id: 30.2.13
+  - metric: vl1d.utcl1_average_lat
+    label: UTCL1 latency
+    display: avg_vl1d_utcl1_average_lat
+    description: 'Latency for UTCL1 (L1 TLB) address translation, from request to completion.
+      Includes both hits and misses. High latency indicates TLB pressure or UTCL2 miss penalty.
+      MI350 restored this counter (removed in MI300 for power savings). Ratio of averages
+      across CUs (AVG/AVG gives equal weight to each CU). Equation: AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum)
+      / AVG(TCP_UTCL1_REQUEST_sum)'
+  - metric: vl1d.utcl1_to_utcl2_average_lat
+    label: UTCL1 to UTCL2 average latency
+    description_note: 'Weighted average across all CUs (SUM/SUM gives more weight to CUs with
+      more accesses). Equation: SUM(TCP_UTCL1_UTCL2_INFLIGHT_sum) / SUM(TCP_UTCL1_TRANSLATION_MISS_sum)'
+    legacy_id: 30.2.15
+  - metric: vl1d.utcl1_to_utcl2_average_lat
+    label: UTCL1 to UTCL2 latency
+    display: avg_vl1d_utcl1_to_utcl2_average_lat
+    description: 'Latency for UTCL1 misses to be resolved by UTCL2 (L2 TLB). Only counts requests
+      that missed UTCL1 and went to UTCL2. High latency indicates page table walk overhead.
+      Ratio of averages across CUs (AVG/AVG gives equal weight to each CU). Equation: AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum)
+      / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)'
+- id: 3003
+  title: TD Return Path
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: td.stalled_by_tcp
+    label: TD - stalled by TCP
+    description_note: 'Equation: SUM((TD_TC_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)'
+    legacy_id: 30.3.0
+  - metric: td.input_fifo_full
+    label: TD - input FIFO full
+    description_note: 'Equation: SUM((TD_TC_TD_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)'
+    legacy_id: 30.3.1
+  - metric: td.output_fifo_full
+    label: TD - output FIFO full
+    description_note: 'Equation: SUM((TD_OUTPUT_FIFO_FULL_sum * 100)) / SUM(TD_TD_BUSY_sum)'
+    legacy_id: 30.3.2
+  - metric: td.stalled_by_spi
+    label: TD - stalled by SPI
+    description_note: 'Equation: SUM((TD_SPI_STALL_sum * 100)) / SUM(TD_TD_BUSY_sum)'
+    legacy_id: 30.3.3
+  - metric: td.l1_cu_throughput
+    label: TD - L1-CU throughput
+    description_note: 'Equation: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)'
+    legacy_id: 30.3.4
+  - metric: td.load_wavefronts
+    label: TD - load wavefronts
+    description_note: 'Equation: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)'
+    legacy_id: 30.3.5
+  - metric: td.atomic_insts
+    label: TD - atomic wavefronts
+    unit: (Wavefronts + $normUnit)
+    description: 'Number of atomic operation wavefronts processed by TD. Equation: SUM(TD_ATOMIC_WAVEFRONT_sum)
+      / SUM($denom)'
+  - metric: td.wr_insts
+    label: TD - store wavefronts
+    unit: (Wavefronts + $normUnit)
+    description: 'Number of store wavefronts processed by TD. Equation: SUM(TD_STORE_WAVEFRONT_sum)
+      / SUM($denom)'
+  - metric: td.coalescable_wavefronts_rate
+    label: TD - coalescable wavefronts rate
+    description_note: 'Equation: SUM((TD_COALESCABLE_WAVEFRONT_sum * 100)) / SUM(TD_LOAD_WAVEFRONT_sum)'
+    legacy_id: 30.3.8
+- id: 3004
+  title: Normalized Stall Metrics (%)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.normalized_l1_cache_vmem_stalled_by_l1_cache
+    label: Normalized L1 Cache - VMEM stalled by L1 Cache
+    description_note: 'Equation: ((SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.0
+  - metric: ta.normalized_l1_cache_ta_addr_stalled_by_tcp
+    label: Normalized L1 Cache - TA addr stalled by TCP
+    description_note: 'Equation: ((SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.1
+  - metric: ta.normalized_l1_cache_ta_addr_stalled_by_td
+    label: Normalized L1 Cache - TA addr stalled by TD
+    description_note: 'Equation: ((SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.2
+  - metric: ta.normalized_l1_cache_ta_data_stalled_by_tcp
+    label: Normalized L1 Cache - TA data stalled by TCP
+    description_note: 'Equation: ((SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.3
+  - metric: ta.normalized_l1_cache_ta_addresser_stalled
+    label: Normalized L1 Cache - TA addresser stalled
+    description_note: 'Equation: ((SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.4
+  - metric: vl1d.normalized_l1_cache_ta_stalled_by_tcp_aggregated
+    label: Normalized L1 Cache - TA stalled by TCP (aggregated)
+    description_note: 'Equation: ((SUM(TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.5
+  - metric: vl1d.normalized_l1_cache_tcp_stalled_by_utcl1
+    label: Normalized L1 Cache - TCP stalled by UTCL1
+    description_note: 'Equation: ((SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.6
+  - metric: vl1d.normalized_l1_cache_tcp_stalled_by_utcl2
+    label: Normalized L1 Cache - TCP stalled by UTCL2
+    description_note: 'Equation: ((SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.7
+  - metric: vl1d.normalized_l1_cache_tcp_stalled_by_td
+    label: Normalized L1 Cache - TCP stalled by TD
+    description_note: 'Equation: ((SUM(TCP_TD_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.8
+  - metric: vl1d.normalized_l1_cache_tcp_stalled_by_l2
+    label: Normalized L1 Cache - TCP stalled by L2
+    description_note: 'Equation: ((SUM(TCP_TCR_TCP_STALL_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.9
+  - metric: td.normalized_td_stalled_by_tcp
+    label: Normalized TD - stalled by TCP
+    description_note: 'Equation: ((SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) *
+      $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.10
+  - metric: td.normalized_td_input_fifo_full
+    label: Normalized TD - input FIFO full
+    description_note: 'Equation: ((SUM(TD_TC_TD_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.11
+  - metric: td.normalized_td_output_fifo_full
+    label: Normalized TD - output FIFO full
+    description_note: 'Equation: ((SUM(TD_OUTPUT_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.12
+  - metric: td.normalized_td_stalled_by_spi
+    label: Normalized TD - stalled by SPI
+    description_note: 'Equation: ((SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $cu_per_gpu)) * 100)'
+    legacy_id: 30.4.13
+- id: 3005
+  title: Normalized Throughput Metrics (per Second)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: ta.normalized_ta_processing_rate
+    label: Normalized TA processing rate
+    description_note: 'Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp))
+      / 1000000000)'
+    legacy_id: 30.5.0
+  - metric: vl1d.normalized_cu_l1_throughput
+    label: Normalized CU-L1 throughput
+    description_note: 'Equation: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp))
+      / 1000000000)'
+    legacy_id: 30.5.1
+  - metric: vl1d.normalized_l1_l2_throughput_reads_writes
+    label: Normalized L1-L2 throughput (reads + writes)
+    description_note: 'Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / (SUM((End_Timestamp
+      - Start_Timestamp)) / 1000000000)'
+    legacy_id: 30.5.2
+  - metric: vl1d.normalized_l1_l2_throughput_total
+    label: Normalized L1-L2 throughput (total)
+    description_note: 'Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
+      + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)'
+    legacy_id: 30.5.3
+  - metric: td.normalized_td_l1_cu_throughput
+    label: Normalized TD - L1-CU throughput
+    description_note: 'Equation: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp))
+      / 1000000000)'
+    legacy_id: 30.5.4
+- id: 3006
+  title: Raw Counter Value
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_vmem
+    label: SQ_INSTS_VMEM
+    description: null
+  - metric: compute.sq_wave_cycles
+    description: null
+    legacy_id: 30.6.1
+  - metric: compute.vmem_ta_cmd_stall
+    label: SQ_VMEM_TA_CMD_FIFO_FULL
+    description: null
+  - metric: compute.sq_busy_cycles
+    description: null
+    legacy_id: 30.6.3
+  - metric: ta.total_insts
+    label: TA_TOTAL_WAVEFRONTS
+    description: null
+  - metric: ta.spill_insts
+    label: TA_BUFFER_WAVEFRONTS
+    description: null
+  - metric: ta.spill_stack_total_cycles
+    label: TA_BUFFER_TOTAL_CYCLES
+    description: null
+  - metric: ta.busy_cycles
+    description: null
+    legacy_id: 30.6.7
+  - metric: ta.addr_stalled_by_tc_cycles
+    description: null
+    legacy_id: 30.6.8
+  - metric: ta.addr_stalled_by_td_cycles
+    description: null
+    legacy_id: 30.6.9
+  - metric: ta.data_stalled_by_tc_cycles
+    description: null
+    legacy_id: 30.6.10
+  - metric: ta.addresser_stalled_cycles
+    description: null
+    legacy_id: 30.6.11
+  - metric: vl1d.tcp_gate_en1_free_running_cycles
+    label: TCP_GATE_EN1 (free running cycles)
+    description: null
+    legacy_id: 30.6.12
+  - metric: vl1d.tcp_gate_en2_busy_cycles
+    label: TCP_GATE_EN2 (busy cycles)
+    description: null
+    legacy_id: 30.6.13
+  - metric: vl1d.total_req
+    label: TCP_TOTAL_ACCESSES
+    description: null
+  - metric: vl1d.cache_accesses
+    label: TCP_TOTAL_CACHE_ACCESSES
+    description: null
+  - metric: vl1d.tcp_cache_miss
+    description: null
+    legacy_id: 30.6.16
+  - metric: vl1d.access_lat_norm
+    label: TCP_TCP_LATENCY
+    description: null
+  - metric: vl1d.tcp_tcp_ta_addr_stall_cycles
+    description: null
+    legacy_id: 30.6.18
+  - metric: vl1d.tcp_td_tcp_stall_cycles
+    description: null
+    legacy_id: 30.6.19
+  - metric: vl1d.tcp_tcr_tcp_stall_cycles
+    description: null
+    legacy_id: 30.6.20
+  - metric: vl1d.tag_ram_0_req
+    label: TCP_TAGRAM0_REQ
+    description: null
+  - metric: vl1d.tag_ram_1_req
+    label: TCP_TAGRAM1_REQ
+    description: null
+  - metric: vl1d.tag_ram_2_req
+    label: TCP_TAGRAM2_REQ
+    description: null
+  - metric: vl1d.tag_ram_3_req
+    label: TCP_TAGRAM3_REQ
+    description: null
+  - metric: vl1d.req
+    label: TCP_UTCL1_REQUEST
+    description: null
+  - metric: vl1d.hits
+    label: TCP_UTCL1_TRANSLATION_HIT
+    description: null
+  - metric: vl1d.translation_misses
+    label: TCP_UTCL1_TRANSLATION_MISS
+    description: null
+  - metric: vl1d.cache_full_stall
+    label: TCP_UTCL1_STALL_INFLIGHT_MAX
+    description: null
+  - metric: vl1d.resident_page_full_stall
+    label: TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES
+    description: null
+  - metric: vl1d.inflight_req
+    label: TCP_CLIENT_UTCL1_INFLIGHT
+    unit: (Cycles + $normUnit)
+    description: null
+  - metric: vl1d.tcp_utcl1_utcl2_inflight
+    description: null
+    legacy_id: 30.6.31
+  - metric: vl1d.l2_rd_req
+    label: TCP_TCC_READ_REQ
+    description: null
+  - metric: vl1d.l2_wr_req
+    label: TCP_TCC_WRITE_REQ
+    description: null
+  - metric: vl1d.tcp_tcc_atomic_with_ret_req
+    description: null
+    legacy_id: 30.6.34
+  - metric: vl1d.tcp_tcc_atomic_without_ret_req
+    description: null
+    legacy_id: 30.6.35
+  - metric: vl1d.l2_rd_lat_norm
+    label: TCP_TCC_READ_REQ_LATENCY
+    description: null
+  - metric: vl1d.l2_wr_lat_norm
+    label: TCP_TCC_WRITE_REQ_LATENCY
+    description: null
+  - metric: td.busy_cycles
+    description: null
+    legacy_id: 30.6.38
+  - metric: td.tc_stall_cycles
+    description: null
+    legacy_id: 30.6.39
+  - metric: td.tc_td_fifo_full
+    description: null
+    legacy_id: 30.6.40
+  - metric: td.output_fifo_full_cycles
+    description: null
+    legacy_id: 30.6.41
+  - metric: td.spi_stall_cycles
+    description: null
+    legacy_id: 30.6.42
+  - metric: td.load_wavefronts
+    label: TD_LOAD_WAVEFRONT
+    unit: (Instructions + $normUnit)
+    description: null
+  - metric: td.atomic_insts
+    label: TD_ATOMIC_WAVEFRONT
+    description: null
+  - metric: td.wr_insts
+    label: TD_STORE_WAVEFRONT
+    description: null
+  - metric: td.coalescable_insts
+    label: TD_COALESCABLE_WAVEFRONT
+    description: null
+  - metric: grbm.gui_active
+    description: null
+    legacy_id: 30.6.47
+  - metric: grbm.count
+    description: null
+    legacy_id: 30.6.48
+  - metric: compute.num_cus
+    label: Num CUs
+    description: null
+    legacy_id: 30.6.49
+- id: 3007
+  title: L2 Cache
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.hit_rate
+    label: L2 hit rate
+    description: 'The ratio of L2 cache hits over total cache accesses (hits + misses). A
+      low hit rate (<= 50%) indicates the workload exceeds L2 cache capacity. Equation: 100
+      * (SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum))'
+  - metric: l2.util
+    label: L2 utilization
+    display: l2_util_whole_channels
+    description: 'The ratio of active L2 cycles over total available L2 cycles across all
+      channels. High utilization indicates the L2 cache is heavily loaded. Equation: 100 *
+      (SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD))'
+  - metric: l2.tag_stall_rate
+    label: L2 tag stall rate
+    description_note: 'Equation: 100 * (SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.7.2
+  - metric: l2.input_buffer_stall_rate
+    label: L2 input buffer stall rate
+    description_note: 'Equation: 100 * (SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.7.3
+  - metric: l2.lat_fifo_full_rate
+    label: L2 latency FIFO full rate
+    description_note: 'Equation: 100 * (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.7.4
+  - metric: l2.wr_data_fifo_full_rate
+    label: L2 write data FIFO full rate
+    description_note: 'Equation: 100 * (SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.7.5
+  - metric: fabric.wr_stall
+    label: L2 to EA write stall rate
+    description: 'The percentage of active L2 cycles where write requests to the EA interface
+      were stalled. A high rate (>= 10%) indicates the EA write path is saturated. Equation:
+      100 * (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_credit_starvation
+    label: L2 to EA too many writes stall
+    description: 'The percentage of active L2 cycles where L2 could not send a write request
+      to EA because the maximum number of pending EA write requests was reached. High values
+      indicate write credit starvation at the L2-to-memory interface. Equation: 100 * (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+  - metric: fabric.rd_hbm_stall
+    label: L2 to EA read credit stall (HBM)
+    description: 'The percentage of active L2 cycles where read requests were stalled due
+      to HBM credit exhaustion. High values indicate HBM read bandwidth is saturated. Equation:
+      100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_hbm_stall
+    label: L2 to EA write credit stall (HBM)
+    description: 'The percentage of active L2 cycles where write requests were stalled due
+      to HBM credit exhaustion. High values indicate HBM write bandwidth is saturated. Equation:
+      100 * (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.rd_infinity_fabric_stall
+    label: L2 to EA read credit stall (GMI)
+    description: 'The percentage of active L2 cycles where read requests were stalled due
+      to GMI credit exhaustion. High values indicate remote read bandwidth is saturated. Equation:
+      100 * (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_infinity_fabric_stall
+    label: L2 to EA write credit stall (GMI)
+    description: 'The percentage of active L2 cycles where write requests were stalled due
+      to GMI credit exhaustion. High values indicate remote write bandwidth is saturated.
+      Equation: 100 * (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.rd_pcie_stall
+    label: L2 to EA read credit stall (IO)
+    description: 'The percentage of active L2 cycles where read requests were stalled due
+      to IO interface credit exhaustion. High values indicate PCIe/IO read bandwidth is saturated.
+      Equation: 100 * (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_pcie_stall
+    label: L2 to EA write credit stall (IO)
+    description: 'The percentage of active L2 cycles where write requests were stalled due
+      to IO interface credit exhaustion. High values indicate PCIe/IO write bandwidth is saturated.
+      Equation: 100 * (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+- id: 3008
+  title: L2 Traffic
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.rd_req_rate
+    label: L2 read request rate
+    description_note: 'Equation: SUM(TCC_READ_sum) / SUM(TCC_BUSY_sum)'
+    legacy_id: 30.8.0
+  - metric: l2.wr_req_rate
+    label: L2 write request rate
+    description_note: 'Equation: SUM(TCC_WRITE_sum) / SUM(TCC_BUSY_sum)'
+    legacy_id: 30.8.1
+  - metric: l2.total_req_rate
+    label: L2 total request rate
+    description_note: 'Equation: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)'
+    legacy_id: 30.8.2
+  - metric: fabric.rd_lat
+    label: L2 to EA read average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA read request was in flight, from the
+      L2 side. Weighted average across all L2 channels (SUM/SUM gives more weight to channels
+      with more requests). Equation: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)'
+  - metric: fabric.rd_lat
+    label: L2 to EA read latency
+    unit: Cycles per Request
+    display: avg_fabric_rd_lat
+    description: 'The number of cycles an EA read request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)'
+  - metric: fabric.wr_lat
+    label: L2 to EA write average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA write request was in flight, from the
+      L2 side. Weighted average across all L2 channels (SUM/SUM gives more weight to channels
+      with more requests). Equation: SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)'
+  - metric: fabric.wr_lat
+    label: L2 to EA write latency
+    unit: Cycles per Request
+    display: avg_fabric_wr_lat
+    description: 'The number of cycles an EA write request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)'
+  - metric: fabric.atomic_lat
+    label: L2 to EA atomic average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA atomic request was in flight, from the
+      L2 side. Weighted average across all L2 channels (SUM/SUM gives more weight to channels
+      with more requests). Equation: SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)'
+  - metric: fabric.atomic_lat
+    label: L2 to EA atomic latency
+    unit: Cycles per Request
+    display: avg_fabric_atomic_lat
+    description: 'The number of cycles an EA atomic request was in flight, from the L2 side.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)'
+  - metric: l2.writeback_rate
+    label: L2 writeback rate
+    description_note: 'Equation: 100 * (SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.8.9
+  - metric: l2.eviction_rate
+    label: L2 eviction rate
+    description_note: 'Equation: 100 * (SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.8.10
+  - metric: fabric.rd_bw
+    label: L2 to EA read BW
+    description: 'The read bandwidth from L2 to the EA interface, calculated from the mix
+      of 32B, 64B, and 128B read request sizes. Equation: ((SUM((TCC_EA0_RDREQ_32B_sum * 32)
+      + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128))) / (SUM(End_Timestamp
+      - Start_Timestamp)))'
+  - metric: fabric.to_ea_wr_atomic_bw
+    label: L2 to EA write and atomic BW
+    description_note: 'Equation: ((SUM((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum
+      - TCC_EA0_WRREQ_64B_sum) * 32))) / (SUM(End_Timestamp - Start_Timestamp)))'
+    legacy_id: 30.8.12
+  - metric: fabric.hbm_rd_traffic
+    label: HBM read fraction
+    description: 'The percentage of L2 to EA read requests destined for the accelerator''s
+      local HBM. Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum))'
+  - metric: fabric.hbm_wr_atomic_traffic
+    label: HBM write fraction
+    description: 'The percentage of L2 to EA write requests destined for the accelerator''s
+      local HBM. Equation: 100 * (SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum))'
+  - metric: l2.non_coherent_req_rate
+    label: Non-coherent request rate
+    description_note: 'Equation: 100 * (SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.8.15
+  - metric: l2.uncached_req_rate
+    label: Uncached request rate
+    description_note: 'Equation: 100 * (SUM(TCC_UC_REQ_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.8.16
+  - metric: l2.coherent_cached_req_rate
+    label: Coherent cached request rate
+    description_note: 'Equation: 100 * (SUM(TCC_CC_REQ_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.8.17
+  - metric: l2.probe_req_rate
+    label: Probe request rate
+    description_note: 'Equation: SUM(TCC_PROBE_sum) / SUM(TCC_BUSY_sum)'
+    legacy_id: 30.8.18
+  - metric: l2.probe_eviction_rate
+    label: Probe eviction rate
+    description_note: 'Equation: 100 * (SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum))'
+    legacy_id: 30.8.19
+- id: 3009
+  title: L2 Raw Counter Values
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.tcc_busy
+    description: null
+    legacy_id: 30.9.0
+  - metric: l2.req
+    label: TCC_REQ
+    description: null
+  - metric: l2.rd_req
+    label: TCC_READ
+    description: null
+  - metric: l2.wr_req
+    label: TCC_WRITE
+    description: null
+  - metric: l2.atomic_req
+    label: TCC_ATOMIC
+    description: null
+  - metric: l2.hits
+    label: TCC_HIT
+    description: null
+  - metric: l2.misses
+    label: TCC_MISS
+    description: null
+  - metric: l2.tcc_tag_stall
+    description: null
+    legacy_id: 30.9.7
+  - metric: l2.input_buffer_stalled_on_l2
+    label: TCC_IB_STALL
+    description: null
+  - metric: l2.stalled_on_lat_fifo
+    label: TCC_LATENCY_FIFO_FULL
+    description: null
+  - metric: l2.stalled_on_wr_data_fifo
+    label: TCC_SRC_FIFO_FULL
+    description: null
+  - metric: l2.writeback
+    label: TCC_WRITEBACK
+    description: null
+  - metric: l2.evict_internal
+    label: TCC_NORMAL_EVICT
+    description: null
+  - metric: fabric.tcc_ea0_rdreq
+    description: null
+    legacy_id: 30.9.13
+  - metric: fabric.rd_32b
+    label: TCC_EA0_RDREQ_32B
+    description: null
+  - metric: fabric.rd_64b
+    label: TCC_EA0_RDREQ_64B
+    description: null
+  - metric: fabric.rd_128b_ea0
+    label: TCC_EA0_RDREQ_128B
+    description: null
+  - metric: fabric.tcc_ea0_rdreq_level
+    description: null
+    legacy_id: 30.9.17
+  - metric: fabric.hbm_rd
+    label: TCC_EA0_RDREQ_DRAM
+    description: null
+    legacy_id: 30.9.18
+  - metric: fabric.tcc_ea0_wrreq
+    description: null
+    legacy_id: 30.9.19
+  - metric: fabric.wr_atomic_64b
+    label: TCC_EA0_WRREQ_64B
+    description: null
+  - metric: fabric.tcc_ea0_wrreq_stall
+    description: null
+    legacy_id: 30.9.21
+  - metric: fabric.tcc_ea0_wrreq_level
+    description: null
+    legacy_id: 30.9.22
+  - metric: fabric.hbm_wr_atomic
+    label: TCC_EA0_WRREQ_DRAM
+    description: null
+    legacy_id: 30.9.23
+  - metric: l2.tcc_too_many_ea_wrreqs_stall
+    description: null
+    legacy_id: 30.9.24
+  - metric: fabric.atomic
+    label: TCC_EA0_ATOMIC
+    description: null
+  - metric: fabric.tcc_ea0_atomic_level
+    description: null
+    legacy_id: 30.9.26
+  - metric: fabric.tcc_ea0_rdreq_dram_credit_stall
+    description: null
+    legacy_id: 30.9.27
+  - metric: fabric.tcc_ea0_wrreq_dram_credit_stall
+    description: null
+    legacy_id: 30.9.28
+  - metric: fabric.tcc_ea0_rdreq_gmi_credit_stall
+    description: null
+    legacy_id: 30.9.29
+  - metric: fabric.tcc_ea0_wrreq_gmi_credit_stall
+    description: null
+    legacy_id: 30.9.30
+  - metric: fabric.tcc_ea0_rdreq_io_credit_stall
+    description: null
+    legacy_id: 30.9.31
+  - metric: fabric.tcc_ea0_wrreq_io_credit_stall
+    description: null
+    legacy_id: 30.9.32
+  - metric: l2.nc_req
+    label: TCC_NC_REQ
+    description: null
+  - metric: l2.uc_req
+    label: TCC_UC_REQ
+    description: null
+  - metric: l2.cc_req
+    label: TCC_CC_REQ
+    description: null
+  - metric: l2.probe_req
+    label: TCC_PROBE
+    description: null
+  - metric: l2.tcc_probe_evict
+    description: null
+    legacy_id: 30.9.37
+  - metric: l2.num_chan
+    label: Num L2 Channels
+    description: null
+    legacy_id: 30.9.38
+- id: 3010
+  title: Normalized L2 Stall Metrics (%)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.normalized_l2_tag_stall
+    label: Normalized L2 - Tag stall
+    description_note: 'Equation: 100 * (SUM(TCC_TAG_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.0
+  - metric: l2.normalized_l2_input_buffer_stall
+    label: Normalized L2 - Input buffer stall
+    description_note: 'Equation: 100 * (SUM(TCC_IB_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.1
+  - metric: l2.normalized_l2_lat_fifo_full
+    label: Normalized L2 - Latency FIFO full
+    description_note: 'Equation: 100 * (SUM(TCC_LATENCY_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.2
+  - metric: l2.normalized_l2_source_fifo_full
+    label: Normalized L2 - Source FIFO full
+    description_note: 'Equation: 100 * (SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.3
+  - metric: fabric.normalized_l2_to_ea_wr_stall
+    label: Normalized L2 to EA - Write stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.4
+  - metric: fabric.normalized_l2_to_ea_too_many_writes_stall
+    label: Normalized L2 to EA - Too many writes stall
+    description_note: 'Equation: 100 * (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.5
+  - metric: fabric.normalized_l2_to_ea_rd_credit_stall_hbm
+    label: Normalized L2 to EA - Read credit stall (HBM)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.6
+  - metric: fabric.normalized_l2_to_ea_wr_credit_stall_hbm
+    label: Normalized L2 to EA - Write credit stall (HBM)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.7
+  - metric: fabric.normalized_l2_to_ea_rd_credit_stall_gmi
+    label: Normalized L2 to EA - Read credit stall (GMI)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.8
+  - metric: fabric.normalized_l2_to_ea_wr_credit_stall_gmi
+    label: Normalized L2 to EA - Write credit stall (GMI)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.9
+  - metric: fabric.normalized_l2_to_ea_rd_credit_stall_io
+    label: Normalized L2 to EA - Read credit stall (IO)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.10
+  - metric: fabric.normalized_l2_to_ea_wr_credit_stall_io
+    label: Normalized L2 to EA - Write credit stall (IO)
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD)
+      * $total_l2_chan))'
+    legacy_id: 30.10.11
+- id: 3011
+  title: Normalized L2 Throughput Metrics (per Second)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.normalized_l2_rd_req
+    label: Normalized L2 read requests
+    description_note: 'Equation: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.0
+  - metric: l2.normalized_l2_wr_req
+    label: Normalized L2 write requests
+    description_note: 'Equation: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.1
+  - metric: l2.normalized_l2_total_req
+    label: Normalized L2 total requests
+    description_note: 'Equation: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.2
+  - metric: fabric.normalized_l2_to_ea_rd_req
+    label: Normalized L2 to EA read requests
+    description_note: 'Equation: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.3
+  - metric: fabric.normalized_l2_to_ea_wr_req
+    label: Normalized L2 to EA write requests
+    description_note: 'Equation: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.4
+  - metric: l2.normalized_l2_hits
+    label: Normalized L2 hits
+    description_note: 'Equation: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.5
+  - metric: l2.normalized_l2_misses
+    label: Normalized L2 misses
+    description_note: 'Equation: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.11.6
+- id: 3012
+  title: L2 Bottleneck Detection Indicators
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.input_buffer_stall_rate
+    label: L2 Back Pressure Indicator
+    description: 'Percentage of L2 busy time the input buffer was stalled. A rate >= 10% indicates
+      L2 is backpressuring L1 (GL1/GL2 potential bottleneck). Equation: 100 * (SUM(TCC_IB_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+  - metric: fabric.rd_hbm_stall
+    label: L2 Memory BW Bound - Read Credit Pressure
+    description: 'Percentage of L2 busy time read requests were stalled due to HBM credit
+      exhaustion. High values (>10%) combined with high memory utilization indicate memory
+      read bandwidth bound. Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_hbm_stall
+    label: L2 Memory BW Bound - Write Credit Pressure
+    description: 'Percentage of L2 busy time write requests were stalled due to HBM credit
+      exhaustion. High values (>10%) combined with high memory utilization indicate memory
+      write bandwidth bound. Equation: 100 * (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.memory_bw_bound_combined_credit_pressure
+    label: L2 Memory BW Bound - Combined Credit Pressure
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.12.3
+  - metric: l2.lat_fifo_full_rate
+    label: L2 Internal Resource Pressure - Latency FIFO
+    description: 'Percentage of L2 busy time the latency FIFO was full. A rate >= 10% indicates
+      L2 internal resource exhaustion bottleneck. This is one of the TCC_TAG_STALL breakdown
+      components (LFIFO full, 2-deep). Equation: 100 * (SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: l2.wr_data_fifo_full_rate
+    label: L2 Internal Resource Pressure - Source FIFO
+    description: 'Percentage of L2 busy time the source data FIFO was full. A rate >= 10%
+      indicates L2 write data path bottleneck. Equation: 100 * (SUM(TCC_SRC_FIFO_FULL_sum)
+      / SUM(TCC_BUSY_sum))'
+  - metric: l2.hit_rate
+    label: L2 Cache Efficiency
+    description: 'L2 cache hit rate. A low rate (<50%) indicates the workload exceeds L2 cache
+      capacity, leading to high memory traffic. This helps distinguish cache-bound from memory
+      bandwidth-bound scenarios. Equation: 100 * (SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum))'
+  - metric: fabric.to_memory_traffic_ratio
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum) / SUM(TCC_REQ_sum))'
+    legacy_id: 30.12.7
+  - metric: fabric.remote_access_pressure_gmi
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.12.8
+- id: 3013
+  title: EA Interface
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: grbm.ea_util
+    label: EA utilization
+    description_note: 'Equation: 100 * (SUM(GRBM_EA_BUSY) / SUM(GRBM_GUI_ACTIVE))'
+    legacy_id: 30.13.0
+  - metric: fabric.hbm_rd_traffic
+    label: EA read request fraction - HBM
+    description: 'Percentage of EA read requests destined for the accelerator''s local HBM.
+      High values (>90%) are typical for compute workloads. Low values indicate significant
+      remote (GMI) or host (IO) read traffic. Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_sum)
+      / SUM(TCC_EA0_RDREQ_sum))'
+  - metric: fabric.ea_rd_bw_fraction_hbm
+    label: EA read BW fraction - HBM
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum
+      + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum))'
+    legacy_id: 30.13.2
+  - metric: fabric.ea_rd_bw_fraction_gmi
+    label: EA read BW fraction - GMI
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum
+      + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum))'
+    legacy_id: 30.13.3
+  - metric: fabric.ea_rd_bw_fraction_io
+    label: EA read BW fraction - IO
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_IO_32B_sum) / SUM(TCC_EA0_RDREQ_DRAM_32B_sum
+      + TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_RDREQ_IO_32B_sum))'
+    legacy_id: 30.13.4
+  - metric: fabric.hbm_wr_atomic_traffic
+    label: EA write request fraction - HBM
+    description: 'Percentage of EA write requests (including atomics) destined for HBM. High
+      values (>90%) are typical for compute workloads. Equation: 100 * (SUM(TCC_EA0_WRREQ_DRAM_sum)
+      / SUM(TCC_EA0_WRREQ_sum))'
+  - metric: fabric.atomic_traffic
+    label: EA atomic fraction of writes
+    description: 'Percentage of EA write requests that are atomic operations. High atomic
+      rates can indicate contention-heavy workloads (locks, reductions) and typically have
+      higher latency than pure writes. Equation: 100 * (SUM(TCC_EA0_ATOMIC_sum) / SUM(TCC_EA0_WRREQ_sum))'
+  - metric: fabric.ea_hbm_wr_vs_atomic_split
+    label: EA HBM write vs atomic split
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / SUM(TCC_EA0_WRREQ_DRAM_sum))'
+    legacy_id: 30.13.7
+  - metric: fabric.uncached_rd_traffic
+    label: EA uncached read fraction
+    description: 'Percentage of EA read requests that bypass caching (uncached/streaming reads).
+      High uncached rates are expected for streaming workloads. Uses 32B-granularity uncached
+      counter relative to total read request count. Equation: 100 * (SUM(TCC_EA0_RD_UNCACHED_32B_sum)
+      / SUM(TCC_EA0_RDREQ_sum))'
+  - metric: fabric.uncached_wr_atomic_traffic
+    label: EA uncached write fraction
+    description: 'Percentage of EA write requests that bypass caching (uncached/streaming
+      writes). High uncached rates are expected for write-only or streaming workloads. Equation:
+      100 * (SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum))'
+- id: 3014
+  title: EA Traffic
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.hbm_rd_bw
+    label: EA to HBM read BW
+    description: 'Read bandwidth from EA to HBM (DRAM), calculated using the gfx950-specific
+      32B-granularity counter. Each count represents 32 bytes of read data transferred. Equation:
+      (SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.hbm_wr_bw
+    label: EA to HBM write BW
+    description: 'Non-atomic write bandwidth from EA to HBM. Uses the gfx950-specific per-destination
+      write counter that separates pure writes from atomics. Equation: (SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum
+      * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.hbm_atomic_bw
+    label: EA to HBM atomic BW
+    description: 'Atomic operation bandwidth from EA to HBM. Atomics involve read-modify-write
+      cycles and typically achieve lower effective bandwidth than pure reads or writes. Equation:
+      (SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.ea_to_hbm_total_bw
+    label: EA to HBM total BW
+    description_note: 'Equation: (SUM((TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum
+      + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+    legacy_id: 30.14.3
+  - metric: fabric.xgmi_rd_bw
+    label: EA to GMI read BW
+    description: 'Read bandwidth from EA via GMI to remote memory. High values indicate significant
+      cross-die or cross-socket data movement. Equation: (SUM(TCC_EA0_RDREQ_GMI_32B_sum *
+      32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.xgmi_wr_bw
+    label: EA to GMI write BW
+    description: 'Write bandwidth from EA via GMI to remote memory. Equation: (SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum
+      * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.xgmi_atomic_bw
+    label: EA to GMI atomic BW
+    description: 'Atomic bandwidth from EA via GMI. Remote atomics incur significantly higher
+      latency than local HBM atomics. Equation: (SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32))
+      / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.pcie_rd_bw
+    label: EA to IO read BW
+    description: 'Read bandwidth from EA via IO (PCIe) interface. Measures host-to-device
+      or device-to-device PCIe read data transfer rate. Equation: (SUM(TCC_EA0_RDREQ_IO_32B_sum
+      * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.pcie_wr_bw
+    label: EA to IO write BW
+    description: 'Write bandwidth from EA via IO (PCIe) interface. Measures device-to-host
+      PCIe write data transfer rate. Equation: (SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32))
+      / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.pcie_atomic_bw
+    label: EA to IO atomic BW
+    description: 'Atomic bandwidth from EA via IO (PCIe) interface. PCIe atomics are rare
+      and typically indicate cross-device synchronization. Equation: (SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum
+      * 32)) / (SUM(End_Timestamp - Start_Timestamp))'
+  - metric: fabric.rd_lat
+    label: EA read average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA read request is in flight, from L2''s
+      perspective. Weighted average across all L2 channels (SUM/SUM gives more weight to channels
+      with more requests). Higher latency indicates memory-side congestion or long HBM/GMI/IO
+      access times. Equation: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)'
+  - metric: fabric.rd_lat
+    label: EA read latency
+    unit: Cycles per Request
+    display: avg_fabric_rd_lat
+    description: 'The number of cycles an EA read request was in flight, from L2''s perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)'
+  - metric: fabric.wr_lat
+    label: EA write average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA write request is in flight. Write latency
+      is typically lower than read latency since writes can be buffered. Weighted average
+      across all L2 channels (SUM/SUM gives more weight to channels with more requests). Equation:
+      SUM(TCC_EA0_WRREQ_LEVEL_sum) / SUM(TCC_EA0_WRREQ_sum)'
+  - metric: fabric.wr_lat
+    label: EA write latency
+    unit: Cycles per Request
+    display: avg_fabric_wr_lat
+    description: 'The number of cycles an EA write request was in flight, from L2''s perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)'
+  - metric: fabric.atomic_lat
+    label: EA atomic average latency
+    unit: Cycles per Request
+    description: 'The average number of cycles an EA atomic request is in flight. Atomics
+      typically have the highest latency due to read-modify-write semantics. Weighted average
+      across all L2 channels (SUM/SUM gives more weight to channels with more requests). Equation:
+      SUM(TCC_EA0_ATOMIC_LEVEL_sum) / SUM(TCC_EA0_ATOMIC_sum)'
+  - metric: fabric.atomic_lat
+    label: EA atomic latency
+    unit: Cycles per Request
+    display: avg_fabric_atomic_lat
+    description: 'The number of cycles an EA atomic request was in flight, from L2''s perspective.
+      Ratio of averages across L2 channels (AVG/AVG gives equal weight to each channel). Equation:
+      AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)'
+- id: 3015
+  title: EA Raw Counter Values
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_128b
+    label: TCC_BUBBLE
+    description: null
+    legacy_id: 30.15.0
+  - metric: fabric.tcc_ea0_rdreq_dram_32b
+    description: null
+    legacy_id: 30.15.1
+  - metric: fabric.tcc_ea0_rdreq_gmi_32b
+    description: null
+    legacy_id: 30.15.2
+  - metric: fabric.tcc_ea0_rdreq_io_32b
+    description: null
+    legacy_id: 30.15.3
+  - metric: fabric.tcc_ea0_wrreq_wr_dram
+    description: null
+    legacy_id: 30.15.4
+  - metric: fabric.tcc_ea0_wrreq_wr_dram_32b
+    description: null
+    legacy_id: 30.15.5
+  - metric: fabric.tcc_ea0_wrreq_wr_gmi_32b
+    description: null
+    legacy_id: 30.15.6
+  - metric: fabric.tcc_ea0_wrreq_wr_io_32b
+    description: null
+    legacy_id: 30.15.7
+  - metric: fabric.tcc_ea0_wrreq_atomic_dram
+    description: null
+    legacy_id: 30.15.8
+  - metric: fabric.tcc_ea0_wrreq_atomic_dram_32b
+    description: null
+    legacy_id: 30.15.9
+  - metric: fabric.tcc_ea0_wrreq_atomic_gmi_32b
+    description: null
+    legacy_id: 30.15.10
+  - metric: fabric.tcc_ea0_wrreq_atomic_io_32b
+    description: null
+    legacy_id: 30.15.11
+  - metric: fabric.rd_uncached
+    label: TCC_EA0_RD_UNCACHED_32B
+    description: null
+  - metric: fabric.wr_atomic_uncached
+    label: TCC_EA0_WR_UNCACHED_32B
+    description: null
+  - metric: grbm.ea_busy
+    description: null
+    legacy_id: 30.15.14
+- id: 3016
+  title: Normalized EA Stall Metrics (%)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.normalized_ea_hbm_rd_credit_stall
+    label: Normalized EA - HBM read credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.0
+  - metric: fabric.normalized_ea_hbm_wr_credit_stall
+    label: Normalized EA - HBM write credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.1
+  - metric: fabric.normalized_ea_gmi_rd_credit_stall
+    label: Normalized EA - GMI read credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.2
+  - metric: fabric.normalized_ea_gmi_wr_credit_stall
+    label: Normalized EA - GMI write credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.3
+  - metric: fabric.normalized_ea_io_rd_credit_stall
+    label: Normalized EA - IO read credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.4
+  - metric: fabric.normalized_ea_io_wr_credit_stall
+    label: Normalized EA - IO write credit stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_IO_CREDIT_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.5
+  - metric: fabric.normalized_ea_wr_stall
+    label: Normalized EA - Write stall
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.6
+  - metric: fabric.normalized_ea_too_many_writes_stall
+    label: Normalized EA - Too many writes stall
+    description_note: 'Equation: 100 * (SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD))'
+    legacy_id: 30.16.7
+- id: 3017
+  title: Normalized EA Throughput Metrics (per Second)
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.normalized_ea_to_hbm_rd_req
+    label: Normalized EA to HBM read requests
+    description_note: 'Equation: SUM(TCC_EA0_RDREQ_DRAM_sum) / (SUM(End_Timestamp - Start_Timestamp)
+      / 1000000000)'
+    legacy_id: 30.17.0
+  - metric: fabric.normalized_ea_to_hbm_wr_req
+    label: Normalized EA to HBM write requests
+    description_note: 'Equation: SUM(TCC_EA0_WRREQ_WRITE_DRAM_sum) / (SUM(End_Timestamp -
+      Start_Timestamp) / 1000000000)'
+    legacy_id: 30.17.1
+  - metric: fabric.normalized_ea_to_hbm_atomic_req
+    label: Normalized EA to HBM atomic requests
+    description_note: 'Equation: SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / (SUM(End_Timestamp -
+      Start_Timestamp) / 1000000000)'
+    legacy_id: 30.17.2
+  - metric: fabric.normalized_ea_to_gmi_total_32b_req
+    label: Normalized EA to GMI total 32B requests
+    description_note: 'Equation: SUM(TCC_EA0_RDREQ_GMI_32B_sum + TCC_EA0_WRREQ_WRITE_GMI_32B_sum
+      + TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)'
+    legacy_id: 30.17.3
+  - metric: fabric.normalized_ea_to_io_total_32b_req
+    label: Normalized EA to IO total 32B requests
+    description_note: 'Equation: SUM(TCC_EA0_RDREQ_IO_32B_sum + TCC_EA0_WRREQ_WRITE_IO_32B_sum
+      + TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)'
+    legacy_id: 30.17.4
+- id: 3018
+  title: EA Bottleneck Detection Indicators
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.rd_hbm_stall
+    label: EA HBM BW Bound - Read Credit Pressure
+    description: 'Percentage of L2 busy time EA read requests were stalled due to HBM credit
+      exhaustion. High values (>10%) indicate HBM read bandwidth is saturated. This is the
+      EA-centric view of the HBM read bottleneck. Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+  - metric: fabric.wr_hbm_stall
+    label: EA HBM BW Bound - Write Credit Pressure
+    description: 'Percentage of L2 busy time EA write requests were stalled due to HBM credit
+      exhaustion. High values (>10%) indicate HBM write bandwidth is saturated. Equation:
+      100 * (SUM(TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.memory_bw_bound_combined_credit_pressure
+    label: EA HBM BW Bound - Combined
+    description: 'Combined HBM read and write credit stall percentage. This is the primary
+      EA-level HBM bandwidth bound indicator. High values (>10%) with high EA utilization
+      strongly indicate HBM bandwidth is the bottleneck. Equation: 100 * (SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum
+      + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.remote_access_pressure_gmi
+    label: EA GMI BW Bound - Combined
+    description: 'Combined GMI read and write credit stall percentage. High values indicate
+      the remote memory (GMI) path is the bottleneck. Relevant for multi-XCD or multi-socket
+      workloads with significant cross-die data movement. Equation: 100 * (SUM(TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum
+      + TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum))'
+  - metric: fabric.ea_io_bw_bound_combined
+    label: EA IO BW Bound - Combined
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_WRREQ_IO_CREDIT_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.18.4
+  - metric: fabric.ea_wr_backpressure
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_STALL_sum + TCC_TOO_MANY_EA_WRREQS_STALL_sum)
+      / SUM(TCC_BUSY_sum))'
+    legacy_id: 30.18.5
+  - metric: fabric.ea_rd_wr_balance
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_RDREQ_sum) / SUM(TCC_EA0_RDREQ_sum + TCC_EA0_WRREQ_sum))'
+    legacy_id: 30.18.6
+  - metric: fabric.ea_hbm_atomic_pressure
+    description_note: 'Equation: 100 * (SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_sum) / SUM(TCC_EA0_WRREQ_DRAM_sum))'
+    legacy_id: 30.18.7
+  - metric: fabric.ea_stall_destination_dominance_hbm
+    description_note: 'Equation: 100 * (SUM(HBM_credit_stalls) / SUM(all_credit_stalls))'
+    legacy_id: 30.18.8
+  - metric: fabric.ea_stall_destination_dominance_gmi
+    description_note: 'Equation: 100 * (SUM(GMI_credit_stalls) / SUM(all_credit_stalls))'
+    legacy_id: 30.18.9
+  - metric: fabric.ea_stall_destination_dominance_io
+    description_note: 'Equation: 100 * (SUM(IO_credit_stalls) / SUM(all_credit_stalls))'
+    legacy_id: 30.18.10
