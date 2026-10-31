@@ -1255,7 +1255,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   if (WaitcheckTarget::classify_events_into(inst, config_.arch, classified).failed() ||
       classified.empty())
     return;
-  const bool legacy = uses_legacy_waitcnt(model.value());
   auto &scoreboard = wf.ensure_memory_wait_scoreboard();
   scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
   const auto xevent =
@@ -1378,10 +1377,11 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Check all writes before adding any new dependencies. FLAT has the same
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result = defs != classified.end() && defs->kind == WaitEventKind::FlatLoad;
-  const auto vmem_write_order =
-      legacy && defs != classified.end() && defs->counter == WaitCounterKind::Load
-          ? scoreboard.ordered_write_order(*defs, config_.arch)
-          : MemoryWaitScoreboard::kUnordered;
+  const auto vmem_write_order = has_ordered_vmem_writeback(config_.arch) &&
+                                        defs != classified.end() &&
+                                        defs->counter == WaitCounterKind::Load
+                                    ? scoreboard.ordered_write_order(*defs, config_.arch)
+                                    : MemoryWaitScoreboard::kUnordered;
   if (flat) {
     const auto ds_event =
         std::ranges::find(classified, WaitCounterKind::Ds, &ClassifiedEvent::counter);

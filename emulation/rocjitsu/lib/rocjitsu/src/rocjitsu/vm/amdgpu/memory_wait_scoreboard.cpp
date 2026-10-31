@@ -670,10 +670,8 @@ namespace {
 bool has_ordered_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
   using namespace waitcheck_detail;
   switch (event.counter) {
-  case WaitCounterKind::Load: {
-    const auto model = waitcnt_model(arch);
-    return model.succeeded() && uses_legacy_waitcnt(model.value());
-  }
+  case WaitCounterKind::Load:
+    return has_ordered_vmem_writeback(arch);
   case WaitCounterKind::Ds:
     // LDS writeback is in-order on all targets.
     return event.kind == WaitEventKind::Ds;
