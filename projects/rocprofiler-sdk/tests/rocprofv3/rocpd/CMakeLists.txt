@@ -15,6 +15,8 @@ set(rocprofv3-rocpd-env
     "OMPI_ALLOW_RUN_AS_ROOT=1"
     "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1")
 
+set(rocprofv3-rocpd-nobindings-env ${rocprofv3-rocpd-env} "ROCPD_DISABLE_BINDINGS=1")
+
 find_package(MPI)
 find_package(Python3 REQUIRED)
 
@@ -287,6 +289,94 @@ rocprofiler_add_integration_execute_test(
 
 #########################################################################################
 #
+# No-bindings (pure Python) path: ROCPD_DISABLE_BINDINGS=1
+#
+#########################################################################################
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-nobindings-csv-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f csv --kernel-rename -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-nobindings-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-nobindings-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-nobindings-otf2-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f otf2 --kernel-rename -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-nobindings-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-nobindings-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-nobindings-summary-generation
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd summary --domain-summary --summary-by-rank -f csv
+        -d ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/summary -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${rocprofv3-rocpd-nobindings-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-rocpd-nobindings-generation
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-nobindings-query
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd query -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db --query
+        "SELECT id, type FROM rocpd_info_agent LIMIT 10;"
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-nobindings-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+# pftrace requires libpyrocpd: expect a clear error message when bindings are disabled
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-nobindings-pftrace-unsupported
+    COMMAND
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings-pftrace -i
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-nobindings-env}"
+    PASS_REGULAR_EXPRESSION "pftrace output requires the rocpd Python bindings"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
+
+# fallback schema loading must match libpyrocpd (runs with bindings enabled)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-schema-fallback-parity
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/schema_fallback_parity.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+#########################################################################################
+#
 # Validation
 #
 #########################################################################################
@@ -370,6 +460,50 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 60
     LABELS "integration-tests;rocpd;region-category"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-region-category)
+
+# Validate the csv/otf2 outputs generated without the python bindings
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-nobindings
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_otf2_data
+         validate.py::test_otf2_system_tree_node_data
+         validate.py::test_csv_data
+         --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
+         --otf2-sys-tree-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_results.otf2
+         --csv-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_agent_info.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_counter_collection_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_kernel_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_memory_allocation_trace.csv
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data-nobindings/out_regions_trace.csv
+         --db-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd-nobindings-generation)
+
+# Validate rocpd.__all__ is importable with and without the python bindings. Validate
+# helper doesn't pass PYTHONPATH from ENVIRONMENT through to the pytest run, so need to be
+# explicit and set PYTHON_PATH directly
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-rocpd-public-api-import
+    TEST_PATHS
+    COPY conftest.py validate.py
+    CONFIG pytest.ini
+    BUNDLE_TESTS
+    ARGS validate.py::test_public_api_import
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    TIMEOUT 60
+    LABELS "integration-tests;rocpd"
+    FIXTURES_REQUIRED rocprofv3-test-rocpd)
 
 #########################################################################################
 #
