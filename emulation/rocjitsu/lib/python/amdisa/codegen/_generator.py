@@ -8603,19 +8603,18 @@ class CodeGenerator:
     def _expcnt_memory_obligation(
         self, sem_class: str, inst_fields: set[str]
     ) -> str | None:
-        """Return the pre-GFX12 write-data/GDS EXPCNT obligation."""
+        """Return the legacy GDS EXPCNT completion obligation.
+
+        MemoryIssueInfo obligations gate whole-event completion, not source-only
+        protection. Static waitcheck tracks GDS source/EXEC protection separately.
+        GWS operations execute with gds=1 and carry this obligation; other GDS
+        data operations are unimplemented.
+        """
         kind = self._MEMORY_ISSUE_KINDS[sem_class]
         obligation = self._memory_counter_obligation(
             'amdgpu::WaitCounterType::EXPCNT',
             'amdgpu::MemoryCompletionClass::UNORDERED',
         )
-        if self.isa_spec.profile.vmem_writes_use_expcnt and kind in (
-            'flat_store',
-            'vmem_store',
-            'flat_atomic',
-            'vmem_atomic',
-        ):
-            return obligation
         if (
             self.isa_spec.profile.gds_uses_expcnt
             and kind == 'local'
