@@ -177,7 +177,7 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunchin
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 
-TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) {
+TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankRankCountAndBarrier) {
   for (size_t count : {size_t{8}, kSingleBlockFloats * 2}) {
     g_ddaLaunches.clear();
     comm().addonStopEvent = kStopEvent;
@@ -189,13 +189,14 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) 
     EXPECT_EQ(launch.stopEvent, kStopEvent) << "count " << count;
     EXPECT_EQ(launch.sharedMemBytes, 0u);
     EXPECT_EQ(launch.flags, 0u);
-    ASSERT_EQ(launch.args.size(), 6u);
+    ASSERT_EQ(launch.args.size(), 7u);
     EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<size_t>(2), count * 2);
     EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
     EXPECT_EQ(launch.Arg<int>(4), 4);
-    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+    EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
+    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
     EXPECT_EQ(comm().addonStopEvent, nullptr);
   }
 }

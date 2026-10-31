@@ -67,13 +67,14 @@ class DdaReduceScatterIpcMicrotest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
     EXPECT_EQ(launch.kernel, Kernel<T>());
-    ASSERT_EQ(launch.args.size(), 6u);
+    ASSERT_EQ(launch.args.size(), 7u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<size_t>(2), recvcount);
     EXPECT_EQ(launch.Arg<const T*>(3), kSendbuff);
     EXPECT_EQ(launch.Arg<int>(4), 2);
-    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+    EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
+    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
   }
 
   DdaIpcMockComm mock_;

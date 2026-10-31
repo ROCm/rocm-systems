@@ -146,7 +146,7 @@ TEST_F(DdaAllGatherIpcMicrotest, Launch_GatheredTotalMayFillScratchExactly) {
   EXPECT_EQ(g_ddaLaunches.size(), 1u);
 }
 
-TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankAndBarrier) {
+TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankRankCountAndBarrier) {
   ASSERT_EQ(Run(8, ncclFloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -157,13 +157,14 @@ TEST_F(DdaAllGatherIpcMicrotest, Launch_PassesBuffersByteCountRankAndBarrier) {
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 6u);
+  ASSERT_EQ(launch.args.size(), 7u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<size_t>(2), 16u);
   EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
   EXPECT_EQ(launch.Arg<int>(4), 6);
-  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+  EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
 }
 
 // The 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS, so a changed cap fails here.
