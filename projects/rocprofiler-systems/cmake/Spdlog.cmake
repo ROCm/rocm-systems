@@ -3,7 +3,13 @@
 
 include_guard(GLOBAL)
 
-if(ROCPROFSYS_BUILD_SPDLOG)
+# An earlier find_package() (e.g. profiler-hub's config) may already have defined
+# spdlog::spdlog; building the bundled copy would then fail on the duplicate ALIAS target.
+if(ROCPROFSYS_BUILD_SPDLOG AND TARGET spdlog::spdlog)
+    message(STATUS "spdlog::spdlog already defined; skipping bundled spdlog build")
+endif()
+
+if(ROCPROFSYS_BUILD_SPDLOG AND NOT TARGET spdlog::spdlog)
     message(STATUS "Building spdlog from source!")
 
     include(FetchContent)
