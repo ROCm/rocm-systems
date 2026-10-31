@@ -80,6 +80,12 @@ amd-smi reset --gpureset --gpu all
 amd-smi --rocm-smi
 ```
 
+On bare-metal systems, `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`
+accept space-separated or repeated selections without duplicates.
+`--gpu all --gpu 0` still selects every GPU, including for set/reset;
+comma-separated lists are unsupported.
+GPU partition setters use the last value and CPU setters the first, across all selected targets.
+
 ```{note}
 For command-specific help, use `amd-smi [command] --help` for see more detailed
 usage information. See [Commands](#cmds).
@@ -115,6 +121,8 @@ details for usage.
 ### amd-smi list
 
 Lists GPU information, including identifier kind and CUID provenance.
+
+`--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
 
 #### CUID identity and compatibility
 
@@ -842,6 +850,9 @@ Command Modifiers:
 Reset options for specified devices.
 
 ```{warning}
+
+* On bare-metal systems, repeated GPU options combine: `amd-smi reset --gpureset -g all -g 0`
+  resets every GPU, not just GPU 0. Remove `-g all` to target only GPU 0.
 
 * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
   GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
