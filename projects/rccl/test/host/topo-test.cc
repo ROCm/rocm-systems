@@ -19,22 +19,12 @@
 
 #include "ScopedHook.h"
 #include "../common/ScopedEnv.hpp"
-#include "fakes/graph_fakes.h"
-#include "fakes/param_redirect.h"
 
-#include TOPO_CC_PATH
-
-#include "TopoScene.h"
+// Pulls in src/graph/topo.cc -- the code under test -- along with its fakes and
+// TopoScene.h, and carries the single definition of TopoSetNetDevsPolicy.
+#include "topo_include.cc"
 
 using namespace topo_scene;
-
-// The NETDEVS policy lives in this TU's statics; the other graph TUs set it through here.
-void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num) {
-  int unused;
-  ncclTopoGetNetDevsPolicy(nullptr, &unused);  // consume the call_once first
-  netDevsPolicy = policy;
-  netDevsPolicyNum = num;
-}
 
 namespace {
 
