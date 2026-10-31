@@ -29,6 +29,21 @@ constexpr int ncclSymkMaxBlocks = 64;
 constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
+// Max blocks for the hierarchical LSA AllGather kernel.
+constexpr int ncclSymkAgHierMaxBlocks = 72;
+
+// How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
+// whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
+// as each pushing group, and at least one.
+constexpr __host__ __device__ int ncclSymkAgHierG0Blocks(int nBlocks, int nGroups) {
+  int n = nBlocks / (2 * nGroups - 1);
+  return n > 1 ? n : 1;
+}
+constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGroups) {
+  int n = (nBlocks - ncclSymkAgHierG0Blocks(nBlocks, nGroups)) / (nGroups - 1);
+  return n > 1 ? n : 1;
+}
+
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
 // This was tuned for TDM, so if you need to change it, please add a constexpr function that 
 // selects an appropriate value for the architecture and method of transfer (TDM or non-TDM).
@@ -58,6 +73,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_STMC,
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
+  ncclSymkKernelId_AllGather_HierLsaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -84,6 +100,7 @@ constexpr char const* ncclSymKernelStr[] = {
   "AllGather_STMC",
   "AllGather_RailRing_LsaST",
   "AllGather_RailRing_LsaSTMC",
+  "AllGather_HierLsaST",
   "ReduceScatter_LL",
   "ReduceScatter_TmaLD",
   "ReduceScatter_LD",
@@ -100,6 +117,12 @@ struct ncclSymkDevComm {
   struct ncclGinSyncHandle ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  // Ranks sharing one physical device, so a hierarchical kernel can tell the on-package half of the
+  // LSA team from the cross-package half. 0 when the comm does not decompose that way.
+  int hierScaleInSize;
+  // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
+  // block on another rank raises after each chunk.
+  ncclDevResourceHandle hierPushFlags;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -188,9 +211,12 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                       size_t nElts, bool symAligned16B = true);
+// How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
+int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);
+bool ncclSymkIsGfx1250(struct ncclComm* comm);
 #endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -200,6 +226,11 @@ int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nB
 // Whether AllGather should take the store kernel over LL on gfx950, where the shared cost model
 // keeps LL well past the point the store kernel overtakes it.
 bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes);
+// Whether AllGather should take the store kernel over LL on gfx1250 in partition mode.
+bool ncclSymkGfx1250AllGatherPrefersStore(int nRanks, size_t nBytes);
+// Whether AllGather should take the hierarchical kernel over the store kernel on gfx1250 in partition
+// mode, which the shared cost model never does.
+bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes);
 #endif
 
 ncclResult_t ncclSymkMakeDevWork(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclSymkDevWork* outDevWork);
