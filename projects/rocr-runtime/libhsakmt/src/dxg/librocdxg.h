@@ -114,6 +114,8 @@ struct hsakmtRuntime {
 
   size_t max_single_alloc_size;
   uint32_t default_node;
+  // GPU index from ROCR_VISIBLE_DEVICES; topology.cpp converts it to a node id.
+  uint32_t visible_gpu_index = 0;
   D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */
