@@ -5907,6 +5907,55 @@ TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
       << "nRanks=" << nRanks << " not divisible by nLsaTeams=" << props.nLsaTeams;
 }
 
+// ginContextCount reported by ncclDevCommCreate is the rounded-up allocation.
+TEST_F(GinMPIDeviceTests, GinContextCount_ReportsRoundedUp) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  // RAIL/NONE communicators cannot honor a FULL request. Skip together, then
+  // fail the probe create on every rank so a regression is not reported as SKIPPED.
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  ncclDevCommRequirements probeReqs = defaultGinReqs();
+  probeReqs.railGinBarrierCount = 1;
+  probeReqs.ginContextCount = 1;
+  probeReqs.ginSignalCount = 1;
+  ncclDevComm probe{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &probeReqs, &probe));
+  // ncclGinConnectOnce already min-reduces ginCommCount across ranks.
+  const int connCount = (int)probe.ginConnectionCount;
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommDestroy(comm, &probe));
+  if (auto reason = mpiCoordinatedSkipReason(
+          connCount < 2, "Needs >= 2 GIN connections for the request to round up");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  const int requested = connCount + 1;
+  const int expected = ((requested + connCount - 1) / connCount) * connCount;
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginContextCount = requested;
+  reqs.ginSignalCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  EXPECT_EQ(connCount, (int)devComm.ginConnectionCount);
+  EXPECT_EQ(expected, (int)devComm.ginContextCount)
+      << "requested " << requested << " contexts on " << connCount
+      << " connection(s); nccl#2301 reports the rounded-up allocation";
+  EXPECT_GE((int)devComm.ginContextCount, requested);
+  EXPECT_EQ(0, (int)devComm.ginContextCount % connCount);
+  EXPECT_GT((int)devComm.ginContextCount, requested);
+}
+
 // Exclusive GIN contexts -- reqs.ginExclusiveContexts (2.29.7).
 TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
