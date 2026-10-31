@@ -32,6 +32,7 @@ struct ImageResource {
   uint32_t type = 0;
   uint32_t base_array = 0;
   uint32_t array_pitch = 0;
+  bool compressed = false; ///< Compression metadata or compressed writes are enabled.
 };
 
 /// SQ_RSRC_IMG_* resource types.
@@ -75,6 +76,7 @@ inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r
   resource.pitch = field(141, 16) + 1;
   resource.base_array = field(160, 13);
   resource.array_pitch = field(173, 4);
+  resource.compressed = field(213, 1);
   return resource;
 }
 
@@ -100,6 +102,7 @@ inline ImageResource decode_gfx11_image_resource(const std::array<uint32_t, 8> &
     resource.depth = field(128, 13) + 1;
   }
   resource.base_array = field(144, 13);
+  resource.compressed = field(212, 1) || field(213, 1);
   return resource;
 }
 
@@ -125,6 +128,7 @@ inline ImageResource decode_gfx12_image_resource(const std::array<uint32_t, 8> &
     resource.depth = field(128, 14) + 1;
   }
   resource.base_array = field(144, 13);
+  resource.compressed = field(212, 1) || field(213, 1);
   return resource;
 }
 

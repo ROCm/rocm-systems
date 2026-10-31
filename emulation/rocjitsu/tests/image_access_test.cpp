@@ -512,6 +512,24 @@ TEST_F(Cdna2ImageAccessTest, NullDescriptorLoadsZero) {
     EXPECT_EQ(cu->read_vgpr(vb + 8 + reg, 0), 0u);
 }
 
+TEST_F(Cdna2ImageAccessTest, CompressedDescriptorsStopBeforeImageMemoryAccess) {
+  bind(Image{});
+  cu->write_sgpr(sb + 6, cu->read_sgpr(sb + 6) | (1u << 21)); // COMPRESSION_ENABLE.
+  wf->set_exec(1);
+  write_coordinates(0, {0, 0, 0});
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(load);
+    memory.write32(kBase, 0x12345678u);
+    fill_destination(0xdeadbeefu);
+    wf->clear_instruction_execution_error();
+    EXPECT_FALSE(issue(load, 1));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(memory.read32(kBase), 0x12345678u);
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+  }
+}
+
 TEST_F(Cdna2ImageAccessTest, TiledSwizzleModesStopAsUnimplemented) {
   Image image;
   image.width = 64;
@@ -871,6 +889,38 @@ TEST(ImageAccessTest, Rdna3MipAndAtomicUseTheBaseAddressPrinter) {
     const std::unique_ptr<Instruction> inst = std::move(decoded).value();
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->disassemble(), test_case.disassembly);
+  }
+}
+
+TEST_P(RdnaDecodedImageAccessTest, CompressionControlsStopBeforeImageMemoryAccess) {
+  const uint32_t sb = wf_->sgpr_alloc().base + kResourceBase;
+  const uint32_t vb = wf_->vgpr_alloc().base;
+  const uint32_t original = cu_->read_sgpr(sb + 6);
+  wf_->set_exec(1);
+  cu_->write_vgpr(vb + 2, 0, 0);
+  cu_->write_vgpr(vb + 6, 0, 0);
+  // WRITE_COMPRESS_ENABLE and COMPRESSION_ENABLE, individually and together.
+  for (uint32_t flags : {0u, 1u << 20, 1u << 21, 3u << 20}) {
+    cu_->write_sgpr(sb + 6, original | flags);
+    for (bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "flags=" << flags << " load=" << load);
+      memory_.write32(kBase, 0x12345678u);
+      cu_->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      wf_->clear_instruction_execution_error();
+      auto decoded = decode(load);
+      ASSERT_TRUE(decoded.succeeded());
+      std::unique_ptr<Instruction> inst = std::move(decoded).value();
+      EXPECT_EQ(cu_->execute_instruction(inst.get(), *wf_).failed(), flags != 0);
+      if (flags == 0) {
+        EXPECT_NE(inst->data(), nullptr);
+      } else {
+        EXPECT_EQ(wf_->instruction_execution_error(),
+                  amdgpu::InstructionExecutionError::UnimplementedInstruction);
+        EXPECT_EQ(inst->data(), nullptr);
+      }
+      EXPECT_EQ(memory_.read32(kBase), 0x12345678u);
+      EXPECT_EQ(cu_->read_vgpr(vb + 8, 0), 0xdeadbeefu);
+    }
   }
 }
 

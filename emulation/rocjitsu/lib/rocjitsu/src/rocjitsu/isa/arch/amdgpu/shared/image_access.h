@@ -48,7 +48,7 @@ struct ImageFields {
 /// layer zero without a layer coordinate.
 /// @returns Failure after reporting an unsupported operand (empty DMASK,
 /// UNORM=0 store) or an unimplemented feature (R128, an architecture other than
-/// CDNA2/RDNA3/RDNA3.5/RDNA4, tiling, mips, cube, MSAA, RDNA linear
+/// CDNA2/RDNA3/RDNA3.5/RDNA4, compression, tiling, mips, cube, MSAA, RDNA linear
 /// 1D/2D-array and 3D resources whose decoded descriptors do not provide PITCH,
 /// decoded RDNA PITCH narrower than WIDTH, nonzero base array, incompatible
 /// RDNA DIM, format outside the buffer table, unqualified RDNA full-selector
@@ -127,9 +127,9 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   }
 
   const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
-  if (resource.type == kImageCube || resource.type > kImage2dArray || resource.swizzle_mode != 0 ||
-      resource.base_level != 0 || resource.last_level != 0 || resource.base_array != 0 ||
-      resource.array_pitch != 0 || resource.pitch == 0)
+  if (resource.compressed || resource.type == kImageCube || resource.type > kImage2dArray ||
+      resource.swizzle_mode != 0 || resource.base_level != 0 || resource.last_level != 0 ||
+      resource.base_array != 0 || resource.array_pitch != 0 || resource.pitch == 0)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!gfx9 && resource.pitch < resource.width)
     return fail(InstructionExecutionError::UnimplementedInstruction);
