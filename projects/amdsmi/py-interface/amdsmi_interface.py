@@ -4563,8 +4563,10 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
     link_metrics = amdsmi_wrapper.amdsmi_link_metrics_t()
     _check_res(amdsmi_wrapper.amdsmi_get_link_metrics(processor_handle, ctypes.byref(link_metrics)))
 
+    # Native entries are packed; only the first num_links are populated.
+    num_links = min(link_metrics.num_links, len(link_metrics.links))
     links = []
-    for i in range(AMDSMI_MAX_NUM_XGMI_LINKS):
+    for i in range(num_links):
         link = link_metrics.links[i]
         links.append(
             {
@@ -4579,7 +4581,7 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
             }
         )
 
-    return {"num_links": link_metrics.num_links, "links": links}
+    return {"num_links": num_links, "links": links}
 
 
 def amdsmi_topo_get_link_type(

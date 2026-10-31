@@ -51,6 +51,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
   - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
 
+- **Added a read-only Linux Go module**.  
+  - Provides GPU discovery, identity, telemetry, PCIe, XGMI link metrics, nearest GPUs, SOC P-state policies, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
+
 - **Added Component Unified ID (CUID) reporting APIs**.  
   - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
   - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
@@ -171,6 +174,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed missing peers in XGMI link metrics**.  
+  - `amdsmi_get_link_metrics()` now reports every XGMI link with its peer and counters, and GPUs without an XGMI port map report counters with unknown peers instead of failing.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
@@ -260,6 +266,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed nearest-GPU topology results**.  
+  - Results are ordered by hop count then link weight, and the reported count stays within the returned handle array.
 
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
