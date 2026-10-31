@@ -35,10 +35,12 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set_source_files_properties(signal-handler.cpp PROPERTIES LANGUAGE HIP)
 add_executable(signal-handler-test)
 target_sources(signal-handler-test PRIVATE signal-handler.cpp)
+target_include_directories(signal-handler-test
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../source/include)
 target_compile_options(signal-handler-test PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow)
 
 find_package(Threads REQUIRED)
-target_link_libraries(signal-handler-test PRIVATE Threads::Threads)
+target_link_libraries(signal-handler-test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(signal-handler-test
