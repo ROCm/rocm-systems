@@ -183,22 +183,6 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     localReady = false;
   }
 
-  // exchangeMemPtrs() exports this rank's IPC handle *before* it reaches its own
-  // bootstrapAllGather, so a rank whose export fails returns without ever
-  // entering that all-gather and strands every peer inside it. No readiness
-  // check placed after exchangeMemPtrs() can catch that, because the peers are
-  // already blocked by then. Export once here instead, while a readiness
-  // exchange still lies ahead, so the failure can be agreed on like any other.
-  // The export is idempotent and cheap, so doing it twice costs nothing.
-  if (localReady) {
-    cudaIpcMemHandle_t probeHandle;
-    cudaError_t he = cudaIpcGetMemHandle(&probeHandle, scratch);
-    if (he != cudaSuccess) {
-      WARN("ncclDdaIpcCommInit: cudaIpcGetMemHandle failed (%s)", cudaGetErrorString(he));
-      localReady = false;
-    }
-  }
-
   // First collective. Past this point every rank must be in lockstep.
   if (!ddaIpcAllRanksReady(comm, localReady)) {
     delete handler;
@@ -318,8 +302,10 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // it on, and they would then diverge at the first collective instead. The
   // enable/disable decision has to be unanimous, so agree one last time.
   //
-  // A failure inside mallocAndInit cannot strand peers either: it agrees on its
-  // own rank-local setup before its internal handle exchange.
+  // A failure inside mallocAndInit cannot strand peers either: every rank
+  // reaches its internal handle exchange, which reports a missing or
+  // unexportable mailbox on any rank to all of them (ncclIpcMemHandler::
+  // exchangeMemPtrs).
   if (!ddaIpcAllRanksReady(comm, localReady)) {
     barrierPair.first.reset();
     delete barrierState;
