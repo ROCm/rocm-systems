@@ -5,6 +5,7 @@
  */
 
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
@@ -3812,6 +3813,29 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
+  if (extent.depth > 1) {
+    // Multi-slice fills use pitch * ysize as the slice stride, so the packed
+    // payload size does not bound the last byte touched.
+    if (extent.height == 0 || pitchedDevPtr.ysize < extent.height) {
+      return hipErrorInvalidValue;
+    }
+    constexpr size_t maxSize = std::numeric_limits<size_t>::max();
+    size_t span = extent.width;
+    const auto appendStride = [&](size_t count, size_t stride) {
+      if (count != 0 && stride > (maxSize - span) / count) return false;
+      span += count * stride;
+      return true;
+    };
+    if (pitchedDevPtr.pitch > maxSize / pitchedDevPtr.ysize ||
+        !appendStride(extent.height - 1, pitchedDevPtr.pitch) ||
+        !appendStride(extent.depth - 1, pitchedDevPtr.pitch * pitchedDevPtr.ysize)) {
+      return hipErrorInvalidValue;
+    }
+    hipError_t status = ihipMemset_validate(memory, value, 1, span, offset);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
   // Return error if sizeBytes passed to memcpy is more than the actual size allocated
   if (sizeBytes > (memory->getSize() - offset)) {
     return hipErrorInvalidValue;
@@ -3828,13 +3852,20 @@ hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memor
 hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevPtr,
                                amd::Memory* memory, size_t offset, int value, hipExtent extent,
                                hip::Stream* stream, size_t elementSize = 1) {
+  if (extent.depth > 1) {
+    hipError_t status = ihipMemset3D_validate(pitchedDevPtr, memory, offset, value, extent,
+                                              extent.width * extent.height * extent.depth);
+    if (status != hipSuccess) {
+      return status;
+    }
+  }
   auto sizeBytes = extent.width * extent.height * extent.depth;
-  if (pitchedDevPtr.pitch == extent.width) {
+  if (pitchedDevPtr.pitch == extent.width &&
+      (extent.depth == 1 || pitchedDevPtr.ysize == extent.height)) {
     return ihipMemsetCommand(command, memory, value, elementSize, static_cast<size_t>(sizeBytes),
                              stream, offset);
   }
-  // Workaround for cases when pitch > row until fill kernel will be updated to support pitch.
-  // Fall back to filling one row at a time.
+  // Preserve row padding and gaps between cropped slices with the pitched fill path.
   amd::Coord3D origin(offset);
   amd::Coord3D region(extent.width, extent.height, extent.depth);
   amd::Coord3D surface(pitchedDevPtr.pitch, pitchedDevPtr.xsize, pitchedDevPtr.ysize);

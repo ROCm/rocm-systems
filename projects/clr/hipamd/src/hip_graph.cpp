@@ -253,7 +253,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   if (depth == 0) {
     return hipErrorInvalidValue;
   }
-  if (pMemsetParams->height == 1) {
+  if (pMemsetParams->height == 1 && depth == 1) {
     size_t offset = 0;
     amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset);
     if (memObj == nullptr) {
@@ -272,8 +272,10 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
+    // Captured 3D nodes retain the allocation slice height, not the fill height.
     status = ihipMemset3D_validate(
-        {pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width, pMemsetParams->height},
+        {pMemsetParams->dst, pMemsetParams->pitch, depth > 1 ? arrWidth : pMemsetParams->width,
+         depth > 1 ? arrHeight : pMemsetParams->height},
         memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth},
         sizeBytes);
   }
