@@ -1048,6 +1048,34 @@ if(RJ_FAULT_INJECTION_CORPUS_OBJECT)
 endif()
 rj_add_gtest_tests(rocjitsu_fault_injection_tests)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        rocjitsu_fault_mutation_cli_tests
+        patch/fault_mutation_cli_test.cpp
+    )
+    target_include_directories(
+        rocjitsu_fault_mutation_cli_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(
+        rocjitsu_fault_mutation_cli_tests
+        PRIVATE
+            rocjitsu_dbt_internal
+            rocjitsu_amdgpu_isa_model_registry
+            simdojo_headers
+            GTest::gtest_main
+    )
+    rj_add_test_path(rocjitsu_fault_mutation_cli_tests RJ_CODE_MUTATE_PATH "$<TARGET_FILE:rj_code_mutate>")
+    add_dependencies(rocjitsu_fault_mutation_cli_tests rj_code_mutate)
+    rj_configure_target(rocjitsu_fault_mutation_cli_tests PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(rocjitsu_fault_mutation_cli_tests PROPERTIES TIMEOUT 30)
+    add_test(
+        NAME FaultMutationCli.SymbolBoundary
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+            -DMODEL_BINARY=$<TARGET_FILE:rj_code_mutate>
+            -DREQUIRED_MODEL_ARCHES=rdna3,rdna4,cdna3,cdna4,cdna5 -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/patch/check_fault_injection_symbols.cmake
+    )
     add_test(
         NAME FaultDropBarrier.SymbolBoundary
         COMMAND
