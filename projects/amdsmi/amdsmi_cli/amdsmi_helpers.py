@@ -648,6 +648,17 @@ class AMDSMIHelpers:
         except UnicodeEncodeError:
             return False
 
+    # Shared int64 range, reused by parse_ampp_field_value and
+    # parse_power_stabilization_token so the two sets of literals can't drift.
+    _INT64_MIN = -(2**63)
+    _INT64_MAX_EXCLUSIVE = 2**63
+
+    @classmethod
+    def _fits_int64(cls, value: int) -> bool:
+        """Range check for anything that lands in an int64 ctypes field
+        (amdsmi_value_t.data.int64_value / AMPP field values)."""
+        return cls._INT64_MIN <= value < cls._INT64_MAX_EXCLUSIVE
+
     @staticmethod
     def parse_ampp_field_value(value) -> Optional[int]:
         """Parse and range-check a candidate AMPP field value the same way
@@ -660,9 +671,105 @@ class AMDSMIHelpers:
             parsed = int(value)
         except (TypeError, ValueError, OverflowError):
             return None
-        if not -(2**63) <= parsed < 2**63:
+        if not AMDSMIHelpers._fits_int64(parsed):
             return None
         return parsed
+
+    @staticmethod
+    def _sanitize_for_error_message(raw_value, max_len=64) -> str:
+        """Strip non-printable characters and cap the length of file-controlled
+        text before embedding it in a raised error message, so a malicious
+        `@<path>` replay file can't forge terminal output (e.g. ANSI escapes)
+        via a parse-failure message."""
+        sanitized = re.sub(r"[^\x20-\x7e]", "?", str(raw_value))
+        if len(sanitized) > max_len:
+            sanitized = sanitized[:max_len] + "..."
+        return sanitized
+
+    @staticmethod
+    def parse_power_stabilization_token(
+        token: str, ignore_read_only: bool
+    ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", Union[int, float]]]:
+        """Parse a single 'KEY=VALUE' Power Stabilization token into
+        (AmdSmiPowerStabilizationParamId, value).
+
+        Shared between --power-stabilization-configure's direct KEY=VALUE
+        argv parsing (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+
+        Returns None for "host_control=..." when ignore_read_only is True
+        (HOST_CONTROL isn't a settable param_id at all, so it's silently
+        skipped when replaying a full `static --json` dump). Raises
+        ValueError with a user-facing message for any other malformed
+        token, unknown key, or unparsable value.
+        """
+        param_ids = amdsmi_interface.AmdSmiPowerStabilizationParamId
+        allowed_keys = {name.lower(): member for name, member in param_ids.__members__.items()}
+
+        if "=" not in token:
+            raise ValueError(
+                f"Invalid KEY=VALUE pair '{AMDSMIHelpers._sanitize_for_error_message(token)}'"
+            )
+        key, _, raw_value = token.partition("=")
+        key = key.strip().lower()
+        raw_value = raw_value.strip()
+        safe_key = AMDSMIHelpers._sanitize_for_error_message(key)
+        safe_value = AMDSMIHelpers._sanitize_for_error_message(raw_value)
+
+        if key == "host_control":
+            if ignore_read_only:
+                return None
+            raise ValueError("HOST_CONTROL is read-only and cannot be set")
+
+        if key not in allowed_keys:
+            raise ValueError(
+                f"Invalid Power Stabilization key '{safe_key}'. Valid keys are: "
+                + ", ".join(sorted(allowed_keys))
+            )
+
+        param_id = allowed_keys[key]
+        if param_id == param_ids.INSERTION_PRIORITY and not raw_value.lstrip("-").isdigit():
+            try:
+                value = int(amdsmi_interface.AmdSmiHawkInsertionPriority[raw_value.upper()])
+            except KeyError:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for insertion_priority. Valid values are: "
+                    + ", ".join(amdsmi_interface.AmdSmiHawkInsertionPriority.__members__)
+                ) from None
+        elif param_id in (param_ids.ENABLE, param_ids.RAMP_ENABLE):
+            bool_map = {"on": 1, "true": 1, "1": 1, "off": 0, "false": 0, "0": 0}
+            value = bool_map.get(raw_value.lower())
+            if value is None:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}. Valid values are: "
+                    "on, off, true, false, 1, 0"
+                )
+        elif param_id in (param_ids.RAMP_MAX_RAMP_UP_RATE, param_ids.RAMP_MAX_RAMP_DOWN_RATE):
+            try:
+                value = float(raw_value)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must be a number"
+                ) from None
+            if not math.isfinite(value):
+                raise ValueError(f"Invalid value '{safe_value}' for {key}: must be a finite number")
+        else:
+            try:
+                value = int(raw_value)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must be an integer"
+                ) from None
+            # ctypes silently truncates an out-of-int64-range value when it's
+            # assigned into amdsmi_value_t.data.int64_value; reject it here
+            # instead of letting the CLI report "success" for a value that
+            # was never actually written.
+            if not AMDSMIHelpers._fits_int64(value):
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must fit in a signed 64-bit integer"
+                )
+
+        return (param_id, value)
 
     @staticmethod
     def is_UUID(uuid_question: str) -> bool:
@@ -3630,6 +3737,23 @@ class AMDSMIHelpers:
     # (amdsmi_interface.py's own string contract stays unchanged).
     NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
     NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def is_npm_enabled(self, node_handle) -> bool:
+        """Check whether NPM (Node Power Management) is enabled on a node.
+
+        No node handle counts as disabled for callers deciding between per-GPU
+        and node-wide behavior. A driver read failure (AmdSmiException) or a
+        malformed return missing "status" (KeyError) is NOT treated as
+        "disabled": that would fail open, silently letting a per-GPU write
+        through on a node where NPM might actually be enabled. Instead such
+        errors propagate to the caller, matching the established precedent in
+        validate_and_set_node_balancing_mode, which lets the same kind of
+        error propagate rather than masking it.
+        """
+        if node_handle is None:
+            return False
+        info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+        return info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_ENABLED
 
     def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
         """Validate and set the NPM balancing mode for a node.

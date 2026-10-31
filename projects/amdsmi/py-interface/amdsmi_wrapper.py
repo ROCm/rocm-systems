@@ -462,6 +462,38 @@ AMDSMI_STATUS_MAP_ERROR = 4294967294
 AMDSMI_STATUS_UNKNOWN_ERROR = 4294967295
 amdsmi_status_t = ctypes.c_uint32 # enum
 
+# values for enumeration 'amdsmi_value_type_t'
+amdsmi_value_type_t__enumvalues = {
+    0: 'AMDSMI_VALUE_TYPE_INT64',
+    1: 'AMDSMI_VALUE_TYPE_DOUBLE',
+}
+AMDSMI_VALUE_TYPE_INT64 = 0
+AMDSMI_VALUE_TYPE_DOUBLE = 1
+amdsmi_value_type_t = ctypes.c_uint32 # enum
+class union_amdsmi_value_data_t(Union):
+    pass
+
+union_amdsmi_value_data_t._pack_ = 1 # source:False
+union_amdsmi_value_data_t._layout_ = 'ms'
+union_amdsmi_value_data_t._fields_ = [
+    ('int64_value', ctypes.c_int64),
+    ('double_value', ctypes.c_double),
+]
+
+amdsmi_value_data_t = union_amdsmi_value_data_t
+class struct_amdsmi_value_t(Structure):
+    pass
+
+struct_amdsmi_value_t._pack_ = 1 # source:False
+struct_amdsmi_value_t._layout_ = 'ms'
+struct_amdsmi_value_t._fields_ = [
+    ('type', amdsmi_value_type_t),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('data', amdsmi_value_data_t),
+]
+
+amdsmi_value_t = struct_amdsmi_value_t
+
 # values for enumeration 'amdsmi_clk_type_t'
 amdsmi_clk_type_t__enumvalues = {
     0: 'AMDSMI_CLK_TYPE_SYS',
@@ -5181,6 +5213,76 @@ try:
     amdsmi_reset_ttm_pages_limit.argtypes = []
 except AttributeError:
     pass
+
+# values for enumeration 'amdsmi_hawk_insertion_priority_t'
+amdsmi_hawk_insertion_priority_t__enumvalues = {
+    0: 'AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC',
+    1: 'AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED',
+    2: 'AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC',
+}
+AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0
+AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1
+AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2
+amdsmi_hawk_insertion_priority_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_power_stabilization_param_id_t'
+amdsmi_power_stabilization_param_id_t__enumvalues = {
+    0: 'AMDSMI_POWER_STABILIZATION_PARAM_ENABLE',
+    1: 'AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR',
+    2: 'AMDSMI_POWER_STABILIZATION_PARAM_DELAY',
+    3: 'AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY',
+    4: 'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE',
+    5: 'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE',
+    6: 'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE',
+    7: 'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR',
+    8: 'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY',
+    8: 'AMDSMI_POWER_STABILIZATION_PARAM_LAST',
+}
+AMDSMI_POWER_STABILIZATION_PARAM_ENABLE = 0
+AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR = 1
+AMDSMI_POWER_STABILIZATION_PARAM_DELAY = 2
+AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY = 3
+AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE = 4
+AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE = 5
+AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE = 6
+AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR = 7
+AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY = 8
+AMDSMI_POWER_STABILIZATION_PARAM_LAST = 8
+amdsmi_power_stabilization_param_id_t = ctypes.c_uint32 # enum
+class struct_amdsmi_power_stabilization_info_t(Structure):
+    pass
+
+struct_amdsmi_power_stabilization_info_t._pack_ = 1 # source:False
+struct_amdsmi_power_stabilization_info_t._layout_ = 'ms'
+struct_amdsmi_power_stabilization_info_t._fields_ = [
+    ('host_control_enabled', ctypes.c_bool),
+    ('enabled', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('power_floor', ctypes.c_uint32),
+    ('delay', ctypes.c_uint32),
+    ('insertion_priority', amdsmi_hawk_insertion_priority_t),
+    ('ramp_enabled', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte * 7),
+    ('ramp_max_ramp_up_rate', ctypes.c_double),
+    ('ramp_max_ramp_down_rate', ctypes.c_double),
+    ('ramp_min_time_at_power_floor', ctypes.c_uint32),
+    ('ramp_stop_delay', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint64 * 10),
+]
+
+amdsmi_power_stabilization_info_t = struct_amdsmi_power_stabilization_info_t
+try:
+    amdsmi_get_power_stabilization_info = _libraries['libamd_smi.so'].amdsmi_get_power_stabilization_info
+    amdsmi_get_power_stabilization_info.restype = amdsmi_status_t
+    amdsmi_get_power_stabilization_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_power_stabilization_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_power_stabilization_param = _libraries['libamd_smi.so'].amdsmi_set_power_stabilization_param
+    amdsmi_set_power_stabilization_param.restype = amdsmi_status_t
+    amdsmi_set_power_stabilization_param.argtypes = [amdsmi_processor_handle, amdsmi_power_stabilization_param_id_t, ctypes.POINTER(struct_amdsmi_value_t)]
+except AttributeError:
+    pass
 __all__ = \
     ['AGG_BW0', 'AMDSMI_ACCELERATOR_DECODER',
     'AMDSMI_ACCELERATOR_DMA', 'AMDSMI_ACCELERATOR_ENCODER',
@@ -5368,18 +5470,22 @@ __all__ = \
     'AMDSMI_GPU_BLOCK_SHUB', 'AMDSMI_GPU_BLOCK_SMN',
     'AMDSMI_GPU_BLOCK_SSBDCI', 'AMDSMI_GPU_BLOCK_UCIE_PCS',
     'AMDSMI_GPU_BLOCK_UMC', 'AMDSMI_GPU_BLOCK_VCN',
-    'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_INIT_ALL_PROCESSORS',
-    'AMDSMI_INIT_AMD_APUS', 'AMDSMI_INIT_AMD_CPUS',
-    'AMDSMI_INIT_AMD_GPUS', 'AMDSMI_INIT_AMD_NICS',
-    'AMDSMI_INIT_NON_AMD_CPUS', 'AMDSMI_INIT_NON_AMD_GPUS',
-    'AMDSMI_LINK_STATUS_DISABLED', 'AMDSMI_LINK_STATUS_ENABLED',
-    'AMDSMI_LINK_STATUS_ERROR', 'AMDSMI_LINK_STATUS_INACTIVE',
-    'AMDSMI_LINK_TYPE_INTERNAL', 'AMDSMI_LINK_TYPE_NOT_APPLICABLE',
-    'AMDSMI_LINK_TYPE_NUMA', 'AMDSMI_LINK_TYPE_PCIE',
-    'AMDSMI_LINK_TYPE_UNKNOWN', 'AMDSMI_LINK_TYPE_XGMI',
-    'AMDSMI_LINK_TYPE_XNUMA', 'AMDSMI_MEMORY_PARTITION_NPS1',
-    'AMDSMI_MEMORY_PARTITION_NPS2', 'AMDSMI_MEMORY_PARTITION_NPS4',
-    'AMDSMI_MEMORY_PARTITION_NPS8', 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
+    'AMDSMI_GPU_BLOCK_XGMI_WAFL',
+    'AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC',
+    'AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED',
+    'AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC',
+    'AMDSMI_INIT_ALL_PROCESSORS', 'AMDSMI_INIT_AMD_APUS',
+    'AMDSMI_INIT_AMD_CPUS', 'AMDSMI_INIT_AMD_GPUS',
+    'AMDSMI_INIT_AMD_NICS', 'AMDSMI_INIT_NON_AMD_CPUS',
+    'AMDSMI_INIT_NON_AMD_GPUS', 'AMDSMI_LINK_STATUS_DISABLED',
+    'AMDSMI_LINK_STATUS_ENABLED', 'AMDSMI_LINK_STATUS_ERROR',
+    'AMDSMI_LINK_STATUS_INACTIVE', 'AMDSMI_LINK_TYPE_INTERNAL',
+    'AMDSMI_LINK_TYPE_NOT_APPLICABLE', 'AMDSMI_LINK_TYPE_NUMA',
+    'AMDSMI_LINK_TYPE_PCIE', 'AMDSMI_LINK_TYPE_UNKNOWN',
+    'AMDSMI_LINK_TYPE_XGMI', 'AMDSMI_LINK_TYPE_XNUMA',
+    'AMDSMI_MEMORY_PARTITION_NPS1', 'AMDSMI_MEMORY_PARTITION_NPS2',
+    'AMDSMI_MEMORY_PARTITION_NPS4', 'AMDSMI_MEMORY_PARTITION_NPS8',
+    'AMDSMI_MEMORY_PARTITION_UNKNOWN',
     'AMDSMI_MEM_PAGE_STATUS_PENDING',
     'AMDSMI_MEM_PAGE_STATUS_RESERVED',
     'AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE', 'AMDSMI_MEM_TYPE_FIRST',
@@ -5392,6 +5498,16 @@ __all__ = \
     'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
     'AMDSMI_NPM_STATUS_DISABLED', 'AMDSMI_NPM_STATUS_ENABLED',
     'AMDSMI_POWER_CAP_TYPE_PPT0', 'AMDSMI_POWER_CAP_TYPE_PPT1',
+    'AMDSMI_POWER_STABILIZATION_PARAM_DELAY',
+    'AMDSMI_POWER_STABILIZATION_PARAM_ENABLE',
+    'AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY',
+    'AMDSMI_POWER_STABILIZATION_PARAM_LAST',
+    'AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR',
+    'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE',
+    'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE',
+    'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE',
+    'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR',
+    'AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY',
     'AMDSMI_PROCESSOR_TYPE_AMD_APU', 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
     'AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE',
     'AMDSMI_PROCESSOR_TYPE_AMD_GPU', 'AMDSMI_PROCESSOR_TYPE_AMD_NIC',
@@ -5520,8 +5636,8 @@ __all__ = \
     'AMDSMI_TEMP_MAX', 'AMDSMI_TEMP_MAX_HYST', 'AMDSMI_TEMP_MIN',
     'AMDSMI_TEMP_MIN_HYST', 'AMDSMI_TEMP_OFFSET',
     'AMDSMI_TEMP_SHUTDOWN', 'AMDSMI_UTILIZATION_COUNTER_FIRST',
-    'AMDSMI_UTILIZATION_COUNTER_LAST',
-    'AMDSMI_VIRTUALIZATION_MODE_BAREMETAL',
+    'AMDSMI_UTILIZATION_COUNTER_LAST', 'AMDSMI_VALUE_TYPE_DOUBLE',
+    'AMDSMI_VALUE_TYPE_INT64', 'AMDSMI_VIRTUALIZATION_MODE_BAREMETAL',
     'AMDSMI_VIRTUALIZATION_MODE_GUEST',
     'AMDSMI_VIRTUALIZATION_MODE_HOST',
     'AMDSMI_VIRTUALIZATION_MODE_PASSTHROUGH',
@@ -5705,7 +5821,7 @@ __all__ = \
     'amdsmi_get_npm_balancing_mode', 'amdsmi_get_npm_info',
     'amdsmi_get_npm_supported_balancing_modes',
     'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
-    'amdsmi_get_power_info',
+    'amdsmi_get_power_info', 'amdsmi_get_power_stabilization_info',
     'amdsmi_get_processor_count_from_handles',
     'amdsmi_get_processor_handle_from_bdf',
     'amdsmi_get_processor_handles',
@@ -5724,6 +5840,7 @@ __all__ = \
     'amdsmi_gpu_ras_policy_info_t', 'amdsmi_gpu_ras_policy_v4_0_t',
     'amdsmi_gpu_read_counter', 'amdsmi_gpu_validate_ras_eeprom',
     'amdsmi_gpu_xcp_metrics_t', 'amdsmi_gpu_xgmi_error_status',
+    'amdsmi_hawk_insertion_priority_t',
     'amdsmi_hsmp_driver_version_t', 'amdsmi_hsmp_freqlimit_src_names',
     'amdsmi_hsmp_metrics_table_t', 'amdsmi_init',
     'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
@@ -5748,16 +5865,19 @@ __all__ = \
     'amdsmi_pcie_bandwidth_t', 'amdsmi_pcie_info_t',
     'amdsmi_power_cap_info_t', 'amdsmi_power_cap_type_t',
     'amdsmi_power_info_t', 'amdsmi_power_profile_preset_masks_t',
-    'amdsmi_power_profile_status_t', 'amdsmi_proc_gpu_entry_t',
-    'amdsmi_proc_info_by_pid_t', 'amdsmi_proc_info_t',
-    'amdsmi_process_handle_t', 'amdsmi_process_info_t',
-    'amdsmi_processor_handle', 'amdsmi_processor_type_t',
-    'amdsmi_ptl_data_format_t', 'amdsmi_range_t',
-    'amdsmi_ras_err_state_t', 'amdsmi_ras_feature_t',
-    'amdsmi_reg_type_t', 'amdsmi_reset_gpu', 'amdsmi_reset_gpu_fan',
-    'amdsmi_reset_gpu_xgmi_error', 'amdsmi_reset_ttm_pages_limit',
-    'amdsmi_retired_page_record_t', 'amdsmi_set_clk_freq',
-    'amdsmi_set_cpu_cc6_enable', 'amdsmi_set_cpu_core_boostlimit',
+    'amdsmi_power_profile_status_t',
+    'amdsmi_power_stabilization_info_t',
+    'amdsmi_power_stabilization_param_id_t',
+    'amdsmi_proc_gpu_entry_t', 'amdsmi_proc_info_by_pid_t',
+    'amdsmi_proc_info_t', 'amdsmi_process_handle_t',
+    'amdsmi_process_info_t', 'amdsmi_processor_handle',
+    'amdsmi_processor_type_t', 'amdsmi_ptl_data_format_t',
+    'amdsmi_range_t', 'amdsmi_ras_err_state_t',
+    'amdsmi_ras_feature_t', 'amdsmi_reg_type_t', 'amdsmi_reset_gpu',
+    'amdsmi_reset_gpu_fan', 'amdsmi_reset_gpu_xgmi_error',
+    'amdsmi_reset_ttm_pages_limit', 'amdsmi_retired_page_record_t',
+    'amdsmi_set_clk_freq', 'amdsmi_set_cpu_cc6_enable',
+    'amdsmi_set_cpu_core_boostlimit',
     'amdsmi_set_cpu_core_floor_freq_limit',
     'amdsmi_set_cpu_core_msr_floor_freq_limit',
     'amdsmi_set_cpu_df_pstate_range', 'amdsmi_set_cpu_dfc_ctrl',
@@ -5785,12 +5905,12 @@ __all__ = \
     'amdsmi_set_gpu_process_isolation', 'amdsmi_set_gpu_ptl_formats',
     'amdsmi_set_gpu_ptl_state', 'amdsmi_set_gpu_uma_carveout',
     'amdsmi_set_npm_balancing_mode', 'amdsmi_set_npm_limit',
-    'amdsmi_set_power_cap', 'amdsmi_set_soc_pstate',
-    'amdsmi_set_ttm_pages_limit', 'amdsmi_set_xgmi_plpd',
-    'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
-    'amdsmi_sock_info_t', 'amdsmi_socket_handle',
-    'amdsmi_status_code_to_string', 'amdsmi_status_t',
-    'amdsmi_stop_gpu_event_notification',
+    'amdsmi_set_power_cap', 'amdsmi_set_power_stabilization_param',
+    'amdsmi_set_soc_pstate', 'amdsmi_set_ttm_pages_limit',
+    'amdsmi_set_xgmi_plpd', 'amdsmi_shut_down',
+    'amdsmi_smu_fw_version_t', 'amdsmi_sock_info_t',
+    'amdsmi_socket_handle', 'amdsmi_status_code_to_string',
+    'amdsmi_status_t', 'amdsmi_stop_gpu_event_notification',
     'amdsmi_temp_range_refresh_rate_t', 'amdsmi_temperature_metric_t',
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',
@@ -5798,7 +5918,8 @@ __all__ = \
     'amdsmi_tray_info_t', 'amdsmi_ttm_info_t',
     'amdsmi_uma_carveout_info_t', 'amdsmi_uma_carveout_option_t',
     'amdsmi_utilization_counter_t',
-    'amdsmi_utilization_counter_type_t', 'amdsmi_vbios_info_t',
+    'amdsmi_utilization_counter_type_t', 'amdsmi_value_data_t',
+    'amdsmi_value_t', 'amdsmi_value_type_t', 'amdsmi_vbios_info_t',
     'amdsmi_version_t', 'amdsmi_violation_status_t',
     'amdsmi_virtualization_mode_t', 'amdsmi_voltage_metric_t',
     'amdsmi_voltage_type_t', 'amdsmi_vram_info_t',
@@ -5855,6 +5976,7 @@ __all__ = \
     'struct_amdsmi_pcie_bandwidth_t', 'struct_amdsmi_pcie_info_t',
     'struct_amdsmi_power_cap_info_t', 'struct_amdsmi_power_info_t',
     'struct_amdsmi_power_profile_status_t',
+    'struct_amdsmi_power_stabilization_info_t',
     'struct_amdsmi_proc_gpu_entry_t',
     'struct_amdsmi_proc_gpu_entry_t_engine_usage',
     'struct_amdsmi_proc_gpu_entry_t_memory_usage',
@@ -5867,7 +5989,7 @@ __all__ = \
     'struct_amdsmi_topology_nearest_t', 'struct_amdsmi_tray_info_t',
     'struct_amdsmi_ttm_info_t', 'struct_amdsmi_uma_carveout_info_t',
     'struct_amdsmi_uma_carveout_option_t',
-    'struct_amdsmi_utilization_counter_t',
+    'struct_amdsmi_utilization_counter_t', 'struct_amdsmi_value_t',
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',
     'struct_amdsmi_violation_status_t', 'struct_amdsmi_vram_info_t',
     'struct_amdsmi_vram_usage_t', 'struct_amdsmi_xgmi_info_t',
@@ -5877,5 +5999,5 @@ __all__ = \
     'struct_pcie_metric_', 'struct_pcie_static_', 'struct_ras_info_',
     'struct_timespec', 'struct_valid_bits_', 'uint32_t', 'uint64_t',
     'uint8_t', 'union_amdsmi_bdf_t', 'union_amdsmi_cper_valid_bits_t',
-    'union_amdsmi_nps_caps_t', 'union_fabric_info_',
-    'union_policy_data_']
+    'union_amdsmi_nps_caps_t', 'union_amdsmi_value_data_t',
+    'union_fabric_info_', 'union_policy_data_']

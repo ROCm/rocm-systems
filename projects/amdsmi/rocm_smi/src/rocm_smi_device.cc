@@ -724,6 +724,16 @@ std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
  */
 std::string Device::get_ampp_root_path(void) const { return path_ + "/device/app_modes/"; }
 
+/**
+ * @brief Get the full sysfs path to the Power Stabilization
+ * power_stabilization/ root directory
+ * @return Full path to the power_stabilization/ directory (e.g.,
+ * /sys/class/drm/card0/device/power_stabilization/)
+ */
+std::string Device::get_power_stabilization_root_path(void) const {
+  return path_ + "/device/power_stabilization/";
+}
+
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
   std::string debugfs_path;

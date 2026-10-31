@@ -783,6 +783,42 @@ class AmdSmiPowerCapType(IntEnum):
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
 
 
+class AmdSmiHawkInsertionPriority(IntEnum):
+    OPPORTUNISTIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC
+    GUARANTEED = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED
+    DYNAMIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC
+
+
+class AmdSmiPowerStabilizationParamId(IntEnum):
+    ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_ENABLE
+    POWER_FLOOR = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR
+    DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_DELAY
+    INSERTION_PRIORITY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY
+    RAMP_ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE
+    RAMP_MAX_RAMP_UP_RATE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE
+    RAMP_MAX_RAMP_DOWN_RATE = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE
+    )
+    RAMP_MIN_TIME_AT_POWER_FLOOR = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR
+    )
+    RAMP_STOP_DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY
+
+
+# The only two Power Stabilization param_ids whose amdsmi_value_t is
+# AMDSMI_VALUE_TYPE_DOUBLE; every other param_id is AMDSMI_VALUE_TYPE_INT64.
+# amdsmi_set_power_stabilization_param() keys its type tag off this set
+# instead of the Python value's type, so an int passed for a ramp-rate
+# param (or a bool/float passed for any other param) is coerced instead of
+# failing with AMDSMI_STATUS_INVAL.
+_POWER_STABILIZATION_DOUBLE_PARAM_IDS = frozenset(
+    {
+        AmdSmiPowerStabilizationParamId.RAMP_MAX_RAMP_UP_RATE,
+        AmdSmiPowerStabilizationParamId.RAMP_MAX_RAMP_DOWN_RATE,
+    }
+)
+
+
 class AmdSmiNpmBalancingMode(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
     POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
@@ -7992,3 +8028,96 @@ def amdsmi_reset_ttm_pages_limit():
         AmdSmiException: If the function fails
     """
     _check_res(amdsmi_wrapper.amdsmi_reset_ttm_pages_limit())
+
+
+def amdsmi_get_power_stabilization_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        dict: Dictionary with keys matching amdsmi_power_stabilization_info_t
+        fields: host_control_enabled, enabled, power_floor, delay,
+        insertion_priority (AmdSmiHawkInsertionPriority), ramp_enabled,
+        ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,
+        ramp_min_time_at_power_floor, ramp_stop_delay
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_power_stabilization_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_power_stabilization_info(processor_handle, ctypes.byref(info))
+    )
+
+    return {
+        "host_control_enabled": info.host_control_enabled,
+        "enabled": info.enabled,
+        "power_floor": info.power_floor,
+        "delay": info.delay,
+        "insertion_priority": AmdSmiHawkInsertionPriority(info.insertion_priority),
+        "ramp_enabled": info.ramp_enabled,
+        "ramp_max_ramp_up_rate": info.ramp_max_ramp_up_rate,
+        "ramp_max_ramp_down_rate": info.ramp_max_ramp_down_rate,
+        "ramp_min_time_at_power_floor": info.ramp_min_time_at_power_floor,
+        "ramp_stop_delay": info.ramp_stop_delay,
+    }
+
+
+def amdsmi_set_power_stabilization_param(
+    processor_handle: processor_handle_t,
+    param_id: AmdSmiPowerStabilizationParamId,
+    value: Union[int, float],
+) -> None:
+    """
+    Set a single Power Stabilization parameter.
+
+    Args:
+        processor_handle: GPU processor handle
+        param_id: Parameter to set
+        value: New value. RAMP_MAX_RAMP_UP_RATE and RAMP_MAX_RAMP_DOWN_RATE
+        require a float (sets an AMDSMI_VALUE_TYPE_DOUBLE amdsmi_value_t);
+        every other param_id accepts an int or bool (sets
+        AMDSMI_VALUE_TYPE_INT64)
+
+    Raises:
+        AmdSmiParameterException: If processor_handle, param_id, or value is
+        invalid, including an int64 value out of signed 64-bit range
+        AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
+        raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
+
+    if not isinstance(value, (int, float)):
+        raise AmdSmiParameterException(value, Union[int, float])
+
+    amdsmi_value = amdsmi_wrapper.amdsmi_value_t()
+    if param_id in _POWER_STABILIZATION_DOUBLE_PARAM_IDS:
+        amdsmi_value.type = amdsmi_wrapper.AMDSMI_VALUE_TYPE_DOUBLE
+        amdsmi_value.data.double_value = float(value)
+    else:
+        int_value = int(value)
+        if not -(2**63) <= int_value < 2**63:
+            raise AmdSmiParameterException(
+                value,
+                ctypes.c_int64,
+                msg=f"value {value!r} does not fit in a signed 64-bit integer",
+            )
+        amdsmi_value.type = amdsmi_wrapper.AMDSMI_VALUE_TYPE_INT64
+        amdsmi_value.data.int64_value = int_value
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(
+            processor_handle, param_id, ctypes.byref(amdsmi_value)
+        )
+    )
