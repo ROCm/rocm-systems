@@ -99,13 +99,20 @@ class ComputeBuildStagesTest(unittest.TestCase):
         )
 
     def _install_fake_topology(
-        self, all_stages=(), required=(), known=None, windows_disabled=()
+        self,
+        all_stages=(),
+        required=(),
+        known=None,
+        windows_disabled=(),
+        stages_by_artifact=None,
     ):
         """Install a fake _therock_utils.build_topology module on sys.path.
 
         known: set of resolvable project names. Any project not in `known`
         resolves to None (mirrors BuildTopology.resolve_alias_to_artifact).
         windows_disabled: artifacts with "windows" in disable_platforms.
+        stages_by_artifact: when set, get_stages_for_artifacts returns the union
+        of these per-artifact stages instead of `required`.
         """
         known = set(known) if known is not None else None
         mod = types.ModuleType("_therock_utils.build_topology")
@@ -122,6 +129,8 @@ class ComputeBuildStagesTest(unittest.TestCase):
                 return set(all_stages)
 
             def get_stages_for_artifacts(self, artifacts):
+                if stages_by_artifact is not None:
+                    return {s for a in artifacts for s in stages_by_artifact[a]}
                 return set(required)
 
             def resolve_alias_to_artifact(self, project):
@@ -178,6 +187,36 @@ class ComputeBuildStagesTest(unittest.TestCase):
             known={"mystery"},
         )
         self.assertEqual(cbs.compute_build_stages("projects/mystery", "_therock"), [])
+
+    def test_run_wsl_adds_wsl_rocdxg_stages(self):
+        # TheRock rejects ci:run-wsl unless the allowlist has wsl-rocdxg.
+        self._install_fake_topology(
+            all_stages=["compiler-runtime", "dctools-core", "math-libs", "wsl-rocdxg"],
+            stages_by_artifact={
+                "rdc": ["compiler-runtime", "dctools-core"],
+                "wsl-rocdxg": ["compiler-runtime", "wsl-rocdxg"],
+            },
+        )
+        self.assertEqual(
+            cbs.compute_build_stages("projects/rdc", "_therock", run_wsl=True),
+            ["compiler-runtime", "dctools-core", "wsl-rocdxg"],
+        )
+        self.assertEqual(
+            cbs.compute_build_stages("projects/rdc", "_therock"),
+            ["compiler-runtime", "dctools-core"],
+        )
+
+    def test_run_wsl_label_reaches_compute_build_stages(self):
+        for labels, run_wsl in (("ci:gfx110X-all, ci:run-wsl", True), ("", False)):
+            with self.subTest(labels=labels), patch.object(
+                cbs, "compute_build_stages", return_value=[]
+            ) as stages, patch.object(
+                cbs, "compute_windows_families", return_value=""
+            ), patch.object(
+                cbs, "set_github_output"
+            ):
+                cbs.main(["--changed-projects", "projects/rdc", "--pr-labels", labels])
+                self.assertEqual(stages.call_args.kwargs["run_wsl"], run_wsl)
 
     def test_windows_all_linux_only_skips_windows(self):
         self._install_fake_topology(windows_disabled={"rocprofiler-compute", "rdc"})
