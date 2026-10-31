@@ -158,4 +158,19 @@ TEST_F(IpcMemHandlerMicrotest, LocalExportFailureIsReportedInTheSlotNotByReturni
   EXPECT_TRUE(opened_.empty());
 }
 
+// One peer could not export (the last rank, so a short scan of the slots misses it): this rank fails too, without
+// opening any peer, even though its own export succeeded.
+TEST_F(IpcMemHandlerMicrotest, PeerReportsFailureEveryRankFails) {
+  ncclIpcMemHandler* h = MakeRegisteredHandler();
+  peerOk_[kNRanks - 1] = 0;
+
+  EXPECT_NE(h->exchangeMemPtrs(), ncclSuccess);
+
+  EXPECT_EQ(gathers_, 1);
+  EXPECT_EQ(selfOkAtGather_, 1);
+  EXPECT_TRUE(opened_.empty());
+  void* p = nullptr;
+  EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
+}
+
 }  // namespace
