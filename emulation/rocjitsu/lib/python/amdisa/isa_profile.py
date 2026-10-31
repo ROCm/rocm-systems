@@ -605,7 +605,11 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        """Whether MIMG uses the GFX11 image-address encoding contract.
+
+        This selects DIM-based VADDR sizing, x4 SRSRC/SSAMP tuple scaling, and
+        the optional NSA DWORD containing additional address-register selectors.
+        """
         return False
 
     @property
@@ -2383,6 +2387,13 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
+
+    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2633,13 +2644,6 @@ class Rdna3_5Profile(Rdna3Profile):
         return {
             'IMAGE_BVH_INTERSECT_RAY': 4,
             'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
         }
 
     @property
