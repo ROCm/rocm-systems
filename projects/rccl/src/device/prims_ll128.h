@@ -89,12 +89,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   RedOp redOp;
   const int tid;
   const int nthreads;
-  const int wid;
   const int stepSize;
   const int warp;
   const int warpInBlock; // warp index in thread block
-  const bool flagThread;
   const int group;
+  // Primitives groups start on a warp boundary, so tid % WARP_SIZE is the hardware lane. Reading it from the
+  // hardware keeps it out of the object, which lives in scratch (its member arrays are indexed at run time).
+  static __device__ __forceinline__ int laneId() { return (int)__lane_id(); }
+  static __device__ __forceinline__ bool isFlagLane() {
+    return (laneId() % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1);
+  }
   const int threadsPerBlock;
   Fan fan;
   T* userBufs[3];
@@ -181,7 +185,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
-        sendConnFifo[sendStep[wid] % NCCL_STEPS].size = nbytes;
+        sendConnFifo[sendStep[laneId()] % NCCL_STEPS].size = nbytes;
       }
       sendConnHead += 1;
     }
@@ -268,7 +272,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int ix[WordPerThread / 2];
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      ix[g] = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
+      ix[g] = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, laneId());
     }
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
@@ -279,7 +283,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
        */
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++) {
-        if (!flagThread || g % 2 == 0) {
+        if (!isFlagLane() || g % 2 == 0) {
           if (ix[g] * EltPer16B < eltN)
             loadUser128((uint64_t*)(src + ix[g] * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
         }
@@ -297,11 +301,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++)
-        if ((g * WARP_SIZE + wid) * 16 < misalignment + eltN * sizeof(T))
-          loadUser128(src8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
+        if ((g * WARP_SIZE + laneId()) * 16 < misalignment + eltN * sizeof(T))
+          loadUser128(src8 + 2 * (g * WARP_SIZE + laneId()), regs[2 * g + 0], regs[2 * g + 1]);
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++)
-        storeShmem128(shm8 + 2 * (g * WARP_SIZE + wid), regs[2 * g + 0], regs[2 * g + 1]);
+        storeShmem128(shm8 + 2 * (g * WARP_SIZE + laneId()), regs[2 * g + 0], regs[2 * g + 1]);
 
       __syncwarp();
 
@@ -310,8 +314,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       T* shm = (T*)shm8 + misalignment / sizeof(T);
 #pragma unroll
       for (int g = 0; g < WordPerThread / 2; g++) {
-        // int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
-        if (!flagThread || g % 2 == 0) {
+        // int ix = g*WARP_SIZE - 16*(g/2) + laneId() - (g%2)*(laneId()/4);
+        if (!isFlagLane() || g % 2 == 0) {
           if (ix[g] * EltPer16B < eltN)
             loadShmemMisaligned128(shm + ix[g] * EltPer16B, regs[2 * g + 0], regs[2 * g + 1]);
         }
@@ -324,7 +328,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // Move data out of flag registers into the vacant registers.
 #pragma unroll
     for (int g = 1; g < WordPerThread / 2; g += 2) {
-      if (flagThread) regs[2 * g] = regs[2 * g - 1];
+      if (isFlagLane()) regs[2 * g] = regs[2 * g - 1];
     }
   }
 
@@ -334,7 +338,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // Reverse Finish() register permuatation.
 #pragma unroll
     for (int g = 1; g < WordPerThread / 2; g += 2) {
-      if (flagThread) regs[2 * g - 1] = regs[2 * g];
+      if (isFlagLane()) regs[2 * g - 1] = regs[2 * g];
     }
 #if TDM_LL128_ON
     if (tdmStoreRegs<WordPerThread>(dst, regs, eltN)) return;
@@ -345,8 +349,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      int ix = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
-      if (!flagThread || g % 2 == 0) {
+      int ix = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, laneId());
+      if (!isFlagLane() || g % 2 == 0) {
         if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
           storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);
         } else {
@@ -359,21 +363,26 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // the hardware keeps up fine.
     T* shm = (T*)ncclScratchForWarp(warpInBlock);
     int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
-    for (int i = skip + wid; i < eltN; i += WARP_SIZE) dst[i] = shm[i];
+    for (int i = skip + laneId(); i < eltN; i += WARP_SIZE) dst[i] = shm[i];
   }
 
 #define WARP_MASK 0xffffffff
 
+  // recvPtr0/recvFlag0/sendPtr0/sendFlag0 are peer 0's FIFO and flag for this step, computed once per op so the
+  // slice loop does not reload them from scratch. A scratch load there costs a vmcnt(0), which on gfx9 also waits
+  // for the previous slice's remote stores to complete.
   template <int ELEMS_PER_THREAD, int RECV, int SEND, int SrcBuf, int DstBuf>
-  __device__ __forceinline__ void recvReduceSendCopy(uint64_t (&v)[ELEMS_PER_THREAD], int ll128Offset, bool postOp) {
+  __device__ __forceinline__ void recvReduceSendCopy(uint64_t (&v)[ELEMS_PER_THREAD], int ll128Offset, bool postOp,
+                                                     uint64_t* recvPtr0, uint64_t recvFlag0, uint64_t* sendPtr0,
+                                                     uint64_t sendFlag0) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
     uint64_t vr[ELEMS_PER_THREAD];
 
     __syncwarp();
     /************************ Wait first recv ********************/
     if (RECV) {
-      uint64_t* ptr = recvPtr(0) + ll128Offset;
-      uint64_t flag = recvFlag(0);
+      uint64_t* ptr = recvPtr0 + ll128Offset;
+      uint64_t flag = recvFlag0;
       bool needReload;
       int spins = 0;
       do {
@@ -381,7 +390,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-          needReload |= flagThread && (vr[u + 1] != flag);
+          needReload |= isFlagLane() && (vr[u + 1] != flag);
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
@@ -398,7 +407,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyPreOp(redOp, v[u]);
-          if (!flagThread) v[u + 1] = applyPreOp(redOp, v[u + 1]);
+          if (!isFlagLane()) v[u + 1] = applyPreOp(redOp, v[u + 1]);
         }
       }
     }
@@ -425,7 +434,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
           for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
             load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-            needReload |= flagThread && (vr[u + 1] != flag);
+            needReload |= isFlagLane() && (vr[u + 1] != flag);
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
@@ -462,14 +471,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         uint64_t* ptr = sendPtr(i) + ll128Offset;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-          store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+          store128Fifo(ptr + u * WARP_SIZE, v[u], isFlagLane() ? flag : v[u + 1]);
         }
       }
-      uint64_t flag = sendFlag(0);
-      uint64_t* ptr = sendPtr(0) + ll128Offset;
+      uint64_t* ptr = sendPtr0 + ll128Offset;
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
-        store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+        store128Fifo(ptr + u * WARP_SIZE, v[u], isFlagLane() ? sendFlag0 : v[u + 1]);
       }
     }
     /********************** End Send ************************/
@@ -486,7 +494,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
     T* dstPtr = DstBuf == -1 ? nullptr : userBufs[DstBuf] + dstIx;
     T* accPtr = (DstBuf == -1 || !useAcc) ? nullptr : userBufs[Acc] + dstIx;
-    int wireOffset = WireWordPerSlice * warp + 2 * wid;
+    int wireOffset = WireWordPerSlice * warp + 2 * laneId();
     const int nwarps = nthreads / WARP_SIZE;
     nelem = nelem < 0 ? 0 : nelem;
 
@@ -498,11 +506,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
     if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+    uint64_t* const recvPtr0 = RECV ? recvPtr(0) : nullptr;
+    const uint64_t recvFlag0 = RECV ? recvFlag(0) : 0;
+    uint64_t* const sendPtr0 = SEND ? sendPtr(0) : nullptr;
+    const uint64_t sendFlag0 = SEND ? sendFlag(0) : 0;
     while (nelem > 0) {
       const int eltInSlice = min(nelem, DataEltPerSlice);
       uint64_t regs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
       if (SRC) loadRegsBegin(regs, srcPtr, eltInSlice);
-      recvReduceSendCopy<NCCL_LL128_SHMEM_ELEMS_PER_THREAD, RECV, SEND, SrcBuf, DstBuf>(regs, wireOffset, postOp);
+      recvReduceSendCopy<NCCL_LL128_SHMEM_ELEMS_PER_THREAD, RECV, SEND, SrcBuf, DstBuf>(
+        regs, wireOffset, postOp, recvPtr0, recvFlag0, sendPtr0, sendFlag0);
       if (DST) {
         if (accPtr != nullptr) {
           uint64_t accRegs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
@@ -541,10 +554,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   __device__ __forceinline__ void loadRecvConn(struct ncclConnInfo* conn, int i) {
     recvBuff[i] = (uint64_t*)conn->buffs[NCCL_PROTO_LL128];
     recvStep[i] = conn->step;
-    if (wid == i) recvConn = conn;
+    if (laneId() == i) recvConn = conn;
   }
   __device__ __forceinline__ void loadRecvSync() {
-    if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) {
+    if (tid >= nthreads - WARP_SIZE && laneId() < fan.nrecv()) {
       recvConnHeadPtr = recvConn->head;
       recvConnHead = recvConn->step;
     }
@@ -553,7 +566,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   __device__ __forceinline__ void loadSendConn(struct ncclConnInfo* conn, int i) {
     sendBuff[i] = (uint64_t*)conn->buffs[NCCL_PROTO_LL128];
     sendStep[i] = conn->step;
-    if (wid == i) sendConn = conn;
+    if (laneId() == i) sendConn = conn;
   }
   __device__ __forceinline__ void loadSendSync() {
     if (tid < fan.nsend()) {
@@ -562,7 +575,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       sendConnHead = sendConn->step;
       sendConnFifo = sendConn->connFifo;
     }
-    if (tid >= nthreads - WARP_SIZE && wid < fan.nsend()) {
+    if (tid >= nthreads - WARP_SIZE && laneId() < fan.nsend()) {
       if (sendConn->connFifo) {
         sendConnTailPtr = sendConn->tail;
         sendConnTail = sendConn->step;
@@ -575,11 +588,11 @@ public:
                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group = 0,
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
-    : redOp(redOpArg), tid(tid), nthreads(nthreads), wid(tid % WARP_SIZE), /*compiler warnings*/
+    : redOp(redOpArg), tid(tid), nthreads(nthreads), /*compiler warnings*/
       stepSize(stepSize_ > 0 ? stepSize_ : ncclShmem.comm.buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS / sizeof(uint64_t)),
       warp(tid / WARP_SIZE),
       warpInBlock(threadIdx.x / WARP_SIZE),
-      flagThread((tid % (NCCL_LL128_LINEELEMS / 2)) == (NCCL_LL128_LINEELEMS / 2 - 1)), group(group),
+      group(group),
       threadsPerBlock(blockDim.x) {
 #ifdef ENABLE_WARP_SPEED
     auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[warpInBlock] : &ncclShmem.channel;
@@ -629,7 +642,7 @@ public:
 
   __device__ ~Primitives() {
     // Save steps for the next operation
-    if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) recvConn->step = recvConnHead;
+    if (tid >= nthreads - WARP_SIZE && laneId() < fan.nrecv()) recvConn->step = recvConnHead;
     if (tid < fan.nsend()) sendConn->step = sendConnHead;
     // Ensure all steps written back
     barrier();
