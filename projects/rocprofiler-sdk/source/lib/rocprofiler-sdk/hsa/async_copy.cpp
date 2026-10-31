@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -594,6 +595,10 @@ initialize_async_copy_tracing(async_copy_data* _data)
 
     for(auto& _copy : _data->traced_copies)
     {
+        // a copy a graph launch enqueues takes the launch's next ordinal, as its kernel dispatches
+        // do (rocprofiler_kernel_dispatch_info_t::graph_node_id numbers both)
+        (void) ::rocprofiler::hip::graph::next_enqueue_identity();
+
         tracing::populate_external_correlation_ids(
             _copy.tracing_data.external_correlation_ids,
             _thread_id,
