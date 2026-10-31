@@ -581,57 +581,25 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     auto page_size =
         (page_size_value > 0) ? static_cast<uint64_t>(page_size_value) : uint64_t{4096};
 
-    // Accept a bias only if every file-backed PT_LOAD segment has a maps entry
-    // at bias + page-aligned p_vaddr with the matching file page. Segments merged
-    // into one maps entry are not handled. More than one surviving bias (e.g. the
-    // same inode mapped twice) is rejected as ambiguous.
-    auto segment_is_mapped_at_bias = [&](const Elf64_Phdr& segment, uint64_t bias) {
-        if(segment.p_filesz == 0) return true;
-
-        auto segment_file_page    = align_down(segment.p_offset, page_size);
-        auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
-        if(!segment_file_page || !segment_virtual_page) return false;
-
-        auto expected_start = checked_add(bias, *segment_virtual_page);
-        if(!expected_start) return false;
-
-        return std::any_of(
-            object.mappings.begin(), object.mappings.end(), [&](const auto& mapping) {
-                return mapping.start == *expected_start &&
-                       mapping.file_offset == *segment_file_page;
-            });
-    };
-
-    auto candidates = std::vector<uint64_t>{};
-    for(const auto& mapping : object.mappings)
+    auto segments = std::vector<detail::load_segment>{};
+    segments.reserve(elf.load_segments.size());
+    for(const auto& segment : elf.load_segments)
     {
-        for(const auto& segment : elf.load_segments)
-        {
-            if(segment.p_filesz == 0) continue;
-
-            auto segment_file_page = align_down(segment.p_offset, page_size);
-            if(!segment_file_page || mapping.file_offset != *segment_file_page) continue;
-
-            auto segment_virtual_page = align_down(segment.p_vaddr, page_size);
-            if(!segment_virtual_page) continue;
-
-            auto candidate =
-                checked_sub(static_cast<uint64_t>(mapping.start), *segment_virtual_page);
-            if(!candidate) continue;
-
-            auto all_segments_mapped = std::all_of(
-                elf.load_segments.begin(), elf.load_segments.end(), [&](const auto& other) {
-                    return segment_is_mapped_at_bias(other, *candidate);
-                });
-            if(all_segments_mapped &&
-               std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
-            {
-                candidates.emplace_back(*candidate);
-            }
-        }
+        segments.emplace_back(
+            detail::load_segment{segment.p_offset, segment.p_vaddr, segment.p_filesz});
     }
 
-    if(candidates.size() != 1)
+    auto mappings = std::vector<detail::file_mapping>{};
+    mappings.reserve(object.mappings.size());
+    for(const auto& mapping : object.mappings)
+    {
+        mappings.emplace_back(detail::file_mapping{static_cast<uint64_t>(mapping.start),
+                                                   static_cast<uint64_t>(mapping.end),
+                                                   mapping.file_offset});
+    }
+
+    auto load_bias = detail::calculate_load_bias(page_size, segments, mappings);
+    if(!load_bias)
     {
         ROCP_ERROR << "[rocprofiler-sdk-rocattach] Could not calculate a unique load bias for "
                    << object.path << " from its PT_LOAD segments and mappings";
@@ -639,8 +607,8 @@ calculate_load_bias(const target_elf& elf, const mapped_object& object)
     }
 
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Calculated target load bias for " << object.path
-               << " as 0x" << std::hex << candidates.front() << std::dec;
-    return candidates.front();
+               << " as 0x" << std::hex << *load_bias << std::dec;
+    return load_bias;
 }
 
 std::optional<std::vector<uint8_t>>
@@ -1140,6 +1108,82 @@ resolve_target_symbol(pid_t                pid,
     return address;
 }
 }  // namespace
+
+namespace detail
+{
+namespace
+{
+std::optional<uint64_t>
+mapped_address_for_file_page(const file_mapping& mapping, uint64_t file_page)
+{
+    if(mapping.end_address <= mapping.start_address || file_page < mapping.file_offset)
+    {
+        return std::nullopt;
+    }
+
+    auto mapping_offset = file_page - mapping.file_offset;
+    if(mapping_offset >= mapping.end_address - mapping.start_address) return std::nullopt;
+    return checked_add(mapping.start_address, mapping_offset);
+}
+}  // namespace
+
+std::optional<uint64_t>
+calculate_load_bias(uint64_t                         page_size,
+                    const std::vector<load_segment>& segments,
+                    const std::vector<file_mapping>& mappings)
+{
+    // A maps entry can cover several adjacent PT_LOAD segments. Translate each
+    // segment's file page through the containing mapping instead of requiring
+    // every segment to begin on its own maps line.
+    auto segment_is_mapped_at_bias = [&](const load_segment& segment, uint64_t bias) {
+        if(segment.file_size == 0) return true;
+
+        auto segment_file_page    = align_down(segment.file_offset, page_size);
+        auto segment_virtual_page = align_down(segment.virtual_address, page_size);
+        if(!segment_file_page || !segment_virtual_page) return false;
+
+        auto expected_address = checked_add(bias, *segment_virtual_page);
+        if(!expected_address) return false;
+
+        return std::any_of(mappings.begin(), mappings.end(), [&](const auto& mapping) {
+            auto mapped_address = mapped_address_for_file_page(mapping, *segment_file_page);
+            return mapped_address && *mapped_address == *expected_address;
+        });
+    };
+
+    auto candidates = std::vector<uint64_t>{};
+    for(const auto& mapping : mappings)
+    {
+        for(const auto& segment : segments)
+        {
+            if(segment.file_size == 0) continue;
+
+            auto segment_file_page    = align_down(segment.file_offset, page_size);
+            auto segment_virtual_page = align_down(segment.virtual_address, page_size);
+            if(!segment_file_page || !segment_virtual_page) continue;
+
+            auto mapped_address = mapped_address_for_file_page(mapping, *segment_file_page);
+            if(!mapped_address) continue;
+
+            auto candidate = checked_sub(*mapped_address, *segment_virtual_page);
+            if(!candidate) continue;
+
+            auto all_segments_mapped =
+                std::all_of(segments.begin(), segments.end(), [&](const auto& other) {
+                    return segment_is_mapped_at_bias(other, *candidate);
+                });
+            if(all_segments_mapped &&
+               std::find(candidates.begin(), candidates.end(), *candidate) == candidates.end())
+            {
+                candidates.emplace_back(*candidate);
+            }
+        }
+    }
+
+    if(candidates.size() != 1) return std::nullopt;
+    return candidates.front();
+}
+}  // namespace detail
 
 bool
 find_symbol(int                target_pid,
