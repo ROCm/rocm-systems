@@ -185,6 +185,8 @@ test_categories:
       - "ProcessIsolatedRunnerMicrotest.*"
       # register/*.cc
       - "Register*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:
