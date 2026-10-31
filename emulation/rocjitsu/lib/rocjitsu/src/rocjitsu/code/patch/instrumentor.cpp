@@ -74,20 +74,6 @@ constexpr std::string_view kRfePrefix = "s_rfe_";
 
 [[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
 
-[[nodiscard]] uint32_t s_clause_following_instruction_count(const Instruction &inst) {
-  if (!is_s_clause(inst) || inst.size() != sizeof(uint32_t) || inst.num_src_operands() != 1)
-    return 0;
-
-  const Operand *clause = inst.src_operand(0);
-  if (clause == nullptr)
-    return 0;
-
-  // The decoded OPR_CLAUSE retains the packed SIMM16 value. SIMM16[5:0]
-  // encodes one less than the number of following instructions; bits 8:11 are
-  // BREAK_SPAN and are not part of the count.
-  return (static_cast<uint32_t>(clause->encoding_value()) & 0x3fu) + 1u;
-}
-
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
 struct AppliedSite {
@@ -900,6 +886,32 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
   points_.push_back(std::move(pt));
 }
 
+bool Instrumentor::ensure_text_edits(TextEditError &error, const CodeObjectPatcher *patcher) {
+  error = {};
+  if (text_edits_)
+    return true;
+  if (!obj_.is_valid() || obj_.text_sections().size() != 1) {
+    error = {.code = TextEditErrorCode::InvalidImage,
+             .offset = 0,
+             .message = "expected one allocated executable .text section"};
+    return false;
+  }
+  // Reuse the private full-section index after coverage is checked.
+  // The existing anchor path already owns a private writer. Reuse its shared
+  // ELF queries before text/layout changes rather than copying another ELF.
+  std::optional<CodeObjectPatcher> source_patcher;
+  if (!patcher) {
+    source_patcher.emplace(obj_);
+    patcher = &*source_patcher;
+  }
+  FailureOr<std::shared_ptr<const CheckedTextEdits>> facts = CheckedTextEdits::create(
+      obj_, arch_, blocks_built_ ? &instruction_boundaries_ : nullptr, *patcher, error);
+  if (facts.failed())
+    return false;
+  text_edits_ = std::move(facts).value();
+  return true;
+}
+
 bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   if (!obj_.is_valid()) {
     report(error_out, "cannot instrument an invalid code object");
@@ -919,6 +931,14 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       report(error_out, "code-object target does not match the requested architecture");
       return false;
     }
+  } else if (obj_.image_size() >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, obj_.image_data(), sizeof(header));
+    const rj_code_arch_t source_arch = arch_for_elf_mach(header.e_flags);
+    if (source_arch != ROCJITSU_CODE_ARCH_INVALID && source_arch != arch_) {
+      report(error_out, "code-object ELF architecture does not match the requested architecture");
+      return false;
+    }
   }
   auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
                                                         : Decoder::create(registry, target);
@@ -934,21 +954,10 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
-  // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
-  uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
-    uint64_t cur = block->start_offset();
     for (const Instruction &inst : block->instructions()) {
-      if (clause_remaining > 0) {
-        clause_blocked_offsets_.insert(cur);
-        --clause_remaining;
-      }
-      offset_to_inst_.emplace(cur, &inst);
-      if (is_s_clause(inst))
-        clause_remaining = std::max(clause_remaining, s_clause_following_instruction_count(inst));
-      cur += static_cast<uint64_t>(inst.size());
+      offset_to_inst_.emplace(inst.src_loc(), &inst);
+      instruction_boundaries_.record(inst);
     }
   }
   blocks_built_ = true;
@@ -1207,7 +1216,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       continue;
     }
 
-    if (clause_blocked_offsets_.contains(pt.anchor_offset)) {
+    const InstructionBoundaries::Entry *boundary = instruction_boundaries_.find(pt.anchor_offset);
+    if (boundary && boundary->clause_member) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1795,20 +1805,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     return result;
   }
 
-  // Every per-site validation, branch-range check, and trampoline-byte
-  // construction has succeeded up to this point. Assemble the new .text in one
-  // buffer: the original bytes with each anchor spliced to its forward branch,
-  // followed by the local cave. replace_text() grows .text in place and fixes
-  // up the surrounding ELF (section/segment sizes, moved symbols, descriptor
-  // entries).
-  const auto text_span = patcher.text_bytes();
-  std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
-  for (const auto &a : applied) {
-    if (a.site->kind == InstrumentationKind::KernelEntry) {
+  // Per-site plans and trampoline bytes are ready. Collect original-text
+  // anchor replacements for one checked-edit transaction; KernelEntry callbacks
+  // retarget only the entry-stub branch. Apply checked edits before appending
+  // the local cave, then let replace_text() grow .text and fix up the surrounding
+  // ELF (section/segment sizes, moved symbols, descriptor entries).
+  std::vector<CheckedTextEdit> anchor_edits;
+  anchor_edits.reserve(applied.size());
+  for (const AppliedSite &applied_site : applied) {
+    if (applied_site.site->kind == InstrumentationKind::KernelEntry) {
       const uint64_t branch_pc =
           entry_patch->stub_offset + (entry_patch->words.size() - 1) * sizeof(uint32_t);
       const std::optional<int16_t> target =
-          compute_sopp_branch_simm16(branch_pc, a.trampoline_offset);
+          compute_sopp_branch_simm16(branch_pc, applied_site.trampoline_offset);
       if (!target) {
         result.errors.emplace_back("kernel-entry callback is outside the stub's branch range");
         return result;
@@ -1820,8 +1829,23 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         return result;
       entry_patch->words.back() = branch.value();
     } else {
-      std::memcpy(new_text.data() + a.site->anchor_offset, a.bytes.patched_anchor_bytes.data(),
-                  a.site->original_size);
+      anchor_edits.push_back({.offset = applied_site.site->anchor_offset,
+                              .expected = applied_site.site->original_bytes,
+                              .replacement = {applied_site.bytes.patched_anchor_bytes.begin(),
+                                              applied_site.bytes.patched_anchor_bytes.begin() +
+                                                  applied_site.site->original_size}});
+    }
+  }
+  // Entry-only callbacks patch the appended stub, leaving original text intact.
+  const std::span<const uint8_t> original_text = patcher.text_bytes();
+  std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
+  if (!anchor_edits.empty()) {
+    TextEditError edit_error;
+    if (!ensure_text_edits(edit_error, &patcher) ||
+        text_edits_->apply(anchor_edits, new_text, edit_error).failed()) {
+      result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
+      result.edit_error = std::move(edit_error);
+      return result;
     }
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
