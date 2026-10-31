@@ -19,8 +19,8 @@
 // environment before any param read) and asserts every count in
 // [2, kDdaNranks] becomes eligible while counts outside that range do not.
 // End-to-end engagement is covered too: the dda_nranks_relax_4rank suite in
-// mi455_ainic_roce.json runs the rccl-tests sweep at 4 ranks with
-// RCCL_DDA_NRANKS_RELAX=1 set in the environment. The isolated-process tests here
+// mi355x_thor2_roce.json and mi300x_mellanox_ib.json runs the rccl-tests sweep
+// at 4 ranks with RCCL_DDA_NRANKS_RELAX=1 set in the environment. The isolated-process tests here
 // remain the tighter check -- they call the DDA entry points directly, so no
 // threshold or backend choice can route around the kernel under test.
 

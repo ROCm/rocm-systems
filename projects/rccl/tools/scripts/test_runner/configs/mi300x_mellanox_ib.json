@@ -5366,9 +5366,58 @@
           "test_filter": "SymmetricKernelCorruptionTest.GroupedAllGather_VaryingSizes"
         }
       ]
+    },
+    "dda_nranks_relax_4rank": {
+      "extends": "perf_base",
+      "description": "End-to-end rccl-tests sweep of the four single-node DDA IPC collectives at 4 ranks with RCCL_DDA_NRANKS_RELAX=1. Without the knob the DDA IPC paths on gfx942/gfx950 stay gated at the full 8-rank clique, so 4 ranks never reach them. Restricted to float/bfloat16: the DDA IPC eligibility predicates admit only float32/float16/bfloat16, so an int sweep would fall back to ring and cover nothing. -c 1 makes it a correctness gate rather than a perf measurement.",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 900,
+      "command_args": "-b 8 -e 256M -f 2 -g 1 -n 20 -w 5 -c 1",
+      "env_variables": {
+        "RCCL_DDA_NRANKS_RELAX": "1"
+      },
+      "tests": [
+        {
+          "name": "DdaRelax4Rank_AllReduce_float",
+          "description": "AllReduce over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_AllReduce_bfloat16",
+          "description": "AllReduce over DDA IPC at 4 ranks (relaxed floor), datatype bfloat16",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",
+          "command_args": "-d bfloat16"
+        },
+        {
+          "name": "DdaRelax4Rank_AllGather_float",
+          "description": "AllGather over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_ReduceScatter_float",
+          "description": "ReduceScatter over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_scatter_perf",
+          "command_args": "-d float"
+        },
+        {
+          "name": "DdaRelax4Rank_AlltoAll_float",
+          "description": "AlltoAll over DDA IPC at 4 ranks (relaxed floor), datatype float",
+          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+          "command_args": "-d float"
+        }
+      ]
     }
   },
   "test_suites": [
+    {
+      "name": "DDA IPC - Relaxed 4-Rank Floor (RCCL_DDA_NRANKS_RELAX)",
+      "description": "rccl-tests correctness sweep of AllReduce/AllGather/ReduceScatter/AlltoAll over the DDA IPC path at 4 ranks with the relaxed participant-count floor enabled",
+      "config": "dda_nranks_relax_4rank",
+      "enabled": true
+    },
     {
       "name": "NET - Device Count Mismatch (AICOMRCCL-1213)",
       "description": "Per-rank Net device-count mismatch detection and NCCL_IGNORE_NET_MISMATCH abort (single node, 2 ranks)",
