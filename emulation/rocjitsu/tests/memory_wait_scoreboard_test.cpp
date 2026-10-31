@@ -24,8 +24,10 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <cstring>
@@ -5546,7 +5548,8 @@ TEST(MemoryWaitFootprintTest, ScaledMfmaChecksAllSourcesAndLanesRegardlessOfExec
   }
 }
 
-TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCUs) {
+// CUs without a command processor keep private sites, so each prints the site once.
+TEST(MemoryWaitExecutionTest, UnattachedCUsPrintEachSiteOnceAndCountEveryOccurrence) {
   GpuMemory memory("budget_memory");
   L2Cache l2("budget_l2");
   std::vector<std::unique_ptr<ComputeUnitCore>> units;
@@ -5571,16 +5574,163 @@ TEST(MemoryWaitExecutionTest, DiagnosticBudgetsAndCountersAreIndependentAcrossCU
       ComputeUnitCore::report_memory_wait(wf, hazard);
     const auto output = testing::internal::GetCapturedStderr();
     unsigned lines = 0;
-    for (size_t pos = 0; (pos = output.find("memory-wait:", pos)) != std::string::npos; ++pos)
+    for (size_t pos = 0; (pos = output.find("checker=memory-wait", pos)) != std::string::npos;
+         ++pos)
       ++lines;
-    EXPECT_EQ(lines, 17u);
-    EXPECT_NE(output.find("further diagnostics on this CU are suppressed"), std::string::npos);
+    // The site prints once on each CU; every occurrence is still counted.
+    EXPECT_EQ(lines, 1u);
+    EXPECT_EQ(output.find("HAZARD_SUPPRESSED"), std::string::npos);
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 20u);
     EXPECT_EQ(cu->xcnt_diagnostic_count(), 0u);
     units.push_back(std::move(cu));
   }
   for (const auto &cu : units)
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), 20u);
+}
+
+namespace {
+
+/// An RDNA3 CU without a GPU VM, so its reports read code straight from @p memory.
+std::unique_ptr<ComputeUnitCore> report_test_cu(GpuMemory &memory, L2Cache &l2,
+                                                const std::string &name) {
+  ComputeUnitCore::Config config{};
+  config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.arch = ROCJITSU_CODE_ARCH_RDNA3;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  return ComputeUnitCore::create(name, config, &memory, &l2);
+}
+
+void write_nops(GpuMemory &memory, uint64_t begin, uint64_t end) {
+  for (uint64_t pc = begin; pc < end; pc += sizeof(uint32_t))
+    memory.write32(pc, rdna3::build_sopp(rdna3::kSNopSopp)[0]);
+}
+
+MemoryWaitScoreboard::Hazard report_hazard(RegisterRef reg, uint64_t producer_pc,
+                                           uint64_t consumer_pc, uint64_t lanes = 1,
+                                           WaitCounterKind counter = WaitCounterKind::Load) {
+  return {{1, producer_pc, lanes, reg, counter, 0xf}, consumer_pc, reg, false, 0};
+}
+
+std::string report_text(Wavefront *wf, const MemoryWaitScoreboard::Hazard &hazard) {
+  testing::internal::CaptureStderr();
+  ComputeUnitCore::report_memory_wait(wf, hazard);
+  return testing::internal::GetCapturedStderr();
+}
+
+} // namespace
+
+TEST(MemoryWaitReportTest, VectorHazardListsTheStraightLineCodeAndAnEnabledLane) {
+  GpuMemory memory("report_memory");
+  L2Cache l2("report_l2");
+  write_nops(memory, 0x100, 0x10c);
+  auto cu = report_test_cu(memory, l2, "report_cu");
+  auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  // Lane 1 wrote the result but is disabled at the consumer, so lane 2 is reported.
+  wf->set_exec(0b1100);
+  const std::string output = report_text(wf, report_hazard({RegClass::VGPR, 5, 1}, 0x100, 0x108,
+                                                           /*lanes=*/0b1110));
+  EXPECT_NE(output.find("HAZARD checker=memory-wait kernel=? symbol=? dispatch=0 type=VGPR "
+                        "access=read reg=5 wave=0 lane=2 wg=0,0,0 cu=report_cu producer_pc=0x100 "
+                        "consumer_pc=0x108 counter=vmcnt required_wait=0\n"
+                        "Hazard on VGPR v5 [workgroup (0, 0, 0), wave 0, lane 2]: read before "
+                        "memory result from pc=0x100 is known ready (vmcnt)."),
+            std::string::npos)
+      << output;
+  EXPECT_NE(output.find("  ==>  0x100  s_nop"), std::string::npos) << output;
+  EXPECT_NE(output.find("; <-- producer\n       0x104  s_nop"), std::string::npos) << output;
+  EXPECT_NE(output.find("; <-- static\n  ==>  0x108  s_nop"), std::string::npos) << output;
+  EXPECT_NE(output.find("; <-- consumer\nEND_HAZARD"), std::string::npos) << output;
+  EXPECT_EQ(output.find("straight-line"), std::string::npos) << output;
+}
+
+TEST(MemoryWaitReportTest, ScalarHazardOnABranchHasNoLaneAndNoTrace) {
+  GpuMemory memory("report_memory");
+  L2Cache l2("report_l2");
+  write_nops(memory, 0x100, 0x110);
+  auto cu = report_test_cu(memory, l2, "report_cu");
+  auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  // A consumer before its producer runs only after a backward branch.
+  const std::string output =
+      report_text(wf, report_hazard({RegClass::SGPR, 7, 1}, 0x10c, 0x100, 0, WaitCounterKind::Ds));
+  EXPECT_NE(output.find(" type=SGPR access=read reg=7 wave=0 lane=-1 "), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("Hazard on SGPR s7 [workgroup (0, 0, 0), wave 0]: read before memory "
+                        "result from pc=0x10c is known ready (lgkmcnt)."),
+            std::string::npos)
+      << output;
+  EXPECT_NE(output.find("  ==>  0x10c  s_nop"), std::string::npos) << output;
+  EXPECT_NE(output.find("; <-- producer\n  ==>  0x100  s_nop"), std::string::npos) << output;
+  EXPECT_NE(output.find("; <-- consumer\n       producer and consumer are not on a "
+                        "straight-line path\nEND_HAZARD"),
+            std::string::npos)
+      << output;
+  EXPECT_EQ(output.find("<-- static"), std::string::npos) << output;
+}
+
+TEST(MemoryWaitReportTest, AccumulatorAndReplayHazardsNameTheirRegisterAndWait) {
+  GpuMemory memory("report_memory");
+  L2Cache l2("report_l2");
+  write_nops(memory, 0x100, 0x108);
+  auto cu = report_test_cu(memory, l2, "report_cu");
+  auto *wf = cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  const std::string acc = report_text(wf, report_hazard({RegClass::ACC_VGPR, 3, 1}, 0x100, 0x104));
+  EXPECT_NE(acc.find(" type=ACC access=read reg=3 wave=0 lane=0 "), std::string::npos) << acc;
+  EXPECT_NE(acc.find("Hazard on ACC acc3 [workgroup (0, 0, 0), wave 0, lane 0]"), std::string::npos)
+      << acc;
+
+  const std::string replay =
+      report_text(wf, report_hazard({RegClass::VGPR, 9, 1}, 0x100, 0x104, 1, WaitCounterKind::X));
+  EXPECT_NE(replay.find("HAZARD checker=xcnt-wait "), std::string::npos) << replay;
+  EXPECT_NE(replay.find("Hazard on VGPR v9 [workgroup (0, 0, 0), wave 0, lane 0]: overwrite "
+                        "before the replay source from pc=0x100 is known safe to reuse. XNACK "
+                        "replay may need the original value. s_wait_xcnt <= 0 is required;"),
+            std::string::npos)
+      << replay;
+  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  EXPECT_EQ(cu->xcnt_diagnostic_count(), 1u);
+}
+
+TEST(MemoryWaitReportTest, ComputeUnitsOfOneCommandProcessorShareTheirSites) {
+  GpuMemory memory("shared_memory");
+  L2Cache l2("shared_l2");
+  CommandProcessor cp("shared_cp");
+  auto first = report_test_cu(memory, l2, "shared_cu0");
+  auto second = report_test_cu(memory, l2, "shared_cu1");
+  first->set_command_processor(&cp);
+  second->set_command_processor(&cp);
+  auto *first_wf = first->dispatch_wf(0, 0x100, 104, 32, 32);
+  auto *second_wf = second->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(first_wf, nullptr);
+  ASSERT_NE(second_wf, nullptr);
+  constexpr uint32_t kDispatchId = 7;
+  first_wf->set_dispatch_id(kDispatchId);
+  second_wf->set_dispatch_id(kDispatchId);
+  cp.hazard_sites().register_dispatch(
+      {.dispatch_id = kDispatchId, .kernel = "shared", .symbol = "_Z6sharedv"});
+
+  const auto hazard = report_hazard({RegClass::VGPR, 0, 1}, 0x100, 0x200);
+  testing::internal::CaptureStderr();
+  for (int repeat = 0; repeat < 10; ++repeat) {
+    ComputeUnitCore::report_memory_wait(first_wf, hazard);
+    ComputeUnitCore::report_memory_wait(second_wf, hazard);
+  }
+  cp.hazard_sites().finish_dispatch(kDispatchId);
+  const std::string output = testing::internal::GetCapturedStderr();
+  size_t blocks = 0;
+  for (size_t pos = output.find("HAZARD checker="); pos != std::string::npos;
+       pos = output.find("HAZARD checker=", pos + 1))
+    ++blocks;
+  EXPECT_EQ(blocks, 1u) << output;
+  EXPECT_NE(output.find(" kernel=shared symbol=_Z6sharedv dispatch=7 "), std::string::npos)
+      << output;
+  EXPECT_NE(output.find("HAZARD_SUMMARY dispatch=7 kernel=shared sites=1 occurrences=20\n"),
+            std::string::npos)
+      << output;
 }
 
 TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {

@@ -10,9 +10,14 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
+
+#include <filesystem>
+#include <fstream>
+#include <unistd.h>
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
@@ -207,6 +212,49 @@ TEST_F(FormattedLoadRaceTest, PartialWaitRetiresOneLoadWithAllItsDestinations) {
   wait(0);
   EXPECT_FALSE(probe(12, 0xf, false));
   EXPECT_FALSE(probe(13, 0xf, false));
+}
+
+TEST_F(FormattedLoadRaceTest, RaceRecordCarriesTheDispatchIdentityAndWorkgroup) {
+  const std::string path =
+      (std::filesystem::temp_directory_path() / std::format("rj_race_record_{}.jsonl", ::getpid()))
+          .string();
+  std::filesystem::remove(path);
+  diagnostics::Settings settings;
+  settings.report_path = path;
+  const diagnostics::HazardSites sites(settings, /*gpu=*/2);
+  KernelDispatchInfo info;
+  info.dispatch_id = 1;
+  info.kernel_name = "race_kernel";
+  info.kernel_symbol = "_Z11race_kernelv";
+  info.process_id = 42;
+  info.hazard_sites = &sites;
+  fixture.plugin_group_->onAmdgpuDispatchPacketProcessed(info);
+  wave->set_wg_coord(2, 3, 4);
+  std::array<Wavefront *, 1> waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 1, 256, 128, waves);
+
+  issue(rdna4::kBufferLoadFormatXVbuffer, 46, 8, 1);
+  const uint64_t producer_pc = wave->pc;
+  wave->pc += 4;
+  ASSERT_TRUE(probe(8, 0xf, /*write=*/false));
+  const std::string text = sink->str();
+  EXPECT_NE(text.find(std::format(
+                "RACE kernel=race_kernel symbol=_Z11race_kernelv dispatch=1 type=VGPR access=read "
+                "reg=8 wave=0 lane=0 wg=2,3,4 conflict=unknown checker=race producer_pc={:#x} "
+                "consumer_pc={:#x}\nRace on VGPR v8 [workgroup (2, 3, 4), wave 0, lane 0]\n",
+                producer_pc, producer_pc + 4)),
+            std::string::npos)
+      << text;
+  EXPECT_NE(text.find("END_RACE\n"), std::string::npos) << text;
+
+  std::ifstream report(path);
+  std::string line;
+  ASSERT_TRUE(std::getline(report, line));
+  std::filesystem::remove(path);
+  EXPECT_EQ(line.find(R"({"record":"site","checker":"race","gpu":2,"kernel":"race_kernel",)"
+                      R"("symbol":"_Z11race_kernelv","dispatch":1,"process":42,"wg":[2,3,4],)"),
+            0u)
+      << line;
 }
 
 TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAllocation) {

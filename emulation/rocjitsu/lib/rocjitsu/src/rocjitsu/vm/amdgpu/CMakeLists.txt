@@ -37,14 +37,17 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     xcd.cpp
 )
 
-# Share ISA wait decoding with the offline checker, without its dataflow state.
-# Final VM consumers need the objects; transitive object-library linking alone
-# propagates usage requirements without including those object files.
+# Share ISA wait decoding with the offline checker, without its dataflow state,
+# and the hazard reports with the race plugin. Final VM consumers need the
+# objects; transitive object-library linking alone propagates usage requirements
+# without including those object files.
 target_link_libraries(
     rocjitsu_vm_amdgpu
     INTERFACE
         $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
         $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
+        $<TARGET_OBJECTS:rocjitsu_vm_diagnostics>
+        $<TARGET_OBJECTS:rocjitsu_hazard_record>
 )
 
 add_subdirectory(pci)

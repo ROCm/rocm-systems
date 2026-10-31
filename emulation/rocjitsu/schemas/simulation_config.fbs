@@ -358,6 +358,14 @@ table SystemManifestDef {
   coherence_domains: [SystemCoherenceDomainDef];
 }
 
+/// How the memory-wait checker and the race plugin print hazard reports.
+table DiagnosticsConfig {
+  // File that receives one JSON object per report. Empty keeps reports on stderr only.
+  report_path: string;
+  // Distinct sites printed for one dispatch. Zero removes the cap.
+  max_sites_per_dispatch: uint32 = 64;
+}
+
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
@@ -391,6 +399,8 @@ table SimulationConfig {
   // Per-launch local projection of a system manifest. Required for multi-node
   // construction; one-node and legacy configs may omit it.
   local_node: string;
+  // Hazard report output. Omission keeps the defaults.
+  diagnostics: DiagnosticsConfig;
 }
 
 root_type SimulationConfig;

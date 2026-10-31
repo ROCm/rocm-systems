@@ -94,13 +94,29 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 You should see output:
 
 ```
-RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
+RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown checker=race producer_pc=0x1000 consumer_pc=0x100c
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+  ==>  0x1000  ds_write_b32 v0, v1  ; <-- wave 1
+       0x1008  v_sub_u32_e32 v1, 0, v0
+  ==>  0x100c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
+
+The header lists `kernel`, `symbol`, `dispatch`, `type`, `access`, `reg`, `wave`,
+`lane` and `wg`, the wave's workgroup coordinates, followed by `conflict=unknown`,
+`checker=race`, and the producer and consumer PCs. `conflict` is always `unknown`.
+
+With `diagnostics.report_path` set, each race is also written to that file as a
+`site` record; see [configuration](configuration.md#hazard-reports). The
+memory-wait checker writes its records to the same file, and a register hazard
+that both report has the same `(gpu, dispatch, reg, type, producer_pc,
+consumer_pc)`. The checkers still differ in three ways:
+
+- The race detector does not model embedded waits, so it can report a site that
+  the memory-wait checker has already retired.
+- The memory-wait checker writes one record per producer; a race with several
+  producers is one race record.
+- LDS races have no memory-wait counterpart.
 
 This tells you that dispatch 1 of `transpose_lds` reported a race: wave 1 wrote
 to LDS (`ds_write_b32`) and wave 0 read from the same address (`ds_read_b32`)

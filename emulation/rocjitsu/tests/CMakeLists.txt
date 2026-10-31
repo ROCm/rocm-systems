@@ -488,6 +488,7 @@ add_executable(
     waitcnt_counter_test.cpp
     wait_hazard_test.cpp
     memory_wait_scoreboard_test.cpp
+    hazard_report_test.cpp
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
@@ -4014,6 +4015,22 @@ if(RJ_ENABLE_HIP_TESTS)
         # generic HIP smoke tests are built for a local RDNA host such as
         # gfx1201.
         rj_add_hip_test(hip_ds_transpose_acc_test ARCH gfx950)
+
+        # The core memory-wait checker and the race plugin report the missing
+        # wait in this kernel; the driver compares their hazard records.
+        rj_add_hip_test(hip_missing_wait_test ARCH gfx950)
+        rj_add_test(
+            NAME RocjitsuHazardReportCrosscheck
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_hazard_report_crosscheck.py
+                -v
+            ENVIRONMENT
+                "RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>"
+                "RJ_SIM_CONFIG=${RJ_CDNA4_KMD_CONFIG}"
+                "RJ_HIP_PROGRAM=${CMAKE_CURRENT_BINARY_DIR}/hip_missing_wait_test"
+            TIMEOUT 300
+        )
 
         rj_add_hip_test(
             cdna4_to_cdna3_lds_hip_test

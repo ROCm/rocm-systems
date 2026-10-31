@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "rocjitsu/vm/soc.h"
 
 #include <gtest/gtest.h>
@@ -1296,6 +1297,17 @@ TEST(CommandProcessorPacketFetch, ReservedWriteIndexWaitsForInitialDoorbellPubli
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+/// Give @p dispatch_id one hazard site, as its first report would.
+void open_hazard_site(diagnostics::HazardSites &sites, uint32_t dispatch_id, const char *kernel) {
+  sites.register_dispatch({.dispatch_id = dispatch_id, .kernel = kernel, .symbol = kernel});
+  diagnostics::HazardSiteKey key;
+  key.dispatch = dispatch_id;
+  key.producer_pc = 0x10;
+  key.consumer_pc = 0x20;
+  const int unit = 0;
+  ASSERT_EQ(sites.classify(&unit, key), diagnostics::HazardDisposition::New);
+}
+
 TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWork) {
   GpuVm gpu_vm;
   CommandProcessor owner("owner");
@@ -1319,7 +1331,10 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
                            .xcd_fanout = true};
   (void)owner.register_queue(queue);
 
-  auto grid = std::make_shared<GridCompletion>();
+  diagnostics::HazardSites &sites = owner.hazard_sites();
+  ASSERT_EQ(&sites, &peer.hazard_sites());
+  open_hazard_site(sites, kDispatchId, "fanned_out");
+  auto grid = owner.make_kernel_grid_for_test(kDispatchId);
   grid->grid_wgs = 2;
   DispatchEntry owner_entry{};
   owner_entry.dispatch_id = kDispatchId;
@@ -1362,9 +1377,52 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
   peer.drain_fanout_inbox_for_test();
   EXPECT_FALSE(peer.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId + 1));
 
+  // Both XCDs dropped their shards, so this test holds the grid's last reference.
+  EXPECT_EQ(sites.find_dispatch(kDispatchId).kernel, "fanned_out");
+  testing::internal::CaptureStderr();
+  grid.reset();
+  const std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_NE(output.find("HAZARD_SUMMARY dispatch=19 kernel=fanned_out sites=1 occurrences=1"),
+            std::string::npos)
+      << output;
+  EXPECT_TRUE(sites.find_dispatch(kDispatchId).kernel.empty());
+
   owner.unregister_queue(kQueueId, kProcessId);
   peer.unregister_queue(kQueueId, kProcessId);
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorVmFault, FanoutGridClosesItsSitesWithItsLastShard) {
+  constexpr uint32_t kDispatchId = 21;
+  std::shared_ptr<GridCompletion> outliving;
+  {
+    CommandProcessor owner("owner");
+    CommandProcessor peer("peer");
+    owner.set_xcd_topology(0, {&owner, &peer});
+    peer.set_xcd_topology(1, {&owner, &peer});
+    diagnostics::HazardSites &sites = peer.hazard_sites();
+    open_hazard_site(sites, kDispatchId, "sharded");
+    auto owner_shard = owner.make_kernel_grid_for_test(kDispatchId);
+    auto peer_shard = owner_shard;
+
+    testing::internal::CaptureStderr();
+    owner_shard.reset();
+    const std::string first = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(first.find("HAZARD_SUMMARY"), std::string::npos) << first;
+    EXPECT_EQ(sites.find_dispatch(kDispatchId).kernel, "sharded");
+
+    testing::internal::CaptureStderr();
+    peer_shard.reset();
+    const std::string last = testing::internal::GetCapturedStderr();
+    EXPECT_NE(last.find("HAZARD_SUMMARY dispatch=21 kernel=sharded sites=1 occurrences=1"),
+              std::string::npos)
+        << last;
+    EXPECT_TRUE(sites.find_dispatch(kDispatchId).kernel.empty());
+
+    outliving = owner.make_kernel_grid_for_test(kDispatchId + 1);
+  }
+  // A grid that outlives its SoC's command processors has no sites left to close.
+  outliving.reset();
 }
 
 TEST(CommandProcessorVmFault, RejectsNonterminalOrMismatchedNotifications) {
@@ -1400,6 +1458,86 @@ TEST(CommandProcessorVmFault, RejectsNonterminalOrMismatchedNotifications) {
   EXPECT_TRUE(command_processor.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
 
   command_processor.unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorVmFault, FaultClosesTheDispatchHazardSites) {
+  GpuVm gpu_vm;
+  CommandProcessor command_processor("cp");
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 43;
+  constexpr uint32_t kDispatchId = 29;
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, kProcessId, 0x11);
+  command_processor.set_gpu_vm(&gpu_vm);
+  (void)command_processor.register_queue({.address_space = address_space,
+                                          .process_id = kProcessId,
+                                          .queue_id = kQueueId,
+                                          .ring_base_va = 0x100,
+                                          .ring_size = 4096,
+                                          .read_ptr_va = 0x80,
+                                          .write_ptr_va = 0x88});
+
+  diagnostics::HazardSites &sites = command_processor.hazard_sites();
+  open_hazard_site(sites, kDispatchId, "faulted");
+
+  DispatchEntry entry{};
+  entry.dispatch_id = kDispatchId;
+  entry.queue_id = kQueueId;
+  entry.process_id = kProcessId;
+  entry.kind = DispatchPacketKind::Kernel;
+  entry.total_wgs = 1;
+  command_processor.accept_fanout_shard(std::move(entry));
+  command_processor.drain_fanout_inbox_for_test();
+
+  // The dispatch never retires, so the fault is what releases its sites.
+  testing::internal::CaptureStderr();
+  command_processor.notify_dispatch_vm_fault(kQueueId, kProcessId, kDispatchId,
+                                             VmAccessOutcome::Faulted);
+  const std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(command_processor.queue_faulted_for_test(kQueueId, kProcessId));
+  EXPECT_TRUE(sites.find_dispatch(kDispatchId).kernel.empty());
+  EXPECT_NE(output.find("HAZARD_SUMMARY dispatch=29 kernel=faulted sites=1 occurrences=1"),
+            std::string::npos)
+      << output;
+
+  command_processor.unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorVmFault, QueueRemovalClosesTheDispatchHazardSites) {
+  GpuVm gpu_vm;
+  CommandProcessor command_processor("cp");
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 45;
+  constexpr uint32_t kDispatchId = 33;
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, kProcessId, 0x11);
+  command_processor.set_gpu_vm(&gpu_vm);
+  (void)command_processor.register_queue({.address_space = address_space,
+                                          .process_id = kProcessId,
+                                          .queue_id = kQueueId,
+                                          .ring_base_va = 0x100,
+                                          .ring_size = 4096,
+                                          .read_ptr_va = 0x80,
+                                          .write_ptr_va = 0x88});
+  diagnostics::HazardSites &sites = command_processor.hazard_sites();
+  open_hazard_site(sites, kDispatchId, "removed");
+  DispatchEntry entry{};
+  entry.dispatch_id = kDispatchId;
+  entry.queue_id = kQueueId;
+  entry.process_id = kProcessId;
+  entry.kind = DispatchPacketKind::Kernel;
+  entry.total_wgs = 1;
+  command_processor.accept_fanout_shard(std::move(entry));
+  command_processor.drain_fanout_inbox_for_test();
+  ASSERT_TRUE(command_processor.has_dispatch_for_test(kQueueId, kProcessId, kDispatchId));
+
+  testing::internal::CaptureStderr();
+  command_processor.unregister_queue(kQueueId, kProcessId);
+  const std::string output = testing::internal::GetCapturedStderr();
+  EXPECT_NE(output.find("HAZARD_SUMMARY dispatch=33 kernel=removed sites=1 occurrences=1"),
+            std::string::npos)
+      << output;
+  EXPECT_TRUE(sites.find_dispatch(kDispatchId).kernel.empty());
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 

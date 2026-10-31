@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/json.h"
 
 #include <algorithm>
 #include <array>
@@ -18,45 +19,7 @@
 namespace rocjitsu::plugins::instruction_mix {
 namespace {
 
-std::string json_escape(std::string_view value) {
-  std::string escaped;
-  escaped.reserve(value.size());
-  constexpr char hex[] = "0123456789abcdef";
-  for (const unsigned char c : value) {
-    switch (c) {
-    case '\"':
-      escaped += "\\\"";
-      break;
-    case '\\':
-      escaped += "\\\\";
-      break;
-    case '\b':
-      escaped += "\\b";
-      break;
-    case '\f':
-      escaped += "\\f";
-      break;
-    case '\n':
-      escaped += "\\n";
-      break;
-    case '\r':
-      escaped += "\\r";
-      break;
-    case '\t':
-      escaped += "\\t";
-      break;
-    default:
-      if (c < 0x20) {
-        escaped += "\\u00";
-        escaped += hex[c >> 4];
-        escaped += hex[c & 0xf];
-      } else {
-        escaped += static_cast<char>(c);
-      }
-    }
-  }
-  return escaped;
-}
+using util::json_escape;
 
 /// Ordering over sightings of the same mnemonic, used to decide which one's
 /// encoding fields the merged entry keeps.

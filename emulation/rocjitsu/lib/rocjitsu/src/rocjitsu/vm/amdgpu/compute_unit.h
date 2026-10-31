@@ -62,6 +62,9 @@ namespace rocjitsu {
 namespace test {
 class ComputeUnitTestAccess;
 }
+namespace diagnostics {
+class HazardSites;
+} // namespace diagnostics
 namespace amdgpu {
 
 /// @brief Reporting policy for pending memory-result register accesses.
@@ -133,7 +136,6 @@ public:
   static constexpr uint32_t kFunctionalQuantum = 1024;
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
-  static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
   static constexpr uint32_t kMaxIsaDiagnostics = 16;
 
   /// @brief Configuration for a compute unit.
@@ -189,7 +191,11 @@ public:
   /// @brief Register a producer using planned FLAT lanes before execution.
   void track_memory_wait(Instruction &inst, Wavefront &wf);
   /// @brief Format a scoreboard hazard using its owning wavefront context.
-  static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
+  /// @details Cold and not inlined so the issue path does not carry the report.
+  [[gnu::cold]] RJ_NOINLINE static void
+  report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
+  /// @brief Hazard sites of this CU's SoC, or of this CU alone when it has no CP.
+  diagnostics::HazardSites &hazard_sites();
 
   /// @brief Validate ISA support and CU resource limits without allocating execution state.
   /// @details Shared with create() so validation-only callers apply the same checks.
@@ -1202,6 +1208,9 @@ public:
   /// @brief Return the decoder (for external decode if needed).
   /// @returns Const pointer to the ISA decoder.
   const Decoder *decoder() const { return decoder_.get(); }
+  /// @brief Return the decoder for decoding outside the execution decode cache.
+  /// @details Use it only on the thread that runs this CU.
+  Decoder *decoder() { return decoder_.get(); }
 
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full

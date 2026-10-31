@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "util/log.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
@@ -243,7 +244,8 @@ std::string RaceDetectorPlugin::getSummary() const {
 
 void RaceDetectorPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
   std::lock_guard<std::mutex> lock(report_mutex_);
-  KernelNames kernel_names{info.kernelNameOrUnknown(), info.kernelSymbolOrUnknown()};
+  KernelNames kernel_names{info.kernelNameOrUnknown(), info.kernelSymbolOrUnknown(),
+                           info.process_id, info.hazard_sites};
   dispatch_kernel_names_[info.dispatch_id] = kernel_names;
   sink().write(std::format("[rocjitsu] Kernel dispatch: \"{}\" symbol=\"{}\"\n", kernel_names.name,
                            kernel_names.symbol));
@@ -287,10 +289,11 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
         << "), wave " << v.wave;
     if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
       oss << ", lane " << v.lane;
-    oss << "]\n";
+    oss << "]";
 
     MarkedPc access_mark{pc, v.wave, v.lane};
-    oss << formatTrace(ws->trace, ws->disasm->to_map(), conflict, access_mark);
+    const auto disasm = ws->disasm->to_map();
+    const std::string trace = formatTrace(ws->trace, disasm, conflict, access_mark);
 
     {
       std::lock_guard<std::mutex> lock(report_mutex_);
@@ -304,18 +307,43 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
                                                                     : "LDS";
         auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
-        const KernelNames kernel_names =
-            kernel_name_iter == dispatch_kernel_names_.end()
-                ? KernelNames{kUnknownKernelIdentity, kUnknownKernelIdentity}
-                : kernel_name_iter->second;
-        const char *access = v.isWrite ? "write" : "read";
-        sink().write(std::format(
-            "RACE kernel={} symbol={} dispatch={} type={} access={} reg={} wave={} "
-            "lane={} "
-            "wg={},{},{} "
-            "conflict=unknown\n{}END_RACE\n",
-            kernel_names.name, kernel_names.symbol, dispatch_id, space, access, v.index, v.wave,
-            v.lane, v.workgroupId.x, v.workgroupId.y, v.workgroupId.z, oss.str()));
+        const KernelNames kernel_names = kernel_name_iter == dispatch_kernel_names_.end()
+                                             ? KernelNames{}
+                                             : kernel_name_iter->second;
+        const auto disasm_at = [&](uint64_t at) {
+          auto found = disasm.find(at);
+          return found == disasm.end() ? std::string{} : found->second;
+        };
+        const diagnostics::HazardSites *sites = kernel_names.hazard_sites;
+        diagnostics::HazardRecord record;
+        record.checker = "race";
+        record.type_name = space;
+        record.kernel = kernel_names.name;
+        record.symbol = kernel_names.symbol;
+        record.gpu = sites ? sites->gpu() : 0;
+        record.dispatch = dispatch_id;
+        record.process = kernel_names.process_id;
+        record.wg = {static_cast<uint32_t>(v.workgroupId.x), static_cast<uint32_t>(v.workgroupId.y),
+                     static_cast<uint32_t>(v.workgroupId.z)};
+        record.wave = static_cast<uint32_t>(v.wave);
+        record.lane = v.lane;
+        record.reg = static_cast<uint32_t>(v.index);
+        record.write = v.isWrite;
+        record.producer.pc = conflict.pc;
+        record.consumer.pc = pc;
+        record.producer.disasm = disasm_at(conflict.pc);
+        record.consumer.disasm = disasm_at(pc);
+        record.summary = oss.str();
+        record.trace_block = trace;
+        record.trace_executed = true;
+        const std::string text = diagnostics::format_text(record, "RACE");
+        if (sites == nullptr) {
+          sink().write(text);
+        } else {
+          const std::string &path = sites->settings().report_path;
+          sites->writer().publish([&] { sink().write(text); }, path,
+                                  path.empty() ? std::string() : diagnostics::format_jsonl(record));
+        }
       }
     }
   };
@@ -323,10 +351,12 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   // Multi-XCD: workgroups from the same dispatch can arrive on different
   // partition threads, so detectors_ and dispatch_disasm_ need protection.
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  const auto coord = wavefronts.front()->wg_coord();
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
-      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
-      counterCapacitiesForArch(wavefronts.front()->cu().arch()),
+      static_cast<int>(physical_sgpr_count),
+      Dim3d(static_cast<int>(coord[0]), static_cast<int>(coord[1]), static_cast<int>(coord[2])),
+      std::move(handler), counterCapacitiesForArch(wavefronts.front()->cu().arch()),
       wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];

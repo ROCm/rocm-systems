@@ -138,8 +138,10 @@ private:
   };
 
   struct KernelNames {
-    std::string name;
-    std::string symbol;
+    std::string name = kUnknownKernelIdentity;
+    std::string symbol = kUnknownKernelIdentity;
+    uint32_t process_id = 0;
+    const diagnostics::HazardSites *hazard_sites = nullptr;
   };
 
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {

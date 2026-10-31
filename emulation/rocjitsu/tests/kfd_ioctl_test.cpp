@@ -10256,8 +10256,8 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
     cu->step();
     const auto diagnostics = testing::internal::GetCapturedStderr();
     EXPECT_EQ(cu->memory_wait_diagnostic_count(), diagnostic_count);
-    EXPECT_EQ(diagnostics.find("memory-wait:"), std::string::npos) << diagnostics;
-    EXPECT_EQ(diagnostics.find("xcnt-wait:"), std::string::npos) << diagnostics;
+    EXPECT_EQ(diagnostics.find("checker=memory-wait"), std::string::npos) << diagnostics;
+    EXPECT_EQ(diagnostics.find("checker=xcnt-wait"), std::string::npos) << diagnostics;
     EXPECT_EQ(wave->debug_read_sgpr(0), data[0]);
     EXPECT_EQ(wave->pc, kernel + 8);
     EXPECT_TRUE(wave->wait_counters().empty());

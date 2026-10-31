@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
+#include "util/json.h"
+
 #include <algorithm>
 #include <format>
 #include <memory>
@@ -11,47 +13,9 @@
 namespace rocjitsu::plugins::throughput {
 namespace {
 
-constexpr size_t family_index(InstructionFamily family) { return static_cast<size_t>(family); }
+using util::json_escape;
 
-std::string json_escape(std::string_view value) {
-  std::string escaped;
-  escaped.reserve(value.size());
-  constexpr char hex[] = "0123456789abcdef";
-  for (const unsigned char c : value) {
-    switch (c) {
-    case '\"':
-      escaped += "\\\"";
-      break;
-    case '\\':
-      escaped += "\\\\";
-      break;
-    case '\b':
-      escaped += "\\b";
-      break;
-    case '\f':
-      escaped += "\\f";
-      break;
-    case '\n':
-      escaped += "\\n";
-      break;
-    case '\r':
-      escaped += "\\r";
-      break;
-    case '\t':
-      escaped += "\\t";
-      break;
-    default:
-      if (c < 0x20) {
-        escaped += "\\u00";
-        escaped += hex[c >> 4];
-        escaped += hex[c & 0xf];
-      } else {
-        escaped += static_cast<char>(c);
-      }
-    }
-  }
-  return escaped;
-}
+constexpr size_t family_index(InstructionFamily family) { return static_cast<size_t>(family); }
 
 double seconds_between(std::chrono::steady_clock::time_point begin,
                        std::chrono::steady_clock::time_point end) {

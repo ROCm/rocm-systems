@@ -22,6 +22,7 @@
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "flatbuffers/idl.h"
@@ -734,6 +735,28 @@ const FactoryMap &factories(BuildMode build_mode) {
   return validation_factories;
 }
 
+diagnostics::Settings diagnostics_from_fb(const fb::DiagnosticsConfig *config) {
+  diagnostics::Settings settings;
+  if (config == nullptr)
+    return settings;
+  if (config->report_path())
+    settings.report_path = config->report_path()->str();
+  settings.max_sites_per_dispatch = config->max_sites_per_dispatch() == 0
+                                        ? std::numeric_limits<uint32_t>::max()
+                                        : config->max_sites_per_dispatch();
+  return settings;
+}
+
+void configure_diagnostics(simdojo::CompositeComponent &root, const diagnostics::Settings &settings,
+                           uint32_t gpu) {
+  const auto sites = std::make_shared<diagnostics::HazardSites>(settings, gpu);
+  std::vector<simdojo::Component *> components;
+  root.collect_components(components);
+  for (simdojo::Component *component : components)
+    if (auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(component))
+      cp->set_hazard_sites(sites);
+}
+
 // Validate explicit policies even when the launch override will replace them.
 void apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides) {
   for (const auto &[key, value] : overrides) {
@@ -1169,6 +1192,7 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
     cu_overrides["memory_wait_diagnostics"] = *mode == WaitChecking::Off ? "off" : "warn";
     cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
   }
+  const diagnostics::Settings hazard_settings = diagnostics_from_fb(fb_config->diagnostics());
   LoadedConfig result;
   auto system_graph = system_graph_from_fb(fb_config, emit_error);
   if (system_graph.failed())
@@ -1275,6 +1299,7 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
   if (primary_build.failed())
     return util::Result::failure();
   result.build_result = std::move(primary_build.value());
+  configure_diagnostics(*result.build_result.root, hazard_settings, 0);
   if (manifest && result.soc() == nullptr)
     throw std::invalid_argument("system topology root must be an SoC");
   // The CWSR capacity uses device fields for LDS and wave slots, while wave
@@ -1364,6 +1389,7 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
       if (extra_build.failed())
         return util::Result::failure();
       result.extra_gpu_builds.push_back(std::move(extra_build.value()));
+      configure_diagnostics(*result.extra_gpu_builds.back().root, hazard_settings, i);
       if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);

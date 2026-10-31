@@ -3,19 +3,39 @@
 Memory-result diagnostics are enabled by default. Functional execution computes
 memory results eagerly; a core, per-wave scoreboard separately tracks whether a
 register result is known complete.
-Reading or overwriting an outstanding destination prints a `memory-wait` warning
-with the issuing PC, consuming PC, register, counter, and sufficient wait
-threshold. Execution continues with the eager value. The first conflicting access
-reports the producer and recovers its readiness to avoid cascading warnings. Each CU
-prints at most 16 warnings during its lifetime, then one suppression notice.
-This budget is per CU, so N active CUs can print up to 17 × N lines for the
-same kernel. The budget stays local so a faulty kernel on one CU does not hide
-diagnostics from another CU or device. Repeated sites can exhaust this budget
-and hide distinct later hazards; the printed set is not exhaustive. Per-CU
-diagnostic counts continue after printing is suppressed. Fix reported waits and
-rerun to expose later sites. For an unfiltered investigation, a host debugger
-breakpoint at `ComputeUnitCore::report_memory_wait` observes every reported
-hazard before the output limit is applied.
+Reading or overwriting an outstanding destination prints one `HAZARD` block for
+that site. The block names the kernel, dispatch, workgroup, wave, lane, issuing
+PC, consuming PC, register, counter, and sufficient wait threshold, and lists the
+instructions from the producer to the consumer. Execution continues with the
+eager value. The first conflicting access reports the producer and recovers its
+readiness to avoid cascading warnings.
+
+```
+[rj warn] HAZARD checker=memory-wait kernel=scale_kernel symbol=_Z12scale_kernelPKjPj dispatch=10 type=VGPR access=read reg=2 wave=0 lane=0 wg=1,0,0 cu=soc.xcd1.se0.cu0 producer_pc=0x727579019938 consumer_pc=0x727579019948 counter=vmcnt required_wait=0
+Hazard on VGPR v2 [workgroup (1, 0, 0), wave 0, lane 0]: read before memory result from pc=0x727579019938 is known ready (vmcnt). A wait threshold <= 0 is required; set top-level wait_checking to "off" (rocjitsu --wait-checking=off) to disable wait checking.
+  ==>  0x727579019938  global_load_dword v2, v[2:3]  ; <-- producer
+       0x727579019940  v_lshl_add_u64 v[0:1], s[6:7], 0, v[0:1]  ; <-- static
+  ==>  0x727579019948  v_add_u32 v2, v2, 1  ; <-- consumer
+END_HAZARD
+[rj warn] HAZARD_SUMMARY dispatch=10 kernel=scale_kernel sites=1 occurrences=4
+```
+
+Each site prints once per dispatch. A site is the tuple
+`(dispatch, consumer PC, producer PC, register class, register, checker)`. Later
+occurrences add to the site's occurrence count, and `HAZARD_SUMMARY` reports the
+counts when the dispatch retires, or when a fault or queue removal drops it. The
+site table belongs to the SoC: dispatch ids are unique across its XCDs, so a
+fanned-out dispatch prints each site once. Each GPU, and each simulator in a
+process, keeps its own table.
+
+`memory_wait_diagnostic_count()` counts every occurrence. A dispatch prints at most
+`diagnostics.max_sites_per_dispatch` sites (64 by default), memory-wait and XCNT
+together, then one `HAZARD_SUPPRESSED` line, and its summary reports the
+suppressed occurrences. A host debugger breakpoint at
+`ComputeUnitCore::report_memory_wait` observes every occurrence before
+deduplication. See
+[configuration](configuration.md#hazard-reports) for the `diagnostics` block and
+the JSON report file.
 
 Registers in diagnostics use the scoreboard's physical numbering. On targets
 with an accumulator bank, `v256+n` names `aN` (for example, `v288` is `a32`).
@@ -53,8 +73,10 @@ On gfx1250, the core also warns when a memory instruction's source register is
 overwritten before address translation is known complete. Hardware may need that
 original value for XNACK replay. This checks scalar address operands and VMEM
 address/data operands, including EXEC and dynamically selected VGPR banks. Reading
-a protected source again is allowed. `xcnt-wait` warnings have their own limit of
-16 per CU and do not consume the ordinary `memory-wait` warning budget.
+a protected source again is allowed. `xcnt-wait` sites print as `HAZARD` blocks with
+`checker=xcnt-wait` and share the per-dispatch site table and its
+`max_sites_per_dispatch` cap. `xcnt_diagnostic_count()` counts their occurrences,
+separately from `memory_wait_diagnostic_count()`.
 
 XCNT tracking and warnings default to `off`. Without a global `wait_checking`
 override, enable them independently of memory-result checks by adding this entry

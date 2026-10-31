@@ -7,6 +7,8 @@
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/mma_admission.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
+#include "rocjitsu/vm/diagnostics/memory_wait_report.h"
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -204,6 +206,7 @@ ComputeUnitCore::~ComputeUnitCore() {
   for (const auto &wave : wfs_)
     if (wave && wave->state() == WfState::GWS_WAIT)
       gws_device_->notify_parked_wave_gone(*wave);
+  diagnostics::release_unattached_sites(this);
 }
 
 template <GpuIsa Isa>
@@ -1093,73 +1096,31 @@ void ComputeUnitCore::report_undefined_behavior(const Wavefront &wf, std::string
     util::Logger::warn("isa-undefined: further diagnostics on this CU are suppressed");
 }
 
-void ComputeUnitCore::report_memory_wait(void *context,
-                                         const MemoryWaitScoreboard::Hazard &hazard) {
+diagnostics::HazardSites &ComputeUnitCore::hazard_sites() {
+  return cp_ ? cp_->hazard_sites() : diagnostics::unattached_sites(this);
+}
+
+[[gnu::cold]] RJ_NOINLINE void
+ComputeUnitCore::report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard) {
   auto &wf = *static_cast<Wavefront *>(context);
   auto &cu = wf.raw_cu();
   const bool replay = hazard.producer.counter == WaitCounterKind::X;
-  const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
-  if (count > kMaxMemoryWaitDiagnostics)
-    return;
-  auto counter_name = wait_counter_name(hazard.producer.counter);
-  const auto model = waitcnt_model(cu.arch());
-  if (model.succeeded() && uses_legacy_waitcnt(model.value())) {
-    if (hazard.producer.counter == WaitCounterKind::Load)
-      counter_name = "vmcnt";
-    else if (hazard.producer.counter == WaitCounterKind::Store)
-      counter_name = "vscnt";
-    else if (hazard.producer.counter == WaitCounterKind::Ds)
-      counter_name = "lgkmcnt";
-  }
-  const auto max_wait =
-      WaitCounterPolicy::maximum_dependency_wait(cu.arch(), hazard.producer.counter);
-  const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
-                                             : hazard.required_wait;
-  const auto register_name = [&] {
-    switch (hazard.reg.cls) {
-    case RegClass::VGPR:
-      return std::format("v{}", hazard.reg.index);
-    case RegClass::SGPR:
-      return std::format("s{}", hazard.reg.index);
-    case RegClass::TTMP:
-      return std::format("ttmp{}", hazard.reg.index);
-    case RegClass::ACC_VGPR:
-      return std::format("acc{}", hazard.reg.index);
-    case RegClass::EXEC:
-      return std::string("exec");
-    case RegClass::VCC:
-      return std::string("vcc");
-    case RegClass::SCC:
-      return std::string("scc");
-    case RegClass::M0:
-      return std::string("m0");
-    case RegClass::FLAT_SCRATCH:
-      return std::string("flat_scratch");
-    case RegClass::PC:
-      return std::string("pc");
-    }
-    return std::string("unknown register");
-  }();
-  if (replay) {
-    util::Logger::warn(std::format(
-        "xcnt-wait: {} wg={} wave={} pc={:#x}: overwrite of {} before the replay source from "
-        "pc={:#x} is known safe to reuse. XNACK replay may need the original value. "
-        "s_wait_xcnt <= {} is required; set top-level wait_checking to \"off\" "
-        "(rocjitsu --wait-checking=off) to disable wait checking.",
-        cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc, register_name,
-        hazard.producer.pc, required));
-  } else {
-    util::Logger::warn(std::format(
-        "memory-wait: {} wg={} wave={} pc={:#x}: {} of {} before memory result from pc={:#x} is "
-        "known ready ({}). A wait threshold <= {} is required; set top-level wait_checking "
-        "to \"off\" (rocjitsu --wait-checking=off) to disable wait checking.",
-        cu.full_path(), wf.wg_id(), wf.wf_id(), hazard.consumer_pc,
-        hazard.write ? "overwrite" : "read", register_name, hazard.producer.pc, counter_name,
-        required));
-  }
-  if (count == kMaxMemoryWaitDiagnostics)
-    util::Logger::warn(replay ? "xcnt-wait: further diagnostics on this CU are suppressed"
-                              : "memory-wait: further diagnostics on this CU are suppressed");
+  if (replay)
+    ++cu.xcnt_diagnostic_count_;
+  else
+    ++cu.memory_wait_diagnostic_count_;
+
+  // Count repeats before building a record, so only a site's first occurrence
+  // pays for decoding, source lookup and formatting.
+  diagnostics::HazardSites &sites = cu.hazard_sites();
+  const diagnostics::HazardSiteKey key{wf.dispatch_id(),
+                                       hazard.producer.pc,
+                                       hazard.consumer_pc,
+                                       hazard.reg.index,
+                                       static_cast<uint8_t>(hazard.reg.cls),
+                                       static_cast<uint8_t>(replay)};
+  if (sites.classify(&cu, key) == diagnostics::HazardDisposition::New)
+    diagnostics::publish_memory_wait(sites, cu, wf, hazard);
 }
 
 void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {

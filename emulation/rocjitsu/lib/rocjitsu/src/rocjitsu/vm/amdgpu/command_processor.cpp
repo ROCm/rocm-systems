@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -39,6 +40,43 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
 namespace amdgpu {
+namespace {
+
+void publish_dispatch_identity(diagnostics::HazardSites &sites, KernelDispatchInfo &info,
+                               uint32_t process_id) {
+  info.process_id = process_id;
+  info.hazard_sites = &sites;
+  sites.register_dispatch({.dispatch_id = info.dispatch_id,
+                           .kernel = info.kernelNameOrUnknown(),
+                           .symbol = info.kernelSymbolOrUnknown()});
+}
+
+} // namespace
+
+diagnostics::HazardSites &CommandProcessor::hazard_sites() { return *hazard_sites_; }
+
+void CommandProcessor::set_hazard_sites(std::shared_ptr<diagnostics::HazardSites> sites) {
+  hazard_sites_ = std::move(sites);
+}
+
+void CommandProcessor::close_dropped_hazard_sites(const std::deque<DispatchEntry> &dropped) {
+  for (const DispatchEntry &entry : dropped)
+    if (!entry.grid_completion)
+      hazard_sites_->finish_dispatch(entry.dispatch_id);
+}
+
+std::shared_ptr<GridCompletion> CommandProcessor::make_kernel_grid(uint32_t dispatch_id) {
+  // Every shard holds the grid, and each XCD drops its shard only after its waves
+  // stop, so the last release can close the dispatch's hazard sites even after a
+  // fault. Retirement normally closes them first; closing twice is harmless.
+  const std::weak_ptr<diagnostics::HazardSites> sites = hazard_sites_;
+  return std::shared_ptr<GridCompletion>(new GridCompletion,
+                                         [sites, dispatch_id](GridCompletion *finished) {
+                                           delete finished;
+                                           if (const auto owner = sites.lock())
+                                             owner->finish_dispatch(dispatch_id);
+                                         });
+}
 
 CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode)
     : simdojo::Component(std::move(name)),
@@ -50,7 +88,7 @@ CommandProcessor::CommandProcessor(std::string name, simdojo::ExecMode exec_mode
                 return admit_aql_packet(request, std::move(prepared));
               },
       }),
-      exec_mode_(exec_mode) {
+      exec_mode_(exec_mode), hazard_sites_(std::make_shared<diagnostics::HazardSites>()) {
   // Bind the doorbell handler at construction, not in startup(): register_queue()
   // may start the doorbell poll thread (which fires doorbell_event_ via
   // schedule_event_now) as soon as a host-accessible queue is registered, which can
@@ -847,6 +885,10 @@ void CommandProcessor::startup() {
         return gate_dispatch_retirement(queue, entry);
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
+    // Each shard of a fanned-out dispatch retires only after the whole grid has
+    // completed. The owner closes the dispatch's hazard sites once.
+    if (!entry.fanout_peer && !entry.is_non_kernel())
+      hazard_sites().finish_dispatch(entry.dispatch_id);
     erase_cluster_workgroups(entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume fetch after the blocking packet's completion is durable.
@@ -892,6 +934,8 @@ void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProces
   dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
   dispatch_id_base_ = 1 + rank;
   next_dispatch_id_ = dispatch_id_base_;
+  // Dispatch ids are unique across the SoC, so its CPs share one table of sites.
+  hazard_sites_ = xcd_peers_.front()->hazard_sites_;
 }
 
 void CommandProcessor::set_scratch_slots_per_cu(uint32_t slots) {
@@ -1014,6 +1058,7 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
         // Native PM4 submissions deliver their failed callback/fence here, before
         // the last replica acknowledges cancellation and stops the engine.
         fail_pm4_queue(*queue, queue->dispatches);
+        close_dropped_hazard_sites(queue->entries);
         queue->entries.clear();
         queue->next_dispatch_idx = 0;
       }
@@ -1115,7 +1160,7 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp,
   assert(participant_count != 0);
 
   const uint32_t grid_wgs = dp.total_wgs;
-  auto grid = std::make_shared<GridCompletion>();
+  auto grid = make_kernel_grid(dp.dispatch_id);
   grid->grid_wgs = grid_wgs;
 
   const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
@@ -1533,6 +1578,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       // every XCD at once: the KFD paths sweep all command processors, and an
       // owner cascades to its replicas below. No XCD is left holding a grid that
       // can no longer retire. Unregistering a lone replica is not supported.
+      close_dropped_hazard_sites(queue->entries);
       compute_queues_.erase(queue);
     }
   }
@@ -2694,6 +2740,9 @@ bool CommandProcessor::drain_completions() {
 bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
                                             uint64_t dispatch_id, VmAccessOutcome outcome) {
   bool found = false;
+  // Keeps removed shards' grids alive until the inbox lock is released, so a last
+  // release never closes hazard sites under that leaf lock.
+  std::vector<std::shared_ptr<GridCompletion>> removed_grids;
   {
     // A shard may still be in transit from its owner. Remove it under the leaf
     // inbox lock without taking the queue lock, preserving the existing
@@ -2707,6 +2756,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
       entry.terminal_faulted = true;
       if (entry.grid_completion)
         entry.grid_completion->mark_faulted();
+      removed_grids.push_back(entry.grid_completion);
       fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
       return true;
     });
@@ -2723,6 +2773,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   ComputeQueueRecord &state = *queue;
 
   size_t index = 0;
+  bool local_dispatch = false;
   for (std::deque<DispatchEntry>::iterator entry = state.entries.begin();
        entry != state.entries.end();) {
     if (entry->dispatch_id != dispatch_id) {
@@ -2734,6 +2785,8 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
     entry->terminal_faulted = true;
     if (entry->grid_completion)
       entry->grid_completion->mark_faulted();
+    else
+      local_dispatch = true;
     if (index < state.next_dispatch_idx)
       --state.next_dispatch_idx;
     entry = state.entries.erase(entry);
@@ -2754,6 +2807,8 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
   for (ComputeUnitCore *cu : cus_)
     cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  if (local_dispatch)
+    hazard_sites().finish_dispatch(static_cast<uint32_t>(dispatch_id));
   return true;
 }
 
@@ -3119,6 +3174,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       flush_gpu_caches();
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+      if (!entry.fanout_peer)
+        hazard_sites().finish_dispatch(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
       state.entries.pop_front();
     }
@@ -3343,6 +3400,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   info.wfs_per_workgroup = dp.wfs_per_workgroup;
   info.sgprs_per_wf = dp.sgprs_per_wf;
   info.vgprs_per_wf = dp.vgprs_per_wf;
+  publish_dispatch_identity(hazard_sites(), info, dp.process_id);
   plugin_group_->onAmdgpuDispatchPacketProcessed(info);
   ++total_dispatched_;
   qs.push_entry(std::move(dp));
@@ -3367,6 +3425,7 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
     });
   }
   flush_gpu_caches();
+  close_dropped_hazard_sites(qs.entries);
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)
     if (submission.complete)
@@ -4222,6 +4281,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dispatch_info.wfs_per_workgroup = wfs_per_wg;
   dispatch_info.sgprs_per_wf = dp.sgprs_per_wf;
   dispatch_info.vgprs_per_wf = dp.vgprs_per_wf;
+  publish_dispatch_identity(hazard_sites(), dispatch_info, dp.process_id);
   plugin_group_->onAmdgpuDispatchPacketProcessed(dispatch_info);
 
   util::Logger::vm([&](auto &os) {

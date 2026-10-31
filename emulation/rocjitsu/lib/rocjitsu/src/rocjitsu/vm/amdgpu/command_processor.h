@@ -67,6 +67,9 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu {
+namespace diagnostics {
+class HazardSites;
+} // namespace diagnostics
 namespace amdgpu {
 
 class GpuVm;
@@ -461,6 +464,12 @@ public:
   const std::vector<simdojo::Port *> &dispatch_ports() const { return dispatch_ports_; }
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
+  /// @brief Hazard sites of this SoC, shared by the CPs of all its XCDs.
+  diagnostics::HazardSites &hazard_sites();
+  /// @brief Use the sites the config built for this CP's GPU. Call before the first
+  /// dispatch, with the same sites for every CP of the SoC.
+  void set_hazard_sites(std::shared_ptr<diagnostics::HazardSites> sites);
+
   /// @brief Return LDS targets selected by a cluster multicast mask.
   /// @details Resolve targets only after all cluster peers have been admitted.
   /// Dispatch plugin callbacks may run before cluster admission is complete.
@@ -526,6 +535,10 @@ public:
   void drain_fanout_inbox_for_test() {
     drain_dispatch_fault_inbox();
     drain_fanout_inbox();
+  }
+
+  std::shared_ptr<GridCompletion> make_kernel_grid_for_test(uint32_t dispatch_id) {
+    return make_kernel_grid(dispatch_id);
   }
 
   [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
@@ -666,6 +679,13 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  /// @brief Close the hazard sites of entries that a fault or queue removal drops.
+  /// @details Call once their waves are stopped. An entry without a grid ran only on
+  /// this XCD; a fanned-out grid closes its sites when its last shard is destroyed.
+  void close_dropped_hazard_sites(const std::deque<DispatchEntry> &dropped);
+  /// @brief The completion of a fanned-out kernel grid, which closes the dispatch's
+  /// hazard sites when its last shard is destroyed.
+  std::shared_ptr<GridCompletion> make_kernel_grid(uint32_t dispatch_id);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                             const std::array<uint32_t, 4> &dimensions,
@@ -1075,6 +1095,8 @@ private:
   // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
   std::jthread doorbell_thread_;
+  /// Shared so a fanned-out grid can close its sites when its last shard is dropped.
+  std::shared_ptr<diagnostics::HazardSites> hazard_sites_;
 };
 
 } // namespace amdgpu

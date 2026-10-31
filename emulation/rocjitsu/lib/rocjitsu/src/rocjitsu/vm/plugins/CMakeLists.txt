@@ -18,7 +18,9 @@ rj_add_object_library(
 )
 target_link_libraries(
     rocjitsu_plugin_race_detector
-    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+    INTERFACE
+        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+        $<TARGET_OBJECTS:rocjitsu_hazard_record>
 )
 
 rj_add_object_library(
@@ -115,10 +117,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                     rocjitsu_wait_counter_policy_standalone
                     PRIVATE -fno-sanitize=vptr
                 )
+                # The hazard record objects use no simulator classes.
                 target_link_libraries(
                     ${plugin_objects}
                     INTERFACE
                         $<TARGET_OBJECTS:rocjitsu_wait_counter_policy_standalone>
+                        $<TARGET_OBJECTS:rocjitsu_hazard_record>
                 )
             endif()
             target_compile_options(${plugin_objects} PRIVATE -fno-sanitize=vptr)

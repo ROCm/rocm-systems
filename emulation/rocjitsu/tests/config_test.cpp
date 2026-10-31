@@ -29,6 +29,7 @@
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/diagnostics/hazard_sites.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -47,8 +48,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -362,6 +365,63 @@ TEST(ConfigExpressionTest, ComponentRangesPreserveHalfOpenAndEmptySemantics) {
   EXPECT_EQ(children[1]->name(), "part4294967294");
   // Preserve the old stoul-to-uint32_t narrowing: 4294967296 becomes component 0.
   EXPECT_EQ(children.back()->name(), "wrapped0");
+}
+
+std::string diagnostics_test_config(std::string_view diagnostics) {
+  return std::string(R"json({"vm":{"arch":"cdna3"},"diagnostics":{)json") +
+         std::string(diagnostics) + R"json(},"topology":{"root":{"name":"soc","type":"soc",
+    "children":[{"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit"}]}]}]}}})json";
+}
+
+TEST(ConfigDiagnosticsTest, DiagnosticsBlockReachesTheCommandProcessor) {
+  const std::string json = diagnostics_test_config(
+      R"json("report_path":"hazards.jsonl","max_sites_per_dispatch":0)json");
+  util::StringDiagnostic diagnostic;
+  auto loaded = config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(), 1);
+  ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+  ASSERT_NE(loaded.value().soc(), nullptr);
+  const diagnostics::Settings &settings =
+      loaded.value().soc()->xcd(0)->command_processor()->hazard_sites().settings();
+  EXPECT_EQ(settings.report_path, "hazards.jsonl");
+  EXPECT_EQ(settings.max_sites_per_dispatch, std::numeric_limits<uint32_t>::max());
+}
+
+TEST(ConfigDiagnosticsTest, InvalidDiagnosticsRejectTheConfig) {
+  for (const char *block :
+       {R"json("max_sites_per_dispatch":-1)json", R"json("max_sites_per_dispatch":"many")json"}) {
+    SCOPED_TRACE(block);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(config::load_config_from_string(diagnostics_test_config(block), kEmbeddedSchema,
+                                                diagnostic.emitter(), 1)
+                    .failed());
+  }
+}
+
+TEST(ConfigDiagnosticsTest, EachGpuSharesOneTableAcrossItsXcds) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x_kmd_2gpu.json", loaded));
+  ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
+  auto *second = dynamic_cast<SoC *>(loaded.extra_gpu_builds.front().root.get());
+  ASSERT_NE(second, nullptr);
+  const auto tables_of = [](SoC &soc) {
+    std::set<const diagnostics::HazardSites *> tables;
+    for (uint32_t xcd = 0; xcd < soc.num_xcds(); ++xcd)
+      tables.insert(&soc.xcd(xcd)->command_processor()->hazard_sites());
+    return tables;
+  };
+  ASSERT_GT(loaded.soc()->num_xcds(), 1u);
+  const auto first_tables = tables_of(*loaded.soc());
+  const auto second_tables = tables_of(*second);
+  ASSERT_EQ(first_tables.size(), 1u);
+  ASSERT_EQ(second_tables.size(), 1u);
+  EXPECT_NE(*first_tables.begin(), *second_tables.begin());
+  EXPECT_EQ((*first_tables.begin())->gpu(), 0u);
+  EXPECT_EQ((*second_tables.begin())->gpu(), 1u);
 }
 
 constexpr std::string_view kSystemGraphManifest = R"({

@@ -378,6 +378,37 @@ Qualified [ISA diagnostics](isa-diagnostics.md) are always enabled, independentl
 of memory-wait checking. The checks use decoded fields and existing operands;
 the coverage and legal exceptions are documented separately.
 
+### Hazard reports
+
+The optional top-level `diagnostics` object controls how the memory-wait checker
+and the [race detector](race-detector.md) print hazards. It applies to every GPU
+the config builds, and an invalid value rejects the config.
+
+```json
+{
+  "diagnostics": {
+    "report_path": "hazards.jsonl",
+    "max_sites_per_dispatch": 64
+  }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `report_path` | empty | File that receives one JSON object per line. Empty keeps reports on stderr only. |
+| `max_sites_per_dispatch` | 64 | Distinct sites printed for one dispatch. `0` removes the cap. |
+
+Each line of the report file has a `record` field:
+
+| `record` | Written when | Fields |
+|---|---|---|
+| `site` | A `HAZARD` or `RACE` block prints | `checker`, `gpu`, `kernel`, `symbol`, `dispatch`, `process`, `wg`, `wave`, `lane`, `cu`, `type`, `access`, `reg`, `producer_pc`, `consumer_pc`, `producer_disasm`, `consumer_disasm`, `trace_executed`; memory-wait adds `counter` and `required_wait` |
+| `suppressed` | A dispatch reaches `max_sites_per_dispatch` | `gpu`, `dispatch`, `max_sites_per_dispatch` |
+| `summary` | A dispatch with sites retires, or a fault or queue removal drops it | `gpu`, `dispatch`, `kernel`, `sites`, `occurrences`, `suppressed` when nonzero |
+
+`gpu` is the ordinal of the simulated GPU; dispatch ids are unique only within one
+GPU. Reports from every checker share one lock, so blocks and lines never interleave.
+
 ### KFD device sections
 
 KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and
