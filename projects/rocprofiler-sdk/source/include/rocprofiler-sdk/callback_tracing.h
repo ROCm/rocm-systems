@@ -305,6 +305,29 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
  * Timestamps are only non-zero in the ::ROCPROFILER_CALLBACK_PHASE_NONE callback (barrier
  * completion). For WAIT operations, @p source_queue_id identifies where the event was originally
  * recorded; for RECORD operations it equals @p queue_id.
+ *
+ * For WAIT operations, @p source_correlation_id is the internal correlation id of the RECORD
+ * operation the wait depends on, or zero when that record was not seen. For RECORD operations it
+ * equals the record's own internal correlation id. It is only present when @p size covers it.
+ * A non-zero id can name a RECORD that was itself not reported, for example because its
+ * barrier had no GPU timestamps.
+ *
+ * The start and end timestamps are when the GPU command processor began processing and retired
+ * the barrier packet that the operation was carried on, in the same clock domain as kernel
+ * dispatch records. Every barrier retires only after the work submitted ahead of it on its own
+ * queue completes. A RECORD's end therefore marks that work completing. A WAIT's barrier also
+ * depends on the waited-on event's barrier, so it retires no earlier than both, and its end is
+ * not necessarily when the dependency was satisfied. When CLR folds a wait into a later barrier
+ * on the queue (for example, a record or a synchronization barrier), the wait reports that
+ * barrier's times, shared with any other waits it carries.
+ * A record that CLR coalesces onto an earlier barrier (no work submitted since) reports that
+ * barrier's times, which can precede its own API call.
+ * When the GPU did not write the barrier's timestamps (for example, the application disabled
+ * profiling on its queue), an error is logged and the ROCPROFILER_CALLBACK_PHASE_NONE callback
+ * carrying the timestamps is not delivered. The ENTER and EXIT callbacks have already been
+ * delivered by then.
+ * A WAIT on one agent for an event recorded on another compares timestamps translated by each
+ * agent's own clock calibration, so the WAIT can appear to end slightly before the RECORD.
  */
 typedef struct rocprofiler_callback_tracing_hip_event_data_t
 {
@@ -315,6 +338,7 @@ typedef struct rocprofiler_callback_tracing_hip_event_data_t
     rocprofiler_queue_id_t  queue_id;          ///< queue where barrier was dispatched
     uint64_t                hip_event_handle;  ///< hipEvent_t pointer value
     rocprofiler_queue_id_t  source_queue_id;   ///< queue where event was recorded
+    uint64_t source_correlation_id;  ///< internal correlation id of the recording operation
 } rocprofiler_callback_tracing_hip_event_data_t;
 
 /**

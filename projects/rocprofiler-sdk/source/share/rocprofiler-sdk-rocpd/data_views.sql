@@ -565,6 +565,7 @@ SELECT
     agent.type AS agent_type,
     H.hip_event_handle,
     H.source_queue_id,
+    H.source_stack_id,
     E.stack_id,
     E.parent_stack_id,
     E.correlation_id AS corr_id

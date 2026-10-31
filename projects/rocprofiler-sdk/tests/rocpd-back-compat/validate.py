@@ -306,6 +306,54 @@ def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.6 (hip_event source correlation id)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_6_changes_absent(output_root, old_schema):
+    """Schema 3.0.6 additions must be absent for pre-3.0.6 schemas.
+
+    Verifies that the hip_event CSV has no source_correlation_id column for schemas < 3.0.6.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 6):
+        print(
+            f"Schema {old_schema} is newer than 3.0.6, calling test_csv_for_schema_3_0_6_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_6_changes_present(output_root, old_schema)
+
+    hip_event_csv = output_root / old_schema / "csv" / "out_hip_event_trace.csv"
+    if not hip_event_csv.exists():
+        # schemas before 3.0.4 have no hip_event output at all
+        return
+    cols = _csv_columns(hip_event_csv)
+    assert (
+        "source_correlation_id" not in cols
+    ), f"Column 'source_correlation_id' in hip_event CSV for schema {old_schema}"
+
+
+def test_csv_for_schema_3_0_6_changes_present(output_root, latest_schema):
+    """Schema 3.0.6 additions must be present for the latest schema.
+
+    Verifies that the hip_event CSV carries the source_correlation_id column and that a
+    RECORD reports its own correlation id there.
+    """
+    hip_event_csv = output_root / latest_schema / "csv" / "out_hip_event_trace.csv"
+    assert (
+        hip_event_csv.exists()
+    ), f"out_hip_event_trace.csv not found for schema {latest_schema}: {hip_event_csv}"
+    cols = _csv_columns(hip_event_csv)
+    assert (
+        "source_correlation_id" in cols
+    ), f"Column 'source_correlation_id' missing from hip_event CSV for schema {latest_schema}"
+
+    with open(hip_event_csv) as fh:
+        rows = list(csv_mod.DictReader(fh))
+    assert rows, f"No rows in hip_event CSV for schema {latest_schema}"
+    for row in rows:
+        assert row["Source_Correlation_Id"] == row["Correlation_Id"], row
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 
