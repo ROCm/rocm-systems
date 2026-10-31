@@ -13,7 +13,7 @@
  *                                             hipMemAllocationHandleType shHandleType)` -
  * 	Imports an allocation from a requested shareable handle type.
  */
-
+#include "ipc_socket_com.hh"
 #include <hip_test_common.hh>
 #include "hip_vmm_common.hh"
 
