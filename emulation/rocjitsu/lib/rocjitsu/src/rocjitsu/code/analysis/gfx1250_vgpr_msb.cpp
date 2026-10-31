@@ -21,6 +21,24 @@
 
 namespace rocjitsu {
 
+bool may_change_vgpr_msb(const Instruction &instruction, rj_code_arch_t arch,
+                         bool setreg_vgpr_msb_fixup) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return false;
+  if (instruction.mnemonic() == "s_set_vgpr_msb")
+    return true;
+  if (instruction.mnemonic() != "s_setreg_b32" && instruction.mnemonic() != "s_setreg_imm32_b32")
+    return false;
+  const Operand *hwreg = instruction.dst_operand(0);
+  if (hwreg == nullptr)
+    return true;
+  const amdgpu::HwregSlice slice =
+      amdgpu::decode_vgpr_msb_hwreg(static_cast<uint16_t>(hwreg->encoding_value()));
+  return slice.id == amdgpu::MODE_HWREG &&
+         (setreg_vgpr_msb_fixup || (slice.begin < amdgpu::VGPR_MSB_MODE_SHIFT + 8 &&
+                                    slice.begin + slice.width > amdgpu::VGPR_MSB_MODE_SHIFT));
+}
+
 namespace {
 
 constexpr size_t kSrc0 = 0;
@@ -135,6 +153,8 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   const amdgpu::VgprMsbBanks incoming_armed_banks = state.armed_banks;
   state.hazard = AdjacentSetVgprMsbHazard::Clear;
   state.armed_banks.fill(std::nullopt);
+  if (!may_change_vgpr_msb(inst, ROCJITSU_CODE_ARCH_CDNA5, setreg_vgpr_msb_fixup))
+    return;
   if (inst.opcode() == cdna5::kSSetVgprMsbSopp && inst.mnemonic() == "s_set_vgpr_msb") {
     if (setreg_vgpr_msb_fixup && incoming_hazard == AdjacentSetVgprMsbHazard::Armed) {
       state.banks = incoming_armed_banks;
@@ -160,8 +180,10 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   if (inst.mnemonic() != "s_setreg_b32" && inst.mnemonic() != "s_setreg_imm32_b32")
     return;
   const Operand *hwreg_operand = inst.dst_operand(0);
-  if (hwreg_operand == nullptr)
+  if (hwreg_operand == nullptr) {
+    state.banks.fill(std::nullopt);
     return;
+  }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
   const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
 
