@@ -1229,7 +1229,7 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       continue;
     const bool is_rela = relocs.sh_type == SHT_RELA;
     const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
-    if (relocs.sh_entsize != entsize || relocs.sh_size % entsize != 0)
+    if (relocs.sh_entsize != entsize)
       continue;
     const RocrRelocationSectionMode section_mode =
         classify_rocr_relocation_section(header, shdrs, relocs);
@@ -1239,6 +1239,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     if (relocs.sh_link >= shdrs.size())
       continue;
     const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+    // Shared admission permits partial tails; preceding complete records still
+    // carry references that can make a text edit unsafe.
     const size_t count = relocs.sh_size / entsize;
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
@@ -1287,6 +1289,40 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     }
   }
   return false;
+}
+
+std::vector<uint64_t> CodeObjectPatcher::relative_text_addend_offsets() const {
+  if (text_size_ == 0 || image_.size() < sizeof(Elf64_Ehdr))
+    return {};
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> sections = section_headers();
+  const std::optional<size_t> text_index =
+      validated_text_section(sections, text_section_index_, text_offset_, text_size_);
+  if (!text_index)
+    return {};
+  const uint64_t text_vaddr = sections[*text_index].sh_addr;
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    // Match relocation rewriting: inspect complete records even with a partial tail.
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image_.data() + relocs.sh_offset + index * sizeof(Elf64_Rela),
+                  sizeof(relocation));
+      if (elf_reloc_type(relocation.r_info) != R_AMDGPU_RELATIVE64 ||
+          elf_reloc_sym(relocation.r_info) != 0 ||
+          !elf_relocation_place_is_allocated(header, sections, relocs, relocation.r_offset))
+        continue;
+      const uint64_t destination = static_cast<uint64_t>(relocation.r_addend);
+      if (destination >= text_vaddr && destination - text_vaddr < text_size_)
+        offsets.push_back(destination - text_vaddr);
+    }
+  }
+  return offsets;
 }
 
 bool CodeObjectPatcher::replace_text(

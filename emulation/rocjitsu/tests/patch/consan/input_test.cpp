@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <utility>
 
 namespace rocjitsu::consan {
 namespace {
@@ -185,6 +187,85 @@ TEST_F(ConSanInputFixture, DecoderFindsTheTwoPhysicalSitesAndRuntimeOperands) {
   EXPECT_EQ(program.value().identity.sha256, digest(image_));
   EXPECT_EQ(program.value().original_vgprs, 8u);
   EXPECT_EQ(program.value().image, image_);
+}
+
+TEST_F(ConSanInputFixture, ReplacementMutantReceivesFreshInputAnalysis) {
+  const std::vector<uint8_t> pristine_image = image_;
+  std::vector<uint8_t> expected = pristine_image;
+  std::vector<uint8_t> mutant;
+  Digest pristine_digest = {};
+  NativeLdsAccess original_read = {};
+  {
+    const FailureOr<InputProgram> original =
+        build_input_program(pristine_image, kTarget, "lds_producer_consumer", error_);
+    ASSERT_TRUE(original.succeeded()) << error_.message;
+    ASSERT_EQ(original.value().accesses.size(), 2u);
+    const NativeLdsAccess &write = original.value().accesses[0];
+    original_read = original.value().accesses[1];
+    ASSERT_EQ(write.kind, AccessKind::Write);
+    ASSERT_EQ(original_read.kind, AccessKind::Read);
+    pristine_digest = original.value().identity.sha256;
+
+    const AmdGpuCodeObject source(original.value().image.data(), original.value().image.size());
+    ASSERT_TRUE(source.is_valid());
+    const uint64_t write_file_offset = original.value().text_file_offset + write.original_offset;
+    std::array<uint32_t, 2> words = {};
+    ASSERT_LE(write_file_offset + sizeof(words), original.value().image.size());
+    std::memcpy(words.data(), original.value().image.data() + write_file_offset, sizeof(words));
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), kTarget.public_id);
+    ASSERT_NE(decoder, nullptr);
+    const DecodeResult decoded = decoder->decode_window(words, write.original_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_EQ(decoded.value()->size(), 8u);
+
+    const uint32_t nop = build_s_nop(0, kTarget.arch);
+    const std::array<uint32_t, 2> nops = {nop, nop};
+    InstructionReplacement replacement = {.expected_bytes = std::vector<uint8_t>(sizeof(words)),
+                                          .replacement_bytes = std::vector<uint8_t>(sizeof(nops))};
+    std::memcpy(replacement.expected_bytes.data(), words.data(), sizeof(words));
+    std::memcpy(replacement.replacement_bytes.data(), nops.data(), sizeof(nops));
+    Instrumentor instrumentor(source, kTarget.arch);
+    instrumentor.add_point({.anchor_offset = write.original_offset,
+                            .kind = InstrumentationKind::ReplaceWithInst,
+                            .probe_symbol = {},
+                            .probe_args = {},
+                            .replacement = std::move(replacement)});
+    InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    EXPECT_EQ(result.sites.front().kind, InstrumentationKind::ReplaceWithInst);
+    EXPECT_EQ(result.sites.front().original_offset, write.original_offset);
+    EXPECT_EQ(result.sites.front().original_size, 8u);
+    EXPECT_EQ(result.sites.front().instrumentation_offset, write.original_offset);
+    EXPECT_EQ(result.sites.front().instrumentation_size, 8u);
+    EXPECT_EQ(result.sites.front().guest_size, 0u);
+    std::memcpy(expected.data() + write_file_offset, nops.data(), sizeof(nops));
+    EXPECT_EQ(result.elf_bytes, expected);
+    EXPECT_EQ(original.value().image, pristine_image);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine_image.data(), pristine_image.size()), 0);
+    mutant = std::move(result.elf_bytes);
+  }
+
+  // The original program, decoder, code object, and Instrumentor are gone. ConSan
+  // must discover the remaining read from the mutant's bytes and new identity.
+  const FailureOr<InputProgram> fresh =
+      build_input_program(mutant, kTarget, "lds_producer_consumer", error_);
+  ASSERT_TRUE(fresh.succeeded()) << error_.message;
+  ASSERT_EQ(fresh.value().accesses.size(), 1u);
+  const NativeLdsAccess &remaining = fresh.value().accesses.front();
+  EXPECT_EQ(remaining.site, 0u);
+  EXPECT_EQ(remaining.kind, AccessKind::Read);
+  EXPECT_EQ(remaining.original_offset, original_read.original_offset);
+  EXPECT_EQ(remaining.address_vgpr, original_read.address_vgpr);
+  EXPECT_EQ(remaining.immediate_bytes, original_read.immediate_bytes);
+  expect_value_operand(fresh.value(), remaining, 3);
+  EXPECT_NE(fresh.value().identity.sha256, pristine_digest);
+  EXPECT_EQ(fresh.value().identity.sha256, digest(mutant));
+  EXPECT_EQ(fresh.value().identity.bytes, pristine_image.size());
+  EXPECT_EQ(fresh.value().image, mutant);
+  EXPECT_EQ(mutant, expected);
+  EXPECT_EQ(image_, pristine_image);
 }
 
 TEST_F(ConSanInputFixture, TemporaryProfileAndNameDoNotEscapeInputConstruction) {

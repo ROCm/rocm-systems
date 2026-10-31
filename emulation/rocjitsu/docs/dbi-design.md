@@ -12,7 +12,8 @@ predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
 `arch_has_unified_vgpr_allocation`) live in the orchestrator.
 
 This document describes the DBI subsystem as implemented. The instrumentor can
-insert an inline nop or call a verified, copied probe body. Calls pass explicit
+replace a complete instruction in place, insert an inline nop through a
+trampoline, or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement
 and callable kernel entry/exit observations are supported; after-placement and
 block boundaries remain reserved. Existing scratch spills coexist with an
@@ -46,7 +47,7 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────────┐│
 │  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: splice + grow .text with trampoline cave, emit││
+│  │  ELF mutation: grow .text, fix ELF references, emit          ││
 │  └──────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -59,20 +60,24 @@ The orchestrator owns the multi-stage pipeline. All per-site validation and buil
 
 **Files:** `code/patch/instrumentor.h`, `code/patch/instrumentor.cpp`
 
-The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator runs the pipeline: validate each anchor, plan a trampoline per site, build it, then mutate the ELF.
+The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. Replacement-only batches validate and write equal-length instruction bytes in place. Observational batches validate each anchor, plan and build a trampoline per site, then apply their original-text anchor changes through the same checked-edit backend before appending the local cave.
 
 ### Pipeline stages
 
 ```
-InstrumentationPoint        -- request: "instrument here, with this body"
+InstrumentationPoint        -- source offset + operation-specific payload
       |  validate_points()
       v
 ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |                        original bytes (captured before mutation)
-      |  make_trampoline_plan() + TrampolineBuilder::build()
+      |  ReplaceWithInst: complete expected/replacement bytes
+      |  Observations: make_trampoline_plan() + TrampolineBuilder::build()
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  splice anchors + append trampoline caves into .text + emit()
+      |  shared checked-edit batch on original text
+      |  ReplaceWithInst: emit the private image without growing .text
+      |  Observations: append probes/stub/trampolines, then replace_text()
+      |  (KernelEntry callbacks retarget only the entry-stub branch)
       v
 InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -85,9 +90,9 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Lazy CFG construction: blocks are decoded on the first call that needs them via `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)`. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured `ValidationResult` / `InstrumentedCodeObject` error, not a crash.
-- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`.
-- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `append_words()` each trampoline after the original bytes as a local code cave, and grow the section in one `replace_text()` call. Returns `InstrumentedCodeObject` with ELF bytes, diagnostics, production site maps, and planned resources.
+- Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy. A conflicting caller architecture is rejected. Observational CFG construction is lazy and uses `BasicBlock::build`; replacement-only validation needs full-text structural facts but no reachable ownership graph or liveness.
+- `validate_points()` resolves each operation through its own admission path. Observations use `validate_anchor()`; replacements validate expected bytes, complete extents, references, clauses, and replacement encoding. Any failure empties `sites` and reports diagnostics in `errors`; structural replacement failures also expose `edit_error` with a category and text-relative offset.
+- `patch()` preflights the entire batch before changing the private writer. Replacements write in place without replay, branches, or caves. Observations build trampolines, then commit their original-text anchor replacements together through the checked backend. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. Both paths return ELF bytes, diagnostics, and production site maps; the observational path also reports planned resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -95,13 +100,82 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
-- `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
-- `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
+- `ReplaceWithInst` replaces one complete 4/8/12-byte instruction with the same number of encoded bytes. Multiple complete replacement instructions may fill that extent. `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- Replacement-only batches are supported. Combining replacement with an observational point in one batch is rejected, including physically disjoint requests. A replacement may change register uses or CFG edges, invalidating analysis of the pristine image. Use the emitted mutant as the source for a fresh Instrumentor when composing the two operations.
+- For observational points, `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
+- `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed by callable points (see [Mask policy](#mask-policy)); inline-nop and replacement points reject it because they have no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
 - Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, an anchor VGPR, a dword of the anchor `EXEC` mask, a dword of the framework's entry storage, or a lane-zero VGPR snapshot captured at dispatch entry. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) to be within the kernel's SGPR allocation (`kernel_sgpr_count`) and any chosen scratch/special-state temps to be below `ordinary_sgpr_bound` of it; allocation growth requires explicit original metadata counts and a supported resource note (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
+
+### Instruction replacement
+
+Set `InstrumentationPoint::kind` to `ReplaceWithInst` and provide an
+`InstructionReplacement` in `replacement`. Its `expected_bytes` must contain
+the complete original instruction; `replacement_bytes` must occupy exactly the
+same extent. The queued payload owns its bytes. The Instrumentor borrows one
+source object, which must remain immutable and alive throughout validation and
+patching. Resolved sites retain their source-byte snapshots; no portable plan or
+cross-source replay token is exposed.
+
+For example, replacing an eight-byte literal instruction with two four-byte
+NOPs keeps all subsequent offsets unchanged:
+
+```text
+source .text + 8:   s_mov_b32 s0, 0x12345678    (8 bytes)
+request:           offset=8, expected=<all 8 bytes>, replacement=<s_nop 0; s_nop 0>
+candidate .text + 8: s_nop 0; s_nop 0           (8 bytes)
+```
+
+The batch checks bounds and overflow, full expected bytes, physical overlap,
+complete source instruction extent, and complete replacement decoding with the
+source's concrete target. It rejects edits to clauses or their members and
+references into an edited instruction's interior. References include direct
+branches anywhere in the original text, symbol endpoints, and supported
+relocation destinations under the existing relocation-place allocation policy.
+An unreachable branch or clause still contributes structural facts. Boundaries
+may remain referenced; no source or candidate range is relocated by replacement.
+
+Replacement requires neither a relocatable trampoline anchor nor a probe ABI,
+spills, temporary registers, or register liveness. Its request must not carry
+probe arguments or other observational options. A successful result records
+`original_offset == instrumentation_offset`, the complete extent in
+`original_size` and `instrumentation_size`, and `guest_size == 0`; the original
+instruction is not replayed. Debug `patches` are empty because no trampoline was
+built. Failure publishes neither ELF bytes nor successful site records and
+leaves the source unchanged.
+
+`instruction_boundaries(error)` lazily exposes a borrowed, read-only full-text
+index for consumers that need instruction extents, clause membership, or direct
+references before queuing requests. It returns null with a typed error when the
+source cannot provide these facts. The index is retained by that Instrumentor
+and any forks sharing its facts; a borrowed view must not outlive those owners
+or the source. Consumers cannot import a different source's
+decoded facts, and a reachable kernel CFG cannot replace this full-text index.
+The query does not establish owner admission, barrier convergence, or execution
+validity.
+
+`fork(error)` creates a fresh single-attempt Instrumentor for the exact same
+immutable source, architecture, and options. It shares the source-bound
+structural facts, including the full-text index, while starting with no queued
+requests, CFG, liveness, or consumed patch budget. The child can outlive the
+parent while the source remains alive. A session can retain one source
+Instrumentor and fork independent replacement batches without decoding the
+source again. Expected bytes, overlap, and replacement encoding are still
+checked for each batch. A different source or analysis profile requires a new
+Instrumentor; callers cannot attach the shared facts to arbitrary bytes.
+
+Composition uses separate transformations and fresh analysis:
+
+```text
+pristine source → replacement-only Instrumentor → mutant ELF
+mutant ELF → new code object + new Instrumentor → callable probe instrumentation
+```
+
+The caller retains each source object for its own Instrumentor's lifetime.
+Expected bytes are checked again on every replacement batch; a successful facts
+query does not authorize stale requests or bypass validation.
 
 ### Key design constraint
 
@@ -183,13 +257,15 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 
 | Type | Stage | Carries |
 | --- | --- | --- |
-| `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
+| `InstrumentationPoint` | request | `anchor_offset`, `kind`, optional `replacement`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
+| `InstructionReplacement` | replacement payload | owned complete `expected_bytes` and equal-length `replacement_bytes` |
 | `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args` |
 | `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, `target`, verified `ProbeAbi`, `body_words`, declared `arg_sources` and `force_full_exec`, `output_text_offset` |
 | `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, optional `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
-| `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings`, `sites`, `resources` |
+| `InstrumentedSite` | production attribution | `kind`, `original_offset`, `original_size`, guest and instrumentation ranges; replacement has no replayed guest range |
+| `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, optional typed `edit_error`, `warnings`, `sites`, `resources` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
 
 The debug `return_target` records the emitted plan's return branch destination.
@@ -205,8 +281,10 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator reads the original payload via
-`text_bytes()`, assembles the new `.text` locally (each anchor spliced in place,
+Owns ELF-level mutations. Replacement-only batches write validated bytes to its
+private text and emit without section growth. The observational path applies
+its validated original-text anchor edits to a local text buffer, then
+assembles the new `.text` (the already-edited original text,
 then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
 every trampoline appended after the original bytes with `append_words()` /
 `append_nop_padding()`), and applies it with a single `replace_text()`. A patch
@@ -227,6 +305,17 @@ The patcher accepts any well-formed mutation request; layout decisions stay in
 the orchestrator. Trampolines live inside `.text` as a local code cave (the same
 layout DBT uses) rather than a separate section, so cave offsets are plain
 `.text`-relative bytes in `[text_size, text_size + cave_bytes)`.
+
+### Checked edits (`code/patch/checked_text_edits.h`)
+
+This internal backend serves both Instrumentor operations. It binds structural
+facts to the immutable source, performs the common batch validation, and writes
+to a private destination span only after all edits pass. The orchestrator passes
+its existing patcher's text or its local assembly buffer; it does not emit an
+intermediate full ELF merely to recover edited text. Instruction replacement is requested
+through `Instrumentor`, not a second public context/apply API. The backend does
+not impose kernel ownership, recipe selection, probe admission, or runtime
+qualification on all consumers.
 
 ### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 
@@ -376,10 +465,10 @@ ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index
 
 For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 
-1. **Lazy block decode:** On the first stage that needs the CFG, `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)` populates `blocks_`. Unsupported arch surfaces as a fatal error here.
+1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder (or the architecture default for a recognized legacy object). `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or source mismatch surfaces as a fatal error here.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
 3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
-4. **Assemble + replace:** Once every site preflighted, copy `.text` into a local buffer, `memcpy` each `patched_anchor_bytes` into its `anchor_offset`, then `append_words()` every trampoline after the original bytes as a local code cave. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries).
+4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one checked transaction to the private text buffer, using the source-bound full-text facts. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
 5. **Emit:** `patcher.emit()` returns the patched ELF.
 
 The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:
