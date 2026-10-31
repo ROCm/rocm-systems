@@ -84,10 +84,10 @@ static ncclResult_t ncclAllGatherDdaIpcLaunch(const void* sendbuff, void* recvbu
 
 // Dispatch to the template instantiation for the active participant count.
 // Only the default kDdaNranks clique gets a compile-time specialisation, keeping
-// that path bit- and perf-identical to baseline; every other supported count uses
-// the NRANKS_CT == 0 runtime kernel. Specialising all seven would compile one
-// kernel per count per type for each DEFAULT_GPUS target, for a path that is
-// default-off and confined to gfx942/gfx950.
+// that path's arithmetic, and so its results, identical to baseline; every other
+// supported count uses the NRANKS_CT == 0 runtime kernel. Specialising all seven
+// would compile one kernel per count per type for each DEFAULT_GPUS target, for a
+// path that is default-off and confined to gfx942/gfx950.
 template <typename T>
 static ncclResult_t ncclAllGatherDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t sendcount, ncclComm* comm,
                                              cudaStream_t stream) {

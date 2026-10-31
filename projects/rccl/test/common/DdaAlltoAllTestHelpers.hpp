@@ -35,8 +35,9 @@ inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
 // to exercise the relaxed floor the AlltoAll DDA gates apply when
 // RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always tracked the
 // unconditional 8-rank floor regardless of what the call sites actually pass.
-// RcclAlltoAllDdaDecision.AlltoAll_Gfx950_FourRanks_RelaxOn_TakesDda
-// (RcclWrapTests.cpp) additionally exercises a real call site directly.
+// This only mirrors the helper-level gate; the live AlltoAll selector's floor
+// is pinned by WrapMicrotestIsolated.SelectAlltoAll_DdaNranksRelaxOpensFourRankFloor
+// (host/wrap-test.cc).
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,

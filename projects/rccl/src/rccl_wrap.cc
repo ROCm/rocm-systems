@@ -42,6 +42,7 @@ THE SOFTWARE.
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "group.h"
 #include "sym_kernels.h"
