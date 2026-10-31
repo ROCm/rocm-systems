@@ -3,8 +3,11 @@
 
 #include "profiler-hub/reader.hpp"
 #include "profiler-hub/storage.hpp"
+#include "profiler-hub/version.hpp"
 #include "profiler-hub/writer.hpp"
 #include "profiler-hub/writer_types.hpp"
+
+#include "backends/sqlite_backend.hpp"
 
 #include <gtest/gtest.h>
 
@@ -32,9 +35,17 @@ protected:
 
     void TearDown() override { std::filesystem::remove(m_db_path); }
 
-    [[nodiscard]] std::unique_ptr<writer_t> make_writer() const
+    [[nodiscard]] std::unique_ptr<writer_t> make_writer(
+        version_t schema_version = version_t{ 3, 0, 1 }) const
     {
-        return std::make_unique<writer_t>(std::make_unique<storage_t>(m_db_path, m_uuid));
+        return std::make_unique<writer_t>(
+            std::make_unique<storage_t>(m_db_path, m_uuid, schema_version));
+    }
+
+    [[nodiscard]] std::shared_ptr<data_storage::sqlite_backend> make_backend() const
+    {
+        return data_storage::sqlite_backend::create(
+            m_db_path, m_uuid, data_storage::sqlite_backend::storage_mode_t::in_memory);
     }
 
     // Registers a minimal node + process pair that most register_*/insert_* calls
@@ -57,6 +68,58 @@ protected:
     // insert_statements, so it must be a valid identifier fragment - no hyphens.
     std::string m_uuid = "testuuid0000";
 };
+
+TEST_F(writer_test, get_storage_version_defaults_to_3_0_1_when_not_specified)
+{
+    const storage_t storage{ m_db_path, m_uuid };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, get_storage_version_returns_explicitly_passed_version)
+{
+    const storage_t storage{ m_db_path, m_uuid, version_t{ 3, 0, 1 } };
+
+    const auto version = storage.get_storage_version();
+    EXPECT_EQ(version.major, 3);
+    EXPECT_EQ(version.minor, 0);
+    EXPECT_EQ(version.patch, 1);
+}
+
+TEST_F(writer_test, initialize_schema_default_version_succeeds)
+{
+    auto backend = make_backend();
+    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 1 }));
+}
+
+TEST_F(writer_test, initialize_schema_latest_sentinel_version_succeeds)
+{
+    auto backend = make_backend();
+
+    // version_t{} (all-zero) is the latest version
+    EXPECT_NO_THROW(backend->initialize_schema(version_t{}));
+}
+
+TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
+{
+    auto backend = make_backend();
+
+    backend->initialize_schema(version_t{ 3, 0, 0 });
+
+    // Second call logs a warning and returns early instead of throwing or re-executing
+    // the schema SQL against an already-initialized database.
+    EXPECT_NO_THROW(backend->initialize_schema(version_t{ 3, 0, 0 }));
+}
+
+TEST_F(writer_test, initialize_schema_unsupported_version_throws_runtime_error)
+{
+    auto backend = make_backend();
+
+    EXPECT_THROW(backend->initialize_schema(version_t{ 99, 0, 0 }), std::runtime_error);
+}
 
 TEST_F(writer_test, construct_with_null_storage_throws_invalid_argument)
 {
@@ -190,7 +253,8 @@ TEST_F(writer_test, register_agent_info_with_invalid_agent_type_throws_invalid_a
 
 TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::agent_info_t agent_info;
@@ -217,7 +281,8 @@ TEST_F(writer_test, register_agent_info_nic_is_readable_after_flush)
 
 TEST_F(writer_test, register_pmc_info_with_nic_target_arch_is_readable_after_flush)
 {
-    auto writer = make_writer();
+    // 3.0.0 allows only CPU and GPU. NIC needs 3.0.1 or newer.
+    auto writer = make_writer(version_t{ 3, 0, 1 });
     register_node_and_process(*writer);
 
     writer_types::pmc_info_t pmc_info;
