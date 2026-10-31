@@ -503,6 +503,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
     algorithms/dda/dda-coll-seams.cc
+    fakes/dda_ipc_nranks_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
