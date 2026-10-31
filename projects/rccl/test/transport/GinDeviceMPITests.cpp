@@ -8155,8 +8155,9 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodePerHostSplitKeepsAnvil) {
       !reason.empty())
     GTEST_SKIP() << reason;
 
+  // No GIN gate on the world comm: only the per-host comms use GIN, and a
+  // 2-host job without a GIN-capable NIC leaves the world comm with none.
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
-  SKIP_IF_GIN_UNSUPPORTED();
   ncclComm_t world = getActiveCommunicator();
   ASSERT_MPI_EQ(2, world->topo->nHosts);
   ncclCommProperties_t worldProps = NCCL_COMM_PROPERTIES_INITIALIZER;
