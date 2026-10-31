@@ -6,6 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* Fixed texture-object gather component selection, the `tex2Dgather` and `tex2DLayered` pointer overloads, the horizontal derivative passed by `tex3DGrad`, and explicit mip levels in `tex1DLayeredLod`/`tex2DLayeredLod`.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 

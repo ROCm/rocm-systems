@@ -5,6 +5,9 @@
  */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
+
+#include "utils.hh"
 
 #include "kernels.hh"
 #include "test_fixture.hh"
@@ -83,6 +86,61 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex2Dgather_Positive_ReadModeElementType, char, unsi
       INFO("comp: " << comp);
       REQUIRE(false);
     }
+  }
+}
+
+static __global__ void gatherDistinctChannels(hipTextureObject_t texture, float4* output) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  const unsigned component = threadIdx.x;
+  if (component == 4) {
+    output[component] = tex2Dgather<float4>(texture, 0.5f, 0.5f);
+    tex2Dgather<float4>(&output[5 + component], texture, 0.5f, 0.5f);
+  } else {
+    output[component] = tex2Dgather<float4>(texture, 0.5f, 0.5f, component);
+    tex2Dgather<float4>(&output[5 + component], texture, 0.5f, 0.5f, component);
+  }
+#endif
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verify zero-based gather channels and the default red channel through both overloads.
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex2Dgather.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_tex2Dgather_DistinctChannelsAndPointerOverload) {
+  CHECK_IMAGE_SUPPORT;
+  float4 pixels[16];
+  for (auto& pixel : pixels) pixel = make_float4(10, 20, 30, 40);
+  ArrayAllocGuard<float4> array(make_hipExtent(4, 4, 0), hipArrayTextureGather);
+  HIP_CHECK(hipMemcpy2DToArray(array.ptr(), 0, 0, pixels, 4 * sizeof(float4), 4 * sizeof(float4), 4,
+                               hipMemcpyHostToDevice));
+  hipResourceDesc res_desc{};
+  res_desc.resType = hipResourceTypeArray;
+  res_desc.res.array.array = array.ptr();
+  hipTextureDesc tex_desc{};
+  tex_desc.normalizedCoords = 1;
+  tex_desc.readMode = hipReadModeElementType;
+  tex_desc.addressMode[0] = tex_desc.addressMode[1] = hipAddressModeClamp;
+  TextureGuard texture(&res_desc, &tex_desc);
+  LinearAllocGuard<float4> device(LinearAllocs::hipMalloc, 10 * sizeof(float4));
+  gatherDistinctChannels<<<1, 5>>>(texture.object(), device.ptr());
+  HIP_CHECK(hipGetLastError());
+  float4 output[10];
+  HIP_CHECK(hipMemcpy(output, device.ptr(), sizeof(output), hipMemcpyDeviceToHost));
+  for (unsigned i = 0; i < 10; ++i) {
+    const unsigned component = i % 5;
+    const float expected = 10.0f * (component == 4 ? 1 : component + 1);
+    INFO("component=" << component << " pointer_overload=" << (i >= 5));
+    REQUIRE(output[i].x == expected);
+    REQUIRE(output[i].y == expected);
+    REQUIRE(output[i].z == expected);
+    REQUIRE(output[i].w == expected);
   }
 }
 
