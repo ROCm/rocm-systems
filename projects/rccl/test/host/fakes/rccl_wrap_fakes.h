@@ -132,7 +132,7 @@ extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, 
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool,
                                   bool, struct rcclCollDecision*)>
     g_rcclSelectAlltoAll;
-extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*)> g_rcclDdaEnabled;
+extern std::function<bool(const struct ncclComm*, size_t, size_t, bool, const char*, int)> g_rcclDdaEnabled;
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaEntryThreshold;
 extern std::function<ncclResult_t(int, const char**)> g_rcclGetAlgoName;
 extern std::function<bool(struct ncclComm*, size_t&)> g_rcclUseAllGatherDirect;

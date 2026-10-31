@@ -882,6 +882,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
   set(TEST_MICRO_DDA_IPC_SOURCE_FILES
     dda-allreduce-ipc-test.cc
+    fakes/dda_ipc_nranks_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp

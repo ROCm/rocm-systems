@@ -93,6 +93,7 @@ struct DdaEnabledCall {
   size_t totalBytes;
   size_t threshold;
   bool query;
+  int minRanks;
 };
 
 struct SymkQuery {
@@ -448,9 +449,9 @@ struct SharedHooks {
                                               hipStream_t st, bool q, bool h, rcclCollDecision* d) {
         return RecordSelect("AlltoAll", s, r, n, ncclNumOps, st, q, h, d);
       }};
-  ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*)> ddaEnabled{
-      g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
-        fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
+  ScopedHook<bool(const ncclComm*, size_t, size_t, bool, const char*, int)> ddaEnabled{
+      g_rcclDdaEnabled, [](const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*, int minRanks) {
+        fake.ddaEnabledCalls.push_back({totalBytes, threshold, query, minRanks});
         return fake.ddaEnabled;
       }};
   ScopedHook<size_t(const ncclComm*, ncclFunc_t)> ddaThreshold{g_rcclDdaEntryThreshold,
