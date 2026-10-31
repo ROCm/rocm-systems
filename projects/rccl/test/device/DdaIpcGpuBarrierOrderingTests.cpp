@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // 8-GPU litmus for ipc_gpu_barrier.h fences; rounds repeat inside one kernel so kernel boundaries cannot hide them.
-// FlatSync_FourRanks reruns the flat shape on a 4-GPU clique whose barriers carry nRanks = 4.
+// FlatSync_FourRanks reruns the flat shape on a 4-GPU clique whose barriers sync over nRanks = 4.
 // AbortedBarrierStaysSilent needs one GPU and checks that a barrier gives up for good once it sees the abort flag;
 // its _FourRanks variant repeats that with nRanks = 4 and checks the four unused lanes are never signaled.
 // AbortVoteIsBlockWide lets one peer arrive before the abort, so the give-up must be one vote across the lanes.
@@ -52,7 +52,6 @@ struct MailboxImage {
 struct BarrierImage {
   int nBlocks;
   int selfRank;
-  int nRanks;  // live peer count; the barrier signals only lanes below it
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaKernelParams params;
   bool aborted;
@@ -70,9 +69,9 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 // mailboxes always holds kRanks entries; with nRanks < kRanks the caller decides what the unused tail points at.
-IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {},
-                          int nRanks = kRanks) {
-  BarrierImage img{kBlocks, selfRank, nRanks, {}, params, false};
+// The live peer count is not part of the barrier: kernels pass it to syncOnSameBlockIdx(nRanks).
+IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes, DdaKernelParams params = {}) {
+  BarrierImage img{kBlocks, selfRank, {}, params, false};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
@@ -144,9 +143,9 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
       // Release-only stand-in for the prior kernel end; with no acquire here, only the barrier orders the reads.
       __syncthreads();
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
-      bar.syncOnSameBlockIdx<false, true>();
+      bar.syncOnSameBlockIdx<false, true>(nRanks);
     } else {
-      bar.syncOnSameBlockIdx<true, true>();
+      bar.syncOnSameBlockIdx<true, true>(nRanks);
     }
     for (int p = 0; p < nRanks; ++p) {
       if (p == self) {
@@ -159,7 +158,7 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
         }
       }
     }
-    bar.syncOnSameBlockIdx<true, false>();
+    bar.syncOnSameBlockIdx<true, false>(nRanks);
     // Stands in for the kernel end that follows <true, false> in production.
     __syncthreads();
   }
@@ -172,12 +171,12 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
 // Barrier 2 must signal nothing, or a late peer would pair with it and read a shard this rank never produced.
 // Only the nRanks live peers drain, so a signal on a lane at or above nRanks survives for the host to see.
 __global__ void abortedBarrierStaysSilent(IpcGpuBarrier bar, uint32_t* const* flags, int self, int nRanks) {
-  bar.syncOnSameBlockIdx<true, true>();
+  bar.syncOnSameBlockIdx<true, true>(nRanks);
   if (threadIdx.x < static_cast<unsigned>(nRanks)) {
     __atomic_store_n(flags[threadIdx.x] + blockIdx.x * kRanks + self, 0u, __ATOMIC_RELAXED);
   }
   __syncthreads();
-  bar.syncOnSameBlockIdx<true, false>();
+  bar.syncOnSameBlockIdx<true, false>(nRanks);
 }
 
 // Uncached is the production scratch; Coarse (cached) is the only allocation where a relaxed release is observable.
@@ -295,11 +294,11 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice, int nRanks 
     HIP_CHECK(hipSetDevice(r));
     if (shape == Shape::kFlat) {
       hipLaunchKernelGGL(flatSync<false>, dim3(kBlocks), dim3(kFlatThreads), 0, streams[r],
-                         makeBarrier(r, barMb[r], DdaKernelParams{}, nRanks), dBufs[r], r, nRanks, iters, slice,
+                         makeBarrier(r, barMb[r], DdaKernelParams{}), dBufs[r], r, nRanks, iters, slice,
                          dBad[r]);
     } else if (shape == Shape::kFlatAcquireOnly) {
       hipLaunchKernelGGL(flatSync<true>, dim3(kBlocks), dim3(kFlatThreads), 0, streams[r],
-                         makeBarrier(r, barMb[r], DdaKernelParams{}, nRanks), dBufs[r], r, nRanks, iters, slice,
+                         makeBarrier(r, barMb[r], DdaKernelParams{}), dBufs[r], r, nRanks, iters, slice,
                          dBad[r]);
     } else if (shape == Shape::kPull) {
       hipLaunchKernelGGL(mailboxMessagePassing<false>, dim3(kBlocks), dim3(64), 0, streams[r], dData[r], dAck[r],
@@ -366,7 +365,7 @@ void runStickyAbortTest(int nRanks = kRanks, int arrivedPeer = -1) {
   HIP_CHECK(hipMemcpy(dFlags, flags.data(), kRanks * sizeof(uint32_t*), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(abortedBarrierStaysSilent, dim3(kBlocks), dim3(64), 0, nullptr,
-                     makeBarrier(kSelf, mailboxes, DdaKernelParams{abortFlag}, nRanks), dFlags, kSelf, nRanks);
+                     makeBarrier(kSelf, mailboxes, DdaKernelParams{abortFlag}), dFlags, kSelf, nRanks);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 

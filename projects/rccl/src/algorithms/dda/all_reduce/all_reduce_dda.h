@@ -37,12 +37,12 @@ __launch_bounds__(512)
 
   copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
   // pattern=2: full reduce into recvbuff (one-shot, not scatter)
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 2);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 }
 
 template <typename T, int NRANKS, bool hasAcc>
@@ -53,7 +53,7 @@ __launch_bounds__(512)
                                       const T* __restrict__ sendbuff, int selfRank, int nRanksRuntime,
                                       IpcGpuBarrier barrier, const T* __restrict__ acc) {
   const int nRanks = (NRANKS > 0) ? NRANKS : nRanksRuntime;
-  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
   const size_t countPerRank = count / nRanks;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -65,11 +65,11 @@ __launch_bounds__(512)
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, ipcbuffs[selfRank], acc, selfRank, nRanks, idxStart, idxEnd, idxStride, 1);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 
   allGather<T, NRANKS>(ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, true);
 
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */, NRANKS>(nRanks);
 }
 
 } // namespace dda::common
