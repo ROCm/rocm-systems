@@ -5,6 +5,7 @@
  */
 
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -658,6 +659,19 @@ static hipError_t ihipCreateKernelCommand(amd::Command*& command, hipFunction_t 
     }
     if (expectsArgs == false && kernargs_size != 0) {
       return hipErrorLaunchOutOfResources;
+    }
+    // A short buffer is silently zero-filled by captureHIPArgs, which can fault
+    // on the GPU later (e.g. a missing pointer becomes null). Flag it here.
+    size_t requiredSize = 0;
+    for (uint32_t i = 0; i < numParams; ++i) {
+      const amd::KernelParameterDescriptor& desc = kernel->signature().at(i);
+      requiredSize = std::max(requiredSize, static_cast<size_t>(desc.offset_ + desc.size_));
+    }
+    if (kernargs_size < requiredSize) {
+      LogPrintfWarning(
+          "Kernel %s expects %zu bytes of arguments but HIP_LAUNCH_PARAM_BUFFER_SIZE is %zu; "
+          "missing arguments will be set to zero",
+          kernel->name().c_str(), requiredSize, kernargs_size);
     }
   }
 
