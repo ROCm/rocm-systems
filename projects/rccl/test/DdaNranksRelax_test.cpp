@@ -612,6 +612,18 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
         rc = ddaInitRunAllReduceCheck(rank, nranks, c);
     }
 
+    // A failed check must not end in ncclCommDestroy(): it waits in an
+    // intra-node barrier for peers that are themselves parked in the next
+    // collective's GPU barrier waiting for this rank, so nobody would exit and
+    // the run would burn the supervisor's whole deadline as a generic timeout.
+    // Aborting lets this rank exit at once, and the supervisor then kills the
+    // stranded peers and reports this rank as the one that failed.
+    if (rc != kDdaInitChildOk)
+    {
+        (void)ncclCommAbort(commHandle);
+        return rc;
+    }
+
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
     return rc;
 }
@@ -738,6 +750,10 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
         }
         if (pid == 0)
         {
+            // stdout is a pipe to the runner, hence fully buffered. A rank the
+            // supervisor SIGKILLs never reaches the flush below, so without this
+            // its "expected X, got Y" line would be lost with it.
+            setvbuf(stdout, nullptr, _IONBF, 0);
             const int rc = ddaInitRunRank(r, nranks, shared, expectResources);
             // _exit() skips stdio teardown; flush so the rank's diagnostics
             // reach the runner's captured output.
