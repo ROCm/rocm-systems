@@ -40,6 +40,7 @@ class TestNicDiscovery(unittest.TestCase):
                 "amdsmi_get_nic_device_uuid",
             ],
         )
+        print("\n### amdsmi_get_nic_processor_handles()\n")
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), self.common.max_num_physical_devices)
@@ -49,9 +50,9 @@ class TestNicDiscovery(unittest.TestCase):
             if nic_info:
                 bdf = nic_info["bdf"]
             print(f"\n\n###Test nic Processor {i}, bdf: {bdf}")
-            print("\n###Test amdsmi_get_processor_handle_from_bdf\n")
+            print("\n### amdsmi_get_processor_handle_from_bdf()\n")
             processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-            print("\n###Test amdsmi_get_nic_device_uuid\n")
+            print("\n### amdsmi_get_nic_device_uuid()\n")
             uuid = amdsmi.amdsmi_get_nic_device_uuid(processor)
             print(f"  uuid is: {uuid}")
         print()
@@ -73,9 +74,9 @@ class TestNicDiscovery(unittest.TestCase):
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
             print(f"\n\n###Test switch Processor {i}, bdf: {bdf}")
-            print("\n###Test amdsmi_get_processor_handle_from_bdf\n")
+            print("\n### amdsmi_get_processor_handle_from_bdf()\n")
             processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-            print("\n###Test amdsmi_get_device_id\n")
+            print("\n### amdsmi_get_device_id()\n")
             device_id = amdsmi.amdsmi_get_device_id(processor)
             print(f"  device_id is: {device_id}")
         print()

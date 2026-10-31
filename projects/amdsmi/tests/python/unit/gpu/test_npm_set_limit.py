@@ -30,7 +30,7 @@ import ctypes
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import amdsmi, log_api_call
 
 
 def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
@@ -42,35 +42,65 @@ def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
 
 class TestAmdSmiSetNpmLimitParameterValidation(unittest.TestCase):
     def test_rejects_non_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit("not-a-node-handle", 100)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_non_int_limit(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit(node_handle, "100")
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_none_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit(None, 100)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_float_limit(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit(node_handle, 100.5)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_negative_limit(self):
         # A Python int can represent negative values a raw ctypes.c_uint64()
         # cannot (it would silently wrap modulo 2**64); the explicit range
         # check must reject this before ever reaching ctypes.
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit(node_handle, -1)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
     def test_rejects_limit_over_uint64_max(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
             amdsmi.amdsmi_set_npm_limit(node_handle, 0xFFFFFFFFFFFFFFFF + 1)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            raised.exception,
+            raises=amdsmi.AmdSmiParameterException,
+        )
 
 
 class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
@@ -82,6 +112,7 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
             return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
         ) as mocked_call:
             result = amdsmi.amdsmi_set_npm_limit(node_handle, 250)
+            log_api_call("\t### amdsmi_set_npm_limit():")
 
         self.assertIsNone(result)
         mocked_call.assert_called_once()
@@ -99,6 +130,11 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_limit(node_handle, 250)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            ctx.exception,
+            amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM,
+        )
         self.assertEqual(
             ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
         )
@@ -112,6 +148,11 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_limit(node_handle, 250)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            ctx.exception,
+            amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+        )
         self.assertEqual(
             ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
         )
@@ -125,4 +166,9 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
         ):
             with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
                 amdsmi.amdsmi_set_npm_limit(node_handle, 250)
+        log_api_call(
+            "\t### amdsmi_set_npm_limit():",
+            ctx.exception,
+            amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL,
+        )
         self.assertEqual(ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)

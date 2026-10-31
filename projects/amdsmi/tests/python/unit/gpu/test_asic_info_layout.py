@@ -8,7 +8,7 @@ import ctypes
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import amdsmi, log_api_call
 
 _ASIC_INFO_SIZE = 896
 _CHIP_REV_ID_OFFSET = 828
@@ -35,7 +35,9 @@ def _asic_info_with(chip: int = None, external: int = None, rev_id: int = _UINT3
         return 0
 
     with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_gpu_asic_info", _stub):
-        return amdsmi.amdsmi_interface.amdsmi_get_gpu_asic_info(handle)
+        asic_info = amdsmi.amdsmi_interface.amdsmi_get_gpu_asic_info(handle)
+    log_api_call("\t### amdsmi_get_gpu_asic_info(gpu=stub):")
+    return asic_info
 
 
 class TestAsicInfoLayout(unittest.TestCase):

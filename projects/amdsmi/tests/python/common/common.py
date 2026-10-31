@@ -1967,3 +1967,44 @@ class Common:
         if raise_exception:
             raise raise_exception
         return
+
+
+def _print_exception_outcome(logger, msg, outcome, raises):
+    """Verdict for a call judged by the exception it raised, since no status exists."""
+    got = "returned without raising" if outcome is None else f"raised {type(outcome).__name__}"
+    if raises is None:
+        logger.print(f"{msg}\n\tAMDSMI API {got}")
+        return
+    expected = raises if isinstance(raises, tuple) else (raises,)
+    failed = outcome is None or not isinstance(outcome, expected)
+    verdict = "TEST FAILURE" if failed else "TEST SUCCESS"
+    lines = [f"{msg}\n\t{verdict}, AMDSMI API {got}"]
+    lines += [f"\t              AMDSMI API Accepted {exc.__name__}" for exc in expected]
+    logger.print("\n".join(lines))
+
+
+def log_api_call(msg, outcome=None, accept=None, raises=None):
+    """Log an API call and what it gave, as expect_status does, for tests with no device.
+
+    outcome is the exception the call raised, or None when it returned. A library exception
+    carries a status, judged against accept (name, AmdSmiStatus or int; default success). The
+    wrapper rejects bad arguments with a parameter exception before any C call, so no status
+    exists; that is judged against raises, the exception type the test expects.
+    """
+    logger = object.__new__(Common)
+    logger.verbose = verbose
+    logger.error_map = ERROR_MAP
+    if raises is not None or (outcome is not None and not hasattr(outcome, "get_error_code")):
+        _print_exception_outcome(logger, msg, outcome, raises)
+        return
+    if accept is None:
+        accept = PASS
+    if not isinstance(accept, (list, tuple)):
+        accept = [accept]
+    accept = [ERROR_MAP.get(str(a), a) if isinstance(a, int) else a for a in accept]
+    result = logger._new_status_outcome(msg, accept)
+    if outcome is None:
+        logger._record_returned_status(result)
+    else:
+        logger._record_raised_status(result, outcome)
+    logger._print_status_outcome(result)
