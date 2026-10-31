@@ -2385,6 +2385,80 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
 
+// Begin fails, so launch() must not run. cudaDev 5 != current 3 makes the set and the restore observable.
+TEST_F(EnqueueMicrotest, AddonLaunch_SetDeviceFailed_SkipsLaunchAndRestoresTheDevice) {
+  AddonComm ac;
+  ac.c()->cudaDev        = 5;
+  ac.c()->addonStopEvent = kAddonDoneEvent;  // Begin clears it, so a stale event can't leak through
+  g_currentDevice        = 3;
+  std::vector<int> setDevices;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    setDevices.push_back(dev);
+    if (dev == 5) return hipErrorInvalidDevice;
+    g_currentDevice = dev;
+    return hipSuccess;
+  });
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  int launches = 0;
+  ncclResult_t res = ncclSuccess;
+  RcclUnitTesting::CaptureLog([&] {
+    res = rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+      ++launches;
+      return ncclSuccess;
+    });
+  });
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_EQ(0, launches);
+  EXPECT_EQ(0, notCapturing.calls);  // Begin stopped at the failed set
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+  EXPECT_EQ(nullptr, ac.c()->addonStopEvent);
+  EXPECT_EQ(std::vector<int>({5, 3}), setDevices);  // the failed set, then the restore
+  EXPECT_EQ(3, g_currentDevice);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CaptureQueryFailed_SkipsLaunchAndRestoresTheDevice) {
+  AddonComm ac;
+  ac.c()->cudaDev        = 5;
+  ac.c()->addonStopEvent = kAddonDoneEvent;  // Begin clears it, so a stale event can't leak through
+  g_currentDevice        = 3;
+  // A tag from another stream: a launch that ran anyway would overwrite it with kAddonStream's.
+  hipStream_t const otherStream = reinterpret_cast<hipStream_t>(0x0B5);
+  ac.c()->lastStreamTag = ncclStreamTag(otherStream);
+  std::vector<int> setDevices;
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    setDevices.push_back(dev);
+    g_currentDevice = dev;
+    return hipSuccess;
+  });
+  ScopedHook queryFails(g_cudaGetCapturingGraph,
+                        [](struct ncclCudaGraph*, hipStream_t, int) { return ncclInternalError; });
+  ScopedHook waitEvent(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  int launches = 0;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+              ++launches;
+              return ncclSuccess;
+            }));
+
+  EXPECT_EQ(1, queryFails.calls);
+  EXPECT_EQ(0, launches);
+  EXPECT_EQ(0, waitEvent.calls);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(ncclStreamTag(otherStream), ac.c()->lastStreamTag);
+  EXPECT_EQ(nullptr, ac.c()->addonStopEvent);
+  EXPECT_EQ(std::vector<int>({5, 3}), setDevices);  // set by the prologue, restored by the epilogue
+  EXPECT_EQ(3, g_currentDevice);
+}
+
 // ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
 // comm->opCount in step with the native path.
 TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
