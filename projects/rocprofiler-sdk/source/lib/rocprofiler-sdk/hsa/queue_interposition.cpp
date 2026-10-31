@@ -41,6 +41,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
@@ -1428,6 +1429,14 @@ write_interceptor(Queue*                                queue,
                           "failed to compute size field based on offset of reserved_padding field");
 
             auto dispatch_id = ++sequence_counter;
+
+            // Feed HIP_GRAPH summary's kernel_dispatch_count, as the legacy path does, and give
+            // the dispatch its graph launch and its ordinal in it (zeros outside a graph launch)
+            if(auto* graph_launch_state = ::rocprofiler::hip::graph::current_launch_state();
+               graph_launch_state != nullptr)
+                ++graph_launch_state->dispatch_count;
+            auto graph_identity = ::rocprofiler::hip::graph::next_enqueue_identity();
+
             _packet_data.callback_record =
                 callback_record_t{sizeof(callback_record_t),
                                   rocprofiler_timestamp_t{0},
@@ -1442,6 +1451,8 @@ write_interceptor(Queue*                                queue,
                                       .group_segment_size   = pkt_info.group_segment_size,
                                       .workgroup_size       = pkt_info.workgroup_size,
                                       .grid_size            = pkt_info.grid_size,
+                                      .graph_exec_id        = graph_identity.graph_exec_id,
+                                      .graph_node_id        = graph_identity.graph_node_id,
                                       .reserved_padding     = {0}}};
 
             {
