@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 // RDMA info is optional: a tolerated status keeps the NIC with a zeroed
-// rdma_dev, while every other RDMA failure and any failure from the five
-// required getters drops it. Driven through the test seam, so each getter's
-// status is set independently and no NIC hardware is needed.
+// rdma_dev. Driver/port info is optional too, tolerating NO_DATA alone with no
+// zeroing guarantee. Every other failure on any of the five required getters
+// drops the NIC. Driven through the test seam, so each getter's status is set
+// independently and no NIC hardware is needed.
 //
 // Coverage stops at populate_amd_ainic_device(). Reaching the public
 // amdsmi_get_nic_rdma_dev_info() needs a handle registered with AMDSmiSystem,
@@ -15,57 +16,25 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <iterator>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
+#include "nic_unit_fixture.h"
 
 namespace {
 
 using amd::smi::AMDSmiAINICDevice;
-using amd::smi::nic_info_getters_t;
 using amd::smi::nic_set_info_getters_for_testing;
 using amd::smi::populate_amd_ainic_device;
 
-// Positions in nic_info_getters_t, in declaration order.
-constexpr size_t kBus = 0;
-constexpr size_t kDriver = 1;
-constexpr size_t kAsic = 2;
-constexpr size_t kNuma = 3;
-constexpr size_t kPort = 4;
-constexpr size_t kRdma = 5;
-constexpr size_t kGetterCount = 6;
-
 // The five getters ahead of the RDMA one; failing any must drop the NIC.
 constexpr std::array<size_t, 5> kRequiredGetters = {kBus, kDriver, kAsic, kNuma, kPort};
-
-std::array<smi_nic_status_t, kGetterCount> g_status;
-
-// A byte unique to each getter position, so a swapped reinterpret_cast
-// destination surfaces as the wrong byte instead of an indistinguishable zero.
-constexpr unsigned char FillByte(size_t index) { return static_cast<unsigned char>(0xA0 + index); }
 
 template <typename T>
 bool IsFilledWith(const T& value, unsigned char byte) {
   const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
   return std::all_of(bytes, bytes + sizeof(T), [byte](unsigned char b) { return b == byte; });
 }
-
-template <size_t Index, typename Info>
-smi_nic_status_t Stub(smi_nic_ctx_t, uint64_t, Info* info) {
-  std::memset(info, FillByte(Index), sizeof(*info));
-  return g_status[Index];
-}
-
-// The RDMA stub fills like the rest rather than writing nothing: a non-zero fill
-// is what the real getter leaves behind when it takes its ports.empty() early
-// return without its own `*info = {}`, so the zeroing the tolerated path is
-// asserted to perform still has to come from production.
-const nic_info_getters_t kStubGetters = {
-    Stub<kBus, smi_nic_bus_info_t>,   Stub<kDriver, smi_nic_driver_info_t>,
-    Stub<kAsic, smi_nic_asic_info_t>, Stub<kNuma, smi_nic_numa_info_t>,
-    Stub<kPort, smi_nic_port_info_t>, Stub<kRdma, smi_nic_rdma_devices_info_t>,
-};
 
 // Every non-SUCCESS status, paired with the amdsmi_status_t a fatal getter
 // failure must surface. Mirrors ainic_status_map in amd_smi_common.h.
@@ -79,7 +48,7 @@ constexpr std::array<StatusMapping, 8> kStatusMappings = {{
     {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
     {SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
     {SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
-    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
     {SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
     {SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED},
@@ -94,6 +63,13 @@ static_assert(kStatusMappings.size() == SMI_NIC_STATUS_DRIVER_NOT_LOADED,
 // The two the RDMA getter is allowed to return without losing the NIC.
 bool IsToleratedForRdma(smi_nic_status_t status) {
   return status == SMI_NIC_STATUS_NO_DATA || status == SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+}
+
+// kDriver and kPort additionally forgive NO_DATA alone: a fwctl-only NIC has no
+// host netdev to query for driver info or link state. Mirrors the carve-outs in
+// populate_amd_ainic_device() (amd_smi_system.cc).
+bool IsToleratedForDriverOrPort(size_t getter, smi_nic_status_t status) {
+  return (((getter == kDriver) || (getter == kPort)) && (status == SMI_NIC_STATUS_NO_DATA));
 }
 
 template <size_t N>
@@ -121,26 +97,6 @@ void ExpectRdmaZeroed(const amdsmi_nic_rdma_devices_info_t& rdma) {
     }
   }
 }
-
-class NicUnit : public ::testing::Test {
- protected:
-  void SetUp() override {
-    g_status.fill(SMI_NIC_STATUS_SUCCESS);
-    nic_set_info_getters_for_testing(&kStubGetters);
-  }
-
-  // Restores the production getters however a test exits.
-  void TearDown() override { nic_set_info_getters_for_testing(nullptr); }
-
-  amdsmi_status_t Populate() {
-    smi_nic_ctx_t ctx = nullptr;
-    info_ = {};
-    std::memset(&info_.rdma_dev, 0xFF, sizeof(info_.rdma_dev));
-    return populate_amd_ainic_device(ctx, 0x1000, info_);
-  }
-
-  AMDSmiAINICDevice::AINICInfo info_ = {};
-};
 
 // Each sub-struct must carry its own getter's byte, so a swapped
 // reinterpret_cast destination among the six near-identical blocks fails here.
@@ -176,6 +132,19 @@ TEST_F(NicUnit, RdmaNoDataKeepsNic) {
   ExpectRdmaZeroed(info_.rdma_dev);
 }
 
+// Unlike the RDMA getter, driver/port never write on this path (they return
+// before touching their output struct), so there is no zeroed-struct contract
+// to assert here.
+TEST_F(NicUnit, DriverNoDataKeepsNic) {
+  g_status[kDriver] = SMI_NIC_STATUS_NO_DATA;
+  EXPECT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+}
+
+TEST_F(NicUnit, PortNoDataKeepsNic) {
+  g_status[kPort] = SMI_NIC_STATUS_NO_DATA;
+  EXPECT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+}
+
 // Pins the status translation, not just "something went wrong".
 TEST_F(NicUnit, RdmaHardFailureMapsToItsAmdsmiStatus) {
   for (const StatusMapping& mapping : kStatusMappings) {
@@ -188,11 +157,16 @@ TEST_F(NicUnit, RdmaHardFailureMapsToItsAmdsmiStatus) {
   }
 }
 
-// Tolerance belongs to the RDMA getter alone: the required five must drop the
-// NIC for every status, including the two the RDMA path forgives.
+// The required five must drop the NIC for every status, including the two the
+// RDMA path forgives, except NO_DATA on driver/port (see
+// IsToleratedForDriverOrPort, covered separately by DriverNoDataKeepsNic and
+// PortNoDataKeepsNic).
 TEST_F(NicUnit, RequiredGetterFailureDropsNicForEveryStatus) {
   for (size_t getter : kRequiredGetters) {
     for (const StatusMapping& mapping : kStatusMappings) {
+      if (IsToleratedForDriverOrPort(getter, mapping.nic)) {
+        continue;
+      }
       SetUp();
       g_status[getter] = mapping.nic;
       EXPECT_EQ(Populate(), mapping.amdsmi)

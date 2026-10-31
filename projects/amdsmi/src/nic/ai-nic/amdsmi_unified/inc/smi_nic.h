@@ -1,32 +1,69 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef __SMI_NIC__H__
-#define __SMI_NIC__H__
+#ifndef AMDSMI_UNIFIED_SMI_NIC_H_
+#define AMDSMI_UNIFIED_SMI_NIC_H_
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "smi_ethtool_ioctl.h"
+#include "smi_nic_hwmon.h"
+#include "smi_nic_stats.h"
+#include "smi_nic_transport.h"
+#include "smi_nic_vpd.h"
+#include "smi_pci_topology.h"
+
+/**
+ * @brief Convert BDF string format to uint64_t
+ *
+ * Converts a BDF string to uint64_t format:
+ * (domain << 16) | (bus << 8) | (device << 3) | function
+ *
+ * @param bdf BDF string
+ * @return uint64_t BDF value, or 0 if parsing fails
+ */
+uint64_t parse_bdf(const std::string& bdf);
 
 enum class NicType {
   Unknown,
   PCIBridge,
   Ethernet,
   InfiniBand,
+  Fabric,  // accelerator-fabric endpoint (UALoE), no host network port
 };
 
 enum class NicVendor { Unknown, AMD, Broadcom };
 
-// TODO: broadcom - update enum with the right products
 enum class NicProduct {
   Unknown,
   AINIC,  // AMD Pensando AINIC
-  Thor,   // Broadcom Thor
 };
+
+// Bitmask of a NIC's management/connectivity capabilities. Mirrors the public
+// amdsmi_nic_capability_bits_t; the bit values MUST stay in sync with it.
+enum SmiNicCapability : uint32_t {
+  SMI_NIC_CAP_FWCTL = 1u << 0,   // firmware-control mgmt function (POLLARA/pds_core)
+  SMI_NIC_CAP_NETDEV = 1u << 1,  // exposes host network port(s)
+};
+
+// Which kind of NIC this is. Mirrors the public amdsmi_nic_type_t; the values MUST
+// stay in sync with it.
+enum SmiNicKind : uint8_t {
+  SMI_NIC_KIND_UNKNOWN = 0,
+  SMI_NIC_KIND_AINIC = 1,  // AMD Pensando AINIC
+  SMI_NIC_KIND_UALOE = 2,  // UALoE accelerator-fabric endpoint (the ifoe driver)
+  SMI_NIC_KIND_OTHER = 3,  // any other vendor
+};
+
+/**
+ * Board temperature sensors a NIC may expose. A vendor that lacks a given
+ * sensor reports it as unsupported (reserved value) rather than fabricating a value.
+ */
+enum class NicTempSensor : uint8_t { Asic, Transceiver, Board };
 
 class SmiInfiniBandPort {
  public:
@@ -36,16 +73,24 @@ class SmiInfiniBandPort {
   const std::string& name() const;
   std::optional<uint8_t> port_num() const;
   std::optional<std::string> state() const;
+  // libibverbs answers first; the sysfs files are the fallback for a driver that exposes them. The
+  // libibverbs answer is read once, on the first call, so it does not follow a later MTU change.
+  // The first call may fork (see smi_ibverbs), so a port shared between threads needs a lock.
   std::optional<uint16_t> max_mtu() const;
   std::optional<uint16_t> active_mtu() const;
-  void collect_hw_counters();
+  // const: counters are re-read on every query, so the map is a mutable cache.
+  void collect_hw_counters() const;
   const std::map<std::string, uint64_t>& get_hw_counters_map() const;
 
  private:
   std::string netdev_;
   std::string name_;
   std::string sysfs_path_;
-  std::map<std::string, uint64_t> hw_counters_map_;
+  mutable std::map<std::string, uint64_t> hw_counters_map_;
+  void query_ibverbs_mtu_once() const;
+  mutable bool m_was_ibverbs_mtu_queried = false;
+  mutable std::optional<uint16_t> m_ibverbs_max_mtu;
+  mutable std::optional<uint16_t> m_ibverbs_active_mtu;
 };
 
 class SmiInfiniBand {
@@ -73,7 +118,9 @@ class SmiInfiniBand {
 class SmiNicPort {
  public:
   SmiNicPort(const std::string& iface, const std::string& bdf, const std::string& sysfs_class_path,
-             const std::string& sysfs_bus_path);
+             const std::string& sysfs_bus_path,
+             std::shared_ptr<amd::smi::nic::transport::NicTransport> transport = nullptr,
+             const StatTable_t* stat_table = nullptr);
 
   const std::string& interface() const;
   const std::string& bdf() const;
@@ -82,7 +129,7 @@ class SmiNicPort {
 
   std::optional<std::string> mac_address() const;
   std::optional<uint32_t> port_num() const;
-  std::optional<uint8_t> ifindex() const;
+  std::optional<uint32_t> ifindex() const;
   std::optional<uint8_t> carrier() const;
   std::optional<uint16_t> mtu() const;
   std::optional<std::string> link_state() const;
@@ -91,39 +138,32 @@ class SmiNicPort {
   const std::string port_type() const;
   std::string flavour() const;
 
-  std::optional<uint32_t> active_fec() const;
-  std::optional<std::string> autoneg() const;
-  std::optional<std::string> pause_autoneg() const;
-  std::optional<std::string> pause_rx() const;
-  std::optional<std::string> pause_tx() const;
+  std::optional<bool> autoneg() const;
+  std::optional<amd::smi::nic::transport::PauseParams> pause_params() const;
+  std::optional<std::string> permanent_address() const;
 
   void discover_infiniband();
   void add_infiniband(const SmiInfiniBand& infiniband);
   const std::vector<SmiInfiniBand>& infiniband() const;
   uint8_t infiniband_num() const;
-  void collect_vendor_statistics();
-  void add_vendor_statistic(struct ethtool_gstrings* strings, struct ethtool_stats* stats);
-  const std::map<std::string, uint64_t>& get_vendor_stats_map() const;
-  void collect_standard_statistics();
+
+  // Refreshes the vendor-counter cache from the transport (ethtool -S plus,
+  // when the transport supports it, netlink FEC stats). Const: the cache is a
+  // mutable implementation detail, not part of the port's logical state, so a
+  // query-time refresh does not require a non-const port.
+  // Returns 0, or the errno of the failed read. A driver without ethtool statistics (ENOTSUP) has
+  // none to report, which is not a failure.
+  int collect_vendor_statistics() const;
+  // Returns the subset of the cached counters this port's stat_table_ allows
+  // for `scope`: Default returns only Default-tier names present; Extended
+  // returns every present name in the table (Default is a subset of Extended).
+  // Returns an empty map if this port has no table (e.g. UALoE has no ports).
+  std::map<std::string, uint64_t> get_vendor_stats_map(StatTier_t scope) const;
+
+  void collect_standard_statistics() const;
   const std::map<std::string, uint64_t>& get_standard_stats_map() const;
-  std::optional<std::string> read_vpd_content() const;
 
  private:
-  enum class SmiVendorStat {
-    TX_PACKETS,
-    RX_PACKETS,
-    TX_BYTES,
-    RX_BYTES,
-    TX_CSUM_NONE,
-    RX_CSUM_NONE,
-    TX_CSUM,
-    TX_TSO,
-    TX_TSO_BYTES
-  };
-
-  std::string map_vendor_stat_to_string(SmiVendorStat stat) const;
-  bool vendor_stat_allowed(const std::string& stat_name) const;
-
   std::string iface_;
   std::string bdf_;
   NicType type_;
@@ -131,8 +171,10 @@ class SmiNicPort {
   std::string sysfs_bus_path_;
   std::optional<uint32_t> port_num_;
   std::vector<SmiInfiniBand> infiniband_;
-  std::map<std::string, uint64_t> vendor_stats_map_;
-  std::map<std::string, uint64_t> standard_stats_map_;
+  mutable std::map<std::string, uint64_t> vendor_stats_map_;
+  mutable std::map<std::string, uint64_t> standard_stats_map_;
+  std::shared_ptr<amd::smi::nic::transport::NicTransport> transport_;
+  const StatTable_t* stat_table_;
 };
 
 class SmiNic {
@@ -147,6 +189,7 @@ class SmiNic {
   NicType type() const;
   NicVendor vendor() const;
   NicProduct product() const;
+  SmiNicKind kind() const;
   const std::string port_type() const;
   const std::string& sysfs_class_path() const;
   const std::string& sysfs_bus_path() const;
@@ -155,7 +198,40 @@ class SmiNic {
   const std::vector<SmiNicPort>& nic_ports() const;
   uint8_t nic_ports_num() const;
 
+  /**
+   * Address of the function telemetry registers on. Where the handle is the
+   * PCIe bridge above the ports, hwmon and the devlink instance live on the
+   * port function beneath it, not on the bridge; a portless fwctl-only NIC
+   * answers on its own address. For a single-function NIC the two coincide.
+   *
+   * On a multi-port card this reports port 0 only, and which port is 0 is
+   * decided by add_nic_port's BDF-ordered insert, not here.
+   */
+  const std::string& telemetry_bdf() const;
+  const std::string& telemetry_sysfs_bus_path() const;
+
+  /**
+   * Address of the card's management function, which is where devlink
+   * registers the health reporter. On a Pensando card that is pds_core, a
+   * function behind the other downstream port of the card's internal switch,
+   * so it is neither the bridge handle nor a sibling of the ionic port.
+   * Falls back to telemetry_bdf() for a card with no separate such function.
+   */
+  const std::string& mgmt_bdf() const;
+  // Ignores an empty argument, so an unset mgmt_bdf_ means "no such function on
+  // this card" and nothing else; capabilities() reads it as exactly that.
+  void set_mgmt_bdf(const std::string& bdf);
+
+  // Capability bitmask (SmiNicCapability). Base reports NETDEV iff a host port
+  // exists; vendors that expose firmware-control management override to add it.
+  virtual uint32_t capabilities() const;
+
   std::optional<uint16_t> vendor_id() const;
+  // How this NIC connects to the device at other_bdf (a packed BDF): the same PCIe switch, the same
+  // NUMA node or another one. Read from sysfs; pci_root is a seam for tests.
+  auto link_type(uint64_t other_bdf,
+                 const std::string& pci_root = amd::smi::nic::pci::kDefaultPciRoot) const
+      -> amd::smi::nic::pci::LinkType_t;
   std::optional<uint16_t> subvendor_id() const;
   std::optional<uint16_t> device_id() const;
   std::optional<uint16_t> subsystem_id() const;
@@ -171,6 +247,26 @@ class SmiNic {
   virtual std::optional<std::string> vendor_name() const;
   virtual std::optional<std::string> part_number() const;
   virtual std::optional<std::string> serial_number() const;
+  // True once the NIC's own vpd, or its port 0's, was opened and parsed; false
+  // when neither could be opened at all (permission denied or no vpd node).
+  bool is_vpd_readable() const;
+
+  /**
+   * Absolute path of the hwmon `tempN_input` file (millidegrees C) backing
+   * `sensor`, or nullopt if this NIC has no such sensor. The base performs
+   * generic hwmon discovery under the PCI device: Asic is the channel labelled
+   * "die" (temp1 for a driver that labels nothing, e.g. bnxt_en) and Board is the
+   * channel labelled "board"; a vendor whose sensors live elsewhere overrides
+   * this. (Health reporters are enumerated over devlink and need no per-vendor
+   * mapping, so there is no reporter-name resolver here.)
+   */
+  virtual std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const;
+
+  /**
+   * One record per readable hwmon attribute under the telemetry function (see
+   * amd::smi::nic::hwmon::scan_sensors). Empty when the NIC has no hwmon node.
+   */
+  std::vector<amd::smi::nic::hwmon::SensorRecord_t> hwmon_sensors() const;
 
  protected:
   std::string iface_;
@@ -180,7 +276,14 @@ class SmiNic {
   NicProduct product_;
   std::string sysfs_class_path_;
   std::string sysfs_bus_path_;
+  std::string mgmt_bdf_;
   std::vector<SmiNicPort> ports_;
+
+ private:
+  // The four identity accessors answer from one VPD read. add_nic_port drops it, since a port's
+  // VPD fills in what the NIC's own lacks. Not thread-safe: callers hold the context mutex.
+  const amd::smi::nic::vpd::VpdFields& identity_vpd() const;
+  mutable std::optional<amd::smi::nic::vpd::VpdFields> identity_vpd_cache_;
 };
 
 class SmiNicPensando : public SmiNic {
@@ -190,21 +293,10 @@ class SmiNicPensando : public SmiNic {
                  NicVendor vendor = NicVendor::AMD, NicProduct product = NicProduct::AINIC);
 
   std::optional<std::string> vendor_name() const override;
-  std::optional<std::string> product_name() const override;
-  std::optional<std::string> part_number() const override;
-  std::optional<std::string> serial_number() const override;
+
+  // Adds FWCTL when discovery found this card's pds_core function, which is the
+  // surface the bit promises; host netdev ports are independent of it.
+  uint32_t capabilities() const override;
 };
 
-class SmiNicBroadcom : public SmiNic {
- public:
-  SmiNicBroadcom(const std::string& iface, const std::string& bdf, NicType type = NicType::Unknown,
-                 const std::string& sysfs_class_path = "", const std::string& sysfs_bus_path = "",
-                 NicVendor vendor = NicVendor::Broadcom, NicProduct product = NicProduct::Thor);
-
-  std::optional<std::string> vendor_name() const override;
-  std::optional<std::string> product_name() const override;
-  std::optional<std::string> part_number() const override;
-  std::optional<std::string> serial_number() const override;
-};
-
-#endif  // __SMI_NIC_H__
+#endif  // AMDSMI_UNIFIED_SMI_NIC_H_
