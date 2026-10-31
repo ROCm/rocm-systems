@@ -15,6 +15,7 @@
 
 #include "../common/DdaIpcTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "fakes/dda_ipc_nranks_fakes.h"
 
 #include DDA_REDUCE_SCATTER_IPC_CC_PATH
 
@@ -34,9 +35,10 @@ const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 // Shards up to 1 MiB are copied in the kernel; larger ones are staged by the host first.
 constexpr size_t kInKernelMaxFloats = (1u << 20) / sizeof(float);
 
-template <typename T, bool kCopyInKernel = true>
+// NRANKS 8 is the compile-time clique kernel; NRANKS 0 is the runtime-rank kernel every other count uses.
+template <typename T, bool kCopyInKernel = true, int NRANKS = 8>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaReduceScatterIpc<T, 8, false, kCopyInKernel>);
+  return KernelPtr(&dda::common::ddaReduceScatterIpc<T, NRANKS, false, kCopyInKernel>);
 }
 
 class DdaReduceScatterIpcMicrotest : public ::testing::Test {
@@ -52,6 +54,7 @@ class DdaReduceScatterIpcMicrotest : public ::testing::Test {
   void TearDown() override {
     ResetDdaCollSeams();
     ResetHipFakes();
+    g_ddaIpcNranksRelaxed = false;
   }
 
   ncclComm& comm() { return mock_.comm; }
@@ -64,9 +67,9 @@ class DdaReduceScatterIpcMicrotest : public ::testing::Test {
     return ncclReduceScatterDdaIpc(kSendbuff, kRecvbuff, recvcount, datatype, ncclSum, mock_.get(), kStream);
   }
 
-  template <typename T>
+  template <typename T, bool kCopyInKernel = true, int NRANKS = 8>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
-    EXPECT_EQ(launch.kernel, Kernel<T>());
+    EXPECT_EQ(launch.kernel, (Kernel<T, kCopyInKernel, NRANKS>()));
     ASSERT_EQ(launch.args.size(), 7u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
@@ -246,6 +249,109 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_GridFollowsShardAndCapsAt24) {
 TEST_F(DdaReduceScatterIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+}
+
+// RCCL_DDA_NRANKS_RELAX: 8 ranks keep the compile-time kernel, any other 2..8 count takes the runtime-rank one, in
+// both staging modes. Forcing either instantiation for every count, or dropping the rank-count argument, fails one
+// of these.
+TEST_F(DdaReduceScatterIpcMicrotest, Eligible_RelaxAdmitsTwoToEightRanksOnly) {
+  g_ddaIpcNranksRelaxed = true;
+  for (int nRanks = 2; nRanks <= 8; ++nRanks) {
+    comm().nRanks = nRanks;
+    EXPECT_TRUE(Eligible(4)) << "nRanks " << nRanks;
+  }
+  for (int nRanks : {1, 9}) {
+    comm().nRanks = nRanks;
+    EXPECT_FALSE(Eligible(4)) << "nRanks " << nRanks;
+  }
+}
+
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_EightRanksKeepTheCompileTimeKernelWithOrWithoutRelax) {
+  ASSERT_EQ(comm().nRanks, 8);
+  for (bool relaxed : {false, true}) {
+    g_ddaLaunches.clear();
+    g_ddaIpcNranksRelaxed = relaxed;
+    ASSERT_EQ(Run(16), ncclSuccess) << "relaxed " << relaxed;
+    ASSERT_EQ(Run(kInKernelMaxFloats + 4), ncclSuccess) << "relaxed " << relaxed;
+    ASSERT_EQ(g_ddaLaunches.size(), 2u);
+    ExpectLaunchOf<float, true, 8>(g_ddaLaunches[0], 16);
+    ExpectLaunchOf<float, false, 8>(g_ddaLaunches[1], kInKernelMaxFloats + 4);
+  }
+}
+
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_RelaxedFourRanksCopyASmallShardInTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  ASSERT_EQ(Run(kInKernelMaxFloats), ncclSuccess);
+  EXPECT_TRUE(copies_.empty());
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  ExpectLaunchOf<float, true, 0>(g_ddaLaunches[0], kInKernelMaxFloats);
+  EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), 4);
+  EXPECT_EQ(g_ddaLaunches[0].stopEvent, kStopEvent);
+}
+
+// The host pre-copy stages only the live ranks' shards, then launches the runtime-rank kernel.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_RelaxedFourRanksStageALargerShardBeforeTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  ASSERT_EQ(Run(kInKernelMaxFloats + 4), ncclSuccess);
+  ASSERT_EQ(copies_.size(), 1u);
+  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
+  EXPECT_EQ(copies_[0].src, kSendbuff);
+  EXPECT_EQ(copies_[0].bytes, 4u * (kInKernelMaxFloats + 4) * sizeof(float));
+  EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
+  EXPECT_EQ(copies_[0].stream, kStream);
+  EXPECT_EQ(copies_[0].launchesBefore, 0u);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  ExpectLaunchOf<float, false, 0>(g_ddaLaunches[0], kInKernelMaxFloats + 4);
+  EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), 4);
+}
+
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_RelaxedFourRanksEachDatatypeLaunchesItsOwnRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  ASSERT_EQ(Run(16, ncclFloat32), ncclSuccess);
+  ASSERT_EQ(Run(16, ncclFloat16), ncclSuccess);
+  ASSERT_EQ(Run(16, ncclBfloat16), ncclSuccess);
+  ASSERT_EQ(g_ddaLaunches.size(), 3u);
+  ExpectLaunchOf<float, true, 0>(g_ddaLaunches[0], 16);
+  ExpectLaunchOf<half, true, 0>(g_ddaLaunches[1], 16);
+  ExpectLaunchOf<bf16, true, 0>(g_ddaLaunches[2], 16);
+}
+
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_RelaxedEveryOtherCountUsesTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().rank = 0;
+  for (int nRanks = 2; nRanks <= 7; ++nRanks) {
+    g_ddaLaunches.clear();
+    comm().nRanks = nRanks;
+    ASSERT_EQ(Run(16), ncclSuccess) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<float, true, 0>())) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches[0].args.size(), 7u);
+    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), nRanks);
+  }
+}
+
+// The whole-send-buffer scratch check is sized on the live rank count, not the 8-rank clique.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_RelaxedScratchCheckScalesWithTheRankCount) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().ddaScratchBytes = 4 * 64;
+  EXPECT_EQ(Run(16), ncclSuccess);
+  EXPECT_EQ(Run(20), ncclInvalidArgument);
+  EXPECT_EQ(g_ddaLaunches.size(), 1u);
+}
+
+// Refused by the rank gate before the stop event is taken or anything is staged, in either staging mode.
+TEST_F(DdaReduceScatterIpcMicrotest, Launch_FourRanksWithoutRelaxAreRefusedWithoutLaunching) {
+  comm().nRanks = 4;
+  EXPECT_FALSE(Eligible(4));
+  EXPECT_EQ(Run(16), ncclInvalidUsage);
+  EXPECT_EQ(Run(kInKernelMaxFloats + 4), ncclInvalidUsage);
+  EXPECT_TRUE(g_ddaLaunches.empty());
+  EXPECT_TRUE(copies_.empty());
+  EXPECT_EQ(comm().addonStopEvent, kStopEvent);
 }
 
 }  // namespace
