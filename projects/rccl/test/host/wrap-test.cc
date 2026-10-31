@@ -1750,13 +1750,13 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
-  t.ddaLL128Max[ncclFuncReduceScatter] = 64 * kMiB;
+  t.ddaLL128Max[ncclFuncReduceScatter] = 128 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
   t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
-  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
+  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 8 * kMiB;
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
@@ -6890,14 +6890,14 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
-        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(2 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
@@ -6905,7 +6905,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         // The entry gate admits the widest tier, so it scales too.
-        EXPECT_EQ(64 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(256 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
         DeleteCommWithArch(comm);
       });
 }
@@ -7792,6 +7792,37 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
             EXPECT_NE((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo) << totalBytes << " op " << op;
             EXPECT_EQ(NCCL_ALGO_RING, decision.algo) << totalBytes << " op " << op;
           }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 SPX ReduceScatter runs DDA LL128 through 128M total at 4 ranks and 64M at 8, then Ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
+      []() {
+        ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                   return true;
+                                 });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nNodes = 1;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        auto algo = [&](size_t totalBytes) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr,
+                                                          totalBytes / sizeof(float) / (size_t)comm->nRanks,
+                                                          ncclFloat32, ncclSum, /*query=*/false, &decision));
+          return decision.algo;
+        };
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> cases[] = {{4, 128 * kMiB}, {8, 64 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll128, algo(c.second)) << c.first;
+          EXPECT_EQ(NCCL_ALGO_RING, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
         }
         DeleteCommWithArch(comm);
       });
