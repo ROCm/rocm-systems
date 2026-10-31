@@ -5,170 +5,116 @@
  */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 #include <hip/device_functions.h>
 
-#include <assert.h>
-#include <stdio.h>
-#include <algorithm>
-#include <stdlib.h>
-#include <iostream>
-#include <random>
+#include <stdint.h>
+#include <vector>
 
-// CPU implementation of bitextract
-template <typename T> T bit_extract(T src0, unsigned int src1, unsigned int src2) {
-  unsigned int bits = sizeof(T) * 8;
-  T offset = src1 & (bits - 1);
-  T width = src2 & (bits - 1);
-  if (width == 0) {
-    return 0;
-  } else {
-    return (src0 << (bits - width - offset)) >> (bits - width);
-  }
+// The intrinsics take the offset from src1 and the width from src2, both masked to the low bits of
+// the source width, so every input the intrinsics can distinguish is covered by sweeping offset and
+// width over [0, bits) for each source pattern below. A width of bits is not expressible: it masks
+// to 0.
+__host__ __device__ static inline unsigned long long int source_pattern(unsigned int index) {
+  constexpr unsigned long long int kPatterns[] = {
+      0ull,
+      ~0ull,
+      0x5555555555555555ull,
+      0xaaaaaaaaaaaaaaaaull,
+      0x0123456789abcdefull,
+      0xdeadbeefcafef00dull,
+  };
+  return kPatterns[index];
 }
 
-__global__ void HIP_kernel(unsigned int* out32, unsigned int* in32_0, unsigned int* in32_1,
-                           unsigned int* in32_2, unsigned long long int* out64,
-                           unsigned long long int* in64_0, unsigned int* in64_1,
-                           unsigned int* in64_2) {
-  int x = blockDim.x * blockIdx.x + threadIdx.x;
+static constexpr unsigned int kNumPatterns = 6;
 
-  out32[x] = __bitextract_u32(in32_0[x], in32_1[x], in32_2[x]);
-  out64[x] = __bitextract_u64(in64_0[x], in64_1[x], in64_2[x]);
+__device__ static inline unsigned int bitextract(unsigned int src0, unsigned int src1,
+                                                 unsigned int src2) {
+  return __bitextract_u32(src0, src1, src2);
+}
+
+__device__ static inline unsigned long long int bitextract(unsigned long long int src0,
+                                                           unsigned int src1, unsigned int src2) {
+  return __bitextract_u64(src0, src1, src2);
+}
+
+// One thread per (pattern, offset, width) case. The inputs come from the index, so nothing has to
+// be staged to the device.
+template <typename T> __global__ void bitextract_kernel(T* out, T* aliased_out,
+                                                        unsigned int num_cases) {
+  constexpr unsigned int kBits = sizeof(T) * 8;
+
+  const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= num_cases) return;
+
+  const unsigned int width = index % kBits;
+  const unsigned int offset = (index / kBits) % kBits;
+  const T src0 = static_cast<T>(source_pattern(index / (kBits * kBits)));
+
+  out[index] = bitextract(src0, offset, width);
+  // Operands past the source width must mask back to the same field.
+  aliased_out[index] = bitextract(src0, offset + kBits, width + kBits);
+}
+
+// Reference model: assembles the field one bit at a time so that it shares no structure with the
+// shift-and-mask form the intrinsics use.
+template <typename T> static T bit_extract_ref(T src0, unsigned int offset, unsigned int width) {
+  constexpr unsigned int kBits = sizeof(T) * 8;
+
+  offset &= kBits - 1;
+  width &= kBits - 1;
+
+  T result = 0;
+  for (unsigned int i = 0; i < width; ++i) {
+    result |= static_cast<T>((src0 >> (offset + i)) & 1) << i;
+  }
+  return result;
+}
+
+template <typename T> static void run_bitextract_cases() {
+  constexpr unsigned int kBits = sizeof(T) * 8;
+  constexpr unsigned int kNumCases = kNumPatterns * kBits * kBits;
+
+  LinearAllocGuard<T> out(LinearAllocs::hipMalloc, kNumCases * sizeof(T));
+  LinearAllocGuard<T> aliased_out(LinearAllocs::hipMalloc, kNumCases * sizeof(T));
+
+  constexpr unsigned int kThreadsPerBlock = 256;
+  const unsigned int num_blocks = (kNumCases + kThreadsPerBlock - 1) / kThreadsPerBlock;
+  bitextract_kernel<T><<<dim3(num_blocks), dim3(kThreadsPerBlock)>>>(out.ptr(), aliased_out.ptr(),
+                                                                     kNumCases);
+  HIP_CHECK(hipGetLastError());
+
+  std::vector<T> host_out(kNumCases);
+  std::vector<T> host_aliased_out(kNumCases);
+  HIP_CHECK(hipMemcpy(host_out.data(), out.ptr(), kNumCases * sizeof(T), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_aliased_out.data(), aliased_out.ptr(), kNumCases * sizeof(T),
+                      hipMemcpyDeviceToHost));
+
+  unsigned int checked_cases = 0;
+  for (unsigned int index = 0; index < kNumCases; ++index) {
+    const unsigned int width = index % kBits;
+    const unsigned int offset = (index / kBits) % kBits;
+    const T src0 = static_cast<T>(source_pattern(index / (kBits * kBits)));
+
+    // The intrinsics are only defined while the field fits in the source.
+    if (offset + width > kBits) continue;
+
+    const T expected = bit_extract_ref<T>(src0, offset, width);
+    if (host_out[index] != expected || host_aliased_out[index] != host_out[index]) {
+      CAPTURE(kBits, index, offset, width, src0, expected, host_out[index],
+              host_aliased_out[index]);
+      REQUIRE(host_out[index] == expected);
+      REQUIRE(host_aliased_out[index] == host_out[index]);
+    }
+    ++checked_cases;
+  }
+
+  // Guards the sweep itself: the pairs with offset + width <= bits, width < bits.
+  REQUIRE(checked_cases == kNumPatterns * (kBits + kBits * (kBits + 1) / 2 - 1));
 }
 
 HIP_TEST_CASE(Unit_bitExtract) {
-  using namespace std;
-
-  unsigned int* hostOut32;
-  unsigned int* hostSrc032;
-  unsigned int* hostSrc132;
-  unsigned int* hostSrc232;
-  unsigned long long int* hostOut64;
-  unsigned long long int* hostSrc064;
-  unsigned int* hostSrc164;
-  unsigned int* hostSrc264;
-
-  unsigned int* deviceOut32;
-  unsigned int* deviceSrc032;
-  unsigned int* deviceSrc132;
-  unsigned int* deviceSrc232;
-  unsigned long long int* deviceOut64;
-  unsigned long long int* deviceSrc064;
-  unsigned int* deviceSrc164;
-  unsigned int* deviceSrc264;
-
-  hipDeviceProp_t devProp;
-  HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-  INFO("System minor : " << devProp.minor);
-  INFO("System major : " << devProp.major);
-  INFO("agent prop name : " << devProp.name);
-
-  INFO("hip Device prop succeeded");
-
-  unsigned int wave_size = devProp.warpSize;
-  unsigned int num_waves_per_block = 2;
-  unsigned int num_threads_per_block = wave_size * num_waves_per_block;
-  unsigned int num_blocks = 2;
-  unsigned int NUM = num_threads_per_block * num_blocks;
-
-  unsigned i;
-  int errors;
-
-  hostOut32 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-  hostSrc032 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-  hostSrc132 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-  hostSrc232 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-
-  hostOut64 = (unsigned long long int*)malloc(NUM * sizeof(unsigned long long int));
-  hostSrc064 = (unsigned long long int*)malloc(NUM * sizeof(unsigned long long int));
-  hostSrc164 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-  hostSrc264 = (unsigned int*)malloc(NUM * sizeof(unsigned int));
-
-  // initialize the input data
-  std::random_device rd;
-  std::uniform_int_distribution<uint32_t> uint32_src0_dist;
-  std::uniform_int_distribution<uint32_t> uint32_src12_dist(0, 31);
-  std::uniform_int_distribution<uint64_t> uint64_src0_dist;
-  std::uniform_int_distribution<uint32_t> uint64_src12_dist(0, 63);
-  for (i = 0; i < NUM; i++) {
-    hostOut32[i] = 0;
-    hostSrc032[i] = uint32_src0_dist(rd);
-    hostSrc132[i] = uint32_src12_dist(rd);
-    hostSrc232[i] = uint32_src12_dist(rd);
-    if (hostSrc132[i] + hostSrc232[i] > 32) hostSrc232[i] = 32 - hostSrc132[i];
-    hostOut64[i] = 0;
-    hostSrc064[i] = uint64_src0_dist(rd);
-    hostSrc164[i] = uint64_src12_dist(rd);
-    hostSrc264[i] = uint64_src12_dist(rd);
-  }
-
-  HIP_CHECK(hipMalloc((void**)&deviceOut32, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc032, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc132, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc232, NUM * sizeof(unsigned int)));
-
-  HIP_CHECK(hipMalloc((void**)&deviceOut64, NUM * sizeof(unsigned long long int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc064, NUM * sizeof(unsigned long long int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc164, NUM * sizeof(unsigned int)));
-  HIP_CHECK(hipMalloc((void**)&deviceSrc264, NUM * sizeof(unsigned int)));
-
-  HIP_CHECK(hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-
-  HIP_CHECK(hipMemcpy(deviceSrc064, hostSrc064, NUM * sizeof(unsigned long long int),
-                      hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-
-
-  hipLaunchKernelGGL(HIP_kernel, dim3(num_blocks), dim3(num_threads_per_block), 0, 0, deviceOut32,
-                     deviceSrc032, deviceSrc132, deviceSrc232, deviceOut64, deviceSrc064,
-                     deviceSrc164, deviceSrc264);
-  HIP_CHECK(hipGetLastError());
-
-
-  HIP_CHECK(hipMemcpy(hostOut32, deviceOut32, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(hostOut64, deviceOut64, NUM * sizeof(unsigned long long int),
-                      hipMemcpyDeviceToHost));
-
-  // verify the results
-  errors = 0;
-  for (i = 0; i < NUM; i++) {
-    if (hostOut32[i] != bit_extract<uint32_t>(hostSrc032[i], hostSrc132[i], hostSrc232[i])) {
-      errors++;
-      INFO("device: " << hostOut32[i] << " host: "
-                      << bit_extract<uint32_t>(hostSrc032[i], hostSrc132[i], hostSrc232[i]) << " "
-                      << hostSrc032[i] << " " << hostSrc132[i] << " " << hostSrc232[i] << "\n");
-    }
-  }
-
-  for (i = 0; i < NUM; i++) {
-    if (hostOut64[i] != bit_extract<uint64_t>(hostSrc064[i], hostSrc164[i], hostSrc264[i])) {
-      errors++;
-      INFO("device: " << hostOut64[i] << " host: "
-                      << bit_extract<uint64_t>(hostSrc064[i], hostSrc164[i], hostSrc264[i]) << " "
-                      << hostSrc064[i] << " " << hostSrc164[i] << " " << hostSrc264[i] << "\n");
-    }
-  }
-
-  HIP_CHECK(hipFree(deviceOut32));
-  HIP_CHECK(hipFree(deviceSrc032));
-  HIP_CHECK(hipFree(deviceSrc132));
-  HIP_CHECK(hipFree(deviceSrc232));
-  HIP_CHECK(hipFree(deviceOut64));
-  HIP_CHECK(hipFree(deviceSrc064));
-  HIP_CHECK(hipFree(deviceSrc164));
-  HIP_CHECK(hipFree(deviceSrc264));
-
-  free(hostOut32);
-  free(hostSrc032);
-  free(hostSrc132);
-  free(hostSrc232);
-  free(hostOut64);
-  free(hostSrc064);
-  free(hostSrc164);
-  free(hostSrc264);
-
-  REQUIRE(errors == 0);
+  run_bitextract_cases<unsigned int>();
+  run_bitextract_cases<unsigned long long int>();
 }
