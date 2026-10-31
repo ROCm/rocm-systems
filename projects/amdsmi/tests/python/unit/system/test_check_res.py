@@ -4,8 +4,6 @@
 
 """Status-code to exception mapping unit tests for _check_res."""
 
-from __future__ import annotations
-
 import unittest
 
 from common.common import amdsmi
