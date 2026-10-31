@@ -77,12 +77,13 @@ int64_t g_paramDmaBufEnable = 0;
 //
 // Defined here rather than in a shared fakes/ .cc because none of them has an
 // owning fakes file today and this is the only binary that needs them.
+// Symbols that do have an owning fakes file -- e.g. src/debug.cc's
+// ncclSetThreadName, in fakes/nccl_fakes.cc -- must not be redefined here:
+// this target links that fakes file.
 // They must precede the #include of the unit under test.
 int64_t ncclParamDmaBufEnable() { return g_paramDmaBufEnable; }
 // NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1), declared by src/transport/net_ib/init.cc.
 int64_t ncclParamIbDataDirect() { return 1; }
-// src/debug.cc. ncclRmaProxyConnectOnce names its progress thread; no behaviour to assert.
-void ncclSetThreadName(std::thread&, const char*, ...) {}
 // src/graph/topo.cc. Only ncclRmaProxyConnectOnce calls it, which these tests do not.
 ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm*, int*, int*) { return ncclInternalError; }
 // src/rma/rma_proxy_progress.cc. Only the proxy thread calls it; never started here.

@@ -92,6 +92,12 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
+// Weak, like the pthread_t overload below, so a suite that wants to observe the
+// name (bootstrap_micro_fakes.cc) can define its own copy and still link.
+__attribute__((weak)) void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
+
 // src/debug.cc's pthread_t overload; the hook gets the name as production would set it. Default: no-op,
 // like production at its NCCL_SET_THREAD_NAME=0 default. Weak so a suite with its own copy still links.
 static void DefaultSetThreadName(pthread_t, const char*) {}
