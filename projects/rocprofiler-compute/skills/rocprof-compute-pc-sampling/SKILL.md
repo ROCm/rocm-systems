@@ -13,6 +13,11 @@ PC sampling is experimental. Every command below needs `--experimental`, and
 option names can change between releases, so run
 `rocprof-compute profile --experimental --help` before choosing flags.
 
+This skill drives `rocprof-compute --pc-sampling`. A request to invoke
+`rocprofv3 --pc-sampling-beta-enabled` directly belongs to the rocprofiler-sdk
+PC sampling skill, not this one. Method support is in
+[PC sampling](../../docs/how-to/pc_sampling.rst).
+
 ## 1. Check what the hardware supports
 
 ```bash
@@ -23,9 +28,10 @@ This reports the sampling methods the installed device accepts and the valid
 interval range. Two methods exist:
 
 - `stochastic` samples in hardware and is the only method that records a stall
-  reason. It requires MI300 or newer.
-- `host_trap` works more widely but records no stall reason, and its samples
-  can land a little past the instruction responsible.
+  reason. Which GPUs accept it is in
+  [PC sampling](../../docs/how-to/pc_sampling.rst).
+- `host_trap` records no stall reason, and its samples can land a little past
+  the instruction responsible.
 
 `--pc-sampling-method` defaults to `stochastic`. Fall back to `host_trap` only
 when the device rejects stochastic.

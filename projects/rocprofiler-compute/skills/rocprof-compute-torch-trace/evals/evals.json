@@ -3,8 +3,8 @@
     {
       "id": "tt-which-operator-is-slow",
       "skill_should_trigger": true,
-      "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?",
-      "sample": "simple_net.py",
+      "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?\n\nThe application is ./simple_net.py.",
+      "workspace": "../../sample",
       "expected_behavior": [
         "collects with --experimental --torch-trace",
         "lists the captured operators to find the slow ones",
@@ -18,8 +18,8 @@
     {
       "id": "tt-map-kernels-to-model-code",
       "skill_should_trigger": true,
-      "prompt": "profile my training script and tell me which layer the GPU time belongs to",
-      "sample": "simple_net.py",
+      "prompt": "profile my training script and tell me which layer the GPU time belongs to\n\nThe application is ./simple_net.py.",
+      "workspace": "../../sample",
       "expected_behavior": [
         "profiles the Python script with torch tracing enabled",
         "advises profiling a few steady-state iterations rather than a full run"

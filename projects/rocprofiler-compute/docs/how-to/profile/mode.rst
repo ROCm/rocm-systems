@@ -54,6 +54,24 @@ Run ``rocprof-compute profile -h`` for more details. See
    - Some metrics may show reduced utilization compared to normal execution
      due to the lack of concurrent kernel execution.
 
+.. _selecting-a-gpu:
+
+Selecting a GPU
+---------------
+
+``HIP_VISIBLE_DEVICES`` chooses the GPU the application runs on. A nonempty
+``HIP_VISIBLE_DEVICES`` overrides ``CUDA_VISIBLE_DEVICES``. If
+``HIP_VISIBLE_DEVICES`` is empty, HIP uses ``CUDA_VISIBLE_DEVICES``. An empty
+value of either variable does not hide GPUs. ``-1``, or an empty
+``ROCR_VISIBLE_DEVICES``, hides every GPU.
+
+``--device`` selects the GPU for the roofline microbenchmarks only. It does
+not choose which GPU the application runs on. See :ref:`standalone-roofline`.
+
+Do not set ``HSA_OVERRIDE_GFX_VERSION`` to force an unsupported architecture.
+The profiler then collects the wrong counters, and printed peaks describe that
+overridden architecture rather than the GPU that ran.
+
 .. _profile-example:
 
 Profiling example
@@ -751,8 +769,9 @@ Roofline options (profile)
 --------------------------
 
 ``--device <gpu_id>``
-   Allows you to specify a device ID to collect performance data from when
-   running a roofline benchmark on your system.
+   Specifies the device ID for the roofline microbenchmark on your system.
+   It does not choose which GPU the application runs on. See
+   :ref:`selecting-a-gpu`.
 
 ``-k``, ``--kernel <kernel-substr>``
    Allows for kernel filtering. See :ref:`profiling-kernel-filtering`.
