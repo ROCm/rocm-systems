@@ -23,6 +23,7 @@
 # THE SOFTWARE.
 
 import sqlite3
+import subprocess
 import sys
 from collections import defaultdict
 import pytest
@@ -501,3 +502,41 @@ def test_summary_mangled_kernels(csv_kernels_mangled, csv_kernels_full, json_dat
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
+
+
+def _run_rocpd_query(db_input, *time_window_args):
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rocpd.query",
+            "--input",
+            db_input,
+            "--query",
+            "SELECT COUNT(*) FROM regions",
+            *time_window_args,
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+
+
+def test_time_window_rejects_disjoint_range(db_input):
+    # trace timestamps are nanoseconds since boot, so this window precedes them all
+    result = _run_rocpd_query(db_input, "--start", "0", "--end", "1")
+
+    assert result.returncode != 0
+    assert "does not overlap trace time range" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_time_window_clamps_start_before_trace(db_input):
+    result = _run_rocpd_query(db_input, "--start", "0")
+
+    assert result.returncode == 0, result.stderr
+    assert "\n###\n### WARNING: " in result.stderr
+    assert "\n### Using time window [" in result.stderr
+    assert " nsec instead\n###\n\n" in result.stderr
+    assert "Traceback" not in result.stderr
