@@ -607,58 +607,71 @@ int ddaInitRunAllGatherCheck(int rank, int nranks, ncclComm* comm)
 // the chunk index makes the expected value differ per rank, so this also catches a
 // kernel that reduces the right peers into the wrong shard -- which a payload
 // constant across chunks would hide.
+//
+// Two shard sizes, one either side of kDdaRsIpcKernelCopyMaxBytes (1 MiB): the
+// launcher stages the send buffer into scratch in-kernel for the small shard and
+// with a host cudaMemcpyAsync for the large one. Those are separate kernel
+// instantiations, and only the in-kernel one loops over the shards itself, so a
+// single size would leave the other free to regress at a non-8 rank count.
 int ddaInitRunReduceScatterCheck(int rank, int nranks, ncclComm* comm)
 {
     hipStream_t stream = nullptr;
     DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
 
-    const size_t recvcount = kDdaInitCollectiveCount;
-    const size_t recvBytes = recvcount * sizeof(float);
-    const size_t sendBytes = recvBytes * static_cast<size_t>(nranks);
+    // 256 KiB shard (in-kernel staging) and 2 MiB shard (host pre-copy).
+    const size_t recvcounts[] = {kDdaInitCollectiveCount, 8 * kDdaInitCollectiveCount};
 
-    void* sendbuff = nullptr;
-    void* recvbuff = nullptr;
-    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
-    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
-
-    std::vector<float> host(recvcount * static_cast<size_t>(nranks), 0.0f);
-    for (int j = 0; j < nranks; ++j)
+    for (size_t ci = 0; ci < sizeof(recvcounts) / sizeof(recvcounts[0]); ++ci)
     {
-        const float v = static_cast<float>((rank + 1) * (j + 1));
-        for (size_t k = 0; k < recvcount; ++k)
+        const size_t recvcount = recvcounts[ci];
+        const size_t recvBytes = recvcount * sizeof(float);
+        const size_t sendBytes = recvBytes * static_cast<size_t>(nranks);
+
+        void* sendbuff = nullptr;
+        void* recvbuff = nullptr;
+        DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, sendBytes));
+        DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, recvBytes));
+
+        std::vector<float> host(recvcount * static_cast<size_t>(nranks), 0.0f);
+        for (int j = 0; j < nranks; ++j)
         {
-            host[static_cast<size_t>(j) * recvcount + k] = v;
+            const float v = static_cast<float>((rank + 1) * (j + 1));
+            for (size_t k = 0; k < recvcount; ++k)
+            {
+                host[static_cast<size_t>(j) * recvcount + k] = v;
+            }
         }
-    }
-    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
-    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
+        DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), sendBytes, hipMemcpyHostToDevice));
+        DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, recvBytes));
 
-    const ncclResult_t rs = ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, ncclFloat32,
-                                                    ncclSum, comm, stream);
-    if (rs != ncclSuccess)
-    {
-        printf("[rank %d] ncclReduceScatterDdaIpc(recvcount=%zu) failed: %d (%s)\n", rank, recvcount,
-               rs, ncclGetErrorString(rs));
-        return kDdaInitChildFail;
-    }
-    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
-
-    std::vector<float> out(recvcount, 0.0f);
-    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
-
-    const float expected = static_cast<float>((rank + 1) * (nranks * (nranks + 1) / 2));
-    for (size_t k = 0; k < recvcount; ++k)
-    {
-        if (out[k] != expected)
+        const ncclResult_t rs = ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, ncclFloat32,
+                                                        ncclSum, comm, stream);
+        if (rs != ncclSuccess)
         {
-            printf("[rank %d] reducescatter element %zu: expected %.1f, got %.1f\n", rank, k,
-                   expected, out[k]);
+            printf("[rank %d] ncclReduceScatterDdaIpc(recvcount=%zu) failed: %d (%s)\n", rank,
+                   recvcount, rs, ncclGetErrorString(rs));
             return kDdaInitChildFail;
         }
+        DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+        std::vector<float> out(recvcount, 0.0f);
+        DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, recvBytes, hipMemcpyDeviceToHost));
+
+        const float expected = static_cast<float>((rank + 1) * (nranks * (nranks + 1) / 2));
+        for (size_t k = 0; k < recvcount; ++k)
+        {
+            if (out[k] != expected)
+            {
+                printf("[rank %d] reducescatter recvcount=%zu element %zu: expected %.1f, got %.1f\n",
+                       rank, recvcount, k, expected, out[k]);
+                return kDdaInitChildFail;
+            }
+        }
+
+        DDA_INIT_CHILD_HC(hipFree(sendbuff));
+        DDA_INIT_CHILD_HC(hipFree(recvbuff));
     }
 
-    DDA_INIT_CHILD_HC(hipFree(sendbuff));
-    DDA_INIT_CHILD_HC(hipFree(recvbuff));
     DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
     return kDdaInitChildOk;
 }
