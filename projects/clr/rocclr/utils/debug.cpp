@@ -122,7 +122,7 @@ class AsyncLogger {
       bool expected = true;
       if (crashHandlersInstalled_.compare_exchange_strong(expected, false,
                                                           std::memory_order_acq_rel)) {
-        Os::uninstallExceptionHandlers();
+        Os::uninstallExceptionHandlers(crashFlushCallback);
       }
     }
   }
@@ -178,7 +178,7 @@ class AsyncLogger {
     }
 
     try {
-      flushPending();
+      flushPending(/*crash=*/true);
     } catch (...) {
     }
   }
@@ -186,10 +186,12 @@ class AsyncLogger {
  private:
   static constexpr size_t kBufferSize = 16 * 1024;//!< Circular buffer size
   static constexpr size_t kFlushIntervalMs = 1;  //!< Flush interval in milliseconds
+  static constexpr size_t kCrashWaitYields = 4096; //!< Yields a crash flush waits on a held claim
 
   std::vector<LogEntry> buffer_;           //!< Circular buffer of log entries
   std::atomic<size_t> writeIndex_{0};      //!< Write position in circular buffer
   std::atomic<size_t> readIndex_{0};       //!< Read position in circular buffer
+  std::atomic<size_t> claimIndex_{0};      //!< readIndex_ + 1 while an entry is being written
   std::atomic<bool> running_{false};       //!< Worker thread running flag
   std::atomic<bool> enabled_{false};       //!< Async logging enabled flag
 
@@ -202,7 +204,7 @@ class AsyncLogger {
       std::unique_lock<std::mutex> lock(flushMutex_);
       flushCV_.wait_for(lock, std::chrono::milliseconds(kFlushIntervalMs),
                        [this] { return !running_.load(std::memory_order_relaxed); });
-      
+
       if (running_.load(std::memory_order_relaxed)) {
         flushPending();
       }
@@ -211,33 +213,90 @@ class AsyncLogger {
     flushPending();
   }
 
-  void flushPending() {
-    TruncateLogFileFlushPath();
-    
-    size_t currentRead = readIndex_.load(std::memory_order_acquire);
-    size_t currentWrite = writeIndex_.load(std::memory_order_acquire);
-    size_t writeCount = 0;
+  // Whoever moves claimIndex_ from readIndex_ to readIndex_ + 1 writes that entry, then moves
+  // readIndex_. A crash flush may have interrupted a holder or a producer: it stops at its starting
+  // writeIndex_, an unfinished entry, or a claim or the stream held for kCrashWaitYields yields.
+  void flushPending(bool crash = false) {
+    if (!crash) {
+      TruncateLogFileFlushPath();
+    }
+    const size_t end = writeIndex_.load(std::memory_order_acquire);
 
-    while (currentRead != currentWrite) {
-      LogEntry& entry = buffer_[currentRead % kBufferSize];
-      
-      // Wait for valid flag
-      while (!entry.valid.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
+    size_t writeCount = 0;
+    size_t waits = 0;
+    for (;;) {
+      size_t currentRead = readIndex_.load(std::memory_order_acquire);
+      size_t last = crash ? end : writeIndex_.load(std::memory_order_acquire);
+      if (static_cast<std::ptrdiff_t>(last - currentRead) <= 0) {
+        break;
       }
-      
+      size_t expected = currentRead;
+      if (!claimIndex_.compare_exchange_strong(expected, currentRead + 1,
+                                               std::memory_order_acq_rel)) {
+        if (crash) {
+          if (readIndex_.load(std::memory_order_acquire) != currentRead) {
+            waits = 0;
+            continue;
+          }
+          if (++waits > kCrashWaitYields) {
+            break;
+          }
+        }
+        std::this_thread::yield();
+        continue;
+      }
+      LogEntry& entry = buffer_[currentRead % kBufferSize];
+
+      // Wait for valid flag
+      bool valid = entry.valid.load(std::memory_order_acquire);
+      while (!valid && !crash) {
+        std::this_thread::yield();
+        valid = entry.valid.load(std::memory_order_acquire);
+      }
+      if (!valid || (crash && !tryLockOutFile())) {
+        claimIndex_.store(currentRead, std::memory_order_release);
+        break;
+      }
+
       writeToFile(entry);
-      entry.valid.store(false, std::memory_order_release);
-      
-      currentRead++;
-      readIndex_.store(currentRead, std::memory_order_release);
       writeCount++;
       if (writeCount % 1024 == 0) {
         fflush(outFile);
       }
-      currentWrite = writeIndex_.load(std::memory_order_acquire);
+      if (crash) {
+        unlockOutFile();
+      }
+      entry.valid.store(false, std::memory_order_release);
+      readIndex_.store(currentRead + 1, std::memory_order_release);
+      waits = 0;
     }
-    fflush(outFile);
+    if (!crash) {
+      fflush(outFile);
+    } else if (tryLockOutFile()) {
+      fflush(outFile);
+      unlockOutFile();
+    }
+  }
+
+  // Gives up after kCrashWaitYields yields on a stream another thread holds, which may be waiting
+  // for the faulting one. FILE locks are recursive, so a fault inside this thread's own stdio call
+  // still gets the lock. Windows has no ftrylockfile.
+  static bool tryLockOutFile() {
+#ifndef _WIN32
+    for (size_t i = 0; ftrylockfile(outFile) != 0; ++i) {
+      if (i == kCrashWaitYields) {
+        return false;
+      }
+      std::this_thread::yield();
+    }
+#endif
+    return true;
+  }
+
+  static void unlockOutFile() {
+#ifndef _WIN32
+    funlockfile(outFile);
+#endif
   }
 
   void writeToFile(const LogEntry& entry) {
