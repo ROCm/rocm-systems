@@ -448,6 +448,7 @@ jobs:
           if [[ -n "${TEST_REGEX}" ]]; then
             CTEST_SELECTION=(-R "${TEST_REGEX}")
           fi
+          export PATH="${ROCJITSU_BUILD_DIR}/tools/rocjitsu:${PATH}"
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             "${CTEST_SELECTION[@]}" \
             -E "${EXCLUDED_TESTS}" \
@@ -475,6 +476,13 @@ jobs:
             ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSan
           if-no-files-found: error
           retention-days: 7
+
+      - name: Test Python API
+        if: matrix.name == 'release'
+        run: |
+          uv pip install "${ROCJITSU_SOURCE_DIR}/python"
+          # Run directly so missing dependencies (exit 77) fail this required lane.
+          python -B "${ROCJITSU_SOURCE_DIR}/python/tests/test_api.py" -v
 
       # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and
