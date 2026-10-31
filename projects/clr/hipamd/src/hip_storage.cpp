@@ -22,7 +22,7 @@ hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t s
 
   if (!device) {
     LogError("Failed to get current device");
-    return hipErrorInvalidDevice;
+    HIP_RETURN(hipErrorInvalidDevice);
   }
 
 #if defined(_WIN32)
@@ -32,9 +32,9 @@ hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t s
 #endif
   if (!device->amdFileRead(opaque, devicePtr, size, file_offset, size_copied, status)) {
     LogError("Failed to perform file read operation");
-    return hipErrorUnknown;
+    HIP_RETURN(hipErrorUnknown);
   }
-  return hipSuccess;
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipAmdFileWrite(hipAmdFileHandle_t handle, void* devicePtr, uint64_t size, int64_t file_offset,
@@ -50,7 +50,7 @@ hipError_t hipAmdFileWrite(hipAmdFileHandle_t handle, void* devicePtr, uint64_t 
 
   if (!device) {
     LogError("Failed to get current device");
-    return hipErrorInvalidDevice;
+    HIP_RETURN(hipErrorInvalidDevice);
   }
 
 #if defined(_WIN32)
@@ -60,7 +60,7 @@ hipError_t hipAmdFileWrite(hipAmdFileHandle_t handle, void* devicePtr, uint64_t 
 #endif
   if (!device->amdFileWrite(opaque, devicePtr, size, file_offset, size_copied, status)) {
     LogError("Failed to perform file write operation");
-    return hipErrorUnknown;
+    HIP_RETURN(hipErrorUnknown);
   }
-  return hipSuccess;
+  HIP_RETURN(hipSuccess);
 }
