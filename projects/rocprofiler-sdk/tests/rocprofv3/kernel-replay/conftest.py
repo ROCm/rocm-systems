@@ -45,7 +45,8 @@ def pytest_addoption(parser):
         action="store",
         nargs="+",
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
-        help="counters shared by every --pmc group; must be constant across a kernel's passes",
+        help="counters shared by every --pmc group; each one the agent implements must be "
+        "constant across a kernel's passes",
     )
     parser.addoption(
         "--expected-dispatch-count",

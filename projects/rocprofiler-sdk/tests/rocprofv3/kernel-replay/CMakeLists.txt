@@ -58,13 +58,15 @@ rocprofiler_add_integration_execute_test(
 
 # Validate replay structure: each dispatch replayed REPLAY_PASSES times, the shared sanity
 # counters (SQ_WAVES, SQ_INSTS_VALU) are constant across a dispatch's passes, and the
-# kernels are present.
+# kernels are present. A sanity counter the agent does not report, or that reads zero for
+# every dispatch (SQ_INSTS_VALU on gfx1201), is skipped rather than failed. No -x, so one
+# skipped or failing counter does not hide the remaining checks.
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
     TEST_PATHS validate.py
     COPY conftest.py
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.json --passes
-         ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU -x
+         ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
@@ -95,7 +97,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.json
-         --passes ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU -x
+         --passes ${REPLAY_PASSES} --common-counters SQ_WAVES SQ_INSTS_VALU
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
