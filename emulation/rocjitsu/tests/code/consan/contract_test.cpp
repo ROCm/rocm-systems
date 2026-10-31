@@ -32,7 +32,7 @@ TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
       "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
   EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
   EXPECT_EQ(hex(mvp_options_digest()),
-            "083a76759fc07e774f153ef7d0f6611a48e23a8102352687fd6d5f9d4c39521a");
+            "e60fe5ab32246cc8ea82200c7ffb626c68af9885b9fe931646140fd201c203c2");
 }
 
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
@@ -166,7 +166,7 @@ TEST_F(ConSanContract, OwningFactsRoundTripIsCanonicalAndLittleEndian) {
   const FailureOr<std::vector<uint8_t>> reencoded = encode_manifest(decoded.value());
   ASSERT_TRUE(reencoded.succeeded());
   EXPECT_EQ(reencoded.value(), bytes_);
-  EXPECT_EQ(bytes_.size(), 64u + 144u + 76u + original.entry.name.size() + 4u + 2u * 68u);
+  EXPECT_EQ(bytes_.size(), 64u + 144u + 76u + original.entry.name.size() + 4u + 2u * 68u + 4u);
   // gfx1100 is encoded as the integer 1100, after the two image identities
   // and the options digest. This also pins the independently specified layout.
   EXPECT_EQ(bytes_[64 + 112], 0x4c);
@@ -248,6 +248,69 @@ TEST_F(ConSanContract, ValidChecksumDoesNotBypassRequiredMappings) {
   rehash();
   EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
   EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+}
+
+TEST_F(ConSanContract, RejectsOverlappingPreparedBarrierMappings) {
+  Manifest manifest = example();
+  manifest.target = 1250;
+  manifest.scope = ScopeKind::NativeLdsWorkgroupBarrier;
+  manifest.sites.back().original_offset = 64;
+  manifest.barriers = {{.original_drain = 8,
+                        .original_signal = 12,
+                        .original_wait = 16,
+                        .prepared_signal = 128,
+                        .prepared_wait = 132,
+                        .completion_probe = 136,
+                        .probe_size = 8},
+                       {.original_drain = 32,
+                        .original_signal = 36,
+                        .original_wait = 40,
+                        .prepared_signal = 144,
+                        .prepared_wait = 164,
+                        .completion_probe = 168,
+                        .probe_size = 8}};
+  // B1's signal starts exactly where B0's completion probe ends: adjacency
+  // is legal, but sharing any instruction or probe bytes is not.
+  ASSERT_TRUE(validate_manifest(manifest, &error_).succeeded()) << error_.message;
+  const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest, &error_);
+  ASSERT_TRUE(encoded.succeeded()) << error_.message;
+  ASSERT_TRUE(decode_manifest(encoded.value(), &error_).succeeded()) << error_.message;
+
+  struct Overlap {
+    const char *name;
+    uint64_t signal;
+    uint64_t wait;
+  };
+  constexpr std::array<Overlap, 5> kOverlaps = {{
+      {.name = "shared signal", .signal = 128, .wait = 164},
+      {.name = "shared wait and callback", .signal = 144, .wait = 132},
+      {.name = "shared signal, wait and callback", .signal = 128, .wait = 132},
+      {.name = "signal inside another callback", .signal = 140, .wait = 164},
+      {.name = "signal inside its own callback", .signal = 168, .wait = 164},
+  }};
+  for (const Overlap &overlap : kOverlaps) {
+    SCOPED_TRACE(overlap.name);
+    Manifest invalid = manifest;
+    invalid.barriers.back().prepared_signal = overlap.signal;
+    invalid.barriers.back().prepared_wait = overlap.wait;
+    invalid.barriers.back().completion_probe = overlap.wait + 4;
+    EXPECT_TRUE(validate_manifest(invalid, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+    EXPECT_TRUE(encode_manifest(invalid, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+
+    // Mutate the last encoded barrier directly, so the encoder cannot hide
+    // a missing decoder check. Keep framing and checksum valid.
+    bytes_ = encoded.value();
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const size_t barrier = bytes_.size() - kBarrierBytes;
+    wire::write_u64(bytes_, barrier + 24, overlap.signal);
+    wire::write_u64(bytes_, barrier + 32, overlap.wait);
+    wire::write_u64(bytes_, barrier + 40, overlap.wait + 4);
+    rehash();
+    EXPECT_TRUE(decode_manifest(bytes_, &error_).failed());
+    EXPECT_EQ(error_.code, ContractErrorCode::InvalidFacts);
+  }
 }
 
 TEST_F(ConSanContract, DuplicateIdentityAndInvalidOwnersAreRejectedAfterChecksum) {
