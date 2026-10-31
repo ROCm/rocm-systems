@@ -324,8 +324,11 @@ TEST(DdaAllReduceIpcTreeEligibleTest, AcceptsDivisibleAndAlignedSlice)
 //
 // Reverting that condition to the pre-feature `comm->nRanks == kDdaNranks`
 // would leave the low-rank path dead at runtime with every test above still
-// passing. The pair below closes that: a real 4-rank ncclCommInitRank, then an
-// assertion on whether ncclDdaIpcCommInit() actually stamped the communicator.
+// passing. The tests below close that: a real ncclCommInitRank at 2, 3 and 4
+// ranks, then an assertion on whether ncclDdaIpcCommInit() actually stamped the
+// communicator. 3 ranks is there on purpose: indexing that is only right for
+// power-of-two clique sizes (a `% nRanks` turned into `& (nRanks - 1)`, a
+// parity pick hardcoded to one value) passes at 2 and 4 and fails at 3.
 //
 // The negative control (relax off -> no resources) is what makes the positive
 // case meaningful: without it, "the gate opened for 4 ranks" and "comm init
@@ -488,10 +491,13 @@ int ddaInitRunAllReduceCheck(int rank, int nranks, ncclComm* comm)
     hipStream_t stream = nullptr;
     DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
 
-    // 4 KiB stays under the 256 KiB flat/tree threshold; 1 MiB clears it. The
-    // large count is also divisible by nranks with a 16-byte-aligned per-rank
-    // slice, which the tree path additionally requires.
-    const size_t counts[] = {1024, 262144};
+    // 4 KiB stays under the 256 KiB flat/tree threshold; ~1 MiB clears it. The
+    // launcher only takes the tree kernel when count % nranks == 0 and the
+    // per-rank slice (count / nranks floats) is 16-byte aligned, and otherwise
+    // falls back to flat without complaint. 262128 = 48 * 5461 meets both for
+    // every rank count tested here (slices of 524256, 349504 and 262128 bytes
+    // at 2, 3 and 4 ranks); 262144 would silently drop the 3-rank run to flat.
+    const size_t counts[] = {1024, 262128};
 
     for (size_t ci = 0; ci < sizeof(counts) / sizeof(counts[0]); ++ci)
     {
@@ -892,6 +898,27 @@ TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitAllocatesDdaIpcResources)
     RUN_ISOLATED_TEST_WITH_ENV(
         "FourRankCommInitAllocatesDdaIpcResources",
         []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Same as above at the smallest relaxed clique, where every rank has exactly
+// one peer.
+TEST(DdaNranksRelaxIsolatedTest, TwoRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "TwoRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/2, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Same as above at an odd, non-power-of-two clique: the only tested count at
+// which `% nRanks` and `& (nRanks - 1)` disagree, or a parity-based pick lands
+// on the other value.
+TEST(DdaNranksRelaxIsolatedTest, ThreeRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ThreeRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/3, /*expectResources=*/true); },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }
 
