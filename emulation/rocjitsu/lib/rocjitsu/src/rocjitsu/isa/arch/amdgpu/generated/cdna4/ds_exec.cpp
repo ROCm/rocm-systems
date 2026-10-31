@@ -434,6 +434,20 @@ void DsWrite2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat{.elem_size = 4,
+                                                                     .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 4U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 4U,
+              .data_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0,
+              .data2_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data1,
+              .elem_size = 4,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -473,6 +487,20 @@ void DsWrite2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat{.elem_size = 4,
+                                                                     .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 256U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 256U,
+              .data_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0,
+              .data2_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data1,
+              .elem_size = 4,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1545,6 +1573,19 @@ void DsRead2B32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
+                                                                      .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 4U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 4U,
+              .dst_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst,
+              .elem_size = 4,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1584,6 +1625,19 @@ void DsRead2st64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat{.elem_size = 4,
+                                                                      .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 256U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 256U,
+              .dst_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst,
+              .elem_size = 4,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2187,6 +2241,20 @@ void DsWrite2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat{.elem_size = 8,
+                                                                     .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 8U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 8U,
+              .data_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0,
+              .data2_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data1,
+              .elem_size = 8,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2232,6 +2300,20 @@ void DsWrite2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat{.elem_size = 8,
+                                                                     .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 512U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 512U,
+              .data_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0,
+              .data2_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data1,
+              .elem_size = 8,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -3399,6 +3481,19 @@ void DsRead2B64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat{.elem_size = 8,
+                                                                      .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 8U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 8U,
+              .dst_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst,
+              .elem_size = 8,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -3438,6 +3533,19 @@ void DsRead2st64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
+  if (amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat{.elem_size = 8,
+                                                                      .num_elems = 1}>(
+          *this,
+          amdgpu::LdsAccessRequest{
+              .addr_vgpr = wf.vgpr_alloc().base + inst_.addr,
+              .offset = static_cast<uint32_t>(inst_.offset0) * 512U,
+              .offset2 = static_cast<uint32_t>(inst_.offset1) * 512U,
+              .dst_vgpr = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst,
+              .elem_size = 8,
+              .num_elems = 1,
+          },
+          wf))
+    return;
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
