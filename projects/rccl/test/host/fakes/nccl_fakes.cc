@@ -105,16 +105,7 @@ __attribute__((weak)) void ncclSetThreadName(pthread_t thread, const char* fmt, 
     g_ncclSetThreadName(thread, name);
 }
 
-// Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) {
-    *cache = deftVal;
-  }
-  if (noCache) {
-    *noCache = 0;
-  }
-  return deftVal;
-}
+// ncclLoadParam itself is owned solely by env_fakes.cc -- see the comment there.
 
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.
