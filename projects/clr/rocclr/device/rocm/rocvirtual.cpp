@@ -5871,6 +5871,54 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
  * It also parses the kernel arguments buffer to inject into Hsa Runtime
  * the list of kernel parameters.
  */
+
+// Reconcile per-dispatch CU enable with queue-level CU mask.
+// Returns packed cu_enable DWORD for the launch descriptor, or 0 (bypass) if not applicable.
+static uint32_t cu_mask_reconcile(const amd::CUEnableConfig& perDispatch,
+                                  const std::vector<uint32_t>& queueCuMask,
+                                  uint32_t numSEs, uint32_t cusPerSE) {
+  if (!perDispatch.isEnabled()) {
+    return 0;
+  }
+
+  uint32_t cu_start = perDispatch.cu_start;
+  uint32_t cu_count = perDispatch.cu_count;
+  uint32_t se_en = perDispatch.se_en;
+
+  // Clamp to hardware limits
+  uint32_t effective_count = (cu_count == 0) ? cusPerSE : cu_count;
+  if (cu_start + effective_count > cusPerSE) {
+    effective_count = (cusPerSE > cu_start) ? cusPerSE - cu_start : 0;
+    cu_count = effective_count;
+  }
+
+  // Advisory check: warn if per-dispatch range has no overlap with queue mask
+  if (!queueCuMask.empty()) {
+    for (uint32_t se = 0; se < numSEs && se < 2; ++se) {
+      if (!(se_en & (1u << se))) continue;
+      uint32_t seOffset = se * cusPerSE;
+      bool hasOverlap = false;
+      for (uint32_t cu = cu_start; cu < cu_start + effective_count; ++cu) {
+        uint32_t bitIdx = seOffset + cu;
+        uint32_t word = bitIdx / 32;
+        uint32_t bit = bitIdx % 32;
+        if (word < queueCuMask.size() && (queueCuMask[word] & (1u << bit))) {
+          hasOverlap = true;
+          break;
+        }
+      }
+      if (!hasOverlap) {
+        ClPrint(amd::LOG_WARNING, amd::LOG_KERN,
+                "cu_mask_reconcile: per-dispatch CU range [%u,%u) in SE%u has no overlap "
+                "with queue-level CU mask — dispatch may have zero available CUs",
+                cu_start, cu_start + effective_count, se);
+      }
+    }
+  }
+
+  return (cu_start & 0xF) | ((cu_count & 0xF) << 4) | ((se_en & 0x3) << 8);
+}
+
 // ================================================================================================
 void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
   if (vcmd.cooperativeGroups()) {
@@ -5939,6 +5987,18 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
       metadata_preloader_.SetDynDataPrefetchRegions(vcmd.dynDataPrefetchConfig());
     }
 
+    if (vcmd.cuEnableConfig().isEnabled()) {
+      uint32_t packed = cu_mask_reconcile(
+          vcmd.cuEnableConfig(), cuMask_,
+          static_cast<uint32_t>(dev().info().numberOfShaderEngines_),
+          dev().info().maxComputeUnits_ /
+              static_cast<uint32_t>(dev().info().numberOfShaderEngines_ > 0
+                                    ? dev().info().numberOfShaderEngines_ : 1));
+      if (packed != 0) {
+        metadata_preloader_.SetCUEnableOverride(packed);
+      }
+    }
+
     // Submit kernel to HW
     if (!submitKernelInternal(vcmd.sizes(), vcmd.kernel(), vcmd.parameters(),
                               static_cast<void*>(as_cl(&vcmd.event())), vcmd.sharedMemBytes(),
@@ -5948,6 +6008,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     metadata_preloader_.ClearDynDataPrefetchConfig();
+    metadata_preloader_.ClearCUEnableOverride();
 
     profilingEnd();
   }
@@ -6405,6 +6466,13 @@ uint32_t VirtualGPU::MetaDataPreloader::FillKernelDispatchMetadata(
           dyn_data_prefetch_hints_,
           m->launch_descriptor.prefetch,
           dyn_data_prefetch_num_regions_);
+    }
+
+    if (cu_enable_override_active_) {
+      if (m->launch_descriptor.version == AMD_LAUNCH_DESCRIPTOR_VERSION_NONE) {
+        m->launch_descriptor.version = launch_descriptor_version_;
+      }
+      m->launch_descriptor.cu_enable = cu_enable_override_;
     }
 
     // Write event_id from amd_signal_t directly (non-interrupt signals have event_id == 0).
