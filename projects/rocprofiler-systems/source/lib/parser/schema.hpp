@@ -61,6 +61,7 @@ enum class severity : std::uint8_t
 enum class constraint_kind : std::uint8_t
 {
     mutually_exclusive = 0,
+    /// Reports when the named values do not already hold. Does not write them.
     forces,
     warn,
 };
@@ -165,6 +166,11 @@ struct schema_param
 /// parameter's environment spec overrides it.
 [[nodiscard]] std::string_view
 list_separator(const schema_param& param) noexcept;
+
+/// Split a list on @p separator, trimming each element.
+/// @return nullopt when @p separator is empty. An empty @p value is an empty list.
+[[nodiscard]] std::optional<std::vector<std::string>>
+split_list(std::string_view value, std::string_view separator);
 
 struct constraint
 {

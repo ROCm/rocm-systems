@@ -3,6 +3,10 @@
 
 #include "parser/schema.hpp"
 
+#include "common/string_utility.hpp"
+
+#include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -14,6 +18,35 @@ std::string_view
 list_separator(const schema_param& param) noexcept
 {
     return param.env ? std::string_view{ param.env->separator } : std::string_view{ "," };
+}
+
+std::optional<std::vector<std::string>>
+split_list(std::string_view value, std::string_view separator)
+{
+    if(separator.empty())
+    {
+        return std::nullopt;
+    }
+
+    std::vector<std::string> parts;
+    if(value.empty())
+    {
+        return parts;
+    }
+
+    std::size_t start = 0;
+    while(start <= value.size())
+    {
+        const auto position = value.find(separator, start);
+        const auto end = (position == std::string_view::npos) ? value.size() : position;
+        parts.emplace_back(utility::string::trim(value.substr(start, end - start)));
+        if(position == std::string_view::npos)
+        {
+            break;
+        }
+        start = position + separator.size();
+    }
+    return parts;
 }
 
 void
