@@ -413,6 +413,12 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
     # author's to name, so it must never be spliced into a command string that
     # bash parses: a folder called  x';touch PWNED;'  would run. `env` sets the
     # variables, and --exec starts it without a shell on the WSL side.
+    # The WSL side gets only the variables named here, and a Windows key path would
+    # not resolve there: with a trusted key set, refuse rather than replay unchecked.
+    if ($null -ne $env:HIP_HRR_TRUSTED_KEY) {
+        Write-Host "error: HIP_HRR_TRUSTED_KEY is set; Docker replay via WSL2 cannot check the signature. Run replay_docker.sh from WSL2 with a WSL path to the key, or replay natively." -ForegroundColor Red
+        exit 1
+    }
     $wslEnv = @("HRR_DOCKER_IMAGE=$($env:HRR_DOCKER_IMAGE)")
     if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { $wslEnv += "HRR_DOCKER_MOUNT_CLR=1" }
     $wslArgs = @($wslEnv) + @("bash", $wslScript, "--archive", $wslArchive, "--log", $wslLog)

@@ -205,6 +205,45 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - `hrr-playback --gen-signing-key` writes a key pair. Capture runs with
+ *     HIP_HRR_SIGNING_KEY set and leaves hrr.manifest and a 64-byte hrr.sig in the
+ *     process archive; the manifest lists every file under it.
+ *   - Replay with --trusted-key accepts the archive and validates the D2H blobs.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureSignedArchiveRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_signed_gpu"};
+  ScopedDir keys{fs::temp_directory_path() / "hrr_signed_gpu_keys"};
+  fs::create_directories(keys.path);
+  const fs::path seed = keys.path / "capture.seed", pub = keys.path / "capture.pub";
+  {
+    hrr::test::SpawnProc proc(hrr_playback_exe(), /*capture_stdout=*/true);
+    set_proc_search_path(proc);
+    REQUIRE(proc.run("--gen-signing-key " + hrr_quote_path(seed) + " " + hrr_quote_path(pub)) == 0);
+  }
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", cap.path, 5,
+                     {{"HIP_HRR_SIGNING_KEY", seed.string()}});
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::file_size(archive / "hrr.sig") == 64);
+  const std::string manifest = read_text_file(archive / "hrr.manifest");
+  size_t listed = 0, files = 0;
+  for (const auto& e : fs::recursive_directory_iterator(archive))
+    if (e.is_regular_file() && e.path().filename() != "hrr.manifest" &&
+        e.path().filename() != "hrr.sig") {
+      ++files;
+      const std::string rel = fs::relative(e.path(), archive).generic_string();
+      if (manifest.find("  " + rel + "\n") != std::string::npos) ++listed;
+    }
+  REQUIRE(files >= 3);
+  CHECK(listed == files);
+
+  // The GPU case: replay under the trusted key. That it is refused for a changed,
+  // added or missing file is Unit_HRR_Sign_*, which needs no GPU.
+  hrr_run_playback(cap.path, "--trusted-key " + hrr_quote_path(pub));
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
  *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
  *     its start notice exactly once, naming the per-process archive directory

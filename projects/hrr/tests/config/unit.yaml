@@ -52,6 +52,20 @@ cases:
   Unit_HRR_Scrub_RefusesOutOfBoundsTables: {}
   Unit_HRR_Scrub_SkipsUnterminatedName: {}
   Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}
+  Unit_HRR_Sign_FilesAreHeldToTheVerifiedDigestsWhenRead: {}
+  Unit_HRR_Sign_KeyFiles: {}
+  Unit_HRR_Sign_ManifestLimitAppliesToSigningToo: {}
+  Unit_HRR_Sign_SigningFollowsTheDirectoryDescriptor: {}
+  Unit_HRR_Sign_SigningHoldsFilesToTheVerifiedTree: {}
+  Unit_HRR_Sign_KeyOptionsAreNotIgnored: {}
+  Unit_HRR_Sign_PlaybackRefusesTamperedArchive: {}
+  Unit_HRR_Sign_RepairRefusesToSignAnAlteredSignedArchive: {}
+  Unit_HRR_Sign_RepairSignsOrDropsStaleSignature: {}
+  Unit_HRR_Sign_Rfc8032Vector: {}
+  Unit_HRR_Sign_SignedArchiveVerifies: {}
+  Unit_HRR_Sign_TamperIsRefusedNamingFile: {}
+  Unit_HRR_Sign_TrustedKeyVariableDoesNotBlockRepair: {}
+  Unit_HRR_Sign_UnsignedAndWrongKey: {}
   Unit_HRR_TranslatePtr_ExactMatch: {}
   Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
   Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}
