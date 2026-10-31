@@ -241,7 +241,7 @@ if(BUILD_DEVICE_ADDRESS_SANITIZER)
     message(FATAL_ERROR "BUILD_DEVICE_ADDRESS_SANITIZER and BUILD_ADDRESS_SANITIZER are mutually exclusive")
   endif()
   execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.dasan.so
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.dasan.a
     OUTPUT_VARIABLE _dasan_host_rt OUTPUT_STRIP_TRAILING_WHITESPACE)
   execute_process(
     COMMAND ${CMAKE_CXX_COMPILER} --target=amdgcn-amd-amdhsa -print-file-name=libclang_rt.dasan.a
@@ -250,10 +250,9 @@ if(BUILD_DEVICE_ADDRESS_SANITIZER)
      NOT IS_ABSOLUTE "${RCCL_DASAN_DEVICE_RT}" OR NOT EXISTS "${RCCL_DASAN_DEVICE_RT}")
     message(FATAL_ERROR
       "BUILD_DEVICE_ADDRESS_SANITIZER: ${CMAKE_CXX_COMPILER} has no device address "
-      "sanitizer runtime (libclang_rt.dasan.so / amdgcn libclang_rt.dasan.a)")
+      "sanitizer runtime (libclang_rt.dasan.a for host and amdgcn)")
   endif()
-  get_filename_component(DASAN_RUNTIME_DIR "${_dasan_host_rt}" DIRECTORY)
-  message(STATUS "DASAN host runtime directory: ${DASAN_RUNTIME_DIR}")
+  message(STATUS "DASAN host runtime: ${_dasan_host_rt}")
   message(STATUS "DASAN device runtime: ${RCCL_DASAN_DEVICE_RT}")
   set(RCCL_DASAN_TU_RT "${CMAKE_BINARY_DIR}/dasan_device_tu.bc")
   execute_process(
