@@ -28,6 +28,8 @@ THE SOFTWARE.
 #include <math.h>
 #include <sys/time.h>
 #include <algorithm>
+#include <memory>
+#include <new>
 #include <vector>
 #include <string.h>
 #include "rome_models.h"
@@ -3849,6 +3851,7 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
       if (digit >= 0 && digit <= 9) {
         switch (status) {
         case 0:
+          if (gpu >= NCCL_TOPO_MAX_NODES) goto end;
           gpus[gpu] = digit;
           status = 1;
           break;
@@ -3856,6 +3859,7 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpus[gpu] = gpus[gpu] * 10 + digit;
           break;
         case 2:
+          if (net_offset >= NCCL_TOPO_MAX_NODES * 2) goto end;
           nets[net_offset] = digit + 'N';
           status = 3;
           break;
@@ -3867,7 +3871,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
         if (status == 1) {
           gpu++;
           net_offset = 2 * gpu - 1;
-          if (gpu > NCCL_TOPO_MAX_NODES) goto end;
         } else if (status == 2 || status == 3) {
           net_offset++;
           net_count++;
@@ -3879,6 +3882,7 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           if (gpu != ngpus) goto newchannel;
           // Ignore if net_count is not 0 or odd number
           if (net_count && net_count % 2) goto newchannel;
+          if (nChannels >= MAXCHANNELS) goto end;
 
           for (int r = 0; r < ngpus; r++) {
             int g = gpus[r];
@@ -3934,8 +3938,9 @@ end:
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;
-      ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr);
-      graph->inter[i * 2 + 1] = netId;
+      if (ncclTopoGetLocalNet(system, graph->intra[i * ngpus + 1], i, &netId, nullptr) == ncclSuccess) {
+        graph->inter[i * 2 + 1] = netId;
+      }
     }
   }
 
@@ -4087,51 +4092,52 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   return ncclSuccess;
 }
 
-#define MAX_OPT_TOKENS 10
 extern const char* topoPathTypeStr[];
 
-static void parseOptions(struct ncclTopoSystem* system, const char* options) {
-  if (strcmp(options, "")) {
-    char* str_temp = (char*)malloc(strlen(options) + 1);
-    if (str_temp == nullptr) {
-      WARN("Failed to allocate memory for options parsing");
-      return;
-    }
-    strcpy(str_temp, options);
-    char* tokens[MAX_OPT_TOKENS];
-    int numTokens = 0;
-    char* state;
-    tokens[numTokens] = strtok_r(str_temp, "=, ", &state);
-    numTokens++;
-    while (tokens[numTokens - 1] != NULL && numTokens < MAX_OPT_TOKENS)
-      tokens[numTokens++] = strtok_r(NULL, "=, ", &state);
-    for (int i = 0; i < numTokens / 2; i++) {
-      if (strcmp(tokens[i * 2], "netGdrLevel") == 0) {
-        int j;
-        for (j = 0; j <= PATH_SYS; j++) {
-          if (strcmp(tokens[i * 2 + 1], topoPathTypeStr[j]) == 0) break;
-        }
-        if (j <= PATH_SYS) system->netGdrLevel = j;
-        else {
-          system->netGdrLevel = -2;
-          WARN("invalid netGdrLevel: %s", tokens[i * 2 + 1]);
-        }
-      } else if (strcmp(tokens[i * 2], "pivotA2AEnabled") == 0) {
-        system->pivotA2AEnabled = (bool)atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "pivotA2ANumBiRings") == 0) {
-        system->pivotA2ANumBiRings = atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "tuning") == 0) {
-        system->tuning = atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "ll128Enabled") == 0) {
-        system->ll128Enabled = (bool)atol(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "baseBw") == 0) {
-        system->baseBw = std::stof(tokens[i * 2 + 1]);
-      } else if (strcmp(tokens[i * 2], "treeDefined") == 0) {
-        system->treeDefined = (bool)atol(tokens[i * 2 + 1]);
-      }
-    }
-    free(str_temp);
+// Calls f(key, value) for every key=value pair of a model's options; false if the string could not be copied.
+template <typename F>
+static bool forEachOption(const char* options, F f) {
+  char* str_temp = (char*)malloc(strlen(options) + 1);
+  if (str_temp == nullptr) return false;
+  strcpy(str_temp, options);
+  char* state;
+  for (char* key = strtok_r(str_temp, "=, ", &state); key != NULL; key = strtok_r(NULL, "=, ", &state)) {
+    char* value = strtok_r(NULL, "=, ", &state);
+    if (value == NULL) break;
+    f(key, value);
   }
+  free(str_temp);
+  return true;
+}
+
+static void parseOptions(struct ncclTopoSystem* system, const char* options) {
+  bool copied = forEachOption(options, [system](const char* key, const char* value) {
+    if (strcmp(key, "netGdrLevel") == 0) {
+      int j;
+      for (j = 0; j <= PATH_SYS; j++) {
+        if (strcmp(value, topoPathTypeStr[j]) == 0) break;
+      }
+      if (j <= PATH_SYS) {
+        system->netGdrLevel = j;
+      } else {
+        system->netGdrLevel = -2;
+        WARN("invalid netGdrLevel: %s", value);
+      }
+    } else if (strcmp(key, "pivotA2AEnabled") == 0) {
+      system->pivotA2AEnabled = (bool)atol(value);
+    } else if (strcmp(key, "pivotA2ANumBiRings") == 0) {
+      system->pivotA2ANumBiRings = atol(value);
+    } else if (strcmp(key, "tuning") == 0) {
+      system->tuning = atol(value);
+    } else if (strcmp(key, "ll128Enabled") == 0) {
+      system->ll128Enabled = (bool)atol(value);
+    } else if (strcmp(key, "baseBw") == 0) {
+      system->baseBw = std::stof(value);
+    } else if (strcmp(key, "treeDefined") == 0) {
+      system->treeDefined = (bool)atol(value);
+    }
+  });
+  if (!copied) WARN("Failed to allocate memory for options parsing");
 }
 
 static ncclResult_t rcclTopoSetPresetRomeModelIdx(struct ncclTopoSystem* system, int idx) {
@@ -4146,32 +4152,14 @@ static ncclResult_t rcclTopoSetPresetRomeModelIdx(struct ncclTopoSystem* system,
 }
 
 static bool checkOption(const char* options, const char* name) {
-  if (strcmp(options, "")) {
-    char* str_temp = (char*)malloc(strlen(options) + 1);
-    if (str_temp == nullptr) {
-      WARN("Failed to allocate memory for options checking");
-      return false;
-    }
-    strcpy(str_temp, options);
-    char* tokens[MAX_OPT_TOKENS];
-    int numTokens = 0;
-    char* state;
-    tokens[numTokens] = strtok_r(str_temp, "=, ", &state);
-    numTokens++;
-    while (tokens[numTokens - 1] != NULL && numTokens < MAX_OPT_TOKENS)
-      tokens[numTokens++] = strtok_r(NULL, "=, ", &state);
-
-    bool result = false;
-    for (int i = 0; i < numTokens / 2; i++) {
-      if (strcmp(tokens[i * 2], name) == 0) {
-        result = (bool)atol(tokens[i * 2 + 1]);
-        break;
-      }
-    }
-    free(str_temp);
-    return result;
-  }
-  return false;
+  bool found = false, result = false;
+  bool copied = forEachOption(options, [&](const char* key, const char* value) {
+    if (found || strcmp(key, name)) return;
+    found = true;
+    result = (bool)atol(value);
+  });
+  if (!copied) WARN("Failed to allocate memory for options checking");
+  return result;
 }
 
 ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
@@ -4484,41 +4472,73 @@ static bool permuteGpuIds(int* g, int n, int last, struct rcclRomeModel* ref, st
   return false;
 }
 
-static bool permuteNetIds(int* n, int* g, int s, int last, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
-                          int* time, bool ignore_numa) {
-  (*time)++;
-  if (s == last) {
-    int i, j;
-    // match NET numa
-    if (!ignore_numa) {
-      for (i = 0; i < ref->nNics; i++) {
-        if (ref->nicNuma[i] != topo->nicNuma[n[i]]) break;
-      }
-      if (i < ref->nNics) return false;
-    }
-    // match gdr level
-    for (i = 0; i < ref->nNics; i++) {
-      for (j = 0; j < ref->nGpus; j++) {
-        // enabling PXN override paths over PHB and SYS
-        if (topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PXN) continue;
-        // treat PIX and PXB as same
-        if ((ref->gdrLevel[i * ref->nGpus + j] == PATH_PXB && topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PIX) ||
-            (ref->gdrLevel[i * ref->nGpus + j] == PATH_PIX && topo->gdrLevel[n[i] * ref->nGpus + g[j]] == PATH_PXB))
-          continue;
-        if (ref->gdrLevel[i * ref->nGpus + j] != topo->gdrLevel[n[i] * ref->nGpus + g[j]]) break;
-      }
-      if (j < ref->nGpus) break;
-    }
-    if (i < ref->nNics) return false;
-    return true;
-  } else {
-    for (int i = s; i <= last; i++) {
-      std::swap(n[s], n[i]);
-      if (permuteNetIds(n, g, s + 1, last, ref, topo, time, ignore_numa)) return true;
-      std::swap(n[s], n[i]);
+// Whether topo NIC k can stand in for model NIC i, given the GPU mapping g.
+static bool netIdFits(int i, int k, const int* g, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
+                      bool ignore_numa) {
+  // match NET numa
+  if (!ignore_numa && ref->nicNuma[i] != topo->nicNuma[k]) return false;
+  // match gdr level
+  for (int j = 0; j < ref->nGpus; j++) {
+    int refLevel = ref->gdrLevel[i * ref->nGpus + j], topoLevel = topo->gdrLevel[k * ref->nGpus + g[j]];
+    // enabling PXN override paths over PHB and SYS
+    if (topoLevel == PATH_PXN) continue;
+    // treat PIX and PXB as same
+    if ((refLevel == PATH_PXB && topoLevel == PATH_PIX) || (refLevel == PATH_PIX && topoLevel == PATH_PXB)) continue;
+    if (refLevel != topoLevel) return false;
+  }
+  return true;
+}
+
+// Kuhn's augmenting path: try to give model NIC i one of the topo NICs n[s..last].
+static bool assignNetId(int i, const int* n, int s, int last, const std::vector<char>& fits, std::vector<char>& seen,
+                        std::vector<int>& owner) {
+  const int nNets = last + 1;
+  for (int q = s; q <= last; q++) {
+    int k = n[q];
+    if (!fits[i * nNets + k] || seen[k]) continue;
+    seen[k] = 1;
+    if (owner[k] < 0 || assignNetId(owner[k], n, s, last, fits, seen, owner)) {
+      owner[k] = i;
+      return true;
     }
   }
   return false;
+}
+
+// Whether model NICs s..last can each be given a distinct topo NIC from n[s..last].
+static bool netIdsAssignable(const int* n, int s, int last, const std::vector<char>& fits) {
+  const int nNets = last + 1;
+  std::vector<int> owner(nNets, -1);
+  std::vector<char> seen(nNets);
+  for (int i = s; i <= last; i++) {
+    std::fill(seen.begin(), seen.end(), 0);
+    if (!assignNetId(i, n, s, last, fits, seen, owner)) return false;
+  }
+  return true;
+}
+
+// Swap-permutation order, descending only into subtrees that still hold a fitting ordering.
+static bool permuteFittingNetIds(int* n, int s, int last, const std::vector<char>& fits, int* time) {
+  (*time)++;
+  if (!netIdsAssignable(n, s, last, fits)) return false;
+  if (s == last) return true;
+  const int nNets = last + 1;
+  for (int i = s; i <= last; i++) {
+    std::swap(n[s], n[i]);
+    if (fits[s * nNets + n[s]] && permuteFittingNetIds(n, s + 1, last, fits, time)) return true;
+    std::swap(n[s], n[i]);
+  }
+  return false;
+}
+
+static bool permuteNetIds(int* n, int* g, int s, int last, struct rcclRomeModel* ref, struct rcclRomeModel* topo,
+                          int* time, bool ignore_numa) {
+  const int nNets = last + 1;
+  std::vector<char> fits(nNets * nNets);
+  for (int i = 0; i < nNets; i++) {
+    for (int k = 0; k < nNets; k++) fits[i * nNets + k] = netIdFits(i, k, g, ref, topo, ignore_numa);
+  }
+  return permuteFittingNetIds(n, s, last, fits, time);
 }
 
 int checkAlltoallWidth(struct rcclRomeModel* romeTopo) {
@@ -4591,7 +4611,7 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   if (!isAlltoall) return ncclSuccess;
 
   int *g8, n[NCCL_TOPO_MAX_NODES];
-  int* all_gpu_permutations = (int*)malloc(TOTAL_PERMUTE_COUNT * NUMA_CPUS * NUMA_GPUS * sizeof(int));
+  std::unique_ptr<int[]> all_gpu_permutations(new (std::nothrow) int[TOTAL_PERMUTE_COUNT * NUMA_CPUS * NUMA_GPUS]);
   if (all_gpu_permutations == nullptr) {
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
@@ -4635,14 +4655,15 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
         uint64_t offset = a * NUMA_PERMUTE_COUNT + b;
         // offset = (offset+TOTAL_PERMUTE_COUNT/2)%TOTAL_PERMUTE_COUNT;
         offset *= (NUMA_CPUS * NUMA_GPUS);
-        memcpy(all_gpu_permutations + offset, &numa_gpu_permutations[0][a][0], NUMA_GPUS * sizeof(int));
-        memcpy(all_gpu_permutations + offset + NUMA_GPUS, &numa_gpu_permutations[1][b][0], NUMA_GPUS * sizeof(int));
+        memcpy(all_gpu_permutations.get() + offset, &numa_gpu_permutations[0][a][0], NUMA_GPUS * sizeof(int));
+        memcpy(all_gpu_permutations.get() + offset + NUMA_GPUS, &numa_gpu_permutations[1][b][0],
+               NUMA_GPUS * sizeof(int));
       }
     }
     // match all GPUs' XGMI connection
     int p;
     for (p = 0; p < TOTAL_PERMUTE_COUNT; p++) {
-      g8 = all_gpu_permutations + p * NUMA_CPUS * NUMA_GPUS;
+      g8 = all_gpu_permutations.get() + p * NUMA_CPUS * NUMA_GPUS;
       int k;
       for (k = 0; k < romeTopoModels[i].nGpus; k++) {
         int m;
@@ -4752,8 +4773,6 @@ ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
 
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
@@ -4958,7 +4977,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   if (ngpus != 16 || ncpus != NUMA_CPUS) return ncclSuccess;
 
   int *g16, n[NCCL_TOPO_MAX_NODES], rdm[NUMA_GPUS * NUMA_CPUS];
-  int* all_gpu_permutations = (int*)malloc(TOTAL_PERMUTE_COUNT * NUMA_CPUS * NUMA_GPUS * sizeof(int));
+  std::unique_ptr<int[]> all_gpu_permutations(new (std::nothrow) int[TOTAL_PERMUTE_COUNT * NUMA_CPUS * NUMA_GPUS]);
   if (all_gpu_permutations == nullptr) {
     WARN("Failed to allocate memory for GPU permutations");
     return ncclSystemError;
@@ -5003,11 +5022,12 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
             uint64_t offset = ((a * NUMA_PERMUTE_COUNT + b) * NUMA_PERMUTE_COUNT + c) * NUMA_PERMUTE_COUNT + d;
             // offset = (offset+TOTAL_PERMUTE_COUNT/2)%TOTAL_PERMUTE_COUNT;
             offset *= (NUMA_CPUS * NUMA_GPUS);
-            memcpy(all_gpu_permutations + offset, &numa_gpu_permutations[0][a][0], NUMA_GPUS * sizeof(int));
-            memcpy(all_gpu_permutations + offset + NUMA_GPUS, &numa_gpu_permutations[1][b][0], NUMA_GPUS * sizeof(int));
-            memcpy(all_gpu_permutations + offset + NUMA_GPUS * 2, &numa_gpu_permutations[2][c][0],
+            memcpy(all_gpu_permutations.get() + offset, &numa_gpu_permutations[0][a][0], NUMA_GPUS * sizeof(int));
+            memcpy(all_gpu_permutations.get() + offset + NUMA_GPUS, &numa_gpu_permutations[1][b][0],
                    NUMA_GPUS * sizeof(int));
-            memcpy(all_gpu_permutations + offset + NUMA_GPUS * 3, &numa_gpu_permutations[3][d][0],
+            memcpy(all_gpu_permutations.get() + offset + NUMA_GPUS * 2, &numa_gpu_permutations[2][c][0],
+                   NUMA_GPUS * sizeof(int));
+            memcpy(all_gpu_permutations.get() + offset + NUMA_GPUS * 3, &numa_gpu_permutations[3][d][0],
                    NUMA_GPUS * sizeof(int));
           }
         }
@@ -5016,7 +5036,7 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
     // match all GPUs' XGMI connection
     int p;
     for (p = 0; p < TOTAL_PERMUTE_COUNT; p++) {
-      g16 = all_gpu_permutations + p * NUMA_CPUS * NUMA_GPUS;
+      g16 = all_gpu_permutations.get() + p * NUMA_CPUS * NUMA_GPUS;
       int k;
       for (k = 0; k < romeTopoModels[i].nGpus; k++) {
         int m;
@@ -5073,8 +5093,6 @@ ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* gra
   if (graph->nChannels) {
     NCCLCHECK(rcclTopoSetPresetRomeModelIdx(system, i));
   }
-  // clean up
-  free(all_gpu_permutations);
   return ncclSuccess;
 }
 
