@@ -63,6 +63,39 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+namespace {
+// Upper bound on how long these tests wait for one asynchronous SVM operation
+// to signal completion.
+constexpr uint64_t kSvmWaitTimeoutSeconds = 120;
+
+// Hint passed to hsa_signal_wait_scacquire. The HSA timeout argument is only a
+// hint, so the real deadline is enforced against steady_clock below; this just
+// bounds how long any single call may block before the deadline is rechecked.
+constexpr uint64_t kSvmWaitHintTicks = 1000000;
+
+// Wait for `signal` to drop below 1. Returns false if that has not happened
+// within kSvmWaitTimeoutSeconds.
+//
+// These waits previously passed a timeout of (uint64_t)-1 together with
+// HSA_WAIT_STATE_ACTIVE, which never gives up and never sleeps in the kernel.
+// An operation that never completed therefore turned into an unbounded
+// busy-spin instead of a test failure: the process stays in state R at close
+// to 100 percent of one core, where neither a D-state check nor the kernel
+// hung-task detector can see it. HSA_WAIT_STATE_ACTIVE is kept because some of
+// these tests measure latency and must not sleep.
+bool WaitForSvmCompletion(hsa_signal_t signal) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(kSvmWaitTimeoutSeconds);
+  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                   kSvmWaitHintTicks, HSA_WAIT_STATE_ACTIVE)) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
 // Wrap printf to add first or second process indicator
 #define PROCESS_LOG(format, ...)                                                                   \
   {                                                                                                \
@@ -264,9 +297,15 @@ void SvmMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_poo
   // ringdoor bell
   hsa_signal_store_relaxed(queue->doorbell_signal, index);
   // wait for the signal and reset it for future use
-  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                   HSA_WAIT_STATE_ACTIVE)) {
+  const bool completed = WaitForSvmCompletion(signal);
+  if (!completed) {
+    hsa_queue_inactivate(queue);
+    hsa_queue_destroy(queue);
+    hsa_signal_destroy(signal);
+    hsa_amd_memory_pool_free(kernArgs);
   }
+  ASSERT_TRUE(completed)
+      << "timed out waiting for SVM operation to complete";
 
   // compare device and host side results
   if (verbosity() > 0) {
@@ -558,9 +597,8 @@ void SvmMemoryTestBasic::TestSVMPrefetch(hsa_agent_t agent, hsa_amd_memory_pool_
   ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(dev_data, sizeof(dev_data_t), agent, 0, nullptr, signal));
 
   // wait for the signal and reset it for future use
-  while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                   HSA_WAIT_STATE_ACTIVE)) {
-  }
+  ASSERT_TRUE(WaitForSvmCompletion(signal))
+      << "timed out waiting for SVM operation to complete";
 
   hsa_amd_svm_attributes_get(dev_data, sizeof(dev_data_t), dev_attrs.data() , dev_attrs.size());
 
@@ -703,8 +741,8 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
     hsa_signal_store_relaxed(queue->doorbell_signal, index);
 
     // wait for kernel execution to finish
-    while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                   HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(completion))
+        << "timed out waiting for SVM operation to complete";
 
     // reset completion signal for next iteration
     hsa_signal_store_relaxed(completion, 1);
@@ -756,8 +794,8 @@ void SvmMemoryTestBasic::TestSVMBatchDiscard(hsa_agent_t agent, hsa_amd_memory_p
     hsa_signal_store_screlease(dep_signals[i], 0);
   }
 
-  while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                 HSA_WAIT_STATE_ACTIVE)) {}
+  ASSERT_TRUE(WaitForSvmCompletion(completion))
+      << "timed out waiting for SVM operation to complete";
 
   for (int i = 0; i < kNumRegions; ++i) {    
     // After discard, memory should have been prefetched to CPU agent
@@ -1053,8 +1091,8 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
   for (uint32_t i = 0; i < kNumRegions; i++) {
     hsa_signal_store_relaxed(completion, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptrs[i], sizes[i], agent, 0, nullptr, completion));
-    while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(completion))
+        << "timed out waiting for SVM operation to complete";
   }
 
   // set up dependency signals
@@ -1079,8 +1117,8 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatch(hsa_agent_t agent,
   }
 
   // wait for submitted discard-and-prefetch op to actually complete 
-  while (hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                   HSA_WAIT_STATE_ACTIVE)) {}
+  ASSERT_TRUE(WaitForSvmCompletion(completion))
+      << "timed out waiting for SVM operation to complete";
 
   // The final prefetch of the combined operation targets the requested gpu
   for (uint32_t i = 0; i < kNumRegions; i++) {
@@ -1143,8 +1181,8 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
   auto populate_on_gpu = [&]() {
     hsa_signal_store_relaxed(signal, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
   };
 
   void* ptrs_arr[1] = {ptr};
@@ -1157,14 +1195,14 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
     // Prefetch to pages to cpu first
     hsa_signal_store_relaxed(signal, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, cpu_agent, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
     hsa_signal_store_relaxed(signal, 1);
 
     auto t0 = std::chrono::steady_clock::now();
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
     auto t1 = std::chrono::steady_clock::now();
 
     prefetch_only_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
@@ -1178,8 +1216,8 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
     auto t0 = std::chrono::steady_clock::now();
     ASSERT_SUCCESS(hsa_amd_svm_discard_and_prefetch_batch_async(ptrs_arr, sizes_arr, 1, dst_arr,
                                                                 1, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
     auto t1 = std::chrono::steady_clock::now();
     fused_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
   }
@@ -1191,12 +1229,12 @@ void SvmMemoryTestBasic::TestSVMDiscardAndPrefetchBatchPerf(hsa_agent_t agent,
     hsa_signal_store_relaxed(signal, 1);
     auto t0 = std::chrono::steady_clock::now();
     ASSERT_SUCCESS(hsa_amd_svm_discard_batch_async(ptrs_arr, sizes_arr, 1, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
     hsa_signal_store_relaxed(signal, 1);
     ASSERT_SUCCESS(hsa_amd_svm_prefetch_async(ptr, kRegionSize, agent, 0, nullptr, signal));
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
-                                     HSA_WAIT_STATE_ACTIVE)) {}
+    ASSERT_TRUE(WaitForSvmCompletion(signal))
+        << "timed out waiting for SVM operation to complete";
     auto t1 = std::chrono::steady_clock::now();
     split_us += std::chrono::duration<double, std::micro>(t1 - t0).count();
   }
