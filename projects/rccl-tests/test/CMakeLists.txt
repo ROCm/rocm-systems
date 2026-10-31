@@ -38,3 +38,15 @@ set_target_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES
 add_test(NAME rccl-tests-GinSdmaDevtimeHostUnit
          COMMAND rccl-tests-GinSdmaDevtimeHostUnit)
 set_tests_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES LABELS "unit")
+
+add_executable(rccl-tests-AllToAllHierHostUnit alltoall_hier_host_test.cpp)
+target_include_directories(rccl-tests-AllToAllHierHostUnit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_compile_definitions(rccl-tests-AllToAllHierHostUnit PRIVATE ALLTOALL_HIER_HOST_ONLY)
+target_link_libraries(rccl-tests-AllToAllHierHostUnit PRIVATE
+  ${_RCCL_TESTS_GTEST_LIB} ${_RCCL_TESTS_GTEST_MAIN})
+set_target_properties(rccl-tests-AllToAllHierHostUnit PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+add_test(NAME rccl-tests-AllToAllHierHostUnit
+         COMMAND rccl-tests-AllToAllHierHostUnit)
+set_tests_properties(rccl-tests-AllToAllHierHostUnit PROPERTIES LABELS "unit")

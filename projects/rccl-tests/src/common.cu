@@ -936,7 +936,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       TESTCHECK(args->collTest->runColl(
             (void*)(in_place ? recvwin : sendwin), shift + (in_place ? args->sendInplaceOffset*rank : 0),
             (void*)recvwin, shift + (in_place ? args->recvInplaceOffset*rank : 0),
-            count, type, op, root, (ncclComm_t)(args->devComms+i), args->streams[i], deviceImpl, bias));
+            count, type, op, root, (ncclComm_t)testDevComms(args, i), args->streams[i], deviceImpl, bias));
 #endif
     }
 
@@ -1708,7 +1708,76 @@ void NetCounterCollectAfterAndPrint(struct threadArgs* args,
 
 // ============================================================
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+/* Create the DevComms the selected device implementation asks for: comm i gets
+ * devComms[i*testMaxDevComms + k] for requirement k. *nDevComms is 0 when the
+ * implementation skipped on this communicator. */
+static testResult_t createTestDevComms(ncclComm_t* comms, int nComms, ncclDevComm* devComms, int* nDevComms) {
+  ncclDevCommRequirements reqs[testMaxDevComms];
+  int nReqs = 1;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  if (test_ncclVersion < NCCL_VERSION(2,29,0)) {
+    fprintf(stderr,
+      "Incompatible NCCL versions. nccl-tests was compiled with NCCL %d, but is running with NCCL %d. "
+      "The %d Device API is not compatible with versions before 2.29.\n",
+      NCCL_VERSION_CODE, test_ncclVersion, NCCL_VERSION_CODE);
+    return testInvalidUsage;
+  }
+  for (int k = 0; k < testMaxDevComms; k++) reqs[k] = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  testResult_t multi = testNotImplemented;
+  if (ncclTestEngine.getMultiDevCommRequirements) {
+    multi = ncclTestEngine.getMultiDevCommRequirements(deviceImpl, reqs, &nReqs, comms[0]);
+    if (multi != testSuccess && multi != testNotImplemented) return multi;
+    if (multi == testSuccess && (nReqs < 0 || nReqs > testMaxDevComms)) return testInternalError;
+  }
+  if (multi == testNotImplemented) {
+    nReqs = 1;
+    reqs[0] = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+    if (!ncclTestEngine.getDevCommRequirements) {
+      fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
+      return testNotImplemented;
+    }
+    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs[0], comms[0]));
+  }
+#else
+  if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
+    fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
+      "The 2.28 Device API is not compatible with later versions.\n", test_ncclVersion);
+    return testInvalidUsage;
+  }
+  reqs[0] = {};
+  if (!ncclTestEngine.getDevCommRequirements ||
+      !ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs[0])) {
+    fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
+    return testNotImplemented;
+  }
+#endif
+
+  for (int k = 0; k < nReqs; k++) {
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < nComms; i++) {
+      NCCLCHECK(ncclDevCommCreate(comms[i], &reqs[k], devComms + i*testMaxDevComms + k));
+    }
+    NCCLCHECK(ncclGroupEnd());
+  }
+  *nDevComms = nReqs;
+  return testSuccess;
+}
+
+static testResult_t destroyTestDevComms(ncclComm_t* comms, int nComms, ncclDevComm* devComms, int nDevComms) {
+  for (int i = 0; i < nComms; i++) {
+    for (int k = nDevComms - 1; k >= 0; k--) {
+      NCCLCHECK(ncclDevCommDestroy(comms[i], devComms + i*testMaxDevComms + k));
+    }
+  }
+  return testSuccess;
+}
+#endif
+
 testResult_t threadRunTests(struct threadArgs* args) {
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  if (deviceImpl && args->nDevComms == 0) return testSuccess;
+#endif
   //  capture the free memory before
   int64_t* totalGpuFreeMem = (int64_t*)calloc(args->nGpus*2, sizeof(int64_t));
   for (int g = 0; g < args->nGpus; ++g) {
@@ -1794,41 +1863,9 @@ testResult_t threadInit(struct threadArgs* args) {
   }
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   /* Create device communicators based on test-specific requirements */
+  args->nDevComms = 0;
   if (deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
-    if (test_ncclVersion < NCCL_VERSION(2,29,0)) {
-      fprintf(stderr,
-        "Incompatible NCCL versions. nccl-tests was compiled with NCCL %d, but is running with NCCL %d. "
-        "The %d Device API is not compatible with versions before 2.29.\n",
-        NCCL_VERSION_CODE, test_ncclVersion, NCCL_VERSION_CODE);
-      return testInvalidUsage;
-    }
-    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-    if (!ncclTestEngine.getDevCommRequirements) {
-      fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
-      return testNotImplemented;
-    }
-    TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, args->comms[0]));
-#else
-    if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
-      fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
-        "The 2.28 Device API is not compatible with later.\n",
-        test_ncclVersion);
-      return testInvalidUsage;
-    }
-    ncclDevCommRequirements reqs = {};
-    if (!ncclTestEngine.getDevCommRequirements ||
-        !ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs)) {
-      fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
-      return testNotImplemented;
-    }
-#endif
-
-    NCCLCHECK(ncclGroupStart());
-    for (int i = 0; i < args->nGpus; i++) {
-      NCCLCHECK(ncclDevCommCreate(args->comms[i], &reqs, args->devComms+i));
-    }
-    NCCLCHECK(ncclGroupEnd());
+    TESTCHECK(createTestDevComms(args->comms, args->nGpus, args->devComms, &args->nDevComms));
   }
   // Capture memory used by test buffers
   int64_t deviceCommMaxMem = 0;
@@ -1850,9 +1887,7 @@ testResult_t threadInit(struct threadArgs* args) {
   TESTCHECK(testStreamSynchronize(args->nGpus, args->streams, args->comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   if (deviceImpl) {
-    for (int i = 0; i < args->nGpus; i++) {
-      NCCLCHECK(ncclDevCommDestroy(args->comms[i], args->devComms+i));
-    }
+    TESTCHECK(destroyTestDevComms(args->comms, args->nGpus, args->devComms, args->nDevComms));
   }
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
@@ -2589,7 +2624,8 @@ testResult_t run() {
   std::vector<void*> biasRegHandles(nThreads*nGpus, nullptr);
 #endif
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-  std::vector<ncclDevComm> devComms(nThreads*nGpus);
+  std::vector<ncclDevComm> devComms(nThreads*nGpus*testMaxDevComms);
+  int nDevComms = 0;
 #endif
   std::vector<int64_t> initGpuMem(nThreads, 0);
   std::vector<int64_t> bufferMemory(nThreads, 0);
@@ -2671,39 +2707,7 @@ testResult_t run() {
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
      /* Create device communicators based on test-specific requirements */
      if (deviceImpl) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
-      if (test_ncclVersion < NCCL_VERSION(2,29,0)) {
-        fprintf(stderr,
-          "Incompatible NCCL versions. nccl-tests was compiled with NCCL %d, but is running with NCCL %d. "
-          "The %d Device API is not compatible with versions before 2.29.\n",
-          NCCL_VERSION_CODE, test_ncclVersion, NCCL_VERSION_CODE);
-        return testInvalidUsage;
-      }
-      ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
-      if (!ncclTestEngine.getDevCommRequirements) {
-        fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
-        return testNotImplemented;
-      }
-      TESTCHECK(ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs, comms[0]));
-#else
-      if (test_ncclVersion >= NCCL_VERSION(2,29,0)) {
-        fprintf(stderr, "Incompatible NCCL versions. nccl-tests was compiled with NCCL 2.28, but is running with NCCL %d. "
-          "The 2.28 Device API is not compatible with later versions.\n", test_ncclVersion);
-        return testInvalidUsage;
-      }
-      ncclDevCommRequirements reqs = {};
-      if (!ncclTestEngine.getDevCommRequirements ||
-          !ncclTestEngine.getDevCommRequirements(deviceImpl, &reqs)) {
-        fprintf(stderr, "Device implementation %d is not supported by this test\n", deviceImpl);
-        return testNotImplemented;
-      }
-#endif
-
-       NCCLCHECK(ncclGroupStart());
-       for (int i = 0; i < nGpus * nThreads; i++) {
-         NCCLCHECK(ncclDevCommCreate(comms[i], &reqs, devComms.data()+i));
-       }
-       NCCLCHECK(ncclGroupEnd());
+       TESTCHECK(createTestDevComms(comms, nGpus * nThreads, devComms.data(), &nDevComms));
      }
      int64_t deviceCommMaxMem = 0;
      for (int g = 0; g < nGpus; ++g) {
@@ -2758,7 +2762,8 @@ testResult_t run() {
     threads[t].args.bias = bias.data()+t*nGpus;
     threads[t].args.expected = expected.data()+t*nGpus;
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
-    threads[t].args.devComms = devComms.data()+t*nGpus;
+    threads[t].args.devComms = devComms.data()+t*nGpus*testMaxDevComms;
+    threads[t].args.nDevComms = nDevComms;
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
     threads[t].args.sendRegHandles = sendRegHandles.data()+t*nGpus;
@@ -2817,9 +2822,7 @@ testResult_t run() {
     TESTCHECK(testStreamSynchronize(nGpus*nThreads, streams.data(), comms));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
     if (deviceImpl) {
-      for (int i = 0; i < nGpus*nThreads; i++) {
-        NCCLCHECK(ncclDevCommDestroy(comms[i], devComms.data()+i));
-      }
+      TESTCHECK(destroyTestDevComms(comms, nGpus*nThreads, devComms.data(), nDevComms));
     }
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
@@ -2832,7 +2835,11 @@ testResult_t run() {
   }
   free(comms);
   envstr = getenv("NCCL_TESTS_MIN_BW");
-  const double check_avg_bw = envstr ? atof(envstr) : -1;
+  double check_avg_bw = envstr ? atof(envstr) : -1;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  // A device implementation that skipped ran no sizes, so there is no bandwidth to check.
+  if (deviceImpl && threads[0].args.nDevComms == 0) check_avg_bw = -1;
+#endif
   if (bw_count[0] > 0) {
     bw[0] /= bw_count[0];
   }
