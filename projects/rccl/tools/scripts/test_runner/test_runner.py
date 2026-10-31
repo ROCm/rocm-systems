@@ -139,6 +139,25 @@ def main():
         # report was generated above.
         executor.emit_results()
 
+        # Generate HTML report when --report was requested.
+        if args.report:
+            if not (args.emit_results or args.db_push):
+                print("WARNING: --report requires --emit-results; skipping HTML report generation")
+            else:
+                run_dir = executor.get_emit_run_dir()
+                if run_dir:
+                    from generate_report import main as _report_main
+                    report_argv = [run_dir, args.report,
+                                   "--mode", args.report_mode]
+                    if args.report_bkc:
+                        report_argv += ["--bkc", args.report_bkc]
+                    try:
+                        _report_main(report_argv)
+                    except Exception as e:
+                        print(f"WARNING: HTML report generation failed: {e}")
+                else:
+                    print("WARNING: Could not determine emit run directory; skipping HTML report")
+
         # Determine whether the test run itself failed.
         tests_failed = False
         if executor.test_results:
