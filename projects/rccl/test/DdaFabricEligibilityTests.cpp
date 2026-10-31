@@ -1757,20 +1757,21 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Ca
 
 // Scratch is sized the way fabric init does: LL enabled, AllReduce LL128 cap,
 // payload cap from the arch table. The ReduceScatter cap is read after nRanks
-// changes. Below rankScaledMinRanks it is the table total (128 MiB), and from 8
-// ranks it is nRanks times the per-rank entry clipped at 64 MiB (64 MiB at 8). The
-// 4-rank shard is the larger of the two, which is the scratch case this test is for.
+// changes. Below rankScaledMinRanks it is the table total (224 MiB), and from 8
+// ranks it is nRanks times the per-rank entry clipped at 112 MiB. The 2-rank shard
+// is the largest, which is the scratch case this test is for.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
 {
     const int savedRanks = mockComm_.comm.nRanks;
-    for (int nRanks : {4, 8})
+    for (int nRanks : {2, 4, 8, 16})
     {
         mockComm_.comm.nRanks = nRanks;
         const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter);
-        // 4 ranks is below rankScaledMinRanks, so the cap is the 128 MiB table total.
-        // 8 ranks uses nRanks x 8 MiB. Reading the cap before this assignment would
-        // check a 16 MiB shard here instead of the 32 MiB 4-rank shard.
-        EXPECT_EQ(totalCap, nRanks < 8 ? 128ULL * 1024 * 1024 : 64ULL * 1024 * 1024);
+        // Below 8 ranks the cap is the 224 MiB table total; 8 ranks use nRanks x 8 MiB
+        // and 16 hit the 112 MiB clip. Reading the cap before this assignment would
+        // check a 32 MiB shard here instead of the 112 MiB 2-rank shard.
+        const size_t expected = (nRanks < 8 ? 224ULL : nRanks == 8 ? 64ULL : 112ULL) * 1024 * 1024;
+        EXPECT_EQ(totalCap, expected) << "nRanks=" << nRanks;
         mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
             nRanks, /*overrideBytes=*/-1, rcclParamDdaEnable(),
             rcclDdaScratchPayloadCap(mockComm_.get()), rcclParamDdaLL(), rcclParamDdaLL128(),
