@@ -8,6 +8,7 @@ test_categories:
       - "FabricMemHandler*"
       - "FabricGpuBarrier*"
       - "FabricInit*"
+      - "IpcMemHandler*"
       - "HipVmmLedger*"
       - "HostAllocLedger*"
     exclude_windows:
