@@ -47,20 +47,22 @@ public:
                size_t ldsSizeBytes);
 
   /// Allocate an event using the counter and ordering implied by its type.
-  EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
+  EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
                           std::vector<uint32_t> registers, uint64_t execMask) {
-    return allocateEventId(wave, pc, type, std::move(registers), execMask, 0xF, {},
+    return allocateEventId(wave, instruction, type, std::move(registers), execMask, 0xF, {},
                            defaultWaitCounterType(type), defaultMemoryOrder(type));
   }
 
   /// Allocate a workgroup-global event ID and record its metadata.
   EventId
-  allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                  uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
-                  amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+  allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
+                  std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                  IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
+                  MemoryOrderClass memoryOrder,
                   std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  EventId allocateEventId(WaveId, uint64_t pc, MemoryEventType, std::vector<uint32_t> registers,
-                          uint64_t execMask, uint8_t byteMask, IntervalSet ldsIntervals,
+  EventId allocateEventId(WaveId, InstructionSnapshot instruction, MemoryEventType,
+                          std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
+                          IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                           MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
