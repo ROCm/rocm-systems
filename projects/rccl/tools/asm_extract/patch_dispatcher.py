@@ -18,6 +18,8 @@ import sys
 import re
 import json
 
+from extract_device_function import max_named_barriers
+
 
 # Maximum addressable (numbered) SGPRs per architecture generation.
 # GFX9 has 104 physical SGPRs with s[102:103] reserved for VCC -> 102 addressable.
@@ -92,7 +94,7 @@ def patch_abs_symbols(lines, max_res):
 
         m = re.match(r'(\s*\.set\s+\S+)\.(num_named_barrier),\s*(.*)', line)
         if m:
-            result.append(f'{m.group(1)}.num_named_barrier, 0\n')
+            result.append(f'{m.group(1)}.num_named_barrier, {max_res.get("num_named_barrier", 0)}\n')
             continue
 
         m = re.match(r'(\s*\.set\s+\S+)\.(private_seg_size),\s*(.*)', line)
@@ -195,6 +197,11 @@ def patch_gpr_maximums(lines, max_res):
             result.append(f'{m.group(1)}{max_res["next_free_sgpr"]}\n')
             continue
 
+        m = re.match(r'(\s*\.set\s+amdgpu\.max_num_named_barrier,\s*)\d+', line)
+        if m:
+            result.append(f'{m.group(1)}{max_res.get("num_named_barrier", 0)}\n')
+            continue
+
         result.append(line)
     return result
 
@@ -264,6 +271,8 @@ def patch(asm_path, output_path, max_resources_path, gpu_target):
     with open(asm_path) as f:
         lines = f.readlines()
 
+    # The dispatcher initializes the named barriers itself, so it reserves its own count too.
+    max_res['num_named_barrier'] = max(max_res.get('num_named_barrier', 0), max_named_barriers(lines))
     lines = patch_abs_symbols(lines, max_res)
     lines = patch_amdhsa_kernel_directives(lines, max_res)
     lines = patch_gpr_maximums(lines, max_res)

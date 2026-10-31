@@ -149,9 +149,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-      barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
+      barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers, group);
 #else
-      barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
+      barrier_generic(__threadfence(), nthreads, barrier_next, barriers, group);
 #endif
 #else
     barrier_sync(15 - group, nthreads);
