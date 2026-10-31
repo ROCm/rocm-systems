@@ -4,6 +4,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ## HIP 7.18.0 for ROCm 10.3.0
 
+### Resolved issues
+
+* `hiprtcCreateProgram` and `hiprtcLinkCreate` no longer crash when the COMGR library cannot be loaded or is incompatible. They now return `HIPRTC_ERROR_INTERNAL_ERROR`. This check runs before argument validation, so when COMGR is unavailable, invalid arguments also yield `HIPRTC_ERROR_INTERNAL_ERROR` instead of `HIPRTC_ERROR_INVALID_PROGRAM` or `HIPRTC_ERROR_INVALID_INPUT`. The cause of the load failure is logged at `AMD_LOG_LEVEL=1` or higher.
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
