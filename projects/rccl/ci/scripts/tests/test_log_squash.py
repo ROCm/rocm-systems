@@ -66,6 +66,33 @@ class SquashLogSpam(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.logs.iterdir() if p.is_file()),
                          ["madengine-x_node_1.out"])
 
+    def test_existing_squash_symlink_is_not_followed(self):
+        log = self.logs / "madengine-x_node_0.out"
+        log.write_bytes(SPAM * 3)
+        victim = self.run_dir / "victim"
+        victim.write_bytes(b"keep me\n")
+        log.with_name(log.name + ".squash").symlink_to(victim)
+        tm.squash_log_spam(self.run_dir)
+        self.assertEqual(victim.read_bytes(), b"keep me\n")
+
+    def test_only_runner_owned_snapshot_logs_are_squashed(self):
+        raw = self.logs / "run_logs" / "42" / "server.log"
+        raw.parent.mkdir(parents=True)
+        raw.write_bytes(SPAM * 3)
+        verified = self.run_dir / "verified_run_logs" / "server.log"
+        verified.parent.mkdir()
+        verified.write_bytes(SPAM * 3)
+
+        tm.squash_log_spam(self.run_dir, "42")
+
+        self.assertEqual(raw.read_bytes(), SPAM * 3)
+        self.assertEqual(
+            verified.read_bytes(),
+            SPAM
+            + b"[rccl-ci] dropped 2 repeats of 'NCCL WARN Please note that "
+              b"ncclAllToAllv is deprecated'\n",
+        )
+
     def test_missing_slurm_output(self):
         self.assertEqual(tm.squash_log_spam(self.run_dir / "nope"), 0)
 

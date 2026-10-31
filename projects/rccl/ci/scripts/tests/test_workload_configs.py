@@ -78,6 +78,76 @@ class WorkflowsMatchConfigs(unittest.TestCase):
             script = int(leg["job_timeout_minutes"]) - SCRIPT_MARGIN_MINUTES
             self.assertGreater(script, limit, leg)
 
+    def test_candidate_sha_is_resolved_and_propagated(self):
+        entry = load_workflow("therock-rccl-ci.yml")
+        linux = load_workflow("therock-rccl-ci-linux.yml")
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+
+        self.assertIn("candidate_sha", entry[True]["workflow_dispatch"]["inputs"])
+        self.assertEqual(
+            entry["jobs"]["setup"]["outputs"]["candidate_sha"],
+            "${{ steps.candidate.outputs.sha }}",
+        )
+        self.assertEqual(
+            entry["jobs"]["therock-ci-linux"]["with"]["candidate_sha"],
+            "${{ needs.setup.outputs.candidate_sha }}",
+        )
+        self.assertTrue(
+            linux[True]["workflow_call"]["inputs"]["candidate_sha"]["required"]
+        )
+        verify = next(
+            step for step in linux["jobs"]["test-plan"]["steps"]
+            if step.get("name") == "Verify candidate artifact source"
+        )
+        plan_checkout = linux["jobs"]["test-plan"]["steps"][0]
+        self.assertNotIn("ref", plan_checkout["with"])
+        self.assertIn("verify-run", verify["run"])
+        self.assertEqual(
+            linux["jobs"]["test-plan"]["permissions"]["actions"], "read"
+        )
+        for job in linux["jobs"].values():
+            if job.get("uses") == "./.github/workflows/therock-rccl-test-madengine.yml":
+                self.assertEqual(job["with"]["candidate_sha"], "${{ inputs.candidate_sha }}")
+                self.assertEqual(job["permissions"]["actions"], "read")
+
+        checkout = next(
+            step for step in callee["jobs"]["test_madengine"]["steps"]
+            if step.get("name") == "Checkout rocm-systems scripts"
+        )
+        self.assertNotIn("ref", checkout["with"])
+        tuner_checkout = next(
+            step for step in callee["jobs"]["test_madengine"]["steps"]
+            if step.get("name") == "Checkout candidate tuner config"
+        )
+        self.assertEqual(
+            tuner_checkout["with"]["ref"], "${{ inputs.candidate_sha }}"
+        )
+        self.assertEqual(
+            tuner_checkout["with"]["sparse-checkout"],
+            "projects/rccl/tuner/rccl_tuner_gfx950.csv",
+        )
+        fetch = next(
+            step for step in callee["jobs"]["test_madengine"]["steps"]
+            if step.get("name") == "Fetch RCCL artifacts"
+        )
+        self.assertIn("candidate_provenance.py", fetch["run"])
+        self.assertIn("verify-run", fetch["run"])
+        run_step = next(
+            step for step in callee["jobs"]["test_madengine"]["steps"]
+            if step.get("name") == "Run MADEngine workload"
+        )
+        self.assertIn(
+            "candidate-source/projects/rccl/tuner/rccl_tuner_gfx950.csv",
+            run_step["run"],
+        )
+        upload = next(
+            step for step in callee["jobs"]["test_madengine"]["steps"]
+            if step.get("name") == "Upload results"
+        )
+        upload_paths = upload["with"]["path"]
+        self.assertIn("verified_run_logs/**/*.log", upload_paths)
+        self.assertNotIn("slurm_output/run_logs", upload_paths)
+
 
 class CheckMadKnobs(unittest.TestCase):
 
