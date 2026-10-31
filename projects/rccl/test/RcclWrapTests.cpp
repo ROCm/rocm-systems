@@ -2693,8 +2693,7 @@ TEST(RcclAllReduceDdaDecision, Gfx950_FourRanks_RelaxOn_TakesDda)
             size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
             EXPECT_TRUE(ncclDdaNranksRelaxEnabled());
             EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
-                                                       /*symEligible=*/false,
-                                                       /*ceAllReduceAllowed=*/false, /*query=*/false));
+                                                       /*symEligible=*/false, /*query=*/false));
         },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }
