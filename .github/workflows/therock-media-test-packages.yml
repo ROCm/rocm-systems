@@ -21,6 +21,13 @@ on:
       artifact_run_id:
         type: string
         default: ""
+    secrets:
+      # Read access to the private bucket holding the rocDecode conformance
+      # stream corpus. Forwarded to the rocdecode job only.
+      ROCDECODE_AWS_ACCESS_KEY_ID:
+        required: false
+      ROCDECODE_AWS_SECRET_ACCESS_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -30,6 +37,9 @@ jobs:
     name: 'Test rocdecode'
     if: ${{ inputs.platform == 'linux' }}
     uses: './.github/workflows/therock-test-component.yml'
+    secrets:
+      ROCDECODE_AWS_ACCESS_KEY_ID: ${{ secrets.ROCDECODE_AWS_ACCESS_KEY_ID }}
+      ROCDECODE_AWS_SECRET_ACCESS_KEY: ${{ secrets.ROCDECODE_AWS_SECRET_ACCESS_KEY }}
     with:
       artifact_run_id: ${{ inputs.artifact_run_id }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
@@ -39,7 +49,7 @@ jobs:
         {
           "job_name": "rocdecode",
           "fetch_artifact_args": "--rocdecode --tests",
-          "timeout_minutes": 10,
+          "timeout_minutes": 30,
           "test_script": "python ./build/share/rocdecode/test/run_rocdecode.py",
           "shard_arr": [1],
           "total_shards": 1,

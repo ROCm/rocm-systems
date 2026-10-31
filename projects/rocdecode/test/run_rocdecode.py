@@ -16,6 +16,7 @@ import platform
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -132,6 +133,33 @@ def execute_tests(env: Dict[str, str], test_source_dir: Path, build_dir: Path) -
     subprocess.run(cmd, cwd=build_dir, check=True, env=env)
 
 
+def execute_conformance(env: Dict[str, str], script_dir: Path, build_dir: Path) -> None:
+    """Run the conformance sweep as a separate phase after CTest.
+
+    Deliberately not a CTest test: the sweep decodes several hundred streams per
+    codec and depends on a corpus fetched from a private bucket at runtime, which
+    makes it a poor fit for the installed CMake suite. Running it here means one
+    entry point still covers both.
+
+    A missing runner, or a run with no credentials to reach the corpus, is not a
+    failure -- the sweep reports that itself and exits 0. A real conformance
+    failure raises, the same way a CTest failure does in execute_tests.
+    """
+    runner = script_dir / "run_rocdecode_conformance.py"
+    if not runner.is_file():
+        logging.info(f"++ conformance runner not found at {runner}, skipping")
+        return
+
+    cmd = [
+        sys.executable,
+        str(runner),
+        "--results-dir",
+        str(build_dir / "conformance-results"),
+    ]
+    logging.info(f"++ Exec [{build_dir}]$ {shlex.join(cmd)}")
+    subprocess.run(cmd, cwd=build_dir, check=True, env=env)
+
+
 def main() -> None:
     parse_args()
     script_dir = Path(__file__).resolve().parent
@@ -145,6 +173,7 @@ def main() -> None:
     if not setup_env(env, rocm_path):
         return
     execute_tests(env, test_source_dir, build_dir)
+    execute_conformance(env, script_dir, build_dir)
 
 
 if __name__ == "__main__":
