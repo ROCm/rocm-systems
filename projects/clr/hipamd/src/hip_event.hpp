@@ -168,6 +168,7 @@ class Event {
   virtual bool awaitEventCompletion();
   virtual bool ready();
   virtual int64_t time(bool getStartTs) const;
+  virtual int64_t awaitSystemTs() const { return 0; }
 
  protected:
   uint32_t flags_;             //!< Flags associated with the event
@@ -191,6 +192,7 @@ class Event {
 };
 
 class EventDD : public Event {
+  mutable int64_t await_system_ts_ = 0;
  public:
   explicit EventDD(uint32_t flags) : Event(flags) {}
   ~EventDD() override = default;
@@ -198,6 +200,7 @@ class EventDD : public Event {
   bool awaitEventCompletion() override;
   bool ready() override;
   int64_t time(bool getStartTs) const override;
+  int64_t awaitSystemTs() const override { return await_system_ts_; }
 };
 
 /// Emulated IPC event using POSIX shared memory + stream write/wait value.

@@ -76,7 +76,15 @@ bool EventDD::awaitEventCompletion() {
   constexpr bool kWaitCompletion = true;
   const amd::SyncPolicy policy =
       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
-  return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, policy);
+  bool result = g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, policy);
+  // Record system clock at completion detection for fallback timing when GPU
+  // barrier signal timestamps are unreliable (e.g. gfx1171).
+  if (result && await_system_ts_ == 0) {
+    struct timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    await_system_ts_ = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
+  }
+  return result;
 }
 
 // ================================================================================================
@@ -122,6 +130,17 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     awaitEventCompletion();
     eStop.awaitEventCompletion();
     ms = static_cast<float>(eStop.time(false) - time(false)) * kNsToMs;
+
+    // Barrier packets on some hardware (e.g. gfx1171) produce non-monotonic GPU
+    // signal timestamps, causing negative elapsed time.  Fall back to system
+    // clock timestamps recorded at event completion detection.
+    if (ms < 0.0f) {
+      int64_t ts_start = awaitSystemTs();
+      int64_t ts_stop = eStop.awaitSystemTs();
+      if (ts_start > 0 && ts_stop > 0) {
+        ms = static_cast<float>(ts_stop - ts_start) * kNsToMs;
+      }
+    }
   }
   return hipSuccess;
 }
