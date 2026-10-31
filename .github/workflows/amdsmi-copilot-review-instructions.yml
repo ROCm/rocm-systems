@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# AMD SMI Copilot code review instructions check.
+#
+# Copilot code review reads instruction files only from the repository root, so
+# .github/instructions/amdsmi-review*.instructions.md are generated copies of
+# the review agents in projects/amdsmi/.github/agents/. This job fails when a
+# copy no longer matches its agent.
+# ---------------------------------------------------------------------------
+name: AMDSMI Copilot Review Instructions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/instructions/amdsmi-*'
+      - '.github/workflows/amdsmi-copilot-review-instructions.yml'
+      - 'projects/amdsmi/.github/agents/**'
+      - 'projects/amdsmi/tools/update_copilot_review_instructions.py'
+  push:
+    branches: [develop]
+    paths:
+      - '.github/instructions/amdsmi-*'
+      - '.github/workflows/amdsmi-copilot-review-instructions.yml'
+      - 'projects/amdsmi/.github/agents/**'
+      - 'projects/amdsmi/tools/update_copilot_review_instructions.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check generated instructions
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/instructions
+            projects/amdsmi/.github/agents
+            projects/amdsmi/tools
+
+      - name: Check the instructions match the review agents
+        run: python3 projects/amdsmi/tools/update_copilot_review_instructions.py --check
