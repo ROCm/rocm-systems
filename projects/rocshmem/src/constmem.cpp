@@ -52,7 +52,8 @@ void init_constant_memory(void) {
   constmem_values.heap_size = backend->heap.get_size();
 
   constmem_values.tdm_tile_bytes = envvar::tdm::tile_bytes;
-  constmem_values.tdm_threshold = envvar::tdm::threshold;
+  constmem_values.tdm_put_threshold = envvar::tdm::put_threshold;
+  constmem_values.tdm_get_threshold = envvar::tdm::get_threshold;
 
 #if defined(USE_TDM)
   {
