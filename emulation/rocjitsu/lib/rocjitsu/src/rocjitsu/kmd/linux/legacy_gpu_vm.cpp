@@ -137,7 +137,7 @@ public:
             .begin = address & ~(kLegacyPageSize - 1),
             .size = kLegacyPageSize,
             .mutation_epoch = mutation_epoch_,
-            .captured_epoch = mutation_epoch_->load(std::memory_order_relaxed)};
+            .captured_epoch = mutation_epoch_->value.load(std::memory_order_relaxed)};
   }
 
   [[nodiscard]] VmTranslationResult probe_translation(uint64_t address, std::size_t size,
@@ -302,7 +302,8 @@ private:
   // Synchronous word reads and stores must not destroy the final request-mutex owner
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
+      mutation_epoch_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
