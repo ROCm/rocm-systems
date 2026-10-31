@@ -605,7 +605,11 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        """Whether MIMG uses the GFX11 image-address encoding contract.
+
+        This selects DIM-based VADDR sizing, x4 SRSRC/SSAMP tuple scaling, and
+        the optional NSA DWORD containing additional address-register selectors.
+        """
         return False
 
     @property
@@ -1641,11 +1645,6 @@ class _AmdgpuProfileBase(IsaProfile):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        """Whether vector-memory writes also contribute to EXPCNT."""
-        return False
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         """Whether GDS operations also contribute to EXPCNT."""
         return False
@@ -1850,10 +1849,6 @@ class CdnaProfile(_AmdgpuProfileBase):
         return False
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2010,6 +2005,11 @@ class CdnaProfile(_AmdgpuProfileBase):
 
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused.
+        return False
 
     @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
@@ -2234,10 +2234,6 @@ class Rdna1Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2391,8 +2387,11 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -2645,13 +2644,6 @@ class Rdna3_5Profile(Rdna3Profile):
         return {
             'IMAGE_BVH_INTERSECT_RAY': 4,
             'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
         }
 
     @property

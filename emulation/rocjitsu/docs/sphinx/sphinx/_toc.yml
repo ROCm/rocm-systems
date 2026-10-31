@@ -30,6 +30,7 @@ subtrees:
       - file: reference/api-status
       - file: reference/rj-dbt-translate
       - file: reference/rocjitsu-cli
+      - file: reference/python-api
       - file: reference/environment-variables
       - file: reference/supported-architectures
   - caption: About

@@ -105,7 +105,7 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             '--race-tests', '--workers', '3', '--soft-timeout', '17'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 7)
+        self.assertEqual(len(calls), 8)
         for call in calls:
             wrapper = shlex.split(self.option(call, '--run-wrapper'))
             self.assertIn(
@@ -124,9 +124,11 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
                 self.assertIn('--skip-tests-config', call['args'])
                 self.assertIsNone(call['case_timeout'])
         self.assertEqual(
-            [self.option(c, '--target') for c in calls[-2:]], ['gfx950', 'gfx1151']
+            [self.option(c, '--target') for c in calls[-3:]],
+            ['gfx942', 'gfx950', 'gfx1151'],
         )
         reports = self.root / '.pytest-artifacts/junit'
+        self.assertTrue((reports / 'race-gfx942.xml').is_file())
         self.assertTrue((reports / 'race-gfx950.xml').is_file())
         self.assertTrue((reports / 'race-gfx1151.xml').is_file())
 
@@ -178,7 +180,9 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
         )
         self.assertEqual(result.returncode, 1, result.stderr)
         race_calls = [c for c in calls if self.option(c, '--suite') == 'race']
-        self.assertEqual([c['case_timeout'] for c in race_calls], ['17', '43', '17'])
+        self.assertEqual(
+            [c['case_timeout'] for c in race_calls], ['17', '17', '43', '17']
+        )
 
     def test_race_near_timeout_reporting_uses_the_execution_deadline(self):
         for timeout, duration in [('30', '29'), ('360', '349')]:
