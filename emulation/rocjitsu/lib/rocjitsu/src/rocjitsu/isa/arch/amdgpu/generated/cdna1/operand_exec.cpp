@@ -13,7 +13,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <format>
 #include <optional>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
@@ -206,7 +205,7 @@ void Operand::write_lane_exec(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val
     amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);
     return;
   }
-  throw std::logic_error("write_lane called on non-VGPR operand type");
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);
 }
 
 uint64_t Operand::read_lane64_exec(const amdgpu::Wavefront &wf, uint32_t lane) const {
@@ -248,7 +247,7 @@ void Operand::write_lane64_exec(amdgpu::Wavefront &wf, uint32_t lane, uint64_t v
     amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);
     return;
   }
-  throw std::logic_error("write_lane64 called on non-VGPR operand type");
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);
 }
 
 uint64_t Operand::read_scalar64_exec(const amdgpu::Wavefront &wf) const {

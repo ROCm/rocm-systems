@@ -345,11 +345,20 @@ public:
     return static_cast<uint16_t>(std::max(1, (size_bits_ + 31) / 32));
   }
 
+protected:
+  static void report_missing_execution_backend(const amdgpu::Wavefront &wf);
+
 private:
   Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
 
   // Value access is intentionally private. Instruction implementations use
   // RegisterAccess; Operand remains the ISA-specific resolver/backend.
+  // The concrete operand must implement each accessor used by its execution
+  // backend. Descriptor-only operands do not support value access, and staged
+  // source delegates do not support writes. Calling an unimplemented base
+  // accessor is a programmer error, not a rejected guest operand encoding.
+  // Missing concrete backends retain a wavefront execution error. Any returned
+  // scalar zero is a placeholder; direct callers must stop on that error.
 
   /// @brief Read this operand as a scalar 32-bit value.
   /// @param wf Wavefront providing register state.
@@ -404,6 +413,13 @@ public:
   /// Delegate mutation is restricted to ScopedOperandDelegate so restoration
   /// cannot be skipped on exceptions or early returns.
   Operand *delegate() const { return delegate_; }
+
+  /// @brief Whether this operand and its read delegate have execution callbacks.
+  /// @details Generated execution callbacks check this before reading any values.
+  /// Model-only operands remain usable for decoding and analysis.
+  virtual bool execution_backend_available() const {
+    return !delegate_ || delegate_->execution_backend_available();
+  }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
   /// SIMD-friendly results for this operand.
