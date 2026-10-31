@@ -195,4 +195,32 @@ TEST_F(IpcMemHandlerMicrotest, PartialOpenFailureClosesTheAlreadyOpenedPeers) {
   EXPECT_EQ(closed_.size(), 2u);
 }
 
+// Every peer's handle is opened once, its mapping is what getPeerDeviceMemPtr returns, and the destructor closes
+// each peer mapping exactly once and never this rank's own pointer.
+TEST_F(IpcMemHandlerMicrotest, HealthyExchangeOpensEveryPeerAndPublishesPointers) {
+  ncclIpcMemHandler* h = MakeRegisteredHandler();
+
+  ASSERT_EQ(h->exchangeMemPtrs(), ncclSuccess);
+
+  EXPECT_EQ(gathers_, 1);
+  EXPECT_EQ(selfOkAtGather_, 1);
+  EXPECT_EQ(RankOf(selfHandleAtGather_), kRank);
+  EXPECT_EQ(opened_, PeerRanks());
+  void* p = nullptr;
+  ASSERT_EQ(h->getPeerDeviceMemPtr(kRank, &p), ncclSuccess);
+  EXPECT_EQ(p, kSelfPtr);
+  for (int r : PeerRanks()) {
+    p = nullptr;
+    ASSERT_EQ(h->getPeerDeviceMemPtr(r, &p), ncclSuccess) << "peer " << r;
+    EXPECT_EQ(p, PeerMapping(r)) << "peer " << r;
+  }
+  EXPECT_TRUE(closed_.empty());
+
+  handler_.reset();
+
+  for (int r : PeerRanks()) EXPECT_EQ(ClosedCount(PeerMapping(r)), 1u) << "peer " << r;
+  EXPECT_EQ(ClosedCount(kSelfPtr), 0u);
+  EXPECT_EQ(closed_.size(), static_cast<size_t>(kNRanks - 1));
+}
+
 }  // namespace
