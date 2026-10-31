@@ -235,7 +235,8 @@ void FlatStoreDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
   d->store_data.resize(wf.wf_size() * 4);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -252,7 +253,8 @@ void FlatStoreDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
   d->store_data.resize(wf.wf_size() * 8);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -269,7 +271,8 @@ void FlatStoreDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
   d->store_data.resize(wf.wf_size() * 12);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -286,7 +289,8 @@ void FlatStoreDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data;
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
   d->store_data.resize(wf.wf_size() * 16);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
