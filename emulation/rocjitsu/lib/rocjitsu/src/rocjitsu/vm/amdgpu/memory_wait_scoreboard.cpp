@@ -220,8 +220,15 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
       return pending_.pending_vgpr(static_cast<uint16_t>(index), reg->width);
     };
     bool hit = false;
-    for (int i = 0; i < inst.num_src_operands(); ++i)
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i)) {
+        // The instruction's implicit uses replace this decoded placeholder, so
+        // the explicit-only prefilter cannot prove that the instruction misses.
+        hit = true;
+        continue;
+      }
       hit |= pending(*inst.src_operand(i));
+    }
     for (int i = 0; i < inst.num_dst_operands(); ++i)
       hit |= pending(*inst.dst_operand(i));
     if (!hit)
@@ -314,11 +321,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return;
   }
   if (!pending_scalar_ && inst.is_memory_op() && name.starts_with("ds_")) {
-    for (int i = 0; i < inst.num_src_operands(); ++i)
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       if (const auto *op = inst.src_operand(i); op && op->is_vgpr())
         if (auto reg = registers.source_register(*op, op == modifiers.wordwise_source0 ||
                                                           op == modifiers.wordwise_source1))
           access(*reg, lanes, op->register_byte_mask(), false);
+    }
     return;
   }
   const bool hwreg_read = name == "s_getreg_b32";
@@ -529,6 +539,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                    : registers.scalar_control_value(selector->encoding_value()).value_or(0)) &
                   (wf.wf_size() - 1);
     for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op == selector || (scalar_lane_write && op == inst.dst_operand(0)))
         continue;
@@ -581,8 +593,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       access(*reg, accessed_lanes, bytes, write);
     }
   };
-  for (int i = 0; i < inst.num_src_operands(); ++i)
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     check_operand(inst.src_operand(i), false);
+  }
   const bool partial_destination =
       inst.dst_operand(0) && inst.dst_operand(0)->register_byte_mask() != 0xf;
   // Liveness models preservation as a use; preserving an untouched byte or
@@ -636,9 +651,15 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const auto stack_entry = [&]() {
     return RegisterRef{RegClass::SGPR, static_cast<uint16_t>(stack_access->first_wave_sgpr), 4};
   };
-  RegisterSet implicit;
-  if (!preserves_destination && !branch_stack)
+  RegisterSet implicit, preservation_uses;
+  const bool distinguishes_preservation = inst.implicit_preservation_uses(preservation_uses);
+  // Legacy partial-destination hooks do not distinguish preservation from
+  // genuine hidden reads. Instructions that do provide the distinction retain
+  // their real implicit dependencies while dropping only preservation uses.
+  if (!branch_stack && (!preserves_destination || distinguishes_preservation)) {
     inst.implicit_uses(implicit);
+    implicit -= preservation_uses;
+  }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
     if (reg.cls == RegClass::VGPR && !implicit_operands.empty())

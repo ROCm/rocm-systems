@@ -359,6 +359,13 @@ public:
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
+  /// @brief Whether an explicit source operand contributes its ordinary register dependency.
+  /// @details Encodings with non-contiguous source tuples can suppress the
+  /// placeholder tuple and report the actual registers through implicit_uses().
+  [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
+    return true;
+  }
+
   /// @brief Add registers implicitly read by this instruction.
   ///
   /// @details Used for encoded fields that affect execution but are not part of
@@ -377,6 +384,15 @@ public:
   /// remain exclusive to implicit_uses(). The pointed-to Operands share this
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
+
+  /// @brief Add implicit uses that only preserve an unwritten destination portion.
+  ///
+  /// @details These uses matter to liveness but do not consume a pending memory
+  /// result. Keeping them separate lets memory-wait checking retain genuine
+  /// implicit reads, such as image coordinate registers.
+  /// @returns True when the instruction distinguishes preservation-only uses
+  /// from genuine implicit reads, even if this encoding has no preservation use.
+  virtual bool implicit_preservation_uses(RegisterSet & /*uses*/) const { return false; }
 
   /// @brief Query already-decoded modifiers only when a register may be pending.
   virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
@@ -417,8 +433,7 @@ public:
       first = false;
     }
     for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-      if (src_operands_[operand_index]->size_bits() == 0 ||
-          src_operands_[operand_index]->is_fieldless())
+      if (!should_print_src_operand(operand_index))
         continue;
       if (omit_repeated_destination_sources_) {
         bool repeats_dst = false;
@@ -491,6 +506,12 @@ protected:
   /// @brief Append one destination operand to textual disassembly.
   virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
     out += dst_operands_[operand_index]->name();
+  }
+  /// @brief Whether a source has its own textual operand.
+  /// Encoding-specific overrides may expose a decoded view of a fieldless source.
+  virtual bool should_print_src_operand(uint8_t operand_index) const {
+    return src_operands_[operand_index]->size_bits() != 0 &&
+           !src_operands_[operand_index]->is_fieldless();
   }
   /// @brief Append one source operand to textual disassembly.
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {
