@@ -77,13 +77,20 @@ bool ncclDdaNranksRelaxConsensusMatters(int nRanks) {
 // every point where the next step is collective, all ranks exchange that verdict
 // and act on it together: either everyone proceeds, or everyone tears down and
 // falls back. One byte per rank on the bootstrap channel, only on the DDA IPC
-// init path. Returns true only when every rank reported ready.
-static bool ddaIpcAllRanksReady(ncclComm* comm, bool localReady) {
+// init path. Sets *allReady only when every rank reported ready.
+//
+// A failed all-gather is returned as an error rather than folded into "not
+// ready": it is not an agreed verdict -- peers may have seen the exchange
+// succeed -- so communicator init must fail instead of claiming a clean
+// fall-back to the ring path.
+static ncclResult_t ddaIpcAllRanksReady(ncclComm* comm, bool localReady, bool* allReady) {
+  *allReady = false;
   std::vector<uint8_t> ready(static_cast<size_t>(comm->nRanks), 0);
   ready[static_cast<size_t>(comm->rank)] = localReady ? 1 : 0;
-  if (bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t)) != ncclSuccess) {
-    WARN("ncclDdaIpcCommInit: readiness all-gather failed; disabling DDA IPC");
-    return false;
+  ncclResult_t res = bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t));
+  if (res != ncclSuccess) {
+    WARN("ncclDdaIpcCommInit: readiness all-gather failed (%d)", res);
+    return res;
   }
   for (int i = 0; i < comm->nRanks; ++i) {
     if (ready[static_cast<size_t>(i)] == 0) {
@@ -91,10 +98,11 @@ static bool ddaIpcAllRanksReady(ncclComm* comm, bool localReady) {
            "ncclDdaIpcCommInit: rank %d could not set up DDA IPC; disabling it on all %d ranks so none of them "
            "diverge into the DDA path",
            i, comm->nRanks);
-      return false;
+      return ncclSuccess;
     }
   }
-  return true;
+  *allReady = true;
+  return ncclSuccess;
 }
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
@@ -185,10 +193,12 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   // First collective. Past this point every rank must be in lockstep.
-  if (!ddaIpcAllRanksReady(comm, localReady)) {
+  bool allReady = false;
+  ncclResult_t readyRes = ddaIpcAllRanksReady(comm, localReady, &allReady);
+  if (readyRes != ncclSuccess || !allReady) {
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    return ncclSuccess;
+    return readyRes;
   }
 
   // Its own all-gather has completed for everyone by the time this returns, but
@@ -278,7 +288,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 
   // Second collective (IpcGpuBarrier::mallocAndInit exchanges barrier pointers
   // over the bootstrap channel). Agree before entering it.
-  if (!ddaIpcAllRanksReady(comm, localReady)) {
+  readyRes = ddaIpcAllRanksReady(comm, localReady, &allReady);
+  if (readyRes != ncclSuccess || !allReady) {
     delete barrierState;
     if (comm->ddaPeerPtrsHost != nullptr) {
       free(comm->ddaPeerPtrsHost);
@@ -287,7 +298,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    return ncclSuccess;
+    return readyRes;
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
@@ -307,7 +318,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // reaches its internal handle exchange, which reports a missing or
   // unexportable mailbox on any rank to all of them (ncclIpcMemHandler::
   // exchangeMemPtrs).
-  if (!ddaIpcAllRanksReady(comm, localReady)) {
+  readyRes = ddaIpcAllRanksReady(comm, localReady, &allReady);
+  if (readyRes != ncclSuccess || !allReady) {
     barrierPair.first.reset();
     delete barrierState;
     if (comm->ddaPeerPtrsHost != nullptr) {
@@ -317,7 +329,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    return ncclSuccess;
+    return readyRes;
   }
 
   barrierState->resources = std::move(barrierPair.first);
