@@ -510,7 +510,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
   if (reportErrors) {
     PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
   } else {
-    PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+    PRINT("  %7s  %6s  %6s  %6s", timeStr, algBwStr, busBwStr, "N/A");
   }
 
   if (!out_of_place && report_timestamps && !per_iter_timing) writeTimestamp();
