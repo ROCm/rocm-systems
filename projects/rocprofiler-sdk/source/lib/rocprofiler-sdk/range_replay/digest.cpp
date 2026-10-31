@@ -23,6 +23,11 @@
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 
 #include <algorithm>
+#include <cstring>
+
+#if defined(__x86_64__)
+#include <nmmintrin.h>
+#endif
 
 namespace rocprofiler
 {
@@ -30,6 +35,53 @@ namespace range_replay
 {
 namespace digest
 {
+namespace
+{
+// The digest is only ever compared against other digests produced by the same binary in the
+// same process, and is never persisted, so the hash function may change freely between
+// releases. The snapshot regions hashed here can be hundreds of megabytes, which makes
+// throughput matter: the byte-at-a-time FNV-1a below is a dependent-multiply chain, while the
+// SSE4.2 CRC32 instruction consumes eight bytes per instruction, and four independent lanes
+// keep the multiplier pipeline fed. SSE4.2 is probed at runtime; the FNV-1a loop remains the
+// fallback.
+#if defined(__x86_64__)
+__attribute__((target("sse4.2"))) uint64_t
+crc32x4(const uint8_t* data, size_t size)
+{
+    constexpr uint64_t offset_basis = 14695981039346656037ULL;
+    uint64_t h0 = offset_basis, h1 = 1, h2 = 2, h3 = 3;
+    size_t   i   = 0;
+    for(; i + 32 <= size; i += 32)
+    {
+        uint64_t v0, v1, v2, v3;
+        std::memcpy(&v0, data + i, 8);
+        std::memcpy(&v1, data + i + 8, 8);
+        std::memcpy(&v2, data + i + 16, 8);
+        std::memcpy(&v3, data + i + 24, 8);
+        h0 = _mm_crc32_u64(h0, v0);
+        h1 = _mm_crc32_u64(h1, v1);
+        h2 = _mm_crc32_u64(h2, v2);
+        h3 = _mm_crc32_u64(h3, v3);
+    }
+    for(; i + 8 <= size; i += 8)
+    {
+        uint64_t v;
+        std::memcpy(&v, data + i, 8);
+        h0 = _mm_crc32_u64(h0, v);
+    }
+    for(; i < size; ++i) h0 = _mm_crc32_u8(static_cast<uint32_t>(h0), data[i]);
+    return h0 ^ h1 ^ h2 ^ h3;
+}
+
+bool
+have_sse42()
+{
+    static const bool v = __builtin_cpu_supports("sse4.2");
+    return v;
+}
+#endif
+}  // namespace
+
 uint64_t
 hash_bytes(const void* data, size_t size)
 {
@@ -37,6 +89,10 @@ hash_bytes(const void* data, size_t size)
     constexpr uint64_t prime        = 1099511628211ULL;
 
     if(data == nullptr) return offset_basis;
+
+#if defined(__x86_64__)
+    if(have_sse42()) return crc32x4(static_cast<const uint8_t*>(data), size);
+#endif
 
     const auto* bytes = static_cast<const uint8_t*>(data);
     uint64_t    hash  = offset_basis;

@@ -250,7 +250,11 @@ snapshot_digests(const snapshot_t& snapshot)
 {
     if(!snapshot.complete()) return std::nullopt;
 
-    auto region_bytes = std::vector<std::vector<uint8_t>>{};
+    // Thread-local, grow-only scratch. std::vector::resize only value-initializes the elements it
+    // adds, so once the buffers reach the region sizes, later digests pay no zero-fill and no
+    // first-touch page faults. Safe to reuse without clearing because every region is covered by
+    // exactly one extent, so every byte is overwritten by the readback below before it is hashed.
+    static thread_local auto region_bytes = std::vector<std::vector<uint8_t>>{};
     try
     {
         region_bytes.resize(snapshot.regions.size());

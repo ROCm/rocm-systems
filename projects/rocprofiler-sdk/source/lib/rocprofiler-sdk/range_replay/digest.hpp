@@ -49,8 +49,9 @@ namespace range_replay
 {
 namespace digest
 {
-// FNV-1a over `size` bytes at `data`. Chosen for being trivially auditable and dependency-free;
-// this detects divergence, it does not defend against anything.
+// Hashes `size` bytes at `data` with the SSE4.2 CRC32 instruction when available and with FNV-1a
+// otherwise. Both are trivially auditable and dependency-free; this detects divergence, it does
+// not defend against anything.
 uint64_t
 hash_bytes(const void* data, size_t size);
 
