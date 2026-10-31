@@ -97,6 +97,7 @@ nav:
       - DBT guest mode: rocjitsu_dbt_guest.md
       - Binary instrumentation: dbi-design.md
       - Instrumentation overview: dbi-overview.md
+      - Fault injection: fault-injection.md
       - Execution plugins: plugins.md
       - ISA code generation: codegen.md
       - ISA target providers: isa-target-providers.md
