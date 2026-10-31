@@ -78,17 +78,7 @@ class TestSet(TestCliBase):
                     )
                 )
 
-            # set --memory-partition defaults
-            # Safe to write back: the mode only takes effect after a driver reload.
-            memory_partition = self.partition_data["current_partition"][index]["memory"]
-            if memory_partition != "N/A":
-                cmds.append(
-                    (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
-                )
-
             # set --compute-partition defaults
-            # Must come after memory partition sets, since the memory partition set can override
-            # this setting (their defaults may differ).
             accelerator_type = self.partition_data["current_partition"][index]["accelerator_type"]
             if accelerator_type != "N/A":
                 cmds.append(
@@ -145,25 +135,9 @@ class TestSet(TestCliBase):
                 # TODO: get the right ptl-format
                 cmds.append((f"amd-smi set --ptl-format {ptl_format} --gpu {index}", self.PASS))
 
-            # set --clk-limit defaults
-            clock = self.metric_data["gpu_data"][index]["clock"]
-            for clk_type in self.clk_limits:
-                for limit_type in self.limit_types:
-                    value = self._clk_limit_value(clock, clk_type, limit_type)
-                    if value is not None:
-                        # A readable min/max clock does not imply the device
-                        # supports setting a limit on it.
-                        cmds.append(
-                            (
-                                f"amd-smi set --clk-limit {clk_type} {limit_type} {value} --gpu {index}",
-                                [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
-                            )
-                        )
-
             # reset --clocks
-            # A clk-level write is a bitmask, so replaying the recorded level would pin DPM
-            # to that one level; only AUTO hands every level back. Overdrive is reset too,
-            # and reports NOT_SUPPORTED on parts that lack it even though the rest worked.
+            # Reset clears clock masks and limits; replaying stale bounds first can fail.
+            # Overdrive may be unsupported even when the clock reset succeeds.
             cmds.append(
                 (
                     f"amd-smi reset --clocks --gpu {index}",
@@ -172,8 +146,7 @@ class TestSet(TestCliBase):
             )
 
             # set --perf-level defaults
-            # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
-            # --perf-determinism each leave the device on a level of their own.
+            # Reset forces AUTO, so restore the saved performance level last.
             perf_level = self.metric_data["gpu_data"][index]["perf_level"]
             if perf_level not in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
                 perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")

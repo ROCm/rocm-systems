@@ -2010,10 +2010,18 @@ def _build_reset_specs(reset):
         return {"amdsmi_reset_gpu": fn}
 
     def clocks(cmd, mode):
-        # Overdrive is reset first, then perf level (twice) with the same
-        # handle; both must be stubbed so a fake handle never reaches hardware.
+        # Overdrive is reset first, then the FCLK cap, then perf level (twice)
+        # with the same handle; all must be stubbed so a fake handle never
+        # reaches hardware.
         fn = _raise_not_supported if mode == "fail" else _noop
-        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn}
+        if mode == "fail":
+            fclk = {"amdsmi_get_clk_freq": fn}
+        else:
+            fclk = {
+                "amdsmi_get_clk_freq": lambda *_: {"frequency": [1800_000_000]},
+                "amdsmi_get_clock_info": lambda *_: {"max_clk": 1800},
+            }
+        return {"amdsmi_set_gpu_overdrive_level": fn, "amdsmi_set_gpu_perf_level": fn, **fclk}
 
     def fans(cmd, mode):
         fn = _raise_not_supported if mode == "fail" else _noop
@@ -2247,6 +2255,77 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
 
 class TestResetGpuGAllFailureGuards(unittest.TestCase):
     """A per-device GPU `reset` failure must be recorded and must NOT crash."""
+
+    def test_missing_fclk_table_keeps_existing_reset_output(self):
+        reset = _load_reset()
+        cmd = _make_reset_cmd(reset)
+        patches = _build_reset_specs(reset)["clocks"](cmd, "success")
+        patches["amdsmi_get_clk_freq"] = _raise_not_supported
+        with _patch_amdsmi_interface(reset, **patches):
+            cmd.reset(_reset_args(reset, clocks=True))
+        self.assertEqual(cmd.helpers.error_collector.resolve_exit_code(), 0)
+        result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
+        self.assertEqual(set(result), {"overdrive", "clocks", "performance"})
+
+    def test_fclk_read_failure_is_reported(self) -> None:
+        reset = _load_reset()
+        for operation, code in (
+            ("amdsmi_get_clk_freq", amdsmi_wrapper.AMDSMI_STATUS_IO),
+            ("amdsmi_get_clk_freq", amdsmi_wrapper.AMDSMI_STATUS_UNEXPECTED_DATA),
+            ("amdsmi_get_clock_info", amdsmi_wrapper.AMDSMI_STATUS_IO),
+        ):
+            with self.subTest(operation=operation, code=code):
+                cmd = _make_reset_cmd(reset)
+
+                def fail_read(*_args: object) -> None:
+                    raise _DriverlessLibErr(code)
+
+                patches = _build_reset_specs(reset)["clocks"](cmd, "success")
+                patches[operation] = fail_read
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(_reset_args(reset, clocks=True))
+                self.assertEqual(cmd.helpers.error_collector.resolve_exit_code(), code)
+                result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
+                self.assertIn("Unable to restore FCLK cap", result["fclk"])
+
+    def test_fclk_permission_failure_requires_elevation(self):
+        reset = _load_reset()
+
+        def no_permission(*args):
+            raise _DriverlessLibErr(amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
+
+        for operation in ("amdsmi_get_clk_freq", "amdsmi_set_gpu_clk_limit"):
+            with self.subTest(operation=operation):
+                cmd = _make_reset_cmd(reset)
+                patches = _build_reset_specs(reset)["clocks"](cmd, "success")
+                patches["amdsmi_get_clock_info"] = lambda *_: {"max_clk": 1550}
+                patches[operation] = no_permission
+                with _patch_amdsmi_interface(reset, **patches):
+                    with self.assertRaisesRegex(PermissionError, "requires elevation"):
+                        cmd.reset(_reset_args(reset, clocks=True))
+
+    def test_fclk_write_failure_is_reported_and_auto_reset_continues(self):
+        reset = _load_reset()
+        for code in (amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED, amdsmi_wrapper.AMDSMI_STATUS_IO):
+            with self.subTest(code=code):
+                cmd = _make_reset_cmd(reset)
+                perf_writes = []
+
+                def fail_write(*args):
+                    raise _DriverlessLibErr(code)
+
+                patches = _build_reset_specs(reset)["clocks"](cmd, "success")
+                patches.update(
+                    amdsmi_get_clock_info=lambda *_: {"max_clk": 1550},
+                    amdsmi_set_gpu_clk_limit=fail_write,
+                    amdsmi_set_gpu_perf_level=lambda *args: perf_writes.append(args),
+                )
+                with _patch_amdsmi_interface(reset, **patches):
+                    cmd.reset(_reset_args(reset, clocks=True))
+                self.assertEqual(cmd.helpers.error_collector.resolve_exit_code(), code)
+                result = next(value for _, key, value in cmd.logger.stored if key == "reset_clocks")
+                self.assertIn("Unable to restore FCLK cap", result["fclk"])
+                self.assertEqual(len(perf_writes), 2)
 
     def test_every_reset_option_is_driven(self):
         """Forcing function: every per-device GPU `reset` option must have a

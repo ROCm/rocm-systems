@@ -353,8 +353,14 @@ amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
   unsigned int current_freq = 0;
   char str[10];
   char single_char;
+  bool has_levels = false;
   for (std::string line; getline(dpm_stream, line);) {
     unsigned int dpm_level, freq;
+
+    if (line.find_first_not_of(" \t\r") == std::string::npos) {
+      continue;
+    }
+    has_levels = true;
 
     char firstChar = line[0];
     if (firstChar == 'S') {
@@ -387,6 +393,13 @@ amdsmi_status_t smi_amdgpu_parse_dpm_ranges(std::istream& dpm_stream,
       }
       dpm = dpm_level > dpm ? dpm_level : dpm;
     }
+  }
+  if (dpm_stream.bad() || (dpm_stream.fail() && !dpm_stream.eof())) {
+    return AMDSMI_STATUS_IO;
+  }
+  // Empty data does not establish whether the clock is supported.
+  if (!has_levels && !od_range.present) {
+    return AMDSMI_STATUS_IO;
   }
   if (dpm == 0 && current_freq > 0) {
     // if the dpm level is 0, then the current frequency is the min/max frequency

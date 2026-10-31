@@ -10,12 +10,58 @@
 #include <gtest/gtest.h>
 
 #include <climits>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <sstream>
+#include <stdexcept>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_clk_testing.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_device.h"
+#include "rocm_smi/rocm_smi_main.h"
 
 namespace {
+
+class FakeDpmDevice {
+ public:
+  FakeDpmDevice() {
+    auto path = (std::filesystem::temp_directory_path() / "amdsmi_dpm_XXXXXX").string();
+    if (!mkdtemp(path.data())) {
+      throw std::runtime_error("cannot create DPM test directory");
+    }
+    root_ = path;
+    std::filesystem::create_directory(root_ / "device");
+    auto& devices = amd::smi::RocmSMI::getInstance().devices();
+    index_ = static_cast<uint32_t>(devices.size());
+    devices.push_back(std::make_shared<amd::smi::Device>(root_.string(), nullptr));
+  }
+
+  ~FakeDpmDevice() {
+    auto& devices = amd::smi::RocmSMI::getInstance().devices();
+    devices.erase(devices.begin() + index_);
+    std::filesystem::remove_all(root_);
+  }
+
+  FakeDpmDevice(const FakeDpmDevice&) = delete;
+  FakeDpmDevice& operator=(const FakeDpmDevice&) = delete;
+
+  uint32_t index() const { return index_; }
+  std::filesystem::path table() const { return root_ / "device" / "pp_dpm_fclk"; }
+
+  void WriteTable(const char* contents) const {
+    std::ofstream out(table());
+    ASSERT_TRUE(out.is_open());
+    out << contents;
+    ASSERT_TRUE(out.good());
+  }
+
+ private:
+  std::filesystem::path root_;
+  uint32_t index_;
+};
 
 // pp_od_clk_voltage as seen on MI45x: SCLK and MCLK sections plus an OD_RANGE
 // footer, but no OD_FCLK section.
@@ -252,15 +298,98 @@ TEST(GpuUnit, DpmRangesUnavailableSleepSentinelNotRejected) {
   EXPECT_EQ(ranges.sleep_state_freq, -1);
 }
 
-// An empty pp_dpm_* stream with no overdrive range: min keeps its UINT_MAX
-// "unavailable" sentinel and surfaces as -1 rather than failing the call.
-TEST(GpuUnit, DpmRangesEmptyStreamKeepsUnavailableMin) {
-  std::istringstream dpm("");
-  SmiAmdgpuOdClkRange od_range;  // not present -> derive from the (absent) levels
+TEST(GpuUnit, DpmRangesEmptyTablesReportIoError) {
+  for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
+    std::istringstream dpm(contents);
+    SmiAmdgpuOdClkRange od_range;
+    SmiAmdgpuClkRanges ranges{1800, 1300, 2, 400};
+    EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
+    EXPECT_EQ(ranges.max_freq, 1800);
+    EXPECT_EQ(ranges.min_freq, 1300);
+    EXPECT_EQ(ranges.num_dpm, 2);
+    EXPECT_EQ(ranges.sleep_state_freq, 400);
+  }
+}
+
+// With an overdrive range the domain still has a range to report.
+TEST(GpuUnit, DpmRangesBlankLineKeepsOdRange) {
+  std::istringstream dpm("\n");
+  SmiAmdgpuOdClkRange od_range{true, 1800u, 1300u};
   SmiAmdgpuClkRanges ranges;
   EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(ranges.max_freq, 0);
-  EXPECT_EQ(ranges.min_freq, -1);
+  EXPECT_EQ(ranges.max_freq, 1800);
+  EXPECT_EQ(ranges.min_freq, 1300);
+}
+
+TEST(GpuUnit, DpmRangesReadFailureIsNotAnEmptyTable) {
+  for (bool has_od_range : {false, true}) {
+    std::istringstream dpm("0: 1300Mhz\n");
+    dpm.setstate(std::ios::badbit);
+    SmiAmdgpuOdClkRange od_range{has_od_range, 1800u, 1300u};
+    SmiAmdgpuClkRanges ranges;
+    EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
+  }
+}
+
+TEST(GpuUnit, DpmFrequencyReadFailureIsNotAnEmptyTable) {
+  FakeDpmDevice device;
+  // Offset zero in our own proc mem file fails with EIO without reading memory.
+  std::filesystem::create_symlink("/proc/self/mem", device.table());
+  rsmi_frequencies_t frequencies{};
+  EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+            RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+TEST(GpuUnit, DpmFrequencyMissingTableNotSupported) {
+  FakeDpmDevice device;
+  rsmi_frequencies_t frequencies{};
+  EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+            RSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, DpmFrequencyEmptyTablesPreserveDataError) {
+  FakeDpmDevice device;
+  for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
+    device.WriteTable("0: 1300Mhz *\n");
+    rsmi_frequencies_t frequencies{};
+    ASSERT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+              RSMI_STATUS_SUCCESS);
+    ASSERT_EQ(frequencies.num_supported, 1u);
+
+    device.WriteTable(contents);
+    EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+              RSMI_STATUS_UNEXPECTED_DATA);
+    EXPECT_EQ(frequencies.num_supported, 0u);
+  }
+}
+
+TEST(GpuUnit, DpmFrequencyMalformedTableStillFails) {
+  FakeDpmDevice device;
+  device.WriteTable("0: 1300invalid\n");
+  rsmi_frequencies_t frequencies{};
+  EXPECT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+            RSMI_STATUS_UNEXPECTED_DATA);
+}
+
+TEST(GpuUnit, DpmFrequencyValidTableStillReportsLevels) {
+  FakeDpmDevice device;
+  device.WriteTable("0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n");
+  rsmi_frequencies_t frequencies{};
+  ASSERT_EQ(rsmi_dev_gpu_clk_freq_get(device.index(), RSMI_CLK_TYPE_DF, &frequencies),
+            RSMI_STATUS_SUCCESS);
+  EXPECT_EQ(frequencies.num_supported, 3u);
+  EXPECT_EQ(frequencies.current, 1u);
+  EXPECT_EQ(frequencies.frequency[0], 1300000000u);
+  EXPECT_EQ(frequencies.frequency[2], 1800000000u);
+}
+
+TEST(GpuUnit, DpmRangesWhitespaceDoesNotHideMalformedData) {
+  for (const char* contents : {"\ninvalid\n", " \t\r\ninvalid\n"}) {
+    std::istringstream dpm(contents);
+    SmiAmdgpuOdClkRange od_range;
+    SmiAmdgpuClkRanges ranges;
+    EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_IO);
+  }
 }
 
 // A genuinely out-of-range value (> INT_MAX, not the sentinel) is still

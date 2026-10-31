@@ -905,6 +905,11 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+`reset --clocks` also restores a lowered FCLK cap to the highest supported DPM
+level. Unsupported FCLK queries skip this step. Clock-query and cap-restoration
+errors are reported in `reset_clocks.fclk` and the exit status while the command
+still attempts to reset the performance level.
+
 (cmd-monitor)=
 ### amd-smi monitor
 
