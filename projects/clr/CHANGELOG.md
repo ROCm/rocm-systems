@@ -6,6 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* Fixed `surf1DLayeredread/write` and `surf2DLayeredread/write` to address array layers rather than treating the layer index as a mip level. Reads and writes now access the requested nonzero layer.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 
