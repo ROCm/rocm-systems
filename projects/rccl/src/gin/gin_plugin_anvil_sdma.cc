@@ -785,16 +785,34 @@ static uintptr_t* ginAnvilBuildSignalPeerAddrs(void* base, int nRanks, int ginRa
   return addrs;
 }
 
+// The signal peer table is indexed by GIN peer, but each entry is a slot in this
+// rank's LSA window. Returns the first GIN peer that is not the LSA team member in
+// the slot its entry points at, or -1 if every entry is a mapped peer.
+static int ginAnvilFirstSignalPeerOutsideLsa(const struct ncclComm* comm, int nRanks, int ginRank) {
+  const struct ncclDevrState* devr = &comm->devrState;
+  const long long ginStride =
+    comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL ? comm->contiguousRanksPerHost : 1;
+  for (int pe = 0; pe < nRanks; pe++) {
+    const int slot = devr->lsaSelf + (pe - ginRank);
+    const long long worldPeer = comm->rank + (long long)(pe - ginRank) * ginStride;
+    if (devr->lsaRankList == nullptr || slot < 0 || slot >= devr->lsaSize || devr->lsaRankList[slot] != worldPeer) {
+      return pe;
+    }
+  }
+  return -1;
+}
+
 static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* spanLsaSelf, size_t spanBytes, int nRanks,
                                                int ginRank) {
   struct ncclDevrState* devr = &comm->devrState;
 
-  if (nRanks != devr->lsaSize) {
-    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", nRanks, devr->lsaSize, ginRank);
-  }
-  if (ginRank != devr->lsaSelf) {
-    WARN("GIN anvil-sdma: ginRank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ginRank,
-         devr->lsaSelf);
+  const int outsidePeer = ginAnvilFirstSignalPeerOutsideLsa(comm, nRanks, ginRank);
+  if (outsidePeer >= 0) {
+    WARN("GIN anvil-sdma: GIN peer %d is outside the LSA team of rank %d (ginRank=%d, ginRanks=%d, lsaSelf=%d, "
+         "lsaSize=%d). Anvil SDMA can only signal LSA team peers; set NCCL_LSA_TEAM_SIZE to cover the GIN team "
+         "or select another NCCL_GIN_TYPE.",
+         outsidePeer, comm->rank, ginRank, nRanks, devr->lsaSelf, devr->lsaSize);
+    return ncclInvalidUsage;
   }
 
   uintptr_t* hostAddrs = ginAnvilBuildSignalPeerAddrs(spanLsaSelf, nRanks, ginRank, (ptrdiff_t)devr->bigSize);
