@@ -745,6 +745,21 @@ TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) 
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
 }
 
+// The participant-count floor the AllReduce gate hands rcclDdaEnabled(): the full
+// 8-rank clique by default, 2 with RCCL_DDA_NRANKS_RELAX. Hardcoding either value
+// in collectives.cc fails one half of this pair.
+TEST_F(CollectivesMicrotest, AllReduceDda_RankFloorFollowsNranksRelax) {
+  fake.ddaEnabled = true;
+  g_ncclDdaNranksRelaxEnabled = false;
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
+  g_ncclDdaNranksRelaxEnabled = true;
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
+  g_ncclDdaNranksRelaxEnabled = false;
+  ASSERT_EQ(2u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(8, fake.ddaEnabledCalls[0].minRanks);
+  EXPECT_EQ(2, fake.ddaEnabledCalls[1].minRanks);
+}
+
 TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {
   fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, true));
