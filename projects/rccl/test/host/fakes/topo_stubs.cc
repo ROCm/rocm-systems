@@ -129,6 +129,18 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
 }
+// src/graph/topo.cc:2589. Reached only from gin_host.cc's ncclGinConnectOnce, so this stays a
+// fail-loud default: rccl-UnitTestsMicroGinHost is the only binary that compiles a caller, and it
+// installs the behaviour it needs. A seam rather than a plain abort because that test has to drive
+// both the device count (it sizes ginCommCount) and the failure arm.
+static ncclResult_t DefaultTopoGetLocalGinDevs(struct ncclComm*, int*, int*) { ::abort(); }
+std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinDevs =
+    DefaultTopoGetLocalGinDevs;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalGinDevs, ncclTopoGetLocalGinDevs);
+ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount) {
+  return g_ncclTopoGetLocalGinDevs(comm, localGinDevs, localGinCount);
+}
+
 static ncclResult_t DefaultTopoGetNetDev(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*,
                                          int*) {
   FailLoudUnfaked("topo_stubs", "ncclTopoGetNetDev");
@@ -318,6 +330,7 @@ void ResetTopoStubs() {
     return ncclSuccess;
   };
   g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
+  g_ncclTopoGetLocalGinDevs = DefaultTopoGetLocalGinDevs;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
