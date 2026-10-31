@@ -230,6 +230,9 @@ performance:
   Performance_PyFR_Couette_IndividualGraphs: *level_stress
   Performance_PyFR_Couette_StepSimulation: *level_stress
   Performance_PyFR_Couette_SingleIteration: *level_stress
+  Performance_GraphBench_Launch: *level_stress
+  Performance_GraphBench_Sweep: *level_stress
+  Performance_GraphBench_Verify: *level_stress
   Performance_hipPerfMemcpy_test: *level_stress
   Performance_hipPerfBufferCopyRectSpeed_test: *level_stress
   Performance_hipPerfBufferCopySpeed_test: *level_stress
