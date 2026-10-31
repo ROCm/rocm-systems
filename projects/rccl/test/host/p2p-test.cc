@@ -4062,6 +4062,50 @@ TEST_F(P2pSetupMicrotest, SendConnect_CopyEngineGfx1250WiresFourMiBStepsAndOffse
     p2pTransport.send.free(&comm_, &send_);
 }
 
+TEST_F(P2pSetupMicrotest, RecvConnect_CopyEngineGfx1250WiresFourMiBStepsAndOffsets)
+{
+    ScopedUseMemcpy ceMode(1);
+    comm_.cudaArch = 1250;
+    comm_.buffSizes[NCCL_PROTO_LL] = 4096;
+    comm_.buffSizes[NCCL_PROTO_LL128] = 8192;
+    comm_.buffSizes[NCCL_PROTO_SIMPLE] = 4 * 1024 * 1024;
+    constexpr size_t kCeStep = 4 * 1024 * 1024;
+    constexpr size_t kCeBuffer = NCCL_STEPS * kCeStep;
+    std::vector<char> recvBuffer(sizeof(ncclRecvMem) + comm_.buffSizes[NCCL_PROTO_LL] +
+                                   comm_.buffSizes[NCCL_PROTO_LL128] + kCeBuffer,
+                                 0);
+    p2pShm hostShm{};
+    p2pShm devShm{};
+    ScopedHook shmImport(g_shmImportShareableBuffer,
+        [&](ncclComm*, int, shmIpcDesc*, void** hptr, void** dptr, shmIpcDesc*) {
+            *hptr = &hostShm;
+            *dptr = &devShm;
+            return ncclSuccess;
+        });
+
+    auto* info = reinterpret_cast<p2pConnectInfo*>(&connect_info_);
+    info->rank = 0;
+    info->read = 0;
+    auto* resources = static_cast<p2pResources*>(std::calloc(1, sizeof(p2pResources)));
+    resources->useCe = true;
+    resources->recvDevMem = reinterpret_cast<ncclRecvMem*>(recvBuffer.data());
+    ncclConnector recv{};
+    recv.transportResources = resources;
+
+    ASSERT_EQ(ncclSuccess, p2pRecvConnect(&comm_, &connect_info_, comm_.nRanks, /*rank=*/0, &recv));
+    char* expectedLl = reinterpret_cast<char*>(resources->recvDevMem + 1);
+    EXPECT_EQ(recv.conn.stepSize, int(kCeStep));
+    EXPECT_EQ(recv.conn.buffs[NCCL_PROTO_LL], expectedLl);
+    EXPECT_EQ(recv.conn.buffs[NCCL_PROTO_LL128], expectedLl + comm_.buffSizes[NCCL_PROTO_LL]);
+    EXPECT_EQ(recv.conn.buffs[NCCL_PROTO_SIMPLE],
+              expectedLl + comm_.buffSizes[NCCL_PROTO_LL] + comm_.buffSizes[NCCL_PROTO_LL128]);
+    EXPECT_EQ(recv.conn.tail, &devShm.recvMem.tail);
+    EXPECT_EQ(recv.conn.head, &devShm.sendMem.head);
+    EXPECT_EQ(shmImport.calls, 1);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
 TEST_F(P2pSetupMicrotest, SendSetupThenConnect_ReadPath_UsesLocalSimpleBuffer)
 {
     InstallTopo(/*read=*/1);
