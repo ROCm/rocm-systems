@@ -117,6 +117,11 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
+    // __constant__ variables are captured too; restoring them is harmless. Symbol info cannot
+    // single them out: ROCr reports HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST inverted (true for
+    // writable sections), so filtering on it drops the __device__ globals, and it reports
+    // HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SEGMENT as READONLY only for a legacy HSA section flag
+    // that LLVM does not emit, so filtering on that skips nothing.
     uint64_t addr = 0;
     uint32_t size = 0;
     if(core->hsa_executable_symbol_get_info_fn(
