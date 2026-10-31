@@ -172,6 +172,10 @@ ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g
 // which this host-only binary intentionally does not compile. Keep GIN-SDMA
 // out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
 // non-GIN test behaviour.
+bool ncclAllGatherGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
+
 bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
   return false;
 }

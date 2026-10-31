@@ -92,6 +92,7 @@ typedef enum {
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
+  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 

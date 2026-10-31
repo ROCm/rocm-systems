@@ -77,6 +77,7 @@ bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool g_devrIsOneLsaTeamValue = true;
 bool ncclDevrIsOneLsaTeam(struct ncclComm*) { return g_devrIsOneLsaTeamValue; }
+ncclResult_t ncclGinAllGatherFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t g_ncclGinFinalizeResult = ncclSuccess;
