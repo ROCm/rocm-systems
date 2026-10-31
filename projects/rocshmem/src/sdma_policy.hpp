@@ -50,10 +50,11 @@ class SdmaImpl {
   int sdmaChannel{0};       // Per-context base channel (= ctx_id % numChannels)
   int sdmaChannelStride{0}; // 0 = use sdmaChannel as-is; 1 = add wf_id offset
 
-  // Device resources - 2D array: [shm_size * numChannels]
+  // Device resources - 2D array: [num_devices * numChannels]
   // Index as: deviceHandles_d[local_pe * numChannels + sdmaChannel]
   sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
   int shm_size{0};
+  int num_devices{0};  // Actual number of HIP GPU devices on this node
   int my_pe{0};
   int local_rank{0};
 
