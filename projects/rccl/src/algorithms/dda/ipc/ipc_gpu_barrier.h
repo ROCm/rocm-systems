@@ -109,8 +109,16 @@ public:
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
     int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params);
 
-  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
-  __device__ __forceinline__ void syncOnSameBlockIdx() {
+  // Active-peer bound: kNRanks when > 0 (the calling kernel's compile-time clique
+  // size; must equal the nRanks this barrier was built with), else nRanksRt (the
+  // NRANKS == 0 runtime kernel under RCCL_DDA_NRANKS_RELAX). Deliberately not a
+  // member: the kernel keeps its by-value barrier copy in scratch, so a member
+  // read here is a scratch load + vmcnt(0) wait on every barrier, and growing
+  // the struct also slows the full-clique kernels (measured ~2-3% busbw at
+  // 64K-1M, 8 ranks, MI355X).
+  template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess, int kNRanks = 0>
+  __device__ __forceinline__ void syncOnSameBlockIdx(int nRanksRt = NRANKS) {
+    static_assert(kNRanks >= 0 && kNRanks <= NRANKS, "kNRanks out of range");
     enum class MemFenceType {
       RELEASE_ACQUIRE,
       RELEASE_ONLY,
@@ -127,7 +135,8 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < nRanks_ && !aborted_) {  // active peers only; NRANKS would deadlock for <8
+    const int activeRanks = (kNRanks > 0) ? kNRanks : nRanksRt;
+    if (threadIdx.x < activeRanks && !aborted_) {  // active peers only; NRANKS would deadlock for <8
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -154,7 +163,6 @@ public:
 private:
   int nBlocks_{-1};
   int selfRank_{-1};
-  int nRanks_{NRANKS};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaKernelParams params_{};
   // Sticky for the rest of the kernel and uniform across the signaling lanes,

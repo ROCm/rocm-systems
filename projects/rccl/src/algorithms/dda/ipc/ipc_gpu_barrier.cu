@@ -47,7 +47,7 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 
 __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
                                       const std::array<DeviceMailbox, NRANKS>& allMailboxes, DdaKernelParams params)
-  : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), allMailboxes_(allMailboxes), params_(params) {
+  : nBlocks_(nBlocks), selfRank_(selfRank), allMailboxes_(allMailboxes), params_(params) {
   assert(nRanks <= NRANKS);
 }
 
