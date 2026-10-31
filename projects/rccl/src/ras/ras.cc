@@ -390,6 +390,50 @@ ncclResult_t rasConnSendMsg(struct rasConnection* conn, bool* closed, bool* allS
   return ncclSuccess;
 }
 
+// Extends wantLength by a variable-length tail of count elements, rejecting a negative count supplied by the peer
+// as well as any arithmetic overflow.
+static ncclResult_t rasMsgAddTailLength(size_t* wantLength, int count, size_t eleSize) {
+  if (count < 0) return ncclRemoteError;
+  if ((size_t)count > (SIZE_MAX - *wantLength) / eleSize) return ncclRemoteError;
+  *wantLength += (size_t)count * eleSize;
+  return ncclSuccess;
+}
+
+static ncclResult_t rasMsgCheckBodyLength(const struct rasMsg* msg, int recvLength) {
+  rasCollectiveType collType = RAS_MSG_NONE;
+  if (msg->type == RAS_MSG_COLLREQ) {
+    // The collective type determines the length, so it must itself be within what we received before we may read it.
+    if ((size_t)recvLength < offsetof(struct rasMsg, collReq) + offsetof(struct rasCollRequest, type) +
+                             sizeof(collType))
+      return ncclRemoteError;
+    collType = msg->collReq.type;
+  }
+  // A zero length means an unrecognized type; rasMsgHandle rejects those, so leave that diagnosis to it.
+  size_t wantLength = rasMsgLength(msg->type, collType);
+  if (wantLength == 0) return ncclSuccess;
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
+
+  // The fixed part is all there, so the element counts it holds can be read.  They are peer-supplied, so the
+  // variable-length tails they describe must fit in what we received before the handlers may index into them.
+  if (msg->type == RAS_MSG_PEERSUPDATE) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nPeers, sizeof(msg->peersUpdate.peers[0])));
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->peersUpdate.nDeadPeers, sizeof(union ncclSocketAddress)));
+  } else if (msg->type == RAS_MSG_COLLREQ && collType == RAS_COLL_COMMS) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collReq.comms.nSkipMissingRanksComms,
+                                  sizeof(msg->collReq.comms.skipMissingRanksComms[0])));
+  } else if (msg->type == RAS_MSG_COLLRESP) {
+    NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nPeers, sizeof(msg->collResp.peers[0])));
+    if (msg->collResp.nData < 0) return ncclRemoteError;
+    if (msg->collResp.nData > 0) {
+      // The sender aligns the data that follows the peers array (see rasConnSendCollResp).
+      ALIGN_SIZE(wantLength, alignof(int64_t));
+      NCCLCHECK(rasMsgAddTailLength(&wantLength, msg->collResp.nData, 1));
+    }
+  }
+  if ((size_t)recvLength < wantLength) return ncclRemoteError;
+  return ncclSuccess;
+}
+
 // Attempts to receive a message through a RAS socket.
 ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, bool* closed) {
   *closed = false;
@@ -398,12 +442,27 @@ ncclResult_t rasMsgRecv(struct rasSocket* sock, struct rasMsg** msg, bool* close
     NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, &sock->recvLength, sizeof(sock->recvLength),
                                  &sock->recvOffset, closed));
     if (*closed || sock->recvOffset < sizeof(sock->recvLength)) return ncclSuccess;
+    if (sock->recvLength < RAS_MSG_MINLEN || sock->recvLength > RAS_MSG_MAXLEN) {
+      INFO(NCCL_RAS, "RAS received an out-of-range message length (%d) from %s", sock->recvLength,
+           ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
+      sock->recvOffset = sock->recvLength = 0;
+      return ncclRemoteError;
+    }
     NCCLCHECK(ncclCallocQuiet((char**)&sock->recvMsg, sock->recvLength));
   }
   // Receive the body of the message.
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &sock->sock, ((char*)sock->recvMsg) - sizeof(sock->recvLength),
                                sock->recvLength + sizeof(sock->recvLength), &sock->recvOffset, closed));
   if (*closed || sock->recvOffset < sock->recvLength + sizeof(sock->recvLength)) return ncclSuccess;
+
+  if (rasMsgCheckBodyLength(sock->recvMsg, sock->recvLength) != ncclSuccess) {
+    INFO(NCCL_RAS, "RAS received a message of type %d that is too short (%d) from %s", sock->recvMsg->type,
+         sock->recvLength, ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)));
+    free(sock->recvMsg);
+    sock->recvMsg = nullptr;
+    sock->recvOffset = sock->recvLength = 0;
+    return ncclRemoteError;
+  }
 
   *msg = sock->recvMsg;
   sock->recvMsg = nullptr;
