@@ -194,13 +194,23 @@ Between passes, kernel replay restores:
 * Coarse-grained device (VRAM) allocations from ``hipMalloc`` /
   ``hsa_amd_memory_pool_allocate`` / ``hsa_memory_allocate``.
 * Module-scope ``__device__`` and ``__constant__`` variables in loaded executables.
+* Fine-grained device memory of the same GPU that a kernel argument points at, up to 512 MiB per
+  dispatch. A host thread must not write it while the dispatch is being replayed: the restore
+  reverts the other writer's update along with the pass's own.
 
 It does **not** restore:
 
 * Unified or managed memory.
 * ``hipMallocAsync`` and other pool-backed, stream-ordered allocations.
-* Host, fine-grained, kernarg, or executable allocations (excluded by design).
+* Host memory, or another GPU's memory.
+* Kernarg or executable allocations (excluded by design).
 * HIP graph-managed memory.
+
+A dispatch whose kernel arguments point at memory in that list runs once without replay, with a
+warning. Only the arguments the kernel's own metadata describes as pointers are followed: a pointer
+the kernel finds inside memory it was handed is not seen, and neither is a scalar the width of a
+pointer whose bits happen to name an address. For a kernel whose metadata cannot be read, every
+argument word is checked instead.
 
 Capture is a **full in-memory copy** of every tracked region into host RAM. Cost is
 ``O(tracked_bytes × passes)``, not kernel time alone. The last executed pass is **not** restored,

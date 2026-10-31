@@ -590,3 +590,65 @@ TEST(codeobj_library, memory_loaded_code_object_symbol_map)
     ASSERT_NE(symbol, symbol_map.end());
     EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
 }
+
+// One pass over a code object's amdhsa metadata yields both maps: the symbol-to-device names the
+// loader already needed, and which kernarg bytes of each kernel can hold a pointer.
+// syncthreads_kernel(int* data) declares one 8-byte pointer, followed by the hidden arguments the
+// compiler appends, which are not the application's to point into.
+TEST(codeobj_library, metadata_reports_kernarg_pointer_regions)
+{
+    std::string path = codeobjhelper::get_data_file_path("syncthreads_kernel.bin");
+    ASSERT_FALSE(path.empty()) << "syncthreads_kernel.bin not found";
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    auto metadata =
+        rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(), objdata.size());
+
+    ASSERT_FALSE(metadata.kernel_symbol_device_map.empty());
+
+    // Kernels are reachable under both spellings the loader uses for them.
+    for(const auto* key : {"_Z18syncthreads_kernelPi.kd", "_Z18syncthreads_kernelPi"})
+    {
+        const auto regions = metadata.kernarg_pointer_regions.find(key);
+        ASSERT_NE(regions, metadata.kernarg_pointer_regions.end()) << key;
+        const auto expected = std::vector<rocprofiler::code_object::kernarg_region_t>{{0u, 8u}};
+        EXPECT_EQ(regions->second, expected) << key;
+    }
+
+    EXPECT_EQ(metadata.kernel_symbol_device_map.at("_Z18syncthreads_kernelPi.kd"),
+              "_Z18syncthreads_kernelPi");
+}
+
+// A by-value scalar the width of a pointer is not offered as one: its bits are an integer.
+TEST(codeobj_library, metadata_reports_scalar_argument_is_not_a_pointer)
+{
+    std::string path = codeobjhelper::get_data_file_path("smallkernel.bin");
+    ASSERT_FALSE(path.empty()) << "smallkernel.bin not found";
+    std::ifstream file(path, std::ios::binary);
+    using iterator_t = std::istreambuf_iterator<char>;
+    std::vector<char> objdata{iterator_t(file), iterator_t{}};
+    ASSERT_FALSE(objdata.empty());
+
+    auto metadata =
+        rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(), objdata.size());
+
+    const auto regions = metadata.kernarg_pointer_regions.find("_Z20reproducible_runtimel.kd");
+    ASSERT_NE(regions, metadata.kernarg_pointer_regions.end());
+    EXPECT_TRUE(regions->second.empty());
+}
+
+// Bytes that are not a parsable code object yield no metadata at all, which leaves the caller to
+// check every kernarg word; what must not happen is a partial or invented description.
+TEST(codeobj_library, metadata_of_unparsable_bytes_is_empty)
+{
+    const auto objdata = std::vector<char>(512, static_cast<char>(0x7f));
+
+    auto metadata =
+        rocprofiler::code_object::hip::get_metadata_from_executable(objdata.data(), objdata.size());
+
+    EXPECT_TRUE(metadata.kernel_symbol_device_map.empty());
+    EXPECT_TRUE(metadata.kernarg_pointer_regions.empty());
+}
