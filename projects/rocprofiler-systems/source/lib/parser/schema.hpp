@@ -79,11 +79,23 @@ struct category
     std::string name;
 };
 
+/// One row of a parameter's maps_to table.
+struct value_mapping
+{
+    std::string when;
+    std::string target;
+    std::string value;
+};
+
 struct choice
 {
     std::string value;
     std::string name;
     std::string description;
+    /// Constants written when this choice is selected.
+    value_map_t sets;
+    /// Extra tokens that select this choice.
+    std::vector<std::string> aliases;
 };
 
 struct env_spec
@@ -97,6 +109,11 @@ struct arg_spec
     std::string  name;
     arg_form     form  = arg_form::value;
     assign_style style = assign_style::separate;
+    /// Tokens this flag accepts. Unset means one value, or none for a flag.
+    std::optional<std::size_t> min_count;
+    std::optional<std::size_t> max_count;
+    /// Parameter id that receives each token, in order.
+    std::vector<std::string> binds;
 };
 
 /// Holds when parameter @c param resolves to @c equals.
@@ -134,6 +151,14 @@ struct schema_param
     std::optional<param_condition> depends_on;
     std::vector<std::string>       mutually_exclusive_with;
     std::vector<std::string>       prerequisites;
+    /// Other parameter ids that receive this parameter's value.
+    std::vector<std::string> copy_to;
+    /// Constants written when this parameter is set.
+    value_map_t assigns;
+    /// Parameter ids filled with this value only while they still have the default.
+    std::vector<std::string> fills;
+    /// Rows mapping this parameter's value to another parameter's value.
+    std::vector<value_mapping> maps_to;
 };
 
 /// Separator between elements of an enumeration_list value; "," unless the
