@@ -11,9 +11,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <string>
 
+#include "LogCapture.hpp"
 #include "TestBed.hpp"
 #include "StandaloneUtils.hpp"
 #include "VerifiableFp8.hpp"
@@ -87,6 +89,78 @@ namespace RcclUnitTesting
 
         EXPECT_EQ(actual.FreeGpuMem(), TEST_SUCCESS);
         EXPECT_EQ(expected.FreeGpuMem(), TEST_SUCCESS);
+      }
+    });
+  }
+
+  // The device compare reads 16 bytes per load when both buffers are 16-byte aligned and
+  // one element per load otherwise. Both paths must count every mismatch, including in the
+  // tail past the last full load, and report the earliest one.
+  TEST(DeviceDataValidation, CompareCountsEveryMismatch)
+  {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
+
+    RUN_ISOLATED_TEST("DeviceDataValidation_CompareCountsEveryMismatch", []()
+    {
+      ASSERT_EQ(hipSetDevice(0), hipSuccess);
+      ncclDataType_t const dataTypes[] = {ncclInt8,    ncclUint8,   ncclInt32,   ncclUint32,
+                                          ncclInt64,   ncclUint64,  ncclFloat16, ncclFloat32,
+                                          ncclFloat64, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+      // At the largest size the last full 16-byte load lies past the first grid-stride pass
+      // for every dtype (the grid is 8 blocks of 256 threads per CU, up to 304 CUs).
+      size_t const sizes[] = {1, 17, 4099, (size_t{1} << 20) + 5, (size_t{1} << 24) + 5};
+      for (ncclDataType_t const dataType : dataTypes)
+      for (size_t const n : sizes)
+      for (size_t const offset : {size_t{0}, size_t{1}})  // offset by one element: unaligned buffers
+      {
+        SCOPED_TRACE("dtype " + std::to_string(dataType) + " n " + std::to_string(n) +
+                     " offset " + std::to_string(offset));
+        size_t const elemBytes = DataTypeToBytes(dataType);
+        PtrUnion actualBase;
+        PtrUnion expectedBase;
+        ASSERT_EQ(actualBase.AllocateGpuMem((n + offset) * elemBytes), TEST_SUCCESS);
+        ASSERT_EQ(expectedBase.AllocateGpuMem((n + offset) * elemBytes), TEST_SUCCESS);
+        char* const actualPtr = static_cast<char*>(actualBase.ptr) + offset * elemBytes;
+        PtrUnion expected;
+        ASSERT_EQ(expected.Attach(static_cast<char*>(expectedBase.ptr) + offset * elemBytes), TEST_SUCCESS);
+        ASSERT_EQ(expected.FillPatternDevice(dataType, n, 0), TEST_SUCCESS);
+        ASSERT_EQ(hipMemcpy(actualPtr, expected.ptr, n * elemBytes, hipMemcpyDeviceToDevice), hipSuccess);
+
+        size_t mismatches = 1;
+        ASSERT_EQ(PtrUnion::IsEqualDevice(dataType, n, actualPtr, expected.ptr, mismatches, false), TEST_SUCCESS);
+        EXPECT_EQ(mismatches, 0u);
+
+        // All-0xFF bytes never match the rank-0 pattern: they are NaN or a negative value for
+        // the float types, and differ from idx % 256 for the integer types unless that is 255.
+        // In one of the last two full loads; wraps past n (skipped) when n is that small.
+        size_t const elemsPerLoad = 16 / elemBytes;
+        size_t const nearLastLoadElem = n / elemsPerLoad * elemsPerLoad - 2;
+        // First element read by thread 64 of block 0 (offset 0 takes the vector path), which
+        // is past wave 0 for both wave sizes: with no mismatch in wave 0, the earliest one
+        // only reaches the result through the cross-wave merge.
+        size_t const laterWaveElem = 64 * (offset == 0 ? elemsPerLoad : 1);
+        std::set<size_t> corrupted;
+        for (size_t const idx : {n - 1, n / 2, nearLastLoadElem, laterWaveElem})
+        {
+          if (idx < n && idx % 256 != 255) corrupted.insert(idx);
+        }
+        for (size_t const idx : corrupted)
+          ASSERT_EQ(hipMemset(actualPtr + idx * elemBytes, 0xFF, elemBytes), hipSuccess);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        ErrCode status = TEST_FAIL;
+        std::string const report = CaptureStdout([&]()
+        {
+          status = PtrUnion::IsEqualDevice(dataType, n, actualPtr, expected.ptr, mismatches, true);
+        });
+        ASSERT_EQ(status, TEST_SUCCESS);
+        EXPECT_EQ(mismatches, corrupted.size());
+        std::string const firstReport = "at index " + std::to_string(*corrupted.begin()) + "\n";
+        EXPECT_NE(report.find(firstReport), std::string::npos) << report;
+
+        EXPECT_EQ(actualBase.FreeGpuMem(), TEST_SUCCESS);
+        EXPECT_EQ(expectedBase.FreeGpuMem(), TEST_SUCCESS);
       }
     });
   }
