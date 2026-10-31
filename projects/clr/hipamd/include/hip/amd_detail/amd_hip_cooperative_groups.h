@@ -915,7 +915,15 @@ template <unsigned int tileSize, typename ParentCGTy> class parent_group_info {
   //! Returns the linear rank of the group within the set of tiles partitioned
   //! from a parent group (bounded by meta_group_size)
   __CG_STATIC_QUALIFIER__ unsigned int meta_group_rank() {
-    return ParentCGTy::thread_rank() / tileSize;
+    const unsigned int rank = ParentCGTy::thread_rank() / tileSize;
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
+    if (tileSize % warpSize == 0) {
+      return __builtin_amdgcn_is_invocable(__builtin_amdgcn_readfirstlane)
+                 ? __builtin_amdgcn_readfirstlane(rank)
+                 : rank;
+    }
+#endif
+    return rank;
   }
 
   //! Returns the number of groups created when the parent group was partitioned.
