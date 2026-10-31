@@ -183,6 +183,18 @@ public:
   /// @returns Current queue size.
   size_t size() const { return local_entries_.size() + asynchronous_entries_.size(); }
 
+  /// @brief Check whether a specific event is the queue's only entry.
+  /// @param event Event identity to match.
+  /// @retval true The queue contains exactly one entry for @p event.
+  /// @retval false The queue is empty or contains any other entry.
+  bool contains_only(const Event *event) const {
+    if (size() != 1)
+      return false;
+    if (!local_entries_.empty())
+      return local_entries_.front().event == event;
+    return asynchronous_entries_.front().event == event;
+  }
+
   /// @brief Return the last processed tick (set by the engine).
   /// @returns The current tick value.
   Tick current_tick() const { return current_tick_; }

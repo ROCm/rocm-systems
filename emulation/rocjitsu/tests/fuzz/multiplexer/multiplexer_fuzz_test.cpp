@@ -4,6 +4,7 @@
 #include "multiplexer_fuzz_core.h"
 
 #include "code_object_fuzz_core.h"
+#include "concurrent_dispatch_fuzz_core.h"
 #include "decode_fuzz_core.h"
 #include "execution_fuzz_core.h"
 
@@ -39,27 +40,32 @@ uint64_t focused_work_units(FuzzTarget target, std::span<const uint8_t> payload)
     const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
     return stats.code_objects_valid + stats.executables_valid;
   }
+  case FuzzTarget::ConcurrentDispatch:
+    return concurrent_dispatch_fuzz::run_input(payload).instructions;
   }
   throw std::logic_error("multiplexer fuzz target registry is inconsistent");
 }
 
 TEST(MultiplexerFuzzTest, RegistryHasEveryFocusedHarnessInStableOrder) {
   const std::span<const TargetDescriptor> registered = targets();
-  ASSERT_EQ(registered.size(), 3u);
+  ASSERT_EQ(registered.size(), 4u);
   EXPECT_EQ(registered[0].id, FuzzTarget::Decode);
   EXPECT_EQ(registered[0].name, "decode");
   EXPECT_EQ(registered[1].id, FuzzTarget::Execution);
   EXPECT_EQ(registered[1].name, "execution");
   EXPECT_EQ(registered[2].id, FuzzTarget::CodeObject);
   EXPECT_EQ(registered[2].name, "code-object");
+  EXPECT_EQ(registered[3].id, FuzzTarget::ConcurrentDispatch);
+  EXPECT_EQ(registered[3].name, "concurrent-dispatch");
 }
 
 TEST(MultiplexerFuzzTest, SelectorIdsRemainStableAsTargetsAreAdded) {
   EXPECT_EQ(selected_target(0), FuzzTarget::Decode);
   EXPECT_EQ(selected_target(1), FuzzTarget::Execution);
   EXPECT_EQ(selected_target(2), FuzzTarget::CodeObject);
+  EXPECT_EQ(selected_target(3), FuzzTarget::ConcurrentDispatch);
 
-  std::array<uint64_t, 3> selections{};
+  std::array<uint64_t, 4> selections{};
   uint64_t unassigned = 0;
   for (unsigned selector = 0; selector <= std::numeric_limits<uint8_t>::max(); ++selector) {
     const std::optional<FuzzTarget> target = selected_target(static_cast<uint8_t>(selector));
@@ -72,14 +78,15 @@ TEST(MultiplexerFuzzTest, SelectorIdsRemainStableAsTargetsAreAdded) {
   EXPECT_EQ(selections[0], 1u);
   EXPECT_EQ(selections[1], 1u);
   EXPECT_EQ(selections[2], 1u);
-  EXPECT_EQ(unassigned, 253u);
+  EXPECT_EQ(selections[3], 1u);
+  EXPECT_EQ(unassigned, 252u);
 }
 
 TEST(MultiplexerFuzzTest, StructuredSeedsReachEveryHarness) {
   const std::vector<std::vector<uint8_t>> seeds = seed_corpus();
-  ASSERT_EQ(seeds.size(), 6u);
-  std::array<uint64_t, 3> seeds_per_target{};
-  std::array<bool, 3> target_did_work{};
+  ASSERT_EQ(seeds.size(), 7u);
+  std::array<uint64_t, 4> seeds_per_target{};
+  std::array<bool, 4> target_did_work{};
   for (std::size_t index = 0; index < seeds.size(); ++index) {
     SCOPED_TRACE(index);
     const std::optional<DispatchResult> result = run_input(seeds[index]);
@@ -90,8 +97,8 @@ TEST(MultiplexerFuzzTest, StructuredSeedsReachEveryHarness) {
     ++seeds_per_target[target_index];
     target_did_work[target_index] |= result->work_units != 0;
   }
-  EXPECT_EQ(seeds_per_target, (std::array<uint64_t, 3>{1, 1, 4}));
-  EXPECT_EQ(target_did_work, (std::array<bool, 3>{true, true, true}));
+  EXPECT_EQ(seeds_per_target, (std::array<uint64_t, 4>{1, 1, 4, 1}));
+  EXPECT_EQ(target_did_work, (std::array<bool, 4>{true, true, true, true}));
 }
 
 TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountAsyncInstructionsOnce) {
@@ -106,6 +113,17 @@ TEST(MultiplexerFuzzTest, ExecutionWorkUnitsCountAsyncInstructionsOnce) {
   const std::optional<DispatchResult> dispatched = run_input(input);
   ASSERT_TRUE(dispatched);
   EXPECT_EQ(dispatched->work_units, 6u);
+}
+
+TEST(MultiplexerFuzzTest, ConcurrentDispatchWorkUnitsCountExecutedInstructions) {
+  const std::vector<uint8_t> input = seed_corpus().back();
+  ASSERT_EQ(input.front(), static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch));
+  const std::span<const uint8_t> payload(input.data() + 1, input.size() - 1);
+  const concurrent_dispatch_fuzz::RunStats focused = concurrent_dispatch_fuzz::run_input(payload);
+  const std::optional<DispatchResult> dispatched = run_input(input);
+  ASSERT_TRUE(dispatched);
+  EXPECT_GT(focused.instructions, 0u);
+  EXPECT_EQ(dispatched->work_units, focused.instructions);
 }
 
 TEST(MultiplexerFuzzTest, PreservesFocusedPayloadSizeContracts) {
@@ -140,6 +158,22 @@ TEST(MultiplexerFuzzTest, PreservesFocusedPayloadSizeContracts) {
   const std::optional<DispatchResult> oversized_result = run_input(oversized_execution);
   ASSERT_TRUE(oversized_result);
   EXPECT_EQ(oversized_result->work_units, 0u);
+
+  std::vector<uint8_t> maximum_concurrent(concurrent_dispatch_fuzz::kMaxInputSize + 1, 0);
+  maximum_concurrent.front() = static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch);
+  maximum_concurrent[1] = static_cast<uint8_t>(execution_fuzz::FuzzTarget::Gfx908);
+  for (std::size_t offset = 1 + concurrent_dispatch_fuzz::kHeaderSize;
+       offset < maximum_concurrent.size(); offset += sizeof(kSNop))
+    for (unsigned byte = 0; byte < sizeof(kSNop); ++byte)
+      maximum_concurrent[offset + byte] = static_cast<uint8_t>(kSNop >> (8 * byte));
+  const std::optional<DispatchResult> maximum_concurrent_result = run_input(maximum_concurrent);
+  ASSERT_TRUE(maximum_concurrent_result);
+  EXPECT_GT(maximum_concurrent_result->work_units, 0u);
+
+  maximum_concurrent.push_back(0xff);
+  const std::optional<DispatchResult> oversized_concurrent_result = run_input(maximum_concurrent);
+  ASSERT_TRUE(oversized_concurrent_result);
+  EXPECT_EQ(oversized_concurrent_result->work_units, 0u);
 }
 
 TEST(MultiplexerFuzzTest, UnassignedSelectorIsAnOrdinaryNoOp) {
