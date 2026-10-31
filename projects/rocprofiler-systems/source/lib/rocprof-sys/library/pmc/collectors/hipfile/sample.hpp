@@ -21,7 +21,7 @@ namespace rocprofsys::pmc::collectors::hipfile
  * collectors. The alternative - one pmc_event_with_sample per metric - would rebuild the
  * track name and the PMC identifier as heap strings for every metric on every poll, on
  * the sampling thread that all the other collectors share. Here the names are resolved
- * once during post-processing, from METRIC_TABLE, so the sampling path stores a POD.
+ * once during post-processing, from k_metric_table, so the sampling path stores a POD.
  */
 struct sample : trace_cache::cacheable_t
 {
@@ -30,12 +30,12 @@ struct sample : trace_cache::cacheable_t
     };
 
     sample() = default;
-    sample(enabled_metrics _settings, std::uint32_t _device_id, std::uint64_t _timestamp,
-           metrics _metric_values)
-    : enabled_metric(_settings)
-    , device_id(_device_id)
-    , timestamp(_timestamp)
-    , metric_values(_metric_values)
+    sample(enabled_metrics settings, std::uint32_t gpu_id, std::uint64_t timestamp_ns,
+           metrics values)
+    : enabled_metric(settings)
+    , device_id(gpu_id)
+    , timestamp(timestamp_ns)
+    , metric_values(values)
     {}
 
     enabled_metrics enabled_metric{};
