@@ -47,6 +47,8 @@
 #endif
 
 #ifdef __HIP_PLATFORM_AMD__
+#include "amd/io-test.h"
+
 using namespace hipFile;
 #endif
 
@@ -684,6 +686,11 @@ public:
 
         ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
         ASSERT_EQ(hipFileStreamRegister(stream, 0xf), HIPFILE_SUCCESS);
+
+        // Gate at the end of SetUp so that TearDown still has a stream to cleanup.
+        if (backend == AsyncIoTestBackend::Fastpath) {
+            enforceFastpathGate(fh, dev_ptr);
+        }
     }
     void TearDown() override
     {
