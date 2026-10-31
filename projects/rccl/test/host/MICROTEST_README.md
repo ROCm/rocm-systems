@@ -1145,7 +1145,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroNet`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`, `rccl-UnitTestsMicroNvls`,
-`rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy`, `rccl-UnitTestsMicroNetIbCastInit` and
+`rccl-UnitTestsMicroNetIbCastDataPath`, `rccl-UnitTestsMicroRmaProxy`, `rccl-UnitTestsMicroNetIbCastInit`,
+`rccl-UnitTestsMicroNetIbGin` and
 `rccl-UnitTestsMicroP2pResiliency` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -1230,6 +1231,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
 ./build/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
 ./build/rccl-UnitTestsMicroNetIbCastInit      # src/transport/net_ib_cast/ init, capability and GIN
+./build/rccl-UnitTestsMicroNetIbGin           # src/transport/net_ib/gin.cc doorbell batching
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries

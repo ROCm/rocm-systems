@@ -608,6 +608,156 @@ TEST_P(RmaMPIFixedSizeTest, IPutSignalInvalidSignalOp)
     Barrier();
 }
 
+// The host proxy closes a batch by posting the last op without the aggregate
+// flag. That op rings the doorbell for everything queued ahead of it.
+TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kBlock   = MessageSize();
+    const size_t kBufSize = kInflightN * kBlock;
+    const int    nCtx     = NumContexts();
+
+    void* sendBuf = AllocBuf(kBufSize);
+    void* recvBuf = AllocBuf(kBufSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/i + 1);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBufSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBufSize, &recvMh, &recvGh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        std::vector<void*> reqs(kInflightN, nullptr);
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            const bool     lastOnCtx = i + nCtx >= kInflightN;
+            const uint32_t flags     = lastOnCtx ? ncclRmaOptFlagsDefault
+                                                 : ncclRmaOptFlagsAggregateRequests;
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/i % nCtx,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i], flags));
+        }
+
+        const bool retiresBatch = RetiresBatchOnTailCompletion();
+        for(int c = 0; c < nCtx; ++c)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[c]))
+                << "first request of ctx " << c << " did not complete";
+        }
+        for(int i = nCtx; i < kInflightN; ++i)
+        {
+            const bool doneNow = TestOnce(reqs[i]);
+            if(retiresBatch)
+            {
+                EXPECT_TRUE(doneNow)
+                    << "request " << i << " (ctx " << (i % nCtx)
+                    << ") was not retired when its context's batch was closed";
+            }
+            if(!doneNow)
+            {
+                EXPECT_TRUE(PollUntilDone(reqs[i]))
+                    << "request " << i << " (ctx " << (i % nCtx) << ") did not complete";
+            }
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/i + 1))
+                << "block " << i << " mismatched";
+        }
+    }
+}
+
+// A flush has to ring any deferred doorbell first. The puts are then visible
+// once both the flush and the put completions have been collected.
+TEST_P(RmaMPITest, IFlushAfterAggregatedPuts)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    constexpr int kN     = 4;
+    const size_t  kBlock = MessageSize();
+    const size_t  kBuf   = kN * kBlock;
+
+    void* sendBuf = AllocBuf(kBuf);
+    void* recvBuf = AllocBuf(kBuf);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/0x40 + i);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBuf, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBuf, &recvMh, &recvGh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        void* reqs[kN] = {};
+        for(int i = 0; i < kN; ++i)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/0,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i],
+                                 ncclRmaOptFlagsAggregateRequests));
+        }
+
+        void* flushReq = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iflush(rmaCtx_, /*context=*/0, recvMh, /*peerRank=*/1, &flushReq));
+        if(flushReq != nullptr)
+        {
+            EXPECT_TRUE(PollUntilDone(flushReq));
+        }
+        for(int i = 0; i < kN; ++i)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[i])) << "aggregated put " << i << " did not complete";
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/0x40 + i))
+                << "block " << i << " mismatched";
+        }
+    }
+}
+
 // ===========================================================================
 // RmaMPIStressTest — non-parameterized stress fixture
 // ===========================================================================
@@ -716,6 +866,86 @@ TEST_F(RmaMPIStressTest, IPutSignalStress10k)
         // wrote the same 256 bytes, so the final state is the seed pattern.
         EXPECT_TRUE(VerifyBuf(recvBuf, kPayload, /*seed=*/0x33))
             << "Final payload mismatch — last successful write left wrong contents";
+    }
+}
+
+// Same sliding window as IPutSignalStress10k, but every post asks the proxy to
+// aggregate. One completion per batch has to retire the puts and the signal
+// counter still has to land on exactly one increment per operation.
+TEST_F(RmaMPIStressTest, AggregatedIPutSignalStress)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    constexpr int    kIterations = 4096;
+    constexpr int    kInflight   = 16;
+    constexpr size_t kPayload    = 64;
+
+    void* sendBuf = AllocBuf(kPayload);
+    void* recvBuf = AllocBuf(kPayload);
+    void* sigBuf  = AllocBuf(kSignalSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+    ASSERT_NE(sigBuf,  nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(sendBuf, kPayload, /*seed=*/0x51);
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kPayload,    &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kPayload,    &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
+
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        std::vector<void*> inflight(kInflight, nullptr);
+        int                next = 0;
+
+        for(int i = 0; i < kIterations; ++i)
+        {
+            if(inflight[next] != nullptr)
+            {
+                ASSERT_TRUE(PollUntilDone(inflight[next]))
+                    << "iteration " << i << " (slot " << next << ") drain failed";
+                inflight[next] = nullptr;
+            }
+
+            const bool     closing = (i % kInflight) == kInflight - 1;
+            const uint32_t flags   = closing ? ncclRmaOptFlagsDefault
+                                             : ncclRmaOptFlagsAggregateRequests;
+            ASSERT_EQ(ncclSuccess,
+                      IPutSignal( /*context=*/0,
+                                       /*srcOff=*/0, sendMh, kPayload,
+                                       /*dstOff=*/0, recvMh,
+                                       /*peerRank=*/1,
+                                       /*signalOff=*/0, sigMh,
+                                       /*signalValue=*/0,
+                                       NCCL_NET_SIGNAL_OP_INC,
+                                       &inflight[next], flags))
+                << "iteration " << i << " post failed";
+            next = (next + 1) % kInflight;
+        }
+
+        for(int s = 0; s < kInflight; ++s)
+        {
+            if(inflight[s] != nullptr)
+            {
+                EXPECT_TRUE(PollUntilDone(inflight[s]))
+                    << "final drain of slot " << s << " failed";
+            }
+        }
+    }
+
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_EQ(ReadSignal(sigBuf), static_cast<uint64_t>(kIterations))
+            << "aggregated iputSignal dropped or duplicated a signal";
+        EXPECT_TRUE(VerifyBuf(recvBuf, kPayload, /*seed=*/0x51));
     }
 }
 
