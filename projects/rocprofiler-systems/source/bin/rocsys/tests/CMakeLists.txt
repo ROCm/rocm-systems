@@ -7,6 +7,7 @@ add_library(
     test_cli_dispatcher.cpp
     test_delivery.cpp
     test_launcher.cpp
+    test_options.cpp
 )
 
 target_link_libraries(
