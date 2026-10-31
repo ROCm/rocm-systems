@@ -26,6 +26,7 @@
 
 #include "nccl.h"
 #include "comm.h"
+#include "graph/topo.h"
 #include "nccl_gin.h"
 #include "plugin.h"
 
@@ -166,6 +167,7 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
 class GinFinalizeTest : public GinPluginInitTest {
  protected:
   std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();
+  std::unique_ptr<ncclTopoSystem> topo_ = std::make_unique<ncclTopoSystem>();
 
   void SetUp() override {
     GinPluginInitTest::SetUp();
@@ -173,6 +175,8 @@ class GinFinalizeTest : public GinPluginInitTest {
     pluginLibs[0] = pluginLib_;
     pluginLibs[0].refCount = kInitialRefCount;
     comm_.sharedRes = sharedRes_.get();
+    topo_->nHosts = 1;
+    comm_.topo = topo_.get();
   }
 
   void TearDown() override {
@@ -245,6 +249,69 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
   EXPECT_TRUE(ginState->supported);
   EXPECT_EQ(ginState->numActiveBackends, 1);
   EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
+// AICOMRCCL-3417: Anvil SDMA stays on a single physical host alongside PROXY.
+TEST_F(GinFinalizeTest, AnvilSdma_KeptWithProxyOnSingleHost) {
+  void* anvil = std::malloc(8);
+  void* proxy = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  addActiveBackend(proxy);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
+  topo_->nHosts = 1;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
+                                     BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
+            ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 2);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+  std::free(anvil);
+  std::free(proxy);
+  fake_.lastCtx = nullptr;
+}
+
+// AICOMRCCL-3417: Anvil SDMA is dropped when topo reports more than one host,
+// including MNNVL pods that fold nNodes to 1. PROXY remains the default.
+TEST_F(GinFinalizeTest, AnvilSdma_DroppedOnMultiHostKeepsProxy) {
+  void* anvil = std::malloc(8);
+  void* proxy = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  addActiveBackend(proxy);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  ginState->backends[1].ginType = NCCL_GIN_TYPE_PROXY;
+  topo_->nHosts = 2;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_,
+                                     BIT(NCCL_GIN_TYPE_ANVIL_SDMA) | BIT(NCCL_GIN_TYPE_PROXY)),
+            ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(ginState->backends[0].ginType, NCCL_GIN_TYPE_PROXY);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  std::free(proxy);
+  fake_.lastCtx = nullptr;
+}
+
+// AICOMRCCL-3417: Anvil-only on multi-host leaves zero backends and clears supported
+// so init.cc keeps globalGinSupport NONE.
+TEST_F(GinFinalizeTest, AnvilSdmaOnly_MultiHostClearsSupported) {
+  void* anvil = std::malloc(8);
+  fake_.lastCtx = anvil;
+  addActiveBackend(anvil);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  topo_->nHosts = 2;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_ANVIL_SDMA)), ncclSuccess);
+  EXPECT_FALSE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 0);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
 }
 
 // Success path: keep the context, mark the plugin enabled, do not finalize.
