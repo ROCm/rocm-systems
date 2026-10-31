@@ -5549,6 +5549,10 @@ amdsmi_status_t amdsmi_get_gpu_pci_throughput(amdsmi_processor_handle processor_
 
 amdsmi_status_t amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_od_volt_freq_data_t* odv) {
+  // rocm_smi writes its own, smaller layout into the caller's buffer, and the Python
+  // library decodes it that way (_RsmiOdVoltFreqData). Change both together.
+  static_assert(sizeof(rsmi_od_volt_freq_data_t) == 152,
+                "the Python library decodes the 152-byte rocm_smi layout");
   return rsmi_wrapper(rsmi_dev_od_volt_info_get, processor_handle, 0,
                       reinterpret_cast<rsmi_od_volt_freq_data_t*>(odv));
 }
@@ -5556,6 +5560,10 @@ amdsmi_status_t amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_ha
 amdsmi_status_t amdsmi_get_gpu_od_volt_curve_regions(amdsmi_processor_handle processor_handle,
                                                      uint32_t* num_regions,
                                                      amdsmi_freq_volt_region_t* buffer) {
+  // rocm_smi writes its own 32-byte records into the caller's buffer, and the Python
+  // library decodes them that way (_RsmiFreqVoltRegion). Change both together.
+  static_assert(sizeof(rsmi_freq_volt_region_t) == 32,
+                "the Python library decodes 32-byte rocm_smi records");
   return rsmi_wrapper(rsmi_dev_od_volt_curve_regions_get, processor_handle, 0, num_regions,
                       reinterpret_cast<rsmi_freq_volt_region_t*>(buffer));
 }
