@@ -101,6 +101,17 @@ This installs:
 -   GPU topology JSON configuration files to
     `<prefix>/share/rocjitsu/configs/`
 -   FlatBuffers schema files to `<prefix>/share/rocjitsu/schemas/`
+-   Python package sources for wheel builders to
+    `<prefix>/lib/python3/site-packages/rocjitsu/` (Linux only)
+-   Python packaging metadata to `<prefix>/share/rocjitsu/python/` (Linux only)
+
+The staged Python sources are not on Python's import path. For a source build,
+install the package with `pip install ./python` from `emulation/rocjitsu/`;
+see the [Python execution API](../reference/python-api.md) for package setup.
+
+Bundled wheels containing the Python package and native runtime require
+follow-up TheRock packaging support. These staging rules provide its inputs;
+they do not build or publish a wheel themselves.
 
 #### Third-party dependencies
 
