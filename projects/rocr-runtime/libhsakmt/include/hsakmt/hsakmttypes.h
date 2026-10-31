@@ -458,7 +458,6 @@ typedef struct _HaCacheProperties
     HSAuint32    CacheLatency;     // Cache latency in ns
     HsaCacheType CacheType;
     HSAuint32    SiblingMap[HSA_CPU_SIBLINGS];
-    HSAuint32    PersistingCacheSizeMax; //Maximum persisting cache size in L2 Cache topology.
 } HsaCacheProperties;
 
 
@@ -1624,6 +1623,10 @@ typedef struct _HsaHandleExportFlags {
     } ui32;
 } HsaHandleExportFlags;
 
+typedef struct _HsaPersistingCacheInfo {
+    HSAuint64 CurrentSize;
+    HSAuint64 MaxSize;
+} HsaPersistingCacheInfo;
 
 #pragma pack(pop, hsakmttypes_h)
 
