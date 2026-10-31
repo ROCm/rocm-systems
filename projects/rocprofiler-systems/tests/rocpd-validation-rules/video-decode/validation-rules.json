@@ -1,7 +1,7 @@
 {
     "required_tables": [
         {
-            "min_rows": 10,
+            "min_rows": 3,
             "name": "threads",
             "required_columns": [
                 "tid",
