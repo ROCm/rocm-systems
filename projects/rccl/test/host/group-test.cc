@@ -425,8 +425,23 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
 
-  EXPECT_FALSE(ncclPlannerMayInitializeSymmetric(comm.get()));
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 }
 
 TEST_F(GroupEndInternalTest, InitializedSymmetricStateAvoidsRepeatedAsyncJobs) {
