@@ -325,8 +325,8 @@ def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
 
 def test_dot2_true16_narrows_inline_float_constants():
     """v_dot2_f16_f16 / v_dot2_bf16_bf16 read src0/src1 as packed v2 halves off a
-    32-bit read_lane, so they need the same narrowing the VOP3P dots do. Only
-    src2 goes through read_vop3_true16_src, which is already 16-bit."""
+    32-bit read_lane, so they need the same narrowing the VOP3P dots do. The
+    src2 inline carrier is already 16-bit and replicates before OPSEL."""
     for cls, narrow in (
         ('dot2_f16_f16', 'f32_to_f16'),
         ('dot2_bf16_bf16', 'f32_to_bf16'),
@@ -343,7 +343,7 @@ def test_dot2_true16_narrows_inline_float_constants():
             'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
         )
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
-        # src2 is read at 16 bits by read_vop3_true16_src, so it is left alone.
+        # src2 already has its 16-bit format and needs no additional narrowing.
         assert 'inst_.src2, src2.size_bits()' not in cpp
 
 
@@ -415,6 +415,20 @@ def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
             'inst_.neg_hi, inst_.neg);' in cpp
         )
         assert 'fp8_e4m3_to_f32' not in cpp
+
+
+def test_fp8_dot4_rejects_missing_or_invalid_formats():
+    import pytest
+
+    for operation in (None, '', 'fp8', 'fp8_fp8_fp8', 'f16_fp8', 'fp8_unknown'):
+        with pytest.raises(ValueError, match='unhandled FP8 dot4 operation'):
+            gen_dot4(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                'dot4_f32_fp8',
+                operation=operation,
+                dot_accumulation=FloatDotAccumulation.GFX12,
+            )
 
 
 def test_fp8_dot4_rejects_other_accumulation_models():
