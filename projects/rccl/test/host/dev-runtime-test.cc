@@ -6717,6 +6717,16 @@ TEST(DevrGinContextsTotal, SingleBackend_RoundsUpToConnectionCount) {
   EXPECT_EQ(devrGinContextsTotal(&ginState, 6), 6);
 }
 
+// AICOMRCCL-3181: a 0 request with an active backend must size the per-context
+// regions to one context per connection, matching ncclGinContextCount's promotion
+// in ginDevCommSetupWithBackend -- the two halves of the fix must not diverge.
+TEST(DevrGinContextsTotal, ZeroRequest_PromotedToConnectionCount) {
+  struct ncclGinState ginState{};
+  ginState.numActiveBackends = 1;
+  ginState.backends[0].ginCommCount = 3;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 0), 3);
+}
+
 // Branch: the widest backend is not the one that rounds furthest.
 TEST(DevrGinContextsTotal, MixedBackends_TakesLargestRoundedCount) {
   struct ncclGinState ginState{};
