@@ -205,6 +205,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroTopo:$SCRIPT_DIR/host_tests_micro_topo.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
     "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
+    "rccl-UnitTestsMicroDdaIpcLifecycle:$SCRIPT_DIR/host_tests_micro_dda_ipc_lifecycle.xml"
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
     "rccl-UnitTestsMicroDda:$SCRIPT_DIR/host_tests_micro_dda.xml"
     "rccl-UnitTestsMicroTransport:$SCRIPT_DIR/host_tests_micro_transport.xml"

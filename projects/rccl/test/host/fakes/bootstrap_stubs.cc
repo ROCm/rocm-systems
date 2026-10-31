@@ -25,6 +25,11 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier =
+    [](void*, int, int, int) { return ncclInternalError; };
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  return g_bootstrapBarrier(commState, rank, nranks, tag);
+}
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
 // ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
@@ -72,7 +77,12 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
   return g_bootstrapInit(nHandles, handle, comm, parent);
 }
 
-ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+static ncclResult_t DefaultBootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier =
+    DefaultBootstrapIntraNodeBarrier;
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  return g_bootstrapIntraNodeBarrier(commState, ranks, rank, nranks, tag);
+}
 
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =
@@ -88,6 +98,8 @@ void ResetBootstrapStubs() {
   g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
   g_bootstrapNetInitFail = false;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  g_bootstrapBarrier = [](void*, int, int, int) { return ncclInternalError; };
+  g_bootstrapIntraNodeBarrier = DefaultBootstrapIntraNodeBarrier;
   g_bootstrapGetUniqueIdResult = ncclSuccess;
   g_bootstrapGetUniqueIdCalls = 0;
   g_bcastGrowHandleResult = ncclSuccess;

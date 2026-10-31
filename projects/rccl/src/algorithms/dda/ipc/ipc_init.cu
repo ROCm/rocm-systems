@@ -29,10 +29,21 @@ using nccl_dda_detail::kDdaNranks;
     } \
   } while (0)
 
-ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+namespace {
+
+bool ddaIpcCommEligible(const ncclComm* comm) {
   if (comm == nullptr) {
-    return ncclSuccess;
+    return false;
   }
+  const bool ddaArchSupported =
+    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+  return comm->nRanks == kDdaNranks && comm->nNodes == 1 && comm->bootstrap != nullptr && !comm->directMode &&
+         !comm->MNNVL && ddaArchSupported;
+}
+
+} // namespace
+
+ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -44,10 +55,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
-  const bool ddaArchSupported =
-    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
-      comm->MNNVL || !ddaArchSupported) {
+  if (!ddaIpcCommEligible(comm)) {
     return ncclSuccess;
   }
 
@@ -197,12 +205,55 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   return ncclSuccess;
 }
 
+ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
+  if (comm == nullptr) {
+    return ncclSuccess;
+  }
+
+  auto* barrierState = comm->ddaIpcBarrierState;
+  const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
+                                  barrierState->resources->ipcMemHandler != nullptr;
+  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+    // DDA kernels run on the user stream, which the hostStream/deviceStream
+    // syncs in commDestroySync do not cover. doneEvent is recorded after
+    // every launch, so waiting on it keeps in-flight kernels off unmapped peers.
+    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+    if (syncErr != cudaSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+           cudaGetErrorString(syncErr));
+    }
+  }
+  if (hasBarrierMappings) {
+    ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
+  if (comm->ddaIpcMemHandler != nullptr) {
+    ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+
+  // commFree must remain non-collective. Destroy and abort close mappings in
+  // commDestroySync and revoke closes them in commReclaim, before the serial
+  // commFree loop; this idempotent call is the local backstop for init-failure
+  // and other direct commFree paths.
+  ncclResult_t closeResult = ncclSuccess;
+  NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
+
   if (comm->ddaIpcBarrierState != nullptr) {
-    delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
+    delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
