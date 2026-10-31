@@ -130,8 +130,10 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   return ncclSuccess;
 }
 
+// Tolerates a zeroed or partially constructed ss so init error paths can tear it down.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
-  CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  if (ss->liveStream != nullptr) CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  ss->liveStream = nullptr;
 #if ROCM_VERSION >= 60100
   struct ncclStrongStreamCapture* cap = ss->captureHead;
   while (cap) {
@@ -140,7 +142,9 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
     free(cap);
     cap = next;
   }
-  CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->captureHead = nullptr;
+  if (ss->serialEvent != nullptr) CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->serialEvent = nullptr;
 #endif
   return ncclSuccess;
 }
@@ -175,6 +179,7 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
     struct ncclStrongStreamCapture** pcap = &ss->captureHead;
     struct ncclStrongStreamCapture* cap;
     struct ncclStrongStreamCapture* spare = nullptr;
+    struct ncclStrongStreamCapture* fresh = nullptr;  // calloc'd below and not yet linked
     while (*pcap != nullptr) {
       cap = *pcap;
       if (cap->graphId == graph.graphId) { // Capture node already exists.
@@ -205,6 +210,7 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
         ret = ncclSystemError;
         goto do_unlock;
       }
+      fresh = cap;
       CUDACHECKGOTO(cudaStreamCreateWithFlags(&cap->captureStream, cudaStreamNonBlocking), ret, do_unlock);
     }
     cap->graphId = graph.graphId;
@@ -215,15 +221,28 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph, struct ncclStro
 
   do_unlock:
     if (concurrent) lock.unlock();
-    if (ret != ncclSuccess) return ret;
+    if (ret != ncclSuccess) {
+      // Neither entry is on the list any more, so nothing else can release it.
+      if (fresh) free(fresh);
+      if (spare) {
+        CUDACHECKIGNORE(cudaStreamDestroy(spare->captureStream));
+        free(spare);
+      }
+      return ret;
+    }
 
     *workStream = cap->captureStream;
 
       // Bring captureStream into the graph but without any dependencies.
     cudaEvent_t scratch;
     CUDACHECK(cudaEventCreateWithFlags(&scratch, cudaEventDisableTiming));
-    CUDACHECK(cudaEventRecord(scratch, graph.origin));
-    CUDACHECK(cudaStreamWaitEvent(cap->captureStream, scratch, 0));
+    CUDACHECKGOTO(cudaEventRecord(scratch, graph.origin), ret, drop_scratch);
+    CUDACHECKGOTO(cudaStreamWaitEvent(cap->captureStream, scratch, 0), ret, drop_scratch);
+  drop_scratch:
+    if (ret != ncclSuccess) {
+      CUDACHECKIGNORE(cudaEventDestroy(scratch));
+      return ret;
+    }
     CUDACHECK(cudaEventDestroy(scratch));
 #if CUDART_VERSION >= 13000
     CUDACHECK(cudaStreamUpdateCaptureDependencies_v2(cap->captureStream, nullptr, nullptr, 0,

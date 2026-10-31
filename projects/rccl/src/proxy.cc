@@ -206,6 +206,13 @@ static ncclResult_t asyncProxyOpDequeue(struct ncclProxyLocalPeer* peer, ncclPro
   return ncclInternalError;
 }
 
+static void asyncProxyOpDrain(struct ncclProxyLocalPeer* peer, int* asyncOpCount) {
+  while (peer->asyncOps != nullptr) {
+    asyncProxyOpDequeue(peer, peer->asyncOps);
+    (*asyncOpCount)--;
+  }
+}
+
 static ncclResult_t allocateArgs(struct ncclProxyProgressState* state, struct ncclProxyArgs** argsptr) {
   struct ncclProxyArgs* elem;
   if (state->pool == NULL) {
@@ -1500,7 +1507,11 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
              resp.respSize);
         return ncclInternalError;
       }
-      NCCLCHECK(ncclSocketRecv(sock, respBuff, resp.respSize));
+      ncclResult_t recvRes = ncclSocketRecv(sock, respBuff, resp.respSize);
+      if (recvRes != ncclSuccess) {
+        if (resp.opId != opId) free(respBuff);
+        return recvRes;
+      }
     }
 
     if (resp.opId == opId) {
@@ -1509,8 +1520,13 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
       return resp.res;
     } else {
       INFO(NCCL_PROXY, "Queuing opId=%p respBuff=%p respSize=%d", resp.opId, respBuff, resp.respSize);
-      // Store the result and mark response as completed
-      NCCLCHECK(expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res));
+      // Store the result and mark response as completed. Store frees the buffer only on success.
+      ncclResult_t storeRes =
+        expectedProxyResponseStore(sharedProxyState, resp.opId, respBuff, resp.respSize, resp.res);
+      if (storeRes != ncclSuccess) {
+        if (resp.respSize > 0) free(respBuff);
+        return storeRes;
+      }
       return ncclInProgress;
     }
   } else {
@@ -2078,10 +2094,7 @@ void* ncclProxyService(void* _args) {
         (void)ncclSocketClose(sock);
 
         // Drain every op still queued for this peer, not just the failed one.
-        while (peer->asyncOps != nullptr) {
-          asyncProxyOpDequeue(peer, peer->asyncOps);
-          asyncOpCount--;
-        }
+        asyncProxyOpDrain(peer, &asyncOpCount);
         pollfds[s].fd = NCCL_INVALID_SOCKET;
         pollfds[s].events = 0; // Clear events for invalid socket descriptors on Windows
         npeers--;
@@ -2091,6 +2104,7 @@ void* ncclProxyService(void* _args) {
       if (stop != PROXY_RUNNING && pollfds[s].fd != -1) {
         INFO(NCCL_PROXY, "[Proxy Service %d] Force closing peer=%d fd: %d", proxyState->tpRank, s, pollfds[s].fd);
         (void)ncclSocketClose(sock);
+        asyncProxyOpDrain(peer, &asyncOpCount);
         pollfds[s].fd = -1;
         npeers--;
       }

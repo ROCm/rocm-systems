@@ -367,6 +367,11 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
   plan->kernelArgsSize = ncclSymkDevWorkArgs::calcArgsSize(nMaxChannels, workCount, profilerEnabled);
   plan->kernelArgsSize = max(plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
   argsBuf = (struct ncclSymkDevWorkArgs*)calloc(1, plan->kernelArgsSize);
+  if (argsBuf == NULL) {
+    WARN("Failed to allocate %zu bytes of symmetric kernel args", plan->kernelArgsSize);
+    ret = ncclSystemError;
+    goto fail;
+  }
 
   argsBuf->nMaxChannels = nMaxChannels;
   argsBuf->maxDynamicSmem = maxDynamicSmem;
@@ -449,6 +454,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
     if (curChannel == nMaxChannels) {
       WARN("ncclSymmetricTaskScheduler ran out of channel space (nMaxChannels=%d, workCount=%d, workIndex=%d)",
            nMaxChannels, workCount, workIndex);
+      ret = ncclInternalError;
       goto fail;
     }
   }
@@ -471,6 +477,8 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 exit:
   return ret;
 fail:
+  // argsBuf is published to plan->kernelSymArgs only on success; every jump here still owns it.
+  free(argsBuf);
   goto exit;
 }
 #endif // NCCL_SYMMETRIC_SCHED_H_

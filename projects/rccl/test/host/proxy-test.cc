@@ -1884,16 +1884,25 @@ TEST_F(ProxyCallMicrotest, Poll_OtherResponseAllocationOrRecvFailures) {
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Could not allocate proxy response buffer"));
 }
 
-// The failed recv returns without freeing the response buffer it allocated. Pins a leak; a fix flips this pin.
-TEST_F(ProxyCallMicrotest, Poll_KnownBug_RecvFailureLeaksTheResponseBuffer) {
+TEST_F(ProxyCallMicrotest, Poll_RecvFailureFreesTheBufferForAnotherOpsResponse) {
   int theirs = Peer(1);
   char other;
   int value = 1, out;
   Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
   g_sock.recvFailAt = 0;
   EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclRemoteError);
-  EXPECT_EQ(LeftoverCount(), 1u);
-  FreeUnitLeftovers();
+  EXPECT_EQ(LeftoverCount(), 0u);
+}
+
+// A response for an opId nobody expects cannot be stored, so its buffer is freed rather than kept.
+TEST_F(ProxyCallMicrotest, Poll_UnstorableResponseFreesItsBuffer) {
+  int theirs = Peer(1);
+  char other;
+  int value = 1, out;
+  Reply(theirs, &other, ncclSuccess, &value, sizeof(value));
+  EXPECT_EQ(ncclPollProxyResponse(comm_.get(), &conn_, &out, this), ncclInternalError);
+  EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "doesn't match any expected response"));
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
 TEST_F(ProxyCallMicrotest, Poll_UnexpectedOpIdsFail) {
@@ -2509,11 +2518,11 @@ TEST_F(ProxyServiceLoopMicrotest, Service_ClosedOrFailingPeersAreDroppedWhileOth
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Connection closed by localRank"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_WARN, "Failed to execute operation Setup"));
   EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
-  FreeUnitLeftovers();  // the queued setup, see Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
-// Force-closing a peer at stop does not drain its queued setup. Pins a leak; a fix flips this pin.
-TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_StopLeaksAForceClosedPeersQueuedSetup) {
+// Force-closing a peer at stop drains its queued setup like any other close.
+TEST_F(ProxyServiceLoopMicrotest, Service_StopDrainsAForceClosedPeersQueuedSetup) {
   int pending = Connect();
   int stopper = Connect();
   Init(pending, {0, 1, 0, 0, 0}, &op1_);
@@ -2524,8 +2533,8 @@ TEST_F(ProxyServiceLoopMicrotest, Service_KnownBug_StopLeaksAForceClosedPeersQue
   });
   ncclProxyService(&ps_);
   EXPECT_EQ(Response<ncclProxyInitResp>(pending, &op1_).connId, 0);
-  EXPECT_EQ(LeftoverCount(), 1u);
-  FreeUnitLeftovers();
+  EXPECT_TRUE(ProxyLogged(NCCL_LOG_INFO, "Force closing peer=0"));
+  EXPECT_EQ(LeftoverCount(), 0u);
 }
 
 TEST_F(ProxyServiceLoopMicrotest, Service_ClosingAPeerDrainsAllItsPendingOps) {

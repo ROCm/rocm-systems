@@ -92,19 +92,15 @@ static T* RmaMicroPoolAlloc(struct ncclMemoryPool* me, struct ncclMemoryStack* b
 
 // The split's "proxy side unused" arm frees the two arrays it just allocated.
 // Dropping that free is a pure leak: no return value or queue state changes, so
-// only a counter can see it. Same textual-substitution caveats as above.
+// only a counter can see it. RmaTestBase installs the counting g_microFree.
 static int g_rmaFreeCalls = 0;
-static void RmaMicroFree(void* p) {
-  ++g_rmaFreeCalls;
-  free(p);
-}
-#define free(p) RmaMicroFree(p)
+#include "fakes/alloc_seam.h"
 
 #include RMA_CC_PATH
 
 // These overrides are only meaningful for the unit under test; past this point
 // the tests' own allocations and cleanup should not land in the counters.
-#undef free
+#include "fakes/alloc_seam_undef.h"
 #undef ncclCalloc
 #undef ncclMemoryStackAlloc
 #undef ncclMemoryPoolAlloc
@@ -191,6 +187,10 @@ protected:
     // its TearDown, and these seams are process-wide.
     ResetRmaFakes();
     ResetHipFakes();
+    g_microFree = [](void* p) {
+      ++g_rmaFreeCalls;
+      ::free(p);
+    };
 
     comm_ = std::make_unique<ncclComm>();  // value-initialises the whole object
     comm_->rank = 0;
@@ -232,6 +232,7 @@ protected:
     g_rmaStackArenas.clear();
     g_rmaPoolArenas.clear();
     g_rmaFreeCalls = 0;
+    ResetAllocSeam();
     proxyConnect_.reset();
     ResetRmaFakes();
     ResetDevRuntimeMicroFakes();
