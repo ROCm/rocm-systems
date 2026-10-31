@@ -1240,6 +1240,9 @@ if(BUILD_TESTS)
         target_link_options(${test_executable} PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
       endif()
     endif()
+    if(BUILD_DEVICE_ADDRESS_SANITIZER)
+      target_link_options(${test_executable} PRIVATE -fsanitize=daddress)
+    endif()
 
     # Add MPI-specific configuration if MPI tests are enabled
     if(ENABLE_MPI_TESTS)

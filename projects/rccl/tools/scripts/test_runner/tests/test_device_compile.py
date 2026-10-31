@@ -128,6 +128,15 @@ class ParseCompilerFlagsTest(unittest.TestCase):
         self.assertEqual(forwarded, ["-DFOO=1", "-Iinc"])
         self.assertEqual(sources, ["b.o"])
 
+    def test_dasan_rt_both_forms_are_our_args(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--dasan-rt=/opt/rt/a.a", "--dasan-rt", "/opt/rt/b.a", "c.o"])
+
+        self.assertEqual(our, ["--dasan-rt=/opt/rt/a.a",
+                               "--dasan-rt", "/opt/rt/b.a"])
+        self.assertEqual(forwarded, [])
+        self.assertEqual(sources, ["c.o"])
+
 
 class BuildLinkCmdTest(unittest.TestCase):
     def test_without_profile_rt_omits_mcpu(self):
@@ -154,6 +163,37 @@ class BuildLinkCmdTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
                                   "gfx942", "/nonexistent/lib.a")
+
+    def test_dasan_rt_is_whole_archive_with_exported_symbols(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive = Path(temp_dir) / "libclang_rt.dasan.a"
+            archive.touch()
+
+            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                        "gfx942", None, str(archive))
+
+        self.assertEqual(cmd[-5:], ["--plugin-opt=mcpu=gfx942",
+                                    "--whole-archive", str(archive),
+                                    "--no-whole-archive", "--export-dynamic"])
+
+    def test_profile_and_dasan_rt_share_one_mcpu(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile = Path(temp_dir) / "libclang_rt.profile.a"
+            dasan = Path(temp_dir) / "libclang_rt.dasan.a"
+            profile.touch()
+            dasan.touch()
+
+            cmd = driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                        "gfx942", str(profile), str(dasan))
+
+        self.assertEqual(cmd.count("--plugin-opt=mcpu=gfx942"), 1)
+        self.assertLess(cmd.index("--plugin-opt=mcpu=gfx942"),
+                        cmd.index(str(profile)))
+
+    def test_missing_dasan_rt_raises(self):
+        with self.assertRaises(SystemExit):
+            driver.build_link_cmd("ld.lld", "device.elf", "objs.rsp",
+                                  "gfx942", None, "/nonexistent/dasan.a")
 
 
 class TargetIdTest(unittest.TestCase):
@@ -327,6 +367,95 @@ class DeviceCompileCmdTest(unittest.TestCase):
 
         self.assertIn("-gline-tables-only", cmd)
         self.assertNotIn("-g0", cmd)
+
+    def test_emit_llvm_writes_bitcode_object(self):
+        cmd = driver.device_compile_cmd(
+            "clang", "gfx942", ["-O3"], "k.bc", "k.cpp", emit_llvm=True
+        )
+
+        self.assertEqual(cmd[-5:], ["-c", "-emit-llvm", "-o", "k.bc", "k.cpp"])
+        self.assertNotIn("-S", cmd)
+
+
+class DasanTuRuntimeTest(unittest.TestCase):
+    FORWARDED = ["-DFOO", "-Iinc", "-std=c++17", "-O3", "-fsanitize=daddress",
+                 "-mllvm", "--amdgpu-kernarg-preload-count=16",
+                 "--include=poison.h", "-fvisibility=hidden"]
+
+    def test_codegen_keeps_only_opt_level_and_mllvm(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942:xnack+", self.FORWARDED,
+                                    "k.s", "k.bc", "rt.bc")
+
+        self.assertEqual(cmd[:6], ["clang", "-target", "amdgcn-amd-amdhsa",
+                                   "-mcpu=gfx942:xnack+", "-x", "ir"])
+        self.assertIn("-O3", cmd)
+        self.assertEqual(cmd[cmd.index("-mllvm") + 1],
+                         "--amdgpu-kernarg-preload-count=16")
+        for dropped in ("-DFOO", "-Iinc", "-std=c++17", "-fsanitize=daddress",
+                        "--include=poison.h", "-fvisibility=hidden"):
+            self.assertNotIn(dropped, cmd)
+
+    def test_codegen_links_runtime_without_reoptimizing(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942", ["-O3"], "k.o", "k.bc",
+                                    "rt.bc", emit="-c")
+
+        self.assertEqual(cmd[-10:], ["-Xclang", "-disable-llvm-passes",
+                                     "-Xclang", "-mlink-builtin-bitcode",
+                                     "-Xclang", "rt.bc",
+                                     "-c", "-o", "k.o", "k.bc"])
+
+    def test_codegen_without_runtime(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942", ["-O3"], "k.o", "k.bc",
+                                    None, emit="-c")
+
+        self.assertNotIn("-mlink-builtin-bitcode", cmd)
+        self.assertEqual(cmd[-6:], ["-Xclang", "-disable-llvm-passes",
+                                    "-c", "-o", "k.o", "k.bc"])
+
+    def test_compile_device_asm_goes_through_bitcode_only_under_dasan(self):
+        with unittest.mock.patch.object(driver, "run") as run:
+            driver.compile_device_asm("clang", "gfx942", ["-O3"], "d/full.s",
+                                      "k.cpp", None, "compile")
+            self.assertEqual(run.call_count, 1)
+            self.assertIn("-S", run.call_args_list[0].args[0])
+
+            run.reset_mock()
+            driver.compile_device_asm("clang", "gfx942", ["-O3"], "d/full.s",
+                                      "k.cpp", "rt.bc", "compile")
+            first, second = (c.args[0] for c in run.call_args_list)
+
+        self.assertEqual(first[first.index("-o") + 1], "d/full.bc")
+        self.assertEqual(second[-4:], ["-S", "-o", "d/full.s", "d/full.bc"])
+
+    def test_rpc_client_definition_becomes_declaration(self):
+        ir = ('@__llvm_rpc_client = weak protected addrspace(1) global '
+              '%"struct.rpc::Client" zeroinitializer, align 8, !guid !0\n'
+              '@_ZZL12ShouldReportmE4Seen = internal addrspace(1) global '
+              '[64 x i64] zeroinitializer, align 8\n')
+
+        out, n = driver._RPC_CLIENT_DEF_RE.subn(r'\1external \2\3', ir)
+
+        self.assertEqual(n, 1)
+        self.assertTrue(out.startswith(
+            '@__llvm_rpc_client = external protected addrspace(1) global '
+            '%"struct.rpc::Client", align 8, !guid !0\n'))
+        self.assertEqual(list(driver._GLOBAL_DEF_RE.finditer(out)), [])
+
+    def test_other_shared_globals_are_detected(self):
+        ir = '@__dasan_state = weak protected addrspace(1) global i32 0, align 4\n'
+
+        self.assertEqual([m.group(1) for m in driver._GLOBAL_DEF_RE.finditer(ir)],
+                         ["__dasan_state"])
+
+    def test_new_options_are_our_args(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--dasan-tu-rt=rt.bc", "--ir-codegen",
+             "--derive-dasan-tu-rt", "lib.a", "-O3", "k.bc"])
+
+        self.assertEqual(our, ["--dasan-tu-rt=rt.bc", "--ir-codegen",
+                               "--derive-dasan-tu-rt", "lib.a"])
+        self.assertEqual(forwarded, ["-O3"])
+        self.assertEqual(sources, ["k.bc"])
 
 
 class PatchDispatcherNoDeadStripTest(unittest.TestCase):

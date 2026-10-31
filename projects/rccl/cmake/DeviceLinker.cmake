@@ -172,6 +172,11 @@ if(ENABLE_FULL_COVERAGE)
     "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
 endif()
 
+set(DL_DASAN_TU_RT_FLAG "")
+if(BUILD_DEVICE_ADDRESS_SANITIZER)
+  set(DL_DASAN_TU_RT_FLAG --dasan-tu-rt=${RCCL_DASAN_TU_RT})
+endif()
+
 # Profile section anchor (ENABLE_FULL_COVERAGE).
 #
 # A coverage-instrumented device TU that emits no counters (e.g. a fat object
@@ -183,6 +188,7 @@ endif()
 # __llvm_prf_{cnts,data} sections so the boundary symbols are always defined; when a
 # TU does emit counters the empty sections merge in as a zero-byte no-op. The anchor
 # is generic amdgcn bitcode (no mcpu) so every per-arch device link LTO-compiles it.
+# It goes on each per-arch link line with the mixed-TU device objects.
 set(DL_DEVICE_PROFILE_ANCHOR "")
 if(DL_DEVICE_PROFILE_RT)
   file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}")
@@ -209,28 +215,6 @@ if(DL_DEVICE_PROFILE_RT)
   set(DL_DEVICE_PROFILE_ANCHOR "${_dl_anchor_bc}")
   message(STATUS "Device Linker: profile section anchor = ${DL_DEVICE_PROFILE_ANCHOR}")
 endif()
-
-# Standalone fat-object compiles (onerank.o, collectives.o, dda_all_reduce_ipc.o,
-# sym_*.o) are built as full `-x hip` objects, so each -c step performs its own
-# embedded device link (clang-linker-wrapper -> ld.lld). That link must resolve
-# __llvm_profile_instrument_gpu from the device profile RT. The rccl-device-compile
-# --link path passes the archive to ld.lld directly; here we forward it to the
-# clang driver's offload linker via -Xoffload-linker.
-#
-# The profile RT is a separate bitcode LTO module, so clang's auto-injected
-# -amdgpu-internalize-symbols dead-strips the hidden __llvm_profile_instrument_gpu; disable it.
-# The anchor supplies the __llvm_prf_{cnts,data} boundary sections (see above).
-set(DL_DEVICE_PROFILE_RT_LINK_FLAGS "")
-if(DL_DEVICE_PROFILE_RT)
-  set(DL_DEVICE_PROFILE_RT_LINK_FLAGS
-    -Xoffload-linker -plugin-opt=-amdgpu-internalize-symbols=false
-    -Xoffload-linker "${DL_DEVICE_PROFILE_ANCHOR}"
-    -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
-endif()
-
-# Instrumentation plus the profile-runtime link flags for the standalone `-x hip`
-# fat-object compiles below. Both expand to nothing unless ENABLE_FULL_COVERAGE.
-set(DL_DEVICE_COVERAGE_FLAGS ${DL_COVERAGE_FLAGS} ${DL_DEVICE_PROFILE_RT_LINK_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Main-module coverage drain: deterministic compilation-unit ID (-cuid).
@@ -317,6 +301,21 @@ endif()
 target_include_directories(rccl_device_defs SYSTEM INTERFACE
   "${PROJECT_SOURCE_DIR}/external/fmt/include")
 
+# The same, as flags for the compiles below that bypass the RCCLDEV language.
+get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
+list(TRANSFORM _iface_defs PREPEND "-D")
+set(_link_def_flags -DRCCL_DEVICE_LINKER ${_iface_defs})
+list(REMOVE_DUPLICATES _link_def_flags)
+
+get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
+list(TRANSFORM _dev_includes PREPEND "-I" OUTPUT_VARIABLE _link_inc_flags)
+get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+foreach(_inc ${_dev_sys_includes})
+  if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+    list(APPEND _link_inc_flags "-isystem${_inc}")
+  endif()
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Read specialized file list
 # ---------------------------------------------------------------------------
@@ -365,6 +364,194 @@ if(NOT _dl_sys_name)
   set(_dl_sys_name "linux")
 endif()
 set(_dl_host_triple "${CMAKE_SYSTEM_PROCESSOR}-unknown-${_dl_sys_name}-gnu")
+
+# ===========================================================================
+# Mixed host+device TUs: sources outside the specialized-kernel pipeline that
+# define kernels of their own. The device half is compiled once per GPU target
+# and linked into that target's device.elf; the host half goes into
+# DEVICE_LINKER_OBJECTS. Both halves are -fgpu-rdc with the same -cuid, so
+# internal-linkage kernels and variables get the same name on each side, and
+# the host half carries offload entries instead of an image of its own.
+# ===========================================================================
+set(DEVICE_LINKER_OBJECTS "")
+
+# dl_add_fat_object(<name> <source> [SUPPRESS_WARNINGS] [DEPFILE_TRACKING]
+#                   [DEFINES ...] [EXTRA_FLAGS ...] [EXTRA_DEPENDS ...])
+# EXTRA_FLAGS and EXTRA_DEPENDS apply to the device half only.
+function(dl_add_fat_object NAME SRC)
+  cmake_parse_arguments(FO "SUPPRESS_WARNINGS;DEPFILE_TRACKING" ""
+    "DEFINES;EXTRA_FLAGS;EXTRA_DEPENDS" ${ARGN})
+  if(FO_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
+  endif()
+  list(TRANSFORM FO_DEFINES PREPEND "-D")
+  set(_flags ${DL_HIP_COMPILER_FLAGS} --offload-new-driver -fgpu-rdc -cuid=${NAME}
+    ${FO_DEFINES} ${_link_def_flags} ${_link_inc_flags} ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS} ${DL_COVERAGE_FLAGS} -std=c++17 -fPIC)
+  if(FO_SUPPRESS_WARNINGS)
+    list(APPEND _flags -w)
+  endif()
+  foreach(_half host ${DL_GPU_TARGETS})
+    if(_half STREQUAL "host")
+      set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
+      set(_half_flags --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS})
+      set(_out "${_obj}")
+      set(_codegen "")
+      set(_deps "")
+    else()
+      set(_obj "${DEVICE_BUILD_DIR}/${_half}/${NAME}.o")
+      file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
+      # Each TU is self-contained on the device; internalize as non-RDC does.
+      # Codegen is a separate step because ROCm 7.0's clang emits bitcode here
+      # even with -fno-offload-lto; see ir_codegen_cmd in tools/rccl-device-compile.
+      set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
+        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
+      set(_out "${_obj}.bc")
+      set(_codegen COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
+        --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
+        ${DL_DASAN_TU_RT_FLAG} ${_flags} -o ${_obj} ${_out})
+      set(_deps ${FO_EXTRA_DEPENDS})
+      set(DL_MIXED_DEVICE_OBJS_${_half} ${DL_MIXED_DEVICE_OBJS_${_half}} "${_obj}" PARENT_SCOPE)
+    endif()
+    # Only <source> is a DEPENDS, so without a depfile a header edit leaves the
+    # object stale. CMake < 3.20 has no DEPFILE for custom commands.
+    set(_depfile "")
+    if(FO_DEPFILE_TRACKING AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
+      list(APPEND _half_flags -MD -MF "${_obj}.d" -MT "${_obj}")
+      set(_depfile DEPFILE "${_obj}.d")
+    endif()
+    add_custom_command(
+      OUTPUT  ${_obj}
+      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_out} ${SRC}
+      ${_codegen}
+      DEPENDS ${SRC} ${_deps}
+      ${_depfile}
+      COMMENT "DL compile (${_half}): ${NAME}"
+      VERBATIM
+    )
+  endforeach()
+  set(DEVICE_LINKER_OBJECTS ${DEVICE_LINKER_OBJECTS} "${DEVICE_BUILD_DIR}/${NAME}.o" PARENT_SCOPE)
+endfunction()
+
+dl_add_fat_object(onerank ${HIPIFY_DIR}/src/device/onerank.cu.cpp)
+dl_add_fat_object(collectives ${HIPIFY_DIR}/src/collectives.cc DEPFILE_TRACKING)
+
+# One TU per (type, redop); src/device/ce_reduce/generate.py says why.
+file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
+foreach(_src IN LISTS _ce_reduce_srcs)
+  get_filename_component(_name "${_src}" NAME_WE)
+  dl_add_fat_object(${_name} ${_src} SUPPRESS_WARNINGS)
+endforeach()
+
+dl_add_fat_object(diagnostics_p2p ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp)
+
+set(_dda_dir ${HIPIFY_DIR}/src/algorithms/dda)
+foreach(_coll all_reduce reduce_scatter all_gather alltoall)
+  dl_add_fat_object(dda_${_coll}_ipc ${_dda_dir}/${_coll}/dda_${_coll}_ipc.cu.cpp)
+endforeach()
+foreach(_coll all_reduce reduce_scatter all_gather alltoall)
+  foreach(_proto "" _ll _ll128)
+    dl_add_fat_object(dda_${_coll}_fabric${_proto}
+      ${_dda_dir}/${_coll}/dda_${_coll}_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
+  endforeach()
+endforeach()
+
+# ===========================================================================
+# Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
+# Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
+# entries.
+# ===========================================================================
+if(GENERATE_SYM_KERNELS)
+  # When ENABLE_ROCSHMEM_GIN is set, GIN device templates reference rocshmem
+  # device symbols (QueuePair::put_nbi, atomic_add, etc.). The installed per-arch
+  # .bc files are arch-optimized (opt -mcpu=) and can't be used with
+  # -mlink-builtin-bitcode across archs. Instead, llvm-link the pre-opt
+  # individual source .bc files (arch-agnostic) into a minimal QP-only bitcode.
+  set(_sym_rocshmem_bc_flag "")
+  set(_sym_rocshmem_deps "")
+  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+    # Pick the first arch's pre-opt bitcode dir (all archs produce identical
+    # unoptimized IR since -Xclang -disable-llvm-passes is used).
+    list(GET DL_GPU_TARGETS 0 _bc_arch)
+    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
+    set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
+    find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+    find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+    find_program(_llvm_as   llvm-as   HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
+
+    # Pipeline:
+    #  1. Compile gin_rocshmem_constmem.hip → device-only .bc (provides
+    #     rocshmem::constmem and rocshmem::logd_constants definitions that
+    #     queue_pair.bc references as external)
+    #  2. llvm-link QP .bc files + constmem .bc into one module
+    #  3. Strip @llvm.compiler.used and @__hip_cuid_ via text round-trip
+    #     (these AMDGCN addrspace(1) appending globals clash with the
+    #     host-side addrspace(0) equivalents in fat-object compilation)
+    set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
+    set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
+    set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
+
+    add_custom_command(
+      OUTPUT ${_cm_bc}
+      COMMAND ${DL_CLANG}
+        -x hip --cuda-device-only --offload-arch=${DL_TARGET_ID_${_bc_arch}}
+        -emit-llvm -Xclang -disable-llvm-passes
+        -std=c++17 -fPIC
+        -I${ROCSHMEM_SOURCE_DIR}/src
+        -I${ROCSHMEM_SOURCE_DIR}/include
+        -c -o ${_cm_bc} ${_cm_src}
+      DEPENDS ${_cm_src}
+      COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
+      VERBATIM)
+
+    add_custom_command(
+      OUTPUT ${_qp_bc}
+      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
+      COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
+      COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
+        ${_qp_raw}.ll > ${_qp_raw}.clean.ll
+      COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
+      DEPENDS ${_cm_bc}
+      COMMENT "DL: linking rocshmem QP device bitcode (with constmem, stripped)"
+      VERBATIM)
+    add_custom_target(dl_rocshmem_qp_bc DEPENDS ${_qp_bc})
+    if(TARGET rocshmem_static)
+      add_dependencies(dl_rocshmem_qp_bc rocshmem_static)
+    endif()
+    set(_sym_rocshmem_bc_flag -Xclang -mlink-builtin-bitcode -Xclang ${_qp_bc})
+    set(_sym_rocshmem_deps dl_rocshmem_qp_bc)
+  endif()
+  file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
+  foreach(_sym_src IN LISTS _sym_srcs)
+    get_filename_component(_sym_name "${_sym_src}" NAME_WE)
+    # Only GIN symmetric kernels need the QP bitcode; non-GIN ones would
+    # just ingest and DCE it, wasting compile time.
+    set(_this_bc_flag "")
+    set(_this_bc_deps "")
+    if(_sym_name MATCHES "_gin")
+      set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
+      set(_this_bc_deps "${_sym_rocshmem_deps}")
+    endif()
+    dl_add_fat_object(sym_${_sym_name} ${_sym_src}
+      EXTRA_FLAGS ${_this_bc_flag} EXTRA_DEPENDS ${_this_bc_deps})
+  endforeach()
+endif()
+
+# The GIN defines go here because these files are filtered out of the rccl
+# target, so per-source properties never apply. Leaving only SDMA on keeps
+# ncclGinCallImpl on its single backend branch. GDA must stay off, as these
+# objects get no QP bitcode.
+if(ENABLE_ROCSHMEM_GIN)
+  foreach(_coll alltoall all_reduce)
+    dl_add_fat_object(gin_${_coll}_sdma
+      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_${_coll}_sdma.cu.cpp
+      DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
+              NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
+  endforeach()
+  dl_add_fat_object(gin_anvil_conn_check_device
+    ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
+    DEFINES ENABLE_ROCSHMEM_GIN)
+endif()
 
 # ===========================================================================
 # Per-GPU-target: OBJECT library (compile) + link custom command
@@ -442,6 +629,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     -fPIC
     ${DL_INHERITED_FLAGS}
   )
+  target_compile_options(${_dev_target} PRIVATE ${DL_DASAN_TU_RT_FLAG})
   target_compile_definitions(${_dev_target} PRIVATE RCCL_DEVICE_LINKER)
   target_link_libraries(${_dev_target} PRIVATE rccl_device_defs)
 
@@ -466,43 +654,14 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   # =========================================================================
   set(ARCH_DEVICE_ELF "${DL_ARCH_DIR}/device.elf")
 
-  # Gather definitions and includes for the dispatcher compilation inside --link.
-  # The driver forwards these to amdclang++ when compiling common.cu.cpp.
-  get_target_property(_dev_defs ${_dev_target} COMPILE_DEFINITIONS)
-  set(_link_def_flags "")
-  if(_dev_defs)
-    foreach(_d ${_dev_defs})
-      list(APPEND _link_def_flags "-D${_d}")
-    endforeach()
+  set(_mixed_objs ${DL_MIXED_DEVICE_OBJS_${DL_GPU_TARGET}})
+  if(DL_DEVICE_PROFILE_ANCHOR)
+    list(APPEND _mixed_objs "${DL_DEVICE_PROFILE_ANCHOR}")
   endif()
-  # Also add interface definitions from rccl_device_defs
-  get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
-  if(_iface_defs)
-    foreach(_d ${_iface_defs})
-      list(APPEND _link_def_flags "-D${_d}")
-    endforeach()
-  endif()
-  list(REMOVE_DUPLICATES _link_def_flags)
-
-  get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
-  set(_link_inc_flags "")
-  if(_dev_includes)
-    foreach(_inc ${_dev_includes})
-      list(APPEND _link_inc_flags "-I${_inc}")
-    endforeach()
-  endif()
-  get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
-  if(_dev_sys_includes)
-    foreach(_inc ${_dev_sys_includes})
-      if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-        list(APPEND _link_inc_flags "-isystem${_inc}")
-      endif()
-    endforeach()
-  endif()
-
+  list(JOIN _mixed_objs "\n" _mixed_objs_lines)
   set(_link_rsp "${DL_ARCH_DIR}/link_objects.rsp")
   file(GENERATE OUTPUT "${_link_rsp}"
-    CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n")
+    CONTENT "$<JOIN:$<TARGET_OBJECTS:${_dev_target}>,\n>\n${_mixed_objs_lines}\n")
 
   # When rocSHMEM is enabled, pass the per-arch device bitcode to the driver.
   # rocSHMEM device API symbols have hidden visibility and must be statically
@@ -523,6 +682,10 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   if(DL_DEVICE_PROFILE_RT)
     set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
   endif()
+  set(_dl_dasan_rt_arg "")
+  if(BUILD_DEVICE_ADDRESS_SANITIZER)
+    set(_dl_dasan_rt_arg "--dasan-rt=${RCCL_DASAN_DEVICE_RT}" ${DL_DASAN_TU_RT_FLAG})
+  endif()
 
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
@@ -535,6 +698,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       --dispatcher=${HIPIFY_DIR}/src/device/common.cu.cpp
       ${_rocshmem_bitcode_arg}
       ${_dl_profile_rt_arg}
+      ${_dl_dasan_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
       ${DL_OPT_FLAGS}
@@ -544,7 +708,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
+    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_mixed_objs} ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -641,769 +805,49 @@ add_custom_command(
 )
 
 # ===========================================================================
-# Host compile common.cu.cpp with embedded device binary
+# common.cu.cpp's host half, and the one registration of the device image for
+# every kernel and variable in DEVICE_LINKER_OBJECTS' offload entries.
 # ===========================================================================
 set(COMMON_FAT_OBJ "${DEVICE_BUILD_DIR}/common.o")
-
-set(DL_HOST_COMPRESS "")
-if(ENABLE_COMPRESS)
-  set(DL_HOST_COMPRESS "--offload-compress")
-endif()
-
-# Gather include flags for host compile (same paths as device)
-set(_host_inc_flags "")
-if(_dev_includes)
-  foreach(_inc ${_dev_includes})
-    list(APPEND _host_inc_flags "-I${_inc}")
-  endforeach()
-endif()
-if(_dev_sys_includes)
-  foreach(_inc ${_dev_sys_includes})
-    if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
-      list(APPEND _host_inc_flags "-isystem${_inc}")
-    endif()
-  endforeach()
-endif()
-
 add_custom_command(
   OUTPUT  ${COMMON_FAT_OBJ}
   COMMAND ${DL_CLANG}
     -x hip --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS}
     ${DL_HIP_COMPILER_FLAGS}
-    -Xclang -fcuda-include-gpubinary -Xclang ${DEVICE_HIPFB}
-    -DRCCL_DEVICE_LINKER
+    --offload-new-driver -fgpu-rdc
     ${_link_def_flags}
-    ${_host_inc_flags}
+    ${_link_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_INHERITED_FLAGS}
     ${DL_COVERAGE_FLAGS}
     ${DL_MAIN_MODULE_CUID_FLAGS}
     -std=c++17
     -fPIC
-    ${DL_HOST_COMPRESS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
-  DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
-  COMMENT "DL host compile: common.cu.cpp with embedded device binary"
+  DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
+  COMMENT "DL compile (host): common"
   VERBATIM
 )
 
-# ===========================================================================
-# Onerank: normal HIP compilation (host+device, no RDC)
-# ===========================================================================
-set(ONERANK_FAT_OBJ "${DEVICE_BUILD_DIR}/onerank.o")
-
+set(DL_IMAGE_OBJ "${DEVICE_BUILD_DIR}/device_image.o")
+set(_image_src "${PROJECT_SOURCE_DIR}/src/device/device_image.cc")
 add_custom_command(
-  OUTPUT  ${ONERANK_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${ONERANK_FAT_OBJ}
-    ${HIPIFY_DIR}/src/device/onerank.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp
-  COMMENT "DL compile: onerank.cu.cpp (normal fat object)"
+  OUTPUT  ${DL_IMAGE_OBJ}
+  COMMAND ${DL_CLANG} -x c++ -O2 -fPIC -std=c++17
+    "-DRCCL_DEVICE_IMAGE=\"${DEVICE_HIPFB}\""
+    -c -o ${DL_IMAGE_OBJ} ${_image_src}
+  DEPENDS ${DEVICE_HIPFB} ${_image_src}
+  COMMENT "DL compile: device image registration"
   VERBATIM
 )
-
-# ===========================================================================
-# collectives.cc: contains a __global__ kernel launch (hierarchicalShuffle)
-# so it needs full HIP compilation, not --offload-host-only.
-# ===========================================================================
-# Dependency tracking note (CMake >= 3.20 vs < 3.20):
-# add_custom_command only rebuilds when files listed in DEPENDS change.  It
-# does NOT automatically track transitive headers (e.g. ce_coll.h), so a
-# struct layout change in a header would not invalidate collectives.o.
-# CMake 3.20 DEPFILE support fixes this by reading the compiler-generated .d
-# file; on older CMake the workaround is: touch hipify/src/collectives.cc.
-# ===========================================================================
-set(COLLECTIVES_FAT_OBJ "${DEVICE_BUILD_DIR}/collectives.o")
-
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
-  set(COLLECTIVES_DEPFILE "${DEVICE_BUILD_DIR}/collectives.d")
-  add_custom_command(
-    OUTPUT  ${COLLECTIVES_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -MD -MF ${COLLECTIVES_DEPFILE}
-      -c -o ${COLLECTIVES_FAT_OBJ}
-      ${HIPIFY_DIR}/src/collectives.cc
-    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
-    DEPFILE ${COLLECTIVES_DEPFILE}
-    COMMENT "DL compile: collectives.cc (has __global__ kernel, header-tracking via DEPFILE)"
-    VERBATIM
-  )
-else()
-  add_custom_command(
-    OUTPUT  ${COLLECTIVES_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${COLLECTIVES_FAT_OBJ}
-      ${HIPIFY_DIR}/src/collectives.cc
-    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
-    COMMENT "DL compile: collectives.cc (has __global__ kernel)"
-    VERBATIM
-  )
-endif()
-
-# ===========================================================================
-# dda_all_reduce_ipc.cu.cpp: contains device kernels and kernel launches.
-# Like collectives.cc, it cannot be built with --offload-host-only on the
-# main rccl target or __hip_fatbin_* stays undefined in librccl.so.
-# ===========================================================================
-# diagnostics/device/p2p.cu.cpp: NCCL 2.31's P2P startup diagnostics kernels.
-# Same reason as the dda objects below - it must be a fat object.
-set(DIAG_P2P_FAT_OBJ "${DEVICE_BUILD_DIR}/diagnostics_p2p.o")
-
-add_custom_command(
-  OUTPUT  ${DIAG_P2P_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${DIAG_P2P_FAT_OBJ}
-    ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
-  COMMENT "DL compile: diagnostics/device/p2p.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-set(DDA_ALL_REDUCE_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_ipc.o")
-set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o")
-set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
-set(DDA_ALLTOALL_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_ipc.o")
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
-  COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
-  COMMENT "DL compile: dda_reduce_scatter_ipc.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
-  COMMENT "DL compile: dda_all_gather_ipc.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALLTOALL_IPC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
-  COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-# ===========================================================================
-# gin_alltoall_sdma.cu.cpp: GIN-SDMA alltoall kernel.
-#
-# The defines go here because this file is filtered out of the rccl target, so
-# per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
-# on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
-# ===========================================================================
-set(GIN_ALLTOALL_SDMA_FAT_OBJ "")
-if(ENABLE_ROCSHMEM_GIN)
-  set(GIN_ALLTOALL_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_alltoall_sdma.o")
-  add_custom_command(
-    OUTPUT  ${GIN_ALLTOALL_SDMA_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      -DNCCL_GIN_ANVIL_SDMA_ENABLE=1
-      -DNCCL_GIN_PROXY_ENABLE=0
-      -DNCCL_GIN_ROCSHMEM_GDA_ENABLE=0
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
-      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
-    DEPENDS ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
-    COMMENT "DL compile: gin_alltoall_sdma.cu.cpp (GIN-SDMA alltoall kernel)"
-    VERBATIM
-  )
-endif()
-
-# ===========================================================================
-# gin_all_reduce_sdma.cu.cpp: GIN-SDMA allreduce kernel.
-#
-# The defines go here because this file is filtered out of the rccl target, so
-# per-source properties never apply. Leaving only SDMA on keeps ncclGinCallImpl
-# on its single backend branch. GDA must stay off, as this object gets no QP bitcode.
-# ===========================================================================
-set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
-if(ENABLE_ROCSHMEM_GIN)
-  set(GIN_ALLREDUCE_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_all_reduce_sdma.o")
-  add_custom_command(
-    OUTPUT  ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      -DNCCL_GIN_ANVIL_SDMA_ENABLE=1
-      -DNCCL_GIN_PROXY_ENABLE=0
-      -DNCCL_GIN_ROCSHMEM_GDA_ENABLE=0
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
-      ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_reduce_sdma.cu.cpp
-    DEPENDS ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_reduce_sdma.cu.cpp
-    COMMENT "DL compile: gin_all_reduce_sdma.cu.cpp (GIN-SDMA allreduce kernel)"
-    VERBATIM
-  )
-endif()
-
-# ===========================================================================
-# gin_anvil_conn_check_device.cc: GIN-SDMA LSA connectivity-check kernels.
-# This source must bypass the rccl target's --offload-host-only compilation.
-# ===========================================================================
-set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "")
-if(ENABLE_ROCSHMEM_GIN)
-  set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_anvil_conn_check_device.o")
-  add_custom_command(
-    OUTPUT  ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      -DENABLE_ROCSHMEM_GIN
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
-      ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
-    DEPENDS ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
-    COMMENT "DL compile: gin_anvil_conn_check_device.cc (GIN-SDMA conn-check kernels)"
-    VERBATIM
-  )
-endif()
-
-# ===========================================================================
-# dda_all_reduce_fabric.cu.cpp: fabric/VMM counterpart of the IPC file above.
-# ===========================================================================
-set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric.o")
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
-  COMMENT "DL compile: dda_all_reduce_fabric.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-set(DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll.o")
-set(DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll128.o")
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
-  COMMENT "DL compile: dda_all_reduce_fabric_ll.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
-  COMMENT "DL compile: dda_all_reduce_fabric_ll128.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-set(DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric.o")
-set(DDA_ALL_GATHER_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric.o")
-set(DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric_ll.o")
-set(DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_fabric_ll128.o")
-set(DDA_ALLTOALL_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric.o")
-set(DDA_ALLTOALL_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric_ll.o")
-set(DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric_ll128.o")
-set(DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll.o")
-set(DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll128.o")
-
-add_custom_command(
-  OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
-  COMMENT "DL compile: dda_reduce_scatter_fabric.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
-  COMMENT "DL compile: dda_all_gather_fabric.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
-  COMMENT "DL compile: dda_all_gather_fabric_ll.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
-  COMMENT "DL compile: dda_all_gather_fabric_ll128.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
-  COMMENT "DL compile: dda_alltoall_fabric.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
-  COMMENT "DL compile: dda_alltoall_fabric_ll.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
-  COMMENT "DL compile: dda_alltoall_fabric_ll128.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
-  COMMENT "DL compile: dda_reduce_scatter_fabric_ll.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
-  COMMAND ${DL_CLANG}
-    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-    ${DL_HIP_COMPILER_FLAGS}
-    -DRCCL_DEVICE_LINKER
-    ${_link_def_flags}
-    ${_host_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_DEVICE_COVERAGE_FLAGS}
-    -std=c++17
-    -fPIC
-    -w
-    -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
-    ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
-  DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
-  COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
-  VERBATIM
-)
-
-# ===========================================================================
-# CE-reduce kernels: per-instantiation device TUs from gensrc/ce_reduce/.
-# Each instantiation file defines one ncclCeLocalReduceKernelVec<T,RedOp,U>
-# (__global__) and its host-callable launcher. Compiled with full HIP here so
-# each fat binary is self-contained (ce_coll.cc, the main target, has no
-# __global__ call sites and stays --offload-host-only).
-#
-# CE_REDUCE_FAT_OBJS is plural (mirroring SYM_FAT_OBJS below) because
-# src/device/ce_reduce/generate.py emits one TU per (type, redop)
-# instantiation instead of one aggregate ce_reduce.cc -- see that script for
-# why: two of the 40 instantiations (int8_t/uint8_t Min/Max) individually
-# generate ~56K instructions each and used to dominate the whole build's
-# wall-clock time by serializing all 40 kernels' codegen into one TU.
-# ===========================================================================
-set(CE_REDUCE_FAT_OBJS "")
-file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cpp")
-foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
-  get_filename_component(_ce_reduce_name "${_ce_reduce_src}" NAME_WE)
-  set(_ce_reduce_obj "${DEVICE_BUILD_DIR}/${_ce_reduce_name}.o")
-  add_custom_command(
-    OUTPUT  ${_ce_reduce_obj}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -w
-      -c -o ${_ce_reduce_obj}
-      ${_ce_reduce_src}
-    DEPENDS ${_ce_reduce_src}
-    COMMENT "DL compile: ${_ce_reduce_name} (CE AllReduce reduce kernel)"
-    VERBATIM
-  )
-  list(APPEND CE_REDUCE_FAT_OBJS ${_ce_reduce_obj})
-endforeach()
-
-# ===========================================================================
-# Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
-# Each instantiation file defines a handful of __global__ ncclSymkDevKernel_*
-# entries. Compiled standalone as multi-arch fat objects, mirroring onerank.o.
-#
-# SYM_FAT_OBJS is plural (vs the singular COMMON/ONERANK/COLLECTIVES_FAT_OBJ
-# siblings) because the symmetric generator emits one TU per instantiation.
-# ===========================================================================
-set(SYM_FAT_OBJS "")
-if(GENERATE_SYM_KERNELS)
-  # When ENABLE_ROCSHMEM_GIN is set, GIN device templates reference rocshmem
-  # device symbols (QueuePair::put_nbi, atomic_add, etc.). The installed per-arch
-  # .bc files are arch-optimized (opt -mcpu=) and can't be used with
-  # -mlink-builtin-bitcode across archs. Instead, llvm-link the pre-opt
-  # individual source .bc files (arch-agnostic) into a minimal QP-only bitcode.
-  set(_sym_rocshmem_bc_flag "")
-  set(_sym_rocshmem_deps "")
-  if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
-    # Pick the first arch's pre-opt bitcode dir (all archs produce identical
-    # unoptimized IR since -Xclang -disable-llvm-passes is used).
-    list(GET DL_GPU_TARGETS 0 _bc_arch)
-    set(_bc_dir "${ROCSHMEM_SOURCE_DIR}/build/bitcode/${_bc_arch}")
-    set(_qp_bc "${DEVICE_BUILD_DIR}/rocshmem_qp_device.bc")
-    find_program(_llvm_link llvm-link HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-    find_program(_llvm_dis  llvm-dis  HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-    find_program(_llvm_as   llvm-as   HINTS ${ROCM_PATH}/llvm/bin REQUIRED)
-
-    # Pipeline:
-    #  1. Compile gin_rocshmem_constmem.hip → device-only .bc (provides
-    #     rocshmem::constmem and rocshmem::logd_constants definitions that
-    #     queue_pair.bc references as external)
-    #  2. llvm-link QP .bc files + constmem .bc into one module
-    #  3. Strip @llvm.compiler.used and @__hip_cuid_ via text round-trip
-    #     (these AMDGCN addrspace(1) appending globals clash with the
-    #     host-side addrspace(0) equivalents in fat-object compilation)
-    set(_cm_src "${CMAKE_SOURCE_DIR}/src/gin/gin_rocshmem_constmem.hip")
-    set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
-    set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
-
-    add_custom_command(
-      OUTPUT ${_cm_bc}
-      COMMAND ${DL_CLANG}
-        -x hip --cuda-device-only --offload-arch=${DL_TARGET_ID_${_bc_arch}}
-        -emit-llvm -Xclang -disable-llvm-passes
-        -std=c++17 -fPIC
-        -I${ROCSHMEM_SOURCE_DIR}/src
-        -I${ROCSHMEM_SOURCE_DIR}/include
-        -c -o ${_cm_bc} ${_cm_src}
-      DEPENDS ${_cm_src}
-      COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
-      VERBATIM)
-
-    add_custom_command(
-      OUTPUT ${_qp_bc}
-      COMMAND ${_llvm_link} ${_cm_bc} -o ${_qp_raw}
-      COMMAND ${_llvm_dis} -o ${_qp_raw}.ll ${_qp_raw}
-      COMMAND grep -v -E "@llvm[.]compiler[.]used|@__hip_cuid_"
-        ${_qp_raw}.ll > ${_qp_raw}.clean.ll
-      COMMAND ${_llvm_as} ${_qp_raw}.clean.ll -o ${_qp_bc}
-      DEPENDS ${_cm_bc}
-      COMMENT "DL: linking rocshmem QP device bitcode (with constmem, stripped)"
-      VERBATIM)
-    add_custom_target(dl_rocshmem_qp_bc DEPENDS ${_qp_bc})
-    if(TARGET rocshmem_static)
-      add_dependencies(dl_rocshmem_qp_bc rocshmem_static)
-    endif()
-    set(_sym_rocshmem_bc_flag -Xclang -mlink-builtin-bitcode -Xclang ${_qp_bc})
-    set(_sym_rocshmem_deps dl_rocshmem_qp_bc)
-  endif()
-  file(GLOB _sym_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/symmetric/*.cpp")
-  foreach(_sym_src IN LISTS _sym_srcs)
-    get_filename_component(_sym_name "${_sym_src}" NAME_WE)
-    set(_sym_obj "${DEVICE_BUILD_DIR}/sym_${_sym_name}.o")
-    # Only GIN symmetric kernels need the QP bitcode; non-GIN ones would
-    # just ingest and DCE it, wasting compile time.
-    set(_this_bc_flag "")
-    set(_this_bc_deps "")
-    if(_sym_name MATCHES "_gin")
-      set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
-      set(_this_bc_deps "${_sym_rocshmem_deps}")
-    endif()
-    add_custom_command(
-      OUTPUT  ${_sym_obj}
-      COMMAND ${DL_CLANG}
-        -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-        ${DL_HIP_COMPILER_FLAGS}
-        -DRCCL_DEVICE_LINKER
-        ${_link_def_flags}
-        ${_host_inc_flags}
-        ${DL_OPT_FLAGS}
-        ${DL_INHERITED_FLAGS}
-        ${DL_DEVICE_COVERAGE_FLAGS}
-        -std=c++17
-        -fPIC
-        ${_this_bc_flag}
-        -c -o ${_sym_obj}
-        ${_sym_src}
-      DEPENDS ${_sym_src} ${_this_bc_deps}
-      COMMENT "DL compile: sym ${_sym_name} (multi-arch fat object)"
-      VERBATIM
-    )
-    list(APPEND SYM_FAT_OBJS ${_sym_obj})
-  endforeach()
-endif()
+list(PREPEND DEVICE_LINKER_OBJECTS ${DL_IMAGE_OBJ} ${COMMON_FAT_OBJ})
 
 # ===========================================================================
 # Top-level target
 # ===========================================================================
 add_custom_target(device_linker_build ALL
-  DEPENDS ${COMMON_FAT_OBJ} ${ONERANK_FAT_OBJ} ${COLLECTIVES_FAT_OBJ} ${DIAG_P2P_FAT_OBJ} ${DDA_ALL_REDUCE_IPC_FAT_OBJ} ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} ${DDA_ALL_GATHER_IPC_FAT_OBJ} ${DDA_ALLTOALL_IPC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} ${CE_REDUCE_FAT_OBJS} ${SYM_FAT_OBJS} ${GIN_ALLTOALL_SDMA_FAT_OBJ} ${GIN_ALLREDUCE_SDMA_FAT_OBJ} ${GIN_ANVIL_CONN_CHECK_FAT_OBJ} ${RCCL_EP_FAT_OBJ} ${DEVICE_ELF_SYMLINKS}
+  DEPENDS ${DEVICE_LINKER_OBJECTS} ${DEVICE_ELF_SYMLINKS}
 )
 add_dependencies(device_linker_build hipify_all copy_nccl_device_headers)
 if(ENABLE_ROCSHMEM_GIN AND TARGET copy_rocshmem_headers)
@@ -1414,34 +858,6 @@ if((ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN) AND TARGET rocshmem_static)
   # headers installed to ext/rocshmem/include by the ExternalProject.
   add_dependencies(device_linker_build rocshmem_static)
 endif()
-
-set(DEVICE_LINKER_OBJECTS
-  ${COMMON_FAT_OBJ}
-  ${ONERANK_FAT_OBJ}
-  ${COLLECTIVES_FAT_OBJ}
-  ${CE_REDUCE_FAT_OBJS}
-  ${DIAG_P2P_FAT_OBJ}
-  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
-  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
-  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
-  ${DDA_ALLTOALL_IPC_FAT_OBJ}
-  ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
-  ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
-  ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
-  ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
-  ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
-  ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
-  ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
-  ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
-  ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
-  ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
-  ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
-  ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
-  ${SYM_FAT_OBJS}
-  ${GIN_ALLTOALL_SDMA_FAT_OBJ}
-  ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
-  ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
-)
 
 # ===========================================================================
 # Optional: emit LLVM IR (ninja device_ir)
