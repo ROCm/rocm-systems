@@ -354,7 +354,8 @@ __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* global
 //     bytes per op matter more than overlap.
 //     Unless the copy shifts in LDS, windows under TWO_SLOT_WINDOW use one slot
 //     instead, with a wait after each load and each store: at that size a chunk
-//     twice as large is worth more than the overlap.
+//     twice as large is worth more than the overlap (3-10% at 4-8KB). A shifting
+//     copy keeps two slots, so each shift overlaps a load.
 //   * shiftDown() rewrites a slot with ordinary LDS stores that the mover then
 //     reads by descriptor, so the store waits for them (DScnt) first.
 //
@@ -452,18 +453,17 @@ __device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_
   else store<cp>(g0, g1);
 }
 
-// ---- one 1-D tile of `nbytes` (<= TILE_DIM_MAX) at BYTE granularity. -------
-// Exact length, so the copy's chunks need no separate sub-row tail. Higher dims
-// (D2/D3/D4) are unused and passed as zero inside load()/store().
+constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
+
+// One 1-D tile at BYTE granularity: the round trip's chunks and the one-way legs'
+// ragged head/tail. Exact length, so it works at any alignment and needs no
+// separate sub-row tail; `nbytes` must be <= TILE_DIM_MAX.
 template <LdsDir DIR, CachePolicy cp>
-__device__ inline void tile1d(uint64_t global, uint32_t lds, uint32_t nbytes) {
+__device__ inline void ldsTileBytes(uint64_t global, uint32_t lds, uint32_t nbytes) {
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS1);
   g1.tileDim0(nbytes);
-  g1.tileDim1(1);
   g1.tensorDim0(nbytes);
-  g1.tensorDim1(1);
-  g1.tensorDim0Stride(nbytes);
   gfx1250_TDM_GROUP0 g0(lds, global);
   ldsIssue<DIR, cp>(g0, g1);
 }
@@ -507,33 +507,14 @@ __device__ inline void shiftDown(uint32_t lds, uint32_t n, uint32_t r, uint32_t 
   }
 }
 
-constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
 constexpr uint32_t LINE = 128;       // alignment the head peel targets
-// Round-trip copy chunking. Stores run at full rate from 128B destination
-// boundaries, loads only from 256B source boundaries (about 10-25% faster than
-// 128B); 512B buys nothing more on either side.
-constexpr uint32_t ALIGN = 256;
+constexpr uint32_t ALIGN = 256;      // round-trip chunk alignment; see HARDWARE MODEL
 constexpr uint32_t MAX_CHUNK = (TILE_DIM_MAX - (ALIGN - 1)) & ~(ALIGN - 1); // a load is chunk + delta bytes
 constexpr uint32_t MIN_SLOT = 2 * ALIGN + SHIFT_SLACK; // room for o <= ALIGN, one ALIGN chunk and the shift
-// Below this per-warp window, one large slot outruns two half-size ones (3-10% at
-// 4-8KB): bytes per TDM op matter more there than overlapping a load with a store.
-// A copy that shifts in LDS keeps two slots, so each shift overlaps a load.
-constexpr uint32_t TWO_SLOT_WINDOW = 16384;
+constexpr uint32_t TWO_SLOT_WINDOW = 16384; // see HARDWARE MODEL
 // Whole 256B rows one 1-D bulk tile can carry: tile_dim0 now holds the entire length
 // in elements, not one row's worth, so the 16-bit field is the limit (1023 x 256B).
 constexpr uint32_t MAX_ROWS = TILE_DIM_MAX / TD0;
-
-// One 1-D tile at BYTE granularity, for the ragged head/tail. Exact length, so
-// it works at any alignment; `nbytes` must be <= TILE_DIM_MAX.
-template <LdsDir DIR, CachePolicy cp>
-__device__ inline void ldsTileBytes(uint64_t global, uint32_t lds, uint32_t nbytes) {
-  gfx1250_TDM_GROUP1 g1;
-  g1.dataSize(DS1);
-  g1.tileDim0(nbytes);
-  g1.tensorDim0(nbytes);
-  gfx1250_TDM_GROUP0 g0(lds, global);
-  ldsIssue<DIR, cp>(g0, g1);
-}
 
 // One 1-D tile covering `rows` back-to-back 256B rows -- the bulk shape. The rows are
 // contiguous (the 2-D form this replaced used stride == TD0), so a flat run of
@@ -550,11 +531,10 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
   ldsIssue<DIR, cp>(g0, g1);
 }
 
-// Split [0, sizeInBytes) into [head][ aligned 256B rows ][tail], mirroring the
-// layout detail::issue() uses for the round trip. The pieces target disjoint LDS
-// and global ranges, so unlike the round trip they need NO waits between them --
-// the whole range is issued back-to-back and the caller drains once (or not at
-// all, under SyncPolicy::Async).
+// Split [0, sizeInBytes) into [head][ aligned 256B rows ][tail]. The pieces
+// target disjoint LDS and global ranges, so unlike the round trip they need NO
+// waits between them -- the whole range is issued back-to-back and the caller
+// drains once (or not at all, under SyncPolicy::Async).
 //
 // `head` brings the GLOBAL pointer up to a 128B boundary and the same offset is
 // applied to the LDS side. When the two pointers start with the same sub-128B
@@ -633,14 +613,12 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   // active threads in THIS warp (handles partial final warp); stride for vector.
   const uint32_t warpThreads = (nThreads - warpId * W < W) ? (nThreads - warpId * W) : W;
 
-  // --- split the range: [head (vector)][ chunks (TDM) ] --------------------
-  // Every chunk starts at an ALIGN boundary of the destination, and its load
-  // starts delta = (src - dst) % ALIGN bytes earlier, at an ALIGN boundary of the
-  // source. The difference is absorbed in LDS, where the store reads 16B-aligned
-  // at slot + o: its multiple-of-4 part `sigma` by loading to slot + o - sigma
-  // (4B aligned), and its sub-dword part `r` by the warp shifting the chunk down
-  // in place before storing it. The extra delta bytes each load reads belong to
-  // the previous chunk and are never stored from this one.
+  // --- split the range: [head (vector)][ chunks (TDM) ]; see LAYOUT --------
+  // delta = (src - dst) % ALIGN is absorbed in LDS, where the store reads
+  // 16B-aligned at slot + o: its multiple-of-4 part `sigma` by loading to
+  // slot + o - sigma (4B aligned), and its sub-dword part `r` by shiftDown().
+  // The delta bytes each load reads ahead belong to the previous chunk and are
+  // never stored from this one.
   const uint64_t sAddr = reinterpret_cast<uint64_t>(s);
   const uint64_t dAddr = reinterpret_cast<uint64_t>(d);
   const uint32_t delta = static_cast<uint32_t>(sAddr - dAddr) & (ALIGN - 1);
@@ -693,14 +671,14 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
       // LDS-only fence: waits for the shift's writes, not the head's global stores.
       __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     }
-    tile1d<LdsDir::Store, cp>(global, slot + o, n);
+    ldsTileBytes<LdsDir::Store, cp>(global, slot + o, n);
   };
 
   if (nSlots == 1) {
     // One slot: each chunk's store waits for its load, and the next load for the store.
     for (size_t off = 0; off < len; off += chunkBytes) {
       const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
-      tile1d<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
+      ldsTileBytes<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
       waitTensor0();
       storeChunk(win, dB + off, n);
       waitTensor0();
@@ -708,16 +686,12 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     return;
   }
 
-  // Two slots: each phase loads the next chunk into one slot, then stores (and,
-  // when shifting, first realigns) the chunk the previous phase loaded into the
-  // other. Refilling a slot needs its store complete, and that store was issued
-  // after the other slot's load, so in-order completion leaves nothing to keep
-  // in flight across the wait: it drains to zero.
+  // Two slots, ping-ponged; see HARDWARE MODEL above for why the wait drains to zero.
   uint32_t slot = 0;
   for (size_t off = 0; off < len; off += chunkBytes) {
     const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
     if (off) waitTensor0();
-    tile1d<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
+    ldsTileBytes<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
     if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
     slot ^= slotBytes;
   }
