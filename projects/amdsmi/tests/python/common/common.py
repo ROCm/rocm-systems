@@ -357,6 +357,18 @@ if _staged_amdsmi:
 PASS = "AMDSMI_STATUS_SUCCESS"
 FAIL = "AMDSMI_STATUS_INVAL"
 
+
+def failure_text(exc):
+    """Describe a collected test failure.
+
+    Assertion messages already say what failed. Anything else is a surprise (a bug in
+    the test, the Python wrapper or the library), so name its type: "unexpected KeyError: 'x'".
+    """
+    if isinstance(exc, AssertionError):
+        return str(exc)
+    return f"unexpected {type(exc).__name__}: {exc}"
+
+
 # Status-code -> name map, derived once from the AmdSmiStatus enum so the table
 # never drifts from the library. Shared by the Common class and the standalone
 # performance benchmark suites (which intentionally do not inherit Common).
@@ -1795,6 +1807,427 @@ class Common:
         if raise_exception:
             raise raise_exception
         return
+
+    def _cpu_socket_handles(self):
+        """CPU socket handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def _cpu_core_handles(self):
+        """CPU core handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpucore_handles()
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    # ------------------------------------------------------------------ #
+    # CPU API contract: negative-input + positive-input, never skip.
+    # ------------------------------------------------------------------ #
+    # Default accept sets for run_cpu_api_contract(). Built on expect_status /
+    # status_sweep, which tolerate nothing implicitly (unlike check_ret).
+    #
+    #  * CPU_WRONG_ACCEPT   - a GPU handle (or any non-CPU handle) handed to a
+    #                         CPU/core API must be rejected, never SUCCESS. The
+    #                         exact rejection code is platform- and state-
+    #                         dependent: the ESMI/HSMP layer may answer
+    #                         NO_HSMP_MSG_SUP (no HSMP mailbox for that target),
+    #                         NOT_FOUND (the out-of-range socket for a GPU handle
+    #                         no longer resolves once the ESMI socket cache has
+    #                         been touched), NOT_SUPPORTED, or INVAL (the handle
+    #                         fails validation outright). All four are valid
+    #                         rejections of a bogus handle - the contract only
+    #                         forbids SUCCESS. APIs that do not validate the
+    #                         processor handle at all (version/firmware queries
+    #                         that return global data) genuinely succeed with any
+    #                         handle; those pass check_wrong_handle=False so this
+    #                         non-applicable portion is skipped rather than failed.
+    #  * CPU_CORRECT_ACCEPT - a real CPU/core handle: SUCCESS, or a documented
+    #                         "feature absent" status on platforms that lack it.
+    #  * CPU_NULL_ACCEPT    - a null (zero) processor handle is rejected by the
+    #                         native library with INVAL before any dereference.
+    CPU_WRONG_ACCEPT = [
+        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        amdsmi.AmdSmiStatus.NOT_FOUND,
+        amdsmi.AmdSmiStatus.INVAL,
+    ]
+    CPU_CORRECT_ACCEPT = [
+        amdsmi.AmdSmiStatus.SUCCESS,
+        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+    ]
+    CPU_NULL_ACCEPT = [amdsmi.AmdSmiStatus.INVAL]
+
+    @staticmethod
+    def _cpu_call_msg(func_name, handle_part, desc):
+        """Header line for one contract call, e.g. ``amdsmi_x(cpu=0, nbio_id=0):``."""
+        parts = [p for p in (handle_part, desc) if p]
+        return f"\t### {func_name}({', '.join(parts)}):"
+
+    @staticmethod
+    def _normalize_arg_sets(arg_sets):
+        """Coerce the caller's extra-arg spec into ``[(desc, args_tuple), ...]``.
+
+        ``None`` means the API takes no extra args beyond the handle.
+        """
+        if arg_sets is None:
+            return [("", ())]
+        normalized = []
+        for desc, args in arg_sets:
+            if not isinstance(args, (list, tuple)):
+                args = (args,)
+            normalized.append((desc, tuple(args)))
+        return normalized
+
+    def _cpu_positive_handles(self, handle_kind):
+        """Real CPU handles for the positive portion, plus the getter's name."""
+        if handle_kind == "core":
+            return self._cpu_core_handles(), "amdsmi_get_cpucore_handles"
+        return self._cpu_socket_handles(), "amdsmi_get_cpu_handles"
+
+    @staticmethod
+    def _cpu_no_handles_msg(label):
+        """Never-skip explanation printed when the positive portion has no handles."""
+        noun = "cores" if label == "core" else "sockets"
+        return (
+            f"\tNo CPU {noun} on machine, unable to validate the response "
+            f"with real {label} handles (test still ran the negative portion)."
+        )
+
+    @staticmethod
+    def _portion_status(failures):
+        """Reduce a portion's collected failures to a ``(status, detail)`` pair."""
+        if failures:
+            return "FAIL", "\n".join(failure_text(f) for f in failures)
+        return "PASS", None
+
+    def _cpu_negative_wrong_handle(self, func, func_name, desc, args, accept):
+        """A GPU handle fed to a CPU/core API must return an error, never SUCCESS."""
+        failures = []
+        try:
+            with self.status_sweep():
+                for i, gpu in enumerate(self.processors):
+                    msg = self._cpu_call_msg(func_name, f"gpu={i}", desc)
+                    val = "N/A"
+                    with self.expect_status(msg, accept):
+                        val = func(gpu, *args)
+                    self.print(f"\t    data: {val}")
+        except Exception as e:  # noqa: BLE001 - reported in the per-portion summary
+            failures.append(e)
+        return self._portion_status(failures)
+
+    def _cpu_negative_null_handle(self, func, func_name, label, desc, args, accept):
+        """A null processor handle is rejected by the native library with INVAL."""
+        failures = []
+        try:
+            msg = self._cpu_call_msg(func_name, f"{label}=null handle", desc)
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            with self.expect_status(msg, accept):
+                func(null_handle, *args)
+        except Exception as e:  # noqa: BLE001 - reported in the per-portion summary
+            failures.append(e)
+        return self._portion_status(failures)
+
+    def _cpu_negative_none_handle(self, func, func_name, label, desc, args):
+        """``None`` is rejected by the Python wrapper with AmdSmiParameterException."""
+        msg = self._cpu_call_msg(func_name, f"{label}=None", desc)
+        failures = []
+        try:
+            func(None, *args)
+            failures.append(
+                AssertionError(
+                    f"{msg}\n\tTEST FAILURE, expected AmdSmiParameterException, "
+                    f"call returned instead"
+                )
+            )
+        except amdsmi.AmdSmiParameterException:
+            self.print(f"{msg}\n\tTEST SUCCESS, raised AmdSmiParameterException as expected")
+        except Exception as e:  # noqa: BLE001 - wrong exception type is a failure
+            failures.append(
+                AssertionError(
+                    f"{msg}\n\tTEST FAILURE, expected AmdSmiParameterException, got {e!r}"
+                )
+            )
+        return self._portion_status(failures)
+
+    def _cpu_positive(self, func, func_name, handle_kind, label, arg_sets, accept):
+        """Exercise every real handle; when none exist, RUN and say why, never skip."""
+        handles, getter = self._cpu_positive_handles(handle_kind)
+        self.print(f"\t### {getter}(): {label}_count={len(handles)}")
+        if not handles:
+            self.print(self._cpu_no_handles_msg(label))
+        failures = []
+        try:
+            with self.status_sweep():
+                for i, handle in enumerate(handles):
+                    for desc, args in arg_sets:
+                        msg = self._cpu_call_msg(func_name, f"{label}={i}", desc)
+                        val = "N/A"
+                        with self.expect_status(msg, accept):
+                            val = func(handle, *args)
+                        self.print(f"\t    data: {val}")
+        except Exception as e:  # noqa: BLE001 - reported in the per-portion summary
+            failures.append(e)
+        if failures:
+            return self._portion_status(failures)
+        if not handles:
+            return "NOT VALIDATED (no real handles)", None
+        return "PASS", None
+
+    def _cpu_positive_custom(self, handle_kind, label, positive):
+        """Positive portion driven by a caller-supplied read-modify-write callable."""
+        handles, getter = self._cpu_positive_handles(handle_kind)
+        self.print(f"\t### {getter}(): {label}_count={len(handles)}")
+        if not handles:
+            self.print(self._cpu_no_handles_msg(label))
+        failures = []
+        try:
+            positive(handles, failures)
+        except Exception as e:  # noqa: BLE001 - reported in the per-portion summary
+            failures.append(e)
+        if failures:
+            return self._portion_status(failures)
+        if not handles:
+            return "NOT VALIDATED (no real handles)", None
+        return "PASS", None
+
+    def _cpu_positive_no_handle(self, func, func_name, arg_sets, accept):
+        """Positive-only portion for CPU APIs that take no processor handle."""
+        failures = []
+        try:
+            with self.status_sweep():
+                for desc, args in arg_sets:
+                    msg = self._cpu_call_msg(func_name, "", desc)
+                    val = "N/A"
+                    with self.expect_status(msg, accept):
+                        val = func(*args)
+                    self.print(f"\t    data: {val}")
+        except Exception as e:  # noqa: BLE001 - reported in the per-portion summary
+            failures.append(e)
+        return self._portion_status(failures)
+
+    # Plain-English meaning of each portion, as (when PASS, when FAIL), so the
+    # report card reads like a sentence instead of a bare PASS/FAIL anyone has
+    # to decode. The positive portion passes by being ACCEPTED; the negative,
+    # null and None portions pass by being REJECTED.
+    _PORTION_PLAIN = {
+        "Positive input (real handle)": (
+            "valid CPU handle was accepted",
+            "valid CPU handle was wrongly REJECTED",
+        ),
+        "Positive input (no handle)": (
+            "call with no handle was accepted",
+            "call with no handle was wrongly REJECTED",
+        ),
+        "Negative input (wrong handle)": (
+            "wrong (GPU) handle was correctly REJECTED",
+            "wrong (GPU) handle was wrongly accepted",
+        ),
+        "Negative input (null handle)": (
+            "null handle was correctly REJECTED (INVAL)",
+            "null handle was NOT rejected with INVAL",
+        ),
+        "Negative input (None)": (
+            "None was correctly REJECTED (AmdSmiParameterException)",
+            "None was NOT rejected with AmdSmiParameterException",
+        ),
+    }
+
+    def _portion_plain(self, portion_label, status):
+        """One plain-English clause describing what *status* means for a portion."""
+        if status.startswith("NOT VALIDATED"):
+            return "could not run: no CPU handles on this host"
+        if status == "SKIPPED":
+            return "not applicable for this API"
+        pass_phrase, fail_phrase = self._PORTION_PLAIN.get(
+            portion_label, ("behaved as expected", "did not behave as expected")
+        )
+        return pass_phrase if status == "PASS" else fail_phrase
+
+    def _contract_verdict(self, func_name, results, overall_pass):
+        """Final plain-English sentence summarizing the whole contract run."""
+        positive = next((s for label, s, _ in results if label.startswith("Positive")), None)
+        has_negatives = any(label.startswith("Negative") for label, _, _ in results)
+        if not overall_pass:
+            failed = ", ".join(label for label, s, _ in results if s == "FAIL")
+            return f"{func_name} FAILED the CPU API contract at: {failed}."
+        if positive and positive.startswith("NOT VALIDATED"):
+            return (
+                f"{func_name} PASSED the negative checks (wrong/null/None inputs "
+                f"correctly rejected), but the positive check could not run: no "
+                f"CPU handles on this host."
+            )
+        if has_negatives:
+            return (
+                f"{func_name} PASSED the CPU API contract: the valid handle was "
+                f"accepted, and the wrong, null and None inputs were correctly "
+                f"rejected."
+            )
+        return f"{func_name} PASSED: the call was accepted as expected."
+
+    def _print_contract_summary(self, func_name, results, overall_pass):
+        """Human-readable report card: one line per portion, then a plain verdict.
+
+        *results* is ``[(portion_label, status, detail), ...]`` in run order.
+        *overall_pass* is the final PASS/FAIL, which is driven by ALL portions:
+        the test passes only when the positive input is accepted AND every
+        negative/null/None input is rejected. Each line is annotated in plain
+        English (see _portion_plain), and a failing portion also prints its
+        reason, indented, so the reader sees at a glance which input broke and
+        why. The closing VERDICT line states the outcome as a sentence anyone
+        can read.
+        """
+        bar = "\t" + "=" * 78
+        self.print("")
+        self.print(bar)
+        self.print(f"\tCONTRACT RESULT: {func_name}")
+        self.print(bar)
+        for portion_label, status, detail in results:
+            plain = self._portion_plain(portion_label, status)
+            self.print(f"\t    {portion_label:<32}: {status:<24} -> {plain}")
+            if status == "FAIL" and detail:
+                for line in detail.splitlines():
+                    self.print(f"\t        {line}")
+        self.print("\t" + "-" * 78)
+        overall = "PASS" if overall_pass else "FAIL"
+        self.print(f"\t    {'OVERALL':<32}: {overall}")
+        self.print(f"\t    VERDICT: {self._contract_verdict(func_name, results, overall_pass)}")
+        self.print(bar)
+
+    def run_cpu_api_contract(
+        self,
+        func,
+        func_name,
+        handle_kind="socket",
+        arg_sets=None,
+        wrong_accept=None,
+        correct_accept=None,
+        null_accept=None,
+        positive=None,
+        check_wrong_handle=True,
+    ):
+        """Negative-input + positive-input contract for one CPU/core API.
+
+        Encodes the reviewer-mandated, never-skip pattern so each test is a few
+        lines. For handle-taking APIs it runs, in order:
+
+          1. NEGATIVE - a GPU handle (wrong processor type) must be rejected
+             against *wrong_accept* (never SUCCESS). Runs even on a host with no
+             CPU hardware.
+          2. NEGATIVE - a null processor handle -> INVAL (*null_accept*).
+          3. NEGATIVE - ``None`` -> AmdSmiParameterException from the wrapper.
+          4. POSITIVE - every real CPU/core handle against *correct_accept*; when
+             none exist it still RUNS and prints why it could not validate.
+
+        For ``handle_kind="none"`` (APIs that take no processor handle) only the
+        positive portion runs, against *correct_accept*; the handle-shaped
+        negatives do not apply.
+
+        Every portion ALWAYS runs and is judged independently; one portion's
+        result never stops another. At the end a per-portion report card is
+        printed (see _print_contract_summary) so the reader sees at a glance
+        which input passed and which failed.
+
+        The overall test verdict is driven by ALL portions: the test passes only
+        when the POSITIVE input is accepted (real-handle calls succeed or report
+        a documented "feature absent" status) AND every NEGATIVE input is
+        rejected (the wrong, null and None handles are turned away). Any portion
+        that misbehaves fails the test, and the printed VERDICT names which one.
+        A positive portion that cannot run because the host has no CPU handles is
+        reported as "NOT VALIDATED" and does not, by itself, fail the test - the
+        negative portions are still enforced.
+
+        Args:
+            func (callable): the amdsmi API under test.
+            func_name (str): its name, for the printed headers.
+            handle_kind (str): ``"socket"`` (amdsmi_get_cpu_handles), ``"core"``
+                (amdsmi_get_cpucore_handles) or ``"none"`` (no handle argument).
+            arg_sets: extra args appended after the handle, as
+                ``[(desc, args), ...]`` where *desc* is the message tail (e.g.
+                ``"nbio_id=0"``) and *args* a tuple/scalar. ``None`` means none.
+                The negative portions use the first entry; the positive portion
+                iterates them all.
+            wrong_accept, correct_accept, null_accept: statuses treated as
+                correct for each portion. Default to CPU_WRONG_ACCEPT,
+                CPU_CORRECT_ACCEPT and CPU_NULL_ACCEPT.
+            positive: optional ``callable(handles, failures)`` replacing the
+                default positive portion. Used by read-modify-write tests that
+                must get/set/restore rather than issue a single call. It receives
+                the real handle list (possibly empty); raising from it marks the
+                positive portion FAIL. Ignored when ``handle_kind="none"``.
+            check_wrong_handle (bool): run the wrong-handle (GPU handle ->
+                CPU API) negative portion. Defaults to True. Set False for APIs
+                that do not validate the processor handle (version/firmware
+                queries returning global data), where a wrong handle legitimately
+                succeeds and the rejection check does not apply; the summary then
+                reports that portion as SKIPPED.
+
+        Raises:
+            AssertionError: when any portion failed - the positive input was
+                rejected, or a wrong/null/None input was not rejected - carrying
+                the offending portion name(s) and detail.
+        """
+        arg_sets = self._normalize_arg_sets(arg_sets)
+        wrong_accept = self.CPU_WRONG_ACCEPT if wrong_accept is None else wrong_accept
+        correct_accept = self.CPU_CORRECT_ACCEPT if correct_accept is None else correct_accept
+        null_accept = self.CPU_NULL_ACCEPT if null_accept is None else null_accept
+
+        results = []
+        if handle_kind == "none":
+            pos_status, pos_detail = self._cpu_positive_no_handle(
+                func, func_name, arg_sets, correct_accept
+            )
+            results.append(("Positive input (no handle)", pos_status, pos_detail))
+        else:
+            label = "core" if handle_kind == "core" else "cpu"
+            neg_desc, neg_args = arg_sets[0]
+
+            if check_wrong_handle:
+                status, detail = self._cpu_negative_wrong_handle(
+                    func, func_name, neg_desc, neg_args, wrong_accept
+                )
+            else:
+                self.print(
+                    f"\t### {func_name}(gpu=wrong handle): skipped, API does not "
+                    f"validate the processor handle (returns global data)"
+                )
+                status, detail = "SKIPPED", None
+            results.append(("Negative input (wrong handle)", status, detail))
+
+            status, detail = self._cpu_negative_null_handle(
+                func, func_name, label, neg_desc, neg_args, null_accept
+            )
+            results.append(("Negative input (null handle)", status, detail))
+
+            status, detail = self._cpu_negative_none_handle(
+                func, func_name, label, neg_desc, neg_args
+            )
+            results.append(("Negative input (None)", status, detail))
+
+            if positive is None:
+                pos_status, pos_detail = self._cpu_positive(
+                    func, func_name, handle_kind, label, arg_sets, correct_accept
+                )
+            else:
+                pos_status, pos_detail = self._cpu_positive_custom(handle_kind, label, positive)
+            results.append(("Positive input (real handle)", pos_status, pos_detail))
+
+        overall_pass = not any(status == "FAIL" for _, status, _ in results)
+        self._print_contract_summary(func_name, results, overall_pass)
+
+        if not overall_pass:
+            failed = [(label, detail) for label, status, detail in results if status == "FAIL"]
+            lines = "\n".join(
+                f"  - {label}:\n    {detail}" if detail else f"  - {label}"
+                for label, detail in failed
+            )
+            raise AssertionError(
+                f"{func_name}: CPU API contract violated by {len(failed)} "
+                f"portion(s) (the positive input must be accepted and every "
+                f"wrong/null/None input must be rejected):\n{lines}"
+            )
 
     def Test_Per_GPU_With_One_Enum(self, **kwargs):
         """
