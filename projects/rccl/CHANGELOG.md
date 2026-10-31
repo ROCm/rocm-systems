@@ -15,6 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
+* Fixed the RMA proxy registering dma-buf memory regions with offset 0 on the ROCr export path, which mapped the wrong part of the allocation for buffers that do not start at the beginning of their dma-buf, such as the RMA signal array.
 
 ### Known issues
 

@@ -52,8 +52,9 @@ void ncclDumpRmaProxyState(int signal);
 // ---- Internal helpers ----
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
-static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNonDataDirect = false) {
+static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, uint64_t* offset, bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+  *offset = 0;
 
 #if CUDA_VERSION >= 11070
   static size_t hostPageSize = ncclOsGetPageSize();
@@ -79,12 +80,13 @@ static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool forceNo
 // [RCCL] AMD/ROCm DMA-BUF export path. The trailing bool selects a sym-buffer
 // (cuMem) export when the cumem gate is enabled; otherwise fall back to the
 // ROCr portable dmabuf export.
-static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool sym_buffer = false) {
+// *offset is the byte offset of addr within the exported dma-buf (0 for the cuMem export).
+static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, uint64_t* offset, bool sym_buffer = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+  *offset = 0;
 #if HIP_VERSION >= 70000000
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
-  uint64_t offset;
   ncclResult_t ret = ncclSuccess;
   ALIGN_SIZE(alignedSize, hostPageSize);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
@@ -94,7 +96,7 @@ static ncclResult_t getDmaBufFd(void* addr, size_t length, int* fd, bool sym_buf
   } else
 #endif
   {
-    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, &offset), ret, fail);
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, offset), ret, fail);
   }
   return ret;
 fail:
@@ -114,11 +116,21 @@ static ncclResult_t ncclRmaProxyRegMrSym(ncclRma_t* rmaComm, void* rmaCollComm, 
     ncclResult_t dmabufResult = ncclInvalidUsage;
     if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
       int dmabufFd = -1;
+      uint64_t dmabufOffset = 0;
       // [RCCL] sym_buffer selects the cuMem (VMM) dmabuf export used for symmetric
       // windows; plain (hipExtMalloc) allocations use the ROCr portable export.
-      dmabufResult = getDmaBufFd(addr, size, &dmabufFd, sym_buffer);
+      dmabufResult = getDmaBufFd(addr, size, &dmabufFd, &dmabufOffset, sym_buffer);
+      // The MR registration rounds addr down to a page and applies the offset as given.
+      if (dmabufResult == ncclSuccess && (((uintptr_t)addr | dmabufOffset) & (ncclOsGetPageSize() - 1)) != 0) {
+        WARN("RMA dma-buf registration needs a page-aligned address and offset (addr %p, offset %lu)", addr,
+             (unsigned long)dmabufOffset);
+        close(dmabufFd);
+        dmabufResult = ncclInvalidUsage;
+      }
       if (dmabufResult == ncclSuccess) {
-        NCCLCHECK(rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, type, 0, dmabufFd, mr_flags, mhandle));
+        TRACE(NCCL_NET, "RMA dma-buf registration: addr %p size %zu offset %lu", addr, size,
+              (unsigned long)dmabufOffset);
+        NCCLCHECK(rmaComm->regMrSymDmaBuf(rmaCollComm, addr, size, type, dmabufOffset, dmabufFd, mr_flags, mhandle));
         close(dmabufFd);
       }
     }
