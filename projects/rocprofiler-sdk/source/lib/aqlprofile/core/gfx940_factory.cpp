@@ -71,7 +71,7 @@ public:
                     block_info->event_id_max   = 199;
                     break;
                 case TcaCounterBlockId:
-                    block_info->instance_count = 32;
+                    block_info->instance_count = 2;
                     block_info->event_id_max   = 34;
                     break;
                 case GceaCounterBlockId:
