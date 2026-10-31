@@ -216,7 +216,7 @@ jobs:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
     runs-on: lstt_ci_runners
-    timeout-minutes: 30
+    timeout-minutes: 45
     container: rocm/dev-ubuntu-22.04:7.2
 
     steps:
@@ -230,8 +230,8 @@ jobs:
         apt update -y
         # rdctst pulls in libamd_smi's netlink (NIC) code, so the runtime
         # libnl stack must be present or the binary fails to load.
-        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0
-        pip3 install pytest prometheus_client
+        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0 binutils
+        pip3 install pytest pytest-timeout prometheus_client
 
     - name: Download RDC packages
       uses: actions/download-artifact@v4
@@ -284,11 +284,38 @@ jobs:
           echo "No missing libs found!"
         fi
 
-    - name: Run RDC test suite (no GPU)
+    - name: Check the installed fake-GPU suite
       shell: bash
       run: |
-        python3 -m pytest tests/ci \
-          -v --tb=short \
+        # TheRock runs this copy; it must import on its own and hold only the
+        # fake library, the suite and its value table.
+        suite="$ROCM_DIR/share/rdc/rdctst_tests/fake_gpu"
+        python3 -m pytest --collect-only -q -p no:cacheprovider "$suite"
+        extra=$(find "$suite" -type f ! -name '*.py' ! -name '*.so' ! -name '*.inc')
+        test -z "$extra" || { echo "unexpected files: $extra"; exit 1; }
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+
+    - name: Run the fake-GPU suite (installed copy)
+      shell: bash
+      run: |
+        # rdcd and rdci against the fake amd-smi. A separate run, because rdcd
+        # allows one instance per host and the next step keeps one running.
+        python3 -m pytest "$ROCM_DIR/share/rdc/rdctst_tests/fake_gpu" \
+          -v --tb=short -p no:cacheprovider --timeout=180 \
+          --junitxml=build/test-results-fake-gpu.xml
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        RDC_TEST_PREFIX: ${{ env.ROCM_DIR }}
+        RDC_CI_REQUIRE_FAKE: "1"
+
+    - name: Run RDC test suite (no GPU)
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        # Without a GPU, the daemon tests run against the fake amd-smi too.
+        python3 -m pytest tests/ci --ignore-glob='tests/ci/test_fake_gpu*.py' \
+          -v --tb=short --timeout=180 \
           --junitxml=build/test-results-nogpu.xml
       env:
         RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
@@ -329,8 +356,8 @@ jobs:
         apt update -y
         # rdctst pulls in libamd_smi's netlink (NIC) code, so the runtime
         # libnl stack must be present or the binary fails to load.
-        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0
-        pip3 install pytest prometheus_client
+        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0 binutils
+        pip3 install pytest pytest-timeout prometheus_client
 
     - name: Download RDC packages
       uses: actions/download-artifact@v4
@@ -357,11 +384,23 @@ jobs:
     - name: Create test results directory
       run: mkdir -p build
 
-    - name: Run RDC test suite (with GPU)
+    - name: Run the fake-GPU suite (installed copy)
       shell: bash
       run: |
-        python3 -m pytest tests/ci \
-          -v --tb=short \
+        python3 -m pytest "$ROCM_DIR/share/rdc/rdctst_tests/fake_gpu" \
+          -v --tb=short -p no:cacheprovider --timeout=180 \
+          --junitxml=build/test-results-fake-gpu.xml
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        RDC_TEST_PREFIX: ${{ env.ROCM_DIR }}
+        RDC_CI_REQUIRE_FAKE: "1"
+
+    - name: Run RDC test suite (with GPU)
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        python3 -m pytest tests/ci --ignore-glob='tests/ci/test_fake_gpu*.py' \
+          -v --tb=short --timeout=180 \
           --junitxml=build/test-results-gpu.xml
       env:
         RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
