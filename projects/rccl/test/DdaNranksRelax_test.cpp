@@ -29,13 +29,16 @@
 #include <rccl/rccl.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <new>
+#include <string>
 #include <thread>
 #include <vector>
 
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -613,8 +616,101 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
     return rc;
 }
 
+// Upper bound on the whole run, from the first fork to the last child exiting.
+// It must sit clearly below the isolated runner's per-test timeout
+// (kDefaultTestTimeoutSeconds, 300 s, in ProcessIsolatedTestRunner.cpp): when
+// that fires the runner abandons the test thread and kills the re-exec'd
+// supervisor by pid only, so any rank still alive -- hung in ncclCommInitRank,
+// or in a DDA kernel's GPU barrier waiting on a peer that already returned --
+// would be orphaned with its GPU held. 240 s plus the reap grace below still
+// leaves the runner ~40 s, and is far above a healthy run (seconds) and above
+// the 120 s rank-0 handshake bound in ddaInitRunRank().
+constexpr int kDdaInitSupervisorTimeoutSeconds = 240;
+// How long to wait for SIGKILLed children to be reaped. Normally immediate; a
+// child in an uninterruptible driver call can take longer, and we would rather
+// report it than block the supervisor past the runner's deadline.
+constexpr int kDdaInitReapGraceSeconds = 20;
+constexpr int kDdaInitPollIntervalMs   = 10;
+
+struct DdaInitRankChild
+{
+    pid_t pid       = -1;     // -1 until forked
+    int   status    = 0;      // waitpid status; valid once reaped
+    bool  reaped    = false;
+    bool  killed    = false;  // the supervisor sent it SIGKILL
+    int   waitErrno = 0;      // non-zero if waitpid itself failed for it
+};
+
+bool ddaInitChildSucceededOrSkipped(int status)
+{
+    return WIFEXITED(status) &&
+           (WEXITSTATUS(status) == kDdaInitChildOk || WEXITSTATUS(status) == kDdaInitChildSkip);
+}
+
+// Non-blocking reap of one child. Returns true once the child is accounted for
+// (exited, or waitpid failed for a reason other than EINTR).
+bool ddaInitTryReap(DdaInitRankChild& kid)
+{
+    if (kid.pid <= 0 || kid.reaped)
+    {
+        return true;
+    }
+    int         status = 0;
+    const pid_t got    = waitpid(kid.pid, &status, WNOHANG);
+    if (got == 0 || (got < 0 && errno == EINTR))
+    {
+        return false;
+    }
+    kid.reaped = true;
+    if (got < 0)
+    {
+        kid.waitErrno = errno;
+    }
+    else
+    {
+        kid.status = status;
+    }
+    return true;
+}
+
+// SIGKILLs every forked child that has not been reaped yet, then reaps them
+// all within kDdaInitReapGraceSeconds, so no rank outlives the test holding a
+// GPU and none is left behind as a zombie.
+void ddaInitKillAndReap(std::vector<DdaInitRankChild>& kids)
+{
+    for (DdaInitRankChild& kid : kids)
+    {
+        if (kid.pid > 0 && !kid.reaped)
+        {
+            kill(kid.pid, SIGKILL);
+            kid.killed = true;
+        }
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitReapGraceSeconds);
+    for (;;)
+    {
+        bool allReaped = true;
+        for (DdaInitRankChild& kid : kids)
+        {
+            allReaped = ddaInitTryReap(kid) && allReaped;
+        }
+        if (allReaped || std::chrono::steady_clock::now() > deadline)
+        {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kDdaInitPollIntervalMs));
+    }
+}
+
 // Forks nranks children, each initialising one rank of a real communicator, and
 // checks whether comm init engaged the DDA IPC path.
+//
+// The children are polled rather than waited on: a rank that fails returns
+// early, and its peers may then block forever in comm init or in a DDA
+// kernel's GPU barrier waiting for it. So the first failing rank, or the
+// overall deadline, ends the run -- every remaining rank is killed and reaped
+// here instead of being left to the runner, which cannot see them.
 void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
 {
     // Shared region set up before any fork and before any HIP/RCCL call.
@@ -624,26 +720,122 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
     ASSERT_NE(shared, MAP_FAILED) << "mmap for shared bootstrap failed";
     new (&shared->state) std::atomic<DdaInitState>(DdaInitState::NotReady);
 
-    std::vector<pid_t> pids(nranks, -1);
+    // Anything still buffered here would otherwise be inherited, and printed
+    // again, by every child.
+    fflush(stdout);
+
+    std::vector<DdaInitRankChild> kids(nranks);
     for (int r = 0; r < nranks; r++)
     {
-        pids[r] = fork();
-        ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
-        if (pids[r] == 0)
+        const pid_t pid = fork();
+        if (pid < 0)
         {
-            _exit(ddaInitRunRank(r, nranks, shared, expectResources));
+            const int forkErrno = errno;
+            ddaInitKillAndReap(kids);
+            munmap(shared, sizeof(DdaInitShared));
+            FAIL() << "fork() failed for rank " << r << " (" << strerror(forkErrno) << "); killed the "
+                   << r << " rank(s) already started.";
         }
+        if (pid == 0)
+        {
+            const int rc = ddaInitRunRank(r, nranks, shared, expectResources);
+            // _exit() skips stdio teardown; flush so the rank's diagnostics
+            // reach the runner's captured output.
+            fflush(stdout);
+            _exit(rc);
+        }
+        kids[r].pid = pid;
+    }
+
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitSupervisorTimeoutSeconds);
+    int  firstFailed = -1;
+    bool timedOut    = false;
+    for (;;)
+    {
+        bool allReaped = true;
+        for (int r = 0; r < nranks; r++)
+        {
+            const bool wasReaped = kids[r].reaped;
+            if (!ddaInitTryReap(kids[r]))
+            {
+                allReaped = false;
+                continue;
+            }
+            if (!wasReaped && firstFailed < 0 &&
+                (kids[r].waitErrno != 0 || !ddaInitChildSucceededOrSkipped(kids[r].status)))
+            {
+                firstFailed = r;
+            }
+        }
+        if (allReaped || firstFailed >= 0)
+        {
+            break;
+        }
+        if (std::chrono::steady_clock::now() > deadline)
+        {
+            timedOut = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kDdaInitPollIntervalMs));
+    }
+
+    ddaInitKillAndReap(kids);
+    munmap(shared, sizeof(DdaInitShared));
+
+    // A child that exited on its own between the last poll and the SIGKILL
+    // keeps its real status; only a SIGKILL death counts as killed by us.
+    std::string killedRanks;
+    for (int r = 0; r < nranks; r++)
+    {
+        DdaInitRankChild& kid = kids[r];
+        if (kid.killed && kid.reaped && kid.waitErrno == 0)
+        {
+            if (WIFSIGNALED(kid.status) && WTERMSIG(kid.status) == SIGKILL)
+            {
+                killedRanks += (killedRanks.empty() ? "" : ", ") + std::to_string(r);
+            }
+            else
+            {
+                kid.killed = false;
+            }
+        }
+    }
+    const std::string killedNote =
+        killedRanks.empty() ? std::string() : "; killed still-running rank(s) " + killedRanks;
+
+    if (timedOut)
+    {
+        ADD_FAILURE() << "Ranks did not all finish within " << kDdaInitSupervisorTimeoutSeconds
+                      << " s (hung in ncclCommInitRank or a DDA collective?)" << killedNote << ".";
     }
 
     bool anySkip = false;
-    bool anyFail = false;
+    bool anyFail = timedOut;
     for (int r = 0; r < nranks; r++)
     {
-        int status = 0;
-        waitpid(pids[r], &status, 0);
-        if (WIFEXITED(status))
+        const DdaInitRankChild& kid  = kids[r];
+        const std::string       note = (r == firstFailed) ? killedNote : std::string();
+        if (!kid.reaped)
         {
-            int code = WEXITSTATUS(status);
+            anyFail = true;
+            ADD_FAILURE() << "Rank " << r << " child (pid " << kid.pid << ") did not exit within "
+                          << kDdaInitReapGraceSeconds << " s of SIGKILL; it may still hold GPU " << r << ".";
+        }
+        else if (kid.waitErrno != 0)
+        {
+            anyFail = true;
+            ADD_FAILURE() << "waitpid() failed for rank " << r << " child (pid " << kid.pid
+                          << "): " << strerror(kid.waitErrno) << note << ".";
+        }
+        else if (kid.killed)
+        {
+            // Already covered by the failing rank's or the timeout's message.
+            anyFail = true;
+        }
+        else if (WIFEXITED(kid.status))
+        {
+            const int code = WEXITSTATUS(kid.status);
             if (code == kDdaInitChildSkip)
             {
                 anySkip = true;
@@ -651,18 +843,18 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
             else if (code != kDdaInitChildOk)
             {
                 anyFail = true;
-                ADD_FAILURE() << "Rank " << r << " child exited with failure code " << code << ".";
+                ADD_FAILURE() << "Rank " << r << " child exited with failure code " << code << note << ".";
             }
         }
         else
         {
             anyFail = true;
-            ADD_FAILURE() << "Rank " << r << " child terminated abnormally (status " << status
-                          << ").";
+            ADD_FAILURE() << "Rank " << r << " child terminated abnormally (status " << kid.status
+                          << (WIFSIGNALED(kid.status) ? ", signal " + std::to_string(WTERMSIG(kid.status))
+                                                      : std::string())
+                          << ")" << note << ".";
         }
     }
-
-    munmap(shared, sizeof(DdaInitShared));
 
     if (anySkip && !anyFail)
     {
