@@ -137,6 +137,15 @@ struct writer_t
         const writer_types::trace_environment_t& trace_environment);
 
     /**
+     * @brief Insert event and a sample referencing it into rocpd
+     * @param sample_data Sample data which will be inserted into rocpd
+     * @param event_data Event data which the sample will reference
+     * @throws std::runtime_error If sample_data.track is not registered
+     */
+    void write_sample(const writer_types::sample_data_t& sample_data,
+                      const writer_types::event_data_t&  event_data);
+
+    /**
      * @brief Flush in-memory data to disk
      * @note This function is only used with in-memory database option
      */

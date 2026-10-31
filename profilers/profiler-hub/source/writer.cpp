@@ -125,6 +125,13 @@ writer_t::insert_memory_alloc_data(
 }
 
 void
+writer_t::write_sample(const writer_types::sample_data_t& sample_data,
+                       const writer_types::event_data_t&  event_data)
+{
+    m_impl->write_sample(sample_data, event_data);
+}
+
+void
 writer_t::flush_in_memory_data_to_disk()
 {
     m_impl->flush_in_memory_data_to_disk();

@@ -521,6 +521,39 @@ TEST_F(writer_test, insert_pmc_event_data_does_not_throw)
     EXPECT_NO_THROW(writer->insert_pmc_event_data(pmc_event_data, pmc_info.unique_id));
 }
 
+// reader_t::get_events() does not query samples yet, so read-back is not possible.
+TEST_F(writer_test, write_sample_does_not_throw)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::track_info_t track_info;
+    track_info.name       = "sample-track";
+    track_info.node_id    = 1;
+    track_info.process_id = 100;
+    writer->register_track_info(track_info);
+
+    writer_types::sample_data_t sample_data;
+    sample_data.timestamp = 1000;
+    sample_data.track     = track_info;
+
+    EXPECT_NO_THROW(writer->write_sample(sample_data, writer_types::event_data_t{}));
+}
+
+TEST_F(writer_test, write_sample_with_unregistered_track_throws_runtime_error)
+{
+    auto writer = make_writer();
+    register_node_and_process(*writer);
+
+    writer_types::sample_data_t sample_data;
+    sample_data.timestamp     = 1000;
+    sample_data.track.name    = "unregistered-track";
+    sample_data.track.node_id = 1;
+
+    EXPECT_THROW(writer->write_sample(sample_data, writer_types::event_data_t{}),
+                 std::runtime_error);
+}
+
 TEST_F(writer_test, insert_memory_copy_data_is_readable_after_flush)
 {
     auto writer = make_writer();
