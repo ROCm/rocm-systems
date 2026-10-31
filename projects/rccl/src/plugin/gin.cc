@@ -12,6 +12,7 @@
 #include "checks.h"
 #include "plugin.h"
 #include "nccl_gin.h"
+#include "graph/topo.h"
 #include "gin/gin_host_proxy.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_host_rocshmem_gda.h"
@@ -446,11 +447,21 @@ ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t globalBitM
   if (ginState->finalized) return ncclSuccess;
   std::lock_guard<std::mutex> lock(pluginMutex);
 
-  // Close ALL non-global backends and compact the array
+  // Close ALL non-global backends and compact the array. Anvil SDMA addresses
+  // peers by local device id, so it is dropped when more than one physical host
+  // is in the communicator (including multi-host MNNVL where nNodes folds to 1).
   for (int i = 0; i < initialNumActiveBackends; i++) {
     struct ncclGinBackendState* backend = &ginState->backends[i];
-    if (!(BIT(backend->ginType) & globalBitMask)) {
-      WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+    const bool anvilMultiHost =
+        comm->topo->nHosts > 1 && backend->ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+    if (anvilMultiHost || !(BIT(backend->ginType) & globalBitMask)) {
+      if (anvilMultiHost) {
+        INFO(NCCL_INIT | NCCL_NET,
+             "GIN backend ANVIL_SDMA is single-host only; removing it from active backends (nHosts=%d)",
+             comm->topo->nHosts);
+      } else {
+        WARN("GIN backend type %d not supported on all ranks, removing from active backends", backend->ginType);
+      }
       NCCLCHECK(ncclGinPluginFinalize(comm, backend->pluginIndex, backend->ginInstance));
     } else {
       ginState->backends[currentNumActiveBackends++] = *backend;
