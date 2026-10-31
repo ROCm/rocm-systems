@@ -130,7 +130,13 @@ ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) {
   ncclResult_t r;
   unsigned int transportMask = 0;
   r = ncclDiagDetectTransportMask(comm, &transportMask);
-  if (comm->rank == 0 && r != ncclSuccess) DIAG_PRINT("NCCL DIAG [INFO] transport detect returned %d", r);
+  if (r != ncclSuccess) {
+    // Detection is collective, so a failure here (e.g. buffer allocation) means the ranks are no
+    // longer in step. Stop and propagate the error: the caller fails init and the job aborts, rather
+    // than running the checks below out of step.
+    if (comm->rank == 0) DIAG_PRINT("NCCL DIAG [INFO] transport detect returned %d; aborting diagnostics", r);
+    return r;
+  }
 
   // Only exercise ib_write_bw when the communicator uses the network transport across at least two
   // hosts (nNodes counts hosts not connected via MNNVL). The union mask is allgathered and nNodes is
@@ -143,7 +149,14 @@ ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) {
   }
 
   r = ncclDiagP2pRun(comm);
-  if (comm->rank == 0 && r != ncclSuccess) DIAG_PRINT("NCCL DIAG [INFO] p2p: check returned %d", r);
+  if (r != ncclSuccess) {
+    // The p2p check is collective too: a setup failure (e.g. the setupResults calloc) makes a rank
+    // skip its all-gathers while its peers block in them, so the ranks are no longer in step. Propagate
+    // the error like detection above so init fails and the job aborts rather than returning success
+    // with a desynced rank.
+    if (comm->rank == 0) DIAG_PRINT("NCCL DIAG [INFO] p2p: check returned %d; aborting diagnostics", r);
+    return r;
+  }
 
   auto t1 = std::chrono::steady_clock::now();
   double elapsedMs = std::chrono::duration<double, std::milli>(t1 - t0).count();

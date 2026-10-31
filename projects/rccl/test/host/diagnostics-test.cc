@@ -488,14 +488,30 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
   EXPECT_EQ(ret, ncclRemoteError);
 }
 
-// Peers enter the allgather this rank skips, so later diagnostics collectives pair up wrongly; a fix flips this pin.
-TEST_F(DiagnosticsMicrotest, DetectTransportMask_KnownBug_CallocFailureSkipsAllGather) {
+// A rank that cannot allocate the gather buffer cannot join the collective, and retrying the same
+// allocator would fail the same way. It surfaces the error without entering the all-gather; the
+// caller propagates it and fails init. This only fires under genuine memory exhaustion.
+TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureReturnsErrorWithoutJoiningAllGather) {
   BuildComm(2, 0, 2);
+  peerMasks_ = {0, Bit(PATH_NET)};
   g_diagnosticsCallocFailAt = 1;
   ncclResult_t ret;
   EXPECT_EQ(Detect(&ret), 0u);
   EXPECT_EQ(ret, ncclSystemError);
+  // The rank never joined the all-gather.
   EXPECT_EQ(gathers_, 0);
+}
+
+// ncclRunDiagnostics must surface the detection failure and run none of the checks, so init fails
+// and the job aborts instead of the surviving ranks proceeding through the checks out of step.
+TEST_F(DiagnosticsMicrotest, Run_CallocFailureReturnsErrorAndRunsNoChecks) {
+  BuildComm(2, 0, 2);
+  peerMasks_ = {0, Bit(PATH_NET)};
+  g_diagnosticsCallocFailAt = 1;
+  ncclResult_t ret;
+  Run(&ret);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_TRUE(checks_.empty());
 }
 
 TEST_F(DiagnosticsMicrotest, Run_SingleHostSkipsNetBwAndRunsP2p) {
@@ -541,34 +557,61 @@ TEST_F(DiagnosticsMicrotest, Run_NetBwNeedsBothANetPathAndTwoHosts) {
 
 TEST_F(DiagnosticsMicrotest, Run_NonZeroRankPrintsNothingEvenOnFailures) {
   BuildComm(2, 1, 1);
-  gatherResult_ = ncclRemoteError;
   p2pResult_ = ncclSystemError;
   ncclResult_t ret;
+  // A non-zero rank is silent, but the p2p failure still propagates so init can abort.
   EXPECT_EQ(Run(&ret), "");
-  EXPECT_EQ(ret, ncclSuccess);
+  EXPECT_EQ(ret, ncclSystemError);
   EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
   BuildComm(2, 1, 2);
-  gatherResult_ = ncclSuccess;
+  p2pResult_ = ncclSuccess;
   peerMasks_[0] = Bit(PATH_NET);
   EXPECT_EQ(Run(&ret), "");
+  EXPECT_EQ(ret, ncclSuccess);
   EXPECT_EQ(checks_, (std::vector<std::string>{"ib", "p2p"}));
 }
 
-TEST_F(DiagnosticsMicrotest, Run_ReportsDetectAndP2pFailuresButSucceeds) {
+// A detect failure on a rank other than 0 is silent but must still propagate, so the surviving ranks
+// do not sail past a collective their peer skipped.
+TEST_F(DiagnosticsMicrotest, Run_DetectFailureOnNonZeroRankStillAborts) {
+  BuildComm(2, 1, 2);
+  gatherResult_ = ncclRemoteError;
+  ncclResult_t ret;
+  EXPECT_EQ(Run(&ret), "");
+  EXPECT_EQ(ret, ncclRemoteError);
+  EXPECT_TRUE(checks_.empty());
+}
+
+// The p2p check is collective, so like detection a failure aborts diagnostics and runs nothing after it;
+// ncclRunDiagnostics propagates the error so init fails instead of returning success on a desynced rank.
+TEST_F(DiagnosticsMicrotest, Run_P2pFailureAbortsAndPropagates) {
+  BuildComm(2, 0, 1);
+  p2pResult_ = ncclSystemError;
+  ncclResult_t ret;
+  const std::string out = Run(&ret);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
+  const std::string expected = kBanner + kNetSkipped +
+                               DiagLine("NCCL DIAG [INFO] p2p: check returned " +
+                                        std::to_string(ncclSystemError) + "; aborting diagnostics");
+  EXPECT_EQ(out, expected);
+}
+
+// A failed transport-mask all-gather desyncs the ranks, so diagnostics must abort and run no checks;
+// ncclRunDiagnostics propagates the error so init fails rather than probing out of step.
+TEST_F(DiagnosticsMicrotest, Run_DetectFailureAbortsAndRunsNoChecks) {
   BuildComm(2, 0, 2);
   peerMasks_[1] = Bit(PATH_NET);
   gatherResult_ = ncclRemoteError;
   p2pResult_ = ncclSystemError;
   ncclResult_t ret;
   const std::string out = Run(&ret);
-  EXPECT_EQ(ret, ncclSuccess);
-  EXPECT_EQ(checks_, (std::vector<std::string>{"p2p"}));
+  EXPECT_EQ(ret, ncclRemoteError);
+  EXPECT_TRUE(checks_.empty());
   const std::string expected = kBanner +
                                DiagLine("NCCL DIAG [INFO] transport detect returned " +
-                                        std::to_string(ncclRemoteError)) +
-                               kNetSkipped +
-                               DiagLine("NCCL DIAG [INFO] p2p: check returned " + std::to_string(ncclSystemError));
-  EXPECT_EQ(out.substr(0, expected.size()), expected);
+                                        std::to_string(ncclRemoteError) + "; aborting diagnostics");
+  EXPECT_EQ(out, expected);
 }
 
 TEST_F(DiagnosticsMicrotest, Run_ReportsElapsedMillisecondsAcrossRanks) {
