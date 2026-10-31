@@ -111,7 +111,13 @@ void DiscoverDrivers() {
 }
 
 bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
-  MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->Close(); });
+  // ShutDown() rather than Close(), because this runs over whichever driver
+  // Init() failed on and only ShutDown() gives back everything Init() took.
+  // KfdDriver::Init() unwinds itself with scope guards, but
+  // KfdVirtioDriver::Init() enables the virtio runtime and then has two failure
+  // returns that leave it enabled, and closing the device without disabling
+  // first strands that.
+  MAKE_NAMED_SCOPE_GUARD(driver_guard, [&]() { driver->ShutDown(); });
 
   if (driver->Init() != HSA_STATUS_SUCCESS) {
     return false;
@@ -562,12 +568,16 @@ bool Load() {
 }
 
 bool Unload() {
+  // Every driver gets its ShutDown() even if an earlier one fails: bailing out
+  // on the first error would leave the remaining drivers holding their opens
+  // and snapshots, which is the same leak as not unwinding at all.
+  bool ok = true;
+
   for (auto& driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
-    hsa_status_t ret = driver->ShutDown();
-    if (ret != HSA_STATUS_SUCCESS) return false;
+    if (driver->ShutDown() != HSA_STATUS_SUCCESS) ok = false;
   }
 
-  return true;
+  return ok;
 }
 }  // namespace amd
 }  // namespace rocr
