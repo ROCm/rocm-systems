@@ -23,11 +23,14 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+
+#include "gfx11_mimg_test_common.h"
 
 #include <cstring>
 #include <fstream>
@@ -662,6 +665,187 @@ TEST_F(MemoryWaitScoreboardTest, ConcurrentWavesKeepIndependentPendingRegisters)
   EXPECT_TRUE(hazards.empty());
   read(5);
   ASSERT_EQ(hazards.size(), 1u);
+}
+
+TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("nsa_image_wait_memory");
+    L2Cache l2("nsa_image_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = ComputeUnitCore::create("nsa_image_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+
+    auto decoder = Decoder::create(arch);
+    util::StringDiagnostic error;
+    const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                       .dim = amdgpu::kImageDim2d,
+                                       .unorm = true,
+                                       .dmask = 1,
+                                       .vaddr = 2,
+                                       .vdata = 8,
+                                       .nsa_word = 6};
+    auto decoded = [&]() -> DecodeResult {
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+        return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+            *decoder, rdna3::build_mimg, rdna3::kImageLoadMimg, mimg, error.emitter());
+      return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+          *decoder, rdna3_5::build_mimg, rdna3_5::kImageLoadMimg, mimg, error.emitter());
+    }();
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(0x200, &hazards, [](void *context, const auto &hazard) {
+      static_cast<decltype(hazards) *>(context)->push_back(hazard);
+    });
+    for (const uint16_t pending : {0, 2, 3, 6}) {
+      SCOPED_TRACE(pending);
+      state.clear();
+      hazards.clear();
+      state.add({state.issue(WaitCounterKind::Load),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, pending, 1},
+                 WaitCounterKind::Load,
+                 0xf});
+      state.check_instruction(*decoded.value(), *wf);
+      EXPECT_EQ(hazards.size(), pending == 2 || pending == 6 ? 1u : 0u);
+      if (pending == 3) {
+        state.access({RegClass::VGPR, 3, 1}, 1, 0xf, false);
+        ASSERT_EQ(hazards.size(), 1u);
+        EXPECT_EQ(hazards.front().reg.index, 3u);
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitReads) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    GpuMemory memory("d16_image_wait_memory");
+    L2Cache l2("d16_image_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = ComputeUnitCore::create("d16_image_wait_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    auto decoder = Decoder::create(arch);
+    auto decode = [&](uint8_t dmask, uint8_t first_address = 2) -> DecodeResult {
+      util::StringDiagnostic error;
+      const test::Gfx11MimgEncoding mimg{.nsa = true,
+                                         .dim = amdgpu::kImageDim2d,
+                                         .unorm = true,
+                                         .dmask = dmask,
+                                         .d16 = true,
+                                         .vaddr = first_address,
+                                         .vdata = 8,
+                                         .nsa_word = 6};
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+        return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+            *decoder, rdna3::build_mimg, rdna3::kImageLoadMimg, mimg, error.emitter());
+      }
+      if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+        return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+            *decoder, rdna3_5::build_mimg, rdna3_5::kImageLoadMimg, mimg, error.emitter());
+      }
+      const auto words = rdna4::build_vimage(rdna4::kImageLoadVimage, {.dim = amdgpu::kImageDim2d,
+                                                                       .d16 = 1,
+                                                                       .dmask = dmask,
+                                                                       .vdata = 8,
+                                                                       .vaddr0 = first_address,
+                                                                       .vaddr1 = 6});
+      return decoder->decode_window(words, 0, error.emitter());
+    };
+
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    unsigned reports = 0;
+    auto bind_reports = [&] {
+      state.bind(0x200, &reports,
+                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
+    };
+    for (const uint8_t dmask : {uint8_t{1}, uint8_t{7}}) {
+      SCOPED_TRACE(unsigned{dmask});
+      auto decoded = decode(dmask);
+      ASSERT_TRUE(decoded.succeeded());
+      auto &inst = *decoded.value();
+      RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      EXPECT_EQ(modifiers.memory_result_last_bytes, 0x3);
+      const uint16_t last = static_cast<uint16_t>(8 + std::popcount(dmask) / 2);
+
+      // The image result owns only the low half of its final VGPR.
+      for (const bool write : {false, true}) {
+        state.clear();
+        reports = 0;
+        cu->track_memory_wait(inst, *wf);
+        bind_reports();
+        state.access({RegClass::VGPR, last, 1}, 1, 0xc, write);
+        EXPECT_EQ(reports, 0u);
+        state.access({RegClass::VGPR, last, 1}, 1, 0x3, write);
+        EXPECT_EQ(reports, 1u);
+      }
+
+      // Destination preservation is not a real read, but an address register is.
+      for (const uint16_t pending : {last, uint16_t{2}}) {
+        state.clear();
+        reports = 0;
+        state.add({state.issue(WaitCounterKind::Ds),
+                   0x100,
+                   1,
+                   {RegClass::VGPR, pending, 1},
+                   WaitCounterKind::Ds,
+                   pending == last ? uint8_t{0xc} : uint8_t{0xf}});
+        bind_reports();
+        state.check_instruction(inst, *wf);
+        EXPECT_EQ(reports, pending == 2 ? 1u : 0u);
+      }
+
+      // A register can be both the preserved destination and a real coordinate
+      // source. Preservation must not erase the coordinate dependency.
+      auto aliased = decode(dmask, static_cast<uint8_t>(last));
+      ASSERT_TRUE(aliased.succeeded());
+      state.clear();
+      reports = 0;
+      state.add({state.issue(WaitCounterKind::Ds),
+                 0x100,
+                 1,
+                 {RegClass::VGPR, last, 1},
+                 WaitCounterKind::Ds,
+                 0xc});
+      bind_reports();
+      state.check_instruction(*aliased.value(), *wf);
+      EXPECT_EQ(reports, 1u);
+
+      // GFX11 image loads have ordered writeback within their completion class.
+      // A second partial load can supersede the first low-half result without
+      // treating its preservation of the high half as a read of the low half.
+      if (arch != ROCJITSU_CODE_ARCH_RDNA4) {
+        state.clear();
+        reports = 0;
+        cu->track_memory_wait(inst, *wf);
+        bind_reports();
+        state.check_instruction(inst, *wf);
+        EXPECT_EQ(reports, 0u);
+        const auto diagnostics = cu->memory_wait_diagnostic_count();
+        cu->track_memory_wait(inst, *wf);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), diagnostics);
+      }
+    }
+  }
 }
 
 TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctionalCounter) {

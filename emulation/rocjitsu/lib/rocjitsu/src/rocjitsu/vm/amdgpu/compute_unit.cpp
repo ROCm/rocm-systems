@@ -1438,6 +1438,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           RegisterModifiers modifiers;
           inst.amdgpu_register_modifiers(modifiers);
           for (int i = 0; i < inst.num_src_operands(); ++i) {
+            if (!inst.tracks_explicit_source(i))
+              continue;
             const auto *operand = inst.src_operand(i);
             if (operand && operand == modifiers.block_data) {
               // Resolve data before whole-operand ownership validation. Address
