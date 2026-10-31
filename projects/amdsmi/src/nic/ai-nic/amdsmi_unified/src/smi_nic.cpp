@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -49,7 +50,13 @@ static std::optional<T> get_sysfs_data(const std::string& path) {
         return static_cast<T>(std::get<int>(val));
       }
       if (std::holds_alternative<std::string>(val)) {
-        return static_cast<T>(std::stoul(std::get<std::string>(val), nullptr, 0));
+        // std::stoul throws on text with no leading number, such as "Unknown",
+        // and on a number out of range.
+        try {
+          return static_cast<T>(std::stoul(std::get<std::string>(val), nullptr, 0));
+        } catch (const std::logic_error&) {
+          return std::nullopt;
+        }
       }
     }
   }
@@ -95,8 +102,8 @@ std::optional<std::string> SmiNicPort::mac_address() const {
 
 std::optional<uint32_t> SmiNicPort::port_num() const { return port_num_; }
 
-std::optional<uint8_t> SmiNicPort::ifindex() const {
-  return get_sysfs_data<uint8_t>(sysfs_class_path_ + "/ifindex");
+std::optional<uint32_t> SmiNicPort::ifindex() const {
+  return get_sysfs_data<uint32_t>(sysfs_class_path_ + "/ifindex");
 }
 
 std::optional<uint8_t> SmiNicPort::carrier() const {

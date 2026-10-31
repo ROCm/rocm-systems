@@ -7,10 +7,30 @@
 
 #include <climits>
 #include <filesystem>
+#include <stdexcept>
+#include <string>
+#include <variant>
 
 #include "smi_sysfs.h"
 
 namespace fs = std::filesystem;
+
+namespace {
+
+// A PCI id from sysfs, or 0 if it is not a number. std::stoul throws on text with no
+// leading number, such as "Unknown", and on a number out of range.
+uint16_t pci_id(const SmiSysfsReader::SysfsValue& val) {
+  if (std::holds_alternative<int>(val)) {
+    return static_cast<uint16_t>(std::get<int>(val));
+  }
+  try {
+    return static_cast<uint16_t>(std::stoul(std::get<std::string>(val), nullptr, 0));
+  } catch (const std::logic_error&) {
+    return 0;
+  }
+}
+
+}  // namespace
 
 std::pair<uint16_t, uint16_t> SmiNicSubsystem::read_pci_ids(
     const std::string& sysfs_bus_path) const {
@@ -22,17 +42,8 @@ std::pair<uint16_t, uint16_t> SmiNicSubsystem::read_pci_ids(
   SmiSysfsReader::SysfsValue vendor_val, device_val;
   if (SmiSysfsReader::readLine(vendor_path, vendor_val) == SmiSysfsReader::SysfsStatus::Success &&
       SmiSysfsReader::readLine(device_path, device_val) == SmiSysfsReader::SysfsStatus::Success) {
-    if (std::holds_alternative<int>(vendor_val)) {
-      vendor_id = static_cast<uint16_t>(std::get<int>(vendor_val));
-    } else if (std::holds_alternative<std::string>(vendor_val)) {
-      vendor_id = static_cast<uint16_t>(std::stoul(std::get<std::string>(vendor_val), nullptr, 0));
-    }
-
-    if (std::holds_alternative<int>(device_val)) {
-      device_id = static_cast<uint16_t>(std::get<int>(device_val));
-    } else if (std::holds_alternative<std::string>(device_val)) {
-      device_id = static_cast<uint16_t>(std::stoul(std::get<std::string>(device_val), nullptr, 0));
-    }
+    vendor_id = pci_id(vendor_val);
+    device_id = pci_id(device_val);
   }
 
   return {vendor_id, device_id};
