@@ -174,8 +174,10 @@ def is_fat_binary(binary_path: Path) -> bool:
         binary_path: Path to binary
 
     Returns:
-        True if binary contains a .hip_fatbin (ELF) or .hip_fat (COFF)
-        section, False otherwise (including non-ELF/non-PE files).
+        True if the binary contains a .hip_fatbin (ELF) or .hip_fat (COFF)
+        section with contents. An ELF .hip_fatbin with sh_size 0 returns
+        False. A missing section, and a non-ELF/non-PE file, also return
+        False.
     """
     try:
         fmt = detect_binary_format(binary_path)
