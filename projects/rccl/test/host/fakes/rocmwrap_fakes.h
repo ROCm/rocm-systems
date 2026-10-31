@@ -39,6 +39,8 @@ struct CuMemExportRecorder : std::vector<CuMemExport> {
   void CloseOpen();
 };
 
+extern int g_rocmLibraryInitCalls;
+
 // Resets the dmaBufSupported gate (pfn_hsa_amd_portable_export_dmabuf) to NULL, i.e. unsupported.
 void ResetRocmWrapFakes();
 

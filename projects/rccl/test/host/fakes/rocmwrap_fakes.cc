@@ -16,7 +16,11 @@
 #include "nccl_fakes.h"  // g_loadParam
 #include "rocmwrap.h"
 
-ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
+int g_rocmLibraryInitCalls = 0;
+ncclResult_t rocmLibraryInit(void) {
+  g_rocmLibraryInitCalls++;
+  return ncclSuccess;
+}
 
 // dmaBufSupported gate: NULL -> unsupported.
 PFN_hsa_amd_portable_export_dmabuf pfn_hsa_amd_portable_export_dmabuf = nullptr;
@@ -82,4 +86,5 @@ void ResetRocmWrapFakes() {
   }
   g_exportedFds.clear();
   g_nextExportFd = 200;
+  g_rocmLibraryInitCalls = 0;
 }

@@ -101,6 +101,8 @@ extern int g_deviceCount;
 extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+// Defaults to device 0 and hipSuccess, as the plain stub did.
+extern std::function<hipError_t(hipDevice_t* /*device*/, int /*ordinal*/)> g_hipDeviceGet;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
@@ -197,6 +199,35 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)>
 extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
                                 hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
     g_hipMemGetHandleForAddressRange;
+#endif
+
+// Stream-ordered pool calls (allocator.cc's shadow pool). Alloc/free default to hipErrorInvalidValue;
+// create follows g_hipMemPoolResult and destroy succeeds, as the plain stubs did.
+extern std::function<hipError_t(hipMemPool_t* /*pool*/, const hipMemPoolProps* /*props*/)> g_hipMemPoolCreate;
+extern std::function<hipError_t(hipMemPool_t /*pool*/)> g_hipMemPoolDestroy;
+extern std::function<hipError_t(void** /*ptr*/, size_t /*size*/, hipMemPool_t /*pool*/, hipStream_t /*stream*/)>
+    g_hipMallocFromPoolAsync;
+extern std::function<hipError_t(void* /*ptr*/, hipStream_t /*stream*/)> g_hipFreeAsync;
+extern std::function<hipError_t(void)> g_hipDeviceSynchronize;
+
+// Default range is [0, 0]; priority-stream creation follows g_hipStreamCreateResult.
+extern std::function<hipError_t(int* /*least*/, int* /*greatest*/)> g_hipDeviceGetStreamPriorityRange;
+extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/, int /*priority*/)>
+    g_hipStreamCreateWithPriority;
+
+// mnnvl.cc's FABRIC probe reads the export error's text through this. Defaults to the stub text and hipSuccess.
+extern std::function<hipError_t(hipError_t /*error*/, const char** /*str*/)> g_hipDrvGetErrorString;
+
+// The FABRIC handle type (p2p.h spells it 0x8 where HIP lacks it) and the VMM allocation type alloc.h requests.
+#ifdef HIP_FABRIC_API
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#else
+const hipMemAllocationHandleType kFabricHandle = (hipMemAllocationHandleType)0x8;
+#endif
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
+#else
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
 #endif
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;

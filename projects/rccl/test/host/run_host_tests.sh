@@ -181,6 +181,10 @@ do_host_tests() {
     # preprocessor, so one compile cannot cover both. See test/host/CMakeLists.txt.
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
+    "rccl-UnitTestsMicroMemManager:$SCRIPT_DIR/host_tests_micro_mem_manager.xml"
+    "rccl-UnitTestsMicroAllocator:$SCRIPT_DIR/host_tests_micro_allocator.xml"
+    "rccl-UnitTestsMicroMnnvl:$SCRIPT_DIR/host_tests_micro_mnnvl.xml"
+    "rccl-UnitTestsMicroAlloc:$SCRIPT_DIR/host_tests_micro_alloc.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
     "rccl-UnitTestsMicroNvls:$SCRIPT_DIR/host_tests_micro_nvls.xml"
     "rccl-UnitTestsMicroNcclDevice:$SCRIPT_DIR/host_tests_micro_nccl_device.xml"

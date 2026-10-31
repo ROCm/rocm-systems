@@ -151,28 +151,7 @@ extern "C" const char* __asan_default_options() {
 }
 
 // Must stay below #undef malloc/#undef free, or these bodies are rewritten into the UUT's seams.
-static const void* g_deleteWatchPtr = nullptr;
-static int g_deleteWatchHits = 0;
-
-static void MicroOperatorDelete(void* p) noexcept {
-  if (p != nullptr && p == g_deleteWatchPtr) ++g_deleteWatchHits;
-  std::free(p);
-}
-// Replaced as a matched pair and in every form: `delete p` emits the SIZED overload, so void* alone counts nothing.
-void* operator new(std::size_t n) {
-  void* p = std::malloc(n != 0 ? n : 1);
-  if (p == nullptr) throw std::bad_alloc();
-  return p;
-}
-void* operator new[](std::size_t n) { return ::operator new(n); }
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
-void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
-void operator delete(void* p) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p) noexcept { MicroOperatorDelete(p); }
-void operator delete(void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p, std::size_t) noexcept { MicroOperatorDelete(p); }
-void operator delete(void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { MicroOperatorDelete(p); }
+#include "WatchedDelete.h"
 
 class DeleteWatch {
  public:
