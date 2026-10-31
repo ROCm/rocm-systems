@@ -403,7 +403,7 @@ TEST(ChannelDefaults, Gfx1250_CopyEngineCapsPerPeerChannelsEndToEnd)
             EXPECT_EQ(r.p2pnChannelsPerPeer, 16);
             ExpectPoolInvariant(r);
         },
-        {{"NCCL_P2P_USE_CUDA_MEMCPY", "1"}, {"RCCL_P2P_CE_CHANNELS_PER_PEER", "16"}});
+        {{"NCCL_P2P_USE_CUDA_MEMCPY", "1"}});
 }
 
 } // namespace RcclUnitTesting

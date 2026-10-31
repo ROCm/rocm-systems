@@ -4012,6 +4012,7 @@ TEST_F(P2pSetupMicrotest, SendSetupThenConnect_WritePath_WiresConnBuffers)
 
 TEST_F(P2pSetupMicrotest, SendConnect_CopyEngineGfx1250WiresFourMiBStepsAndOffsets)
 {
+    ScopedUseMemcpy ceMode(1);
     InstallHappyProxy();
     comm_.cudaArch = 1250;
     comm_.buffSizes[NCCL_PROTO_LL] = 4096;
