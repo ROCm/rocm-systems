@@ -291,7 +291,7 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
 // gfx1250 in-place AllToAll. The per-peer Send/Recv decomposition is wrong in place there, so
-// every AllToAll funnel uses these two: rcclSelectAlltoAll, taskAppend for calls that carry no
+// every AllToAll funnel uses these helpers: rcclSelectAlltoAll, taskAppend for calls that carry no
 // decision (ncclAlltoAllConfig), and the NCCL_ENQUEUE_REARCH_ENABLE lowering.
 // - CeScratchInPlace: in place may take CE-Scratch (correct through ddaScratch) even though the
 //   arch table does not force it; RCCL_FORCE_CE=0 turns it off. Buffer-less queries are not in place.
@@ -301,8 +301,8 @@ bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
 //   race exists upstream on every arch; other arches are left unchanged).
 // - InPlaceGuard: called where in place would otherwise reach Send/Recv; ncclInvalidUsage + WARN
 //   on gfx1250 (never wrong data), ncclSuccess otherwise. The WARN names the API (site) and why
-//   no correct path was left: capturing / registeredCe say what the caller saw; check mode, the
-//   RCCL_FORCE_CE setting and the CE scratch size are read from the comm.
+//   no correct path was left: capturing / registeredCe say what the caller saw; the RCCL_FORCE_CE
+//   setting and the CE scratch size are read from the comm.
 enum rcclA2aInPlaceSite {
   rcclA2aSiteAlltoAll,         // rcclSelectAlltoAll (ncclAlltoAll)
   rcclA2aSiteAlltoAllEnqueue,  // taskAppend, ncclAlltoAll carrying a non-CE decision

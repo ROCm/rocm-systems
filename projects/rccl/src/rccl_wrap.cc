@@ -1107,18 +1107,21 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   return table == nullptr || table->forceCeScratch;
 }
 
+static bool rcclAlltoAllInPlaceOnGfx1250(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
+  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff && comm->nRanks > 1;
+}
+
 bool rcclAlltoAllCeScratchInPlace(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
-  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff && comm->nRanks > 1 &&
-         rcclParamForceCe() != 0;
+  return rcclAlltoAllInPlaceOnGfx1250(comm, sendbuff, recvbuff) && rcclParamForceCe() != 0;
 }
 
 bool rcclAlltoAllRegisteredCeRefused(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
-  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff && comm->nRanks > 1;
+  return rcclAlltoAllInPlaceOnGfx1250(comm, sendbuff, recvbuff);
 }
 
 ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff, const void* recvbuff,
                                       size_t totalBytes, rcclA2aInPlaceSite site, bool capturing, bool registeredCe) {
-  if (sendbuff != recvbuff || totalBytes == 0 || comm->nRanks <= 1 || !IsArchMatch(comm->archName, "gfx1250")) {
+  if (totalBytes == 0 || !rcclAlltoAllInPlaceOnGfx1250(comm, sendbuff, recvbuff)) {
     return ncclSuccess;
   }
   // Split / shrink / grow children, MNNVL-off, multi-clique and DDA-off comms never get the fabric
@@ -1134,14 +1137,12 @@ ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff
   bool ceConsidered = true;
   switch (site) {
   case rcclA2aSiteAlltoAll:
-    if (rcclCollectiveMustUseEnqueuePath(const_cast<ncclComm*>(comm))) {
-      fabric = "NCCL_CHECK_MODE turns the DDA fabric paths off";
-    } else if (noFabric) {
+    if (noFabric) {
       fabric = kNoFabric;
       fabricNamedNoScratch = true;
     } else {
-      fabric = "no DDA fabric path takes these arguments (they need 16-byte aligned buffers and per-peer size, "
-               "RCCL_DDA_ENABLE and a call outside a group)";
+      fabric = "no DDA fabric path takes these arguments (they need a per-peer size that is a multiple of 16 "
+               "bytes, RCCL_DDA_ENABLE and a call outside a group)";
     }
     break;
   case rcclA2aSiteAlltoAllEnqueue:
@@ -2715,13 +2716,8 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
     // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
     // CTAPolicy_ZERO bypasses the size window; RCCL_FORCE_CE=0 disables CE-scratch entirely.
-    // gfx1250: CE-Scratch is not forced out of place (arch table forceCeScratch = false; stock R0
-    // CE-Scratch vs p2p busBW agrees above 2 MiB: 16r 4M-512M CE 54-178 vs p2p 101-291, 8r 2M-512M
-    // CE 42-222 vs p2p 62-332).
-    // In place it is kept wherever it fits, outside the size window too: it copies through ddaScratch and
-    // is correct, while the p2p fallback below is wrong in place (P02: every size >= 1 MiB; P05:
-    // misaligned / P%16 != 0). RCCL_FORCE_CE=0 still turns it off. Buffer-less queries (nullptr) are not
-    // treated as in place.
+    // gfx1250 in place: keep CE-Scratch wherever it fits, outside the size window too; the p2p fallback is
+    // wrong in place.
     const size_t a2aCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAlltoAll);
     const size_t a2aCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAlltoAll);
     const bool a2aCeNonRegWindow = rcclWindowFits(totalBytes, a2aCeNonRegMin, a2aCeNonRegMax);

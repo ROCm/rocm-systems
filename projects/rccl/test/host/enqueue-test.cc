@@ -4544,7 +4544,7 @@ TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_Capturing_Fail
   }
 }
 
-// N1: ncclAlltoAllConfig with CTA_POLICY_ZERO and registered windows. In place on gfx1250 the registered-window
+// ncclAlltoAllConfig with CTA_POLICY_ZERO and registered windows. In place on gfx1250 the registered-window
 // CE AllToAll (single-node, or hierarchical) races on the user buffer, and CE-Scratch does not take registered
 // recv windows: InvalidUsage, naming the registered-window reason. Out of place, and other arches in place,
 // keep the registered CE path.

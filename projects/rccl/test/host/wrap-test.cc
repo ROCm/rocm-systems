@@ -10658,9 +10658,6 @@ TEST(WrapMicrotestIsolated, AlltoAllInPlaceGuard_WarnNamesEntryAndReason) {
           const std::string log = warn(c.bytes, c.site, c.capturing, c.registeredCe);
           EXPECT_NE(std::string::npos, log.find(c.entry)) << c.reason << "\n" << log;
           EXPECT_NE(std::string::npos, log.find(c.reason)) << log;
-          if (c.site != rcclA2aSiteAlltoAll) {
-            EXPECT_EQ(std::string::npos, log.find("NCCL_CHECK_MODE turns")) << log;
-          }
           if (c.site == rcclA2aSiteAlltoAllConfig) {
             EXPECT_EQ(std::string::npos, log.find("ncclAlltoAll: ")) << log;
           }
@@ -10671,10 +10668,6 @@ TEST(WrapMicrotestIsolated, AlltoAllInPlaceGuard_WarnNamesEntryAndReason) {
           ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
           EXPECT_NE(std::string::npos, warn(4096, rcclA2aSiteAlltoAll, true, false).find("RCCL_FORCE_CE=0"));
         }
-        comm->checkMode = ncclCheckModeDebugLocal;
-        EXPECT_NE(std::string::npos, warn(64, rcclA2aSiteAlltoAll, false, false).find("NCCL_CHECK_MODE turns the DDA "
-                                                                                      "fabric paths off"));
-        comm->checkMode = ncclCheckModeDefault;
         // No fabric handler (split / shrink / grow child, MNNVL off, multi-clique, DDA off): no fabric paths and no
         // ddaScratch. The WARN names the comm, not the arguments.
         comm->ddaFabricMemHandler = nullptr;
@@ -10685,7 +10678,7 @@ TEST(WrapMicrotestIsolated, AlltoAllInPlaceGuard_WarnNamesEntryAndReason) {
         std::string log = warn(64, rcclA2aSiteAlltoAll, false, false);
         EXPECT_NE(std::string::npos, log.find(kNoFabric)) << log;
         EXPECT_NE(std::string::npos, log.find("CE-Scratch has nothing to stage through")) << log;
-        EXPECT_EQ(std::string::npos, log.find("16-byte aligned")) << log;
+        EXPECT_EQ(std::string::npos, log.find("multiple of 16")) << log;
         log = warn(64, rcclA2aSiteAlltoAllConfig, false, false);
         EXPECT_NE(std::string::npos, log.find("ncclAlltoAllConfig has no DDA fabric path")) << log;
         EXPECT_NE(std::string::npos, log.find(std::string("CE-Scratch is unavailable: ") + kNoFabric)) << log;
@@ -10695,7 +10688,7 @@ TEST(WrapMicrotestIsolated, AlltoAllInPlaceGuard_WarnNamesEntryAndReason) {
       });
 }
 
-// F4: the selector-site refusal returns from ncclAlltoAll before ncclEnqueueCheck, so it must record the error for an
+// The selector-site refusal returns from ncclAlltoAll before ncclEnqueueCheck, so it must record the error for an
 // enclosing group itself (ncclGroupErrCheck); ncclGroupEnd then fails the group, as for the taskAppend-site refusal.
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceRefusalInGroupFailsTheGroup) {
   RUN_ISOLATED_TEST(
@@ -10773,7 +10766,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceGroupStartEnd) {
       });
 }
 
-// N1: CTA_POLICY_ZERO with window-registered buffers. In place on gfx1250 neither the registered-window CE
+// CTA_POLICY_ZERO with window-registered buffers. In place on gfx1250 neither the registered-window CE
 // AllToAll (4) nor hierarchical CE (5) may be chosen (both race on the user buffer); CE-Scratch does not take
 // registered recv windows, so the live call is ncclInvalidUsage and the query names the fallback. Out of
 // place keeps CE-Registered; other arches keep it in place too (upstream behaviour, unchanged).

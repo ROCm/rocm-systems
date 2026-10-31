@@ -4814,7 +4814,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                !(rcclNcclAlgoEnvIsSet() &&
                                  (info->coll == ncclFuncAllGather || info->coll == ncclFuncReduceScatter)) &&
                                (ceAvailable || hierCeAvailable) && !hasSysmemSegment;
-      const bool a2aRegCeRefused = symWindowCe && info->coll == ncclFuncAlltoAll &&
+      const bool a2aRegCeSkipped = symWindowCe && info->coll == ncclFuncAlltoAll &&
                                    rcclAlltoAllRegisteredCeRefused(comm, info->sendbuff, info->recvbuff);
       if ((info->coll == ncclFuncAllReduce || info->coll == ncclFuncReduceScatter) && info->decisionValid) {
         // Backend was already chosen once by rcclSelectAllReduce() / rcclSelectReduceScatter();
@@ -4848,8 +4848,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr,
                                      comm->ddaScratch, comm->ddaPeerPtrsHost, opDev));
         }
-      } else if ((symWindowCe && !a2aRegCeRefused) || ceArSymRegistered ||
-                 (!allGatherDecided && ceAgSymRegistered)) {
+      } else if ((symWindowCe && !a2aRegCeSkipped) || ceArSymRegistered || (!allGatherDecided && ceAgSymRegistered)) {
         INFO(NCCL_INIT, "Taking CE collective path with symmetric registered windows for user buffers");
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, /*ddaRecvBase=*/nullptr, /*ddaPeerBases=*/nullptr,
                                    opDev));
@@ -4882,7 +4881,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         if (info->coll == ncclFuncAlltoAll) {
           NCCLCHECK(rcclAlltoAllInPlaceGuard(comm, info->sendbuff, info->recvbuff, recvBytes,
                                              alltoAllDecided ? rcclA2aSiteAlltoAllEnqueue : rcclA2aSiteAlltoAllConfig,
-                                             ceCapturing, a2aRegCeRefused));
+                                             ceCapturing, a2aRegCeSkipped));
           bool sendLocalValid = false;
           bool recvLocalValid = false;
           NCCLCHECK(ncclRegFind(comm, info->sendbuff, comm->nRanks * info->count * ncclTypeSize(info->datatype),
