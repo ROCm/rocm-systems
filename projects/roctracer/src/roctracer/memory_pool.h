@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <future>
 #include <mutex>
 #include <type_traits>
