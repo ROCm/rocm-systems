@@ -1448,6 +1448,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
   }
 
+  int connStepSize[2] = {0, 0};
   if (!selfSend) {
     for (int part = 0; part < nChannelsMax; part++) {
       int channelId =
@@ -1462,6 +1463,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
         hasLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
         hasLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
+        connStepSize[dir] = part == 0 ? conn->conn.stepSize : std::min(connStepSize[dir], conn->conn.stepSize);
         bool isNet = conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         network[dir] |= isNet;
         // Only AND sameProcess on NET connectors. Unused/unconnected P2P parts
@@ -1483,10 +1485,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   int chunkDataSize_u32fp8[2];
   bool netRegistered[2] = {false, false};
   bool ipcRegistered[2] = {false, false};
+  int simpleStepSize[2];
 
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
+    simpleStepSize[dir] =
+      rcclP2pSimpleStepSize(comm->p2pChunkSize, comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS, connStepSize[dir]);
     // Assume SIMPLE protocol to start with to determine number of channels
-    stepSize[dir] = comm->p2pChunkSize;
+    stepSize[dir] = simpleStepSize[dir];
 
     if (bytes[dir] == -1) nChannels[dir] = 0;
     else if (bytes[dir] == 0) nChannels[dir] = 1;
@@ -1536,7 +1541,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
 
     stepSize[dir] = (protocol[dir] == NCCL_PROTO_LL128 ? comm->p2pLl128BuffSize : comm->buffSizes[protocol[dir]]) /
                     NCCL_STEPS;
-    if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = comm->p2pChunkSize;
+    if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = simpleStepSize[dir];
     chunkSize[dir] = stepSize[dir];
     if (paramChunkSize != 0) {
       chunkSize[dir] = paramChunkSize;

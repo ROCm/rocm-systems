@@ -5,6 +5,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.
+* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB, at most 32 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
@@ -13,6 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. Copy Engine connections use one shared non-blocking stream per proxy thread, cross-process staging buffers use legacy IPC instead of the slow cuMem/VMM import path, and the Copy Engine transport carries only send/recv-based operations, so collectives keep the kernel P2P transport.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 
