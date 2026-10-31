@@ -385,7 +385,6 @@ std::string RunShowVersion(int debugLevel) {
 }
 }  // namespace
 
-// LATENT BUG (init.cc:1011-1012): hostBuf is uninitialised and gethostname need not NUL-terminate on truncation.
 TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
   char host[HOST_NAME_MAX] = {};
   ASSERT_EQ(0, gethostname(host, sizeof(host) - 1));
@@ -408,7 +407,7 @@ TEST_F(InitMicrotest, ShowVersion_HappyPath_LogsVersionHostAndLibPath) {
 TEST_F(InitMicrotest, ShowVersion_DebugLevelVersion_UsesVersionLog) {
   const std::string log = RunShowVersion(NCCL_LOG_VERSION);
   // showVersion passes sizeof(hostBuf)-1, reserving the byte gethostname need not NUL-terminate.
-  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX - 1), LastGethostnameLen());
+  EXPECT_EQ(static_cast<size_t>(HOST_NAME_MAX), LastGethostnameLen());
   EXPECT_TRUE(LogHas(log, "RCCL version")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "init.cc:")) << "VERSION arm not taken:\n" << log;
   EXPECT_FALSE(LogHas(log, "showVersion:")) << "took the INFO arm:\n" << log;
@@ -482,6 +481,13 @@ TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
   // The trailing \n matters: LogHas is a substring check, so without it "UnknownHostX" would also match.
   EXPECT_TRUE(LogHas(log, "Hostname     : Unknown\n")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, ShowVersion_GethostnameFillsBufferUnterminated_LogsAMaxLengthTerminatedName) {
+  SetGethostnameFillUnterminated(true);
+  const std::string log = RunShowVersion(NCCL_LOG_INFO);
+  const std::string expect = "Hostname     : " + std::string(HOST_NAME_MAX, 'x') + "\n";
+  EXPECT_TRUE(LogHas(log, expect.c_str())) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, ShowVersion_DladdrFails_ReportsUnknownLibPath) {
@@ -709,7 +715,7 @@ TEST_F(InitMicrotest, GetParentRanks_ExcludeAll_ReturnsZeroRanks) {
       << "nothing should have been written";
 }
 
-// LATENT BUG (init.cc:2540): *nRanksRet is parentRanks - excludeRanksCount and nothing dedupes, so myRank can == nRanks
+// Not a reachable defect: the sole caller rejects duplicate exclusions first (ncclCommInitChildComm).
 TEST_F(InitMicrotest, GetParentRanks_DuplicateExclusion_EvictsAnExtraRank) {
   int exclude[2] = {1, 1};  // sorted, but the same rank twice
   int out[4] = {-1, -1, -1, -1};
@@ -1248,15 +1254,19 @@ TEST_F(InitMicrotest, CommGetUniqueId_BcastGrowHandleFails_PropagatesError) {
 }
 
 TEST_F(InitMicrotest, CommShrink_NotReadyComm_ReturnsInvalidArgument) {
-  // rank 1 so the self-exclusion bsearch at init.cc:4039 does not reject first.
+  // rank 1 so the self-exclusion bsearch does not reject first.
   ReadyComm rc;
   rc.get()->rank = 1;
   rc.get()->asyncResult = ncclInProgress;
   ncclComm_t out = nullptr;
   int exclude[1] = {0};
-  EXPECT_EQ(ncclInvalidArgument,
-            ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, &out,
-                                /*config=*/nullptr, /*shrinkFlags=*/0));
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, &out, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "Attempt to use communicator before")) << log;
   EXPECT_EQ(nullptr, out);
 }
 
@@ -1270,18 +1280,25 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
   EXPECT_EQ(nullptr, out) << "a failed shrink must not hand back a comm";
 }
 
-// LATENT BUG (init.cc:4113): PtrCheck rejects a null newcomm by jumping to exit:, which derefs *newcomm and SEGFAULTs.
-TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
+TEST_F(InitMicrotest, CommShrink_NullNewcomm_ReturnsInvalidArgument) {
   ReadyComm rc;
   int exclude[1] = {0};
-  // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0);
-      },
-      DEATH_BY_SEGV, "newcomm argument is NULL");
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "newcomm argument is NULL")) << log;
+}
+
+TEST_F(InitMicrotest, CommSplit_NullNewcomm_ReturnsInvalidArgument) {
+  ReadyComm rc;
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&] { res = ncclCommSplit_impl(rc.get(), /*color=*/1, /*key=*/0, nullptr, /*config=*/nullptr); });
+  EXPECT_EQ(ncclInvalidArgument, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "newcomm argument is NULL")) << log;
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.
@@ -4586,8 +4603,7 @@ TEST_F(InitMicrotestIsolated, GetUniqueId_NcclInitEnvFails_PropagatesBeforeNcclI
       });
 }
 
-// LATENT BUG (init.cc:369): this is the only record(rcclCall_t,int,int,ncclUniqueId*,...) site that drops the
-// result; :3467/:3483/:3709 all NCCLCHECK it. A recorder failure here is swallowed and the API reports success.
+// Deliberately unlike the comm-init sites, which NCCLCHECK the recorder: a trace-write failure must not fail the mint.
 TEST_F(InitMicrotest, GetUniqueId_RecorderFails_StillReturnsSuccess) {
   g_bootstrapHandleTemplate = DistinctiveHandle();
   g_recorderResult = ncclInternalError;
@@ -8200,6 +8216,18 @@ TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColor_ReturnsSuccessWithoutAllocat
   EXPECT_EQ(s.comm(), s.published());
 }
 
+TEST_F(InitMicrotest, CommInitRankFunc_SplitNoColorSetDeviceFails_ReturnsTheErrorWithoutAComm) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  s.job()->parent = parent.get();
+  s.job()->color = NCCL_SPLIT_NOCOLOR;
+  s.job()->comm = nullptr;
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+
+  EXPECT_EQ(ncclUnhandledCudaError, s.Run()) << "fail: must not touch the absent NCCL_SPLIT_NOCOLOR comm";
+  EXPECT_EQ(nullptr, s.published());
+}
+
 TEST_F(InitMicrotest, CommInitRankFunc_SplitWithColor_DerivesChildHashAndHandsItToBootstrapSplit) {
   Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
   auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
@@ -8250,6 +8278,24 @@ TEST_F(InitMicrotest, CommInitRankFunc_SplitWithColor_DerivesChildHashAndHandsIt
   EXPECT_EQ(1, s.comm()->rank);
   EXPECT_FALSE(s.comm()->isGrow);
   EXPECT_EQ(ncclRemoteError, s.comm()->initState);
+}
+
+TEST_F(InitMicrotest, CommInitRankFunc_SplitBootstrapFails_UnlinksTheParentChildAbortFlag) {
+  Rank_JobScene s(/*nranks=*/0, /*myrank=*/0);
+  auto parent = MakeParentComm(/*nRanks=*/4, /*rank=*/1);
+  uint32_t childAbortFlag = 0;
+  parent->childAbortFlag = &childAbortFlag;
+  s.job()->parent = parent.get();
+  s.job()->color = 7;
+  s.job()->key = 2;
+  InstallSplitInfoTable(/*selfRank=*/1, {{7, 0}, {7, 2}, {7, 4}, {7, 6}});
+  ScopedHook split(g_bootstrapSplit, [](uint64_t, ncclComm*, ncclComm*, int, int, int*) { return ncclRemoteError; });
+  ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
+  ScopedHook kernels(g_ncclInitKernelsForDevice, Rank_KernelInitOk);
+
+  EXPECT_EQ(ncclRemoteError, s.Run());
+  EXPECT_EQ(s.comm(), s.published()) << "the failed child is still handed back";
+  EXPECT_EQ(nullptr, parent->childAbortFlag) << "a failed child init must unlink the parent's child abort flag";
 }
 
 TEST_F(InitMicrotest, CommInitRankFunc_SplitBootstrapSucceeds_CarriesOnIntoTheSharedArchBringup) {
@@ -8732,6 +8778,18 @@ TEST_F(InitMicrotest, CommSplit_WithColor_ForwardsColourKeyAndTheIncrementedChil
   Rank_ReleaseComm(child);
 }
 
+TEST_F(InitMicrotest, CommSplit_NotReadyCommWithPoisonedHandle_ClearsItAndReturnsInvalidArgument) {
+  ReadyComm rc;
+  rc.get()->asyncResult = ncclInProgress;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommSplit_impl(rc.get(), /*color=*/1, /*key=*/0, &out, /*config=*/nullptr));
+  EXPECT_EQ(nullptr, out) << "a garbage handle must not reach the NVTX payload at ncclCommSplit's exit";
+  EXPECT_EQ(0, rec.calls);
+}
+
 TEST_F(InitMicrotest, CommSplit_NotReadyComm_ReturnsInvalidArgumentWithoutLaunching) {
   ReadyComm rc;
   rc.get()->asyncResult = ncclInProgress;
@@ -8788,6 +8846,39 @@ TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
   EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
                                                      /*config=*/nullptr, /*shrinkFlags=*/0));
   EXPECT_EQ(0u, c.abortFlag()) << "without NCCL_SHRINK_ABORT nothing raises the flags";
+}
+
+namespace {
+ncclResult_t Shrink_RejectedWithoutLaunching(std::vector<int> exclude, const char* expectWarn) {
+  ReadyComm rc;
+  rc.get()->nRanks = 4;
+  rc.get()->rank = 3;
+  Teardown_LaunchRecord rec;
+  ScopedHook launch(g_ncclAsyncLaunch, Teardown_CaptureLaunch(&rec));
+  ncclComm_t out = reinterpret_cast<ncclComm_t>(0x1);
+  ncclResult_t res = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    res = ncclCommShrink_impl(rc.get(), exclude.data(), static_cast<int>(exclude.size()), &out, /*config=*/nullptr,
+                              /*shrinkFlags=*/0);
+  });
+  EXPECT_EQ(0, rec.calls) << "a rejected exclusion list must not launch the child init";
+  EXPECT_EQ(nullptr, out) << "a rejected exclusion list must clear *newcomm";
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, expectWarn)) << log;
+  rec.Release();
+  return res;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, CommShrink_NegativeExcludedRank_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, -1}, "must be in [0, 4)"));
+}
+
+TEST_F(InitMicrotest, CommShrink_ExcludedRankEqualToNRanks_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({4, 0}, "must be in [0, 4)"));
+}
+
+TEST_F(InitMicrotest, CommShrink_DuplicateExcludedRank_ReturnsInvalidArgument) {
+  EXPECT_EQ(ncclInvalidArgument, Shrink_RejectedWithoutLaunching({1, 2, 1}, "contains rank 1 more than once"));
 }
 
 
@@ -9471,7 +9562,7 @@ TEST_F(InitMicrotest, InitChildComm_GetDeviceFails_ReturnsCudaErrorBeforeAnyVali
   ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   ncclComm_t out = kGrow_NewcommPoison;
   EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(/*parent=*/nullptr, kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
-  EXPECT_EQ(kGrow_NewcommPoison, out) << "the device query precedes every write to *newcomm";
+  EXPECT_EQ(nullptr, out) << "*newcomm is cleared before the device query";
   EXPECT_EQ(1, getDevice.calls);
 }
 
@@ -9490,7 +9581,7 @@ TEST_F(InitMicrotest, InitChildComm_SetDeviceFails_ReturnsCudaErrorAndRestoresDe
 
   EXPECT_EQ(ncclUnhandledCudaError, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
 
-  EXPECT_EQ(kGrow_NewcommPoison, out) << "*newcomm is cleared only after the device switch succeeds";
+  EXPECT_EQ(nullptr, out) << "*newcomm is cleared before any validation that can fail";
   EXPECT_EQ(2, setDevice.calls);
   EXPECT_EQ(kOldDevice, g_currentDevice);
   EXPECT_EQ(0, spy.calls());
@@ -9669,18 +9760,18 @@ TEST_F(InitMicrotest, InitChildComm_Shrink_SortsCallerListAndCopiesItIntoTheJob)
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
   parent->childCount = kGrow_ParentChildCount;
-  int exclude[3] = {5, 1, 3};
+  int exclude[3] = {kGrow_ParentRanks - 1, 1, 0};
   Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
   ASSERT_EQ(ncclSuccess, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 3, &out));
 
-  EXPECT_EQ(1, exclude[0]);
-  EXPECT_EQ(3, exclude[1]);
-  EXPECT_EQ(5, exclude[2]);
+  EXPECT_EQ(0, exclude[0]);
+  EXPECT_EQ(1, exclude[1]);
+  EXPECT_EQ(kGrow_ParentRanks - 1, exclude[2]);
   const Grow_LaunchRecord& r = spy.rec();
   EXPECT_EQ(3, r.excludeRanksCount);
-  EXPECT_EQ(std::vector<int>({1, 3, 5}), r.excludeRanks);
+  EXPECT_EQ(std::vector<int>({0, 1, kGrow_ParentRanks - 1}), r.excludeRanks);
   EXPECT_EQ(0, r.childCount) << "a shrink does not consume a childCount slot";
   EXPECT_EQ(kGrow_ParentChildCount, parent->childCount);
   Rank_ReleaseComm(r.jobComm, /*ownsAbortResources=*/true);
@@ -9702,6 +9793,22 @@ TEST_F(InitMicrotest, InitChildComm_ConfigProvided_ParsesInsteadOfCopyingParent)
   EXPECT_EQ(kGrow_SuppliedMinCTAs, child->config.minCTAs);
   EXPECT_EQ(kGrow_ParentMinCTAs, parent->config.minCTAs);
   Rank_ReleaseComm(child, /*ownsAbortResources=*/true);
+}
+
+TEST_F(InitMicrotest, InitChildComm_ConfigParseFails_ClearsTheParentChildAbortFlag) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.splitShare = 7;
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, &cfg));
+
+  EXPECT_FALSE(parent->shareResources);
+  EXPECT_EQ(nullptr, parent->childAbortFlag) << "the parent must not keep the freed child abort flag";
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(0, spy.calls());
 }
 
 TEST_F(InitMicrotest, InitChildComm_ChildAllocFails_ReturnsSystemErrorAndClearsNewcomm) {
