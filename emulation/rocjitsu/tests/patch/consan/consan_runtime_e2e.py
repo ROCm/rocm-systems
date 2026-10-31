@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 # Row publication flags from the shared ConSan wire contract.
 ROW_ENTERED = 1
@@ -35,6 +36,11 @@ CASES = (
     'empty',
     'branched',
     'high_lane',
+    'barrier',
+    'barrier_empty',
+    'barrier_high',
+    'barrier_separated',
+    'barrier_multiple',
     'wrong-artifact',
     'bad-geometry',
     'profiling',
@@ -104,6 +110,7 @@ class Driver:
                     '--',
                     *argv,
                 ]
+        started = time.perf_counter()
         result = subprocess.run(
             argv,
             env=environment or self.environment,
@@ -115,7 +122,12 @@ class Driver:
         (self.directory / f'{label}.stdout').write_text(result.stdout)
         (self.directory / f'{label}.stderr').write_text(result.stderr)
         self.commands.append(
-            {'label': label, 'argv': argv, 'exit_status': result.returncode}
+            {
+                'label': label,
+                'argv': argv,
+                'exit_status': result.returncode,
+                'elapsed_seconds': time.perf_counter() - started,
+            }
         )
         if result.returncode == 77:
             if self.args.require_agent:
@@ -156,6 +168,11 @@ class Driver:
                 'read_read': 3,
                 'alias': 6,
                 'high_lane': 14,
+                'barrier': 15,
+                'barrier_empty': 16,
+                'barrier_high': 20,
+                'barrier_separated': 21,
+                'barrier_multiple': 24,
             }[fixture_name]
             prefix = 'hip' if args.fixture_kind == 'hip' else 'native'
             fixture = fixture_directory / f'{prefix}-{case_number}.hsaco'
@@ -175,19 +192,25 @@ class Driver:
         artifact = self.directory / 'artifact'
         launches = (
             2
-            if args.case in ('repeat', 'repeat_race', 'branched', 'reused-signal')
+            if args.case
+            in (
+                'repeat',
+                'repeat_race',
+                'branched',
+                'reused-signal',
+                'barrier_multiple',
+            )
             else 1
         )
         defined = fixture_name in ('disjoint', 'alias')
-        mode = 'defined' if defined else 'observe'
+        synchronized = fixture_name.startswith('barrier')
+        mode = 'synchronized' if synchronized else ('defined' if defined else 'observe')
         # The missing-statistics diagnostic precedes device admission in the
         # runner. Check the requested agent first so an unavailable physical
         # target cannot pass that control without a matching device.
-        if defined and args.case in (
-            'disjoint',
-            'alias',
-            'repeat',
-            'missing-statistics',
+        if synchronized or (
+            defined
+            and args.case in ('disjoint', 'alias', 'repeat', 'missing-statistics')
         ):
             self.run(
                 'original-baseline',
@@ -333,6 +356,11 @@ class Driver:
         expected = {
             'race': 2,
             'high_lane': 2,
+            'barrier': 2,
+            'barrier_empty': 2,
+            'barrier_high': 2,
+            'barrier_separated': 2,
+            'barrier_multiple': 3,
             'disjoint': 4,
             'read_read': 2,
             'collision': 1,
@@ -355,6 +383,21 @@ class Driver:
             observations = []
             for wave, row in enumerate(rows):
                 assert row['wave'] == wave and row['serial'] == index + 1
+                if fixture.startswith('barrier'):
+                    phases = 2 if fixture == 'barrier_multiple' else 1
+                    assert row['final_phase'] == phases
+                    assert len(row['completions']) == phases
+                    for group, completion in enumerate(row['completions']):
+                        assert completion['commit'] == 0x43534243
+                        assert (
+                            completion['group'] == group
+                            and completion['occurrence'] == 1
+                        )
+                        assert completion['phase'] == group + 1
+                        assert completion['participants'] == wave_count
+                        assert completion['sequence'] == (
+                            1 if wave == 0 else (group if wave == 1 else 0)
+                        )
                 exhausted = fixture == 'exhausted' and wave == 0
                 assert row['status'] == (
                     ROW_ENTERED | ROW_EXITED | (ROW_EXHAUSTED if exhausted else 0)
