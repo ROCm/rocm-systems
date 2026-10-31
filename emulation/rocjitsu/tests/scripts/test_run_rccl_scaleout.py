@@ -431,6 +431,46 @@ class RunRcclScaleoutTest(unittest.TestCase):
             child_pid = int((root / "run" / "shared" / "grandchild1.pid").read_text())
             self.assert_stopped(child_pid)
 
+    def test_signal_during_poll_still_allows_rank_reaping(self) -> None:
+        for signum in RUNNER.TERMINATION_SIGNALS:
+            with self.subTest(signal=signum.name):
+                process = subprocess.Popen(
+                    [sys.executable, "-c", "import time; time.sleep(60)"],
+                    start_new_session=True,
+                )
+                lock = process._waitpid_lock
+
+                def acquire_and_signal(*args: object) -> bool:
+                    acquired = lock.acquire(*args)
+                    if acquired:
+                        os.kill(os.getpid(), signum)
+                    return acquired
+
+                try:
+                    # Inject termination after Popen acquires its waitpid lock,
+                    # before its try/finally can release the lock on an error.
+                    with (
+                        mock.patch.object(
+                            process, "_waitpid_lock", wraps=lock
+                        ) as interrupted_lock,
+                        RUNNER.managed_signals(),
+                    ):
+                        interrupted_lock.acquire.side_effect = acquire_and_signal
+                        with self.assertRaisesRegex(
+                            RUNNER.ScaleOutError, f"launcher received {signum.name}"
+                        ):
+                            RUNNER.wait_for_ranks([process], time.monotonic() + 5, 5)
+                    with mock.patch.object(RUNNER, "TERMINATION_GRACE_SECONDS", 0.05):
+                        RUNNER.cleanup_process_groups([process])
+                    self.assertIsNotNone(process.returncode)
+                finally:
+                    # The unfixed runner can strand the lock; don't leak the
+                    # real child when this regression detects that failure.
+                    if lock.locked():
+                        lock.release()
+                    process.kill()
+                    process.wait(timeout=5)
+
     def test_sigterm_cleans_both_process_groups(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
