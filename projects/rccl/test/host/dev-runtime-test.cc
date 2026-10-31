@@ -3007,6 +3007,35 @@ TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_PopulatesEachSegmentPerBac
   }
 }
 
+// Branch: GIN on, so window (b, s) gets backend b's ginDevWins slice of segment s, never ginHostWins.
+TEST_F(AllocAndPopulateSegmentWindowsTest, GinEnabled_CopiesEachBackendsDeviceWindows) {
+  comm->devrState.ginEnabled = true;
+  auto devToken = [](int seg, int backend, int conn) {
+    return reinterpret_cast<ncclGinWindow_t>(uintptr_t{0x10000} + seg * 0x1000 + backend * 0x100 + conn * 0x10);
+  };
+  for (int s = 0; s < mem.numGinSegments; s++) {
+    for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        ginInfos[s].ginDevWins[b * NCCL_GIN_MAX_CONNECTIONS + i] = devToken(s, b, i);
+        // Host handles get distinct values so copying the wrong array shows up.
+        ginInfos[s].ginHostWins[b * NCCL_GIN_MAX_CONNECTIONS + i] =
+            reinterpret_cast<void*>(uintptr_t{0x900000} + s * 0x1000 + b * 0x100 + i * 0x10);
+      }
+    }
+  }
+
+  ASSERT_EQ(Alloc(), ncclSuccess);
+  ASSERT_NE(dev, nullptr);
+  for (int b = 0; b < NCCL_GIN_MAX_ACTIVE_BACKENDS; b++) {
+    for (int s = 0; s < mem.numGinSegments; s++) {
+      const ncclSegmentWindow& win = dev[b * mem.numGinSegments + s];
+      for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        EXPECT_EQ(win.ginWins[i], devToken(s, b, i)) << "backend " << b << " segment " << s << " conn " << i;
+      }
+    }
+  }
+}
+
 // Branch: the shadow-pool allocation fails, so no windows are reported back.
 TEST_F(AllocAndPopulateSegmentWindowsTest, AllocFails_ReturnsErrorWithoutOutputs) {
   comm->devrState.ginEnabled = true;
