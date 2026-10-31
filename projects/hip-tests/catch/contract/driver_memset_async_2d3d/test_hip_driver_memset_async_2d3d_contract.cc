@@ -67,7 +67,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_FillsWordRows_V
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
-                                kWidth * sizeof(uint16_t), kHeight, stream));
+                                kWidth, kHeight, stream));
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth * sizeof(uint16_t), device_ptr, pitch,
                              kWidth * sizeof(uint16_t), kHeight, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -92,7 +92,7 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D32Async_FillsDwordRows_
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
   HIP_CHECK(hipMemsetD2D32Async(reinterpret_cast<hipDeviceptr_t>(device_ptr), pitch, pattern,
-                                kWidth * sizeof(int), kHeight, stream));
+                                kWidth, kHeight, stream));
   HIP_CHECK(hipMemcpy2DAsync(dst.data(), kWidth * sizeof(int), device_ptr, pitch,
                              kWidth * sizeof(int), kHeight, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -164,10 +164,10 @@ HIP_TEST_CASE(Contract_DriverMemsetAsync2D3D_HipMemsetD2D16Async_NullDestination
   HIP_CHECK(hipStreamCreate(&stream));
   cleanup.Add([stream] { (void)hipStreamDestroy(stream); });
 
-  const hipError_t d2d16_status = hipMemsetD2D16Async(
-      hipDeviceptr_t(nullptr), pitch, 0x1357, kWidth * sizeof(uint16_t), kHeight, stream);
-  const hipError_t d2d32_status = hipMemsetD2D32Async(
-      hipDeviceptr_t(nullptr), pitch, 0x12345678, kWidth * sizeof(int), kHeight, stream);
+  const hipError_t d2d16_status =
+      hipMemsetD2D16Async(hipDeviceptr_t(nullptr), pitch, 0x1357, kWidth, kHeight, stream);
+  const hipError_t d2d32_status =
+      hipMemsetD2D32Async(hipDeviceptr_t(nullptr), pitch, 0x12345678, kWidth, kHeight, stream);
   const hipError_t memset2d_status = hipMemset2DAsync(nullptr, pitch, 0x7b, kWidth, kHeight, stream);
   const hipError_t memset3d_status = hipMemset3DAsync(null_3d, 0x5c, extent, stream);
 

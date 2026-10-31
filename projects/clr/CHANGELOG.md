@@ -6,6 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* Fixed `hipMemsetD2D16`, `hipMemsetD2D32`, `hipMemsetD2D16Async`, and `hipMemsetD2D32Async` to count width in typed elements, preserve row padding, and retain the typed pattern during stream capture. Multi-row typed fills require naturally aligned destinations and pitches; single-row fills retain support for unaligned destinations and odd pitches. Applications that previously passed a byte width must divide it by the element size (2 or 4 bytes).
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 

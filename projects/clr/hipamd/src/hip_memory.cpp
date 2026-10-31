@@ -5,6 +5,7 @@
  */
 
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 #include <hip/hip_runtime.h>
@@ -3899,11 +3900,34 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   return hipSuccess;
 }
 
+hipError_t ihipMemset2D_validate(void* dst, size_t pitch, size_t width, size_t height,
+                                 size_t elementSize, size_t& widthBytes) {
+  constexpr size_t maxSize = std::numeric_limits<size_t>::max();
+  if (elementSize == 0 || width > maxSize / elementSize) {
+    return hipErrorInvalidValue;
+  }
+  widthBytes = width * elementSize;
+  if ((height != 0 && widthBytes > maxSize / height) || widthBytes > pitch ||
+      (height > 1 &&
+       (pitch % elementSize != 0 || reinterpret_cast<uintptr_t>(dst) % elementSize != 0))) {
+    return hipErrorInvalidValue;
+  }
+  return hipSuccess;
+}
+
 hipError_t hipMemset2D_common(void* dst, size_t pitch, int value, size_t width, size_t height,
                               hipStream_t stream = nullptr, size_t elementSize = 1) {
   CHECK_STREAM_CAPTURING();
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, false,
-                      elementSize);
+  if (width == 0 || height == 0) {
+    return hipSuccess;
+  }
+  size_t widthBytes = 0;
+  hipError_t status = ihipMemset2D_validate(dst, pitch, width, height, elementSize, widthBytes);
+  if (status != hipSuccess) {
+    return status;
+  }
+  return ihipMemset3D({dst, pitch, widthBytes, height}, value, {widthBytes, height, 1}, stream,
+                      false, elementSize);
 }
 
 hipError_t hipMemset2D_spt(void* dst, size_t pitch, int value, size_t width, size_t height) {
@@ -3920,9 +3944,17 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
 hipError_t hipMemset2DAsync_common(void* dst, size_t pitch, int value, size_t width, size_t height,
                                    hipStream_t stream, size_t elementSize = 1) {
   CHECK_STREAM_DETACHED(stream);
-  STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, width, height);
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true,
-                      elementSize);
+  STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, elementSize, width, height);
+  if (width == 0 || height == 0) {
+    return hipSuccess;
+  }
+  size_t widthBytes = 0;
+  hipError_t status = ihipMemset2D_validate(dst, pitch, width, height, elementSize, widthBytes);
+  if (status != hipSuccess) {
+    return status;
+  }
+  return ihipMemset3D({dst, pitch, widthBytes, height}, value, {widthBytes, height, 1}, stream,
+                      true, elementSize);
 }
 
 hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, size_t height,

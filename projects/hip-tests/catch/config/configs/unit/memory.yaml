@@ -1031,6 +1031,12 @@ memory:
   Unit_hipMemsetD2D16_NegTsts:
     <<: *level_default
     tags: [memset]
+  Unit_hipMemsetD2D16_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
   Unit_hipMemsetD2D16Async_BasicFunctional:
     <<: *level_default
     tags: [memset]
@@ -1038,6 +1044,15 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16Async_NegTsts:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D16Async_EmptyCapture:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32_BasicFunctional:
@@ -1049,6 +1064,12 @@ memory:
   Unit_hipMemsetD2D32_NegTsts:
     <<: *level_default
     tags: [memset]
+  Unit_hipMemsetD2D32_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
   Unit_hipMemsetD2D32Async_BasicFunctional:
     <<: *level_default
     tags: [memset]
@@ -1056,6 +1077,15 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_NegTsts:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_ElementCountsAndPadding:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_InvalidGeometry:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32Async_EmptyCapture:
     <<: *level_default
     tags: [memset]
   Unit_hipMemcpy3DPeer_BasicFunctional:
