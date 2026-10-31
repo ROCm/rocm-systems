@@ -96,8 +96,48 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
+  /// waits, barriers, messages, no-ops and the PC writers.
+  SALU = (1ULL << 30),
+  /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
+  /// transcendental operations.
+  VALU = (1ULL << 31),
+  /// @brief Encoded for scalar memory (SMEM), including scalar cache maintenance
+  /// and the SMEM timestamp reads.
+  SMEM = (1ULL << 32),
+  /// @brief Encoded for vector memory: buffer, flat, global, scratch, image and
+  /// tensor.
+  VMEM = (1ULL << 33),
+  /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
+  LDS = (1ULL << 34),
+  /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
+  /// sin and cos, including their pseudo-scalar forms.
+  TRANSCENDENTAL = (1ULL << 35),
+  /// @brief Sleeps or halts its wave (s_sleep, s_sleep_var, s_sethalt, s_sendmsghalt).
+  SUSPENDS_WAVE = (1ULL << 36),
+  /// @brief Enters or returns from the trap handler (s_trap, s_rfe*). Writes the PC
+  /// without any of the control-flow flags above.
+  TRAP_CONTROL = (1ULL << 37)
 };
+
+namespace amdgpu {
+
+/// @brief The AMDGPU block an instruction issues to.
+/// @details A static classification of the decoded instruction's encoding: it
+/// does not see address routing, so generic FLAT is VMEM even when its address
+/// resolves to LDS.
+enum class ExecutionBlock : uint8_t {
+  UNKNOWN, ///< In no block below, e.g. exports and non-AMDGPU instructions.
+  SALU,    ///< Scalar ALU, including waits, barriers, messages and no-ops.
+  VALU,    ///< Vector ALU, including matrix and transcendental operations.
+  BRANCH,  ///< Instructions that may write the PC; see Instruction::writes_pc().
+  SMEM,    ///< Scalar memory and scalar cache maintenance.
+  VMEM,    ///< Vector memory: buffer, global, scratch, flat, image and tensor.
+  LDS,     ///< LDS, including LDS-direct, GWS and the ds_ no-op.
+};
+
+} // namespace amdgpu
 
 class BasicBlock;
 
@@ -351,6 +391,46 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Whether this instruction ends the program (e.g. s_endpgm).
+  bool is_program_terminator() const { return flags_ & PROGRAM_TERMINATOR; }
+
+  /// @brief Whether this instruction may leave the PC somewhere other than the
+  /// next instruction.
+  /// @details The control-flow flags plus TRAP_CONTROL. s_setpc, s_swappc and
+  /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
+  bool writes_pc() const {
+    constexpr uint64_t pc_flags =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | TRAP_CONTROL;
+    return (flags_ & pc_flags) != 0;
+  }
+
+  /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
+  bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
+
+  /// @brief Whether this instruction sleeps or halts its wave. See SUSPENDS_WAVE.
+  bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
+
+  /// @brief The AMDGPU block this instruction issues to.
+  /// @details The generated encoding sets exactly one of the block flags, or
+  /// none for exports. PC writers are encoded for the scalar ALU and report as
+  /// BRANCH.
+  [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
+    using amdgpu::ExecutionBlock;
+    if (flags_ & LDS)
+      return ExecutionBlock::LDS;
+    if (flags_ & VMEM)
+      return ExecutionBlock::VMEM;
+    if (flags_ & SMEM)
+      return ExecutionBlock::SMEM;
+    if (writes_pc())
+      return ExecutionBlock::BRANCH;
+    if (flags_ & SALU)
+      return ExecutionBlock::SALU;
+    if (flags_ & VALU)
+      return ExecutionBlock::VALU;
+    return ExecutionBlock::UNKNOWN;
+  }
 
   /// @brief Signed byte offset for a direct branch target.
   ///

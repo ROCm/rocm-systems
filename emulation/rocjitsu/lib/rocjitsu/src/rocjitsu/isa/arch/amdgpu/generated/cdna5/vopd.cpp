@@ -182,6 +182,7 @@ Vopd::Vopd(const MachineInst *inst)
   raw_encoding_ = words;
   word0_ = words[0];
   word1_ = words[1];
+  flags_ |= VALU;
 
   if ((word0_ >> 24) == 0xCF) {
     format_ = Format::Vopd3;
