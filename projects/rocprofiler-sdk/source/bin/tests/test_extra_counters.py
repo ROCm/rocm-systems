@@ -96,7 +96,7 @@ def test_attach_with_application_preserves_args_and_large_path_only(
 
     real_open = os.open
 
-    def redirected_open(path, flags, mode=0o777):
+    def redirected_open(path, flags, mode=0o600):
         if path == f"/tmp/rocprofv3_attach_{pid}.pkl":
             path = cache_file
         return real_open(path, flags, mode)
