@@ -17,6 +17,7 @@
 #include "device/hierarchical_shuffle.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
