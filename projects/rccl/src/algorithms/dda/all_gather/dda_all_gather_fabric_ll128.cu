@@ -21,10 +21,15 @@
 #include <cstdint>
 #include <utility>
 
-// Tuned block size, and the fallback when the env override is out of range.
-constexpr unsigned kDdaLL128AGDefaultThreads = 512;
+// Block size from bytes pushed, (nRanks - 1) x per-rank: small blocks spread few slices over more CUs.
+constexpr unsigned kDdaLL128AGLargeThreads = 512;
+constexpr unsigned kDdaLL128AGMidThreads = 256;
+constexpr unsigned kDdaLL128AGSmallThreads = 128;
+constexpr size_t kDdaLL128AGSmallMaxPushBytes = 4ULL * 1024 * 1024;
+constexpr size_t kDdaLL128AGMidMaxPushBytes = 16ULL * 1024 * 1024;
 
-RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
+// 0 (unset): pick the block size from the pushed bytes as above.
+RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 
 namespace {
 
@@ -45,12 +50,15 @@ constexpr size_t ddaLL128AGMaxPerRankBytes(int nRanks, size_t scratchBytes) {
   return ddaLL128AGSlotSlices(nRanks, scratchBytes) * (size_t)kDdaLL128DataBytesPerSlice;
 }
 
-unsigned ddaLL128AGThreads(unsigned blockSize) {
+unsigned ddaLL128AGThreads(int nRanks, size_t perRankBytes) {
   const int64_t UserInput = rcclParamDdaLL128AGThreads();
   if (UserInput >= kDdaLL128Warp && UserInput <= 1024 && (UserInput % kDdaLL128Warp) == 0) {
     return (unsigned)UserInput;
   }
-  return blockSize;
+  const size_t pushBytes = (size_t)(nRanks - 1) * perRankBytes;
+  if (pushBytes <= kDdaLL128AGSmallMaxPushBytes) return kDdaLL128AGSmallThreads;
+  if (pushBytes <= kDdaLL128AGMidMaxPushBytes) return kDdaLL128AGMidThreads;
+  return kDdaLL128AGLargeThreads;
 }
 
 // Blocks in one peer column: a warp per slice, capped by the column's share of
@@ -67,7 +75,7 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
 // Single source of the launch geometry: grid.x = one column per remote peer,
 // grid.y = the per-peer slice split.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
-  const unsigned threads = ddaLL128AGThreads(kDdaLL128AGDefaultThreads);
+  const unsigned threads = ddaLL128AGThreads(comm->nRanks, perRankBytes);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
