@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -251,8 +252,7 @@ int main(int argc, char **argv) {
     bool b_extract_sei_messages = false;
     OutputSurfaceMemoryType mem_type = OUT_SURFACE_MEM_DEV_INTERNAL;        // set to decode only for performance
     bool b_force_zero_latency = false, b_dump_output_frames = false;
-    bool b_unsupported_codec = false;
-    std::vector<std::string> input_file_names;
+    std::vector<std::string> input_file_paths, input_file_names;
     ParseCommandLine(input_folder_path, output_folder_path, device_id, n_thread, b_dump_output_frames, mem_type, disp_delay, argc, argv);
 
     try {
@@ -261,12 +261,13 @@ int main(int argc, char **argv) {
 #else
         for (const auto& entry : std::experimental::filesystem::directory_iterator(input_folder_path)) {
 #endif
-            input_file_names.push_back(entry.path().string());
-            num_files++;
+            input_file_paths.push_back(entry.path().string());
+        }
+        if (input_file_paths.empty()) {
+            std::cerr << "Error: No input files found in " << input_folder_path << std::endl;
+            return 1;
         }
 
-        std::vector<std::string> output_file_names(num_files);
-        n_thread = ((n_thread > num_files) ? num_files : n_thread);
         int num_devices = 0, sd = 0;
         hipError_t hip_status = hipSuccess;
         hipDeviceProp_t hip_dev_prop;
@@ -296,6 +297,82 @@ int main(int argc, char **argv) {
             sd = 1;
         }
 
+        int hip_vis_dev_count = 0;
+        GetEnvVar("HIP_VISIBLE_DEVICES", hip_vis_dev_count);
+        // GPU device that decoder thread i decodes on
+        auto dec_device_id = [&](int i) {
+            if (hip_vis_dev_count) {
+                return i % hip_vis_dev_count;
+            }
+            if (device_id % 2 == 0) {
+                return (i % 2 == 0) ? device_id : device_id + sd;
+            }
+            return (i % 2 == 0) ? device_id - sd : device_id;
+        };
+
+        // Step 1: check the decode capability of every GPU device the decoder threads use for each input file. Query
+        // rocDecGetDecoderCaps directly instead of using RocVideoDecoder::CodecSupported(), which reports a failed query
+        // the same way as an unsupported codec. A codec the GPU's VCN doesn't support (e.g. AV1 on gfx90a) or an entry
+        // that isn't a video (e.g. a subdirectory or a subtitle file) only removes that entry from the batch; a failed
+        // query is an error.
+        std::vector<int> dec_device_ids;
+        int max_threads = std::min(n_thread, static_cast<int>(input_file_paths.size()));
+        for (int i = 0; i < max_threads; i++) {
+            if (std::find(dec_device_ids.begin(), dec_device_ids.end(), dec_device_id(i)) == dec_device_ids.end()) {
+                dec_device_ids.push_back(dec_device_id(i));
+            }
+        }
+        std::vector<std::unique_ptr<VideoDemuxer>> v_demuxer;
+        int num_unsupported = 0;
+        for (const auto &input_file_path : input_file_paths) {
+            std::unique_ptr<VideoDemuxer> demuxer(new VideoDemuxer(input_file_path.c_str()));
+            std::string input_file_name = input_file_path.substr(input_file_path.find_last_of("/\\") + 1);
+            // VideoDemuxer doesn't throw when it can't open the file or find a video stream; it leaves the bit depth at 0
+            // and the codec ID unset.
+            if (demuxer->GetBitDepth() == 0) {
+                std::cout << "info: skipping " << input_file_name << ", not a video file" << std::endl;
+                continue;
+            }
+            bool b_supported = true;
+            for (int dev_id : dec_device_ids) {
+                RocdecDecodeCaps decode_caps = {};
+                decode_caps.device_id = dev_id;
+                decode_caps.codec_type = AVCodec2RocDecVideoCodec(demuxer->GetCodecID());
+                decode_caps.chroma_format = rocDecVideoChromaFormat_420;
+                decode_caps.bit_depth_minus_8 = demuxer->GetBitDepth() - 8;
+                rocDecStatus caps_status = rocDecGetDecoderCaps(&decode_caps);
+                if (caps_status != ROCDEC_SUCCESS) {
+                    std::cerr << "Error: rocDecGetDecoderCaps failed for " << input_file_name << ": " << rocDecGetErrorName(caps_status) << std::endl;
+                    return 1;
+                }
+                if (!decode_caps.is_supported) {
+                    b_supported = false;
+                    break;
+                }
+            }
+            if (!b_supported) {
+                std::cout << "info: skipping " << input_file_name << ", its codec isn't supported on the GPU" << std::endl;
+                num_unsupported++;
+                continue;
+            }
+            v_demuxer.push_back(std::move(demuxer));
+            input_file_names.push_back(input_file_name);
+        }
+
+        // Step 2: decode only the supported files. If none is supported, report the whole run as skipped; if there
+        // is no video file at all, that's an error.
+        if (v_demuxer.empty() && num_unsupported == 0) {
+            std::cerr << "Error: No video files found in " << input_folder_path << std::endl;
+            return 1;
+        }
+        num_files = static_cast<int>(v_demuxer.size());
+        if (num_files == 0) {
+            std::cout << "info: Codec not supported on GPU, skipping!" << std::endl;
+            return 77;
+        }
+        std::vector<std::string> output_file_names(num_files);
+        n_thread = ((n_thread > num_files) ? num_files : n_thread);
+
         std::string device_name;
         int pci_bus_id, pci_domain_id, pci_device_id;
         double total_fps = 0;
@@ -304,12 +381,9 @@ int main(int argc, char **argv) {
         std::vector<int> v_frame;
         v_fps.resize(num_files, 0);
         v_frame.resize(num_files, 0);
-        int hip_vis_dev_count = 0;
-        GetEnvVar("HIP_VISIBLE_DEVICES", hip_vis_dev_count);
 
         std::cout << "info: Number of threads: " << n_thread << std::endl;
 
-        std::vector<std::unique_ptr<VideoDemuxer>> v_demuxer(num_files);
         std::unique_ptr<RocVideoDecoder> dec_8bit_avc(nullptr), dec_8bit_hevc(nullptr), dec_10bit_hevc(nullptr), dec_8bit_av1(nullptr), dec_10bit_av1(nullptr), dec_8bit_vp9(nullptr), dec_10bit_vp9(nullptr);
         std::vector<std::unique_ptr<DecoderInfo>> v_dec_info;
         ThreadPool thread_pool(n_thread);
@@ -327,28 +401,16 @@ int main(int argc, char **argv) {
         }
         reconfig_params.p_reconfig_user_struct = &reconfig_user_struct;
 
-        for (int i = 0; i < num_files; i++) {
-            std::unique_ptr<VideoDemuxer> demuxer(new VideoDemuxer(input_file_names[i].c_str()));
-            v_demuxer[i] = std::move(demuxer);
-            std::size_t found_file = input_file_names[i].find_last_of("/\\");
-            input_file_names[i] = input_file_names[i].substr(found_file + 1);
-            if (b_dump_output_frames) {
+        if (b_dump_output_frames) {
+            for (int i = 0; i < num_files; i++) {
                 std::size_t found_ext = input_file_names[i].find_last_of('.');
-                std::string path = output_folder_path + "/output_" + input_file_names[i].substr(0, found_ext) + ".yuv";
-                output_file_names[i] = path;
+                output_file_names[i] = output_folder_path + "/output_" + input_file_names[i].substr(0, found_ext) + ".yuv";
             }
         }
 
         for (int i = 0; i < n_thread; i++) {
             v_dec_info.emplace_back(std::make_unique<DecoderInfo>());
-            if (!hip_vis_dev_count) {
-                if (device_id % 2 == 0) {
-                    v_dec_info[i]->dec_device_id = (i % 2 == 0) ? device_id : device_id + sd;
-                } else
-                    v_dec_info[i]->dec_device_id = (i % 2 == 0) ? device_id - sd : device_id;
-            } else {
-                v_dec_info[i]->dec_device_id = i % hip_vis_dev_count;
-            }
+            v_dec_info[i]->dec_device_id = dec_device_id(i);
 
             v_dec_info[i]->rocdec_codec_id = AVCodec2RocDecVideoCodec(v_demuxer[i]->GetCodecID());
             v_dec_info[i]->bit_depth = v_demuxer[i]->GetBitDepth();
@@ -464,12 +526,6 @@ int main(int argc, char **argv) {
                 std::setfill('0') << std::setw(2) << std::right << std::hex << pci_bus_id << ":" << std::setfill('0') << std::setw(2) <<
                 std::right << std::hex << pci_domain_id << "." << pci_device_id << std::dec << std::endl;
             }
-            if (!v_dec_info[thread_idx]->viddec->CodecSupported(v_dec_info[thread_idx]->dec_device_id, v_dec_info[thread_idx]->rocdec_codec_id, v_dec_info[thread_idx]->bit_depth)) {
-                std::cerr << "Error: Codec not supported on GPU for " << input_file_names[j] << "!" << std::endl;
-                v_dec_info[thread_idx]->decoding_complete = true;
-                b_unsupported_codec = true;
-                continue;
-            }
             thread_pool.ExecuteJob(std::bind(DecProc, v_dec_info[thread_idx]->viddec.get(), v_demuxer[j].get(), &v_frame[j], &v_fps[j], std::ref(v_dec_info[thread_idx]->decoding_complete), b_dump_output_frames, output_file_names[j], mem_type));
         }
 
@@ -501,6 +557,6 @@ int main(int argc, char **argv) {
       exit(1);
     }
 
-    return b_unsupported_codec ? 1 : 0;
+    return 0;
 }
 
