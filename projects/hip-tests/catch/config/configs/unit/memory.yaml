@@ -840,11 +840,11 @@ memory:
   Unit_hipMemcpy3DBatchAsync_Any_MatchesSourceAfterSync:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_AllocationFailure:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_DuringApiCall_IgnoresSourceWritesAfterReturn:
     <<: *level_default
-    disabled:
-      targets: [amd_linux, amd_windows, amd_wsl]
-      reason: "ROCM-31101 - DuringApiCall on an ephemeral host source is not applied on the 3D batch path yet."
     tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_NonZeroFlags_SetsFailIdxToSizeMax:
     <<: *level_default
@@ -868,6 +868,27 @@ memory:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpy3DBatchAsync_PartiallyRegisteredHostSource_IsRejected:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_HostAccessibleDestinations:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_LargeDistinctSources:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_LargeSharedSource:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_LayeredSourceStrides:
+    <<: *level_default
+    tags: [transfer, image]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_MixedSourceOrders:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_QueuedSourceVersions:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DBatchAsync_DuringApiCall_StridesAndDeferredDispatch:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
@@ -971,6 +992,33 @@ memory:
   Unit_hipMemcpyBatchAsync_LegacyFlags_Ignored:
     <<: *level_2
     tags: [P1]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_AllocationFailure:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_GateScopeExit:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_BlockedSourceLifetime:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_HostAccessibleDestinations:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_LargeDistinctSources:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_LargeSharedSource:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_MixedSourceOrders:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_DuringApiCall_QueuedSourceVersions:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_ZeroAttributeCountUsesStreamOrder:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative:
     <<: *level_2
     tags: [P1]
@@ -1004,6 +1052,33 @@ memory:
   Unit_hipExtMemcpyBatchAsync_IndirectSrcDst:
     <<: *level_2
     tags: [P1]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_AllocationFailure:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_BlockedSourceLifetime:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_HostAccessibleDestinations:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_HostSwap:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_LargeDistinctSources:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_LargeSharedSource:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_MixedSourceOrders:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_DuringApiCall_QueuedSourceVersions:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipExtMemcpyBatchAsync_ZeroAttributeCountUsesStreamOrder:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemsetD2D8_BasicFunctional:
     <<: *level_default
     tags: [memset]

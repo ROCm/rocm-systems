@@ -292,3 +292,5 @@ if(HIP_PLATFORM MATCHES "nvidia")
   set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=compute_75)
   set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=compute_75)
 endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/batch_alloc_failure.cmake")

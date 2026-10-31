@@ -261,6 +261,9 @@ class Event : public RuntimeObject {
 };
 
 union CopyMetadata {
+  //! The ROCm backend honors BLIT as shader-only for rectangular and buffer-to-image
+  //! copies, avoiding blocking host-copy fallback for pinned source snapshots.
+  //! Other backends may treat this as a preference.
   enum CopyEnginePreference { NONE = 0, BLIT = 1, SDMA = 2, CPDMA = 3 };
   //! Source access ordering for batch copies
   enum SrcAccessOrder {
@@ -1287,14 +1290,17 @@ struct BatchCopyRectOp {
   BufferRect src_rect;  //!< Source origin, row pitch and slice pitch
   BufferRect dst_rect;  //!< Destination origin, row pitch and slice pitch
   Coord3D size;         //!< Box width in bytes, height and depth
+  CopyMetadata metadata;  //!< Copy metadata for this operation
 
   BatchCopyRectOp(Memory* src_memory_arg, Memory* dst_memory_arg, const BufferRect& src_rect_arg,
-                  const BufferRect& dst_rect_arg, const Coord3D& size_arg)
+                  const BufferRect& dst_rect_arg, const Coord3D& size_arg,
+                  CopyMetadata metadata_arg = CopyMetadata())
       : src_memory(src_memory_arg),
         dst_memory(dst_memory_arg),
         src_rect(src_rect_arg),
         dst_rect(dst_rect_arg),
-        size(size_arg) {}
+        size(size_arg),
+        metadata(metadata_arg) {}
 };
 
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
@@ -1385,11 +1391,8 @@ class BatchWriteMemoryCommand : public Command {
  public:
   BatchWriteMemoryCommand(HostQueue& queue, cl_command_type cmd_type,
                           const EventWaitList& event_wait_list,
-                          std::vector<BatchWriteMemoryOp>&& write_ops,
-                          std::vector<std::vector<char>>&& host_snapshots = {})
-      : Command(queue, cmd_type, event_wait_list),
-        write_ops_(std::move(write_ops)),
-        host_snapshots_(std::move(host_snapshots)) {}
+                          std::vector<BatchWriteMemoryOp>&& write_ops)
+      : Command(queue, cmd_type, event_wait_list), write_ops_(std::move(write_ops)) {}
 
   void submit(device::VirtualDevice& device) override { device.SubmitBatchWriteMemory(*this); }
 
@@ -1415,7 +1418,6 @@ class BatchWriteMemoryCommand : public Command {
  private:
   std::vector<BatchWriteMemoryOp> write_ops_;      //!< Vector of write operations
   std::vector<Memory*> pinned_memory_;             //!< Pinned memory used by the batch
-  std::vector<std::vector<char>> host_snapshots_;  //!< DuringApiCall source snapshots
 };
 
 /*! \brief  A batch read memory command for multiple device-to-pageable-host
