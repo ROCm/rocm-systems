@@ -1281,7 +1281,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             AllocKind akind = AllocKind::Device;
             if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
                 continue;
-            if (akind == AllocKind::Device) continue;
+            if (akind == AllocKind::Device || akind == AllocKind::Managed) continue;
             static std::mutex mu;
             static std::set<std::string> seen;
             std::string key = kernel_name + "#" + std::to_string(idx);
@@ -2573,7 +2573,16 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 }
 
 void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
-    ctx.remove_alloc(rec_base);
+    // Only the entry for the stand-in buffer goes: the archive may have
+    // allocated something else at this address since (a managed buffer, a host
+    // allocation), and that entry keeps its charge and its buffer.
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(rec_base);
+        const bool standin = it != ctx.alloc_map.end() && it->second.live_ptr == live;
+        lk.unlock();
+        if (standin) ctx.remove_alloc(rec_base);
+    }
     if (live) (void)hipFree(live);
 }
 
@@ -3106,6 +3115,8 @@ void PlaybackContext::note_d2h_fail(uint64_t seq) {
     }
 }
 
+static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec);
+
 static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
                                 bool managed = false) {
     const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
@@ -3113,6 +3124,13 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
     hipError_t r;
+    // Managed memory can be backed by host memory (pageable system memory, or
+    // pinned host memory on a runtime without SVM), so it counts against
+    // --max-host-bytes like hipHostMalloc, charged before the call.
+    if (managed) {
+        free_replaced_host_alloc(ctx, a->ptr);
+        if (!ctx.charge_host(pad_sz, "hipMallocManaged")) return hipErrorMemoryAllocation;
+    }
     // --guard-segments: back the allocation with VMM and leave an unmapped span
     // after it, so running off the end of the segment traps here instead of
     // landing in whatever the driver placed next. Managed memory has no VMM
@@ -3136,10 +3154,13 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         // where the original run never issued it and an injected memset would
         // invalidate the capture (HIP 901) for every subsequent op in the graph.
         hrr_zero_init_alloc(ctx, live, pad_sz);
-        ctx.record_alloc(a->ptr, live, pad_sz);
+        ctx.record_alloc(a->ptr, live, pad_sz,
+                         managed ? AllocKind::Managed : AllocKind::Device);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
                     (unsigned long long)a->ptr, orig_sz, pad_sz);
+    } else if (managed) {
+        ctx.host_budget.release(pad_sz);
     }
     return r;
 }
@@ -3268,8 +3289,8 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 // hipMallocHost:  ret(4) ptr(8) size(8)
 
-// An archive can record a host allocation again at an address that still holds
-// one: a second pass replays the same events, and a crafted archive can repeat
+// An archive can record a host (or managed) allocation again at an address that
+// still holds one: a second pass replays the same events, and a crafted archive can repeat
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
@@ -3282,7 +3303,9 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         auto it = ctx.alloc_map.find(rec);
         if (it == ctx.alloc_map.end()) return;
         kind = it->second.kind;
-        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
+        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister &&
+            kind != AllocKind::Managed)
+            return;
         host_ptr = it->second.live_ptr;
         ctx.host_budget.release(it->second.size);
         ctx.alloc_map.erase(it);
@@ -3294,6 +3317,10 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     }
     if (kind == AllocKind::HostMalloc) {
         (void)hipHostFree(host_ptr);
+        return;
+    }
+    if (kind == AllocKind::Managed) {
+        (void)hipFree(host_ptr);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
@@ -5369,12 +5396,36 @@ hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
             return hipErrorInvalidDevice;
         }
     }
+    // A host-located handle is host-backed physical memory (pinned, GTT), so it
+    // counts against --max-host-bytes. A device-located one does not.
+    const bool host_backed = prop.location.type != hipMemLocationTypeDevice;
+    // A handle recorded again under a name still held: release the old one first
+    // so neither the handle nor its charge is left behind.
+    {
+        hipMemGenericAllocationHandle_t old{};
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            auto it = ctx.vmm_handle_map.find(rec_handle);
+            if (it != ctx.vmm_handle_map.end()) {
+                old = it->second;
+                ctx.vmm_handle_map.erase(it);
+            }
+        }
+        if (old) {
+            (void)hipMemRelease(old);
+            ctx.vmm_note_release(old);  // its charge stays while a mapping holds it
+        }
+    }
+    const uint64_t charge = host_backed ? a->size : 0;
+    if (host_backed && !ctx.charge_host(charge, "hipMemCreate (host location)"))
+        return hipErrorMemoryAllocation;
     hipMemGenericAllocationHandle_t live_handle{};
     hipError_t r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
                                 static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess) {
-        std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_handle_map[rec_handle] = live_handle;
+        ctx.vmm_note_create(rec_handle, live_handle, charge);
+    } else {
+        ctx.host_budget.release(charge);
     }
     return r;
 }
@@ -5385,8 +5436,11 @@ hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live) return hipSuccess;
     hipError_t r = hipMemRelease(live);
     if (r == hipSuccess) {
-        std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_handle_map.erase(a->handle);
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.vmm_handle_map.erase(a->handle);
+        }
+        ctx.vmm_note_release(live);
     }
     return r;
 }
@@ -5403,18 +5457,22 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     }
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
-    return hipMemMap(live_va,
-                     static_cast<size_t>(a->size),
-                     static_cast<size_t>(a->offset),
-                     live_handle,
-                     static_cast<unsigned long long>(a->flags));
+    hipError_t r = hipMemMap(live_va,
+                             static_cast<size_t>(a->size),
+                             static_cast<size_t>(a->offset),
+                             live_handle,
+                             static_cast<unsigned long long>(a->flags));
+    if (r == hipSuccess) ctx.vmm_note_map(live_va, static_cast<size_t>(a->size), live_handle);
+    return r;
 }
 
 hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemUnmap*>(pl);
     void* live_va = ctx.translate_vmm_va(a->ptr);
     if (!live_va) return hipSuccess;
-    return hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    if (r == hipSuccess) ctx.vmm_note_unmap(live_va, static_cast<size_t>(a->size));
+    return r;
 }
 
 // ---------------------------------------------------------------------------

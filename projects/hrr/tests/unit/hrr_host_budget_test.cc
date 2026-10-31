@@ -35,6 +35,8 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl);
+hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl);
+hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace fs = std::filesystem;
 
@@ -281,6 +283,114 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - hipMallocManaged refuses a recorded size the budget cannot hold before it
+ *     calls HIP (managed memory can be backed from host memory): the
+ *     hipHostMalloc refusal, so hipErrorMemoryAllocation, the replay ended,
+ *     the message names --max-host-bytes, nothing charged, no mapping recorded.
+ *     It does so through the dispatch table too, and a size that would wrap a
+ *     naive sum is refused the same way.
+ */
+TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationRefusedOverBudget", "[hrr]") {
+  CHECK(hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED] == &playback_hipMallocManaged);
+  for (uint64_t size : {uint64_t{101}, uint64_t{1} << 32, UINT64_MAX - 4096}) {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    hrr_test::ExactRecord<hrr_args_hipMalloc> rec;
+    rec.get()->ptr = 0x6000;
+    rec.get()->size = size;
+    hipError_t r = hipSuccess;
+    const std::string err = hrr_test::capture_stderr(
+        [&] { r = hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED](ctx, rec.bytes()); });
+    CHECK(r == hipErrorMemoryAllocation);
+    CHECK(ctx.fatal_error.load());
+    CHECK(ctx.host_budget.used() == 0);
+    CHECK_FALSE(ctx.has_alloc(0x6000));
+    CHECK(err.find("hipMallocManaged") != std::string::npos);
+    CHECK(err.find("--max-host-bytes") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - hipMemCreate with a host location (Host, HostNuma or HostNumaCurrent)
+ *     refuses a size the budget cannot hold before it calls HIP: the same
+ *     refusal as hipHostMalloc, nothing charged, no handle recorded. This holds
+ *     through the dispatch table too.
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
+  CHECK(hrr_playback_dispatch[HRR_API_HIPMEMCREATE] == &playback_hipMemCreate);
+  for (hipMemLocationType loc : {hipMemLocationTypeHost, hipMemLocationTypeHostNuma,
+                                 hipMemLocationTypeHostNumaCurrent}) {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    hrr_test::ExactRecord<hrr_args_hipMemCreate> rec;
+    hipMemAllocationProp prop{};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = loc;
+    prop.location.id = 0;
+    rec.get()->handle = 0x7000;
+    rec.get()->size = uint64_t{4} << 30;
+    rec.get()->prop_present = 1;
+    std::memcpy(rec.get()->prop_bytes, &prop, sizeof(prop));
+    hipError_t r = hipSuccess;
+    const std::string err = hrr_test::capture_stderr(
+        [&] { r = hrr_playback_dispatch[HRR_API_HIPMEMCREATE](ctx, rec.bytes()); });
+    CHECK(r == hipErrorMemoryAllocation);
+    CHECK(ctx.fatal_error.load());
+    CHECK(ctx.host_budget.used() == 0);
+    CHECK(ctx.translate_vmm_handle(0x7000) == hipMemGenericAllocationHandle_t{});
+    CHECK(err.find("hipMemCreate") != std::string::npos);
+    CHECK(err.find("--max-host-bytes") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A managed entry holds its charge until it is removed: remove_alloc (what
+ *     hipFree calls) returns it, a device entry returns nothing, and removing
+ *     the same address twice does not give back more than was charged.
+ *   - A managed allocation recorded again at an address that still holds one
+ *     frees the old entry and gives its charge back before the new one is
+ *     charged. The new allocation is over budget here so no HIP allocation is
+ *     made: only the replaced entry's release is observed.
+ */
+TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree", "[hrr]") {
+  {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    REQUIRE(ctx.charge_host(60, "seed managed"));
+    ctx.record_alloc(0x8000, nullptr, 60, AllocKind::Managed);
+    REQUIRE(ctx.charge_host(30, "seed device-side"));  // unrelated charge stays
+    ctx.record_alloc(0x9000, nullptr, 30, AllocKind::Device);
+    CHECK(ctx.host_budget.used() == 90);
+
+    ctx.remove_alloc(0x9000);  // a device entry was never charged here
+    CHECK(ctx.host_budget.used() == 90);
+    ctx.remove_alloc(0x8000);
+    CHECK(ctx.host_budget.used() == 30);
+    ctx.remove_alloc(0x8000);  // already gone
+    CHECK(ctx.host_budget.used() == 30);
+  }
+  {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    REQUIRE(ctx.charge_host(60, "seed"));
+    ctx.record_alloc(0xA000, nullptr, 60, AllocKind::Managed);
+    hrr_test::ExactRecord<hrr_args_hipMalloc> rec;
+    rec.get()->ptr = 0xA000;
+    rec.get()->size = 101;
+    (void)hrr_test::capture_stderr(
+        [&] { (void)hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED](ctx, rec.bytes()); });
+    CHECK_FALSE(ctx.has_alloc(0xA000));
+    CHECK(ctx.host_budget.used() == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - host_landing_buffer hands back the same buffer for a smaller request,
  *     charges a larger one whole (the outgrown block stays resident for the
  *     nodes holding it), and on a refusal returns null, ends the replay and
@@ -328,6 +438,77 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
   // Launching graph 1 now writes through the pointer node 1 was given.
   std::memset(n1, 0x44, 16);
   CHECK(n1[15] == 0x44);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A host-located hipMemCreate handle keeps its charge while a hipMemMap
+ *     holds it: hipMemRelease alone does not give the bytes back (the runtime
+ *     keeps the memory until the last hipMemUnmap), the unmap does. A handle
+ *     mapped twice is returned only by the second unmap, and one never mapped is
+ *     returned by the release. Each step checks the exact figure, so a charge
+ *     returned twice shows too.
+ */
+TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
+  auto* h1 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x1000});
+  auto* h2 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x2000});
+  auto* va = reinterpret_cast<void*>(uintptr_t{0x100000});
+  auto* va2 = reinterpret_cast<void*>(uintptr_t{0x200000});
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(1000);
+
+  // Create, map, release: the charge stays, then the unmap returns it.
+  REQUIRE(ctx.charge_host(300, "seed"));
+  ctx.vmm_note_create(0x7000, h1, 300);
+  ctx.vmm_note_map(va, 300, h1);
+  ctx.vmm_note_release(h1);
+  CHECK(ctx.host_budget.used() == 300);
+  ctx.vmm_note_unmap(va, 300);
+  CHECK(ctx.host_budget.used() == 0);
+
+  // Two mappings: only the last unmap returns it.
+  REQUIRE(ctx.charge_host(200, "seed"));
+  ctx.vmm_note_create(0x7100, h2, 200);
+  ctx.vmm_note_map(va, 100, h2);
+  ctx.vmm_note_map(va2, 100, h2);
+  ctx.vmm_note_release(h2);
+  ctx.vmm_note_unmap(va, 100);
+  CHECK(ctx.host_budget.used() == 200);
+  ctx.vmm_note_unmap(va2, 100);
+  CHECK(ctx.host_budget.used() == 0);
+  ctx.vmm_note_unmap(va2, 100);  // nothing mapped any more
+  CHECK(ctx.host_budget.used() == 0);
+
+  // Never mapped: the release returns it at once.
+  REQUIRE(ctx.charge_host(50, "seed"));
+  ctx.vmm_note_create(0x7200, h1, 50);
+  ctx.vmm_note_release(h1);
+  CHECK(ctx.host_budget.used() == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Releasing a region's stand-in buffer removes the alloc_map entry only if
+ *     that entry is the stand-in. When the archive has since allocated managed
+ *     memory at the region base, region DEL leaves the managed entry and its
+ *     charge in place.
+ */
+TEST_CASE("Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation", "[hrr]") {
+  auto* managed = reinterpret_cast<void*>(uintptr_t{0xB0000});
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(100);
+  REQUIRE(ctx.charge_host(60, "seed managed"));
+  ctx.record_alloc(0xB000, managed, 60, AllocKind::Managed);
+
+  hrr_release_region(ctx, 0xB000, nullptr);  // the stand-in was some other buffer
+  CHECK(ctx.has_alloc(0xB000));
+  CHECK(ctx.host_budget.used() == 60);
+
+  hrr_release_region(ctx, 0xB000, managed);  // now it is the entry's own buffer
+  CHECK_FALSE(ctx.has_alloc(0xB000));
+  CHECK(ctx.host_budget.used() == 0);
 }
 
 /** @} */
