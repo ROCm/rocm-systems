@@ -36,6 +36,14 @@ class KFDPerformanceTest: public KFDBaseComponentTest {
  protected:
     virtual void SetUp();
     virtual void TearDown();
+
+    /* Shared body of P2PBandWidthTest and P2PBandWidthBlitTest. The matrix of
+     * node pairs and directions is the same either way; only the engine that
+     * moves the bytes differs.
+     */
+    void P2PBandWidth(CopyEngine engine);
+
+    void BlitCopySanityCheck(HSAuint32 node);
 };
 
 void KFDPerformanceTest::SetUp() {
@@ -65,7 +73,7 @@ enum P2PDirection {
  * Do the copy of one GPU from & to multiple GPUs.
  */
 static void
-testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirection n1Direction,
+testNodeToNodes(CopyEngine engine, HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirection n1Direction,
         P2PDirection n2Direction, HSAuint64 size, HSAuint64 *speed, HSAuint64 *speed2, std::stringstream *msg,
         bool isTestOverhead = false, HSAuint64 *time = 0) {
     HSAuint32 n2[n];
@@ -74,10 +82,10 @@ testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirectio
     memFlags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
     memFlags.ui32.HostAccess = 0;
     memFlags.ui32.NonPaged = 1;
-    SDMACopyParams array[n * 4];
+    GpuCopyParams array[n * 4];
     int array_count = 0;
     HSAuint64 alloc_size = ALIGN_UP(size, PAGE_SIZE);
-    std::vector<SDMACopyParams> copyArray;
+    std::vector<GpuCopyParams> copyArray;
     int i;
 
     ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtAllocMemory, g_baseTest->m_hsakmt_current_ctx, n1, alloc_size, memFlags, &n1Mem));
@@ -121,11 +129,11 @@ testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirectio
             for (i = 0; i < 1000; i++)
                 for (int j = 0; j < array_count; j++)
                     copyArray.push_back(array[j]);
-        sdma_multicopy(copyArray, 1, HEAD_TAIL);
+        gpu_multicopy(copyArray, engine, 1, HEAD_TAIL);
         *time = CounterToNanoSec(copyArray[0].timeConsumption / (1000 * array_count));
     } else
         /* It did not respect the group id we set above.*/
-        sdma_multicopy(array, array_count, speed, speed2, msg);
+        gpu_multicopy(array, array_count, engine, speed, speed2, msg);
 
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, g_baseTest->m_hsakmt_current_ctx, n1Mem));
     EXPECT_SUCCESS(HSAKMT_CALL(hsaKmtFreeMemory, g_baseTest->m_hsakmt_current_ctx, n1Mem, alloc_size));
@@ -136,8 +144,45 @@ testNodeToNodes(HSAuint32 n1, const HSAuint32 *const n2Array, int n, P2PDirectio
     }
 }
 
-TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
-    TEST_START(TESTPROFILE_RUNALL);
+/* A blit copy is a shader, and a broken shader can report a spectacular
+ * bandwidth for copying nothing at all. Prove the bytes really move before
+ * trusting any of the numbers below.
+ *
+ * Uses the same size as the measurement so that both paths through the shader
+ * get exercised: the uniform main loop, and the guarded remainder pass for the
+ * chunks that do not divide evenly across the grid.
+ */
+void KFDPerformanceTest::BlitCopySanityCheck(HSAuint32 node) {
+    const HSAuint64 size = 32ULL << 20;
+    const HSAuint64 dwords = size / sizeof(HSAuint32);
+    HsaMemoryBuffer srcBuf(size, node);
+    HsaMemoryBuffer dstBuf(size, node);
+    HSAuint32 *src = srcBuf.As<HSAuint32 *>();
+    HSAuint32 *dst = dstBuf.As<HSAuint32 *>();
+    std::vector<GpuCopyParams> copy;
+    HSAuint64 i;
+
+    /* Pattern varies per dword, so a copy that lands at the wrong offset is
+     * caught, not just one that does not copy at all.
+     */
+    for (i = 0; i < dwords; i++) {
+        src[i] = 0xa5000000 | (HSAuint32)i;
+        dst[i] = 0;
+    }
+
+    copy.push_back({node, src, dst, size, node});
+    gpu_multicopy(copy, COPY_BLIT, 0, NOTS);
+
+    for (i = 0; i < dwords; i++)
+        if (dst[i] != src[i])
+            break;
+
+    ASSERT_EQ(dwords, i) << "Blit copy is wrong at dword " << i << " of " << dwords
+        << ": expected 0x" << std::hex << src[i] << ", got 0x" << dst[i] << std::dec
+        << std::endl;
+}
+
+void KFDPerformanceTest::P2PBandWidth(CopyEngine engine) {
     if (!hsakmt_is_dgpu()) {
         LOG() << "Skipping test: Can't have 2 APUs on the same system." << std::endl;
         return;
@@ -147,7 +192,13 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
     std::vector<int> nodes;
     const bool isSpecified = g_TestDstNodeId != -1 && g_TestNodeId != -1;
     int numPeers = 0;
-    const unsigned int maxSdmaQueues = m_numSdmaEngines * m_numSdmaQueuesPerEngine;
+    /* How many copies can run concurrently on one node. A blit copy occupies a
+     * compute queue instead of an SDMA engine, so the batching limit differs.
+     * Never let this reach 0: it is used as a batch stride below, and a stride
+     * of 0 would loop forever.
+     */
+    const unsigned int maxQueues = std::max(1u, engine == COPY_BLIT ?
+                                   m_numCpQueues : m_numSdmaEngines * m_numSdmaQueuesPerEngine);
 
     if (isSpecified) {
         if (g_TestNodeId != g_TestDstNodeId) {
@@ -165,6 +216,13 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
     if (numPeers < 2) {
         LOG() << "Skipping test: Need at least two large bar GPU or XGMI connected." << std::endl;
         return;
+    }
+
+    if (engine == COPY_BLIT) {
+        LOG() << "Copy engine: CU (blit)" << std::endl;
+        BlitCopySanityCheck(nodes[0]);
+        if (::testing::Test::HasFatalFailure())
+            return;
     }
 
     g_TestTimeOut *= numPeers;
@@ -208,7 +266,7 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
 
         LOG() << "Copy from node to node by [push, pull]" << std::endl;
         snprintf(str, sizeof(str), "[%d -> %d] ", n1, n2);
-        testNodeToNodes(n1, &n2, 1, OUT, IN, size, &speed, &speed2, &msg);
+        testNodeToNodes(engine, n1, &n2, 1, OUT, IN, size, &speed, &speed2, &msg);
 
         LOG() << std::dec << str << (float)speed / 1024 << " - " <<
                                  (float)speed2 / 1024 << " GB/s" << std::endl;
@@ -236,7 +294,7 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
 
                 snprintf(str, sizeof(str), "[%d -> %d] ", n1, n2);
                 msg << str << std::endl;
-                testNodeToNodes(n1, &n2, 1, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
+                testNodeToNodes(engine, n1, &n2, 1, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
 
                 LOG() << std::dec << str << (float)speed / 1024 << " - " <<
                                             (float)speed2 / 1024 << " GB/s" << std::endl;
@@ -261,7 +319,7 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
 
                 snprintf(str, sizeof(str), "[%d <-> %d] ", n1, n2);
                 msg << str << std::endl;
-                testNodeToNodes(n1, &n2, 1, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
+                testNodeToNodes(engine, n1, &n2, 1, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
 
                 LOG() << std::dec << str << (float)speed / 1024 << " - " <<
                                             (float)speed2 / 1024 << " GB/s" << std::endl;
@@ -302,7 +360,7 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
             if (test_suits[s][1] == OUT) {
                 snprintf(str, sizeof(str), "[[%d...%d] -> %d] ", dst.front(), dst.back(), n1);
                 msg << str << std::endl;
-                testNodeToNodes(n1, n2, n, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
+                testNodeToNodes(engine, n1, n2, n, test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
 
                 LOG() << std::dec << str << (float)speed / 1024 << " - " <<
                                         (float)speed2 / 1024 << " GB/s" << std::endl;
@@ -322,15 +380,15 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
                 unsigned int start_index;
                 unsigned int end_index;
                 do {
-                    start_index = maxSdmaQueues * j++;
-                    end_index = start_index + maxSdmaQueues - 1;
+                    start_index = maxQueues * j++;
+                    end_index = start_index + maxQueues - 1;
 
                     if (end_index + 1 > n)
                         end_index = n - 1;
 
                     snprintf(str, sizeof(str), "[%d -> [%d...%d]] ", n1, n2[start_index], n2[end_index]);
                     msg << str << std::endl;
-                    testNodeToNodes(n1, &n2[start_index], end_index - start_index + 1,
+                    testNodeToNodes(engine, n1, &n2[start_index], end_index - start_index + 1,
                                     test_suits[s][0], test_suits[s][1], size, &speed, &speed2, &msg);
                     LOG() << std::dec << str << (float)speed / 1024 << " - " <<
                                                 (float)speed2 / 1024 << " GB/s" << std::endl;
@@ -343,6 +401,27 @@ TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
 exit:
     /* New line.*/
     LOG() << std::endl << msg.str() << std::endl;
+}
+
+/* Bandwidth over the sDMA engines. */
+TEST_F(KFDPerformanceTest, P2PBandWidthTest) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    P2PBandWidth(COPY_SDMA);
+
+    TEST_END
+}
+
+/* The same matrix driven by a copy kernel on the CUs, which is how ROCr moves
+ * large buffers. SDMA and blit have different peak bandwidth and behave
+ * differently over XGMI, so both numbers are needed to characterise a link -
+ * and under partitioning they scale differently, since a partition changes how
+ * many CUs and how many SDMA engines a logical node owns.
+ */
+TEST_F(KFDPerformanceTest, P2PBandWidthBlitTest) {
+    TEST_START(TESTPROFILE_RUNALL);
+
+    P2PBandWidth(COPY_BLIT);
 
     TEST_END
 }
@@ -403,7 +482,7 @@ TEST_F(KFDPerformanceTest, P2POverheadTest) {
 
                 msg << test_suits_string[s] << "[" << n1 << " -> " << n2 << "]";
                 for (auto &size : sizeArray) {
-                    testNodeToNodes(n1, &n2, 1, test_suits[s], NONE, size, 0, 0, 0, 1, &time);
+                    testNodeToNodes(COPY_SDMA, n1, &n2, 1, test_suits[s], NONE, size, 0, 0, 0, 1, &time);
                     msg << "\t" << time;
                 }
                 LOG() << msg.str() << std::endl;
