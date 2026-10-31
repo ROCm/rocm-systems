@@ -23,6 +23,8 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -32,9 +34,13 @@
 #include <hsa/hsa.h>
 
 #include <cstdint>
+#include <map>
 #include <new>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -117,6 +123,11 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
 
     if(kind != HSA_SYMBOL_KIND_VARIABLE) return HSA_STATUS_SUCCESS;
 
+    // __constant__ variables are captured too; restoring them is harmless. Symbol info cannot
+    // single them out: ROCr reports HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST inverted (true for
+    // writable sections), so filtering on it drops the __device__ globals, and it reports
+    // HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SEGMENT as READONLY only for a legacy HSA section flag
+    // that LLVM does not emit, so filtering on that skips nothing.
     uint64_t addr = 0;
     uint32_t size = 0;
     if(core->hsa_executable_symbol_get_info_fn(
@@ -129,6 +140,26 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
     }
 
     if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
+
+    // HIP emits a one-byte __hip_cuid_<hash> marker into every code object so the runtime can pair
+    // host and device compilation units. No kernel writes it, and capturing it would cost one
+    // synchronous copy per loaded code object on every snapshot and on every restore.
+    if(size == 1)
+    {
+        constexpr auto hip_cuid_prefix = std::string_view{"__hip_cuid_"};
+        uint32_t       name_length     = 0;
+        if(core->hsa_executable_symbol_get_info_fn(symbol,
+                                                   HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH,
+                                                   &name_length) == HSA_STATUS_SUCCESS &&
+           name_length >= hip_cuid_prefix.size())
+        {
+            auto name = std::string(name_length, '\0');
+            if(core->hsa_executable_symbol_get_info_fn(
+                   symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS &&
+               std::string_view{name}.substr(0, hip_cuid_prefix.size()) == hip_cuid_prefix)
+                return HSA_STATUS_SUCCESS;
+        }
+    }
 
     // A variable above the cap is skipped, which means a kernel's writes to it leak across replay
     // passes and passes 2..N see mutated inputs. That is a wrong-counters outcome, so it cannot be
@@ -178,12 +209,115 @@ discover_module_variables(hsa_agent_t agent)
     });
     return scan;
 }
+
+// Staging storage retained per agent (keyed by the HSA agent handle), ordered by capacity. Leaked
+// on purpose so a staging buffer destroyed during static destruction still has a pool to return to.
+using staging_free_list_t = std::multimap<size_t, std::unique_ptr<char[]>>;
+using staging_pool_t      = std::unordered_map<uint64_t, staging_free_list_t>;
+
+common::Synchronized<staging_pool_t>&
+staging_pool()
+{
+    static auto* pool = new common::Synchronized<staging_pool_t>{};
+    return *pool;
+}
 }  // namespace
+
+staging_buffer_t::~staging_buffer_t() { release(); }
+
+staging_buffer_t::staging_buffer_t(staging_buffer_t&& rhs) noexcept
+: m_agent{std::exchange(rhs.m_agent, 0)}
+, m_storage{std::move(rhs.m_storage)}
+, m_capacity{std::exchange(rhs.m_capacity, 0)}
+, m_size{std::exchange(rhs.m_size, 0)}
+{}
+
+staging_buffer_t&
+staging_buffer_t::operator=(staging_buffer_t&& rhs) noexcept
+{
+    if(this != &rhs)
+    {
+        release();
+        m_agent    = std::exchange(rhs.m_agent, 0);
+        m_storage  = std::move(rhs.m_storage);
+        m_capacity = std::exchange(rhs.m_capacity, 0);
+        m_size     = std::exchange(rhs.m_size, 0);
+    }
+    return *this;
+}
+
+bool
+staging_buffer_t::acquire(hsa_agent_t agent, size_t size)
+{
+    release();
+
+    // Best fit, but at most twice the request, so a small region cannot take a large buffer that a
+    // later, larger region would then have to allocate again.
+    staging_pool().wlock([&](staging_pool_t& pool) {
+        auto itr = pool.find(agent.handle);
+        if(itr == pool.end()) return;
+        auto fit = itr->second.lower_bound(size);
+        if(fit == itr->second.end() || fit->first / 2 > size) return;
+        m_capacity = fit->first;
+        m_storage  = std::move(fit->second);
+        itr->second.erase(fit);
+    });
+
+    if(!m_storage)
+    {
+        m_storage.reset(new(std::nothrow) char[size]);
+        if(!m_storage) return false;
+        m_capacity = size;
+    }
+
+    m_agent = agent.handle;
+    m_size  = size;
+    return true;
+}
+
+void
+staging_buffer_t::release()
+{
+    if(!m_storage) return;
+
+    try
+    {
+        staging_pool().wlock([this](staging_pool_t& pool) {
+            pool[m_agent].emplace(m_capacity, std::move(m_storage));
+        });
+    } catch(const std::bad_alloc&)
+    {
+        // The pool could not grow to hold it; the storage is simply freed below instead.
+    }
+    m_storage.reset();
+    m_agent    = 0;
+    m_capacity = 0;
+    m_size     = 0;
+}
+
+size_t
+retained_staging_bytes(hsa_agent_t agent)
+{
+    return staging_pool().rlock([agent](const staging_pool_t& pool) {
+        auto   itr   = pool.find(agent.handle);
+        size_t total = 0;
+        if(itr != pool.end())
+            for(const auto& [capacity, _] : itr->second)
+                total += capacity;
+        return total;
+    });
+}
 
 device_snapshot_t
 snap(hsa_agent_t agent)
 {
     device_snapshot_t out{};
+
+    // Staging this snapshot does not take from the agent's pool belongs to regions that no longer
+    // exist or shrank, so free it once capture ends rather than holding it indefinitely.
+    auto _trim_staging = common::scope_destructor{[agent]() {
+        staging_pool().wlock([agent](staging_pool_t& pool) { pool.erase(agent.handle); });
+    }};
 
     // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
     // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining
@@ -238,10 +372,7 @@ snap(hsa_agent_t agent)
         auto blk         = mem_block_t{};
         blk.gpu_addr     = gpu_addr;
         blk.from_tracker = from_tracker;
-        try
-        {
-            blk.host_copy.resize(size);
-        } catch(const std::bad_alloc&)
+        if(!blk.host_copy.acquire(agent, size))
         {
             ROCP_WARNING << fmt::format("kernel-replay snapshot: host allocation of {} bytes "
                                         "failed for {} {} (memory pressure)",
