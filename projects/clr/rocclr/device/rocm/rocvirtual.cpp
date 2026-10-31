@@ -5034,63 +5034,20 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     return;
   }
 
-  // Get the amd::Memory object for the physical address
-  amd::Memory* phys_mem_obj = vcmd.memory();
-  hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
-
-  // If Physical address is not set, then it is map command. If set, it is unmap command.
-  if (phys_mem_obj != nullptr) {
-    amd::Memory* vaddr_sub_obj = nullptr;
-    if (vcmd.trackMapping()) {
-      vaddr_sub_obj =
-          dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-      if (vaddr_sub_obj == nullptr) {
-        LogError("HSA Command: MapMemObjBookkeeping failed!");
-        profilingEnd();
-        return;
-      }
-    }
-    // Map the physical to virtual address the hsa api
-    hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
-    opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
-    size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
-    if ((hsa_status = Hsa::vmem_map(const_cast<void*>(vcmd.ptr()), vcmd.size(), phys_offset,
-                                    opaque_hsa_handle, 0)) != HSA_STATUS_SUCCESS) {
-      LogError("HSA Command: hsa_amd_vmem_map failed!");
-    } else if (vaddr_sub_obj != nullptr) {
-      constexpr bool kImportVmmForInterprocess = true;
-      dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
-                                         kImportVmmForInterprocess);
-      // The VA is now backed, so the true owning agent (a peer device for imported memory)
-      // can finally be resolved. create() ran before the mapping existed, so cache it now.
-      if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
-        devMem->refreshOwningAgentFromPointerInfo();
-      }
-    }
+  void* va = const_cast<void*>(vcmd.ptr());
+  cl_int status = CL_SUCCESS;
+  // If Physical address is set, then it is map command. If not set, it is unmap command.
+  if (vcmd.memory() != nullptr) {
+    status = dev().MapPhysicalToVirtual(va, vcmd.size(), vcmd.memory(), vcmd.trackMapping());
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
 
-    if (!vcmd.trackMapping()) {
-      if ((hsa_status = Hsa::vmem_unmap(const_cast<void*>(vcmd.ptr()), vcmd.size())) !=
-          HSA_STATUS_SUCCESS) {
-        LogError("HSA Command: hsa_amd_vmem_unmap failed");
-      }
-    } else {
-      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
-      assert(vaddr_sub_obj != nullptr);
+    status = dev().UnmapVirtual(va, vcmd.size(), vcmd.trackMapping());
+  }
 
-      // Unmap the object, since the physical addr is set.
-      if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
-          HSA_STATUS_SUCCESS) {
-        constexpr bool kDestroyVirtualBuffer = true;
-        constexpr bool kReleaseSubObj = true;
-        dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
-                                     kDestroyVirtualBuffer, kReleaseSubObj);
-      } else {
-        LogError("HSA Command: hsa_amd_vmem_unmap failed");
-      }
-    }
+  if (status != CL_SUCCESS) {
+    vcmd.setStatus(status);
   }
 
   // Since this is a memory operation, the HW event set for barrier packet

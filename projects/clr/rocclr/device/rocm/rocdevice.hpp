@@ -528,6 +528,16 @@ class Device : public NullDevice {
   virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
   virtual cl_int virtualUnmap(void* va, size_t size) override;
 
+  //! Maps phys at va. With track_mapping, creates the VA sub-object, wires MemObjMap, resolves
+  //! the owning agent on its existing device views, and rolls the sub-object back if the map
+  //! fails. phys must not be nullptr.
+  [[nodiscard]] cl_int MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                            bool track_mapping) const;
+
+  //! Unmaps va. With track_mapping, also tears down the VA sub-object bookkeeping, and va must
+  //! name a range this runtime previously mapped and bookkept.
+  [[nodiscard]] cl_int UnmapVirtual(void* va, size_t size, bool track_mapping) const;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
