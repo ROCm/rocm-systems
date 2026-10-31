@@ -27,8 +27,9 @@ using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
 // Relax the DDA IPC AllReduce eligibility beyond exactly kDdaNranks (8) ranks.
-// When 0 (default) the classic 8-rank-only gate is enforced and behaviour is
-// bit- and perf-identical to baseline. When 1, any single-node comm of 2..kDdaNranks
+// When 0 (default) the classic 8-rank-only gate is enforced: collective selection,
+// the 8-rank kernels' arithmetic and therefore results are unchanged from baseline.
+// When 1, any single-node comm of 2..kDdaNranks
 // ranks is eligible for the IPC path. Defined here alongside the DDA IPC comm-init
 // gate so the host init unit tests link it without pulling in the all-reduce compute TU.
 RCCL_PARAM(DdaNranksRelax, "DDA_NRANKS_RELAX", 0);

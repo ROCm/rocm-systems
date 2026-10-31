@@ -834,10 +834,11 @@ intended for debugging and development purposes.
         | Relaxes the DDA (direct data access) IPC AllReduce eligibility so that
           any single-node communicator of 2 to 8 ranks can use the low-latency DDA
           IPC path, which is otherwise restricted to the full 8-rank clique.
-          Only affects ``gfx942``/``gfx950``; the default (``0``) remains
-          bit-identical to prior behavior. Benefits latency-bound low-rank
-          AllReduce (largest gains at odd/non-power-of-two rank counts, where the
-          ring is least efficient) and is neutral at 8 ranks.
+          Only affects ``gfx942``/``gfx950``; with the default (``0``)
+          collective selection and results are unchanged from prior behavior.
+          Benefits latency-bound low-rank AllReduce (largest gains at
+          odd/non-power-of-two rank counts, where the ring is least efficient)
+          and is neutral at 8 ranks.
         | Enabling this at 2 to 7 ranks also has a side effect beyond AllReduce:
           the DDA IPC scratch buffer it allocates is reused by ``RCCL_FORCE_CE``'s
           generic CE-collective fast path (default on) for AllGather, AlltoAll,
