@@ -23,6 +23,10 @@
  */
 
 // C++ Header File(s)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <cstdlib>
 #include <ctime>
 #include <iomanip>
@@ -484,8 +488,13 @@ void ROCmLogging::Logger::initialize_resources() {
   // first root-run. The log is root-owned, so the group-write bit has no
   // practical effect; the security-relevant part is withholding world-write
   // (S_IWOTH), which would let any local user tamper with a root-owned log
-  // (CWE-732).
-  chmod(logFileName, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+  // (CWE-732). Apply the mode through a descriptor opened with O_NOFOLLOW so a
+  // symlink placed at logFileName cannot redirect the change to another file.
+  int fd = open(logFileName, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd != -1) {
+    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH);
+    close(fd);
+  }
 }
 
 void ROCmLogging::Logger::destroy_resources() { m_File.close(); }
