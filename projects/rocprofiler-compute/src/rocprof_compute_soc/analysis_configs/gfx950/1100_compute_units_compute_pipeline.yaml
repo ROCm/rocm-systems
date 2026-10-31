@@ -80,33 +80,33 @@ Panel Config:
           unit: Instructions per Cycle
         SALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
-          max: 100 * MAX(SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          min: MIN(100 * SQ_ACTIVE_INST_SCA / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(100 * SQ_ACTIVE_INST_SCA / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         VALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
-          max: 100 * MAX(SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          min: MIN(100 * SQ_ACTIVE_INST_VALU / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(100 * SQ_ACTIVE_INST_VALU / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Dual-issue VALU Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN(SQ_ACTIVE_INST_VALU2 / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
-          max: 100 * MAX(SQ_ACTIVE_INST_VALU2 / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          min: MIN(100 * SQ_ACTIVE_INST_VALU2 / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(100 * SQ_ACTIVE_INST_VALU2 / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         VALU Co-Issue Efficiency:
           avg: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM(SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2)
-          min: 100 * MIN(SQ_ACTIVE_INST_VALU2 / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
-          max: 100 * MAX(SQ_ACTIVE_INST_VALU2 / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
+          min: MIN(100 * SQ_ACTIVE_INST_VALU2 / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
+          max: MAX(100 * SQ_ACTIVE_INST_VALU2 / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
           unit: Percent
         VMEM Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN((SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
-          max: 100 * MAX((SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          min: MIN(100 * (SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(100 * (SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         Branch Utilization:
           avg: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: 100 * MIN(SQ_ACTIVE_INST_MISC / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
-          max: 100 * MAX(SQ_ACTIVE_INST_MISC / $GRBM_GUI_ACTIVE_PER_XCD / $cu_per_gpu)
+          min: MIN(100 * SQ_ACTIVE_INST_MISC / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          max: MAX(100 * SQ_ACTIVE_INST_MISC / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
@@ -115,8 +115,8 @@ Panel Config:
           unit: Work-items
         MFMA Utilization:
           avg: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
-          min: 100 * MIN(SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
-          max: 100 * MAX(SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
+          min: MIN(100 * SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
+          max: MAX(100 * SQ_VALU_MFMA_BUSY_CYCLES / (4 * $cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))
           unit: Percent
         MFMA Instruction Cycles:
           avg: SUM(SQ_VALU_MFMA_BUSY_CYCLES) / SUM(SQ_INSTS_MFMA)
@@ -155,8 +155,8 @@ Panel Config:
           unit: (IOPS + $normUnit)
         F8 OPs:
           avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
-          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
-          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
+          min: MIN(512 * SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
+          max: MAX(512 * SQ_INSTS_VALU_MFMA_MOPS_F8 / $denom)
           unit: (FLOPs + $normUnit)
         F16 OPs:
           avg: SUM(64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM($denom)
@@ -165,8 +165,8 @@ Panel Config:
           unit: (FLOPs + $normUnit)
         BF16 OPs:
           avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM($denom)
-          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
-          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
+          min: MIN(512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
+          max: MAX(512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / $denom)
           unit: (FLOPs + $normUnit)
         F32 OPs:
           avg: SUM(64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM($denom)
@@ -180,13 +180,13 @@ Panel Config:
           unit: (FLOPs + $normUnit)
         F6F4 OPs:
           avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F6F4) / SUM($denom)
-          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_F6F4 / $denom)
-          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_F6F4 / $denom)
+          min: MIN(512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4 / $denom)
+          max: MAX(512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4 / $denom)
           unit: (FLOPs + $normUnit)
         INT8 OPs:
           avg: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM($denom)
-          min: 512 * MIN(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
-          max: 512 * MAX(SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
+          min: MIN(512 * SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
+          max: MAX(512 * SQ_INSTS_VALU_MFMA_MOPS_I8 / $denom)
           unit: (IOPS + $normUnit)
   metrics_description:
     VALU FLOPs: >-
@@ -283,9 +283,6 @@ Panel Config:
     F8 OPs: >-
       The total number of 8-bit floating-point operations executed on MFMA units,
       per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
-    MXF8 OPs: >-
-      The total number of 8-bit microscaling floating-point operations executed on MFMA units,
-      per normalization unit. MXF8 (MXFP8) uses E4M3 format.
     F16 OPs: The total number of 16-bit floating-point operations executed on either
       the VALU or MFMA units, per normalization unit.
     BF16 OPs: The total number of 16-bit brain floating-point operations executed

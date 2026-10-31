@@ -1,0 +1,466 @@
+view: Vector L1 Data Cache
+legacy_panel_id: 1600
+alias: vl1d
+tables:
+- id: 1601
+  title: vL1D Speed-of-Light
+  cli_style: simple_bar
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: vl1d.hit_rate
+    label: Hit rate
+    description: The ratio of the number of vL1D cache line requests that hit in vL1D cache
+      over the total number of cache line requests to the vL1D Cache RAM.
+  - metric: vl1d.bw_util
+    label: Bandwidth Utilization
+    legacy_id: 16.1.1
+  - metric: vl1d.util
+    label: Utilization
+    legacy_id: 16.1.2
+  - metric: vl1d.coalescing
+    label: Coalescing
+- id: 1602
+  title: vL1D cache stall metrics
+  cli_style: simple_box
+  header:
+    metric: Metric
+    expr: Expression
+  metrics:
+  - metric: vl1d.stalled_on_l2_data
+    label: Stalled on L2 Data
+    legacy_id: 16.2.0
+  - metric: vl1d.stalled_on_l2_req
+    label: Stalled on L2 Req
+    legacy_id: 16.2.1
+  - metric: vl1d.stalled_on_address
+    label: Stalled on Address
+    archs:
+    - gfx950
+    legacy_id: 16.2.2
+  - metric: vl1d.stalled_on_data
+    label: Stalled on Data
+    archs:
+    - gfx950
+    legacy_id: 16.2.3
+  - metric: vl1d.stalled_on_lat_fifo
+    label: Stalled on Latency FIFO
+    archs:
+    - gfx950
+    legacy_id: 16.2.4
+  - metric: vl1d.stalled_on_req_fifo
+    label: Stalled on Request FIFO
+    archs:
+    - gfx950
+    legacy_id: 16.2.5
+  - metric: vl1d.stalled_on_rd_return
+    label: Stalled on Read Return
+    archs:
+    - gfx950
+    legacy_id: 16.2.6
+  - metric: vl1d.tag_ram_stall_rd
+    label: Tag RAM Stall (Read)
+    legacy_id:
+      gfx908: 16.2.2
+      gfx90a: 16.2.2
+      gfx940: 16.2.2
+      gfx941: 16.2.2
+      gfx942: 16.2.2
+      gfx950: 16.2.7
+  - metric: vl1d.tag_ram_stall_wr
+    label: Tag RAM Stall (Write)
+    legacy_id:
+      gfx908: 16.2.3
+      gfx90a: 16.2.3
+      gfx940: 16.2.3
+      gfx941: 16.2.3
+      gfx942: 16.2.3
+      gfx950: 16.2.8
+  - metric: vl1d.tag_ram_stall_atomic
+    label: Tag RAM Stall (Atomic)
+    legacy_id:
+      gfx908: 16.2.4
+      gfx90a: 16.2.4
+      gfx940: 16.2.4
+      gfx941: 16.2.4
+      gfx942: 16.2.4
+      gfx950: 16.2.9
+- id: 1603
+  title: vL1D cache access metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.total_req
+    label: Total Req
+    legacy_id: 16.3.0
+  - metric: vl1d.rd_req
+    label: Read Req
+    legacy_id: 16.3.1
+  - metric: vl1d.wr_req
+    label: Write Req
+    legacy_id: 16.3.2
+  - metric: vl1d.atomic_req
+    label: Atomic Req
+    legacy_id: 16.3.3
+  - metric: vl1d.cache_bw
+    label: Cache BW
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx942
+    - gfx950
+    unit: Gbps
+    description: The number of bytes looked up in the vL1D cache as a result of VMEM instructions
+      divided by total duration. The number of bytes is calculated as the number of cache
+      lines requested multiplied by the cache line size. This value does not consider partial
+      requests, so for instance, if only a single value is requested in a cache line, the
+      data movement will still be counted as a full cache line.
+  - metric: vl1d.cache_bw_128b
+    label: Cache BW
+    archs:
+    - gfx940
+    - gfx941
+    unit: Gbps
+    description: The number of bytes looked up in the vL1D cache as a result of VMEM instructions
+      divided by total duration. The number of bytes is calculated as the number of cache
+      lines requested multiplied by the cache line size. This value does not consider partial
+      requests, so for instance, if only a single value is requested in a cache line, the
+      data movement will still be counted as a full cache line.
+  - metric: vl1d.hit_rate
+    label: Cache Hit Rate
+    archs:
+    - gfx908
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx950
+    description: The ratio of the number of vL1D cache line requests that hit in vL1D cache
+      over the total number of cache line requests to the vL1D Cache RAM.
+  - metric: vl1d.hit_rate
+    label: Cache Hit Rate
+    archs:
+    - gfx942
+    display: noise_clamped_vl1d_hit_rate
+    description: The ratio of the number of vL1D cache line requests that hit in vL1D cache
+      over the total number of cache line requests to the vL1D Cache RAM.
+  - metric: vl1d.cache_accesses
+    label: Cache Accesses
+    legacy_id: 16.3.6
+  - metric: vl1d.cache_hits
+    label: Cache Hits
+    legacy_id: 16.3.7
+  - metric: vl1d.invalidations
+    label: Invalidations
+    legacy_id: 16.3.8
+  - metric: vl1d.l2_bw
+    label: L1-L2 BW
+    archs:
+    - gfx908
+    - gfx90a
+    unit: Gbps
+  - metric: vl1d.l2_bw_by_size
+    label: L1-L2 BW
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    unit: Gbps
+    legacy_id: 16.3.9
+  - metric: vl1d.tag_ram_0_req
+    label: Tag RAM 0 Req
+    archs:
+    - gfx950
+    description: The total number of vL1D cache requests (cache line lookups) that mapped
+      to Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit. The vL1D
+      cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+      affects lookup efficiency.
+    legacy_id: 16.3.10
+  - metric: vl1d.tag_ram_1_req
+    label: Tag RAM 1 Req
+    archs:
+    - gfx950
+    description: The total number of vL1D cache requests (cache line lookups) that mapped
+      to Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit. The vL1D
+      cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+      affects lookup efficiency.
+    legacy_id: 16.3.11
+  - metric: vl1d.tag_ram_2_req
+    label: Tag RAM 2 Req
+    archs:
+    - gfx950
+    description: The total number of vL1D cache requests (cache line lookups) that mapped
+      to Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit. The vL1D
+      cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+      affects lookup efficiency.
+    legacy_id: 16.3.12
+  - metric: vl1d.tag_ram_3_req
+    label: Tag RAM 3 Req
+    archs:
+    - gfx950
+    description: The total number of vL1D cache requests (cache line lookups) that mapped
+      to Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit. The vL1D
+      cache uses multiple Tag RAM banks for parallel tag lookups. Distribution across banks
+      affects lookup efficiency.
+    legacy_id: 16.3.13
+  - metric: vl1d.l2_rd_req
+    label: L1-L2 Read
+    legacy_id:
+      gfx908: 16.3.10
+      gfx90a: 16.3.10
+      gfx940: 16.3.10
+      gfx941: 16.3.10
+      gfx942: 16.3.10
+      gfx950: 16.3.14
+  - metric: vl1d.l2_wr_req
+    label: L1-L2 Write
+    legacy_id:
+      gfx908: 16.3.11
+      gfx90a: 16.3.11
+      gfx940: 16.3.11
+      gfx941: 16.3.11
+      gfx942: 16.3.11
+      gfx950: 16.3.15
+  - metric: vl1d.l2_atomic_req
+    label: L1-L2 Atomic
+    legacy_id:
+      gfx908: 16.3.12
+      gfx90a: 16.3.12
+      gfx940: 16.3.12
+      gfx941: 16.3.12
+      gfx942: 16.3.12
+      gfx950: 16.3.16
+  - metric: vl1d.access_lat
+    label: L1 Access Latency
+    archs:
+    - gfx908
+    - gfx90a
+    legacy_id: 16.3.13
+  - metric: vl1d.l2_rd_lat
+    label: L1-L2 Read Latency
+    archs:
+    - gfx908
+    - gfx90a
+    legacy_id: 16.3.14
+  - metric: vl1d.l2_wr_lat
+    label: L1-L2 Write Latency
+    archs:
+    - gfx908
+    - gfx90a
+    legacy_id: 16.3.15
+  - metric: vl1d.access_lat_norm
+    label: L1 Access Latency
+    archs:
+    - gfx950
+    description: Calculated as the average number of cycles that a vL1D cache line request
+      spent in the vL1D cache pipeline.
+    legacy_id: 16.3.17
+  - metric: vl1d.l2_rd_lat_norm
+    label: L1-L2 Read Latency
+    archs:
+    - gfx950
+    description: Calculated as the average number of cycles that the vL1D cache took to issue
+      and receive read requests from the L2 Cache. This number also includes requests for
+      atomics with return values.
+    legacy_id: 16.3.18
+  - metric: vl1d.l2_wr_lat_norm
+    label: L1-L2 Write Latency
+    archs:
+    - gfx950
+    description: Calculated as the average number of cycles that the vL1D cache took to issue
+      and receive acknowledgement of a write request to the L2 Cache. This number also includes
+      requests for atomics without return values.
+    legacy_id: 16.3.19
+- id: 1604
+  title: L1D - L2 Transactions
+  header:
+    metric: Metric
+    xfer: Xfer
+    coherency: Coherency
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.nc_rd
+    label: NC - Read
+    values:
+      xfer: Read
+      coherency: NC
+    legacy_id: 16.4.0
+  - metric: vl1d.uc_rd
+    label: UC - Read
+    values:
+      xfer: Read
+      coherency: UC
+    legacy_id: 16.4.1
+  - metric: vl1d.cc_rd
+    label: CC - Read
+    values:
+      xfer: Read
+      coherency: CC
+    legacy_id: 16.4.2
+  - metric: vl1d.rw_rd
+    label: RW - Read
+    values:
+      xfer: Read
+      coherency: RW
+    legacy_id: 16.4.3
+  - metric: vl1d.rw_wr
+    label: RW - Write
+    values:
+      xfer: Write
+      coherency: RW
+    legacy_id: 16.4.4
+  - metric: vl1d.nc_wr
+    label: NC - Write
+    values:
+      xfer: Write
+      coherency: NC
+    legacy_id: 16.4.5
+  - metric: vl1d.uc_wr
+    label: UC - Write
+    values:
+      xfer: Write
+      coherency: UC
+    legacy_id: 16.4.6
+  - metric: vl1d.cc_wr
+    label: CC - Write
+    values:
+      xfer: Write
+      coherency: CC
+    legacy_id: 16.4.7
+  - metric: vl1d.nc_atomic
+    label: NC - Atomic
+    values:
+      xfer: Atomic
+      coherency: NC
+    legacy_id: 16.4.8
+  - metric: vl1d.uc_atomic
+    label: UC - Atomic
+    values:
+      xfer: Atomic
+      coherency: UC
+    legacy_id: 16.4.9
+  - metric: vl1d.cc_atomic
+    label: CC - Atomic
+    values:
+      xfer: Atomic
+      coherency: CC
+    legacy_id: 16.4.10
+  - metric: vl1d.rw_atomic
+    label: RW - Atomic
+    values:
+      xfer: Atomic
+      coherency: RW
+    legacy_id: 16.4.11
+- id: 1605
+  title: L1 Unified Translation Cache (UTCL1)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.req
+    label: Req
+    legacy_id: 16.5.0
+  - metric: vl1d.inflight_req
+    label: Inflight Req
+    archs:
+    - gfx950
+    legacy_id: 16.5.1
+  - metric: vl1d.hit_ratio
+    label: Hit Ratio
+    legacy_id:
+      gfx908: 16.5.1
+      gfx90a: 16.5.1
+      gfx940: 16.5.1
+      gfx941: 16.5.1
+      gfx942: 16.5.1
+      gfx950: 16.5.2
+  - metric: vl1d.hits
+    label: Hits
+    legacy_id:
+      gfx908: 16.5.2
+      gfx90a: 16.5.2
+      gfx940: 16.5.2
+      gfx941: 16.5.2
+      gfx942: 16.5.2
+      gfx950: 16.5.3
+  - metric: vl1d.translation_misses
+    label: Translation Misses
+    legacy_id:
+      gfx908: 16.5.3
+      gfx90a: 16.5.3
+      gfx940: 16.5.3
+      gfx941: 16.5.3
+      gfx942: 16.5.3
+      gfx950: 16.5.4
+  - metric: vl1d.misses_under_translation_miss
+    label: Misses under Translation Miss
+    archs:
+    - gfx950
+    legacy_id: 16.5.5
+  - metric: vl1d.permission_misses
+    label: Permission Misses
+    description: The total number of translation requests that missed in the UTCL1 due to
+      a permission error, per normalization unit. This is unused and expected to be zero in
+      most configurations for modern CDNA\u2122 accelerators.
+    legacy_id:
+      gfx908: 16.5.4
+      gfx90a: 16.5.4
+      gfx940: 16.5.4
+      gfx941: 16.5.4
+      gfx942: 16.5.4
+      gfx950: 16.5.6
+- id: 1606
+  title: L1D Addr Translation Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: vl1d.cache_full_stall
+    label: Cache Full Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.0
+  - metric: vl1d.cache_miss_stall
+    label: Cache Miss Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.1
+  - metric: vl1d.serialization_stall
+    label: Serialization Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.2
+  - metric: vl1d.thrashing_stall
+    label: Thrashing Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.3
+  - metric: vl1d.lat_fifo_stall
+    label: Latency FIFO Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.4
+  - metric: vl1d.resident_page_full_stall
+    label: Resident Page Full Stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.5
+  - metric: vl1d.utcl2_stall
+    archs:
+    - gfx950
+    legacy_id: 16.6.6

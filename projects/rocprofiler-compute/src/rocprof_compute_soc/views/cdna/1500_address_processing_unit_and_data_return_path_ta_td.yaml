@@ -1,0 +1,213 @@
+view: Address Processing Unit and Data Return Path (TA/TD)
+legacy_panel_id: 1500
+alias: tatd
+tables:
+- id: 1501
+  title: Busy and stall metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.busy
+    legacy_id: 15.1.0
+  - metric: ta.address_stall
+    label: Address Stall
+    legacy_id: 15.1.1
+  - metric: ta.data_stall
+    label: Data Stall
+    legacy_id: 15.1.2
+  - metric: ta.data_processor_address_stall
+    label: "Data-Processor \u2192 Address Stall"
+    legacy_id: 15.1.3
+  - metric: compute.vmem_ta_addr_stall
+    label: "Sequencer \u2192 TA Address Stall"
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx950
+    description: null
+    legacy_id: 15.1.4
+  - metric: compute.vmem_ta_cmd_stall
+    label: "Sequencer \u2192 TA Command Stall"
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx950
+    description: null
+    legacy_id: 15.1.5
+  - metric: compute.vmem_ta_data_stall
+    label: "Sequencer \u2192 TA Data Stall"
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx950
+    description: null
+    legacy_id: 15.1.6
+  - metric: compute.vmem_ta_addr_stall
+    label: "Sequencer \u2192 TA Address Stall"
+    archs:
+    - gfx942
+    legacy_id: 15.1.4
+  - metric: compute.vmem_ta_cmd_stall
+    label: "Sequencer \u2192 TA Command Stall"
+    archs:
+    - gfx942
+    legacy_id: 15.1.5
+  - metric: compute.vmem_ta_data_stall
+    label: "Sequencer \u2192 TA Data Stall"
+    archs:
+    - gfx942
+    legacy_id: 15.1.6
+- id: 1502
+  title: Instruction counts
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.total_insts
+    label: Total Instructions
+    legacy_id: 15.2.0
+  - metric: ta.global_insts
+    label: Global/Generic Instructions
+  - metric: ta.global_rd_insts
+    label: Global/Generic Read Instructions
+    description: The total number of global & generic memory read instructions executed on
+      all compute units on the accelerator, per normalization unit.
+  - metric: ta.global_generic_rd_insts_for_lds
+    label: Global/Generic Read Instructions for LDS
+    archs:
+    - gfx950
+    legacy_id: 15.2.3
+  - metric: ta.global_wr_insts
+    label: Global/Generic Write Instructions
+    description: The total number of global & generic memory write instructions executed on
+      all compute units on the accelerator, per normalization unit.
+  - metric: ta.global_atomic_insts
+    label: Global/Generic Atomic Instructions
+    description: The total number of global & generic memory atomic (with and without return)
+      instructions executed on all compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_insts
+    label: Spill/Stack Instructions
+  - metric: ta.spill_rd_insts
+    label: Spill/Stack Read Instructions
+    description: The total number of spill/stack memory read instructions executed on all
+      compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_stack_rd_insts_for_lds
+    label: Spill/Stack Read Instructions for LDS
+    archs:
+    - gfx950
+    legacy_id: 15.2.8
+  - metric: ta.spill_wr_insts
+    label: Spill/Stack Write Instructions
+    description: The total number of spill/stack memory write instructions executed on all
+      compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_atomic_insts
+    label: Spill/Stack Atomic Instructions
+    archs:
+    - gfx908
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description: The total number of spill/stack memory atomic (with and without return) instructions
+      executed on all compute units on the accelerator, per normalization unit. Typically
+      unused as these memory operations are typically used to implement thread-local storage.
+  - metric: ta.spill_atomic_insts
+    label: Spill/Stack Atomic Instructions
+    archs:
+    - gfx90a
+    display: spill_atomic_insts_max_as_min
+    description: The total number of spill/stack memory atomic (with and without return) instructions
+      executed on all compute units on the accelerator, per normalization unit. Typically
+      unused as these memory operations are typically used to implement thread-local storage.
+- id: 1503
+  title: Spill and stack metrics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.spill_stack_total_cycles
+    label: Spill/Stack Total Cycles
+    legacy_id: 15.3.0
+  - metric: ta.spill_stack_coalesced_rd
+    label: Spill/Stack Coalesced Read
+    legacy_id: 15.3.1
+  - metric: ta.spill_stack_coalesced_wr
+    label: Spill/Stack Coalesced Write
+    legacy_id: 15.3.2
+- id: 1504
+  title: Vector L1 data-return path or Texture Data (TD)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: td.busy
+    legacy_id: 15.4.0
+  - metric: td.tc_stall
+    label: "Cache RAM \u2192 Data-Return Stall"
+    legacy_id: 15.4.1
+  - metric: td.spi_stall
+    label: "Workgroup manager \u2192 Data-Return Stall"
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 15.4.2
+  - metric: td.coalescable_insts
+    label: Coalescable Instructions
+    legacy_id:
+      gfx908: 15.4.2
+      gfx90a: 15.4.3
+      gfx940: 15.4.3
+      gfx941: 15.4.3
+      gfx942: 15.4.3
+      gfx950: 15.4.3
+  - metric: td.rd_insts
+    label: Read Instructions
+    legacy_id:
+      gfx908: 15.4.3
+      gfx90a: 15.4.4
+      gfx940: 15.4.4
+      gfx941: 15.4.4
+      gfx942: 15.4.4
+      gfx950: 15.4.4
+  - metric: td.wr_insts
+    label: Write Instructions
+    legacy_id:
+      gfx908: 15.4.4
+      gfx90a: 15.4.5
+      gfx940: 15.4.5
+      gfx941: 15.4.5
+      gfx942: 15.4.5
+      gfx950: 15.4.5
+  - metric: td.atomic_insts
+    label: Atomic Instructions
+    legacy_id:
+      gfx908: 15.4.5
+      gfx90a: 15.4.6
+      gfx940: 15.4.6
+      gfx941: 15.4.6
+      gfx942: 15.4.6
+      gfx950: 15.4.6
+  - metric: td.wr_ack_insts
+    label: Write Ack Instructions
+    archs:
+    - gfx950
+    legacy_id: 15.4.7

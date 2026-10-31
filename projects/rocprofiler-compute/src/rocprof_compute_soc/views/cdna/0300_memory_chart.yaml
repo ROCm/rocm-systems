@@ -1,0 +1,322 @@
+view: Memory Chart
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Memory Chart
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+    legacy_id: 3.1.0
+  - metric: dispatch.vgprs
+    label: VGPR
+    round: 0
+    legacy_id: 3.1.1
+  - metric: dispatch.sgprs
+    label: SGPR
+    round: 0
+    legacy_id: 3.1.2
+  - metric: dispatch.lds_allocation
+    round: 0
+    legacy_id: 3.1.3
+  - metric: dispatch.scratch_allocation_per_wave
+    label: Scratch Allocation
+    unit: KB per Wave
+    round: 3
+    legacy_id: 3.1.4
+  - metric: spi.workgroups_per_cu
+    label: Workgroups
+    round: 1
+    legacy_id: 3.1.5
+  - metric: ta.global_rd_insts
+    label: Flat Read
+    round: 0
+    description: The total number of flat read instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.6
+  - metric: ta.global_wr_insts
+    label: Flat Write
+    round: 0
+    description: The total number of flat write instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.7
+  - metric: ta.global_atomic_insts
+    label: Flat Atomic
+    round: 0
+    description: The total number of flat atomic instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.8
+  - metric: ta.spill_rd_insts
+    label: Buffer Read
+    round: 0
+    description: The total number of buffer read instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.9
+  - metric: ta.spill_wr_insts
+    label: Buffer Write
+    round: 0
+    description: The total number of buffer write instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.10
+  - metric: ta.spill_atomic_insts
+    label: Buffer Atomic
+    round: 0
+    description: The total number of buffer atomic instructions processed by the address processing
+      unit, counted once per wavefront, per normalization unit.
+    legacy_id: 3.1.11
+  - metric: lds.insts
+    label: LDS Req
+    round: 0
+    description: The total number of LDS instructions (including, but not limited to, read/write/atomics
+      and HIP's __shfl instructions) executed per normalization unit.
+    legacy_id: 3.1.12
+  - metric: lds.util
+    label: LDS Util
+    round: 0
+    legacy_id: 3.1.13
+  - metric: lds.load
+    label: LDS Read
+    archs:
+    - gfx950
+    round: 0
+    legacy_id: 3.1.14
+  - metric: lds.store
+    label: LDS Write
+    archs:
+    - gfx950
+    round: 0
+    legacy_id: 3.1.15
+  - metric: lds.atomic
+    label: LDS Atomic
+    archs:
+    - gfx950
+    round: 0
+    legacy_id: 3.1.16
+  - metric: vl1d.hit_rate
+    label: VL1 Hit
+    round: 0
+    description_note: Calculated as 100 minus the percent of requests that were sent to the
+      L2.
+    legacy_id:
+      gfx908: 3.1.14
+      gfx90a: 3.1.14
+      gfx940: 3.1.14
+      gfx941: 3.1.14
+      gfx942: 3.1.14
+      gfx950: 3.1.17
+  - metric: vl1d.coalescing
+    label: VL1 Coalesce
+    round: 0
+    legacy_id:
+      gfx908: 3.1.15
+      gfx90a: 3.1.15
+      gfx940: 3.1.15
+      gfx941: 3.1.15
+      gfx942: 3.1.15
+      gfx950: 3.1.18
+  - metric: vl1d.l2_rd_bw
+    label: VL1_L2 Read BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.16
+      gfx90a: 3.1.16
+      gfx940: 3.1.16
+      gfx941: 3.1.16
+      gfx942: 3.1.16
+      gfx950: 3.1.19
+  - metric: vl1d.l2_wr_bw
+    label: VL1_L2 Write BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.17
+      gfx90a: 3.1.17
+      gfx940: 3.1.17
+      gfx941: 3.1.17
+      gfx942: 3.1.17
+      gfx950: 3.1.20
+  - metric: vl1d.l2_atomic_bw
+    label: VL1_L2 Atomic BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.18
+      gfx90a: 3.1.18
+      gfx940: 3.1.18
+      gfx941: 3.1.18
+      gfx942: 3.1.18
+      gfx950: 3.1.21
+  - metric: sl1d.req
+    label: sL1D Rd
+    round: 0
+    legacy_id:
+      gfx908: 3.1.19
+      gfx90a: 3.1.19
+      gfx940: 3.1.19
+      gfx941: 3.1.19
+      gfx942: 3.1.19
+      gfx950: 3.1.22
+  - metric: sl1d.hits_per_req
+    label: sL1D Hit
+    round: 0
+    legacy_id:
+      gfx908: 3.1.20
+      gfx90a: 3.1.20
+      gfx940: 3.1.20
+      gfx941: 3.1.20
+      gfx942: 3.1.20
+      gfx950: 3.1.23
+  - metric: sl1d.l2_rd_bw
+    label: sL1D_L2 Read BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.21
+      gfx90a: 3.1.21
+      gfx940: 3.1.21
+      gfx941: 3.1.21
+      gfx942: 3.1.21
+      gfx950: 3.1.24
+  - metric: l1i.req
+    label: IL1 Fetch
+    round: 0
+    legacy_id:
+      gfx908: 3.1.22
+      gfx90a: 3.1.22
+      gfx940: 3.1.22
+      gfx941: 3.1.22
+      gfx942: 3.1.22
+      gfx950: 3.1.25
+  - metric: l1i.hits_per_req
+    label: IL1 Hit
+    round: 0
+    legacy_id:
+      gfx908: 3.1.23
+      gfx90a: 3.1.23
+      gfx940: 3.1.23
+      gfx941: 3.1.23
+      gfx942: 3.1.23
+      gfx950: 3.1.26
+  - metric: l1i.l2_bw
+    label: IL1_L2 Read BW
+    unit: Bytes/s
+    description: Bandwidth of read requests from the instruction L1 cache to the L2 cache
+      per unit time.
+    legacy_id:
+      gfx908: 3.1.24
+      gfx90a: 3.1.24
+      gfx940: 3.1.24
+      gfx941: 3.1.24
+      gfx942: 3.1.24
+      gfx950: 3.1.27
+  - metric: l2.hit_rate
+    label: L2 Hit
+    round: 0
+    description: The percent of L2 cache line requests that hit in the L2 cache, over the
+      total number of incoming cache line requests to the L2 cache.
+    legacy_id:
+      gfx908: 3.1.25
+      gfx90a: 3.1.25
+      gfx940: 3.1.25
+      gfx941: 3.1.25
+      gfx942: 3.1.25
+      gfx950: 3.1.28
+  - metric: fabric.rd_bw
+    label: L2-Fabric Read BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.26
+      gfx90a: 3.1.26
+      gfx940: 3.1.26
+      gfx941: 3.1.26
+      gfx942: 3.1.26
+      gfx950: 3.1.29
+  - metric: fabric.wr_atomic_bw
+    label: L2-Fabric Write and Atomic BW
+    unit: Bytes/s
+    legacy_id:
+      gfx908: 3.1.27
+      gfx90a: 3.1.27
+      gfx940: 3.1.27
+      gfx941: 3.1.27
+      gfx942: 3.1.27
+      gfx950: 3.1.30
+  - metric: fabric.hbm_rd_bw_est
+    label: Estimated HBM Read BW
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: Bytes/s
+    legacy_id: 3.1.28
+  - metric: fabric.hbm_wr_atomic_bw_est
+    label: Estimated HBM Write and Atomic BW
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: Bytes/s
+    legacy_id: 3.1.29
+  - metric: fabric.hbm_rd_bw
+    label: HBM Read BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.31
+  - metric: fabric.hbm_wr_bw
+    label: HBM Write BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.32
+  - metric: fabric.hbm_atomic_bw
+    label: HBM Atomic BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.33
+  - metric: fabric.hbm_wr_atomic_bw
+    label: HBM Write and Atomic BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.34
+  - metric: fabric.xgmi_rd_bw
+    label: xGMI Read BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.35
+  - metric: fabric.xgmi_wr_bw
+    label: xGMI Write BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.36
+  - metric: fabric.xgmi_atomic_bw
+    label: xGMI Atomic BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.37
+  - metric: fabric.pcie_rd_bw
+    label: PCIe Read BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.38
+  - metric: fabric.pcie_wr_bw
+    label: PCIe Write BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.39
+  - metric: fabric.pcie_atomic_bw
+    label: PCIe Atomic BW
+    archs:
+    - gfx950
+    unit: Bytes/s
+    legacy_id: 3.1.40

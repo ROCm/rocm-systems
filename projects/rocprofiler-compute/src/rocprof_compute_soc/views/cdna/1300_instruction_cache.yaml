@@ -1,0 +1,59 @@
+view: Instruction Cache
+legacy_panel_id: 1300
+alias: ins_cache
+tables:
+- id: 1301
+  title: L1I Speed-of-Light
+  cli_style: simple_bar
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l1i.bw_util
+    label: Bandwidth Utilization
+    legacy_id: 13.1.0
+  - metric: l1i.hit_rate_incl_dup
+    label: Cache Hit Rate
+    legacy_id: 13.1.1
+  - metric: l1i.l2_bw_util
+    description: The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth
+      achieved. Calculated as the ratio of the total number of requests from the L1I to the
+      L2 cache over the total L1I-L2 interface cycles.
+    legacy_id: 13.1.2
+- id: 1302
+  title: L1I cache accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+    label: Req
+    description: The total number of requests made to the L1I per normalization-unit
+  - metric: l1i.hits
+    label: Hits
+    legacy_id: 13.2.1
+  - metric: l1i.misses_non_duplicated
+    label: Misses - Non Duplicated
+    legacy_id: 13.2.2
+  - metric: l1i.misses_duplicated
+    label: Misses - Duplicated
+    legacy_id: 13.2.3
+  - metric: l1i.hit_rate_incl_dup
+    label: Cache Hit Rate
+  - metric: l1i.fetch_lat
+    label: Instruction Fetch Latency
+- id: 1303
+  title: L1I <-> L2 interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.l2_bw
+    unit: Gbps

@@ -51,13 +51,20 @@ from typing import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base, iter_analysis_config_metrics
 from utils import metric_library
+from utils.analysis_views import (
+    DISPLAY_FORMS,
+    MAIN_COLUMNS,
+    NANOSECONDS_DENOMINATOR,
+    ROUND_RE,
+    SECONDS_DENOMINATOR,
+    SECONDS_SCALED_UNITS,
+    UNIT_ALIASES,
+)
+from utils.equation_format import normalize_equation
 from utils.metric_library import (
     SETS_FILENAME,
     VARIABLES_FILENAME,
@@ -84,20 +91,6 @@ from vendored import yaml
 
 # Categories named after panels rather than hardware.
 VIEW_CATEGORIES = ("system", "memchart", "roofline", "wavefront")
-
-# Alias -> canonical unit. A display scale such as Bytes/s vs GB/s is not an alias.
-UNIT_ALIASES = {
-    "Gbps": "GB/s",
-    "GFLOPs": "GFLOP/s",
-    "GIOPs": "GIOP/s",
-    "(Req + $normUnit)": "(Requests + $normUnit)",
-    "Instr/cycle": "Instructions per Cycle",
-    "Waves/cycle": "Wavefronts per Cycle",
-    "Cycles/wave": "Cycles per Wavefront",
-    "KB per Wave": "KB per Wavefront",
-    "Wave": "Wavefronts",
-    "Waves": "Wavefronts",
-}
 
 # A metric id, "{category}.{subcategory}_{name}": lowercase words joined by
 # underscores. utils_common.METRIC_ID_RE matches the numeric panel ids instead.
@@ -140,50 +133,20 @@ SPLIT_FORMULA_IDS = {
     "vl1d.cache_bw_128b": "vl1d.cache_bw",
 }
 
-# A row's equation comes from the first of these columns it has; a row with none
-# shows one equation in each of its table's value columns.
-MAIN_FORMS = ("avg", "value", "expr")
 # Value columns that _Row reads separately rather than as equations.
 ROW_FIELDS = ("unit", "peak")
-ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
-# Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
-SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
-NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
-# Metric unit -> the unit of a row that shows the metric in seconds.
-SECONDS_SCALE_UNITS = {"GB/s": "Bytes/s"}
+# Time in seconds (Bytes/s rows) and in nanoseconds (GB/s), in _canonical() form.
+SECONDS_SCALE = re.sub(r"\s+", "", SECONDS_DENOMINATOR)
+NANOSECONDS = re.sub(r"\s+", "", NANOSECONDS_DENOMINATOR)
 # TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
 # deleted (see "Equivalence with analysis_configs" below).
-# Rows that write a metric's formula differently (positional id -> label, metric id,
-# row equation). A row whose time is in seconds needs no entry: it shows a GB/s formula
-# scaled by 1e9, and its unit must say Bytes/s.
-# The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
-_ROOFLINE_L2_BW_EQUATION = (
-    "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
-    "/ SUM(End_Timestamp - Start_Timestamp)"
-)
-_ROOFLINE_L2_BW = (
-    "L2 Cache Bandwidth",
-    "vl1d.l2_bw",
-    _ROOFLINE_L2_BW_EQUATION.format(64),
-)
-_ROOFLINE_L2_BW_128B = (
-    "L2 Cache Bandwidth",
-    "vl1d.l2_bw",
-    _ROOFLINE_L2_BW_EQUATION.format(128),
-)
-_ROOFLINE_LDS_BW = (
-    "LDS Bandwidth",
-    "lds.theoretical_bw",
-    "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
-    "/ SUM(End_Timestamp - Start_Timestamp)",
-)
-_PIPELINE_MFMA_UTIL = (
-    "MFMA Utilization",
-    "compute.mfma_util",
-    "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
-    "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
-)
+# Rows that show a display form of their metric (positional id -> label, metric id,
+# DISPLAY_FORMS name). A row whose time is in seconds needs no entry: it shows a GB/s
+# formula scaled by 1e9, and its unit must say Bytes/s.
+_ROOFLINE_L2_BW = ("L2 Cache Bandwidth", "vl1d.l2_bw", "roofline_l2_bw_64b")
+_ROOFLINE_L2_BW_128B = ("L2 Cache Bandwidth", "vl1d.l2_bw", "roofline_l2_bw_128b")
+_ROOFLINE_LDS_BW = ("LDS Bandwidth", "lds.theoretical_bw", "roofline_lds_bw")
+_PIPELINE_MFMA_UTIL = ("MFMA Utilization", "compute.mfma_util", "pipeline_mfma_util")
 DISPLAY_VARIANTS = {
     "gfx908": {
         "4.1.9": _ROOFLINE_L2_BW,
@@ -202,111 +165,56 @@ DISPLAY_VARIANTS = {
 }
 DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
 DISPLAY_VARIANTS["gfx950"] = {
-    "2.1.23": (
-        "L2-Fabric Read BW",
-        "fabric.rd_bw",
-        "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
-        "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
-    ),
+    "2.1.23": ("L2-Fabric Read BW", "fabric.rd_bw", "fabric_rd_bw_by_request_size"),
     "4.1.12": _ROOFLINE_L2_BW_128B,
     "4.1.14": _ROOFLINE_LDS_BW,
     "11.2.9": _PIPELINE_MFMA_UTIL,
-    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows: the
-    # counters are summed across CUs (channels), so both give the same value.
-    "30.2.6": (
-        "L1 latency",
-        "vl1d.average_lat",
-        "AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)",
-    ),
+    "30.2.6": ("L1 latency", "vl1d.average_lat", "avg_vl1d_average_lat"),
     "30.2.10": (
         "L2 read latency",
         "vl1d.l2_rd_average_lat",
-        "AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)",
+        "avg_vl1d_l2_rd_average_lat",
     ),
     "30.2.12": (
         "L2 write latency",
         "vl1d.l2_wr_average_lat",
-        "AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)",
+        "avg_vl1d_l2_wr_average_lat",
     ),
     "30.2.14": (
         "UTCL1 latency",
         "vl1d.utcl1_average_lat",
-        "AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)",
+        "avg_vl1d_utcl1_average_lat",
     ),
     "30.2.16": (
         "UTCL1 to UTCL2 latency",
         "vl1d.utcl1_to_utcl2_average_lat",
-        "AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)",
+        "avg_vl1d_utcl1_to_utcl2_average_lat",
     ),
-    "30.8.4": (
-        "L2 to EA read latency",
-        "fabric.rd_lat",
-        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
-    ),
-    "30.8.6": (
-        "L2 to EA write latency",
-        "fabric.wr_lat",
-        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
-    ),
-    "30.8.8": (
-        "L2 to EA atomic latency",
-        "fabric.atomic_lat",
-        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
-    ),
-    "30.14.11": (
-        "EA read latency",
-        "fabric.rd_lat",
-        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
-    ),
-    "30.14.13": (
-        "EA write latency",
-        "fabric.wr_lat",
-        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
-    ),
-    "30.14.15": (
-        "EA atomic latency",
-        "fabric.atomic_lat",
-        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
-    ),
-    "30.7.1": (
-        "L2 utilization",
-        "l2.util",
-        "100 * SUM(TCC_BUSY_sum) "
-        "/ (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))",
-    ),
+    "30.8.4": ("L2 to EA read latency", "fabric.rd_lat", "avg_fabric_rd_lat"),
+    "30.8.6": ("L2 to EA write latency", "fabric.wr_lat", "avg_fabric_wr_lat"),
+    "30.8.8": ("L2 to EA atomic latency", "fabric.atomic_lat", "avg_fabric_atomic_lat"),
+    "30.14.11": ("EA read latency", "fabric.rd_lat", "avg_fabric_rd_lat"),
+    "30.14.13": ("EA write latency", "fabric.wr_lat", "avg_fabric_wr_lat"),
+    "30.14.15": ("EA atomic latency", "fabric.atomic_lat", "avg_fabric_atomic_lat"),
+    "30.7.1": ("L2 utilization", "l2.util", "l2_util_whole_channels"),
 }
 DISPLAY_VARIANTS["gfx942"] = {
     **DISPLAY_VARIANTS["gfx940"],
     "4.1.10": _ROOFLINE_L2_BW_128B,
     # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
     # rows have no NOISE_CLAMP.
-    "16.3.5": (
-        "Cache Hit Rate",
-        "vl1d.hit_rate",
-        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
-        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
-        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
-    ),
+    "16.3.5": ("Cache Hit Rate", "vl1d.hit_rate", "noise_clamped_vl1d_hit_rate"),
 }
 DISPLAY_VARIANTS["gfx115x"] = {
-    "4.1.0": (
-        "VALU FLOPs",
-        "compute.valu_flops",
-        "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)",
-    ),
+    "4.1.0": ("VALU FLOPs", "compute.valu_flops", "valu_flops_per_valu_inst"),
     "4.1.1": (
         "VALU FLOPs (F64)",
         "compute.valu_flops_f64",
-        "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
+        "valu_flops_f64_per_dp_inst",
     ),
 }
 DISPLAY_VARIANTS["gfx1250"] = {
-    "3.3.4": (
-        "GL0 Hit Rate",
-        "gl0.hit_rate",
-        "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
-    ),
+    "3.3.4": ("GL0 Hit Rate", "gl0.hit_rate", "gl0_hit_rate_times_100"),
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
@@ -826,12 +734,12 @@ def _row_errors(
 def _variant_errors(
     arch: str, row: "_Row", variant: tuple, library: MetricLibrary
 ) -> List[str]:
-    label, metric_id, row_equation = variant
+    label, metric_id, form = variant
     if row.label != label:
         return [f"[{arch}] {row.legacy_id} is now {row.label!r}; update variants"]
     if metric_id not in library.metrics:
         return [f"[{arch}] {row.legacy_id} {label}: no metric {metric_id}"]
-    if row.equation == _canonical(row_equation):
+    if row.equation == _canonical(DISPLAY_FORMS[form]["formula"]):
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
 
@@ -888,7 +796,7 @@ def _unit_errors(
             )
             continue
         if _in_seconds(row):
-            unit = SECONDS_SCALE_UNITS.get(unit, unit)
+            unit = SECONDS_SCALED_UNITS.get(unit, unit)
         if row.label != label:
             errors.append(
                 f"[{arch}] {row.legacy_id} is now {row.label!r}; update unit variants"
@@ -911,18 +819,11 @@ def _peak_errors(
 
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
     is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
-    A row's measured peak is skipped where the roofline benchmark does not measure that
-    ceiling on the arch (always, on an arch without a benchmark); a ceiling that is no
-    roofline.csv column is still an error.
     """
-    unmeasured = mi_gpu_specs.get_all_roofline_columns() - _arch_ceilings(arch)
     errors = []
     shown_fields = defaultdict(set)
     for row, metric_id in zip(rows, metric_ids):
         if row.peak is None or metric_id is None:
-            continue
-        ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
-        if ceiling and ceiling.group(1) in unmeasured:
             continue
         metric = library.metrics[metric_id]
         fields = [
@@ -1088,7 +989,7 @@ def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
 
 def _row_forms(table: Dict[str, Any], row: Dict[str, Any]) -> List[str]:
     """Return the columns of row that show an equation."""
-    main_forms = [form for form in MAIN_FORMS if form in row]
+    main_forms = [form for form in MAIN_COLUMNS if form in row]
     if main_forms:
         return main_forms[:1]
     return [

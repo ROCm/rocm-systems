@@ -1,0 +1,87 @@
+view: System Speed-of-Light
+legacy_panel_id: 200
+alias: sol
+tables:
+- id: 201
+  title: System Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops_fp16
+  - metric: compute.valu_flops_fp32
+  - metric: compute.valu_flops_fp64
+  - metric: compute.valu_iops
+  - metric: compute.valu_trans_flops_fp16
+  - metric: compute.valu_trans_flops_fp32
+  - metric: compute.valu_trans_flops_fp64
+  - metric: compute.wmma_flops_fp64
+  - metric: compute.wmma_flops_fp32
+  - metric: compute.wmma_flops_fp16
+  - metric: compute.wmma_flops_bf16
+  - metric: compute.wmma_flops_fp8
+  - metric: compute.wmma_flops_mxfp8
+  - metric: compute.wmma_flops_fp6
+  - metric: compute.wmma_flops_fp4
+  - metric: compute.wmma_iops_int8
+  - metric: compute.wmma_iops_int4
+    legacy_id: 2.1.16
+  - metric: wgp.active_wgps
+    unit: WGPs per Cycle
+    legacy_id: 2.1.17
+  - metric: compute.ipc
+    legacy_id: 2.1.18
+  - metric: wave.occupancy
+    legacy_id: 2.1.19
+  - metric: txa.lds_bw_load
+    label: LDS Read Bandwidth
+  - metric: txa.lds_bw_store
+    label: LDS Write Bandwidth
+  - metric: lds.bank_conflicts_access
+    label: LDS Bank Conflicts/Access
+    description: Number of LDS bank conflicts per LDS access.
+    legacy_id: 2.1.22
+  - metric: gl0.hit_rate
+    pct_of_peak: false
+  - metric: gl0.bw
+    label: GL0 Cache BW
+  - metric: gl1.gl1a_util
+    label: GL1A Busy Rate
+    pct_of_peak: false
+  - metric: gl2.hit_rate
+    pct_of_peak: false
+  - metric: l2.bw
+    label: GL2 Cache BW
+    legacy_id: 2.1.27
+  - metric: ea.dram_rd_bw
+    label: GL2 to DRAM Read BW
+    description: Total read bandwidth from HBM to GL2.
+  - metric: ea.dram_wr_bw
+    label: GL2 to DRAM Write BW
+    description: Total write bandwidth from GL2 to HBM.
+  - metric: ea.gl2_to_dram_rd_lat
+    pct_of_peak: false
+    legacy_id: 2.1.30
+  - metric: ea.gl2_to_dram_wr_lat
+    pct_of_peak: false
+    legacy_id: 2.1.31
+  - metric: sl1d.hit_rate_excl_dup
+    label: Scalar Data Cache Hit Rate
+    pct_of_peak: false
+    legacy_id: 2.1.32
+  - metric: sl1d.bw
+    label: Scalar Data Cache BW
+    legacy_id: 2.1.33
+  - metric: l1i.hit_rate_excl_dup
+    label: Instruction Cache Hit Rate
+    pct_of_peak: false
+    legacy_id: 2.1.34
+  - metric: l1i.bw
+    label: Instruction Cache BW
+    legacy_id: 2.1.35
+  - metric: compute.inst_cache_fetch_lat
+    pct_of_peak: false
+    legacy_id: 2.1.36

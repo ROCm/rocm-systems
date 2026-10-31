@@ -1,0 +1,67 @@
+view: Wavefront
+legacy_panel_id: 700
+alias: wavefront
+tables:
+- id: 701
+  title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+    legacy_id: 7.1.0
+  - metric: dispatch.workgroup_size
+    legacy_id: 7.1.1
+  - metric: spi.dispatched_wavefronts
+    label: Total Wavefronts
+    description: The total number of wavefronts launched as part of the kernel dispatch. On
+      AMD Instinct\u2122 CDNA\u2122 accelerators and GCN\u2122 GPUs, the wavefront size is
+      always 64 work-items. Thus, the total number of wavefronts should be equivalent to the
+      ceiling of grid size divided by 64.
+  - metric: wave.saved
+    legacy_id: 7.1.3
+  - metric: wave.restored
+    legacy_id: 7.1.4
+  - metric: dispatch.vgprs
+  - metric: dispatch.agprs
+    legacy_id: 7.1.6
+  - metric: dispatch.sgprs
+  - metric: dispatch.lds_allocation
+    unit: Bytes
+    description: 'The number of bytes of LDS memory (or, shared memory) allocated for this
+      kernel. Note: This may also be larger than what was requested at compile time due to
+      both allocation granularity and dynamic per-dispatch LDS allocations.'
+  - metric: dispatch.scratch_allocation
+    legacy_id: 7.1.9
+- id: 702
+  title: Wavefront Runtime Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.kernel_time
+    legacy_id: 7.2.0
+  - metric: grbm.gui_active_cycles
+    legacy_id: 7.2.1
+  - metric: compute.insts_per_wave
+    label: Instructions per wavefront
+    legacy_id: 7.2.2
+  - metric: wave.cycles
+    label: Wave Cycles
+    legacy_id: 7.2.3
+  - metric: wave.dep_wait_cycles
+    label: Dependency Wait Cycles
+    legacy_id: 7.2.4
+  - metric: wave.issue_wait_cycles
+    label: Issue Wait Cycles
+    legacy_id: 7.2.5
+  - metric: wave.active_cycles
+    label: Active Cycles
+    legacy_id: 7.2.6
+  - metric: wave.occupancy

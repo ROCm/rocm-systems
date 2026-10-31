@@ -34,8 +34,8 @@ Panel Config:
           unit: (Count + $normUnit)
         UTCL1 Lookup Hit Rate:
           avg: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
-          min: 100 * MIN(UTCL1_HITS_sum / UTCL1_REQS_sum)
-          max: 100 * MAX(UTCL1_HITS_sum / UTCL1_REQS_sum)
+          min: MIN(100 * UTCL1_HITS_sum / UTCL1_REQS_sum)
+          max: MAX(100 * UTCL1_HITS_sum / UTCL1_REQS_sum)
           unit: Percent
         UTCL1-UTCL2 Requests:
           avg: SUM(UTCL1_UTCL2_REQS_sum) / SUM($denom)
@@ -54,13 +54,13 @@ Panel Config:
           unit: Cycles
         UTCL1-UTCL2 Request Stall Rate:
           avg: 100 * SUM(UTCL1_STALL_UTCL2_CREDITS_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
-          min: 100 * MIN(UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
-          max: 100 * MAX(UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          min: MIN(100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          max: MAX(100 * UTCL1_STALL_UTCL2_CREDITS_sum / UTCL1_XLAT_REQ_BUSY_sum)
           unit: Percent
         UTCL1 Miss Handler FIFO Full Rate:
           avg: 100 * SUM(UTCL1_STALL_MH_FULL_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
-          min: 100 * MIN(UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
-          max: 100 * MAX(UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          min: MIN(100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
+          max: MAX(100 * UTCL1_STALL_MH_FULL_sum / UTCL1_XLAT_REQ_BUSY_sum)
           unit: Percent
 
   metrics_description:

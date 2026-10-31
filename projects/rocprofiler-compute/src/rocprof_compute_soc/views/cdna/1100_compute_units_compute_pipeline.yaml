@@ -1,0 +1,293 @@
+view: Compute Units - Compute Pipeline
+legacy_panel_id: 1100
+alias: cu_pipe
+tables:
+- id: 1101
+  title: Compute Speed-of-Light
+  archs:
+  - gfx908
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+  metrics: []
+- id: 1101
+  title: Compute Speed-of-Light
+  archs:
+  - gfx90a
+  - gfx940
+  - gfx941
+  - gfx942
+  - gfx950
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+    unit: GFLOPs
+    description: 'The total floating-point operations executed per second on the VALU. This
+      is also presented as a percent of the peak theoretical FLOPs achievable on the specific
+      accelerator. Note: this does not include any floating-point operations from MFMA instructions.'
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    unit: GFLOPs
+    description: The total number of 8-bit floating point MFMA operations executed per second.
+      This is also presented as a percent of the peak theoretical F8 MFMA operations achievable
+      on the specific accelerator. It is supported on AMD Instinct MI300 series and later
+      only.
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx950
+    unit: GFLOPs
+    description: The total number of 8-bit floating-point operations executed on MFMA units,
+      per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
+  - metric: compute.mfma_flops_mxf8
+    archs:
+    - gfx950
+    unit: GFLOPs
+    description: The total number of 8-bit microscaling floating-point operations executed
+      on MFMA units, per normalization unit. MXF8 (MXFP8) uses E4M3 format.
+  - metric: compute.mfma_flops_bf16
+    unit: GFLOPs
+    description_note: This is also presented as a percent of the peak theoretical BF16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f16
+    unit: GFLOPs
+    description_note: This is also presented as a percent of the peak theoretical F16 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f32
+    unit: GFLOPs
+    description_note: This is also presented as a percent of the peak theoretical F32 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f64
+    unit: GFLOPs
+    description_note: This is also presented as a percent of the peak theoretical F64 MFMA
+      operations achievable on the specific accelerator.
+  - metric: compute.mfma_flops_f6f4
+    archs:
+    - gfx950
+    unit: GFLOPs
+    description: The total number of 4-bit and 6-bit floating-point operations executed on
+      MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950)
+      and later only.
+  - metric: compute.mfma_iops_int8
+    unit: GIOPs
+    description_note: This is also presented as a percent of the peak theoretical INT8 MFMA
+      operations achievable on the specific accelerator.
+- id: 1102
+  title: Pipeline Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.ipc
+  - metric: compute.ipc_issued
+    legacy_id: 11.2.1
+  - metric: compute.salu_util
+    description: Indicates what percent of the kernel's duration the SALU was busy executing
+      instructions. Computed as the ratio of the total number of cycles spent by the scheduler
+      issuing SALU / SMEM instructions over the total CU cycles.
+  - metric: compute.valu_util
+  - metric: compute.dual_issue_valu_util
+    label: Dual-issue VALU Utilization
+    archs:
+    - gfx950
+    legacy_id: 11.2.4
+  - metric: compute.valu_co_issue_efficiency
+    archs:
+    - gfx950
+    legacy_id: 11.2.5
+  - metric: compute.vmem_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description: Indicates what percent of the kernel's duration the VMEM unit was busy executing
+      instructions, including both global/generic and spill/scratch operations (see the VMEM
+      instruction count metrics for more detail). Does not include VALU operations. Computed
+      as the ratio of the total number of cycles spent by the scheduler issuing VMEM instructions
+      over the total CU cycles.
+  - metric: compute.branch_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description: Indicates what percent of the kernel's duration the branch unit was busy
+      executing instructions. Computed as the ratio of the total number of cycles spent by
+      the scheduler issuing branch instructions over the total CU cycles.
+  - metric: compute.valu_active_threads
+    description: Indicates the average level of divergence within a wavefront over the lifetime
+      of the kernel. The number of work-items that were active in a wavefront during execution
+      of each VALU instruction, time-averaged over all VALU instructions run on all wavefronts
+      in the kernel
+  - metric: compute.mfma_util
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    display: pipeline_mfma_util
+    description: Indicates what percent of the kernel's duration the MFMA unit was busy executing
+      instructions. Computed as the ratio of the total number of cycles spent by the MFMA
+      was busy over the total CU cycles.
+  - metric: compute.mfma_inst_cycles
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.2.8
+      gfx940: 11.2.8
+      gfx941: 11.2.8
+      gfx942: 11.2.8
+      gfx950: 11.2.10
+  - metric: compute.vmem_lat
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.2.9
+      gfx940: 11.2.9
+      gfx941: 11.2.9
+      gfx942: 11.2.9
+      gfx950: 11.2.11
+  - metric: compute.smem_lat
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.2.10
+      gfx940: 11.2.10
+      gfx941: 11.2.10
+      gfx942: 11.2.10
+      gfx950: 11.2.12
+- id: 1103
+  title: Arithmetic Operations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.flops_per_norm
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 11.3.0
+  - metric: compute.iops_per_norm
+    archs:
+    - gfx90a
+    - gfx942
+    - gfx950
+    legacy_id: 11.3.1
+  - metric: compute.iops_per_norm
+    archs:
+    - gfx940
+    - gfx941
+    unit: (FLOPs + $normUnit)
+    legacy_id: 11.3.1
+  - metric: compute.f8_ops
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 11.3.2
+  - metric: compute.f16_ops
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.3.2
+      gfx940: 11.3.3
+      gfx941: 11.3.3
+      gfx942: 11.3.3
+      gfx950: 11.3.3
+  - metric: compute.bf16_ops
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.3.3
+      gfx940: 11.3.4
+      gfx941: 11.3.4
+      gfx942: 11.3.4
+      gfx950: 11.3.4
+  - metric: compute.f32_ops
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.3.4
+      gfx940: 11.3.5
+      gfx941: 11.3.5
+      gfx942: 11.3.5
+      gfx950: 11.3.5
+  - metric: compute.f64_ops
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.3.5
+      gfx940: 11.3.6
+      gfx941: 11.3.6
+      gfx942: 11.3.6
+      gfx950: 11.3.6
+  - metric: compute.f6f4_ops
+    archs:
+    - gfx950
+    legacy_id: 11.3.7
+  - metric: compute.int8_ops
+    archs:
+    - gfx90a
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 11.3.6
+      gfx942: 11.3.7
+      gfx950: 11.3.8
+  - metric: compute.int8_ops
+    archs:
+    - gfx940
+    - gfx941
+    unit: (FLOPs + $normUnit)
+    legacy_id: 11.3.7

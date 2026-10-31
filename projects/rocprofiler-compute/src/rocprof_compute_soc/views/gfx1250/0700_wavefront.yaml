@@ -1,0 +1,354 @@
+view: Workgroup Processor (WGP)
+legacy_panel_id: 700
+alias: wgp
+tables:
+- id: 701
+  title: Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.util
+    legacy_id: 7.1.0
+  - metric: wgp.wall_clock
+    legacy_id: 7.1.1
+  - metric: wgp.active_wgps
+    description: Average number of WGPs with at least one active wavefront in a cycle.
+- id: 702
+  title: Wavefront Launch Stats
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: dispatch.grid_size
+    legacy_id: 7.2.0
+  - metric: dispatch.workgroup_size
+    legacy_id: 7.2.1
+  - metric: dispatch.vgprs
+    description: Number of architectural VGPRs allocated per wave.
+  - metric: dispatch.agprs
+    legacy_id: 7.2.3
+  - metric: dispatch.sgprs
+    description: Number of SGPRs allocated per wave.
+  - metric: dispatch.lds_allocation
+    unit: Bytes
+    description: Bytes of LDS allocated per workgroup.
+  - metric: dispatch.scratch_allocation
+    legacy_id: 7.2.6
+- id: 703
+  title: Wavefront Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.dispatched_wavefronts
+    label: Dispatched Wavefronts
+    legacy_id: 7.3.0
+  - metric: wave.dispatched_threads
+    legacy_id: 7.3.1
+- id: 704
+  title: Wavefront Life
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wave.life
+    legacy_id: 7.4.0
+- id: 705
+  title: Wavefront Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_insts
+    legacy_id: 7.5.0
+  - metric: compute.insts_internal
+    legacy_id: 7.5.1
+  - metric: compute.insts_valu
+    legacy_id: 7.5.2
+  - metric: compute.insts_salu
+    legacy_id: 7.5.3
+  - metric: compute.insts_smem
+    legacy_id: 7.5.4
+  - metric: compute.insts_transcendental
+    legacy_id: 7.5.5
+  - metric: compute.insts_double_precision
+    legacy_id: 7.5.6
+  - metric: compute.insts_vmem
+    legacy_id: 7.5.7
+  - metric: compute.insts_lds
+    legacy_id: 7.5.8
+- id: 706
+  title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_vmem_flat
+    legacy_id: 7.6.0
+  - metric: compute.insts_global_scratch
+    legacy_id: 7.6.1
+  - metric: compute.insts_flat_load
+    legacy_id: 7.6.2
+  - metric: compute.insts_flat_store
+    legacy_id: 7.6.3
+  - metric: compute.insts_buffer_load
+    legacy_id: 7.6.4
+  - metric: compute.insts_buffer_store
+    legacy_id: 7.6.5
+  - metric: compute.insts_global_scratch_load
+    legacy_id: 7.6.6
+  - metric: compute.insts_global_scratch_store
+    legacy_id: 7.6.7
+  - metric: compute.insts_global_scratch_atomics
+    legacy_id: 7.6.8
+  - metric: compute.insts_vmem_atomic_return
+    legacy_id: 7.6.9
+  - metric: compute.insts_vmem_atomic_non_return
+    legacy_id: 7.6.10
+  - metric: compute.insts_multicast_load
+    legacy_id: 7.6.11
+  - metric: compute.insts_async_load
+    legacy_id: 7.6.12
+  - metric: compute.insts_async_store
+    legacy_id: 7.6.13
+  - metric: compute.insts_tdm
+    legacy_id: 7.6.14
+- id: 707
+  title: LDS Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.total_lds_insts
+    legacy_id: 7.7.0
+  - metric: compute.insts_lds_load
+    legacy_id: 7.7.1
+  - metric: compute.insts_lds_store
+    legacy_id: 7.7.2
+  - metric: compute.insts_lds_atomic_return
+    legacy_id: 7.7.3
+  - metric: compute.insts_lds_atomic_non_return
+    legacy_id: 7.7.4
+  - metric: compute.insts_lds_other
+    legacy_id: 7.7.5
+- id: 708
+  title: VALU Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.insts_valu
+    label: Total VALU Instructions
+    description: Total VALU instructions issued.
+  - metric: compute.insts_transcendental
+    label: VALU Instructions - Trans
+  - metric: compute.insts_double_precision
+    label: VALU Instructions - Double Precision
+  - metric: compute.valu_insts_cmacc
+    legacy_id: 7.8.3
+  - metric: compute.valu_insts_smacc
+    legacy_id: 7.8.4
+  - metric: compute.valu_insts_xdl
+    legacy_id: 7.8.5
+  - metric: compute.valu_insts_wmma
+    legacy_id: 7.8.6
+- id: 709
+  title: VALU FLOPs and IOPs Counting
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.valu_integer_operations
+    legacy_id: 7.9.0
+  - metric: compute.valu_fp_operations_fp16
+    legacy_id: 7.9.1
+  - metric: compute.valu_fp_operations_fp16_trans
+    legacy_id: 7.9.2
+  - metric: compute.valu_fp_operations_fp32
+    legacy_id: 7.9.3
+  - metric: compute.valu_fp_operations_fp32_trans
+    legacy_id: 7.9.4
+  - metric: compute.valu_fp_operations_fp64
+    legacy_id: 7.9.5
+  - metric: compute.valu_fp_operations_fp64_trans
+    legacy_id: 7.9.6
+- id: 710
+  title: WMMA Instruction FLOPs and IOPs Counting
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.wmma_fp_operations_fp32
+    legacy_id: 7.10.0
+  - metric: compute.wmma_fp_operations_fp64
+    legacy_id: 7.10.1
+  - metric: compute.wmma_fp_operations_fp16
+    legacy_id: 7.10.2
+  - metric: compute.wmma_fp_operations_bf16
+    legacy_id: 7.10.3
+  - metric: compute.wmma_fp_operations_fp8
+    legacy_id: 7.10.4
+  - metric: compute.wmma_fp_operations_fp6
+    legacy_id: 7.10.5
+  - metric: compute.wmma_fp_operations_fp4
+    legacy_id: 7.10.6
+  - metric: compute.wmma_fp_operations_fp6fp4
+    legacy_id: 7.10.7
+  - metric: compute.wmma_int_operations_int8
+    legacy_id: 7.10.8
+  - metric: compute.wmma_int_operations_int4
+    legacy_id: 7.10.9
+- id: 711
+  title: Instruction Issue Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.tdm_issue_stall_rate
+    legacy_id: 7.11.0
+- id: 712
+  title: Compute Pipeline Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.pipeline_util_cmacc
+    legacy_id: 7.12.0
+  - metric: compute.pipeline_util_smacc
+    legacy_id: 7.12.1
+  - metric: compute.pipeline_util_double_precision
+    legacy_id: 7.12.2
+  - metric: compute.pipeline_util_xdl
+    legacy_id: 7.12.3
+- id: 713
+  title: WGP Latencies
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: lds.access_lat
+    legacy_id: 7.13.0
+- id: 714
+  title: WGP-TXA Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.gl0_req_bus_util
+    label: WGP-GL0 Request Bus Util
+    legacy_id: 7.14.0
+  - metric: wgp.gl0_lds_req_bus_util
+    label: WGP-GL0 LDS Request Bus Util
+    legacy_id: 7.14.1
+  - metric: wgp.gl0_vmem_req_bus_util
+    label: WGP-GL0 VMEM Request Bus Util
+    legacy_id: 7.14.2
+  - metric: wgp.gl0_vmem_rd_req_bus_util
+    label: WGP-GL0 VMEM Read Request Bus Util
+    legacy_id: 7.14.3
+  - metric: wgp.gl0_vmem_wr_req_bus_util
+    label: WGP-GL0 VMEM Write Request Bus Util
+    legacy_id: 7.14.4
+  - metric: wgp.bus_util_row0
+    label: Bus Utilization - Row0
+    legacy_id: 7.14.5
+  - metric: wgp.bus_stall_rate_row0
+    label: Bus Stall Rate - Row0
+    legacy_id: 7.14.6
+  - metric: wgp.bus_util_row1
+    label: Bus Utilization - Row1
+    legacy_id: 7.14.7
+  - metric: wgp.bus_stall_rate_row1
+    label: Bus Stall Rate - Row1
+    legacy_id: 7.14.8
+- id: 715
+  title: WGP-TXD Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: wgp.txd_data_bus_util
+    legacy_id: 7.15.0
+- id: 716
+  title: Instruction Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: l1i.hit_rate_excl_dup
+    label: Icache Hit Rate
+- id: 717
+  title: Scalar Data Cache
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.hits_per_req
+    label: Dcache Hit Rate
+  - metric: sl1d.req_bw_norm
+    label: Dcache Request Bandwidth
+    legacy_id: 7.17.1
+- id: 718
+  title: SQC-GL1 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.interface_stall_rate
+    label: Interface Stall Rate
+    legacy_id: 7.18.0

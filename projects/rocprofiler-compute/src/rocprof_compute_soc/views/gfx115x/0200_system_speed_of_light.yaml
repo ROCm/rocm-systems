@@ -1,0 +1,66 @@
+view: System Speed-of-Light
+legacy_panel_id: 200
+alias: sol
+tables:
+- id: 201
+  title: System Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
+  - metric: compute.valu_flops_f64
+  - metric: compute.ipc
+    unit: Instr/cycle
+    legacy_id: 2.1.2
+  - metric: wave.occupancy
+    legacy_id: 2.1.3
+  - metric: gl2.hit_rate
+    pct_of_peak: false
+  - metric: gl2.fabric_rd_bw
+    label: GL2-Fabric Read BW
+    unit: Bytes/s
+  - metric: gl2.fabric_wr_bw
+    label: GL2-Fabric Write BW
+    unit: Bytes/s
+  - metric: lds.bank_conflicts
+    pct_of_peak: false
+    legacy_id: 2.1.7
+  - metric: wave.wait_for_any
+    label: Wave Dependency Wait
+    pct_of_peak: false
+    legacy_id: 2.1.8
+  - metric: wave.issue_wait
+    pct_of_peak: false
+    legacy_id: 2.1.9
+  - metric: gl0.hit_rate
+    label: GL0 Cache Hit Rate (TCP Cache)
+    pct_of_peak: false
+  - metric: gl0.bw
+    label: GL0 Cache BW (TCP Cache)
+    unit: Bytes/s
+  - metric: gl1.hit_rate
+    label: GL1 Cache Hit Rate
+    pct_of_peak: false
+  - metric: gl1.gl2_rd_bw
+    label: GL1 Cache Read BW
+    unit: Bytes/s
+  - metric: l2.bw
+    label: GL2 Cache BW
+    unit: Bytes/s
+    legacy_id: 2.1.14
+  - metric: sl1d.hit_rate_excl_dup
+    label: Scalar Data Cache Hit Rate
+    pct_of_peak: false
+  - metric: sl1d.gl1_rd_bw
+    label: Scalar Data Cache BW
+    unit: Bytes/s
+  - metric: l1i.hit_rate_excl_dup
+    label: Instruction Cache Hit Rate
+    pct_of_peak: false
+  - metric: l1i.gl1_rd_bw
+    label: Instruction Cache BW
+    unit: Bytes/s

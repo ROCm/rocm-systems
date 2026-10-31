@@ -16,8 +16,8 @@ Panel Config:
       metric:
         SPI Utilization:
           avg: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $se_per_gpu)
-          min: 100 * MIN(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $se_per_gpu))
-          max: 100 * MAX(SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $se_per_gpu))
+          min: MIN(100 * SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $se_per_gpu))
+          max: MAX(100 * SPI_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $se_per_gpu))
           unit: Percent
 
   - metric_table:
@@ -75,18 +75,18 @@ Panel Config:
           unit: Cycles
         Context Save Rate:
           avg: 100 * SUM(SPI_ALL_WAVE_SAVED_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_ALL_WAVE_SAVED_sum / SPI_BUSY_sum)
           unit: Percent
         Context Restore Rate:
           avg: 100 * SUM(SPI_ALL_WAVE_RESTORED_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_ALL_WAVE_RESTORED_sum / SPI_BUSY_sum)
           unit: Percent
         Wavefront Dispatch FIFO Full Rate:
           avg: 100 * SUM(SPI_RA_WR_CTL_FULL_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_WR_CTL_FULL_sum / SPI_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -101,48 +101,48 @@ Panel Config:
       metric:
         Resource No-Allocation Rate:
           avg: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_REQ_NO_ALLOC_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Resource Allocation Rate:
           avg: 100 * SUM(SPI_RA_REQ_ALLOC_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_REQ_ALLOC_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - LDS Full:
           avg: 100 * SUM(SPI_RA_LDS_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_LDS_CU_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Waveslots Full:
           avg: 100 * SUM(SPI_RA_WAVE_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_WAVE_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - VGPR Full:
           avg: 100 * SUM(SPI_RA_VGPR_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_VGPR_SIMD_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Barrier Full:
           avg: 100 * SUM(SPI_RA_BAR_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_BAR_CU_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Bulky Full:
           avg: 100 * SUM(SPI_RA_BULKY_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_BULKY_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Named Barriers Full:
           avg: 100 * SUM(SPI_RA_NAMED_BAR_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_NAMED_BAR_FULL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
         Alloc Failure - Temp Space Full:
           avg: 100 * SUM(SPI_RA_TMP_STALL_CSN_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_TMP_STALL_CSN_sum / SPI_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -177,8 +177,8 @@ Panel Config:
           unit: Requests
         CPC Pre-Alloc Request Stall Rate:
           avg: 100 * SUM(SPI_RA_PRE_ALLOC_STALL_sum) / SUM(SPI_BUSY_sum)
-          min: 100 * MIN(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
-          max: 100 * MAX(SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
+          min: MIN(100 * SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
+          max: MAX(100 * SPI_RA_PRE_ALLOC_STALL_sum / SPI_BUSY_sum)
           unit: Percent
 
   metrics_description:

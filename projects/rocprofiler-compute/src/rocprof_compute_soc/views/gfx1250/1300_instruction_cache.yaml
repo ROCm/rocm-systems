@@ -1,0 +1,195 @@
+view: GL2 Cache
+legacy_panel_id: 1300
+alias: gl2
+tables:
+- id: 1301
+  title: GL2A Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.gl2a_util
+    label: Utilization
+    description: Percentage of GL2 Arbiter cycles when it's distributing requests across GL2C
+      partitions.
+  - metric: gl2.gl2a_gl2c0_req
+    legacy_id: 13.1.1
+  - metric: gl2.gl2a_gl2c1_req
+    legacy_id: 13.1.2
+  - metric: gl2.gl2a_gl2c2_req
+    legacy_id: 13.1.3
+  - metric: gl2.gl2a_gl2c3_req
+    legacy_id: 13.1.4
+  - metric: gl2.gl2a_gl2c0_req_stall_rate
+    legacy_id: 13.1.5
+  - metric: gl2.gl2a_gl2c1_req_stall_rate
+    legacy_id: 13.1.6
+  - metric: gl2.gl2a_gl2c2_req_stall_rate
+    legacy_id: 13.1.7
+  - metric: gl2.gl2a_gl2c3_req_stall_rate
+    legacy_id: 13.1.8
+  - metric: gl2.gl2c0_gl2a_return_stall_rate
+    legacy_id: 13.1.9
+  - metric: gl2.gl2c1_gl2a_return_stall_rate
+    legacy_id: 13.1.10
+  - metric: gl2.gl2c2_gl2a_return_stall_rate
+    legacy_id: 13.1.11
+  - metric: gl2.gl2c3_gl2a_return_stall_rate
+    legacy_id: 13.1.12
+- id: 1310
+  title: GL2C Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.util
+    label: GL2C Utilization
+    legacy_id: 13.10.0
+- id: 1311
+  title: GL2C Cache Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.hit_rate
+  - metric: gl2.pipeline_stall
+    legacy_id: 13.11.1
+  - metric: gl2.lat_fifo_full_stall
+    legacy_id: 13.11.2
+  - metric: gl2.source_fifo_full_stall
+    legacy_id: 13.11.3
+  - metric: gl2.tag_stall_set_full
+    legacy_id: 13.11.4
+  - metric: gl2.tag_stall_writeback_fifo_full
+    legacy_id: 13.11.5
+  - metric: gl2.tag_stall_cached_ea_fifo_full
+    legacy_id: 13.11.6
+- id: 1302
+  title: GL2C-EA Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_req_stall_on_vc3
+    legacy_id: 13.2.0
+  - metric: gl2.ea_req_stall_on_vc4
+    legacy_id: 13.2.1
+  - metric: gl2.ea_req_stall_on_vc6
+    legacy_id: 13.2.2
+  - metric: gl2.ea_req_stall_on_vc7
+    legacy_id: 13.2.3
+  - metric: gl2.ea_data_stall_on_vc2
+    legacy_id: 13.2.4
+  - metric: gl2.ea_data_stall_on_vc3
+    legacy_id: 13.2.5
+  - metric: gl2.ea_data_stall_on_vc4
+    legacy_id: 13.2.6
+  - metric: gl2.ea_data_stall_on_vc6
+    legacy_id: 13.2.7
+  - metric: gl2.ea_data_stall_on_vc7
+    legacy_id: 13.2.8
+- id: 1303
+  title: GL2C-EA Interface - Latencies
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_rd_lat
+    description: null
+    legacy_id: 13.3.0
+  - metric: gl2.ea_wr_lat
+    description: null
+    legacy_id: 13.3.1
+  - metric: gl2.ea_atomic_lat
+    description: null
+    legacy_id: 13.3.2
+- id: 1304
+  title: GL2C-EA Interface - HBM Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_hbm_bw_rd
+    description: Total HBM read bandwidth between GL2 and EA.
+  - metric: gl2.ea_hbm_bw_wr
+    description: Total HBM write bandwidth between GL2 and EA.
+  - metric: gl2.ea_hbm_bw_atomic
+    description: Total HBM atomic bandwidth between GL2 and EA.
+- id: 1305
+  title: GL2C-EA Interface - Host CPU Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_host_cpu_bw_rd
+    legacy_id: 13.5.0
+  - metric: gl2.ea_host_cpu_bw_wr
+    legacy_id: 13.5.1
+  - metric: gl2.ea_host_cpu_bw_atomic
+    legacy_id: 13.5.2
+- id: 1306
+  title: GL2C-EA Interface - PCIe Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_pcie_bw_rd
+    legacy_id: 13.6.0
+  - metric: gl2.ea_pcie_bw_wr
+    legacy_id: 13.6.1
+  - metric: gl2.ea_pcie_bw_atomic
+    legacy_id: 13.6.2
+- id: 1307
+  title: GL2C-EA Interface - Remote Node Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_remote_node_bw_rd
+    legacy_id: 13.7.0
+  - metric: gl2.ea_remote_node_bw_wr
+    legacy_id: 13.7.1
+  - metric: gl2.ea_remote_node_bw_atomic
+    legacy_id: 13.7.2
+- id: 1308
+  title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_remote_memory_bw_rd
+    legacy_id: 13.8.0
+  - metric: gl2.ea_remote_memory_bw_wr
+    legacy_id: 13.8.1
+  - metric: gl2.ea_remote_memory_bw_atomic
+    legacy_id: 13.8.2

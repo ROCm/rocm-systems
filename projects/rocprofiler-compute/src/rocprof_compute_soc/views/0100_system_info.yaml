@@ -1,0 +1,9 @@
+view: System Info
+legacy_panel_id: 100
+alias: sysinfo
+tables:
+- render: raw_csv_table
+  id: 101
+  title: System Info
+  source: sysinfo.csv
+  columnwise: true

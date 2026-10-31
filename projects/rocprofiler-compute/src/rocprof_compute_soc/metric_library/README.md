@@ -7,7 +7,8 @@ peaks), not how a panel shows it. The design is in
 
 Production does not read these files yet: `analyze` and `profile` still use
 [`analysis_configs/`](../analysis_configs/). Until the cutover, a metric change goes into
-both trees.
+both trees, and a change to how a panel shows a metric goes into its view in
+[`views/`](../views/).
 
 ## Layout
 

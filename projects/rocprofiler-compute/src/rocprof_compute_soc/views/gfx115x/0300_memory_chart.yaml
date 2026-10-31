@@ -1,0 +1,231 @@
+view: Memory Chart
+legacy_panel_id: 300
+alias: memchart
+tables:
+- id: 301
+  title: Instruction Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l1i.req
+    label: ICache Requests
+    description: null
+    legacy_id: 3.1.0
+  - metric: l1i.hit_rate_excl_dup
+    label: ICache Hit Rate
+    description: Percentage of instruction cache accesses that are serviced from cache without
+      fetching from the GL1 cache. High hit rates indicate good instruction locality. Low
+      hit rates may indicate large kernels exceeding instruction cache capacity or divergent
+      branches.
+    legacy_id: 3.1.1
+  - metric: l1i.gl1_rd_bw
+    label: ICache-GL1 Read Bandwidth
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.1.2
+- id: 302
+  title: Scalar Data Cache
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+    label: DCache Requests
+    description: null
+    legacy_id: 3.2.0
+  - metric: sl1d.hit_rate_excl_dup
+    label: DCache Hit Rate
+    description: Percentage of scalar data cache accesses that hit in cache. High hit rates
+      indicate efficient reuse of constant and uniform data. Low hit rates may indicate excessive
+      unique constant data or poor temporal locality.
+    legacy_id: 3.2.1
+  - metric: sl1d.gl1_rd_bw
+    label: DCache-GL1 Read Bandwidth
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.2.2
+- id: 303
+  title: TCP Cache (GL0 Vector Cache)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.rd_req
+    label: TCP Read Requests
+    description: null
+    legacy_id: 3.3.0
+  - metric: gl0.wr_req
+    label: TCP Write Requests
+    description: null
+    legacy_id: 3.3.1
+  - metric: gl0.hit_rate
+    label: GL0 Cache Hit Rate (TCP Cache)
+    description: Percentage of GL0 vector cache (TCP Cache) requests serviced from cache.
+      TCP Cache is the first-level cache for vector memory operations. Higher hit rates reduce
+      traffic to the GL1 cache and lower memory access latency for vector operations.
+    legacy_id: 3.3.2
+  - metric: gl0.bw
+    label: GL0 Cache BW (TCP Cache)
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.3.3
+- id: 304
+  title: LDS (Local Data Share)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: compute.insts_lds
+    label: LDS Req
+    unit: (Requests + $normUnit)
+    legacy_id: 3.4.0
+  - metric: lds.util
+    description: Percentage of the LDS cycle budget across all CUs spent servicing indexed
+      (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two
+      CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this
+      architecture.
+    legacy_id: 3.4.1
+  - metric: lds.bank_conflict_rate
+    legacy_id: 3.4.2
+  - metric: lds.estimated_bw
+    unit: Bytes/s
+    legacy_id: 3.4.3
+- id: 305
+  title: TCP-GL1 Interface
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl0.gl1_rd_bw
+    label: TCP-GL1 Read Bandwidth
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.5.0
+  - metric: gl0.gl1_wr_bw
+    label: TCP-GL1 Write Bandwidth
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.5.1
+- id: 306
+  title: GL1 Cache (L1)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.util
+    legacy_id: 3.6.0
+  - metric: gl1.hit_rate
+    label: GL1 Cache Hit Rate
+    description: Percentage of L1 cache requests that hit in cache. Higher hit rates reduce
+      traffic to the L2 cache and improve memory access latency. Low hit rates may indicate
+      poor data locality or working sets exceeding L1 capacity.
+    legacy_id: 3.6.1
+  - metric: gl1.stall_gl2_backpressure
+    description: null
+    legacy_id: 3.6.2
+- id: 307
+  title: GL1-GL2 Interface
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_bw
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.7.0
+  - metric: gl1.gl2_wr_bw
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.7.1
+- id: 308
+  title: GL2 Cache (L2)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gl2.util
+    description: null
+    legacy_id: 3.8.0
+  - metric: gl2.hit_rate
+    description: Percentage of L2 cache requests that hit in cache. GL2 cache is the GPU's
+      final on-chip cache before accessing system memory via GCEA. High hit rates reduce memory
+      bandwidth pressure. Low hit rates cause traffic to system memory, increasing latency.
+    legacy_id: 3.8.1
+  - metric: gl2.fabric_rd_bw
+    label: GL2-Fabric Read BW
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.8.2
+  - metric: gl2.fabric_wr_bw
+    label: GL2-Fabric Write BW
+    unit: Bytes/s
+    description: null
+    legacy_id: 3.8.3
+- id: 309
+  title: Graphics Core Efficiency Arbiter (GCEA) to System Memory
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: gcea.sysarb_util
+    legacy_id: 3.9.0
+  - metric: gcea.sysarb_stall_rate
+    description: null
+    legacy_id: 3.9.1
+  - metric: gcea.dram_rd_bw
+    unit: Bytes/s
+    legacy_id: 3.9.2
+  - metric: gcea.dram_wr_bw
+    unit: Bytes/s
+    legacy_id: 3.9.3
+- id: 310
+  title: Workgroup Processors (WGPs)
+  cli_style: mem_chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+    legacy_id: 3.10.0
+  - metric: dispatch.vgprs
+    label: VGPR
+    round: 0
+    legacy_id: 3.10.1
+  - metric: dispatch.sgprs
+    label: SGPR
+    round: 0
+    legacy_id: 3.10.2
+  - metric: dispatch.lds_allocation
+    round: 0
+    legacy_id: 3.10.3
+  - metric: dispatch.scratch_allocation_per_wave
+    label: Scratch Allocation
+    unit: KB per Wave
+    round: 3
+    legacy_id: 3.10.4
+  - metric: dispatch.workgroups_per_wgp
+    label: Workgroups
+    round: 1
+    legacy_id: 3.10.5

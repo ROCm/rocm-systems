@@ -1,0 +1,349 @@
+view: Compute Units - Instruction Mix
+legacy_panel_id: 1000
+alias: cu_ins
+tables:
+- id: 1001
+  title: Overall Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_valu
+    label: VALU
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.1.0
+  - metric: compute.inst_mix_vmem
+    label: VMEM
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.1.1
+  - metric: lds.insts
+    label: LDS
+    description: The total number of LDS (also known as shared memory) operations issued.
+      These include loads, stores, atomics, and HIP's __shfl operations.
+  - metric: compute.inst_mix_mfma
+    label: MFMA
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.1.3
+  - metric: compute.inst_mix_salu
+    label: SALU
+    legacy_id:
+      gfx908: 10.1.1
+      gfx90a: 10.1.4
+      gfx940: 10.1.4
+      gfx941: 10.1.4
+      gfx942: 10.1.4
+      gfx950: 10.1.4
+  - metric: compute.inst_mix_smem
+    label: SMEM
+    legacy_id:
+      gfx908: 10.1.2
+      gfx90a: 10.1.5
+      gfx940: 10.1.5
+      gfx941: 10.1.5
+      gfx942: 10.1.5
+      gfx950: 10.1.5
+  - metric: compute.inst_mix_branch
+    label: Branch
+    legacy_id:
+      gfx908: 10.1.3
+      gfx90a: 10.1.6
+      gfx940: 10.1.6
+      gfx941: 10.1.6
+      gfx942: 10.1.6
+      gfx950: 10.1.6
+- id: 1002
+  title: VALU Arithmetic Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_int32
+    label: INT32
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.0
+  - metric: compute.inst_mix_int64
+    label: INT64
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.1
+  - metric: compute.inst_mix_f16_add
+    label: F16-ADD
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.2
+  - metric: compute.inst_mix_f16_mul
+    label: F16-MUL
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.3
+  - metric: compute.inst_mix_f16_fma
+    label: F16-FMA
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.4
+  - metric: compute.inst_mix_f16_trans
+    label: F16-Trans
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.5
+  - metric: compute.inst_mix_f32_add
+    label: F32-ADD
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.6
+  - metric: compute.inst_mix_f32_mul
+    label: F32-MUL
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.7
+  - metric: compute.inst_mix_f32_fma
+    label: F32-FMA
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.8
+  - metric: compute.inst_mix_f32_trans
+    label: F32-Trans
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.9
+  - metric: compute.inst_mix_f64_add
+    label: F64-ADD
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.10
+  - metric: compute.inst_mix_f64_mul
+    label: F64-MUL
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.11
+  - metric: compute.inst_mix_f64_fma
+    label: F64-FMA
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.12
+  - metric: compute.inst_mix_f64_trans
+    label: F64-Trans
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.2.13
+  - metric: compute.inst_mix_conversion
+    label: Conversion
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    description: The total number of type conversion instructions (such as converting data
+      to or from F32\u2194F64) issued to the VALU per normalization unit.
+    legacy_id: 10.2.14
+- id: 1003
+  title: VMEM Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: ta.global_insts
+    label: Global/Generic Instr
+    legacy_id: 10.3.0
+  - metric: ta.global_rd_insts
+    label: Global/Generic Read
+    description: The total number of global & generic memory read instructions executed on
+      all compute units on the accelerator, per normalization unit.
+  - metric: ta.global_wr_insts
+    label: Global/Generic Write
+    description: The total number of global & generic memory write instructions executed on
+      all compute units on the accelerator, per normalization unit.
+  - metric: ta.global_atomic_insts
+    label: Global/Generic Atomic
+    description: The total number of global & generic memory atomic (with and without return)
+      instructions executed on all compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_insts
+    label: Spill/Stack Instr
+    legacy_id: 10.3.4
+  - metric: ta.spill_coalescable_insts
+    label: Spill/Stack Coalesceable Instr
+    archs:
+    - gfx950
+    legacy_id: 10.3.5
+  - metric: ta.spill_rd_insts
+    label: Spill/Stack Read
+    description: The total number of spill/stack memory read instructions executed on all
+      compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_wr_insts
+    label: Spill/Stack Write
+    description: The total number of spill/stack memory write instructions executed on all
+      compute units on the accelerator, per normalization unit.
+  - metric: ta.spill_atomic_insts
+    label: Spill/Stack Atomic
+    description: The total number of spill/stack memory atomic (with and without return) instructions
+      executed on all compute units on the accelerator, per normalization unit. Typically
+      unused as these memory operations are typically used to implement thread-local storage.
+- id: 1004
+  title: MFMA Arithmetic Instruction Mix
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: compute.inst_mix_mfma_i8
+    label: MFMA-I8
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.4.0
+  - metric: compute.inst_mix_mfma_f8
+    label: MFMA-F8
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id: 10.4.1
+  - metric: compute.inst_mix_mfma_f16
+    label: MFMA-F16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 10.4.1
+      gfx940: 10.4.2
+      gfx941: 10.4.2
+      gfx942: 10.4.2
+      gfx950: 10.4.2
+  - metric: compute.inst_mix_mfma_bf16
+    label: MFMA-BF16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 10.4.2
+      gfx940: 10.4.3
+      gfx941: 10.4.3
+      gfx942: 10.4.3
+      gfx950: 10.4.3
+  - metric: compute.inst_mix_mfma_f32
+    label: MFMA-F32
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 10.4.3
+      gfx940: 10.4.4
+      gfx941: 10.4.4
+      gfx942: 10.4.4
+      gfx950: 10.4.4
+  - metric: compute.inst_mix_mfma_f64
+    label: MFMA-F64
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    legacy_id:
+      gfx90a: 10.4.4
+      gfx940: 10.4.5
+      gfx941: 10.4.5
+      gfx942: 10.4.5
+      gfx950: 10.4.5
+  - metric: compute.inst_mix_mfma_f6f4
+    label: MFMA-F6F4
+    archs:
+    - gfx950
+    legacy_id: 10.4.6

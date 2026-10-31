@@ -1,0 +1,30 @@
+view: Workgroup Manager (SPI)
+legacy_panel_id: 600
+alias: spi
+tables:
+- id: 601
+  title: SPI Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.workgroup_manager_util
+    label: SPI Busy
+    legacy_id: 6.1.0
+- id: 602
+  title: Wave Dispatch Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.compute_wave_dispatches
+    legacy_id: 6.2.0
+  - metric: spi.wave_dispatch_rate
+    unit: Waves/cycle
+    legacy_id: 6.2.1

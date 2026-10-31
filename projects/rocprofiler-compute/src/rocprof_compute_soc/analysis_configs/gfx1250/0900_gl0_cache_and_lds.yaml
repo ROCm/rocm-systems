@@ -26,8 +26,8 @@ Panel Config:
         # Utilization: TX_VMW_VMW_BUSY_sum is summed across all GL0 cache units (one per WGP).
         Utilization:
           avg: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
-          min: 100 * MIN(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
-          max: 100 * MAX(TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          min: MIN(100 * TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: MAX(100 * TX_VMW_VMW_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
 
   - metric_table:
@@ -57,8 +57,8 @@ Panel Config:
           unit: (Requests + $normUnit)
         Request Stall Rate:
           avg: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / SUM(TX_VMW_GATE_EN1_sum)
-          min: 100 * MIN(TX_VMW_VMW_VCA_REQ_STALL_sum / TX_VMW_GATE_EN1_sum)
-          max: 100 * MAX(TX_VMW_VMW_VCA_REQ_STALL_sum / TX_VMW_GATE_EN1_sum)
+          min: MIN(100 * TX_VMW_VMW_VCA_REQ_STALL_sum / TX_VMW_GATE_EN1_sum)
+          max: MAX(100 * TX_VMW_VMW_VCA_REQ_STALL_sum / TX_VMW_GATE_EN1_sum)
           unit: Percent
         Request Latency:
           avg: SUM(TX_VMW_VMW_LATENCY_sum) / SUM(TX_VMW_REQ_sum)
@@ -102,23 +102,23 @@ Panel Config:
           unit: Percent
         Cache Capacity Stall Rate:
           avg: 100 * SUM(TX_VMW_ALLOC_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_ALLOC_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_ALLOC_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_ALLOC_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_ALLOC_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Cache Total Conflict Stall Rate:
           avg: 100 * SUM(TX_VMW_TOTAL_CONFLICT_STALLS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_TOTAL_CONFLICT_STALLS_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_TOTAL_CONFLICT_STALLS_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_TOTAL_CONFLICT_STALLS_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_TOTAL_CONFLICT_STALLS_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Latency FIFO Stall Rate:
           avg: 100 * SUM(TX_VMW_LFIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LFIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LFIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LFIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LFIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         GL1 Memory Request FIFO Stall Rate:
           avg: 100 * SUM(TX_VMW_MEM_REQ_FIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_MEM_REQ_FIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_MEM_REQ_FIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_MEM_REQ_FIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_MEM_REQ_FIFO_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         # Return Queue Pending Stall Rate: TX_VMW_GL1_PENDING_STALL and TX_VMW_VMW_BUSY
         # are in different profiling passes (TX block is at full capacity — 8 counters/pass,
@@ -128,43 +128,43 @@ Panel Config:
         # with an amplification artifact from different measurement windows.
         Return Queue Pending Stall Rate:
           avg: 100 * SUM(TX_VMW_GL1_PENDING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_GL1_PENDING_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_GL1_PENDING_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_GL1_PENDING_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_GL1_PENDING_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Cache Write Stall Rate - GL1 Read Return:
           avg: 100 * SUM(TX_VMW_GL1_VMW_RDRET_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Set Conflict Stall Rate - Cache Read:
           avg: 100 * SUM(TX_VMW_READ_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_READ_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_READ_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_READ_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_READ_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Set Conflict Stall Rate - Cache Write:
           avg: 100 * SUM(TX_VMW_WRITE_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_WRITE_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_WRITE_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_WRITE_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_WRITE_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Set Conflict Stall Rate - Atomics:
           avg: 100 * SUM(TX_VMW_ATOMIC_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_ATOMIC_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_ATOMIC_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_ATOMIC_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_ATOMIC_SETCONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Cache RAM Bank Conflict Stall Rate - Read:
           avg: 100 * SUM(TX_VMW_READ_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_READ_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_READ_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_READ_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_READ_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Cache RAM Bank Conflict Stall Rate - Write:
           avg: 100 * SUM(TX_VMW_WRITE_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_WRITE_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_WRITE_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_WRITE_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_WRITE_DATACONFLICT_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Segment Conflict Stall Rate - Cache:
           avg: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -180,8 +180,8 @@ Panel Config:
         # Show N/A when no user LDS traffic (TX_VMW_LDS_INPUT_ACTIVE_sum == 0).
         LDS Utilization:
           avg: 100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_INPUT_ACTIVE_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         # LDS Utilization (Load/Store/Atomics): TX_VMW_LDS_ACTIVE_*_CNT counters count
         # internal hardware LDS pipeline slots, not user LDS operations. They return
@@ -191,53 +191,53 @@ Panel Config:
         # active, correctly identifying kernels with no user LDS operations.
         LDS Utilization - Load:
           avg: 100 * SUM(TX_VMW_LDS_ACTIVE_LOAD_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_ACTIVE_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Utilization - Store:
           avg: 100 * SUM(TX_VMW_LDS_ACTIVE_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_ACTIVE_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Utilization - Atomics:
           avg: 100 * SUM(TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_ACTIVE_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Bank Conflict Stall Rate:
           avg: 100 * SUM(TX_VMW_LDS_BANK_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_BANK_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Bank Conflict Stall Rate - Read:
           avg: 100 * SUM(TX_VMW_LDS_BANKCONF_LOAD_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_BANKCONF_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_BANKCONF_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_BANKCONF_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_BANKCONF_LOAD_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Bank Conflict Stall Rate - Write:
           avg: 100 * SUM(TX_VMW_LDS_BANKCONF_STORE_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_BANKCONF_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_BANKCONF_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_BANKCONF_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_BANKCONF_STORE_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Bank Conflict Stall Rate - Atomic:
           avg: 100 * SUM(TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_BANKCONF_ATOMIC_CNT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Address Conflict Stall Rate:
           avg: 100 * SUM(TX_VMW_LDS_ADDR_CONFLICT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_ADDR_CONFLICT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Segment Conflict Stall Rate - LDS:
           avg: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         LDS Stall Rate:
           avg: 100 * SUM(TX_VMW_LDS_LDS_EXECUTION_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_LDS_LDS_EXECUTION_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_LDS_LDS_EXECUTION_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_LDS_LDS_EXECUTION_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_LDS_LDS_EXECUTION_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -252,28 +252,28 @@ Panel Config:
       metric:
         Slot Replacement Rate:
           avg: 100 * SUM(TX_VMW_SLOT_REPLACEMENT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_SLOT_REPLACEMENT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_SLOT_REPLACEMENT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_SLOT_REPLACEMENT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_SLOT_REPLACEMENT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Slot Hit Rate:
           avg: 100 * SUM(TX_VMW_SLOT_HIT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_SLOT_HIT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_SLOT_HIT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_SLOT_HIT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_SLOT_HIT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Set Conflict Stall - Same Port:
           avg: 100 * SUM(TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Slot Replacement Stall - Same Port:
           avg: 100 * SUM(TX_VMW_SLOT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_SLOT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_SLOT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_SLOT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_SLOT_STALL_SAME_PORT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         Slot Replacement Stall - Cross Port:
           avg: 100 * SUM(TX_VMW_SLOT_STALL_CROSS_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_SLOT_STALL_CROSS_PORT_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_SLOT_STALL_CROSS_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_SLOT_STALL_CROSS_PORT_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_SLOT_STALL_CROSS_PORT_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -369,18 +369,18 @@ Panel Config:
       metric:
         GL0-GL1 Request Stall:
           avg: 100 * SUM(TX_VMW_GL1_VMW_BACK_PRESSURE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_GL1_VMW_BACK_PRESSURE_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         GL0 Cache RAM Read Stall by GL1 Write:
           avg: 100 * SUM(TX_VMW_GL1_GRANT_READ_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_GL1_GRANT_READ_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_GL1_GRANT_READ_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_GL1_GRANT_READ_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_GL1_GRANT_READ_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         GL0 Cache RAM Write Stall by GL1 Return:
           avg: 100 * SUM(TX_VMW_GL1_VMW_RDRET_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_GL1_VMW_RDRET_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -400,8 +400,8 @@ Panel Config:
           unit: (Requests + $normUnit)
         UTCL0 Thrash Stall Rate:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_STALL_THRASHING_STALL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_STALL_THRASHING_STALL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -456,8 +456,8 @@ Panel Config:
           unit: Cycles
         UTCL1 Request Stall:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -472,13 +472,13 @@ Panel Config:
       metric:
         UTCL0 Lookup Hit Rate:
           avg: 100 * SUM(TX_VMW_UTCL0_TRANSLATION_HIT_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_TRANSLATION_HIT_sum / TX_VMW_UTCL0_REQUEST_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_TRANSLATION_HIT_sum / TX_VMW_UTCL0_REQUEST_sum)
+          min: MIN(100 * TX_VMW_UTCL0_TRANSLATION_HIT_sum / TX_VMW_UTCL0_REQUEST_sum)
+          max: MAX(100 * TX_VMW_UTCL0_TRANSLATION_HIT_sum / TX_VMW_UTCL0_REQUEST_sum)
           unit: Percent
         UTCL0 Lookup Hit-on-Miss Rate:
           avg: 100 * SUM(TX_VMW_UTCL0_MISS_UNDER_MISS_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_MISS_UNDER_MISS_sum / TX_VMW_UTCL0_REQUEST_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_MISS_UNDER_MISS_sum / TX_VMW_UTCL0_REQUEST_sum)
+          min: MIN(100 * TX_VMW_UTCL0_MISS_UNDER_MISS_sum / TX_VMW_UTCL0_REQUEST_sum)
+          max: MAX(100 * TX_VMW_UTCL0_MISS_UNDER_MISS_sum / TX_VMW_UTCL0_REQUEST_sum)
           unit: Percent
         UTCL0 Lookup Latency:
           avg: SUM(TX_VMW_UTCL0_INFLIGHT_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
@@ -487,23 +487,23 @@ Panel Config:
           unit: Cycles
         UTCL0 LFIFO Full Stall:
           avg: 100 * SUM(TX_VMW_UTCL0_LFIFO_FULL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_LFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_LFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_LFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_LFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         UTCL0 Max Inflight Stall:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         UTCL0 Miss FIFO Stall:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
         UTCL0 LFIFO Not-Present Stall:
           avg: 100 * SUM(TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
-          min: 100 * MIN(TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum / TX_VMW_VMW_BUSY_sum)
-          max: 100 * MAX(TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum / TX_VMW_VMW_BUSY_sum)
+          min: MIN(100 * TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum / TX_VMW_VMW_BUSY_sum)
+          max: MAX(100 * TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum / TX_VMW_VMW_BUSY_sum)
           unit: Percent
 
   metrics_description:
@@ -672,8 +672,6 @@ Panel Config:
     UTCL0 Requests: >-
       Total address translation requests sent to UTCL0.
 
-    UTCL0 Requests for GL2 Prefetch: >-
-      Number of UTCL0 translation requests for GL2 prefetch operations.
 
     UTCL0 Thrash Stall Rate: >-
       Percentage of VMW-busy cycles the UTCL0 TLB is thrashing.

@@ -1,0 +1,352 @@
+view: Roofline
+legacy_panel_id: 400
+alias: roof
+tables:
+- id: 401
+  title: Roofline Performance Rates
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops_f16
+    archs:
+    - gfx908
+    description: 'The total 16-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F16 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F16 operations from MFMA instructions.'
+    legacy_id: 4.1.0
+  - metric: compute.valu_flops_f32
+    archs:
+    - gfx908
+    description: 'The total 32-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F32 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F32 operations from MFMA instructions.'
+    legacy_id: 4.1.1
+  - metric: compute.valu_flops_f64
+    archs:
+    - gfx908
+    description: 'The total 64-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F64 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F64 operations from MFMA instructions.'
+    legacy_id: 4.1.2
+  - metric: compute.mfma_flops_f64
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured F64 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.3
+  - metric: compute.mfma_flops_f32
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured F32 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.4
+  - metric: compute.mfma_flops_f16
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured F16 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.5
+  - metric: compute.mfma_flops_bf16
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured BF16 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.6
+  - metric: compute.mfma_iops_int8
+    label: MFMA IOPs (Int8)
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured INT8 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.7
+  - metric: fabric.hbm_bw
+    archs:
+    - gfx908
+    description: The total number of bytes read from and written to High-Bandwidth Memory
+      (HBM) per second. The peak empirically measured bandwidth achievable on the specific
+      accelerator is displayed alongside for comparison. It reflects peak single-direction
+      (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    legacy_id: 4.1.8
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    archs:
+    - gfx908
+    display: roofline_l2_bw_64b
+    description: The number of bytes looked up in the L2 cache per unit time. The number of
+      bytes is calculated as the number of cache lines requested multiplied by the cache line
+      size. This value does not consider partial requests, so e.g., if only a single value
+      is requested in a cache line, the data movement will still be counted as a full cache
+      line. The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id: 4.1.9
+  - metric: vl1d.cache_bw
+    label: L1 Cache Bandwidth
+    archs:
+    - gfx908
+    peak: null
+    description_note: The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id: 4.1.10
+  - metric: lds.theoretical_bw
+    label: LDS Bandwidth
+    archs:
+    - gfx908
+    display: roofline_lds_bw
+    peak: null
+    description: Indicates the maximum amount of bytes that could have been loaded from, stored
+      to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more
+      detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id: 4.1.11
+  - metric: compute.valu_flops_f16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description: 'The total 16-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F16 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F16 operations from MFMA instructions.'
+    legacy_id: 4.1.0
+  - metric: compute.valu_flops_f32
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description: 'The total 32-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F32 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F32 operations from MFMA instructions.'
+    legacy_id: 4.1.1
+  - metric: compute.valu_flops_f64
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description: 'The total 64-bit floating-point operations executed per second on the VALU.
+      This is presented with the value of the peak empirical F64 FLOPs achievable on the specific
+      accelerator. Note: this does not include any F64 operations from MFMA instructions.'
+    legacy_id: 4.1.2
+  - metric: compute.mfma_flops_f64
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured F64 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.3
+  - metric: compute.mfma_flops_f32
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured F32 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.4
+  - metric: compute.mfma_flops_f16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured F16 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.5
+  - metric: compute.mfma_flops_bf16
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured BF16 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id: 4.1.6
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx940
+    - gfx941
+    - gfx942
+    peak: empirical
+    description: The total number of 8-bit floating point MFMA operations executed per second.
+      This is also presented as a percent of the peak theoretical F8 MFMA operations achievable
+      on the specific accelerator. It is supported on AMD Instinct MI300 series and later
+      only.
+    legacy_id: 4.1.7
+  - metric: compute.mfma_flops_f8
+    archs:
+    - gfx950
+    peak: empirical
+    description_note: This is also presented as a percent of the peak theoretical F8 MFMA
+      operations achievable on the specific accelerator.
+    legacy_id: 4.1.7
+  - metric: compute.mfma_flops_mxf8
+    archs:
+    - gfx950
+    peak: empirical
+    description_note: This is also presented as a percent of the peak theoretical MXF8 MFMA
+      operations achievable on the specific accelerator.
+    legacy_id: 4.1.8
+  - metric: compute.mfma_flops_f6f4
+    archs:
+    - gfx950
+    peak: empirical
+    description: 'The total number of 4-bit and 6-bit floating point MFMA operations executed
+      per second. Note: this does not include any floating point operations from VALU instructions.
+      The peak empirically measured F6F4 MFMA operations achievable on the specific accelerator
+      is displayed alongside for comparison. It is supported on AMD Instinct MI350 series
+      (gfx950) and later only.'
+    legacy_id: 4.1.9
+  - metric: compute.mfma_iops_int8
+    label: MFMA IOPs (Int8)
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured INT8 MFMA operations achievable on the
+      specific accelerator is displayed alongside for comparison.
+    legacy_id:
+      gfx90a: 4.1.7
+      gfx940: 4.1.8
+      gfx941: 4.1.8
+      gfx942: 4.1.8
+      gfx950: 4.1.10
+  - metric: fabric.hbm_bw
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description: The total number of bytes read from and written to High-Bandwidth Memory
+      (HBM) per second. The peak empirically measured bandwidth achievable on the specific
+      accelerator is displayed alongside for comparison. It reflects peak single-direction
+      (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    legacy_id:
+      gfx90a: 4.1.8
+      gfx940: 4.1.9
+      gfx941: 4.1.9
+      gfx942: 4.1.9
+      gfx950: 4.1.11
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    display: roofline_l2_bw_64b
+    peak: empirical
+    description: The number of bytes looked up in the L2 cache per unit time. The number of
+      bytes is calculated as the number of cache lines requested multiplied by the cache line
+      size. This value does not consider partial requests, so e.g., if only a single value
+      is requested in a cache line, the data movement will still be counted as a full cache
+      line. The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id:
+      gfx90a: 4.1.9
+      gfx940: 4.1.10
+      gfx941: 4.1.10
+  - metric: vl1d.l2_bw
+    label: L2 Cache Bandwidth
+    archs:
+    - gfx942
+    - gfx950
+    display: roofline_l2_bw_128b
+    peak: empirical
+    description: The number of bytes looked up in the L2 cache per unit time. The number of
+      bytes is calculated as the number of cache lines requested multiplied by the cache line
+      size. This value does not consider partial requests, so e.g., if only a single value
+      is requested in a cache line, the data movement will still be counted as a full cache
+      line. The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id:
+      gfx942: 4.1.10
+      gfx950: 4.1.12
+  - metric: vl1d.cache_bw
+    label: L1 Cache Bandwidth
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    peak: empirical
+    description_note: The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id:
+      gfx90a: 4.1.10
+      gfx940: 4.1.11
+      gfx941: 4.1.11
+      gfx942: 4.1.11
+      gfx950: 4.1.13
+  - metric: lds.theoretical_bw
+    label: LDS Bandwidth
+    archs:
+    - gfx90a
+    - gfx940
+    - gfx941
+    - gfx942
+    - gfx950
+    display: roofline_lds_bw
+    peak: empirical
+    description: Indicates the maximum amount of bytes that could have been loaded from, stored
+      to, or atomically updated in the LDS per unit time (see LDS Bandwidth example for more
+      detail). The peak empirically measured LDS bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    legacy_id:
+      gfx90a: 4.1.11
+      gfx940: 4.1.12
+      gfx941: 4.1.12
+      gfx942: 4.1.12
+      gfx950: 4.1.14
+- id: 402
+  title: Roofline Plot Points
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: fabric.ai_hbm
+    label: AI HBM
+    legacy_id: 4.2.0
+  - metric: l2.ai
+    label: AI L2
+    legacy_id: 4.2.1
+  - metric: vl1d.ai
+    label: AI L1
+    legacy_id: 4.2.2
+  - metric: lds.ai
+    label: AI LDS
+    legacy_id: 4.2.3
+  - metric: compute.total_flops
+    legacy_id: 4.2.4

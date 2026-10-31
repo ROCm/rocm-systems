@@ -51,7 +51,7 @@ Panel Config:
         WMMA FLOPs (FP64):
           value: 64 * SUM(SQ_VALU_WMMA_FLOP_FP64_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s
-          peak: $WMMAF64Flops_empirical_peak
+          peak: None
         WMMA FLOPs (FP32):
           value: 128 * SUM(SQ_VALU_WMMA_FLOP_FP32_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GFLOP/s

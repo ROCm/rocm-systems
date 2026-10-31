@@ -16,18 +16,18 @@ Panel Config:
       metric:
         GL1A Utilization:
           avg: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
-          min: 100 * MIN(GL1A_BUSY_sum / GL1A_CYCLE_sum)
-          max: 100 * MAX(GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          min: MIN(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
+          max: MAX(100 * GL1A_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Request Bus Utilization:
           avg: 100 * SUM(GL1A_REQ_PATH_BUSY_sum) / SUM(GL1A_CYCLE_sum)
-          min: 100 * MIN(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          max: 100 * MAX(GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          min: MIN(100 * GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          max: MAX(100 * GL1A_REQ_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Return Bus Utilization:
           avg: 100 * SUM(GL1A_RET_PATH_BUSY_sum) / SUM(GL1A_CYCLE_sum)
-          min: 100 * MIN(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
-          max: 100 * MAX(GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          min: MIN(100 * GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
+          max: MAX(100 * GL1A_RET_PATH_BUSY_sum / GL1A_CYCLE_sum)
           unit: Percent
         GL1A Requests:
           avg: SUM(GL1A_ARB_REQUESTS_sum) / SUM($denom)
@@ -52,8 +52,8 @@ Panel Config:
       metric:
         GL1C Utilization:
           avg: 100 * SUM(GL1C_BUSY_sum) / SUM(GL1C_CYCLE_sum)
-          min: 100 * MIN(GL1C_BUSY_sum / GL1C_CYCLE_sum)
-          max: 100 * MAX(GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          min: MIN(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
+          max: MAX(100 * GL1C_BUSY_sum / GL1C_CYCLE_sum)
           unit: Percent
         GL1C Return Arbitration Latency:
           avg: SUM(GL1C_ARB_RET_LEVEL_sum) / SUM(GL1C_REQ_sum)
@@ -62,8 +62,8 @@ Panel Config:
           unit: Cycles
         GL1C Buffer Full Stall:
           avg: 100 * SUM(GL1C_STALL_BUFFER_FULL_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_STALL_BUFFER_FULL_sum / GL1C_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -133,8 +133,8 @@ Panel Config:
       metric:
         GL1C Multicast Tracker Depletion Stall:
           avg: 100 * SUM(GL1C_MULTICAST_TRACKER_DEPLETS_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_MULTICAST_TRACKER_DEPLETS_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Request - 128B:
           avg: SUM(GL1C_REQ_MULTICAST_128B_sum) / SUM($denom)
@@ -153,28 +153,28 @@ Panel Config:
           unit: GB/s
         GL1C Multicast Tracker 0 Timeout Rate:
           avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT0_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT0_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 1 Timeout Rate:
           avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT1_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT1_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 2 Timeout Rate:
           avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT2_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT2_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast Tracker 3 Timeout Rate:
           avg: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT3_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_REQ_MULTICAST_TIMEOUT3_sum / GL1C_BUSY_sum)
           unit: Percent
         GL1C Multicast-to-Unicast Downgrade Rate:
           avg: 100 * SUM(GL1C_REQ_MULTICAST_DOWNGRADE_sum) / SUM(GL1C_BUSY_sum)
-          min: 100 * MIN(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
-          max: 100 * MAX(GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          min: MIN(100 * GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
+          max: MAX(100 * GL1C_REQ_MULTICAST_DOWNGRADE_sum / GL1C_BUSY_sum)
           unit: Percent
 
   - metric_table:
@@ -254,8 +254,8 @@ Panel Config:
           unit: GB/s
         GL1C-GLARB Write Bandwidth:
           avg: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL1C-GLARB Write ACKs:
           avg: SUM(GL1C_GL2_RET_ACK_sum) / SUM($denom)

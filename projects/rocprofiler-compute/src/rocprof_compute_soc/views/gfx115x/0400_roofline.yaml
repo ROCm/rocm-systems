@@ -1,0 +1,68 @@
+view: Roofline
+legacy_panel_id: 400
+alias: roof
+tables:
+- id: 401
+  title: Roofline Performance Rates
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+    peak: Peak (Empirical)
+  metrics:
+  - metric: compute.valu_flops
+    display: valu_flops_per_valu_inst
+    peak: empirical
+    legacy_id: 4.1.0
+  - metric: compute.valu_flops_f64
+    display: valu_flops_f64_per_dp_inst
+    peak: empirical
+    legacy_id: 4.1.1
+  - metric: gl1.gl2_bw
+    label: GL2 Cache BW
+    unit: Bytes/s
+    peak: empirical
+    legacy_id: 4.1.2
+  - metric: gl0.gl1_cache_bw
+    label: GL1 Cache BW
+    unit: Bytes/s
+    peak: empirical
+    legacy_id: 4.1.3
+  - metric: gl0.bw
+    label: GL0 Cache BW (TCP Cache)
+    unit: Bytes/s
+    peak: empirical
+    description: Achieved bandwidth at the GL0 vector cache (TCP Cache). This represents total
+      data requested by shader cores from the memory hierarchy. Compare against peak to assess
+      memory subsystem utilization.
+  - metric: lds.theoretical_bw
+    label: LDS BW
+    unit: Bytes/s
+    peak: empirical
+    description: Achieved bandwidth for Local Data Share memory operations. LDS provides high-bandwidth,
+      low-latency shared memory within a workgroup. Compare against peak to identify if LDS
+      bandwidth is limiting performance.
+    legacy_id: 4.1.5
+- id: 402
+  title: Roofline Plot Points
+  cli_style: Roofline
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: l2.ai
+    label: AI L2
+    legacy_id: 4.2.0
+  - metric: vl1d.ai
+    label: AI L1
+    legacy_id: 4.2.1
+  - metric: gl0.ai
+    label: AI L0
+    legacy_id: 4.2.2
+  - metric: lds.ai
+    label: AI LDS
+    legacy_id: 4.2.3
+  - metric: compute.total_flops
+    legacy_id: 4.2.4
