@@ -245,6 +245,51 @@ sudo ./amdsmitst --gtest_filter="*Functional*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _
 sudo ./amdsmitst --gtest_filter="*Integration*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_intg_test.log 2> _c_intg_test_err.log
 ```
 
+## Running by CTest category
+
+The `amdsmitst` tests are grouped into the quality categories defined in
+`amd_smi_test/test_categories.yaml` (`quick`/`standard`/`comprehensive`/`full`)
+and can be run through CTest labels.
+
+`quick` and `standard` do not require root. The three Python runners currently
+require root, so they carry only `comprehensive`/`full` (and their aliases), plus
+the `requires_root` label. Run those categories with `sudo`; adding
+`-LE '^amdsmi_python$'` omits the Python runners.
+
+> **Keep in sync:** the per-ASIC exclusions are maintained by hand in **both**
+> `amd_smi_test/test_categories.yaml` (this ctest label path) and
+> `amd_smi_test/amdsmitst.exclude` (the `detect_asic_filter.sh` runtime path).
+> Update both together until they are consolidated into a single source.
+
+Each category has a generic suite and a suite per GPU arch with a known-issue
+list. A bare `-L <category>` runs all these copies, including filters for other
+GPUs. Narrow to your GPU with a second `-L ^ex_gpu_<arch>$` label, as CI does:
+
+```
+# Pick the suite for your GPU (this is what TheRock CI does):
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^standard$' -L '^ex_gpu_gfx90a$'
+
+# Discover which ex_gpu_* labels exist for your build:
+ctest --test-dir <install>/share/amd_smi/tests/ctest --print-labels
+
+# GPUs without an exclusion label (for example gfx950, gfx1103 and gfx12xx):
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^standard$' -LE ex_gpu
+```
+
+Installed tree (how TheRock CI runs it):
+```
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^<category>$' -L '^ex_gpu_<arch>$'
+```
+
+Standalone amd-smi build (`cmake -S projects/amdsmi -B <build> -DBUILD_TESTS=ON`):
+the top-level `enable_testing()` is not set, so run from the test dir. Python
+runners are registered only in the installed tree.
+```
+cd <build>/tests/amd_smi_test
+ctest -L '^quick$' -L '^ex_gpu_gfx90a$'
+# or: ctest --test-dir <build>/tests/amd_smi_test -L '^quick$' -L '^ex_gpu_gfx90a$'
+```
+
 ## How to Run Summary Report
 ### Command Line Options
 
