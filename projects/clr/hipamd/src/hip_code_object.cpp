@@ -234,16 +234,11 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
 hipError_t DynCO::populateDynGlobalVars() {
   std::scoped_lock lock(dclock_);
   hipError_t err = hipSuccess;
-  std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
   // For Dynamic Modules there is only one hipFatBinaryDevInfo_
   device::Program* dev_program =
       fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
-
-  if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
-    LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
-    return hipErrorSharedObjectSymbolNotFound;
-  }
+  const std::vector<std::string>& var_names = dev_program->getGlobalVarFromCodeObj();
 
   for (auto& elem : var_names) {
     vars_.insert(
@@ -263,17 +258,13 @@ hipError_t DynCO::populateDynGlobalVars() {
 hipError_t DynCO::populateDynGlobalFuncs() {
   std::scoped_lock lock(dclock_);
 
-  std::vector<std::string> func_names;
   device::Program* dev_program =
       fb_info_->GetProgram(device_id_)->getDeviceProgram(*g_devices[device_id_]->devices()[0]);
 
-  // Get all the global func names from COMGR
-  if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
-    LogPrintfError("Could not get Global Funcs from Code Obj for Module: 0x%x", module_);
-    return hipErrorSharedObjectSymbolNotFound;
-  }
+  // All the global func names from the code object
+  const std::vector<std::string>& func_names = dev_program->getGlobalFuncFromCodeObj();
 
-  // COMGR returns every AMD_COMGR_SYMBOL_TYPE_FUNC entry in the ELF, which
+  // This returns every STT_FUNC entry in the ELF's .dynsym, which
   // includes C++ ABI helpers like __cxa_deleted_virtual that have no HSA
   // kernel symbol. Filter to user-callable kernels — anything else would
   // SIGABRT inside Function::BuildKernel's findSymbol guarantee when later

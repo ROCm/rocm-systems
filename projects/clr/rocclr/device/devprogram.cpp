@@ -14,6 +14,8 @@
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
+#include "device/codeobject/elf_header.hpp"
+#include "device/codeobject/metadata_notes.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -61,13 +63,7 @@ Program::Program(amd::Device& device, amd::Program& owner)
       programOptions_(nullptr) {}
 
 // ================================================================================================
-Program::~Program() {
-  clear();
-  for (auto const& kernelMeta : kernelMetadataMap_) {
-    amd::Comgr::destroy_metadata(kernelMeta.second);
-  }
-  amd::Comgr::destroy_metadata(metadata_);
-}
+Program::~Program() { clear(); }
 
 // ================================================================================================
 void Program::clear() {
@@ -490,6 +486,9 @@ bool Program::compileImpl(const std::string& sourceCode,
       return false;
     }
   }
+  if (!requireCompiler()) {
+    return false;
+  }
 
   // add CL source to input data set
   amd_comgr_data_set_t inputs;
@@ -622,6 +621,9 @@ bool Program::compileImpl(const std::string& sourceCode,
 // ================================================================================================
 bool Program::linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
                        bool createLibrary) {
+  if (!requireCompiler()) {
+    return false;
+  }
   amd_comgr_data_set_t inputs;
 
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
@@ -730,11 +732,42 @@ static void dumpCodeObject(const std::string& image) {
 }
 
 // ================================================================================================
+bool Program::requireCompiler() {
+  if (amd::Comgr::Load()) {
+    return true;
+  }
+  compilerUnavailable_ = true;
+  buildLog_ += "Error: the compiler (comgr library) is not available.\n";
+  return false;
+}
+
+// ================================================================================================
 bool Program::linkImpl(amd::option::Options* options) {
   file_type_t continueCompileFrom = FILE_TYPE_LLVMIR_BINARY;
 
   internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
 
+  if (llvmBinary_.empty()) {
+    continueCompileFrom = getNextCompilationStageFromBinary(options);
+  }
+
+  // A finished code object needs no compiler: create the kernels without touching comgr
+  if (continueCompileFrom == FILE_TYPE_ISA) {
+    binary_t isaBinary = binary();
+    if (GPU_DUMP_CODE_OBJECT) {
+      dumpCodeObject(std::string{(const char*)isaBinary.first, isaBinary.second});
+    }
+    if (!createKernels(const_cast<void*>(isaBinary.first), isaBinary.second,
+                       options->oVariables->UniformWorkGroupSize, internal_)) {
+      buildLog_ += "Error: Cannot create kernels.\n";
+      return false;
+    }
+    return true;
+  }
+
+  if (!requireCompiler()) {
+    return false;
+  }
   amd_comgr_data_set_t inputs;
   if (amd::Comgr::create_data_set(&inputs) != AMD_COMGR_STATUS_SUCCESS) {
     buildLog_ += "Error: COMGR fails to create data set for linking.\n";
@@ -742,10 +775,6 @@ bool Program::linkImpl(amd::option::Options* options) {
   }
 
   bool bLinkLLVMBitcode = true;
-  if (llvmBinary_.empty()) {
-    continueCompileFrom = getNextCompilationStageFromBinary(options);
-  }
-
   switch (continueCompileFrom) {
     case FILE_TYPE_CG:
     case FILE_TYPE_LLVMIR_BINARY: {
@@ -765,20 +794,6 @@ bool Program::linkImpl(amd::option::Options* options) {
 
       bLinkLLVMBitcode = false;
       break;
-    }
-    case FILE_TYPE_ISA: {
-      amd::Comgr::destroy_data_set(inputs);
-      binary_t isaBinary = binary();
-      if (GPU_DUMP_CODE_OBJECT) {
-        dumpCodeObject(std::string{(const char*)isaBinary.first, isaBinary.second});
-      }
-
-      if (!createKernels(const_cast<void*>(isaBinary.first), isaBinary.second,
-                         options->oVariables->UniformWorkGroupSize, internal_)) {
-        buildLog_ += "Error: Cannot create kernels.\n";
-        return false;
-      }
-      return true;
     }
     default:
       buildLog_ += "Error while Codegen phase: the binary is incomplete \n";
@@ -1040,7 +1055,7 @@ int32_t Program::compile(const std::string& sourceCode,
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_COMPILE_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_COMPILER_NOT_AVAILABLE : CL_COMPILE_PROGRAM_FAILURE;
   }
 
   if (options->oVariables->EnableBuildTiming) {
@@ -1140,7 +1155,7 @@ int32_t Program::link(const std::vector<Program*>& inputPrograms, const char* or
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_LINK_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_LINKER_NOT_AVAILABLE : CL_LINK_PROGRAM_FAILURE;
   }
 
   if (options.oVariables->EnableBuildTiming) {
@@ -1326,7 +1341,7 @@ int32_t Program::build(const std::string& sourceCode, const char* origOptions,
   if (buildStatus_ == CL_BUILD_IN_PROGRESS) {
     buildStatus_ = CL_BUILD_SUCCESS;
   } else {
-    buildError_ = CL_BUILD_PROGRAM_FAILURE;
+    buildError_ = compilerUnavailable_ ? CL_COMPILER_NOT_AVAILABLE : CL_BUILD_PROGRAM_FAILURE;
   }
 
   if (options->oVariables->EnableBuildTiming) {
@@ -1735,208 +1750,106 @@ Program::file_type_t Program::getNextCompilationStageFromBinary(amd::option::Opt
 }
 
 // ================================================================================================
-bool ComgrBinaryData::create(amd_comgr_data_kind_t kind, void* binary, size_t binSize) {
-  amd_comgr_status_t status = amd::Comgr::create_data(kind, &binaryData_);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return false;
-  }
-  created_ = true;
-
-  status = amd::Comgr::set_data(binaryData_, binSize, reinterpret_cast<const char*>(binary));
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return false;
-  }
-
-  return true;
-}
-
-amd_comgr_data_t& ComgrBinaryData::data() {
-  assert(created_);
-  return binaryData_;
-}
-
-ComgrBinaryData::~ComgrBinaryData() {
-  if (created_) {
-    amd::Comgr::release_data(binaryData_);
-  }
-}
-
 bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
-  ComgrBinaryData binaryData;
-  if (!binaryData.create(AMD_COMGR_DATA_KIND_EXECUTABLE, binary, binSize)) {
-    buildLog_ += "Error: COMGR failed to create code object data object.\n";
-    return false;
-  }
+  kernelMetadataMap_.clear();
+  printfStrings_.clear();
 
-  amd_comgr_status_t status;
   if (device().isOnline()) {
-    size_t requiredSize = 0;
-    status = amd::Comgr::get_data_isa_name(binaryData.data(), &requiredSize, nullptr);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      buildLog_ += "Error: COMGR failed to get code object ISA name.\n";
+    std::string binaryIsaName;
+    amd::ELFIO::Elf64_Ehdr ehdr;
+    if (binSize >= sizeof(ehdr)) {
+      std::memcpy(&ehdr, binary, sizeof(ehdr));
+    }
+    if (binSize < sizeof(ehdr) ||
+        !codeobject::GetIsaFromHeader(ehdr.e_ident[EI_CLASS], ehdr.e_machine,
+                                      ehdr.e_ident[EI_OSABI], ehdr.e_ident[EI_ABIVERSION],
+                                      ehdr.e_flags, binaryIsaName)) {
+      buildLog_ += "Error: Cannot get the code object ISA name.\n";
       return false;
     }
 
-    std::vector<char> binaryIsaName(requiredSize);
-    status = amd::Comgr::get_data_isa_name(binaryData.data(), &requiredSize, binaryIsaName.data());
-    if ((status != AMD_COMGR_STATUS_SUCCESS) || (requiredSize != binaryIsaName.size())) {
-      buildLog_ += "Error: COMGR failed to get code object ISA name.\n";
-      return false;
-    }
-
-    const amd::Isa* binaryIsa = amd::Isa::findIsa(binaryIsaName.data());
+    const amd::Isa* binaryIsa = amd::Isa::findIsa(binaryIsaName.c_str());
     if (!binaryIsa) {
-      buildLog_ +=
-          "Error: Could not find the program ISA " + std::string(binaryIsaName.data()) + "\n";
+      buildLog_ += "Error: Could not find the program ISA " + binaryIsaName + "\n";
       return false;
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
+      buildLog_ += "Error: The program ISA " + binaryIsaName;
       buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
       return false;
     }
   }
 
-  status = amd::Comgr::get_data_metadata(binaryData.data(), &metadata_);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    buildLog_ += "Error: COMGR failed to get the metadata.\n";
+  // A linked code object can hold one metadata note per input object (e.g. rocBLAS's Tensile
+  // libraries, one per kernel); MetadataNotes merges them as comgr does. Each kernel's map is
+  // kept in place, by name, for its Kernel::init().
+  codeobject::MetadataNotes notes(printfStrings_, [this](codeobject::MsgPackReader& reader) {
+    const char* map = reader.position();
+    codeobject::MsgPackReader fields = reader;
+    std::string_view name;
+    uint32_t numFields = 0;
+    bool ok = fields.readMapSize(&numFields);
+    for (uint32_t i = 0; ok && i < numFields && name.empty(); ++i) {
+      std::string_view key;
+      ok = fields.readString(&key) && ((key == ".name") ? fields.readString(&name) : fields.skip());
+    }
+    // A kernel map without .name fails the load
+    if (!ok || name.empty() || !reader.skip()) {
+      return false;
+    }
+    // A kernel listed by several notes is kept once
+    kernelMetadataMap_.emplace(name, std::string_view(map, reader.position() - map));
+    return true;
+  });
+  bool hasNote = false;
+  bool noteOk = true;
+  if (!codeobject::ForEachNote(binary, binSize, codeobject::kAmdgpuNoteName,
+                               codeobject::kAmdgpuMetadataNoteType,
+                               [&](const char* note, uint32_t size) {
+                                 hasNote = true;
+                                 noteOk = notes.parse(note, size);
+                                 return noteOk;
+                               })) {
+    buildLog_ += "Error: Malformed code object note section.\n";
+    return false;
+  }
+  if (!noteOk || !hasNote || !notes.hasVersion()) {
+    if (!noteOk) {
+      buildLog_ += "Error: " + notes.error() + ".\n";
+    } else if (!hasNote) {
+      buildLog_ += "Error: The code object has no AMDGPU metadata note "
+                   "(code object v2 is not supported).\n";
+    } else {
+      buildLog_ += "Error: The code object metadata has no amdhsa.version.\n";
+    }
+    kernelMetadataMap_.clear();
+    printfStrings_.clear();
+    return false;
+  }
+  const auto& [major, minor] = notes.version();
+  if (major == 1) {
+    codeObjectVer_ = static_cast<uint32_t>(minor) + 3;  // 1.0 is code object v3
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V%u.", codeObjectVer_);
+  } else {
+    ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Unknown code object metadata version [%llu.%llu].",
+            static_cast<unsigned long long>(major), static_cast<unsigned long long>(minor));
+  }
+
+  // HIP may have binaries with just global variables
+  if (!notes.hasKernels() && !amd::IS_HIP) {
+    buildLog_ += "Error: The code object metadata has no kernels.\n";
     return false;
   }
 
-  amd_comgr_metadata_node_t kernelsMD;
-  bool hasKernelMD = false;
-  size_t size = 0;
-
-  status = amd::Comgr::metadata_lookup(metadata_, "Kernels", &kernelsMD);
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V2.");
-    hasKernelMD = true;
-    codeObjectVer_ = 2;
-  } else {
-    amd_comgr_metadata_node_t versionMD, versionNode;
-    char major_version, minor_version;
-
-    status = amd::Comgr::metadata_lookup(metadata_, "amdhsa.version", &versionMD);
-
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "No amdhsa.version metadata found.");
-      return false;
-    }
-
-    status = amd::Comgr::index_list_metadata(versionMD, 0, &versionNode);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Cannot get code object metadata major version node.");
-      amd::Comgr::destroy_metadata(versionMD);
-      return false;
-    }
-
-    size = 1;
-    status = amd::Comgr::get_metadata_string(versionNode, &size, &major_version);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Cannot get code object metadata major version.");
-      amd::Comgr::destroy_metadata(versionNode);
-      amd::Comgr::destroy_metadata(versionMD);
-      return false;
-    }
-    amd::Comgr::destroy_metadata(versionNode);
-
-    status = amd::Comgr::index_list_metadata(versionMD, 1, &versionNode);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Cannot get code object metadata minor version node.");
-      amd::Comgr::destroy_metadata(versionMD);
-      return false;
-    }
-
-    size = 1;
-    status = amd::Comgr::get_metadata_string(versionNode, &size, &minor_version);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Cannot get code object metadata minor version.");
-      amd::Comgr::destroy_metadata(versionNode);
-      amd::Comgr::destroy_metadata(versionMD);
-      return false;
-    }
-    amd::Comgr::destroy_metadata(versionNode);
-
-    amd::Comgr::destroy_metadata(versionMD);
-
-    if (major_version == '1') {
-      if (minor_version == '0') {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V3.");
-        codeObjectVer_ = 3;
-      } else if (minor_version == '1') {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V4.");
-        codeObjectVer_ = 4;
-      } else if (minor_version == '2') {
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "Using Code Object V5.");
-        codeObjectVer_ = 5;
-      } else {
-        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "Unknown code object metadata minor version [%s.%s].", major_version,
-                minor_version);
-      }
-    } else {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "Unknown code object metadata major version [%s.%s].",
-              major_version, minor_version);
-    }
-
-    status = amd::Comgr::metadata_lookup(metadata_, "amdhsa.kernels", &kernelsMD);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasKernelMD = true;
-    }
+  // The dynamic symbols, read now so hipModuleLoad* doesn't walk the code object again
+  dynFuncNames_.clear();
+  dynVarNames_.clear();
+  if (!codeobject::DynamicSymbolNames(binary, binSize, dynFuncNames_, dynVarNames_)) {
+    buildLog_ += "Error: Malformed code object dynamic symbol table.\n";
+    return false;
   }
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::get_metadata_list_size(kernelsMD, &size);
-  } else if (amd::IS_HIP) {
-    // Assume an empty binary. HIP may have binaries with just global variables
-    return true;
-  }
-
-  for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-    amd_comgr_metadata_node_t nameMeta;
-    bool hasNameMeta = false;
-    bool hasKernelNode = false;
-
-    amd_comgr_metadata_node_t kernelNode;
-
-    std::string kernelName;
-    status = amd::Comgr::index_list_metadata(kernelsMD, i, &kernelNode);
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasKernelNode = true;
-      status = amd::Comgr::metadata_lookup(kernelNode, (codeObjectVer() == 2) ? "Name" : ".name",
-                                           &nameMeta);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      hasNameMeta = true;
-      status = getMetaBuf(nameMeta, &kernelName);
-    }
-
-    if (status == AMD_COMGR_STATUS_SUCCESS) {
-      kernelMetadataMap_[std::move(kernelName)] = kernelNode;
-    } else {
-      if (hasKernelNode) {
-        amd::Comgr::destroy_metadata(kernelNode);
-      }
-      for (auto const& kernelMeta : kernelMetadataMap_) {
-        amd::Comgr::destroy_metadata(kernelMeta.second);
-      }
-      kernelMetadataMap_.clear();
-    }
-
-    if (hasNameMeta) {
-      amd::Comgr::destroy_metadata(nameMeta);
-    }
-  }
-
-  if (hasKernelMD) {
-    amd::Comgr::destroy_metadata(kernelsMD);
-  }
-
-  return (status == AMD_COMGR_STATUS_SUCCESS);
+  return true;
 }
 
 bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
@@ -1988,153 +1901,6 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
     return false;
   }
   return true;
-}
-
-amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData) {
-  size_t nlen = 0;
-  size_t* userDataInfo = nullptr;
-  amd_comgr_status_t status;
-  amd_comgr_symbol_type_t type;
-  std::vector<std::string>* var_names = nullptr;
-
-  /* Unpack the user data */
-  SymbolInfo* sym_info = reinterpret_cast<SymbolInfo*>(userData);
-
-  if (!sym_info) {
-    return AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  /* Retrieve the symbol info */
-  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &nlen);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return status;
-  }
-
-  /* Retrieve the symbol name */
-  char* name = new char[nlen + 1];
-  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return status;
-  }
-
-  /* Retrieve the symbol type*/
-  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type);
-  if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return status;
-  }
-
-  /* If symbol type is object(Variable) add it to vector */
-  if ((std::strcmp(name, "") != 0) && (type == sym_info->sym_type)) {
-    sym_info->var_names->push_back(std::string(name));
-  }
-
-  delete[] name;
-  return status;
-}
-
-bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names,
-                                    amd_comgr_symbol_type_t sym_type) const {
-  amd_comgr_status_t status = AMD_COMGR_STATUS_SUCCESS;
-  amd_comgr_data_t dataObject;
-  SymbolInfo sym_info;
-  bool ret_val = true;
-
-  do {
-    /* Create comgr data */
-    status = amd::Comgr::create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &dataObject);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      buildLog_ += "COMGR:  Cannot create comgr data \n";
-      ret_val = false;
-      break;
-    }
-
-    /* Set the binary as a dataObject */
-    status = amd::Comgr::set_data(dataObject, static_cast<size_t>(clBinary_->data().second),
-                                  reinterpret_cast<const char*>(clBinary_->data().first));
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      buildLog_ += "COMGR:  Cannot set comgr data \n";
-      ret_val = false;
-      break;
-    }
-
-    /* Pack the user data */
-    sym_info.sym_type = sym_type;
-    sym_info.var_names = var_names;
-
-    /* Iterate through list of symbols */
-    status = amd::Comgr::iterate_symbols(dataObject, getSymbolFromModule, &sym_info);
-    if (status != AMD_COMGR_STATUS_SUCCESS) {
-      buildLog_ += "COMGR:  Cannot iterate comgr symbols \n";
-      ret_val = false;
-      break;
-    }
-    amd::Comgr::release_data(dataObject);
-  } while (0);
-
-  return ret_val;
-}
-
-const bool Program::getLoweredNames(std::vector<std::string>* mangledNames) const {
-  /* Iterate thru kernel names first */
-  mangledNames->reserve(mangledNames->size() + kernelMetadataMap_.size());
-  for (auto const& kernelMeta : kernelMetadataMap_) {
-    mangledNames->emplace_back(kernelMeta.first);
-  }
-
-  /* Itrate thru global vars */
-  if (!getSymbolsFromCodeObj(mangledNames, AMD_COMGR_SYMBOL_TYPE_OBJECT)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_COMGR, "Cannot get Symbols from Code Obj \n");
-    return false;
-  }
-
-  return true;
-}
-
-bool Program::getDemangledName(const std::string& mangledName, std::string& demangledName) const {
-  amd_comgr_data_t mangled_data;
-  amd_comgr_data_t demangled_data;
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data))
-    return false;
-
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::set_data(mangled_data, mangledName.size(), mangledName.c_str())) {
-    amd::Comgr::release_data(mangled_data);
-    return false;
-  }
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::demangle_symbol_name(mangled_data, &demangled_data)) {
-    amd::Comgr::release_data(mangled_data);
-    return false;
-  }
-
-  size_t demangled_size = 0;
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size, NULL)) {
-    amd::Comgr::release_data(mangled_data);
-    amd::Comgr::release_data(demangled_data);
-    return false;
-  }
-
-  demangledName.resize(demangled_size);
-
-  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
-                                                       const_cast<char*>(demangledName.data()))) {
-    amd::Comgr::release_data(mangled_data);
-    amd::Comgr::release_data(demangled_data);
-    return false;
-  }
-
-  amd::Comgr::release_data(mangled_data);
-  amd::Comgr::release_data(demangled_data);
-  return true;
-}
-
-bool Program::getGlobalFuncFromCodeObj(std::vector<std::string>* func_names) const {
-  return getSymbolsFromCodeObj(func_names, AMD_COMGR_SYMBOL_TYPE_FUNC);
-}
-
-bool Program::getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const {
-  return getSymbolsFromCodeObj(var_names, AMD_COMGR_SYMBOL_TYPE_OBJECT);
 }
 
 // Init Fini Launch Lock
