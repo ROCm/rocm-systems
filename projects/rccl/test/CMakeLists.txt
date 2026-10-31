@@ -1101,6 +1101,7 @@ if(BUILD_TESTS)
       ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      SymmetricAllGatherTdmMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp

@@ -187,6 +187,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M and CE-registered wins from 256M.
+  // Under graph capture TDM beats Ring to 4G in one tray and to 512M across trays.
+  .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 128ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).

@@ -5709,6 +5709,44 @@
       "num_ranks": 8,
       "num_gpus": 8
     },
+    "symmetric_all_gather_tdm_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "Symmetric_AllGather_TDM_Window",
+          "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it; checks the reported algorithm, the logged kernel and every rank data",
+          "test_filter": "SymWin_AllGatherTdm.*"
+        }
+      ]
+    },
+    "symmetric_all_gather_tdm_2rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "symmetric_all_gather_tdm_4rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "symmetric_all_gather_tdm_8rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "symmetric_all_gather_tdm_2node": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4
+    },
     "dda_fabric_allreduce_ll_base": {
       "extends": "default",
       "is_gtest": true,
@@ -6628,6 +6666,30 @@
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
       "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2-Rank",
+      "description": "Symmetric AllGather TDM window on 2 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink domain and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 4-Rank",
+      "description": "Symmetric AllGather TDM window on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink domain and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 8-Rank",
+      "description": "Symmetric AllGather TDM window on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink domain and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2 Nodes",
+      "description": "Symmetric AllGather TDM window on 8 GPUs across two UALink trays, where the window ends at 512 MiB and is the only symmetric AllGather path. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink domain and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2node",
       "enabled": true
     },
     {
