@@ -858,6 +858,11 @@ intended for debugging and development purposes.
           associative, so low-order-bit differences are expected. Every
           participating communicator also allocates the full DDA IPC scratch
           buffer, which previously only 8-rank communicators did.
+        | The message-size thresholds that decide when DDA is attempted are
+          not rescaled for the rank count: on ``gfx942``/``gfx950`` a 2 to 7-rank
+          communicator uses the same total-byte caps as the 8-rank clique, so
+          each rank can handle a larger share than at 8 ranks. Check
+          bandwidth-bound sizes for your rank count before enabling it.
       - | ``0``: 8-rank-only DDA (default).
         | ``1``: allow 2..8-rank DDA IPC AllReduce.
 
