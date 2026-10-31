@@ -153,7 +153,8 @@ make_dispatch_info(const hsa::Queue&              queue,
     if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
     {
         const auto& ext_packet = pkt.ext_kernel_dispatch;
-        if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+        if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+           ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
         {
             info.kernel_id            = code_object::get_kernel_id(ext_packet.kernel_object);
             info.private_segment_size = ext_packet.private_segment_size;

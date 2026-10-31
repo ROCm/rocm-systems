@@ -277,9 +277,9 @@ static inline void logAqlDispatchPacketExtended(
   emitAqlLine(sink, amd::LOG_DETAIL_DEBUG, aqlFormat(
           "SWq=0x%zx, HWq=0x%zx, id=%d, priority=%d,%s Dispatch Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-          "setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
+          "amd_format=%d, setup=%d, cluster_count=[%u, %u, %u], cluster_size=[%u, %u, %u], "
           "workgroup=[%u, %u, %u], private_seg_size=%u, group_seg_size=%u, kernel_obj=0x%zx, "
-          "kernarg_address=0x%zx, dep_signal=0x%zx, completion_signal=0x%zx, "
+          "kernarg_address=0x%zx, dep_signal/launch_desc=0x%zx, completion_signal=0x%zx, "
           "rptr=%" PRIu64 ", wptr=%" PRIu64,
           queue, queue->base_address, queue->id, static_cast<int>(priority), prefix, header,
           extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
@@ -288,6 +288,7 @@ static inline void logAqlDispatchPacketExtended(
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
           extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                          HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+          static_cast<int>(pkt->amd_format),
           pkt->setup, pkt->cluster_count_x, pkt->cluster_count_y, pkt->cluster_count_z,
           pkt->cluster_size_x, pkt->cluster_size_y, pkt->cluster_size_z, pkt->workgroup_size_x,
           pkt->workgroup_size_y, pkt->workgroup_size_z, pkt->private_segment_size,
@@ -1954,7 +1955,8 @@ std::string VirtualGPU::AnalyzeAqlQueueBody() const {
   // and the debug log print identical packet detail, including the metadata blob.
   if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
     auto* vendor_hdr = reinterpret_cast<const hsa_amd_vendor_packet_header_t*>(aql_loc);
-    if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+    if (vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+        vendor_hdr->AmdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
       auto* ext = reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(aql_loc);
       lookupKernelName(ext->kernel_object);
       logAqlDispatchPacketExtended(dev(), gpu_queue_, header, ext, index, priority_, meta,
@@ -1994,12 +1996,12 @@ template <typename AqlPacket>
 void VirtualGPU::writePacketToRingBuffer(AqlPacket* aql_loc, AqlPacket* packet,
                                          uint16_t header, uint16_t rest, uint64_t slot_index) {
   if (use_movdir64b_) {
-    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, true, device_mem_ring_buf_, rest, aql_loc);
     amd::nontemporalStoreFence();
     amd::nontemporalWriteAQL(aql_loc, packet, header, rest);
   } else {
     amd::nontemporalCopyAQL(aql_loc, packet);
-    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_);
+    metadata_preloader_.SetMetadata(packet, header, slot_index, false, device_mem_ring_buf_, rest, aql_loc);
     amd::nontemporalStoreFence();
     packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), header, rest);
   }
@@ -2135,8 +2137,9 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   if (IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
-      // setup travels in `rest`, not in the local packet struct, so the log
-      // would otherwise print setup=0. Populate it before logging.
+      // amd_format and setup travel in `rest`, not in the local packet struct,
+      // so the log would otherwise print 0. Populate them before logging.
+      packet->amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
       packet->setup = static_cast<uint8_t>((rest >> 8) & 0xFF);
     }
     if (dev().settings().ext_dispatch_packet_) {
@@ -2213,14 +2216,20 @@ void VirtualGPU::adjustHeader(uint16_t& header) {
 }
 
 // ================================================================================================
-void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet) {
+void VirtualGPU::dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet,
+                                      hsa_amd_packet_type8_t amd_format) {
   auto wait_signals = Barriers().WaitingSignal();
-  if (dev().settings().ext_dispatch_packet_ && wait_signals.size() == 1 && packet != nullptr) {
-      // The Ext Dispatch Packet supports only one dependent signal
-      auto ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
-      ext_packet->dep_signal = wait_signals[0];
+
+  // Format 3 (DISPATCH) supports one dep_signal when there's exactly one wait signal
+  if (amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH &&
+      wait_signals.size() == 1 && packet != nullptr) {
+    auto ext_packet = reinterpret_cast<hsa_amd_ext_kernel_dispatch_packet_t*>(packet);
+    ext_packet->dep_signal = wait_signals[0];
   } else {
-    // AQL dispatch doesn't support dependent signals and extra barrier packet must be generated
+    // All other cases: use barrier packets for dependencies
+    // - Format 4 (DISPATCH1): dep_signal field is launch_descriptor, must use barriers
+    // - Format 3 with multiple signals or null packet: use barriers
+    // - Standard dispatch packets: use barriers
     for (uint32_t i = 0; i < wait_signals.size(); ++i) {
       uint32_t j = i % 5;
       barrier_packet_.dep_signal[j] = wait_signals[i];
@@ -2258,7 +2267,12 @@ bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
     }
     return true;
   } else {
-    dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet));
+    // rest is setup (dimensions) for regular dispatch; amd_format lives in rest only for ext packets.
+    hsa_amd_packet_type8_t amd_format = 0;
+    if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+      amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+    }
+    dispatchBlockingWait(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(packet), amd_format);
     return dispatchGenericAqlPacket(packet, header, rest, blocking, attach_signal);
   }
 }
@@ -2341,7 +2355,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   const bool firstPacketIsKernel =
       firstPacketType == HSA_PACKET_TYPE_KERNEL_DISPATCH ||
       (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-       (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+       ((firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+        (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
   const bool firstHeaderRequestedBarrier =
       firstPacketIsKernel && ((firstHeader & kBarrierBit) != 0);
   if (TestAndClearStateFlag(kAddSystemScope)) {
@@ -2418,7 +2433,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     const bool isKernelDispatch =
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-         amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+         (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+          amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     // A segmented graph's cross-stream dependencies are BARRIER_AND/OR or vendor
     // BARRIER_VALUE packets.  They carry the timing of the wait they perform,
     // so report them alongside the dispatches instead of dropping their signal.
@@ -2492,7 +2508,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     const bool isKernelDispatch =
         isBaseKernelDispatch ||
         (pktType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-         amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+         (amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+          || amdFormat == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
     if (isKernelDispatch) {
       auto kit = dev().KernelMap().find(hostPkt->kernel_object);
       const char* kname = kit != dev().KernelMap().end()
@@ -3109,7 +3126,7 @@ bool VirtualGPU::create() {
                                        dedicated_queue_));
   if (!gpu_queue_) return false;
 
-  if (dev().isa().versionMajor() == 12 && dev().isa().versionMinor() >= 5) {
+  if (dev().settings().ext_dispatch_packet_) {
     metadata_preloader_.SetLaunchDescriptorVersion(AMD_LAUNCH_DESCRIPTOR_VERSION_GFX1250);
   }
 
@@ -5388,6 +5405,16 @@ void VirtualGPU::HiddenHeapInit() {
 }
 
 // ================================================================================================
+hsa_amd_packet_type8_t VirtualGPU::SelectExtDispatchAmdFormat(
+    bool ext_dispatch_packet, const amd::NDRangeKernelCommand* vcmd) const {
+  if (ext_dispatch_packet && vcmd != nullptr &&
+      vcmd->dynDataPrefetchConfig().isEnabled()) {
+    return HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD;
+  }
+  return HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH;
+}
+
+// ================================================================================================
 bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const amd::Kernel& kernel,
                                       const_address parameters, void* event_handle,
                                       uint32_t sharedMemBytes, amd::NDRangeKernelCommand* vcmd,
@@ -5781,6 +5808,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
   }
 
+  const hsa_amd_packet_type8_t amd_format = SelectExtDispatchAmdFormat(extDispatchPacket, vcmd);
+
   // Copy scheduler's AQL packet for possible relaunch from the scheduler itself
     if (aql_packet != nullptr) {
       *aql_packet = dispatchPacket;
@@ -5790,8 +5819,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
                               (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
         // For an ext-dispatch vendor packet byte+2 is amd_format, not setup; set
-        // amd_format=EXT_KERNEL_DISPATCH and shift setup (dimensions) into byte+3.
-        aql_packet->setup = static_cast<uint16_t>(HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+        // amd_format and shift setup (dimensions) into byte+3.
+        aql_packet->setup = static_cast<uint16_t>(amd_format
                               | ((sizes.dimensions()
                                   << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
       } else {
@@ -5811,8 +5840,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       // on normal dispatch packet, first 32 bits are header & setup. In ext dispatch packet,
       // the first 32 bits are header, amd_format, setup. Update the "rest" of the 32 bits, so we
       // can commit it atomically in packet_store_release.
-      rest = (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
-              | ((sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
+      rest = (amd_format | ((sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS) << 8));
     } else {
       rest = (sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS);
     }
