@@ -349,6 +349,8 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
     "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
     "${ROCM_SRC_DIR}/rocm_smi_ampp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_evt_notif.cc"
+    "${PROJECT_SOURCE_DIR}/src/amd_smi/amd_smi_test_overrides.cc" # Required for both rocm-smi & amd-smi paths
 )
 
 if(ENABLE_ESMI_LIB)
@@ -379,6 +381,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
     "${ROCM_INC_DIR}/rocm_smi_npm.h"
     "${ROCM_INC_DIR}/rocm_smi_ampp.h"
+    "${ROCM_INC_DIR}/rocm_smi_evt_notif.h"
 )
 
 add_subdirectory("rocm_smi")
