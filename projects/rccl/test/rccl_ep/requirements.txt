@@ -1,0 +1,5 @@
+# Dependencies for the rccl_ep Python tests. torch must be a ROCm build, so it comes from PyTorch's ROCm index.
+--extra-index-url https://download.pytorch.org/whl/rocm7.2
+pytest
+numpy
+torch==2.14.1+rocm7.2
