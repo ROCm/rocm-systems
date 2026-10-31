@@ -334,6 +334,9 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;
 
   // @brief Override from core::Agent.
+  hsa_status_t DmaFillBytes(void* ptr, uint8_t value, size_t size) override;
+
+  // @brief Override from core::Agent.
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
