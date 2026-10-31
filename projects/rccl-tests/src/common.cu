@@ -2527,6 +2527,30 @@ testResult_t run() {
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
 
+  const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
+  if (tlsPsk) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+    // Looked up at run time: a direct reference would keep the binary from loading against
+    // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
+    typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
+    ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
+    if (setEncryption == NULL) {
+      fprintf(stderr, "NCCL_TESTS_TLS_PSK is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
+        test_ncclVersion);
+      return testInvalidUsage;
+    }
+    ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+    encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
+    encryption.psk = tlsPsk;
+    NCCLCHECK(setEncryption(&encryption));
+    if (proc == 0) printf("# Socket encryption: TLS, %zu-byte pre-shared key\n", strlen(tlsPsk));
+#else
+    fprintf(stderr, "NCCL_TESTS_TLS_PSK is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
+      NCCL_VERSION_CODE);
+    return testInvalidUsage;
+#endif
+  }
+
   ncclUniqueId ncclId;
   if (ncclProc == 0) {
     NCCLCHECK(ncclGetUniqueId(&ncclId));
