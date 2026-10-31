@@ -7,6 +7,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace rocprofsys::parser;
 
@@ -144,6 +145,46 @@ TEST(parser_schema, params_in_category)
     EXPECT_EQ(tracing.at(0)->id, "first");
     EXPECT_EQ(tracing.at(1)->id, "third");
     EXPECT_TRUE(value.params_in_category("missing").empty());
+}
+
+TEST(parser_schema, effect_fields_round_trip)
+{
+    auto param           = make_param("flat_profile", "", "--flat-profile");
+    param.copy_to        = { "profile" };
+    param.assigns        = { { "log_level", "debug" } };
+    param.fills          = { "trace_delay" };
+    param.maps_to        = { value_mapping{
+               .when = "0", .target = "log_level", .value = "info" } };
+    param.choices        = { choice{
+               .value       = "pftrace",
+               .name        = "Perfetto",
+               .description = "Trace",
+               .sets        = { { "trace", "true" } },
+               .aliases     = { "proto" },
+    } };
+    param.arg->min_count = 1;
+    param.arg->max_count = 2;
+    param.arg->binds     = { "output_path", "output_prefix" };
+
+    schema value{};
+    ASSERT_TRUE(value.add_param(std::move(param)));
+    const auto* stored = value.find_param("flat_profile");
+    ASSERT_NE(stored, nullptr);
+    EXPECT_EQ(stored->copy_to, std::vector<std::string>({ "profile" }));
+    EXPECT_EQ(stored->assigns.at("log_level"), "debug");
+    EXPECT_EQ(stored->fills, std::vector<std::string>({ "trace_delay" }));
+    ASSERT_EQ(stored->maps_to.size(), 1U);
+    EXPECT_EQ(stored->maps_to.front().target, "log_level");
+    ASSERT_EQ(stored->choices.size(), 1U);
+    EXPECT_EQ(stored->choices.front().sets.at("trace"), "true");
+    EXPECT_EQ(stored->choices.front().aliases, std::vector<std::string>({ "proto" }));
+    ASSERT_TRUE(stored->arg.has_value());
+    ASSERT_TRUE(stored->arg->min_count.has_value());
+    ASSERT_TRUE(stored->arg->max_count.has_value());
+    EXPECT_EQ(*stored->arg->min_count, 1U);
+    EXPECT_EQ(*stored->arg->max_count, 2U);
+    EXPECT_EQ(stored->arg->binds,
+              (std::vector<std::string>{ "output_path", "output_prefix" }));
 }
 
 TEST(parser_schema, list_separator_defaults_to_comma)
