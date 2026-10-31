@@ -173,4 +173,26 @@ TEST_F(IpcMemHandlerMicrotest, PeerReportsFailureEveryRankFails) {
   EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
 }
 
+// Opening the last peer fails after peers 0 and 2 were mapped. The destructor skips a handler that never finished
+// exchanging, so exchangeMemPtrs() itself has to close those two mappings -- once each, and never this rank's own
+// pointer.
+TEST_F(IpcMemHandlerMicrotest, PartialOpenFailureClosesTheAlreadyOpenedPeers) {
+  ncclIpcMemHandler* h = MakeRegisteredHandler();
+  failOpenOf_ = 3;
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(opened_, (std::vector<int>{0, 2, 3}));
+  EXPECT_EQ(ClosedCount(PeerMapping(0)), 1u);
+  EXPECT_EQ(ClosedCount(PeerMapping(2)), 1u);
+  EXPECT_EQ(ClosedCount(kSelfPtr), 0u);
+  EXPECT_EQ(closed_.size(), 2u);
+  void* p = nullptr;
+  EXPECT_EQ(h->getPeerDeviceMemPtr(0, &p), ncclInvalidUsage);
+
+  handler_.reset();
+
+  EXPECT_EQ(closed_.size(), 2u);
+}
+
 }  // namespace
