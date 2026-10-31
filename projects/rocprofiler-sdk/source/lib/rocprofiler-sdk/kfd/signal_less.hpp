@@ -131,6 +131,12 @@ drain_signal_less_queues_hw(uint64_t deadline_ns);
 void
 join_signal_less_tasks();
 
+bool
+fence_signal_less_tasks(uint64_t timeout_ns);
+
+rocprofiler_status_t
+flush_signal_less_records(rocprofiler_buffer_id_t buffer_id);
+
 // Processor-side handoff for a proven completion. Submits to the task group;
 // if it is gone, defers the entry for the teardown thread. Never runs a client
 // callback on the caller's thread.

@@ -66,6 +66,7 @@ namespace
 {
 using task_group_vec_t     = common::container::stable_vector<task_group_t*>;
 using thread_pool_config_t = PTL::ThreadPool::Config;
+thread_local bool task_group_thread = false;
 
 auto affinity_functor(intmax_t)
 {
@@ -85,10 +86,16 @@ get_thread_pool_config(size_t pool_size = 1)
                                 .pool_size    = pool_size,
                                 .task_queue   = nullptr,
                                 .set_affinity = affinity_functor,
-                                .initializer  = []() {},
-                                .finalizer    = []() {}};
+                                .initializer  = []() { task_group_thread = true; },
+                                .finalizer    = []() { task_group_thread = false; }};
 }
 }  // namespace
+
+bool
+is_task_group_thread()
+{
+    return task_group_thread;
+}
 
 TaskGroup::TaskGroup(size_t pool_size)
 : parent_type{new thread_pool_t{get_thread_pool_config(pool_size)}, false}
@@ -152,6 +159,22 @@ void
 TaskGroup::join(bool async_only)
 {
     wait(async_only);
+}
+
+bool
+TaskGroup::wait_async_for(uint64_t timeout_ns)
+{
+    if(is_task_group_thread() ||
+       m_fork_generation != g_fork_generation.load(std::memory_order_acquire))
+        return false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds{timeout_ns};
+    while(m_tasks_count.load(std::memory_order_acquire) > 0)
+    {
+        if(std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::yield();
+    }
+    return true;
 }
 
 namespace
