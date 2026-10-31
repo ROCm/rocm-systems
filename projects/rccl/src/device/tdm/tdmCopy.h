@@ -355,6 +355,8 @@ __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* global
 //     Unless the copy shifts in LDS, windows under TWO_SLOT_WINDOW use one slot
 //     instead, with a wait after each load and each store: at that size a chunk
 //     twice as large is worth more than the overlap.
+//   * shiftDown() rewrites a slot with ordinary LDS stores that the mover then
+//     reads by descriptor, so the store waits for them (DScnt) first.
 //
 // ONE-WAY LEGS (asyncLoadToLDS / asyncStoreFromLDS)
 //   * A line-aligned call of whole rows is one descriptor behind a single check:
@@ -686,7 +688,11 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   const uint64_t dB = dAddr + begin;
   const size_t len = end - begin;
   auto storeChunk = [&](uint32_t slot, uint64_t global, uint32_t n) {
-    if (r) shiftDown(slot + o, n, r, warpThread, warpThreads);
+    if (r) {
+      shiftDown(slot + o, n, r, warpThread, warpThreads);
+      // LDS-only fence: waits for the shift's writes, not the head's global stores.
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    }
     tile1d<LdsDir::Store, cp>(global, slot + o, n);
   };
 
