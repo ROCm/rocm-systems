@@ -90,12 +90,12 @@ class GinAnvilPluginTest : public ::testing::Test {
     ncclGinAnvilSetInitContext(*ictx, mockComm_.get());
   }
 
-  void connectColl(void* ictx, void** coll, int nranks = 1) {
+  void connectColl(void* ictx, void** coll, int nranks = 1, int ginRank = 0) {
     void* listen = nullptr;
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx, 0, handle, &listen), ncclSuccess);
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
-    ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, 0, listen, coll), ncclSuccess);
+    ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, ginRank, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
 
@@ -124,6 +124,27 @@ class GinAnvilPluginTest : public ::testing::Test {
     if (ginCtx) plugin_.destroyContext(ginCtx);
     if (coll) plugin_.closeColl(coll);
     if (ictx) plugin_.finalize(ictx);
+  }
+
+  // A refused bind must leave nothing behind: no signals on the device context,
+  // no IPC table entry, and no conn-check traffic.
+  void expectSignalsUnbound(ncclNetDeviceHandle_v11_t* devHandle) {
+    const size_t nContexts = devHandle->size / sizeof(ncclGinAnvilSdmaGPUContext);
+    ASSERT_GE(nContexts, 1u);
+    std::vector<ncclGinAnvilSdmaGPUContext> hostCtx(nContexts);
+    ASSERT_EQ(hipMemcpy(hostCtx.data(), devHandle->handle, nContexts * sizeof(ncclGinAnvilSdmaGPUContext),
+                        hipMemcpyDeviceToHost),
+              hipSuccess);
+    for (size_t c = 0; c < nContexts; c++) {
+      EXPECT_EQ(hostCtx[c].signals, nullptr) << "context " << c;
+      EXPECT_EQ(hostCtx[c].signal_remote_addrs, nullptr) << "context " << c;
+    }
+    const ncclGinAnvilIpcBufEntry* table = nullptr;
+    int ipcCount = -1;
+    ncclGinAnvilIpcTableGetDevice(&table, &ipcCount);
+    EXPECT_EQ(ipcCount, 0);
+    EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
+    EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
   }
 };
 
@@ -757,8 +778,9 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
   plugin_.finalize(ictx);
 }
 
-// G20: conn-check skipped when nRanks != lsaSize (no gate on single-rank LSA team).
-TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenLsaSizeMismatch) {
+// G20: a GIN team wider than the LSA team fails registration. On the first rank of
+// an LSA team, GIN peer 1 would point past the end of a one-slot LSA window.
+TEST_F(GinAnvilPluginTest, BindSignals_GinPeerPastLsaWindowFailsRegistration) {
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->devrState.lsaSize = 1;
   void* ictx = nullptr;
@@ -772,9 +794,38 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenLsaSizeMismatch) {
   ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
 
   char arena[4096] = {};
-  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
-  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
-  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclInvalidUsage);
+  expectSignalsUnbound(devHandle);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The MI300X CPX shape from AICOMRCCL-2706, scaled down: four ranks in two LSA teams
+// of two, seen from world rank 2 (lsaSelf 0). GIN peers 0 and 1 would point before
+// the start of this rank's LSA window.
+TEST_F(GinAnvilPluginTest, BindSignals_GinPeerBeforeLsaWindowFailsRegistration) {
+  GinAnvilPluginStubs::SetBootstrapNranks(4);
+  mockComm_.get()->rank = 2;
+  mockComm_.get()->nRanks = 4;
+  mockComm_.get()->devrState.lsaSelf = 0;
+  mockComm_.get()->devrState.lsaSize = 2;
+  mockComm_.lsaRanks[0] = 2;
+  mockComm_.lsaRanks[1] = 3;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 4;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 4), ncclInvalidUsage);
+  expectSignalsUnbound(devHandle);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
@@ -806,14 +857,15 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedWhenSignalSlotTooSmall) {
   plugin_.finalize(ictx);
 }
 
-// Conn-check is an LSA cuMem-VMM probe. Under NCCL_GIN_CONNECTION_RAIL the GIN team
-// indexes rail ranks, not lsaSelf, so skip even when nRanks == lsaSize.
-TEST_F(GinAnvilPluginTest, ConnCheck_SkippedOnRailConnection) {
+// Under NCCL_GIN_CONNECTION_RAIL the GIN peers are ranks on other hosts. Two hosts of
+// two ranks, seen from world rank 0: rail peer 1 is world rank 2, but LSA slot 1 is
+// world rank 1, so registration fails even though nRanks == lsaSize.
+TEST_F(GinAnvilPluginTest, BindSignals_RailGinTeamFailsRegistration) {
   GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.get()->contiguousRanksPerHost = 2;
+  mockComm_.get()->nRanks = 4;
   mockComm_.get()->devrState.lsaSize = 2;
-  mockComm_.get()->devrState.lsaSelf = 0;
-  mockComm_.get()->rank = 1;
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
@@ -825,9 +877,8 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedOnRailConnection) {
   ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
 
   char arena[4096] = {};
-  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
-  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 0);
-  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 0);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclInvalidUsage);
+  expectSignalsUnbound(devHandle);
 
   plugin_.destroyContext(ginCtx);
   plugin_.closeColl(coll);
@@ -836,19 +887,20 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedOnRailConnection) {
 
 // The span-base probe allgathers over comm->bootstrap, which writes one slot per
 // world rank. Under NCCL_GIN_CONNECTION_RAIL the world is wider than the GIN team,
-// so a buffer sized by the GIN team would be overrun.
+// so a buffer sized by the GIN team would be overrun. A wider rail team would fail
+// registration, so this uses one host of 8 ranks, where the rail team is this rank.
 TEST_F(GinAnvilPluginTest, BindSignals_SpanBaseProbeSizedForWorldRanks) {
   constexpr int kWorldRanks = 8;
-  GinAnvilPluginStubs::SetBootstrapNranks(2);
   mockComm_.get()->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.get()->contiguousRanksPerHost = kWorldRanks;
   mockComm_.get()->nRanks = kWorldRanks;
   mockComm_.get()->rank = 5;
-  mockComm_.get()->devrState.lsaSize = 2;
-  mockComm_.get()->devrState.lsaSelf = 0;
+  mockComm_.get()->devrState.lsaSize = kWorldRanks;
+  mockComm_.get()->devrState.lsaSelf = 5;
   void* ictx = nullptr;
   initCtx(&ictx);
   void* coll = nullptr;
-  connectColl(ictx, &coll, 2);
+  connectColl(ictx, &coll);
   ncclGinConfig_t cfg{};
   cfg.nSignals = 2;
   void* ginCtx = nullptr;
@@ -1362,22 +1414,27 @@ TEST_F(GinAnvilPluginTest, ConnCheck_UsesLsaTeamForBootstrap) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->rank = 1;
   mockComm_.get()->devrState.lsaSelf = 1;
-  mockComm_.lsaRanks[0] = 1;
-  mockComm_.lsaRanks[1] = 0;
 
   void* ictx = nullptr;
+  initCtx(&ictx);
   void* coll = nullptr;
+  connectColl(ictx, &coll, 2, 1);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
   void* ginCtx = nullptr;
-  startTwoRankGin(&ictx, &coll, &ginCtx);
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
 
   char arena[4096] = {};
   EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
   EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherRank(), 1);
   EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherNranks(), 2);
-  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherRanks(), std::vector<int>({1, 0}));
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeAllGatherRanks(), std::vector<int>({0, 1}));
   EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRank(), 1);
-  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRanks(), std::vector<int>({1, 0}));
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRanks(), std::vector<int>({0, 1}));
 
   stopGin(ictx, coll, ginCtx);
 }

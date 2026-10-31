@@ -345,11 +345,11 @@ class CollNetMicrotestBase : public ::testing::Test {
     g_activeCollNet = nullptr;
     ncclGdrCopy = nullptr;
     ResetNcclFakes();
-    ResetHipFakes();
     ResetTopoStubs();
     ResetTransportStubs();
     ResetChannelFakes();
     ResetDevRuntimeMicroFakes();
+    ResetHipFakes();
   }
 };
 
