@@ -37,6 +37,8 @@ subtrees:
   - file: how-to/rccl-usage-tips
   - file: how-to/network-telemetry
     title: RCCL network telemetry
+  - file: how-to/fabric-telemetry-profiler
+    title: Fabric or host? Telemetry with the accl profiler
 
 - caption: Examples
   entries:

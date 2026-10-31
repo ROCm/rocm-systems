@@ -67,7 +67,7 @@ After the run, inspect any `rccl_telemetry_*.json` in the output directory.
 ```
 {
   "version", "host_name", "process_name", "process_id",
-  "start_time", "end_time", "transport",
+  "start_time", "end_time", "transport",   // "none" if no device registered
   "latency_sample_interval",   // only when RCCL_TELEMETRY_LATENCY_SAMPLE > 1
   "devices": [
     {
@@ -90,6 +90,52 @@ After the run, inspect any `rccl_telemetry_*.json` in the output directory.
   "hw_samples": [ ... only if RCCL_TELEMETRY_SAMPLE_MS > 0 ... ]
 }
 ```
+
+Each device also carries `qos`: what RCCL needs to know which PFC priority its
+traffic rides.
+
+```
+"qos": {"dcb": "ok",                  // or "unsupported" (e.g. ionic), "error"
+        "traffic_class": 0, "sl": 0,  // what RCCL's sender data QPs use; -1 if none, or InfiniBand
+        "traffic_class_mixed": false, // data QPs on this device used different values
+        "pfc_enabled": [0, 0, 0, 1, 0, 0, 0, 0],   // only when dcb is "ok"
+        "app": [{"selector": "dgram", "protocol": 4791, "priority": 3},
+                {"selector": "dscp", "protocol": 26, "priority": 3}]}
+```
+
+`pfc_enabled` and `app` come from one unprivileged IEEE DCB read of the netdev
+at registration, the same request `dcb pfc show` and `dcb app show` make. Up
+to 256 app entries are kept; `"app_truncated": true` says some were not.
+
+The top level also carries `clock` (`"CLOCK_MONOTONIC"`, the clock of every
+`ts_us`), `histogram_bucket_interval_ns`, `histogram_max_buckets` and, when the
+sampler ran, `sample_interval_ms`, so an offline tool can interpret the file
+without the run's environment.
+
+Each `hw_samples` entry holds absolute (not delta) values for one device:
+
+```
+{"ts_us": ..., "device_id": 0, "roce_device": "mlx5_0",
+ "tx_bytes": ..., "rx_bytes": ...,                      // RCCL SW counters
+ "ecn_marked_pkts": ..., "cnp_sent": ..., "cnp_rcvd": ..., ...,
+ "nic_tx_bytes": ..., "nic_rx_bytes": ...,              // NIC RoCE byte counters
+ "pfc_rx_pause_us": [p0, ..., p7],                      // switch paused our transmit
+ "pfc_tx_pause_us": [p0, ..., p7],                      // we paused the switch
+ "pfc_rx_frames": [p0, ..., p7],                        // pause frames received
+ "pfc_tx_frames": [p0, ..., p7]}                        // pause frames sent
+```
+
+`nic_*_bytes` and `pfc_*` are filled only for devices this process drives;
+otherwise, and on a NIC that does not expose the counter, they are `-1`. The
+`pfc_*_pause_us` values are cumulative pause time per priority since the NIC's
+counters were last reset, not the length of one pause: subtract two samples to
+get the pause time between them. Pause frames are sampled as well because some
+firmware never moves the pause-time counters: Thor2 on MI355X nodes reported
+`pfc_priN_rx_duration_us` = 0 on every priority while `rx_pfc_ena_frames_pri3`
+counted 36.8 million frames. `ts_us` uses the same clock as the accl
+profiler plugin's `host_ts`, which is what lets
+`plugins/profiler/accl/accl_fabric_report.py` charge each collective with the
+pause time that fell inside it.
 
 The channel WQE/CTS counters are not stored; they are summed from the channel's
 QP slots when the JSON is written. Storing them instead made every QP on a
@@ -222,7 +268,7 @@ channel (aggregated) and per QP.
 |---|---|
 | `num_wqe_sent` | Send WQEs posted on this QP. |
 | `num_recv_wqe` | Receive WQEs posted (`ibv_post_recv`). |
-| `num_wqe_rcvd` | Completions drained from the CQ, send and receive alike. |
+| `num_wqe_rcvd` | Send, receive and CTS completions drained from the CQ. Not counted: error completions (see `num_cq_errors`), GPU flush completions, and completions resiliency matches to no active request. |
 | `num_wqe_completed` | Completions that matched a tracked posting, i.e. those with a recorded post timestamp so latency is computable. |
 | `num_cts_sent` | CTS (clear-to-send) messages posted. |
 | `num_cts_sent_signalled` / `num_cts_sent_unsignalled` | Split of `num_cts_sent` by whether the WR was signalled. Their sum equals `num_cts_sent`. |
@@ -251,7 +297,7 @@ Three counters look similar but mean different things, and the difference is the
 usual source of confusion:
 
 - `num_recv_wqe` counts receive WQEs **posted**, not completed.
-- `num_wqe_rcvd` counts **all** completions drained from the CQ (send and recv).
+- `num_wqe_rcvd` counts send, receive and CTS completions drained from the CQ.
 - `num_wqe_completed` counts only the subset of those completions that were
   matched to a tracked posting.
 
@@ -271,10 +317,26 @@ whole run: once on first use (baseline) and once at exit (final). A rank
 registers every NIC it can enumerate but normally drives only one or two, and
 each read is a direct `ioctl(SIOCETHTOOL)` (using `<linux/ethtool.h>` and
 `<net/if.h>`, no shell) plus a few IB sysfs reads, so devices the rank never
-connects over are not read at all and report `-1`. The periodic `hw_samples`
-time series is produced only when `RCCL_TELEMETRY_SAMPLE_MS > 0`, and even then
-it reads only IB sysfs files. The data path itself never reads sysfs or the NIC
-counters.
+connects over are not read at all and are left out of the JSON. The periodic
+`hw_samples` time series is produced only when `RCCL_TELEMETRY_SAMPLE_MS > 0`. It
+samples only the devices the process drives: a few IB sysfs files plus one
+`ETHTOOL_GSTATS` ioctl per sample (PFC pause time and frames, per-priority bytes,
+and NIC byte/packet counters); the ethtool key lookup is done once per device and
+cached. The data path itself never reads sysfs or the NIC counters.
+
+The series holds at most 100,000 samples per process: about 16 minutes at
+10 ms for a rank that drives one NIC. When it fills, sampling stops, a line
+says so on stderr, and the JSON carries `"hw_samples_truncated": true`. Raise
+`RCCL_TELEMETRY_SAMPLE_MS` for longer runs.
+
+Some NIC counters refresh only periodically, and a counter that moves in such
+steps cannot be differenced over a short collective. `tools/net-counter-probe`
+measures how often each counter really changes on a given NIC. On Broadcom
+Thor2 the IB sysfs byte counters refreshed anywhere from ~11 ms to seconds
+apart, so `hw_samples` take `nic_*_bytes` and `nic_*_packets` there from the
+port ethtool counters (`tx_bytes`, `rx_bytes`, `tx_total_frames`,
+`rx_total_frames`), which step regularly about once a second and count all
+traffic on the port. One `ETHTOOL_GSTATS` read there costs about 2 us.
 
 ## Known limitations
 
@@ -283,3 +345,15 @@ counters.
   completion, so `rx_bytes` cannot be measured and reads 0. This is expected,
   not a lost count. When the receiver does take completions,
   `IBV_WR_RDMA_WRITE_WITH_IMM` is used and `rx_bytes` is populated.
+- With pre-posted receive WQEs (`NCCL_IB_PREPOST_RECEIVE_WORK_REQUESTS`,
+  resiliency or OOO RQ), receive completions carry no post timestamp: they count
+  in `num_wqe_rcvd` but not in `num_wqe_completed` or the latency histogram.
+- thor2 (`bnxt_re`): counter names differ across driver versions, so the table
+  falls back to older names. The IB sysfs byte counters can update late, so
+  `delta_*` is only reliable over the whole run. Some are 48 bits wide; one
+  wrap during the run is accounted for. Some firmware reports
+  `pfc_*_pause_us` as 0 while PFC frames are counted.
+- With QP sharing, each communicator has its own QP slots, so a shared QP is
+  counted once per communicator using it.
+- In `hw_samples`, a column the NIC cannot read falls back to a related counter:
+  `local_ack_timeout_err` reports `to_retransmits` on ainic and thor2.

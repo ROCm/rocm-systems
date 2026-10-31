@@ -248,6 +248,7 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
         comm->wrs[r].sg_list = NULL;
         comm->wrs[r].num_sge = 0;
         length = 0;
+        rcclTelemetryWqeSize(telDevIdx, 0);
       } else {
         // Select proper lkey
         comm->sges[r].lkey = reqs[r]->send.lkeys[devIndex];
@@ -526,7 +527,12 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
     TIME_START(0);
     NCCLCHECK(IbCastMultiSend(comm, slot, nqps, startQpIndex, wrrSched, useWriteOp));
 
-    rcclTelemetryBytes(comm->base.vProps.devs[0], 1, (uint64_t)size);
+    // Only the last Isend of a multi-send gets here; count all nreqs.
+    if (rcclTelemetryOn()) {
+      uint64_t sentBytes = 0;
+      for (int i = 0; i < nreqs; i++) sentBytes += reqs[i]->send.size;
+      rcclTelemetryBytes(comm->base.vProps.devs[0], 1, sentBytes);
+    }
 
     comm->base.fifoHead++;
     TIME_STOP(0);
@@ -1101,6 +1107,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
       TRACE(NCCL_NET, "NET/IB: %s: Got completion for a CTS (devIndex=%d, qp_num=%u)", __func__, devIndex, wc->qp_num);
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
       req->events[devIndex]--;
       return ncclSuccess;
     } else {
@@ -1212,6 +1219,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         NCCLCHECK(IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &qp, &qpIndex));
         req->recv.cmplsRecords->completions[qpIndex] = 1;
         NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest));
+        rcclTelemetryQpRecvPosted(qp->telQpStats);
       } else {
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.
@@ -1253,6 +1261,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              be32toh(wc->imm_data));
         return ncclSuccess;
       }
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
     } else {
       WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
