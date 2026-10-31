@@ -203,6 +203,8 @@ enum class TestOpcode : uint32_t {
   WriteExecHiHalf = 23,
   WriteExecHiHalfZero = 25,
   PartialDefSgpr4 = 24,
+  SetregWithoutHwreg = 26,
+  SetregImmWithoutHwreg = 27,
 };
 
 class TestDecoder : public Decoder {
@@ -290,6 +292,10 @@ public:
       return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
                                  std::nullopt, {}, std::nullopt, std::nullopt,
                                  /*def_size_bits=*/16);
+    case TestOpcode::SetregWithoutHwreg:
+      return new TestInstruction("s_setreg_b32");
+    case TestOpcode::SetregImmWithoutHwreg:
+      return new TestInstruction("s_setreg_imm32_b32");
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -6127,6 +6133,43 @@ TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAcrossFallthroughBlockIsIgnored)
   auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1});
   ASSERT_TRUE(maybe_is_live_2.succeeded());
   EXPECT_FALSE(maybe_is_live_2.value());
+}
+
+TEST(LivenessAnalysis, Gfx1250MissingHwregOperandMarksBanksAmbiguous) {
+  // A synthetic decoder models a malformed instruction whose missing HWREG
+  // destination cannot prove that the known entry banks survive the write.
+  for (const TestOpcode opcode :
+       {TestOpcode::SetregWithoutHwreg, TestOpcode::SetregImmWithoutHwreg}) {
+    SCOPED_TRACE(static_cast<uint32_t>(opcode));
+    // A zero-word synthetic NOP would be skipped as gfx1250 alignment padding.
+    const TestCodeObject object({static_cast<uint32_t>(opcode),
+                                 static_cast<uint32_t>(TestOpcode::UseVgpr0),
+                                 static_cast<uint32_t>(TestOpcode::End)});
+    TestDecoder decoder;
+    const std::vector<std::unique_ptr<BasicBlock>> blocks =
+        build_valid_blocks(object, decoder, ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_EQ(blocks.size(), 1u);
+    ASSERT_EQ(blocks.front()->num_instructions(), 3u);
+    const std::vector<BasicBlock *> scope = block_scope(blocks);
+    const LivenessAnalysisOptions options = {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+                                             .entry_block = scope.front(),
+                                             .additional_entry_blocks = {}};
+    const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+    LivenessAnalysis liveness(KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec),
+                              options);
+    const Instruction &write = *blocks.front()->instructions().begin();
+    const Instruction &next = *std::next(blocks.front()->instructions().begin());
+    ASSERT_EQ(write.dst_operand(0), nullptr);
+    for (const amdgpu::VgprMsbRole role : {amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1,
+                                           amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst}) {
+      const FailureOr<std::optional<uint8_t>> before = liveness.vgpr_msb_bank_before(write, role);
+      ASSERT_TRUE(before.succeeded());
+      ASSERT_EQ(before.value(), 0);
+      const FailureOr<std::optional<uint8_t>> after = liveness.vgpr_msb_bank_before(next, role);
+      ASSERT_TRUE(after.succeeded());
+      EXPECT_EQ(after.value(), std::nullopt);
+    }
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
