@@ -736,6 +736,10 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
     // again, by every child.
     fflush(stdout);
 
+    // Started before the first fork, so the bound covers spawning as well.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitSupervisorTimeoutSeconds);
+
     std::vector<DdaInitRankChild> kids(nranks);
     for (int r = 0; r < nranks; r++)
     {
@@ -763,8 +767,6 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
         kids[r].pid = pid;
     }
 
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitSupervisorTimeoutSeconds);
     int  firstFailed = -1;
     bool timedOut    = false;
     for (;;)
