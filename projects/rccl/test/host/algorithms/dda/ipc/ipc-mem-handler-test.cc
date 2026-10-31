@@ -145,4 +145,17 @@ TEST_F(IpcMemHandlerMicrotest, AllRanksEnterTheExchangeWhenTheLocalPointerIsMiss
   EXPECT_TRUE(opened_.empty());
 }
 
+// A failed handle export is published as ok = 0 in this rank's slot; the rank does not skip the all-gather.
+TEST_F(IpcMemHandlerMicrotest, LocalExportFailureIsReportedInTheSlotNotByReturningEarly) {
+  ncclIpcMemHandler* h = MakeRegisteredHandler();
+  ScopedHook exportHook(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(h->exchangeMemPtrs(), ncclSuccess);
+
+  EXPECT_EQ(exportHook.calls, 1);
+  EXPECT_EQ(gathers_, 1);
+  EXPECT_EQ(selfOkAtGather_, 0);
+  EXPECT_TRUE(opened_.empty());
+}
+
 }  // namespace
