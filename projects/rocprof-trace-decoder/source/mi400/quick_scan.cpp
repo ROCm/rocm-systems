@@ -46,25 +46,34 @@ namespace mi400::quick_scan
 namespace
 {
 using ::quick_scan::QuickToken;
+using ::quick_scan::ScanState;
 
 // Single combined byte per first-byte slot, derived once from the canonical
 // mi400::TokenLookupTable at TU init. Any future AddEncoding edit in
 // mi400token.cpp / gfx12 / gfx11 / gfx10 propagates automatically.
 //
-// Per-byte info encoding (one cache load per inner iter, vs three in the
-// previous design):
-//   bits 0-3 : token byte length (max 9 = 0b1001 fits in 4 bits)
-//   bit  4   : is_rare       (first byte of REG/REG_INIT/EVENT/EVENT_SYNC/UNKNOWN)
-//   bit  5   : is_ext_start  (first byte of WAVE_START_EXT)
-//   bits 6-7 : unused
+// Per-byte info encoding, used by the scalar walks:
+//   bits 0-3 : token byte length (max 9)
+//   bit  4   : is_rare (first byte of REG/REG_INIT/EVENT/EVENT_SYNC/UNKNOWN)
+//   bits 5-7 : unused
+//
+// MI400 tokens are whole bytes; sub-byte entries inherited from the gfx12
+// table are never emitted and are clamped to one byte so they cannot look like
+// rare tokens (jump 0). WAVE_START_EXT is an ordinary fixed-length (40-bit)
+// token; it is not followed by extension bytes.
+//
+// `jump` and `len` are the vector LUTs: jump[b] is 0 for rare bytes and the
+// token length otherwise, so that index + jump[b] is the jump function g
+// described below; len[b] is the token length for every byte.
 struct Tables
 {
     uint8_t info[256];
     uint8_t rare_type[256]; // RdnaType id (1..4); valid only when info[b] & 0x10
+    alignas(64) uint8_t jump[256];
+    alignas(64) uint8_t len[256];
 };
 
 constexpr uint8_t INFO_RARE = 0x10;
-constexpr uint8_t INFO_EXT = 0x20;
 constexpr uint8_t INFO_LEN = 0x0F;
 constexpr uint8_t MAX_TOKEN_BYTES = 9;
 
@@ -80,181 +89,152 @@ const Tables& tables()
             const unsigned len = static_cast<unsigned>(info.length) >> 3;
             const unsigned type = info.type;
             if (len > MAX_TOKEN_BYTES) __builtin_trap();
-            uint8_t v = static_cast<uint8_t>(len & INFO_LEN);
+            uint8_t v = static_cast<uint8_t>((len ? len : 1) & INFO_LEN);
             if (type < mi400::TokenGenerator::RARE_END)
             {
                 v |= INFO_RARE;
                 out.rare_type[b] = static_cast<uint8_t>(type);
             }
-            if (type == RdnaType::WAVE_START_EXT) v |= INFO_EXT;
             out.info[b] = v;
+            out.len[b] = v & INFO_LEN;
+            out.jump[b] = (v & INFO_RARE) ? 0 : (v & INFO_LEN);
         }
         return out;
     }();
     return t;
 }
 
-// AVX-512_VBMI path. Per 64-byte chunk:
-//   1. Load 64 bytes.
-//   2. Look up info[byte] for each lane via two `vpermi2b` over the 256-byte
-//      info table, blended on bit 7 of the byte. ~6c latency.
-//   3. Build a normal-state successor function and use vpermi2b doubling to
-//      compute both the next entry and whether rare/ext attention lies on the
-//      actual token-start orbit for each possible entry.
-//   4. Fast path: when ext is false and the current entry has no reachable
-//      attention, advance without any scalar walk.
-//   5. Slow path: store info_vec to a 64B stack buffer and scalar-walk with
-//      full rare/ext handling.
-//
-// State carried across chunks: `entry` (byte offset within next chunk where
-// the next token starts; 0..max_token_len-1) and `ext` (WAVE_START_EXT
-// in-progress flag). Same semantics as the scalar.
+#    define MI400_SCAN_TARGET __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2")))
 
-__attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_mi400_avx512(
-    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
+MI400_SCAN_TARGET inline unsigned lane0(__m512i v)
+{ return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v))); }
+
+// 256-entry byte LUT held in four zmm registers: vpermi2b covers 128 entries
+// using the low 7 index bits, so the two halves are blended on bit 7.
+MI400_SCAN_TARGET inline __m512i lookup256(const __m512i (&lut)[4], __m512i bytes_v, __mmask64 hi_mask)
+{
+    const __m512i lo = _mm512_permutex2var_epi8(lut[0], bytes_v, lut[1]);
+    const __m512i hi = _mm512_permutex2var_epi8(lut[2], bytes_v, lut[3]);
+    return _mm512_mask_blend_epi8(hi_mask, lo, hi);
+}
+
+// AVX-512_VBMI path. Per 64-byte chunk:
+//   1. Look up jump[byte] and form g[i] = i if a rare token starts at byte i,
+//      else i + len(i). Exit lanes (>= 64) are fixed points through
+//      exit_table_v.
+//   2. Square g six times. Tokens are at least one byte long, so g^64[i] is
+//      the first rare token on the token-start orbit from i, or
+//      64 + the next chunk's entry if there is none.
+//   3. Fast path: g^64[entry] leaves the chunk.
+//   4. Slow path: capture the rare token, then jump straight to the next one
+//      through g^64 sampled just past it.
+//
+// State carried across chunks: the entry (byte offset within the next chunk
+// where the next token starts; 0..MAX_TOKEN_BYTES-1).
+//
+// With `state`, the scan starts at state->pos and, when `out` fills, stops
+// right after the last captured token so a later call can resume.
+MI400_SCAN_TARGET size_t scan_mi400_avx512(
+    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state
 )
 {
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
+    if (!buf || !out || out_cap == 0 || size == 0)
+    {
+        if (state && (!buf || size == 0)) state->done = true;
+        return 0;
+    }
 
     const Tables& T = tables();
 
-    // 256-byte info LUT held in 4 zmm registers.
-    const __m512i lut0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info));
-    const __m512i lut1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 64));
-    const __m512i lut2 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 128));
-    const __m512i lut3 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 192));
-
     constexpr size_t CHUNK = 64;
-    constexpr size_t TAIL_GUARD = 16; // longest token = 9B + safety
-    constexpr uint8_t SUCCESSOR_CAP = (CHUNK - 1) + MAX_TOKEN_BYTES;
-    static_assert(SUCCESSOR_CAP <= 127, "vpermi2b successor indices must not wrap");
+    constexpr size_t TAIL_GUARD = 16; // longest token = 9B + safety; covers the 8-byte contents reads
+    static_assert((CHUNK - 1) + MAX_TOKEN_BYTES <= 127, "vpermi2b successor indices must not wrap");
 
     alignas(64) static constexpr uint8_t index_bytes[CHUNK] = {
         0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
         22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
         44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
 
-    size_t bp = 0;
-    size_t entry = 0;
-    bool ext = false;
+    __m512i jump_lut[4];
+    __m512i len_lut[4];
+    for (int i = 0; i < 4; ++i)
+    {
+        jump_lut[i] = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.jump + 64 * i));
+        len_lut[i] = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.len + 64 * i));
+    }
+    const __m512i index_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(index_bytes));
+    const __m512i chunk_v = _mm512_set1_epi8(static_cast<char>(CHUNK));
+    const __m512i exit_table_v = _mm512_add_epi8(index_v, chunk_v);
+
+    size_t bp = state ? state->pos : 0;
+    __m512i entry_v = _mm512_setzero_si512();
     size_t n_out = 0;
 
-    // Splat for the fast-skip test: any reachable token start has rare-or-ext set?
-    const __m512i rare_or_ext_v = _mm512_set1_epi8(static_cast<char>(INFO_RARE | INFO_EXT));
-    const __m512i len_mask_v = _mm512_set1_epi8(static_cast<char>(INFO_LEN));
-    const __m512i index_v = _mm512_load_si512(index_bytes);
-    const __m512i exit_table_v = _mm512_add_epi8(index_v, _mm512_set1_epi8(64));
-    const __m512i len_one_v = _mm512_set1_epi8(1);
-    const __m512i succ_cap_v = _mm512_set1_epi8(static_cast<char>(SUCCESSOR_CAP));
-    const __m512i zero_v = _mm512_setzero_si512();
-
-    while (bp + CHUNK + TAIL_GUARD <= size && n_out < out_cap)
+    // `out` is full: record the resume point just past the captured token.
+    const auto stop_after = [&](size_t next_byte)
     {
-        const __m512i bytes_v = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(buf + bp));
+        if (state) *state = ScanState{next_byte, false};
+        return n_out;
+    };
 
-        // 256-byte LUT lookup: vpermi2b uses low 7 bits of each index lane.
-        // First permute covers info[0..127], second covers info[128..255];
-        // blend on bit 7 of the byte (extracted via movepi8_mask).
-        const __m512i lo_lookup = _mm512_permutex2var_epi8(lut0, bytes_v, lut1);
-        const __m512i hi_lookup = _mm512_permutex2var_epi8(lut2, bytes_v, lut3);
+    while (bp + CHUNK + TAIL_GUARD <= size)
+    {
+        const uint8_t* chunk = buf + bp;
+        const __m512i bytes_v = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(chunk));
         const __mmask64 hi_mask = _mm512_movepi8_mask(bytes_v);
-        const __m512i info_v = _mm512_mask_blend_epi8(hi_mask, lo_lookup, hi_lookup);
 
-        // Build succ_1[i] = min(i + max(len[i], 1), 72), then compose the
-        // successor function 6 times. In parallel, propagate rare/ext bits
-        // along the same orbit so payload-byte aliases no longer force the
-        // slow path unless they are reachable token starts.
-        __m512i len_v = _mm512_and_si512(info_v, len_mask_v);
-        const __mmask64 zero_len_mask = _mm512_cmpeq_epi8_mask(len_v, zero_v);
-        len_v = _mm512_mask_mov_epi8(len_v, zero_len_mask, len_one_v);
+        __m512i g = _mm512_add_epi8(index_v, lookup256(jump_lut, bytes_v, hi_mask));
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^2
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^4
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^8
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^16
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^32
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^64
 
-        __m512i succ = _mm512_add_epi8(index_v, len_v);
-        succ = _mm512_min_epu8(succ, succ_cap_v);
+        // The entry is carried as a broadcast vector so that the loop-carried
+        // chain is a single vpermb + vpsubb. The scalar copy only feeds the
+        // (predicted) fast-path branch, off the critical path.
+        const __m512i pos_v = _mm512_permutexvar_epi8(entry_v, g);
+        size_t pos = lane0(pos_v);
 
-        __m512i attention_path = _mm512_and_si512(info_v, rare_or_ext_v);
-
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_2
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_4
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_8
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_16
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_32
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v); // succ_64
-
-        const __mmask64 attention_entry_mask = _mm512_test_epi8_mask(attention_path, rare_or_ext_v);
-        const __m128i succ_lo_v = _mm512_castsi512_si128(succ);
-        const uint64_t succ_lo = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_lo_v));
-        const uint64_t succ_hi = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_lo_v, 8)));
-        const uint64_t succ_word = entry < 8 ? succ_lo : succ_hi;
-        size_t pos = static_cast<size_t>((succ_word >> ((entry & 7u) * 8)) & 0xFFu);
-
-        if (__builtin_expect(!ext && ((attention_entry_mask >> entry) & 1u) == 0, 1))
+        if (__builtin_expect(pos >= CHUNK, 1))
         {
-            entry = pos - CHUNK;
+            entry_v = _mm512_sub_epi8(pos_v, chunk_v);
             bp += CHUNK;
             continue;
         }
 
         // ============= Slow path =============
-        // Either ext is currently active (in-flight WSE) OR this chunk has a
-        // reachable rare/ext-start token. Walk byte-by-byte with full state
-        // tracking and capture.
+        // after_rare[r] is the next rare token (or exit) following the rare
+        // token at r: g^64 sampled just past that token.
+        const __m512i len_v = lookup256(len_lut, bytes_v, hi_mask);
+        const __m512i after = _mm512_permutex2var_epi8(g, _mm512_add_epi8(index_v, len_v), exit_table_v);
+
+        alignas(64) uint8_t after_rare[CHUNK];
+        _mm512_store_si512(reinterpret_cast<__m512i*>(after_rare), after);
+
+        // pos is always a rare token start here.
+        while (pos < CHUNK)
         {
-            alignas(64) uint8_t info_buf[CHUNK];
-            _mm512_store_si512(reinterpret_cast<__m512i*>(info_buf), info_v);
-
-            pos = entry;
-            while (pos < CHUNK)
-            {
-                const uint8_t b = buf[bp + pos];
-
-                if (__builtin_expect(ext && (b & 1u), 0))
-                {
-                    pos += 1;
-                    continue;
-                }
-
-                const uint8_t v = info_buf[pos];
-                const unsigned bytes = v & INFO_LEN;
-
-                if (__builtin_expect(v & INFO_RARE, 0))
-                {
-                    uint64_t contents;
-                    std::memcpy(&contents, buf + bp + pos, 8);
-                    out[n_out++] = QuickToken{contents, T.rare_type[b], bp + pos};
-                    if (n_out >= out_cap) goto done;
-                }
-
-                ext = (v & INFO_EXT) != 0;
-                pos += bytes ? bytes : 1;
-            }
+            const uint8_t b = chunk[pos];
+            uint64_t contents;
+            std::memcpy(&contents, chunk + pos, 8);
+            out[n_out++] = QuickToken{contents, T.rare_type[b], bp + pos};
+            if (n_out == out_cap) return stop_after(bp + pos + (T.info[b] & INFO_LEN));
+            pos = after_rare[pos];
         }
 
-        entry = pos - CHUNK;
+        entry_v = _mm512_set1_epi8(static_cast<char>(pos - CHUNK));
         bp += CHUNK;
     }
 
-    bp += entry;
+    bp += lane0(entry_v);
 
-done:
-    // Scalar tail: identical to scan_mi400_scalar's tail.
-    while (bp < size && n_out < out_cap)
+    // Scalar tail.
+    while (bp < size)
     {
-        uint8_t b = buf[bp];
-
-        if (ext && (b & 1u))
-        {
-            bp += 1;
-            continue;
-        }
-
+        const uint8_t b = buf[bp];
         const uint8_t v = T.info[b];
-        const unsigned bytes = v & INFO_LEN;
 
         if (__builtin_expect(v & INFO_RARE, 0))
         {
@@ -263,17 +243,19 @@ done:
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
             out[n_out++] = QuickToken{contents, T.rare_type[b], bp};
-            if (n_out >= out_cap) break;
+            if (n_out == out_cap) return stop_after(bp + (v & INFO_LEN));
         }
 
-        ext = (v & INFO_EXT) != 0;
-        bp += bytes ? bytes : 1;
+        bp += v & INFO_LEN;
     }
 
+    if (state) *state = ScanState{bp, true};
     return n_out;
 }
 
-using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
+#    undef MI400_SCAN_TARGET
+
+using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t, ScanState*);
 
 // Returns nullptr if the x86 CPU lacks AVX-512.
 ScanFn select_scanner()
@@ -289,12 +271,12 @@ ScanFn select_scanner()
 
 namespace quick_scan
 {
-size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state)
 {
     static const mi400::quick_scan::ScanFn fn = mi400::quick_scan::select_scanner();
     if (!fn) throw std::exception();
 
-    return fn(buf, size, out, out_cap);
+    return fn(buf, size, out, out_cap, state);
 }
 } // namespace quick_scan
 

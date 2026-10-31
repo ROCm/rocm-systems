@@ -481,6 +481,24 @@ std::vector<uint8_t> make_unknown_header_trace()
     return data;
 }
 
+// `count` CS_PARTIAL_FLUSH events. For gfx12 every third event is preceded by
+// a one-nibble token so that rare tokens start at both nibble parities.
+std::vector<uint8_t> make_event_flood_trace(bool mi400, size_t count)
+{
+    BitStreamBuilder builder;
+    if (mi400)
+        append_mi400_header(builder);
+    else
+        append_gfx12_header(builder);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (!mi400 && i % 3 == 0) builder.writeBits(0, 4);
+        append_event(builder, EVENT_CS_PARTIAL_FLUSH);
+    }
+    return builder.finish();
+}
+
 std::vector<uint8_t> make_mi400_scan_stress_stream()
 {
     std::vector<uint8_t> data(64, 0);
@@ -499,10 +517,11 @@ std::vector<uint8_t> make_mi400_scan_stress_stream()
     ext_start.extlds = 0;
     ext_start.wgid = kWorkgroup;
     ext_start.last = 1;
+    // WAVE_START_EXT is a plain 40-bit token, followed here by NOP padding.
     append_little_endian(data, ext_start.raw, 5);
 
-    data.push_back(0x01);
-    data.push_back(0x03);
+    data.push_back(0x00);
+    data.push_back(0x00);
     data.push_back(0x00);
 
     gfx10::event_type event{};
@@ -821,6 +840,34 @@ TEST(QuickScanApiTest, MapsGfx12EventIds)
     EXPECT_EQ(sink.events[6].flags, ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE | ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP);
 }
 
+TEST(QuickScanApiTest, ReportsEveryEventWhenCapturesOutgrowTokenBuffer)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    // More captures than the export's initial 2^18-entry token buffer, so the
+    // scan has to grow the buffer and resume.
+    constexpr size_t kEvents = (size_t{1} << 18) * 2 + 1000;
+
+    for (bool mi400 : {false, true})
+    {
+        const auto trace = make_event_flood_trace(mi400, kEvents);
+
+        HandleGuard handle;
+        ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+
+        RecordSink sink;
+        ASSERT_EQ(
+            rocprof_trace_decoder_quick_scan(handle.value, 0, trace.data(), trace.size(), collect_records, &sink),
+            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+        );
+
+        ASSERT_EQ(sink.events.size(), kEvents) << (mi400 ? "mi400" : "gfx12");
+        for (size_t i = 1; i < sink.events.size(); ++i)
+            ASSERT_GT(sink.events[i].byte_offset, sink.events[i - 1].byte_offset) << "event " << i;
+        EXPECT_EQ(sink.events.back().type, ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH);
+    }
+}
+
 TEST(QuickScanApiTest, HandlesChunkStateAndApiErrors)
 {
     if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
@@ -893,7 +940,7 @@ TEST(QuickScanApiTest, AcceptsEmptyAndGfx9HeaderOnlyChunks)
 }
 
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
-TEST(QuickScanInternalTest, CapturesMi400RareTokensAcrossFastPathExtAndTail)
+TEST(QuickScanInternalTest, CapturesMi400RareTokensAcrossFastPathWaveStartAndTail)
 {
     if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
 
@@ -938,6 +985,118 @@ TEST(QuickScanInternalTest, CapturesMi400RareTokensAcrossFastPathExtAndTail)
     EXPECT_EQ(tokens[3].offset, 144u);
     gfx10::event_type tail_event{.raw = tokens[3].contents};
     EXPECT_EQ(tail_event.id, EVENT_TT_FLUSH);
+}
+
+// WAVE_START_EXT is a fixed 40-bit token: an event right after it (whose first
+// byte, 0x61, has the low bit set) must still be captured.
+TEST(QuickScanInternalTest, TreatsWaveStartExtAsFixedLengthToken)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    gfx12::wstart_type ext_start{};
+    ext_start.header = 0b1100;
+    ext_start.isExt = 1;
+    ext_start.count = 10;
+
+    gfx10::event_type event{};
+    event.header = 0b01100001;
+    event.pipe = kPipe;
+    event.me = kMe;
+    event.id = EVENT_CS_PARTIAL_FLUSH;
+
+    for (size_t lead : {0u, 70u})
+    {
+        // mi400: byte stream, padded with NOPs; `lead` moves the pair into the
+        // vector loop instead of the scalar tail.
+        std::vector<uint8_t> mi400_stream(lead, 0);
+        append_little_endian(mi400_stream, ext_start.raw, 5);
+        append_little_endian(mi400_stream, event.raw, 3);
+        mi400_stream.resize(mi400_stream.size() + 96, 0);
+
+        std::array<quick_scan::QuickToken, 4> tokens{};
+        ASSERT_EQ(quick_scan::scan_mi400(mi400_stream.data(), mi400_stream.size(), tokens.data(), tokens.size()), 1u);
+        EXPECT_EQ(tokens[0].type, RdnaType::EVENT);
+        EXPECT_EQ(tokens[0].offset, lead + 5);
+
+        // gfx12: nibble stream, padded with one-nibble NOPs.
+        BitStreamBuilder builder;
+        for (size_t i = 0; i < lead; ++i) builder.writeBits(0, 8);
+        builder.writeBits(ext_start.raw, 40);
+        builder.writeBits(event.raw, 24);
+        for (size_t i = 0; i < 96; ++i) builder.writeBits(0, 8);
+        const auto gfx12_stream = builder.finish();
+
+        ASSERT_EQ(quick_scan::scan_gfx12(gfx12_stream.data(), gfx12_stream.size(), tokens.data(), tokens.size()), 1u);
+        EXPECT_EQ(tokens[0].type, RdnaType::EVENT);
+        EXPECT_EQ(tokens[0].offset, lead + 5);
+        gfx10::event_type captured{.raw = tokens[0].contents};
+        EXPECT_EQ(captured.id, EVENT_CS_PARTIAL_FLUSH);
+    }
+}
+
+using ResumableScanner =
+    size_t (*)(const uint8_t*, size_t, quick_scan::QuickToken* __restrict__, size_t, quick_scan::ScanState*);
+
+// Scanning in `window`-sized pieces through ScanState must reproduce a single
+// full scan exactly.
+void expect_resumed_scan_matches_full_scan(ResumableScanner scanner, const std::vector<uint8_t>& stream, size_t window)
+{
+    std::vector<quick_scan::QuickToken> full(stream.size());
+    quick_scan::ScanState full_state{};
+    const size_t n_full = scanner(stream.data(), stream.size(), full.data(), full.size(), &full_state);
+    ASSERT_TRUE(full_state.done);
+    ASSERT_GT(n_full, 0u);
+
+    std::vector<quick_scan::QuickToken> resumed(n_full + window);
+    quick_scan::ScanState state{};
+    size_t n_resumed = 0;
+    size_t calls = 0;
+    while (!state.done && calls++ <= n_full)
+    {
+        ASSERT_LE(n_resumed + window, resumed.size());
+        const size_t n = scanner(stream.data(), stream.size(), resumed.data() + n_resumed, window, &state);
+        EXPECT_TRUE(state.done || n == window);
+        n_resumed += n;
+    }
+
+    ASSERT_TRUE(state.done);
+    ASSERT_EQ(n_resumed, n_full);
+    for (size_t i = 0; i < n_full; ++i)
+    {
+        EXPECT_EQ(resumed[i].contents, full[i].contents) << "token " << i;
+        EXPECT_EQ(resumed[i].type, full[i].type) << "token " << i;
+        EXPECT_EQ(resumed[i].offset, full[i].offset) << "token " << i;
+    }
+}
+
+TEST(QuickScanInternalTest, ResumesMi400ScanAfterFilledOutput)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    for (size_t window : {1u, 3u})
+    {
+        expect_resumed_scan_matches_full_scan(quick_scan::scan_mi400, make_mi400_scan_stress_stream(), window);
+        expect_resumed_scan_matches_full_scan(quick_scan::scan_mi400, make_event_flood_trace(true, 200), window);
+    }
+}
+
+TEST(QuickScanInternalTest, ResumesGfx12ScanAfterFilledOutput)
+{
+    if (!quick_scan::avx512_available()) GTEST_SKIP() << "quick_scan requires AVX-512";
+
+    const auto stream = make_event_flood_trace(false, 200);
+
+    std::vector<quick_scan::QuickToken> tokens(stream.size());
+    const size_t n = quick_scan::scan_gfx12(stream.data(), stream.size(), tokens.data(), tokens.size());
+    size_t events = 0;
+    for (size_t i = 0; i < n; ++i) events += tokens[i].type == RdnaType::EVENT;
+    EXPECT_EQ(events, 200u);
+
+    for (size_t window : {1u, 3u})
+    {
+        expect_resumed_scan_matches_full_scan(quick_scan::scan_gfx12, stream, window);
+        expect_resumed_scan_matches_full_scan(quick_scan::scan_gfx12, make_dispatch_trace().data, window);
+    }
 }
 
 TEST(QuickScanInternalTest, CapturesGfx9RareTokensThroughAvx2TestingEntry)
