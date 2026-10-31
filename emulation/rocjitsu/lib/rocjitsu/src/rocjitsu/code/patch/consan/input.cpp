@@ -183,10 +183,8 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   const IsaGpuTargetDescription *binding =
       registry.find_gpu_target_by_code_object_id(profile->name);
   const IsaTargetDescriptor *provider = registry.find(profile->public_id);
-  if (!registry.ok() ||
-      (profile->public_id != ROCJITSU_CODE_TARGET_INVALID &&
-       (binding == nullptr || provider == nullptr || binding->elf_machine != profile->elf_machine ||
-        provider->architecture_id != arch)))
+  if (!registry.ok() || binding == nullptr || provider == nullptr ||
+      binding->elf_machine != profile->elf_machine || provider->architecture_id != arch)
     return reject(error, InputErrorCode::UnsupportedTarget, "selected ISA provider is unavailable");
   if (validate_image_header(image, *profile, error).failed())
     return Result::failure();
@@ -245,11 +243,7 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
 
   // Decoders/blocks stay alive through classification and register-use planning;
   // the returned program owns original bytes, offsets and operations only.
-  // gfx1100 has no concrete binding in this base: exact ELF identity above plus
-  // the legacy RDNA3 decoder is the explicit fallback for that target alone.
-  std::unique_ptr<Decoder> decoder = profile->public_id == ROCJITSU_CODE_TARGET_INVALID
-                                         ? Decoder::create(registry, arch)
-                                         : Decoder::create(registry, profile->public_id);
+  std::unique_ptr<Decoder> decoder = Decoder::create(registry, profile->public_id);
   if (decoder == nullptr)
     return reject(error, InputErrorCode::DecodeFailure, "concrete target decoder is unavailable");
   const std::array<uint64_t, 1> entries = {kernel.entry_text_offset};
