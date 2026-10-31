@@ -35,6 +35,25 @@ static bool multiplyOverflow(__hip_uint32_t operand,
 #endif
 }
 
+// Returns true if the launch needs more workgroups in any dimension than the device allows.
+// Counts with ceiling division so a non-uniform launch still counts its partial final workgroup.
+static bool exceedsMaxGridDim(const amd::LaunchParams& launchParams, const amd::Device& device) {
+  const auto& info = device.info();
+  for (size_t i = 0; i < 3; ++i) {
+    // A zero local size is rejected by the existing config checks; skip to avoid dividing by zero.
+    if (launchParams.local_[i] == 0) {
+      continue;
+    }
+    const size_t numWorkgroups =
+        (static_cast<size_t>(launchParams.global_[i]) + launchParams.local_[i] - 1) /
+        launchParams.local_[i];
+    if (numWorkgroups > info.maxGridDim_[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace hip {
 
 hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t mmap_size);
@@ -371,6 +390,12 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
     return hipErrorInvalidConfiguration;
   }
+
+  // Make sure dispatch doesn't exceed max grid dimensions
+  if (exceedsMaxGridDim(launch_params, *device)) {
+    return hipErrorInvalidConfiguration;
+  }
+
   amd::Kernel* kernel = hip::asKernel(f);
   if (!kernel) {
     LogPrintfError("%s", "Kernel object is invalid or null, possibly due to architecture mismatch.");
@@ -814,7 +839,8 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes, *device, 0, 0, 0, 1, 1, 1);
   if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+       launch_params.local_.product() > device->info().maxWorkGroupSize_ ||
+       exceedsMaxGridDim(launch_params, *device)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
