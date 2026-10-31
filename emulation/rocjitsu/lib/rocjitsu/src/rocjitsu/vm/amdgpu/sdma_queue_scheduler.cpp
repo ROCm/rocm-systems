@@ -11,10 +11,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
+#include <exception>
 #include <format>
 #include <limits>
-#include <stdexcept>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -91,8 +92,7 @@ SdmaQueueScheduler::SdmaQueueScheduler(GpuVm &gpu_vm,
                                        std::shared_ptr<DeviceCacheCoherence> coherence,
                                        SdmaPacketDialect dialect)
     : gpu_vm_(gpu_vm), coherence_(std::move(coherence)), dialect_(dialect) {
-  if (!coherence_)
-    throw std::invalid_argument("SDMA queue scheduler requires a cache-coherence domain");
+  assert(coherence_ && "SDMA queue scheduler requires a cache-coherence domain");
 }
 
 SdmaQueueScheduler::~SdmaQueueScheduler() { shutdown(); }

@@ -3,7 +3,6 @@
 
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
-#include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -20,8 +19,7 @@ namespace amdgpu {
 
 L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::Component(std::move(name)), coherence_(std::move(coherence)) {
-  if (!coherence_)
-    throw util::ConfigError("L2 cache requires a coherence domain");
+  assert(coherence_ && "L2 cache requires a coherence domain");
   req_port_ = add_port(std::make_unique<simdojo::Port>("req", 0, this, simdojo::PortDirection::OUT,
                                                        simdojo::PortProtocol::MEMORY));
   coherence_epoch_ = coherence_->current_epoch();
@@ -30,11 +28,12 @@ L2Cache::L2Cache(std::string name, std::shared_ptr<DeviceCacheCoherence> coheren
 
 L2Cache::~L2Cache() { coherence_->unregister_l2_cache(this); }
 
-void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+util::Result L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                           util::DiagnosticEmitter emit_error) {
   if (!coherence)
-    throw util::ConfigError("L2 cache requires a coherence domain");
+    return emit_error.emit() << "L2 cache requires a coherence domain";
   if (coherence == coherence_)
-    return;
+    return util::Result::success();
   coherence_->unregister_l2_cache(this);
   {
     std::unique_lock maintenance_lock(maintenance_mutex_);
@@ -44,6 +43,7 @@ void L2Cache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coheren
   coherence_ = std::move(coherence);
   coherence_epoch_ = coherence_->current_epoch();
   coherence_->register_l2_cache(this);
+  return util::Result::success();
 }
 
 std::shared_lock<L2Cache::MaintenanceMutex> L2Cache::acquire_cache_access() {
@@ -151,8 +151,7 @@ VmAccessOutcome L2Cache::publish_dirty_bytes(uint64_t line_addr, const uint8_t *
 
 VmAccessOutcome L2Cache::publish_dirty_bytes_to_legacy_backing(uint64_t line_addr,
                                                                const uint8_t *data, uint32_t vmid) {
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
-    throw util::ConfigError("L2 cache has no legacy maintenance backing");
+  assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
 
   std::optional<GpuVmAccess> vm_access;
   if (vmid != 0) {
@@ -708,8 +707,7 @@ VmAccessOutcome L2Cache::flush_dirty_locked() {
 VmAccessOutcome L2Cache::flush_dirty_to_legacy_backing_locked() {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
-    throw util::ConfigError("L2 cache has no legacy maintenance backing");
+  assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
 
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(

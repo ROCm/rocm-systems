@@ -5,8 +5,10 @@
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
+#include "util/log.h"
 
 #include <chrono>
+#include <format>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -84,10 +86,15 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
     };
   }
   if (!callbacks.acquire_cache_maintenance) {
-    callbacks.acquire_cache_maintenance =
-        [coherence = scheduler_->cache_coherence()](SdmaCacheOperation operation) {
-          return coherence->acquire_cache_maintenance(operation);
-        };
+    callbacks.acquire_cache_maintenance = [coherence = scheduler_->cache_coherence(),
+                                           context](SdmaCacheOperation operation) {
+      auto report = [context](std::string_view message) {
+        util::Logger::warn(
+            std::format("SDMA{} queue {}:{} stopped after cache maintenance failure: {}",
+                        context.engine_id, context.process_id, context.queue_id, message));
+      };
+      return coherence->acquire_cache_maintenance(operation, util::DiagnosticEmitter(report));
+    };
   }
   if (!callbacks.timestamp) {
     callbacks.timestamp = [] {
