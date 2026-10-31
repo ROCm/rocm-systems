@@ -1760,6 +1760,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
+  t.rankScaledFuncMaxBytes[ncclFuncReduceScatter] = 64 * kMiB;
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
@@ -6878,8 +6879,8 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
 // Ring protocol ranges and the ReduceScatter channel cap.
 // ===========================================================================
 
-// Below rankScaledMinRanks the totals apply; from it, nRanks x the per-rank entry,
-// clipped to rankScaledMaxBytes. Tiers without a per-rank entry keep their totals.
+// Below rankScaledMinRanks the totals apply; from it, nRanks x the per-rank entry, clipped to
+// rankScaledFuncMaxBytes (else rankScaledMaxBytes). Tiers without a per-rank entry keep their totals.
 TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaTierCaps_RankScaledFromMinRanks",
@@ -6901,11 +6902,17 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
+        comm->nRanks = 16;
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
         EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         // The entry gate admits the widest tier, so it scales too.
-        EXPECT_EQ(256 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(64 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
+        comm->nRanks = 64;
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
+        EXPECT_EQ(64 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
+        EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "rankScaledMaxBytes";
         DeleteCommWithArch(comm);
       });
 }
@@ -7797,7 +7804,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter runs DDA LL128 through 128M total at 4 ranks and 64M at 8, then Ring.
+// gfx1250 SPX ReduceScatter runs DDA LL128 through 128M total at 4 ranks and 64M from 8, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
@@ -7818,7 +7825,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
           return decision.algo;
         };
         const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
-        const std::pair<int, size_t> cases[] = {{4, 128 * kMiB}, {8, 64 * kMiB}};
+        const std::pair<int, size_t> cases[] = {{4, 128 * kMiB}, {8, 64 * kMiB}, {16, 64 * kMiB}};
         for (const auto& c : cases) {
           comm->nRanks = c.first;
           EXPECT_EQ(ll128, algo(c.second)) << c.first;

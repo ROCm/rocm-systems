@@ -44,7 +44,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
-    128ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 128M total
+    128ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 128M total below 8 ranks
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
@@ -205,7 +205,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
-    8ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 8M from 8 ranks
+    8ULL*1024*1024,      // [3] ReduceScatter   -- nRanks x 8M from 8 ranks, clipped at 64M
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -225,6 +225,17 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
+  .rankScaledFuncMaxBytes = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- rankScaledMaxBytes
+    64ULL*1024*1024,     // [3] ReduceScatter   -- Ring LL128 beats DDA LL128 1.1x at 128M on 16 ranks
+    0,                   // [4] AllReduce       -- rankScaledMaxBytes
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- rankScaledMaxBytes
+  },
   // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,

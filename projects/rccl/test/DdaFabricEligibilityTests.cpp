@@ -1655,12 +1655,12 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_OverSlotCapacityRejecte
 }
 
 // gfx1250 on this 8-rank comm: ReduceScatter LL is nRanks x 256 KiB (2 MiB)
-// and LL128 is nRanks x 2 MiB (16 MiB). The selector checks LL first, so LL128
-// owns messages above the LL cap through 16 MiB.
+// and LL128 is nRanks x 8 MiB (64 MiB). The selector checks LL first, so LL128
+// owns messages above the LL cap through 64 MiB.
 TEST_F(DdaFabricEligibilityTest, ReduceScatter_Gfx1250DefaultThresholds)
 {
     constexpr size_t kLlCap    = 2ULL * 1024 * 1024;
-    constexpr size_t kLl128Cap = 16ULL * 1024 * 1024;
+    constexpr size_t kLl128Cap = 64ULL * 1024 * 1024;
     EXPECT_EQ(rcclDdaLLThreshold(mockComm_.get(), ncclFuncReduceScatter), kLlCap);
     EXPECT_EQ(rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter), kLl128Cap);
     EXPECT_LT(kLlCap, kLl128Cap);
@@ -1757,9 +1757,9 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Ca
 
 // Scratch is sized the way fabric init does: LL enabled, AllReduce LL128 cap,
 // payload cap from the arch table. The ReduceScatter cap is read after nRanks
-// changes. Below rankScaledMinRanks it is the table total (64 MiB), and from 8
-// ranks it is nRanks times the per-rank entry (16 MiB at 8). The 4-rank shard
-// is the larger of the two, which is the scratch case this test is for.
+// changes. Below rankScaledMinRanks it is the table total (128 MiB), and from 8
+// ranks it is nRanks times the per-rank entry clipped at 64 MiB (64 MiB at 8). The
+// 4-rank shard is the larger of the two, which is the scratch case this test is for.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
 {
     const int savedRanks = mockComm_.comm.nRanks;
@@ -1767,11 +1767,10 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
     {
         mockComm_.comm.nRanks = nRanks;
         const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter);
-        // 4 ranks is below rankScaledMinRanks, so the cap is the 64 MiB table total.
-        // 8 ranks uses nRanks x 2 MiB. Reading the cap before this assignment would
-        // check a 4 MiB shard here instead of the 16 MiB 4-rank shard.
-        EXPECT_EQ(totalCap, nRanks < 8 ? 64ULL * 1024 * 1024
-                                        : static_cast<size_t>(nRanks) * 2ULL * 1024 * 1024);
+        // 4 ranks is below rankScaledMinRanks, so the cap is the 128 MiB table total.
+        // 8 ranks uses nRanks x 8 MiB. Reading the cap before this assignment would
+        // check a 16 MiB shard here instead of the 32 MiB 4-rank shard.
+        EXPECT_EQ(totalCap, nRanks < 8 ? 128ULL * 1024 * 1024 : 64ULL * 1024 * 1024);
         mockComm_.comm.ddaScratchBytes = nccl_dda_detail::ddaFabricScratchSizing(
             nRanks, /*overrideBytes=*/-1, rcclParamDdaEnable(),
             rcclDdaScratchPayloadCap(mockComm_.get()), rcclParamDdaLL(), rcclParamDdaLL128(),

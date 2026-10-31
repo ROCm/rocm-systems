@@ -93,14 +93,16 @@ struct rcclArchThresholds {
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
   // ddaLLMax / ddaLL128Max / ddaVmmMax total with nRanks * entry, clipped to
-  // rankScaledMaxBytes (which must not exceed the largest total above: fabric
-  // scratch is sized from the totals). Smaller comms, and entries of 0, keep the
-  // totals. The RCCL_DDA_*_THRESHOLD env vars still win over both.
+  // rankScaledFuncMaxBytes[func], or rankScaledMaxBytes where that is 0 (neither may
+  // exceed the largest total above: fabric scratch is sized from the totals).
+  // Smaller comms, and entries of 0, keep the totals. The RCCL_DDA_*_THRESHOLD
+  // env vars still win over both.
   size_t ddaLLMaxPerRank[RCCL_DDA_FUNC_COUNT];
   size_t ddaLL128MaxPerRank[RCCL_DDA_FUNC_COUNT];
   size_t ddaVmmMaxPerRank[RCCL_DDA_FUNC_COUNT];
   int rankScaledMinRanks;     // 0 = no rank scaling
   size_t rankScaledMaxBytes;
+  size_t rankScaledFuncMaxBytes[RCCL_DDA_FUNC_COUNT];
 
   // AllReduce only: on comms of at least ddaArVmmFirstMinRanks ranks, DDA VMM
   // takes unregistered messages in (ddaArVmmFirstMinBytes, nRanks *

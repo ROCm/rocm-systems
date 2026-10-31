@@ -1173,12 +1173,14 @@ inline bool rcclDdaRankScaled(const rcclArchThresholds* table, int nRanks) {
 }
 
 // Table cap for one DDA tier: nRanks * the per-rank entry (clipped to
-// rankScaledMaxBytes) on rank-scaled comms when that entry is set, else the total.
+// rankScaledFuncMaxBytes[func] if set, else rankScaledMaxBytes) on rank-scaled
+// comms when that entry is set, else the total.
 inline size_t ddaTierCapFromTable(const rcclArchThresholds* table, const size_t* totals, const size_t* perRank,
                                   ncclFunc_t func, int nRanks) {
   const size_t share = funcThresholdFromTable(perRank, func);
   if (share != 0 && rcclDdaRankScaled(table, nRanks)) {
-    return std::min((size_t)nRanks * share, table->rankScaledMaxBytes);
+    const size_t funcClip = funcThresholdFromTable(table->rankScaledFuncMaxBytes, func);
+    return std::min((size_t)nRanks * share, funcClip != 0 ? funcClip : table->rankScaledMaxBytes);
   }
   return funcThresholdFromTable(totals, func);
 }
