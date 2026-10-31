@@ -527,8 +527,10 @@ hsa_status_t Runtime::FindDriverMemoryHandle(const void* ptr, const Agent* reque
     const MappedHandle& mappedHandle = mapped_it->second;
     const auto* mapped_base = reinterpret_cast<const uint8_t*>(mapped_it->first);
     if (ptr >= mapped_base && ptr < mapped_base + mappedHandle.size) {
-      // Imported handles have no owning region, so resolve the owner null-safely.
-      const MemoryRegion* owner_region = mappedHandle.mem_handle->region;
+      // An imported handle holds no allocation handle of its own, even once its region is
+      // recovered from the dma-buf: only the per-agent imports below resolve it.
+      const MemoryRegion* owner_region =
+          mappedHandle.mem_handle->imported ? nullptr : mappedHandle.mem_handle->region;
       const Agent* owner = owner_region ? owner_region->owner() : nullptr;
       if (owner != nullptr && owner->driver().kernel_driver_type_ == requesting_driver) {
         *base = const_cast<void*>(mapped_it->first);
@@ -1123,13 +1125,13 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
-      // Handles imported from another process (dmabuf or fabric) carry no local region: the
-      // owning agent and the allocation's memory flags belong to the exporter. Report those as
-      // unset instead of resolving them through MemoryHandle::region, which is NULL here.
-      const AMD::MemoryRegion* memRegion =
-          mappedHandleIt->second.mem_handle->imported
-              ? nullptr
-              : static_cast<const AMD::MemoryRegion*>(mappedHandleIt->second.mem_handle->region);
+      // A handle imported from another process (dmabuf or fabric) has no region until its
+      // placement is recovered from the dma-buf. Once it is, the region names the agent whose
+      // memory backs the import, as for a local handle. A handle the driver cannot describe, or
+      // whose memory belongs to an agent outside this process, keeps the owner and flags unset.
+      MemoryHandle* memHandle = mappedHandleIt->second.mem_handle;
+      EnsureImportInfo(memHandle);
+      const AMD::MemoryRegion* memRegion = static_cast<const AMD::MemoryRegion*>(memHandle->region);
       info->agentOwner = {};
       info->global_flags = 0;
       info->alloc_flags = 0;
