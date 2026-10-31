@@ -11,6 +11,8 @@
 #include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/exec_mode.h"
@@ -61,17 +63,19 @@ public:
   /// @details Each CU takes a shared_ptr, so the store outlives every registered
   /// CU regardless of teardown order. Must be called after the CUs are attached to
   /// the command processor; the full constructor and the config loader both do so.
-  /// Preflights every CU and throws std::logic_error if an active CU would
-  /// change stores, before changing any CU. The caller serializes topology changes.
+  /// Called during topology construction, before execution starts; every CU must
+  /// accept the XCD's GWS store.
   void wire_gws_to_cus();
 
   /// @brief Replace this XCD's default GWS store with an externally owned one (the
   /// SoC's device-wide store, shared across every XCD; see GwsDevice).
   /// @details Rewires every CU to @p store. Idempotent and a no-op if @p store is
   /// null or already current; must be called after the CUs are attached.
-  /// Preflights every CU and throws std::logic_error if an active CU would change
+  /// Preflights every CU and returns failure if an active CU would change
   /// stores, before updating any CU or the XCD owner. The caller serializes topology changes.
-  void adopt_gws_store(std::shared_ptr<GwsDevice> store);
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result adopt_gws_store(std::shared_ptr<GwsDevice> store,
+                               util::DiagnosticEmitter emit_error = {});
 
   /// @brief Return the device-global GWS store this XCD's CUs share.
   const std::shared_ptr<GwsDevice> &gws_device() const { return gws_device_; }

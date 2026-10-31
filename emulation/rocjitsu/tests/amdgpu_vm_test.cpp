@@ -50,7 +50,10 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include "util/diagnostic.h"
+#include "util/result.h"
 #include <gtest/gtest-spi.h>
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -100,6 +103,15 @@ public:
     std::lock_guard lock(cp.hw_queue_mutex_);
     const auto result = cp.dispatch_workgroups(entry);
     return {result.dispatched, result.outcome};
+  }
+
+  static std::shared_ptr<Pm4ScratchPool> pending_pm4_scratch(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    for (auto &queue : cp.compute_queues_)
+      for (auto &entry : queue.dispatches.entries)
+        if (entry.pm4_scratch_pool)
+          return entry.pm4_scratch_pool;
+    return {};
   }
 
   static void retire(CommandProcessor &cp, const DispatchEntry &entry, uint32_t workgroup) {
@@ -294,6 +306,123 @@ TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
         EXPECT_EQ(fixture.gpu_mem, nullptr);
       },
       "Failed to parse JSON config");
+}
+
+/// @brief Reserve a scratch slot between placement's availability check and wave setup.
+class ScratchLeaseRace final : public ExecutionPlugin {
+public:
+  explicit ScratchLeaseRace(std::function<std::shared_ptr<amdgpu::Pm4ScratchPool>()> find_pool)
+      : ExecutionPlugin("scratch-lease-race"), find_pool_(std::move(find_pool)) {}
+
+  void onAmdgpuDispatchExecutionBegin(uint32_t) override {
+    pool = find_pool_();
+    ASSERT_NE(pool, nullptr);
+    util::FailureOr<std::shared_ptr<uint32_t>> acquired = pool->acquire();
+    ASSERT_TRUE(acquired.succeeded());
+    lease = std::move(acquired.value());
+  }
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override { ++waves; }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halts; }
+
+  std::shared_ptr<amdgpu::Pm4ScratchPool> pool;
+  std::shared_ptr<uint32_t> lease;
+  uint32_t waves = 0;
+  uint32_t halts = 0;
+
+private:
+  std::function<std::shared_ptr<amdgpu::Pm4ScratchPool>()> find_pool_;
+};
+
+TEST(CommandProcessorTest, ScratchExhaustionReturnsFailureAndReclaimsPartialWaveSetup) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("rdna3", 1, 4));
+  KfdProcess process(7);
+  std::array<uint8_t, 4096> scratch_backing{};
+  process.map_pages(0x10000, scratch_backing.data(), scratch_backing.size());
+  amdgpu::LegacyGpuVmAdapter adapter(fixture.soc_ptr->gpu_vm(), fixture.mem());
+  const amdgpu::AddressSpaceHandle address_space =
+      adapter.register_address_space(7, {.page_table = &process.page_table_,
+                                         .page_table_mutex = &process.page_table_mutex_,
+                                         .page_table_generation = process.page_table_generation(),
+                                         .request_mutex = process.page_table_request_mutex(),
+                                         .mutation_epoch = process.page_table_mutation_epoch()});
+  ASSERT_TRUE(address_space);
+  amdgpu::DispatchEntry entry;
+  entry.address_space = address_space;
+  entry.process_id = 7;
+  entry.kind = amdgpu::DispatchPacketKind::Kernel;
+  entry.dispatch_id = 1;
+  entry.kernel_entry_pc = 0x8000;
+  entry.total_wgs = entry.grid_wgs_x = 1;
+  entry.grid_yz_valid = true;
+  entry.group_segment_fixed_size = 2048;
+  entry.vgprs_per_wf = 24;
+  entry.sgprs_per_wf = 104;
+  entry.kernel_wave_size = 32;
+  entry.wfs_per_workgroup = 2;
+  entry.workgroup_size_x = entry.grid_size_x = 64;
+  entry.pm4_abi = true;
+  entry.private_segment_fixed_size = 8;
+  entry.scratch_backing_addr = 0x10000;
+  entry.pm4_scratch_pool = std::make_shared<amdgpu::Pm4ScratchPool>(2);
+  auto plugin = std::make_unique<ScratchLeaseRace>([&] { return entry.pm4_scratch_pool; });
+  ScratchLeaseRace *observed = plugin.get();
+  auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(plugins->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(plugins);
+
+  // This calls below the PM4 launch catch. Reintroducing the exhaustion throw
+  // must fail this test even though the public queue would contain it.
+  EXPECT_EQ(amdgpu::CommandProcessorPlacementTestAccess::place(*fixture.cp(), entry),
+            (std::pair{0u, amdgpu::VmAccessOutcome::Faulted}));
+  ASSERT_NE(observed->lease, nullptr);
+  EXPECT_EQ(entry.dispatched_wgs, 0u);
+  EXPECT_EQ(observed->waves, 0u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_TRUE(fixture.cu()->is_idle());
+  EXPECT_TRUE(fixture.cu()->can_accept_workgroup(2, 64 * 1024));
+  EXPECT_TRUE(entry.pm4_scratch_pool->available(1));
+  EXPECT_FALSE(entry.pm4_scratch_pool->available(2));
+  observed->lease.reset();
+  ASSERT_TRUE(entry.pm4_scratch_pool->available(2));
+  ASSERT_EQ(amdgpu::CommandProcessorPlacementTestAccess::place(*fixture.cp(), entry),
+            (std::pair{1u, amdgpu::VmAccessOutcome::Complete}));
+  EXPECT_EQ(observed->waves, 2u);
+  amdgpu::CommandProcessorPlacementTestAccess::retire(*fixture.cp(), entry, 0);
+  EXPECT_TRUE(entry.pm4_scratch_pool->available(2));
+}
+
+TEST(Pm4ScratchPoolTest, ExhaustionPreservesLeasesAndSlotsCanBeReused) {
+  auto pool = std::make_shared<amdgpu::Pm4ScratchPool>(2);
+  util::FailureOr<std::shared_ptr<uint32_t>> maybe_first = pool->acquire();
+  ASSERT_TRUE(maybe_first.succeeded());
+  std::shared_ptr<uint32_t> first = std::move(maybe_first.value());
+  util::FailureOr<std::shared_ptr<uint32_t>> maybe_second = pool->acquire();
+  ASSERT_TRUE(maybe_second.succeeded());
+  std::shared_ptr<uint32_t> second = std::move(maybe_second.value());
+  EXPECT_NE(*first, *second);
+  const uint32_t released_slot = *first;
+  const uint32_t retained_slot = *second;
+  util::StringDiagnostic diagnostic;
+  auto report = [&](std::string_view message) {
+    EXPECT_FALSE(pool->available(1));
+    diagnostic(message);
+  };
+  util::FailureOr<std::shared_ptr<uint32_t>> exhausted =
+      pool->acquire(util::DiagnosticEmitter(report));
+  EXPECT_TRUE(exhausted.failed());
+  EXPECT_EQ(diagnostic.message(), "PM4 scratch pool exhausted");
+  EXPECT_EQ(*first, released_slot);
+  EXPECT_EQ(*second, retained_slot);
+  std::shared_ptr<uint32_t> retained_owner = first;
+  first.reset();
+  EXPECT_FALSE(pool->available(1));
+  retained_owner.reset();
+  ASSERT_TRUE(pool->available(1));
+  util::FailureOr<std::shared_ptr<uint32_t>> reused = pool->acquire();
+  ASSERT_TRUE(reused.succeeded());
+  EXPECT_EQ(*reused.value(), released_slot);
+  EXPECT_EQ(*second, retained_slot);
 }
 
 TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFailedSetup) {
@@ -1621,7 +1750,12 @@ TEST(RdnaDispatchTest, LegacySpiQueueRejectsWgpMode) {
   amdgpu::DispatchEntry entry{};
   entry.wgp_mode = true;
 
-  EXPECT_THROW(f.se()->spi().enqueue_wg(0, 0, &entry), std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(f.se()->spi().enqueue_wg(0, 0, &entry, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "legacy SPI queue path does not support WGP-mode workgroups");
+  EXPECT_FALSE(f.se()->spi().has_pending());
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
 }
 
 TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
@@ -10129,6 +10263,59 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
   EXPECT_EQ(callbacks, (std::array<uint32_t, 2>{1, 1}));
   EXPECT_FALSE(f.cp()->has_registered_queues());
   EXPECT_TRUE(adapter.unregister_address_space(address_space));
+}
+
+TEST(Pm4DispatchTest, ScratchExhaustionFailsQueueWithoutCompletionOrSuccessorEffects) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("rdna3", 1, 4));
+  amdgpu::ComputeQueueConfig queue;
+  queue.queue_id = 71;
+  ASSERT_TRUE(fixture.cp()->register_drm_queue(std::move(queue)));
+  auto plugin = std::make_unique<ScratchLeaseRace>([&] {
+    return amdgpu::CommandProcessorPlacementTestAccess::pending_pm4_scratch(*fixture.cp());
+  });
+  ScratchLeaseRace *observed = plugin.get();
+  auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(plugins->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(plugins);
+  constexpr uint64_t kCode = 0x8000;
+  constexpr uint64_t kIb = 0x4000;
+  constexpr uint64_t kOutput = 0x7000;
+  fixture.mem()->write32(kCode, 0xbfb00000); // RDNA3 s_endpgm.
+  std::vector<uint32_t> words;
+  const auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload) {
+    words.push_back(0xc0000000 | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+    words.insert(words.end(), payload.begin(), payload.end());
+  };
+  packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 32, 1, 1});
+  packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(kCode >> 8), 0});
+  packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc2, 1});
+  packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeScratchLo, 0x100, 0});
+  packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeTmpringSize, 1u | (1u << 12)});
+  packet(amdgpu::Pm4Opcode::DispatchDirect, {1, 1, 1, 0x8001});
+  packet(amdgpu::Pm4Opcode::WriteData, {5u << 8, uint32_t(kOutput), 0, 0x12345678});
+  for (uint32_t index = 0; index < words.size(); ++index)
+    fixture.mem()->write32(kIb + index * 4, words[index]);
+  uint32_t completions = 0;
+  amdgpu::Pm4Submission submission;
+  submission.buffers.push_back({kIb, uint32_t(words.size())});
+  submission.complete = [&](bool success) {
+    EXPECT_FALSE(success);
+    ++completions;
+  };
+  ASSERT_TRUE(fixture.cp()->submit_pm4(71, 0, std::move(submission)));
+  EXPECT_NO_THROW(fixture.engine->run());
+  ASSERT_NE(observed->lease, nullptr);
+  EXPECT_EQ(completions, 1u);
+  EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(71, 0));
+  EXPECT_EQ(fixture.mem()->read32(kOutput), 0u);
+  EXPECT_EQ(observed->waves, 0u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_TRUE(fixture.cu()->is_idle());
+  observed->lease.reset();
+  ASSERT_TRUE(observed->pool->available(1));
+  util::FailureOr<std::shared_ptr<uint32_t>> reused = observed->pool->acquire();
+  EXPECT_TRUE(reused.succeeded());
 }
 
 TEST(Pm4DispatchTest, OverlappingScratchQueuesSerializeAndPreserveContents) {
