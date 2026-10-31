@@ -204,9 +204,21 @@ add_custom_command(
   COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} ${HIPRTC_ASAN_OPTIONS} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
   COMMAND ${CMAKE_COMMAND} -DHIPRTC_ADD_MACROS=1 -DHIPRTC_HEADERS="${HIPRTC_HEADERS}" -DHIPRTC_PREPROCESSED_FILE=${HIPRTC_GEN_PREPROCESSED} -P ${HIPRTC_CMAKE}
   DEPENDS ${clang} ${HIPRTC_GEN_HEADER})
+# llvm-mc has no information about the distro's default ABI convention (the
+# ${HIPRTC_GEN_MCIN} source has no floating point instructions to infer it
+# from), so on riscv64 it emits an object with no float-ABI ELF flag at all.
+# ld.lld then refuses to link it against the rest of the build (compiled by
+# clang, which *does* default to riscv64-unknown-linux-gnu's lp64d/double-
+# float ABI, matching the system's own crti.o): "cannot link object files
+# with different floating-point ABI". Pass the same triple/features/ABI
+# explicitly so the generated object's ELF flags match.
+set(HIPRTC_MC_ABI_FLAGS)
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "riscv64")
+  set(HIPRTC_MC_ABI_FLAGS -triple=riscv64-unknown-linux-gnu -mattr=+d,+c -target-abi=lp64d)
+endif()
 add_custom_command(
   OUTPUT ${HIPRTC_GEN_OBJ}
-  COMMAND ${llvm-mc} -o ${HIPRTC_GEN_OBJ} ${HIPRTC_GEN_MCIN} --filetype=obj
+  COMMAND ${llvm-mc} -o ${HIPRTC_GEN_OBJ} ${HIPRTC_GEN_MCIN} --filetype=obj ${HIPRTC_MC_ABI_FLAGS}
   DEPENDS ${llvm-mc} ${HIPRTC_GEN_PREPROCESSED} ${HIPRTC_GEN_MCIN})
 
 # Create hiprtc-builtins library.
