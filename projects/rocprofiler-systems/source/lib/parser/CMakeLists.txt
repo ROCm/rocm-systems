@@ -22,6 +22,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/parse_result.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_schema.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.cpp
@@ -29,6 +30,8 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/precedence.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_provider.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/builtin_providers.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/help.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
@@ -42,6 +45,9 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/precedence.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_provider.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/help.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/default_schema.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/configuration_parser.hpp
 )
 
 get_filename_component(PARSER_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
