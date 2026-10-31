@@ -71,7 +71,8 @@ add_dbgapi_unit_test(my_new_unit_test
   LIBS amd-dbgapi)
 ```
 
-Unit tests link `GTest::gtest_main` automatically.
+Unit tests link `GTest::gtest_main` automatically.  Use `amd-dbgapi-internal`
+when you need to reach internal symbols; otherwise link the `amd-dbgapi`.
 
 Optional knobs:
 
