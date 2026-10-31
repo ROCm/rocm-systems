@@ -363,28 +363,50 @@ protected:
     // the request out-param; these functional tests always use the default
     // (non-strong) ordering semantics, so it is fixed to false here.
     ncclResult_t IPut(int context, uint64_t srcOff, void* srcMhandle, size_t size,
-                      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request)
+                      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request,
+                      uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iput(rmaCtx_, context, srcOff, srcMhandle, size, dstOff, dstMhandle,
-                          rank, ncclRmaOptFlagsDefault, request);
+                          rank, optFlags, request);
     }
 
     ncclResult_t IGet(int context, uint64_t remoteOff, void* remoteMhandle, size_t size,
-                      uint64_t localOff, void* localMhandle, uint32_t rank, void** request)
+                      uint64_t localOff, void* localMhandle, uint32_t rank, void** request,
+                      uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iget(rmaCtx_, context, remoteOff, remoteMhandle, size, localOff,
-                          localMhandle, rank, ncclRmaOptFlagsDefault, request);
+                          localMhandle, rank, optFlags, request);
     }
 
     ncclResult_t IPutSignal(int context, uint64_t srcOff, void* srcMhandle, size_t size,
                             uint64_t dstOff, void* dstMhandle, uint32_t rank,
                             uint64_t signalOff, void* signalMhandle, uint64_t signalValue,
-                            uint32_t signalOp, void** request)
+                            uint32_t signalOp, void** request,
+                            uint32_t optFlags = ncclRmaOptFlagsDefault)
     {
         return rma_->iputSignal(rmaCtx_, context, srcOff, srcMhandle, size, dstOff,
                                 dstMhandle, rank, signalOff, signalMhandle, signalValue,
-                                signalOp, /*isStrongSignal=*/false, ncclRmaOptFlagsDefault,
+                                signalOp, /*isStrongSignal=*/false, optFlags,
                                 request);
+    }
+
+    // A single rma->test() call: true iff the request was already complete.
+    bool TestOnce(void* request)
+    {
+        int          done = 0;
+        ncclResult_t r    = rma_->test(collComm_, request, &done);
+        if(r != ncclSuccess)
+        {
+            ADD_FAILURE() << "rma->test failed: " << r;
+            return false;
+        }
+        return done != 0;
+    }
+
+    // Only net_ib at the default batch size signals just a batch's tail, so one completion retires the whole batch.
+    bool RetiresBatchOnTailCompletion() const
+    {
+        return rma_ == &ncclRmaIbProxy && std::getenv("NCCL_RMA_IB_WR_BATCHSIZE") == nullptr;
     }
 
     bool PollUntilDone(void* request, int timeoutMs = kDefaultPollTimeoutMs)
