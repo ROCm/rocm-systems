@@ -74,6 +74,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           CUID_METADATA_STATUS: available
   ```
 
+- **Added an opt-in `dynamic-loading` feature to the Rust bindings**.  
+  - `libamd_smi.so` is loaded on the first API call instead of being linked at build time, so applications build and start without AMD SMI installed. `AMDSMI_LIB_DIR` selects the library directory at runtime.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 use amdsmi::*;
+use std::process::ExitCode;
 
-fn main() {
-    // Initialize the AMD SMI library
+fn main() -> ExitCode {
     if let Err(e) = amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus) {
         eprintln!("Failed to initialize AMD SMI: {}", e);
-        return;
+        return ExitCode::FAILURE;
     }
 
     // Get socket handles
@@ -16,7 +16,7 @@ fn main() {
         Err(e) => {
             eprintln!("Failed to get socket handles: {}", e);
             amdsmi_shut_down().expect("Failed to shutdown AMD SMI");
-            return;
+            return ExitCode::FAILURE;
         }
     };
 
@@ -83,5 +83,7 @@ fn main() {
     // Shutdown the AMD SMI library
     if let Err(e) = amdsmi_shut_down() {
         eprintln!("Failed to shutdown AMD SMI: {}", e);
+        return ExitCode::FAILURE;
     }
+    ExitCode::SUCCESS
 }
