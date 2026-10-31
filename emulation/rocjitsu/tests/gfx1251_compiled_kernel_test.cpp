@@ -48,6 +48,7 @@ constexpr uint32_t kWorkgroupSize = 64;
 class Gfx1251CompiledKernelTest : public testing::Test {
 protected:
   void SetUp() override {
+    util::StringDiagnostic admission_diagnostic;
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
     ASSERT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1251);
@@ -57,8 +58,10 @@ protected:
     ASSERT_NE(memory_, nullptr);
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine_->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded.wire_links(engine_->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
   }
 
   void load_compiled_kernel(const char *fixture_name, const char *kernel_name,

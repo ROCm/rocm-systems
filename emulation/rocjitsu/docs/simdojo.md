@@ -367,7 +367,12 @@ building and wiring a model.
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
 
 // Create clock domains.
-auto *core_clk = engine.topology().add_clock_domain("core", 1'000'000'000);
+util::StringDiagnostic diagnostic;
+auto maybe_core_clk =
+    engine.topology().add_clock_domain("core", 1'000'000'000, 0, diagnostic.emitter());
+if (maybe_core_clk.failed())
+  return; // report diagnostic.message()
+auto *core_clk = maybe_core_clk.value();
 
 // Build the component tree.
 auto root = std::make_unique<CompositeComponent>("soc");
@@ -380,8 +385,10 @@ engine.topology().set_root(std::move(root));
 engine.topology().add_link(pipe_req_port, mem_req_port, /*latency=*/10);
 engine.topology().add_link(mem_resp_port, pipe_resp_port, /*latency=*/5);
 
-engine.topology().partition_balanced(4);
-engine.create();
+if (engine.topology().partition_balanced(4, diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
+if (engine.create(diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
 auto exit = engine.run();
 ```
 
@@ -609,10 +616,13 @@ empty but primaries are registered, returns true so the caller can poll.
 
 ```cpp
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
+util::StringDiagnostic diagnostic;
 engine.topology().set_root(std::move(my_model));
 engine.topology().add_link(src_port, dst_port, latency);
-engine.topology().partition_balanced(4);
-engine.create();       // validates partitions, initializes components
+if (engine.topology().partition_balanced(4, diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
+if (engine.create(diagnostic.emitter()).failed())
+  return; // report diagnostic.message()
 // (user enqueues work via CP)
 auto exit = engine.run();   // starts up components, runs to completion
 engine.shutdown();    // called automatically by destructor if needed
