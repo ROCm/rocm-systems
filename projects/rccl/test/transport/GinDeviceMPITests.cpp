@@ -19,10 +19,12 @@
 #include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 #include "comm.h"
+#include "graph/topo.h"
 
 #include "nccl_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #ifdef ENABLE_ROCSHMEM_GIN
+#include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
 #endif
 
@@ -135,6 +137,29 @@ std::string anvilSingleNodeReason() {
   if (nodeLocalRanks() != worldSize)
     return "anvil-SDMA is a single-node backend; skipping multi-node run";
   return "";
+}
+
+// AICOMRCCL-3417. The rest of this file requires NCCL_GIN_TYPE. This case is
+// the opposite: unset, so Anvil SDMA and PROXY are both eligible and SDMA
+// would otherwise sort ahead of PROXY on a multi-host communicator.
+std::string mixedBackendTwoNodeSkipReason() {
+  std::string local = ginEnvDisabledReason();
+  if (local.empty()) local = cuMemReason();
+#ifndef ENABLE_ROCSHMEM_GIN
+  if (local.empty()) local = "AICOMRCCL-3417 requires ENABLE_ROCSHMEM_GIN";
+#else
+  if (local.empty() && gin_anvil_sdma_probe() <= 0)
+    local = "AICOMRCCL-3417 requires Anvil SDMA (gin_anvil_sdma_probe)";
+#endif
+  if (local.empty()) {
+    const char* ginType = std::getenv("NCCL_GIN_TYPE");
+    if (ginType && ginType[0])
+      local = "AICOMRCCL-3417 requires NCCL_GIN_TYPE to be unset";
+  }
+  // crossNodeReason splits MPI_COMM_TYPE_SHARED. Every rank must call it.
+  std::string cross = crossNodeReason();
+  if (local.empty()) local = std::move(cross);
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
 }
 
 // Unlike anvilSingleNodeReason() above, this applies on every backend: the
@@ -485,7 +510,8 @@ class GinMPIDeviceTests : public MPITestBase {
   // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1 on the
   // caller's comm and stream. Contains ASSERT_MPI_*, so it must be the
   // caller's last statement.
-  void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream) {
+  void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream,
+                           ncclGinType_t ginType = NCCL_GIN_TYPE_NONE) {
     int rank = -1, nRanks = -1;
     ncclCommUserRank(comm, &rank);
     ncclCommCount(comm, &nRanks);
@@ -523,6 +549,7 @@ class GinMPIDeviceTests : public MPITestBase {
     ncclDevCommRequirements reqs = defaultGinReqs();
     reqs.railGinBarrierCount = 1;
     reqs.ginSignalCount      = 1;
+    reqs.ginType             = ginType;
     ncclDevComm devComm{};
     ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
     auto devCommCleanup = makeScopeGuard([&]() {
@@ -8111,6 +8138,49 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   runPutWaitRoundTrip(child, getActiveStream());
+}
+
+// Two ranks, two physical hosts, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Anvil
+// SDMA must not stay active: its factory addresses peers by local device id,
+// including across hosts in one MNNVL pod where nNodes folds to 1. PROXY is
+// the default, a symmetric window registers, a default DevComm and an explicit
+// PROXY DevComm each complete a cross-host put/signal, and an explicit Anvil
+// DevComm is rejected.
+TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
+  if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2,
+                                     /*require_power_of_two=*/false, /*min_nodes=*/2, /*max_nodes=*/2),
+          "Requires exactly 2 ranks on 2 hosts");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  if (auto reason = mpiCoordinatedSkipReason(comm->topo->nHosts < 2, "Requires topo->nHosts >= 2");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+  ASSERT_MPI_EQ(true, comm->topo->nHosts >= 2);
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  ASSERT_MPI_EQ(NCCL_GIN_TYPE_PROXY, props.ginType);
+  ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_PROXY]);
+  ASSERT_MPI_EQ(false, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+
+  ncclDevCommRequirements anvilReqs = defaultGinReqs();
+  anvilReqs.ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  anvilReqs.railGinBarrierCount = 1;
+  anvilReqs.ginSignalCount = 1;
+  ncclDevComm anvil{};
+  ncclResult_t anvilSt = ncclDevCommCreate(comm, &anvilReqs, &anvil);
+  if (anvilSt == ncclSuccess) (void)ncclDevCommDestroy(comm, &anvil);
+  ASSERT_MPI_EQ(ncclInternalError, anvilSt);
+
+  // Default backend (ginType unset on the DevComm) and an explicit PROXY one.
+  runPutWaitRoundTrip(comm, getActiveStream());
+  runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
 }
 
 // ---------------------------------------------------------------------------
