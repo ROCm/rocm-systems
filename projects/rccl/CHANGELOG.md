@@ -13,6 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed collectives failing with `unspecified launch failure` when `NCCL_ENQUEUE_REARCH_ENABLE=1`. The re-architected enqueue path sized thread blocks for NVIDIA's 32-thread warp plus a sync warp, so ring and tree collectives launched up to 576 threads per block on 64-lane AMD GPUs, past the 256 that RCCL kernels are built for. With `NCCL_PROTO=LL128` it also requested `ncclAllReduce`, `ncclAllGather` and `ncclBroadcast` kernels that RCCL does not build. The path now selects threads and kernels the way the default path does, and also keeps the `ncclAllReduceWithBias` accumulator, which it used to drop and so returned wrong results, and the single-node slicing and Direct ReduceScatter settings, so `RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD` now applies on this path too.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 

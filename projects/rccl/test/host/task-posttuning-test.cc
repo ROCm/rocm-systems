@@ -210,9 +210,12 @@ uint64_t TaskPostTuning_DevFuncKey(int coll, int devRedOp, int type, int algo, i
          (static_cast<uint64_t>(type & RCCL_FUNC_ID_MASK) << RCCL_DTYPE_SHIFT);
 }
 
+// LL128 AllReduce/AllGather/Broadcast resolve the non-registered variant (reg 2) until registration is known.
 void TaskPostTuning_StampDevFuncId(int algo, int proto, int devRedOp = ncclDevSum,
                                   ncclFunc_t func = ncclFuncAllReduce, ncclDataType_t datatype = ncclFloat32) {
-  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(func, devRedOp, datatype, algo, proto)] = kStampedDevFuncId;
+  const int regMode = ncclDevFuncIsLL128RegVariant(func, proto) ? 2 : 0;
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(func, devRedOp, datatype, algo, proto) |
+                      (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT)] = kStampedDevFuncId;
 }
 
 void TaskPostTuning_SetTunerOutput(struct ncclTuningResult_t* out, int algo, int proto) {
@@ -733,6 +736,22 @@ TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_Broadcast_RescalesTheCountTo
   EXPECT_EQ(ncclFloat64, fill.raw()->datatype);
 }
 
+// The API entry picks single-node chunk/slice steps per arch; the kernel's Simple variant must see the same.
+TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_RawCarriesAccAndApiSteps_CopiesThemOverTheDefaults) {
+  constexpr int kApiSteps = 1;
+  TaskPostTuning_CollFill fill;
+  int acc = 0;
+  fill.raw()->acc = &acc;
+  fill.raw()->chunkSteps = kApiSteps;
+  fill.raw()->sliceSteps = kApiSteps;
+
+  ASSERT_EQ(ncclSuccess, fill.Run());
+
+  EXPECT_EQ(&acc, fill.task()->acc);
+  EXPECT_EQ(kApiSteps, fill.task()->chunkSteps);
+  EXPECT_EQ(kApiSteps, fill.task()->sliceSteps);
+}
+
 TEST_F(TaskPostTuningMicrotest, FillCollTaskFromRaw_ReduceScatter_KeepsTheElementCountAndScalesTrafficByRank) {
   TaskPostTuning_CollFill fill(ncclFuncReduceScatter);
 
@@ -1067,24 +1086,32 @@ TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_FillRejectsTheConfig_Propa
   EXPECT_EQ(kUnwrittenDevFuncId, fill.task()->devFuncId);
 }
 
-// applyTuningToCollTask's !tuningOut.valid guard reads the untuned -1 sentinel as valid; fixing it turns this red.
-TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_CurrentlyPassesTheValidityGate) {
-  TaskPostTuning_CollFill fill;
-
-  EXPECT_EQ(ncclSuccess, fill.RunApplyTuning());
-
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.tuningOut()->valid);
-  EXPECT_EQ(NCCL_ALGO_UNDEF, fill.task()->algorithm);
-  EXPECT_EQ(NCCL_PROTO_UNDEF, fill.task()->protocol);
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.task()->nMaxChannels);
-  EXPECT_EQ(NCCL_TUNING_ENTRY_INIT_VALUE, fill.task()->nWarps);
-}
-
-// applyTuningToCollTask's !tuningOut.valid guard reads the untuned -1 sentinel as valid; fixing it turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_ReportsAnInternalError) {
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_TuningEntryLeftAtItsInitValue_ReportsAnInternalError) {
   TaskPostTuning_CollFill fill;
 
   EXPECT_EQ(ncclInternalError, fill.RunApplyTuning());
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_NoKernelBuiltForTheTuning_ReportsInvalidUsage) {
+  TaskPostTuning_CollFill fill;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+
+  EXPECT_EQ(ncclInvalidUsage, fill.RunApplyTuning());
+}
+
+TEST_F(TaskPostTuningMicrotest, ApplyTuningToCollTask_AllReduceWithAcc_SelectsTheAccKernel) {
+  TaskPostTuning_CollFill fill;
+  int acc = 0;
+  fill.raw()->acc = &acc;
+  TaskPostTuning_SetTunerOutput(fill.tuningOut(), NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ncclDevFuncNameToId[TaskPostTuning_DevFuncKey(ncclFuncAllReduce, ncclDevSum, ncclFloat32, NCCL_ALGO_RING,
+                                                NCCL_PROTO_SIMPLE) |
+                      (static_cast<uint64_t>(1) << RCCL_ACC_SHIFT)] = kStampedDevFuncId;
+
+  ASSERT_EQ(ncclSuccess, fill.RunApplyTuning());
+
+  EXPECT_EQ(&acc, fill.task()->acc);
+  EXPECT_EQ(kStampedDevFuncId, fill.task()->devFuncId);
 }
 
 constexpr bool kIsSend = true;
@@ -3461,13 +3488,9 @@ TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_UnregisteredTask_MarshalsE
   EXPECT_EQ(kFlagClear, devWork->regUsed);
   EXPECT_EQ(kFlagClear, devWork->netRegUsed);
   EXPECT_EQ(kFlagClear, devWork->profilerEnabled);
-  // enqueue.cc:486,496,498 also copy acc, rcclUseOneSlice, and opCount; task_posttuning.cc drops all three.
-  EXPECT_EQ(nullptr, devWork->acc);
-  EXPECT_EQ(kFlagClear, devWork->rcclUseOneSlice);
-  EXPECT_EQ(0u, devWork->opCount);
 }
 
-TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_UnregisteredTask_CopiesAccRcclUseOneSliceAndOpCount) {
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_UnregisteredTask_CopiesAccRcclUseOneSliceAndOpCount) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
 
@@ -3479,28 +3502,7 @@ TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_UnregisteredTask_
   EXPECT_EQ(kLegacyOpCount, devWork->opCount);
 }
 
-// enqueue.cc:519-538 also marshals the Direct ReduceScatter group when comm->enableDirectReduceScatter is
-// set; task_posttuning.cc has no equivalent, so these fields stay at devWork's zero-initialized defaults.
-TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_DirectReduceScatterEnabled_CurrentlyDropsEveryField) {
-  TaskPostTuning_LegacyWork work;
-  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
-  work.task()->func = ncclFuncReduceScatter;
-  work.task()->count = kLegacyDrsCount;
-  work.comm()->enableDirectReduceScatter = true;
-  work.comm()->rank = kLegacyDrsRank;
-  work.comm()->tempBuff = TaskPrep_Addr(kLegacyDrsTempBuffBase);
-
-  ASSERT_EQ(ncclSuccess, work.Run());
-
-  const struct ncclDevWorkColl* devWork = work.OnlyColl();
-  EXPECT_EQ(kFlagClear, devWork->enableDirectReduceScatter);
-  EXPECT_EQ(0u, devWork->directReduceScatterLimitBytes);
-  EXPECT_EQ(nullptr, devWork->tempBuff);
-  EXPECT_EQ(0, devWork->currentRank);
-  EXPECT_EQ(0u, devWork->count);
-}
-
-TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_DirectReduceScatterEnabled_MarshalsEveryField) {
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_DirectReduceScatterEnabled_MarshalsEveryField) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
   work.task()->func = ncclFuncReduceScatter;
@@ -3675,24 +3677,7 @@ uint64_t TaskPostTuning_RegVariantDevFuncKey(int algo, int proto, int regMode) {
          (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
 }
 
-// enqueue.cc:549-558 re-picks the device function once registration is known; task_posttuning.cc has no equivalent.
-TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_CurrentlyKeepsThePlaceholderFunction) {
-  TaskPostTuning_LegacyWork work;
-  ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
-  ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
-    kRegisteredDevFuncId;
-  work.task()->datatype = ncclFloat32;
-  work.task()->protocol = NCCL_PROTO_LL128;
-  work.task()->regBufType = NCCL_IPC_REG_BUFFER;
-  work.task()->devFuncId = kUnregisteredDevFuncId;
-
-  ASSERT_EQ(ncclSuccess, work.Run());
-
-  EXPECT_EQ(kFlagSet, work.OnlyColl()->regUsed);
-  EXPECT_EQ(kUnregisteredDevFuncId, work.task()->devFuncId);
-}
-
-TEST_F(TaskPostTuningMicrotest, DISABLED_LegacyEnqueueCollWork_RegisteredLl128Collective_ReselectsTheRegisteredFunction) {
+TEST_F(TaskPostTuningMicrotest, LegacyEnqueueCollWork_RegisteredLl128Collective_ReselectsTheRegisteredFunction) {
   TaskPostTuning_LegacyWork work;
   ScopedHook profiler(g_profilerPluginLoaded, [] { return false; });
   ncclDevFuncNameToId[TaskPostTuning_RegVariantDevFuncKey(NCCL_ALGO_RING, NCCL_PROTO_LL128, kRegisteredUserBuffer)] =
@@ -4188,10 +4173,13 @@ constexpr int kOneTaskPerChannel = 1;
 constexpr int kUnsetResourceCap = 0;
 constexpr int kNoBcastPeers = 0;
 
-// ncclDevFuncId keys a Broadcast on coll and proto alone (device.h:909-912), unlike a general collective.
+// ncclDevFuncId keys a Broadcast on coll, proto and reg only, unlike a general collective; LL128 Broadcast
+// resolves the non-registered variant (reg 2) until registration is known.
 uint64_t TaskPostTuning_BroadcastDevFuncKey(int proto) {
+  const int regMode = ncclDevFuncIsLL128RegVariant(ncclFuncBroadcast, proto) ? 2 : 0;
   return (static_cast<uint64_t>(ncclFuncBroadcast & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
-         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
+         (static_cast<uint64_t>(proto & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT) |
+         (static_cast<uint64_t>(regMode & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
 }
 
 // The bcast peer range starts at the sentinels init.cc:872 uses, so a min/max update is not a no-op.
