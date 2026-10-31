@@ -118,9 +118,9 @@ static ncclResult_t ncclAllReduceDdaIpcLaunch(const void* sendbuff, void* recvbu
 // (exactly kDdaNranks when RCCL_DDA_NRANKS_RELAX is off) before we get here.
 //
 // Only the default kDdaNranks clique gets a compile-time specialisation, keeping
-// that path bit- and perf-identical to baseline. Every other supported count uses
-// the NRANKS_CT == 0 runtime kernel, which the CollCommon reduceScatter/allGather
-// helpers unroll 8-wide. Specialising all seven counts instead would compile
+// that path's unrolled arithmetic, and so its results, identical to baseline.
+// Every other supported count uses the NRANKS_CT == 0 runtime kernel, which the
+// CollCommon reduceScatter/allGather helpers unroll 8-wide. Specialising all seven counts instead would compile
 // 2 kernels x 7 counts x 3 types for each of the DEFAULT_GPUS targets, for a path
 // that is default-off and confined to gfx942/gfx950.
 template <typename T>

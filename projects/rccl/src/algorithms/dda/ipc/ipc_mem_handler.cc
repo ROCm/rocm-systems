@@ -13,6 +13,10 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
 ncclIpcMemHandler::ncclIpcMemHandler(void* bootstrap, int rank, int nranks)
   : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), memPtrs_(static_cast<size_t>(nranks), nullptr),
     exchanged_(false) {}
@@ -38,22 +42,60 @@ ncclResult_t ncclIpcMemHandler::exchangeMemPtrs() {
   if (exchanged_) {
     return ncclSuccess;
   }
+
+  // The all-gather below is a bootstrap collective, so every rank has to reach
+  // it: a rank that returned early -- local pointer never set, handle export
+  // failed -- would leave its peers blocked there. Such a rank still takes part
+  // and reports the failure in its slot instead, and every rank then fails
+  // together after the exchange.
+  struct Slot {
+    cudaIpcMemHandle_t handle;
+    uint8_t ok;
+  };
+  std::vector<Slot> slots(static_cast<size_t>(nranks_));
+  Slot& self = slots[static_cast<size_t>(rank_)];
+  std::memset(&self, 0, sizeof(self));
   if (memPtrs_[static_cast<size_t>(rank_)] == nullptr) {
     WARN("ncclIpcMemHandler::exchangeMemPtrs: local device pointer was not set");
-    return ncclInvalidUsage;
+  } else {
+    cudaError_t err = cudaIpcGetMemHandle(&self.handle, memPtrs_[static_cast<size_t>(rank_)]);
+    if (err == cudaSuccess) {
+      self.ok = 1;
+    } else {
+      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcGetMemHandle failed (%s)", cudaGetErrorString(err));
+    }
   }
+  NCCLCHECK(bootstrapAllGather(bootstrap_, slots.data(), static_cast<int>(sizeof(Slot))));
 
-  const int handleBytes = static_cast<int>(sizeof(cudaIpcMemHandle_t));
-
-  std::vector<cudaIpcMemHandle_t> ipcHandles(static_cast<size_t>(nranks_));
-  CUDACHECK(cudaIpcGetMemHandle(&ipcHandles[rank_], memPtrs_[static_cast<size_t>(rank_)]));
-  NCCLCHECK(bootstrapAllGather(bootstrap_, ipcHandles.data(), handleBytes));
+  for (int i = 0; i < nranks_; ++i) {
+    if (slots[static_cast<size_t>(i)].ok == 0) {
+      if (i != rank_) {
+        INFO(NCCL_INIT, "ncclIpcMemHandler::exchangeMemPtrs: rank %d could not export its IPC handle", i);
+      }
+      return ncclSystemError;
+    }
+  }
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
       continue;
     }
-    CUDACHECK(cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], ipcHandles[i], cudaIpcMemLazyEnablePeerAccess));
+    cudaError_t err = cudaIpcOpenMemHandle(&memPtrs_[static_cast<size_t>(i)], slots[static_cast<size_t>(i)].handle,
+                                           cudaIpcMemLazyEnablePeerAccess);
+    if (err != cudaSuccess) {
+      WARN("ncclIpcMemHandler::exchangeMemPtrs: cudaIpcOpenMemHandle(rank %d) failed (%s)", i,
+           cudaGetErrorString(err));
+      // The destructor only closes peer mappings once exchanged_ is set, so
+      // close the ones this loop already opened before failing.
+      for (int j = 0; j < i; ++j) {
+        if (j != rank_) {
+          CUDACHECKIGNORE(cudaIpcCloseMemHandle(memPtrs_[static_cast<size_t>(j)]));
+          memPtrs_[static_cast<size_t>(j)] = nullptr;
+        }
+      }
+      memPtrs_[static_cast<size_t>(i)] = nullptr;
+      return ncclUnhandledCudaError;
+    }
   }
   exchanged_ = true;
   return ncclSuccess;

@@ -365,6 +365,37 @@ TEST_F(DdaAllReduceIpcDispatchTest, RelaxedFourRanksLaunchTheRuntimeRankKernel) 
   EXPECT_EQ(4, launches_[0].nRanksRuntime);
 }
 
+// The tree side of the same split. Above the 256 KiB threshold a relaxed 4-rank
+// comm must still take the tree kernel -- the NRANKS = 0 one, with the live rank
+// count -- since the launcher's tree check divides by the runtime count; deciding
+// it with the compile-time NRANKS instead would silently send every relaxed
+// tree-sized AllReduce down the flat kernel. 65536 + 16 floats is past the
+// threshold and splits into four 16-byte-aligned slices.
+TEST_F(DdaAllReduceIpcDispatchTest, RelaxedFourRanksTreePayloadLaunchesTheRuntimeRankTreeKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  mock_.comm.nRanks = 4;
+  const size_t count = kFp32CountAtThreshold + 16;
+  ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<float, 0, false>), launches_[0].kernel);
+  EXPECT_EQ(4, launches_[0].nRanksRuntime);
+  EXPECT_EQ(count, launches_[0].count);
+}
+
+// The knob only widens the supported range: with it on, the 8-rank clique still
+// gets the compile-time kernels on both the flat and the tree side.
+TEST_F(DdaAllReduceIpcDispatchTest, RelaxOnEightRanksKeepTheCompileTimeKernels) {
+  g_ddaIpcNranksRelaxed = true;
+  ASSERT_EQ(8, mock_.comm.nRanks);
+  ASSERT_EQ(ncclSuccess, Run(16, ncclFloat32));
+  ASSERT_EQ(ncclSuccess, Run(kFp32CountAtThreshold + 4 * kDdaNranks, ncclFloat32));
+  ASSERT_EQ(2u, launches_.size());
+  EXPECT_EQ(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[1].kernel);
+  EXPECT_EQ(8, launches_[0].nRanksRuntime);
+  EXPECT_EQ(8, launches_[1].nRanksRuntime);
+}
+
 TEST_F(DdaAllReduceIpcDispatchTest, FourRanksWithoutRelaxAreRefusedWithoutLaunching) {
   mock_.comm.nRanks = 4;
   EXPECT_EQ(ncclInvalidUsage, Run(16, ncclFloat32));

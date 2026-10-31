@@ -312,8 +312,11 @@ TEST(DdaAllReduceIpcTreeEligibleTest, AcceptsDivisibleAndAlignedSlice)
 //
 // Reverting that condition to the pre-feature `comm->nRanks == kDdaNranks`
 // would leave the low-rank path dead at runtime with every test above still
-// passing. The pair below closes that: a real 4-rank ncclCommInitRank, then an
-// assertion on whether ncclDdaIpcCommInit() actually stamped the communicator.
+// passing. The tests below close that: a real ncclCommInitRank at 2, 3 and 4
+// ranks, then an assertion on whether ncclDdaIpcCommInit() actually stamped the
+// communicator. 3 ranks is there on purpose: indexing that is only right for
+// power-of-two clique sizes (a `% nRanks` turned into `& (nRanks - 1)`, a
+// parity pick hardcoded to one value) passes at 2 and 4 and fails at 3.
 //
 // The negative control (relax off -> no resources) is what makes the positive
 // case meaningful: without it, "the gate opened for 4 ranks" and "comm init
@@ -476,10 +479,13 @@ int ddaInitRunAllReduceCheck(int rank, int nranks, ncclComm* comm)
     hipStream_t stream = nullptr;
     DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
 
-    // 4 KiB stays under the 256 KiB flat/tree threshold; 1 MiB clears it. The
-    // large count is also divisible by nranks with a 16-byte-aligned per-rank
-    // slice, which the tree path additionally requires.
-    const size_t counts[] = {1024, 262144};
+    // 4 KiB stays under the 256 KiB flat/tree threshold; ~1 MiB clears it. The
+    // launcher only takes the tree kernel when count % nranks == 0 and the
+    // per-rank slice (count / nranks floats) is 16-byte aligned, and otherwise
+    // falls back to flat without complaint. 262128 = 48 * 5461 meets both for
+    // every rank count tested here (slices of 524256, 349504 and 262128 bytes
+    // at 2, 3 and 4 ranks); 262144 would silently drop the 3-rank run to flat.
+    const size_t counts[] = {1024, 262128};
 
     for (size_t ci = 0; ci < sizeof(counts) / sizeof(counts[0]); ++ci)
     {
@@ -835,6 +841,18 @@ int ddaInitRunRank(int rank, int nranks, DdaInitShared* shared, bool expectResou
         rc = ddaInitRunAllToAllCheck(rank, nranks, c);
     }
 
+    // A failed check must not end in ncclCommDestroy(): it waits in an
+    // intra-node barrier for peers that are themselves parked in the next
+    // collective's GPU barrier waiting for this rank, so nobody would exit and
+    // the run would burn the supervisor's whole deadline as a generic timeout.
+    // Aborting lets this rank exit at once, and the supervisor then kills the
+    // stranded peers and reports this rank as the one that failed.
+    if (rc != kDdaInitChildOk)
+    {
+        (void)ncclCommAbort(commHandle);
+        return rc;
+    }
+
     DDA_INIT_CHILD_NC(ncclCommDestroy(commHandle));
     return rc;
 }
@@ -947,6 +965,10 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
     // again, by every child.
     fflush(stdout);
 
+    // Started before the first fork, so the bound covers spawning as well.
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitSupervisorTimeoutSeconds);
+
     std::vector<DdaInitRankChild> kids(nranks);
     for (int r = 0; r < nranks; r++)
     {
@@ -961,6 +983,10 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
         }
         if (pid == 0)
         {
+            // stdout is a pipe to the runner, hence fully buffered. A rank the
+            // supervisor SIGKILLs never reaches the flush below, so without this
+            // its "expected X, got Y" line would be lost with it.
+            setvbuf(stdout, nullptr, _IONBF, 0);
             const int rc = ddaInitRunRank(r, nranks, shared, expectResources);
             // _exit() skips stdio teardown; flush so the rank's diagnostics
             // reach the runner's captured output.
@@ -970,8 +996,6 @@ void runDdaIpcCommInitEngagementTest(int nranks, bool expectResources)
         kids[r].pid = pid;
     }
 
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(kDdaInitSupervisorTimeoutSeconds);
     int  firstFailed = -1;
     bool timedOut    = false;
     for (;;)
@@ -1097,6 +1121,27 @@ TEST(DdaNranksRelaxIsolatedTest, FourRankCommInitAllocatesDdaIpcResources)
     RUN_ISOLATED_TEST_WITH_ENV(
         "FourRankCommInitAllocatesDdaIpcResources",
         []() { runDdaIpcCommInitEngagementTest(/*nranks=*/4, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Same as above at the smallest relaxed clique, where every rank has exactly
+// one peer.
+TEST(DdaNranksRelaxIsolatedTest, TwoRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "TwoRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/2, /*expectResources=*/true); },
+        {{"RCCL_DDA_NRANKS_RELAX", "1"}});
+}
+
+// Same as above at an odd, non-power-of-two clique: the only tested count at
+// which `% nRanks` and `& (nRanks - 1)` disagree, or a parity-based pick lands
+// on the other value.
+TEST(DdaNranksRelaxIsolatedTest, ThreeRankCommInitAllocatesDdaIpcResources)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ThreeRankCommInitAllocatesDdaIpcResources",
+        []() { runDdaIpcCommInitEngagementTest(/*nranks=*/3, /*expectResources=*/true); },
         {{"RCCL_DDA_NRANKS_RELAX", "1"}});
 }
 

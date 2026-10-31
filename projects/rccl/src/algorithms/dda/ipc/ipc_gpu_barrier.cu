@@ -7,13 +7,10 @@
  ************************************************************************/
 
 #include <cassert>
-#include <cstdint>
 #include <memory>
-#include <vector>
 
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
-#include "bootstrap.h"
 #include "checks.h"
 #include "debug.h"
 
@@ -54,55 +51,28 @@ __host__ IpcGpuBarrier::IpcGpuBarrier(int nRanks, int nBlocks, int selfRank,
   assert(nRanks <= NRANKS);
 }
 
-// True only if every rank reports localReady. Each rank contributes one byte to
-// a bootstrap all-gather, so every rank reaches the same answer.
-static bool barrierAllRanksReady(void* bootstrap, int nRanks, int selfRank, bool localReady) {
-  std::vector<uint8_t> ready(static_cast<size_t>(nRanks), 0);
-  ready[static_cast<size_t>(selfRank)] = localReady ? 1 : 0;
-  if (bootstrapAllGather(bootstrap, ready.data(), sizeof(uint8_t)) != ncclSuccess) {
-    WARN("IpcGpuBarrier::mallocAndInit: readiness all-gather failed");
-    return false;
-  }
-  for (int i = 0; i < nRanks; ++i) {
-    if (ready[static_cast<size_t>(i)] == 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /* static */ __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> IpcGpuBarrier::mallocAndInit(
   int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaKernelParams params) {
   assert(nRanks <= NRANKS);
-  // exchangeMemPtrs() below is a bootstrap all-gather, so a rank that bailed out
-  // on its own before it would leave every peer blocked there. Do all the
-  // rank-local work first -- including exporting the mailbox's IPC handle,
-  // which exchangeMemPtrs() would otherwise fail on just before its all-gather
-  // -- and agree on the outcome before anyone enters the exchange.
+  // exchangeMemPtrs() below is a bootstrap all-gather, so every rank has to
+  // reach it, even one whose mailbox allocation failed: returning early here
+  // would leave every peer blocked in that exchange. A rank with no mailbox
+  // registers none, exchangeMemPtrs() reports that in its slot, and every rank
+  // fails together after the exchange.
   auto selfAlloc = DeviceMailbox::mallocAndInit(nRanks, nBlocks);
   auto& selfMboxBuf = selfAlloc.first;
   auto& selfMbox = selfAlloc.second;
-  bool localReady = selfMboxBuf != nullptr && selfMboxBuf->get() != nullptr;
-  if (localReady) {
-    cudaIpcMemHandle_t probeHandle;
-    cudaError_t err = cudaIpcGetMemHandle(&probeHandle, selfMboxBuf->get());
-    if (err != cudaSuccess) {
-      WARN("IpcGpuBarrier::mallocAndInit: cudaIpcGetMemHandle failed (%s)", cudaGetErrorString(err));
-      localReady = false;
-    }
-  }
-  if (!barrierAllRanksReady(bootstrap, nRanks, selfRank, localReady)) {
-    return {nullptr, IpcGpuBarrier{}};
-  }
 
   auto memHandler = std::make_unique<ncclIpcMemHandler>(bootstrap, selfRank, nRanks);
 
-  ncclResult_t result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
-  if (result != ncclSuccess && result != ncclInProgress) {
-    if (ncclDebugNoWarn == 0) {
-      INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
+  ncclResult_t result = ncclSuccess;
+  if (selfMboxBuf != nullptr) {
+    result = memHandler->addSelfDeviceMemPtr(selfMboxBuf->get());
+    if (result != ncclSuccess && result != ncclInProgress) {
+      if (ncclDebugNoWarn == 0) {
+        INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);
+      }
     }
-    return {nullptr, IpcGpuBarrier{}};
   }
   result = memHandler->exchangeMemPtrs();
   if (result != ncclSuccess && result != ncclInProgress) {
