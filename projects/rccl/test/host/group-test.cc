@@ -41,6 +41,7 @@
 #include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
 #include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
+#include "fakes/sym_kernels_fakes.h"  // g_symkAvailable
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
 
@@ -378,6 +379,15 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   comm->intraRanks = 2;
   comm->symmetricSupport = 1;
   comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
 
   ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
   ncclIntruQueueConstruct(&asyncCollJobs);
@@ -399,6 +409,73 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 
   queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyncJob) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAlltoAll;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+}
+
+TEST_F(GroupEndInternalTest, InitializedSymmetricStateAvoidsRepeatedAsyncJobs) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  comm->symkState.initialized = true;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess,
+            ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 }
 
 TEST_F(GroupEndInternalTest, DepthZero_ReturnsInvalidUsage) {
