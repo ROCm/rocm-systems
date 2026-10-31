@@ -10,8 +10,10 @@
 
 #include <algorithm>
 #include <csignal>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -151,6 +153,41 @@ MakeSymmetricTaskList_TuningFindsKernel(int nChannels, int nWarps) {
     result->nWarps = nWarps;
     return ncclSuccess;
   };
+}
+
+// The in-place tests run on kInPlaceRanks ranks with kInPlaceCount floats per rank, so recvbuff holds
+// kInPlaceRanks slices of kInPlaceSliceBytes each.
+constexpr int kInPlaceRanks = 4;
+constexpr size_t kInPlaceCount = 256;
+constexpr size_t kInPlaceSliceBytes = kInPlaceCount * sizeof(float);
+constexpr uintptr_t kInPlaceRecvAddr = 0x100000;
+constexpr uintptr_t kInPlaceSecondRecvAddr = 0x200000;
+constexpr uintptr_t kInPlaceSendAddr = 0x300000;
+
+ncclTaskColl MakeSymmetricTaskList_MakeInPlaceTask(MakeSymmetricTaskList_Scene& scene, int rank, ncclFunc_t func,
+                                                   uintptr_t sendAddr) {
+  scene.comm->nRanks = kInPlaceRanks;
+  scene.comm->rank = rank;
+  ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene, func, ncclFloat32);
+  task.count = kInPlaceCount;
+  task.recvbuff = reinterpret_cast<void*>(kInPlaceRecvAddr);
+  task.sendbuff = reinterpret_cast<void*>(sendAddr);
+  return task;
+}
+
+// Returns the inPlace (and optionally nWorks) handed to the single tuning call, or -1 if tuning never ran.
+int MakeSymmetricTaskList_TunedInPlace(MakeSymmetricTaskList_Scene& scene, ncclTaskColl* head,
+                                       int* nWorks = nullptr) {
+  int inPlace = -1;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
+    inPlace = input->inPlace;
+    if (nWorks != nullptr) *nWorks = input->nWorks;
+    return ncclSuccess;
+  });
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), head, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(tuningHook.calls, 1);
+  return inPlace;
 }
 
 // Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
@@ -1678,6 +1715,55 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
   EXPECT_FALSE(capturedNvlsSupport);
+}
+
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_AllGatherFromItsOwnSliceAtEveryRank) {
+  for (int rank = 0; rank < kInPlaceRanks; ++rank) {
+    MakeSymmetricTaskList_Scene scene;
+    ncclTaskColl task = MakeSymmetricTaskList_MakeInPlaceTask(scene, rank, ncclFuncAllGather,
+                                                              kInPlaceRecvAddr + rank * kInPlaceSliceBytes);
+
+    EXPECT_EQ(MakeSymmetricTaskList_TunedInPlace(scene, &task), 1) << "rank " << rank;
+  }
+}
+
+// Slice 0 is the start of recvbuff: a bare sendbuff == recvbuff check would call rank 2 in place there.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_FalseForAnAllGatherNotFromItsOwnSlice) {
+  constexpr int kRank = 2;
+  for (uintptr_t sendAddr : {kInPlaceSendAddr, kInPlaceRecvAddr, kInPlaceRecvAddr + kInPlaceSliceBytes,
+                             kInPlaceRecvAddr + 3 * kInPlaceSliceBytes}) {
+    MakeSymmetricTaskList_Scene scene;
+    ncclTaskColl task = MakeSymmetricTaskList_MakeInPlaceTask(scene, kRank, ncclFuncAllGather, sendAddr);
+
+    EXPECT_EQ(MakeSymmetricTaskList_TunedInPlace(scene, &task), 0) << "sendbuff " << reinterpret_cast<void*>(sendAddr);
+  }
+}
+
+// At rank 0 an aliased buffer also matches the AllGather layout, so only the func check keeps these at 0.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_FalseForAnInPlaceCollOtherThanAllGather) {
+  for (ncclFunc_t func : {ncclFuncBroadcast, ncclFuncAllReduce, ncclFuncReduceScatter}) {
+    MakeSymmetricTaskList_Scene scene;
+    ncclTaskColl task = MakeSymmetricTaskList_MakeInPlaceTask(scene, 0, func, kInPlaceRecvAddr);
+
+    EXPECT_EQ(MakeSymmetricTaskList_TunedInPlace(scene, &task), 0) << "func " << func;
+  }
+}
+
+// Each AllGather sends from rank 2's slice of its own recvbuff, but a batch of two is never tuned as in place.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_FalseForABatchOfInPlaceAllGathers) {
+  constexpr int kRank = 2;
+  MakeSymmetricTaskList_Scene scene;
+  ncclTaskColl first = MakeSymmetricTaskList_MakeInPlaceTask(scene, kRank, ncclFuncAllGather,
+                                                             kInPlaceRecvAddr + kRank * kInPlaceSliceBytes);
+  ncclTaskColl second = first;
+  second.recvbuff = reinterpret_cast<void*>(kInPlaceSecondRecvAddr);
+  second.sendbuff = reinterpret_cast<void*>(kInPlaceSecondRecvAddr + kRank * kInPlaceSliceBytes);
+  second.next = &first;
+  int nWorks = 0;
+
+  EXPECT_EQ(MakeSymmetricTaskList_TunedInPlace(scene, &second, &nWorks), 0);
+  EXPECT_EQ(nWorks, 2) << "both AllGathers must be tuned as one batch";
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRegBuff_WiredFromTheirOwnFakes) {
