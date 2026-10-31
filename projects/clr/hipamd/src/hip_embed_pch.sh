@@ -92,6 +92,26 @@ generate_pch() {
   tmp=$tmpdir/hip_pch.$$
   mkdir -p $tmp
 
+  # Keep build paths out of the PCH so it is reproducible. Clang records the
+  # source as "<cwd>/<stdin>", so pin the working directory, and linemarkers in
+  # the preprocessed input carry absolute include and temp paths, so make those
+  # relative.
+  pch_cwd_flag=""
+  if [[ $isWindows -eq 0 ]]; then
+    pch_cwd_flag="-working-directory /"
+  fi
+  resource_dir=$($LLVM_DIR/bin/clang -print-resource-dir)
+  strip_build_paths() {
+    local path escaped
+    local sed_args=()
+    for path in "$tmp" "$HIP_BUILD_INC_DIR" "$HIP_INC_DIR" "$HIP_AMD_INC_DIR" "$resource_dir"; do
+      escaped=$(printf '%s\n' "$path" | sed 's/[][\\.^$*|]/\\&/g')
+      sed_args+=(-e "/^# [0-9]/s|\"$escaped/|\"|")
+    done
+    sed "${sed_args[@]}" "$1" >"$1.tmp" &&
+    mv "$1.tmp" "$1"
+  }
+
   create_hip_macro_file $tmp/hip_macros.h
 
 cat >$tmp/hip_pch.h <<EOF
@@ -134,15 +154,19 @@ EOF
 
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only --cuda-gpu-arch=gfx1030 -x hip $tmp/hip_pch.h -E >$tmp/pch_wave32.cui &&
 
+  strip_build_paths $tmp/pch_wave32.cui &&
+
   cat $tmp/hip_macros.h >> $tmp/pch_wave32.cui &&
 
-  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave32.pch -x hip-cpp-output - <$tmp/pch_wave32.cui &&
+  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 $pch_cwd_flag -o $tmp/hip_wave32.pch -x hip-cpp-output - <$tmp/pch_wave32.cui &&
 
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -x hip $tmp/hip_pch.h -E >$tmp/pch_wave64.cui &&
 
+  strip_build_paths $tmp/pch_wave64.cui &&
+
   cat $tmp/hip_macros.h >> $tmp/pch_wave64.cui &&
 
-  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
+  $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 $pch_cwd_flag -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
 
   $LLVM_DIR/bin/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj &&
 
