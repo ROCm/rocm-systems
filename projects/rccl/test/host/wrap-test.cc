@@ -65,6 +65,7 @@
 // binary -- declaring a second copy here would be a duplicate-symbol error.
 #include "fakes/nccl_fakes.h"    // extern g_loadParam
 #include "fakes/param_redirect.h"  // NCCL_PARAM/RCCL_PARAM -> g_loadParam
+#include "fakes/rccl_arch_thresholds_fakes.h"  // g_archThresholdsTable (DPX vs SPX)
 
 // WRAP_CC_PATH is defined by test/host/CMakeLists.txt as the hipified copy of
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
@@ -3274,6 +3275,106 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_SingleNodeUsesHalfThreads) {
         int nThreads = -1;
         rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
         EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX caps a 256-thread request at 192. Single-node would otherwise
+// force RCCL_SINGLE_NODE_MAX_NTHREADS, and multi-node LL would force
+// RCCL_LL_MAX_NTHREADS. nThreads is seeded with 256, the value the caller
+// passes from maxThreads when NCCL_NTHREADS is unset.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxDefaultIs192) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxDefaultIs192",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        comm->nNodes = 1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        comm->nNodes = 2;
+        info.protocol = NCCL_PROTO_LL;
+        nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1024, nThreads);
+        EXPECT_EQ(RCCL_GFX1250_DEFAULT_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS is already in nThreads. DPX must
+// not raise it to 192.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxKeepsLowerNthreads",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 128;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(128, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// SPX is unmeasured, so gfx1250 SPX keeps the 256-thread single-node default.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250SpxStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250SpxStays256",
+      []() {
+        static rcclArchThresholds spx{};
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &spx;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &spx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The 192 default must not lower the cap: an explicit 256-thread request on
+// gfx1250 still launches 256.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250UserOverrideKeeps256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250UserOverrideKeeps256",
+      []() {
+        g_loadParam = ForceParam("RCCL_THREADS_PER_BLOCK", int64_t(256));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncBroadcast;
+        comm->nNodes = 1;
+        int nThreads = -1;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(256, nThreads);
         DeleteCommWithArch(comm);
       });
 }
