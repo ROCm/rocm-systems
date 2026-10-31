@@ -5491,6 +5491,53 @@ TEST_F(InitMicrotest, ParseCommConfig_VersionAt2305_KeepsGraphStreamOrdering) {
   EXPECT_EQ(0, s.result_config().graphStreamOrdering);
 }
 
+// --- nvlsHostMode (NCCL 2.32): NVLS never activates on AMD, but the public field is still validated, defaulted,
+// version-gated and inherited by a NULL-config split ---
+
+TEST_F(InitMicrotest, ParseCommConfig_NvlsHostModeOutsideTheFlagSet_RejectsAndNamesTheField) {
+  // An unknown flag, a known flag plus an unknown one, a negative non-default, and every bit but one (not Disable).
+  const int kBad[] = {1 << 2, ncclNvlsHostModeDisableTransport | (1 << 3), -1, INT_MAX - 1};
+  for (int bad : kBad) {
+    SCOPED_TRACE(::testing::Message() << "nvlsHostMode " << bad);
+    const std::string warning = "Invalid config nvlsHostMode attribute value " + std::to_string(bad);
+    ParseCfg_ExpectRejected([bad](ncclConfig_t& c) { c.nvlsHostMode = bad; }, warning.c_str());
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_NvlsHostModeFlagCombinations_AreAcceptedAndAssigned) {
+  const int kModes[] = {ncclNvlsHostModeEnable, ncclNvlsHostModeDisableTransport,
+                        ncclNvlsHostModeDisableSymmetricMultimem,
+                        ncclNvlsHostModeDisableTransport | ncclNvlsHostModeDisableSymmetricMultimem,
+                        ncclNvlsHostModeDisable};
+  for (int mode : kModes) {
+    ParseCfg_Scene s;
+    s.config().nvlsHostMode = mode;
+    EXPECT_EQ(ncclSuccess, s.Run()) << "nvlsHostMode " << mode;
+    EXPECT_EQ(mode, s.result_config().nvlsHostMode) << "nvlsHostMode " << mode;
+  }
+}
+TEST_F(InitMicrotest, ParseCommConfig_NvlsHostModeUndefined_DefaultsToEnable) {
+  ParseCfg_Scene s;  // the initializer leaves both the config and the comm at ncclNvlsHostModeDefault
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(ncclNvlsHostModeEnable, s.result_config().nvlsHostMode);
+}
+TEST_F(InitMicrotest, ParseCommConfig_VersionBelow231_ResetsNvlsHostModeToEnable) {
+  ParseCfg_Scene s;
+  s.config().version = NCCL_VERSION(2, 31, 0) - 1;
+  s.config().nvlsHostMode = 1 << 2;  // rejected at 2.31 and above
+  EXPECT_EQ(ncclSuccess, s.Run());
+  EXPECT_EQ(ncclNvlsHostModeEnable, s.result_config().nvlsHostMode);
+}
+TEST_F(InitMicrotest, CopyCommConfig_ParsedNvlsHostMode_IsInheritedByTheSplitChild) {
+  ConfigComm parent;
+  ncclConfig_t cfg = NCCL_CONFIG_INITIALIZER;
+  cfg.nvlsHostMode = ncclNvlsHostModeDisableSymmetricMultimem;
+  ASSERT_EQ(ncclSuccess, parent.RunParse(&cfg));
+  auto child = std::make_unique<ncclComm>();
+  ScopedNetName freeNetName(child.get());
+  ASSERT_EQ(ncclSuccess, copyCommConfig(child.get(), parent.comm()));  // ncclCommSplit with config == NULL
+  EXPECT_EQ(ncclNvlsHostModeDisableSymmetricMultimem, child->config.nvlsHostMode);
+}
+
 // --- graphStreamOrdering=0 is unsupported with graph mixing and is forced back to 1 (init.cc:3452) ---
 
 TEST_F(InitMicrotest, ParseCommConfig_StreamOrderingZeroWithGraphMixing_WarnsAndForcesSerialize) {
