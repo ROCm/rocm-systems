@@ -115,6 +115,7 @@ test_categories:
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
       - "CpuAffinity.*"
+      - "DdaReduceScatterFabricLL.*"
     exclude_windows:
       - "*"
     labels:
