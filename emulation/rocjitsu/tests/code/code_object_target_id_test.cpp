@@ -9,7 +9,7 @@
 ///        basic_block_list_create) accepts each target by exercising the
 ///        provider-selected target registry in rj_code.cpp.
 ///
-/// Covers the only currently supported targets (gfx90a, gfx942, gfx950,
+/// Covers the only currently supported targets (gfx90a, gfx942, gfx950, gfx1100,
 /// gfx1200, gfx1201, gfx1250, gfx1251) plus an unknown-machine-flag case to
 /// guard the INVALID sentinel and prevent a future edit from silently aliasing
 /// one target onto another.
@@ -286,6 +286,14 @@ TEST(GfxCodeObjectTargets, LoadsGfx1251FromMachineFlags) {
   expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1251, ROCJITSU_CODE_TARGET_GFX1251);
 }
 
+TEST(GfxCodeObjectTargets, LoadsGfx1100FromMachineFlags) {
+  expect_machine_flag_maps_to_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
+  const std::vector<uint8_t> image = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1100);
+  const AmdGpuCodeObject object(image.data(), image.size(), "hip", "gfx1100");
+  ASSERT_TRUE(object.is_valid());
+  EXPECT_EQ(object.target_id(), ROCJITSU_CODE_TARGET_GFX1100);
+}
+
 TEST(GfxCodeObjectTargets, FatbinMetadataRequiresMatchingConcreteTargetIdentity) {
   const auto gfx1250 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1250);
   const auto gfx1251 = make_minimal_amdgpu_elf(EF_AMDGPU_MACH_AMDGCN_GFX1251);
@@ -337,6 +345,10 @@ TEST(GfxCodeObjectTargets, CApiAcceptsGfx942ForBasicBlockList) {
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx950ForBasicBlockList) {
   expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX950, ROCJITSU_CODE_TARGET_GFX950);
+}
+
+TEST(GfxCodeObjectTargets, CApiAcceptsGfx1100ForBasicBlockList) {
+  expect_c_api_accepts_target(EF_AMDGPU_MACH_AMDGCN_GFX1100, ROCJITSU_CODE_TARGET_GFX1100);
 }
 
 TEST(GfxCodeObjectTargets, CApiAcceptsGfx1200ForBasicBlockList) {
