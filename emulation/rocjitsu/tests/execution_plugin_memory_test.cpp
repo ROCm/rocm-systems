@@ -870,6 +870,7 @@ TEST(RoutedMemoryObservationTest, FlatLdsBoundsRetainNominalRequestsAndValidPref
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *instruction, *wave);
   cu->track_memory_wait(*instruction, *wave);
   ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
   ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, instruction.release(), *wave),
