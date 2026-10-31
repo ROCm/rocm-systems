@@ -13,6 +13,8 @@
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
+#include "batch_source_lifetime_common.hh"
+#include "stream_copy_gate.hh"
 
 /**
  * @addtogroup hipExtMemcpyBatchAsync hipExtMemcpyBatchAsync
@@ -1062,6 +1064,233 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_IndirectSrcDst) {
   HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
   RequireDeviceFilled(dst.ptr(), copy_size, kPatternValue);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - DuringApiCall snapshots preserve CE and compute preferences with blocked
+ *   streams and all supported host source allocations.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_BlockedSourceLifetime) {
+  const auto allocation =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::mallocAndRegister, LinearAllocs::hipHostMalloc);
+  const size_t size = GENERATE(size_t{4096}, size_t{1024 * 1024}, size_t{64 * 1024 * 1024});
+  const unsigned int engine =
+      GENERATE(static_cast<unsigned int>(hipMemcpyFlagExtPreferCE),
+               static_cast<unsigned int>(hipMemcpyFlagExtPreferComputeEngine));
+  HipTest::checkBatchSourceLifetime(allocation, LinearAllocs::hipMalloc, size, true, engine);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - DuringApiCall retains sources for queued copies into host-accessible memory.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_HostAccessibleDestinations) {
+  const auto allocation = GENERATE(LinearAllocs::mallocAndRegister, LinearAllocs::hipHostMalloc);
+  const auto destination = GENERATE(LinearAllocs::hipHostMalloc, LinearAllocs::hipMallocManaged);
+  const unsigned int engine =
+      GENERATE(static_cast<unsigned int>(hipMemcpyFlagExtPreferCE),
+               static_cast<unsigned int>(hipMemcpyFlagExtPreferComputeEngine));
+  HipTest::checkBatchSourceLifetime(allocation, destination, 2048, true, engine);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - A batch containing a DuringApiCall swap completes before return, including
+ *   prior stream producers and Stream-order entries on either side of the swap.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_HostSwap) {
+  constexpr size_t kBytes = 512;
+  const size_t swap_index = GENERATE(size_t{0}, size_t{1});
+  const size_t linear_index = 1 - swap_index;
+  LinearAllocGuard<uint8_t> source(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<uint8_t> destination(LinearAllocs::hipMalloc, kBytes);
+  LinearAllocGuard<uint8_t> linear_source(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<uint8_t> linear_destination(LinearAllocs::hipMalloc, kBytes);
+  std::vector<uint8_t> initial_source(kBytes);
+  std::vector<uint8_t> initial_destination(kBytes, uint8_t{0x6C});
+  std::vector<uint8_t> actual(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) {
+    initial_source[i] = static_cast<uint8_t>(i * 13 + 7);
+    linear_source.host_ptr()[i] = initial_source[i];
+  }
+  std::copy(initial_source.begin(), initial_source.end(), source.host_ptr());
+  StreamGuard stream(Streams::created);
+  HIP_CHECK(hipMemsetAsync(destination.ptr(), 0x6C, kBytes, stream.stream()));
+  void* srcs[2]{};
+  void* dsts[2]{};
+  srcs[swap_index] = source.host_ptr();
+  dsts[swap_index] = destination.ptr();
+  srcs[linear_index] = linear_source.host_ptr();
+  dsts[linear_index] = linear_destination.ptr();
+  size_t sizes[2]{kBytes, kBytes};
+  size_t sizes_dst[2]{};
+  sizes_dst[swap_index] = kBytes;
+  size_t attrs_idx[2]{0, 1};
+  hipExtMemcpyAttributes attributes[2]{};
+  attributes[swap_index].srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  attributes[swap_index].flags = hipMemcpyFlagExtOpSwap;
+  attributes[linear_index].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  const hipError_t result = hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizes_dst, nullptr, nullptr,
+                                                   2, attributes, attrs_idx, 2, stream.stream());
+  if (result == hipErrorNotSupported) {
+    static_cast<void>(hipGetLastError());
+    HIP_SKIP_TEST(HipTest::SkipReason::kSdmaSwapUnsupported);
+  }
+  HIP_CHECK(result);
+  REQUIRE(std::equal(initial_destination.begin(), initial_destination.end(), source.host_ptr()));
+  HIP_CHECK(hipStreamQuery(stream.stream()));
+  HIP_CHECK(hipMemcpy(actual.data(), destination.ptr(), kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(actual == initial_source);
+  HIP_CHECK(hipMemcpy(actual.data(), linear_destination.ptr(), kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(actual == initial_source);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Mixed host DuringApiCall entries and stream-ordered device entries retain
+ *   distinct data and preserve destination padding across a five-operation batch.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_MixedSourceOrders) {
+  const unsigned int flags =
+      GENERATE(0u, static_cast<unsigned int>(hipMemcpyFlagExtPreferCE),
+               static_cast<unsigned int>(hipMemcpyFlagExtPreferComputeEngine));
+  HipTest::checkBatchMixedSourceOrders(true, flags);
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ * - A large batch sharing one read-only source preserves its pre-return bytes
+ *   across disjoint destinations without requiring unbounded snapshot storage.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_LargeSharedSource) {
+  HipTest::checkBatchLargeSharedSource(true, false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Zero attributes selects Stream ordering even when the ignored pointer is
+ *   non-null and its unused element contains DuringApiCall.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_ZeroAttributeCountUsesStreamOrder) {
+  constexpr size_t kBytes = 2048;
+  LinearAllocGuard<uint8_t> source(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<uint8_t> destination(LinearAllocs::hipMalloc, kBytes);
+  std::fill_n(source.host_ptr(), kBytes, uint8_t{0x11});
+  StreamGuard stream(Streams::created);
+  HIP_CHECK(hipDeviceSynchronize());
+  HipTest::StreamCopyGate gate(stream.stream());
+  HIP_CHECK(hipLaunchHostFunc(
+      stream.stream(),
+      [](void* data) { std::fill_n(static_cast<uint8_t*>(data), kBytes, uint8_t{0x5A}); },
+      source.host_ptr()));
+  void* src = source.host_ptr();
+  void* dst = destination.ptr();
+  size_t bytes = kBytes;
+  hipExtMemcpyAttributes ignored{};
+  ignored.srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  const hipError_t result = hipExtMemcpyBatchAsync(&dst, &src, &bytes, nullptr, nullptr, nullptr, 1,
+                                                   &ignored, nullptr, 0, stream.stream());
+  gate.release();
+  HIP_CHECK(result);
+  REQUIRE_FALSE(gate.timed_out());
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  std::vector<uint8_t> actual(kBytes);
+  HIP_CHECK(hipMemcpy(actual.data(), destination.ptr(), kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(actual == std::vector<uint8_t>(kBytes, 0x5A));
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ * - Large distinct host regions remain asynchronous behind prior work.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_LargeDistinctSources) {
+  HipTest::checkBatchLargeSharedSource(true, false, false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Queued batches preserve each source version until GPU completion.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_QueuedSourceVersions) {
+  HipTest::checkQueuedBatchSources(true, false);
+}
+
+
+#if defined(__linux__) && defined(__HIP_PLATFORM_AMD__)
+/**
+ * Test Description
+ * ------------------------
+ * - Snapshot allocation failure returns an error without waiting or enqueuing copies.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipExtMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_DuringApiCall_AllocationFailure) {
+  HipTest::checkBatchAllocationFailure(
+      "Unit_hipExtMemcpyBatchAsync_DuringApiCall_AllocationFailure", true, false);
+}
+#endif
 
 /**
  * End doxygen group hipExtMemcpyBatchAsync.

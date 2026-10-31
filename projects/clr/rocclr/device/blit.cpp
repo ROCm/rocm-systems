@@ -365,7 +365,8 @@ bool HostBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp
   for (const amd::BatchCopyRectOp& op : copy_ops) {
     device::Memory* src_dev_mem = op.src_memory->getDeviceMemory(dev_);
     device::Memory* dst_dev_mem = op.dst_memory->getDeviceMemory(dev_);
-    if (!copyBufferRect(*src_dev_mem, *dst_dev_mem, op.src_rect, op.dst_rect, op.size)) {
+    if (!copyBufferRect(*src_dev_mem, *dst_dev_mem, op.src_rect, op.dst_rect, op.size, false,
+                        op.metadata)) {
       return false;
     }
   }
