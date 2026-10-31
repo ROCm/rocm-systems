@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,10 @@
                           (sizeof(size_t) + (operation_idx * sizeof(void*))),                      \
                       "ABI error for " #HIP_FUNC);                                                 \
                                                                                                    \
-        static auto& get_table() { return hip_table_lookup<table_idx>{}(); }                       \
+        static auto& get_table(tracing_table)                                                      \
+        {                                                                                          \
+            return hip_table_lookup<table_idx>{}(tracing_table{});                                 \
+        }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
@@ -79,7 +82,7 @@
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+        static auto& get_table_func() { return get_table_func(get_table(tracing_table{})); }       \
                                                                                                    \
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
@@ -139,7 +142,10 @@
                           (sizeof(size_t) + (operation_idx * sizeof(void*))),                      \
                       "ABI error for " #HIP_FUNC);                                                 \
                                                                                                    \
-        static auto& get_table() { return hip_table_lookup<table_idx>{}(); }                       \
+        static auto& get_table(tracing_table)                                                      \
+        {                                                                                          \
+            return hip_table_lookup<table_idx>{}(tracing_table{});                                 \
+        }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
@@ -161,7 +167,7 @@
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+        static auto& get_table_func() { return get_table_func(get_table(tracing_table{})); }       \
                                                                                                    \
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
@@ -201,6 +207,9 @@
     {                                                                                              \
     namespace hip                                                                                  \
     {                                                                                              \
+    struct tracing_table;                                                                          \
+    struct internal_table;                                                                         \
+                                                                                                   \
     template <>                                                                                    \
     struct hip_table_lookup<TABLE_ID>                                                              \
     {                                                                                              \
@@ -209,7 +218,8 @@
         auto& operator()(hip_api_table_t* _v) const { return _v->MEMBER; }                         \
         auto& operator()(type& _v) const { return _v; }                                            \
         auto& operator()(type* _v) const { return *_v; }                                           \
-        auto& operator()() const { return (*this)(get_table()); }                                  \
+        auto& operator()(tracing_table) const { return (*this)(get_tracing_table()); }             \
+        auto& operator()(internal_table) const { return (*this)(get_table()); }                    \
     };                                                                                             \
                                                                                                    \
     template <>                                                                                    \
