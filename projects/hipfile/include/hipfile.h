@@ -85,7 +85,7 @@ extern "C" {
  * @brief hipFile minor version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_MINOR 6
+#define HIPFILE_VERSION_MINOR 7
 /*!
  * @brief hipFile patch version number
  * @ingroup core
