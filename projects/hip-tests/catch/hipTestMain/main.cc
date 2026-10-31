@@ -37,5 +37,8 @@ int main(int argc, char** argv) {
 
   int out = session.run(argc, argv);
   context.cleanContext();
+  if (out == 0 && g_hipStrictLastErrorFailed.load(std::memory_order_relaxed)) {
+    out = EXIT_FAILURE;
+  }
   return out;
 }

@@ -50,14 +50,18 @@ size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no c
 // Controllable (was fail-loud). Records the mask too: :1608 and exit::2403 both call this, and without the
 // recorder either call site could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity)
 // with nothing noticing. Default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
+// The counter is atomic and the recorder is locked because gin_host.cc's proxy progress workers reach both
+// of these from spawned threads; see os_fakes.h.
 int g_ncclOsCpuCountValue = 0;
-int g_ncclOsCpuCountCalls = 0;
+std::atomic<int> g_ncclOsCpuCountCalls{0};
+std::mutex g_ncclOsAffinityMutex;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
-static std::mutex g_affinityMutex;  // proxy.cc's two service threads call these concurrently
 int ncclOsCpuCount(const ncclAffinity& affinity) {
-  std::lock_guard<std::mutex> lock(g_affinityMutex);
-  g_ncclOsCpuCountCalls++;
-  g_ncclOsCpuCountMasks.push_back(affinity);
+  g_ncclOsCpuCountCalls.fetch_add(1, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsCpuCountMasks.push_back(affinity);
+  }
   return g_ncclOsCpuCountValue;
 }
 
@@ -76,9 +80,21 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffin
 ncclResult_t g_ncclOsSetAffinityResult = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
-  std::lock_guard<std::mutex> lock(g_affinityMutex);
-  g_ncclOsSetAffinityMasks.push_back(affinity);
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsSetAffinityMasks.push_back(affinity);
+  }
   return g_ncclOsSetAffinityResult;
+}
+
+std::vector<ncclAffinity> ncclOsCpuCountMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsCpuCountMasks;
+}
+
+std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsSetAffinityMasks;
 }
 
 // Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
@@ -191,11 +207,14 @@ void ResetOsFakes() {
   g_ncclSocketClose = DefaultSocketClose;
 #endif
   g_ncclOsCpuCountValue = 0;
-  g_ncclOsCpuCountCalls = 0;
-  g_ncclOsCpuCountMasks.clear();
+  g_ncclOsCpuCountCalls.store(0, std::memory_order_relaxed);
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclOsSetAffinityResult = ncclSuccess;
-  g_ncclOsSetAffinityMasks.clear();
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsCpuCountMasks.clear();
+    g_ncclOsSetAffinityMasks.clear();
+  }
   g_ncclOsMutexCondSharedCalls = 0;
   g_ncclOsMutexCondUnsharedCalls = 0;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;

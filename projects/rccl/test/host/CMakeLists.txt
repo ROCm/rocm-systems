@@ -277,6 +277,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
@@ -467,6 +468,13 @@ function(rccl_define_micro_source_lists)
   # around utils.cc, which other micro binaries link whole as an oracle TU.
   set(TEST_MICRO_UTILS_SOURCE_FILES
     utils-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroHostDispatch -- host_test_dispatch.cc, the rccl-UnitTestsHostAll front end.
+  # Own binary like every other unit under test; it also makes the dispatcher run its own tests.
+  set(TEST_MICRO_HOST_DISPATCH_SOURCE_FILES
+    host-test-dispatch-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -682,6 +690,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/devcomm_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by the GIN cost model
     fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
@@ -869,10 +878,13 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
-    fakes/devcomm_fakes.cc               # ncclTeamRail
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
+    fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
+    fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -917,6 +929,8 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/topo_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -982,10 +996,12 @@ function(rccl_define_micro_source_lists)
     diag-p2p-device-test.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
+    fakes/env_fakes.cc
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
     fakes/libc_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
@@ -1242,6 +1258,7 @@ function(rccl_add_micro_binary _name)
     target_link_libraries(${_name} PRIVATE
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
+  target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
 endfunction()
 
 # =====================================================================
@@ -1572,6 +1589,10 @@ function(rccl_standalone_coverage)
     target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
 endfunction()
+
+# --- nlohmann/json: the RCCL-vendored single header ------------------
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/nlohmann_json"
+                 "${CMAKE_BINARY_DIR}/external/nlohmann_json")
 
 # =====================================================================
 # Driver: pick the mode, then define the micro-test binaries ONCE.
@@ -2564,6 +2585,28 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMisc
     MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
     MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroHostDispatch
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
+  SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
+  EXTRA_DEFS ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsHostAll
+# ---------------------------------------------------------------------------
+# The single gtest-shaped front door for every rccl-UnitTestsMicro* binary above: it discovers
+# them at run time, so a test harness integrates with this one target and never needs a copy of
+# the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
+#
+# Defined through the same helper as the binaries it runs purely so the two build modes, the
+# install rule and the host-only flags stay in one place; it compiles no production source and
+# links no fakes.
+rccl_add_micro_binary(rccl-UnitTestsHostAll
+  SOURCES host_test_dispatch.cc
+  EXTRA_DEFS ${_MICRO_MODE_DEFS})
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

@@ -193,6 +193,22 @@ add_test(
 )
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Exercise the native runtime resolved by the configured Python environment.
+    # Reinstall native changes first, or put an uninstalled build on PATH when
+    # that interpreter has no native runtime installed in its prefix.
+    add_test(
+        NAME PythonApiTest
+        COMMAND
+            ${CMAKE_COMMAND} -E env "PYTHONPATH=${PROJECT_SOURCE_DIR}/python"
+            ${Python3_EXECUTABLE} -B
+            ${PROJECT_SOURCE_DIR}/python/tests/test_api.py -v
+    )
+    set_tests_properties(
+        PythonApiTest
+        PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120
+    )
+endif()
 add_test(
     NAME RocjitsuWaitCheckingCliTest
     COMMAND
@@ -387,6 +403,7 @@ add_executable(
     gpu_vm_translation_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
+    checkpoint_restore_errors_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp

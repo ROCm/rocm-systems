@@ -244,7 +244,8 @@ std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
 // channel count. General DST_SEL routing is not an inverse of load swizzling.
 // CDNA1-4, RDNA1/2 and RDNA3.5 use this policy by extrapolation, without native
 // measurements. Rejection marks unsupported emulation, not a hardware fault.
-bool qualified_store_selectors(const Format &f, uint32_t selectors) {
+util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t selectors,
+                                                  bool image_store = false) {
   constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
   constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
   const uint32_t channels =
@@ -252,24 +253,30 @@ bool qualified_store_selectors(const Format &f, uint32_t selectors) {
   if (channels == 4) {
     constexpr uint32_t rgb = 4 | (5 << 3) | (6 << 6);
     constexpr uint32_t bgra = 6 | (5 << 3) | (4 << 6) | (7 << 9);
-    return selectors == identity || selectors == reversed || selectors == bgra ||
-           selectors == rgb || selectors == (rgb | (1 << 9));
+    constexpr uint32_t zyx1 = 6 | (5 << 3) | (4 << 6) | (1 << 9);
+    if (selectors == identity || selectors == reversed || selectors == bgra || selectors == rgb ||
+        selectors == (rgb | (1 << 9)) || (image_store && selectors == zyx1))
+      return selectors;
+    return util::Result::failure();
   }
+  if (!image_store && channels == 1 && f.widths[0] == 32 && f.number == Number::Float &&
+      selectors == 0)
+    return 4u << 9; // Native gfx1100/gfx1201 resolve this view to A8 (W to R).
   if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
-    return true; // Single-channel identity, WZYX, and A8 views were measured.
+    return selectors; // Single-channel identity, WZYX, and A8 views were measured.
   if (!channels)
-    return false;
+    return util::Result::failure();
   for (uint32_t channel = 0; channel < 4; ++channel) {
     const uint32_t selector = (selectors >> (channel * 3)) & 7;
     if (channel < channels ? selector != channel + 4 : selector > 1)
-      return false;
+      return util::Result::failure();
   }
-  return true;
+  return selectors;
 }
 
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
                  std::span<uint8_t> bytes, BufferStoreMissingChannel missing,
-                 BufferFormatEncoding encoding) {
+                 BufferFormatEncoding encoding, uint32_t component_mask) {
   // Native Gfx11-format stores encode SCALED as NORM, unlike SCALED loads.
   const auto number = encoding != BufferFormatEncoding::Gfx11 ? f.number
                       : f.number == Number::Uscaled           ? Number::Unorm
@@ -282,17 +289,20 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
     if (!width)
       continue;
     // Qualified permutations invert the load mapping (A8 maps W to R).
-    // Four-channel RGB0/RGB1 instead write a constant to physical alpha.
+    // A selector of one writes a constant to physical alpha for both buffer
+    // and image XYZ1/ZYX1 stores, independently of DMASK.
     uint32_t component = 0;
-    if (i == 3 && (selectors >> 9) == 1)
+    if (i == 3 && ((selectors >> 9) & 7) == 1) {
       component = integer(f.number) ? 1u : 0x3f800000u;
-    for (uint32_t shader = 0; shader < 4; ++shader) {
-      if (((selectors >> (3 * shader)) & 7) == i + 4) {
-        if (shader < components.size())
-          component = components[shader];
-        else if (missing == BufferStoreMissingChannel::ReplicateFirst)
-          component = components[0];
-        break;
+    } else {
+      for (uint32_t shader = 0; shader < 4; ++shader) {
+        if (((selectors >> (3 * shader)) & 7) == i + 4) {
+          if (component_mask & (1u << shader))
+            component = components[shader];
+          else if (missing == BufferStoreMissingChannel::ReplicateFirst && (component_mask & 1u))
+            component = components[0];
+          break;
+        }
       }
     }
     const uint64_t bits = uint64_t{pack(component, width, number, encoding)} << (offset % 8);
@@ -303,6 +313,10 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
 }
 
 } // namespace
+
+bool image_store_selectors_supported(const BufferFormat &format, uint32_t selectors) {
+  return resolve_store_selectors(format, selectors, true).succeeded();
+}
 
 util::FailureOr<std::array<uint32_t, 4>> unpack_buffer_format(uint32_t format, uint32_t selectors,
                                                               std::span<const uint8_t> bytes,
@@ -318,11 +332,15 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
                                 BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed() || components.empty() ||
-      !qualified_store_selectors(decoded.value(), selectors))
+  if (decoded.failed() || components.empty())
+    return util::Result::failure();
+  const auto resolved = resolve_store_selectors(decoded.value(), selectors);
+  if (resolved.failed())
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
-  pack_format(decoded.value(), selectors, components, bytes, missing, encoding);
+  const uint32_t component_mask = (1u << components.size()) - 1u;
+  pack_format(decoded.value(), resolved.value(), components, bytes, missing, encoding,
+              component_mask);
   return util::Result::success();
 }
 
@@ -388,9 +406,12 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
       d.buffer_selectors = resolved;
     }
   }
-  if (!d.is_load && format < 0 &&
-      !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
-    return util::Result::failure();
+  if (!d.is_load && format < 0) {
+    const auto resolved = resolve_store_selectors(d.decoded_buffer_format, d.buffer_selectors);
+    if (resolved.failed())
+      return util::Result::failure();
+    d.buffer_selectors = resolved.value();
+  }
   return true;
 }
 
@@ -410,23 +431,34 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
     std::array<uint32_t, 4> components{};
+    uint32_t remaining_image_components = d.image_store_component_mask;
     for (uint32_t i = 0; i < d.buffer_components; ++i) {
+      uint32_t shader_component = i;
+      if (remaining_image_components) {
+        shader_component = std::countr_zero(remaining_image_components);
+        remaining_image_components &= remaining_image_components - 1;
+      }
       if (!d.buffer_d16) {
-        components[i] = data.lane(i, lane);
+        components[shader_component] = data.lane(i, lane);
         continue;
       }
       const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
       const uint16_t half = data.lane(i / 2, lane) >> shift;
-      components[i] =
+      components[shader_component] =
           integer(format.number)
               ? format.number == Number::Sint
                     ? static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(half)))
                     : half
               : std::bit_cast<uint32_t>(util::f16_to_f32(half));
     }
-    pack_format(format, d.buffer_selectors, std::span(components).first(d.buffer_components),
+    const bool image_store = d.image_store_component_mask != 0;
+    const uint32_t component_mask =
+        image_store ? d.image_store_component_mask : (1u << d.buffer_components) - 1u;
+    const auto shader_components =
+        image_store ? std::span(components) : std::span(components).first(d.buffer_components);
+    pack_format(format, d.buffer_selectors, shader_components,
                 std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing,
-                d.buffer_format_encoding);
+                d.buffer_format_encoding, component_mask);
   }
 }
 
