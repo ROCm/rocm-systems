@@ -415,8 +415,8 @@ protected:
   DeviceBuffer<ncclWindow_vidmem> d_dstWin_{1};
   DeviceBuffer<ncclWindow_vidmem> d_srcWin_{1};
   DeviceBuffer<uint64_t> d_signalShadows_{kSignalCount};
-  DeviceBuffer<ncclSegmentWindow> d_dstSegs_{4};
-  DeviceBuffer<ncclSegmentWindow> d_srcSegs_{4};
+  DeviceBuffer<ncclSegmentWindow> d_dstSegs_{6};
+  DeviceBuffer<ncclSegmentWindow> d_srcSegs_{6};
 };
 
 // With two backends compiled, ctx.backend (from comm.ginNetDeviceTypes) picks the ncclGinApi_Put specialization.
@@ -635,6 +635,37 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutUsesWindowsOfItsBackendIndex) 
   expectPutChunks<ncclGin_SegmentMixed>(comm, kEfaSlot, args, ncclGin_SignalInc{args.signalId},
       ncclGin_CounterInc{args.counterId}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
       /*strongSignals=*/true, /*lastHasCounter=*/true);
+}
+
+// A device-only put on backend b reads ginMultiSegmentWins[b * numSegments].ginWins[connection 0] for both windows,
+// not the default-backend token or another backend's segment. Backend 2 of 3 tells b * numSegments from numSegments.
+TEST_F(GinBackendMaskDispatchTest, DevicePutUsesWindowOfItsBackendIndex) {
+  constexpr uintptr_t kS[3][2] = {{0x5C6100, 0x5C6200}, {0x5C6300, 0x5C6400}, {0x5C6500, 0x5C6600}};
+  constexpr uintptr_t kD[3][2] = {{0xD56100, 0xD56200}, {0xD56300, 0xD56400}, {0xD56500, 0xD56600}};
+  std::vector<SegmentSpec> src, dst;
+  for (int b = 0; b < 3; ++b) {
+    for (int seg = 0; seg < 2; ++seg) {
+      src.push_back({kS[b][seg], 64, kDev});
+      dst.push_back({kD[b][seg], 100, kDev});
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(
+      uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, kSrcOffset4K, src, /*numBackends=*/3));
+  ASSERT_NO_FATAL_FAILURE(
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, kDstOffset4K, dst, /*numBackends=*/3));
+  for (int backend : {1, 2}) {
+    SCOPED_TRACE(testing::Message() << "backendIndex=" << backend);
+    ncclDevComm comm = makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA);
+    comm.backendIndex = backend;
+    PutArgs args = defaultArgs();
+    const std::vector<ExpectedChunk> chunks = {
+        {kD[backend][0], ginOffset(kDstOffset4K, args.dstOff), kS[backend][0], ginOffset(kSrcOffset4K, args.srcOff),
+         args.bytes, args.required},
+    };
+    expectPutChunks<ncclGin_SegmentDevice>(comm, kEfaSlot, args, ncclGin_SignalInc{args.signalId},
+        ncclGin_CounterInc{args.counterId}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc,
+        /*signalOpArg=*/1, /*strongSignals=*/true, /*lastHasCounter=*/true);
+  }
 }
 
 }  // namespace
