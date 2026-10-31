@@ -1385,6 +1385,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#vmem-completion-and-exp-source-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VMEM completion and EXP source protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#flat-register-readiness" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1592,6 +1603,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#vmem-completion-and-exp-source-protection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VMEM completion and EXP source protection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#flat-register-readiness" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1659,8 +1681,12 @@ memory effects are still computed eagerly.</p>
 </thead>
 <tbody>
 <tr>
-<td>CDNA1, CDNA2, CDNA3, CDNA4</td>
+<td>CDNA1, CDNA2, CDNA3</td>
 <td><code>vmcnt</code>, <code>lgkmcnt</code>, <code>expcnt</code></td>
+</tr>
+<tr>
+<td>CDNA4</td>
+<td><code>vmcnt</code>, <code>lgkmcnt</code>; the encoded <code>expcnt</code> field is unused</td>
 </tr>
 <tr>
 <td>RDNA1, RDNA2, RDNA3, RDNA3.5</td>
@@ -1676,6 +1702,18 @@ memory effects are still computed eagerly.</p>
 </tr>
 </tbody>
 </table>
+<p>The <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf">CDNA4 ISA</a>,
+sections 3.1 and 4.4, specifies EXPCNT as unused. CDNA4 memory
+instructions therefore do not acquire an EXPCNT obligation, and static
+waitcheck omits the legacy GDS EXP event for this architecture. Table 57 also
+marks <code>GDS=1</code> reserved, and the generated CDNA4 instruction set has no
+<code>ds_ordered_count</code>. Tests using that bit or a synthetic <code>ds_ordered_count</code>
+therefore exercise defensive classification of unsupported encodings, rather
+than an executable CDNA4 GDS contract. LLVM accepts <code>ds_gws_init</code> and
+<code>ds_gws_barrier</code> on gfx950 and classifies them with <code>GDS_GPR_LOCK</code>, while the
+CDNA4 manual omits those opcodes and calls EXPCNT unused. This source
+disagreement remains unresolved; the fallback follows the manual's unused-EXP
+policy.</p>
 <p>Only instructions present in a target's ISA produce entries. Counter names do not imply
 that every target has every instruction associated with that family. The GFX10 legacy
 <code>lgkmcnt</code> field has six bits; the CDNA legacy field has four.</p>
@@ -1753,6 +1791,73 @@ associated replay translation prefix.</p>
 capacity constraints after routing, before checking result writeback. The instruction
 cannot use an unused domain's full counter to prove an older request complete. Address
 and other source operands are read before this inference is available.</p>
+<h2 id="vmem-completion-and-exp-source-protection">VMEM completion and EXP source protection<a class="headerlink" href="#vmem-completion-and-exp-source-protection" title="Permanent link">&para;</a></h2>
+<p>The dynamic race detector treats each <code>MemoryIssueInfo</code> counter obligation as
+a completion requirement. <code>EventRegistry::allWaitCountersSatisfied</code> requires
+every obligation attached to an event before that event can complete and
+release its destination-register or memory dependency. These obligations do
+not express a separate source-register lifetime.</p>
+<p>The obligations also drive emulated counters and plugin-visible metadata.
+<code>MemoryPipeline::issue_counters</code> turns each obligation into wave counter tokens,
+and execution plugins observe the metadata through <code>amdgpu_memory_issue_info()</code>.
+Removing VMEM EXP obligations therefore means VMEM stores and atomics no longer
+contribute EXPCNT tokens in emulation. This is the emulator's concrete accounting
+choice; the hardware source-reuse uncertainty described below remains separate.</p>
+<p>Generated VMEM store and atomic metadata therefore omits EXP completion
+obligations on all supported CDNA and RDNA targets. Source-data release must
+not gate a returning atomic's destination or memory completion. On legacy-counter
+targets such as gfx942, gfx950 and gfx1151, a returning GLOBAL atomic followed
+by <code>s_waitcnt vmcnt(0)</code> releases its result; no wait or an EXP-only wait leaves
+that result pending. Generic FLAT retains its separate
+VMEM/DS obligations for the resolved request domains. The FLAT-to-LDS tests
+wait for LGKM and the target's VMEM/store counters before a workgroup barrier,
+making the write visible to other waves without an EXP wait. The counter waits
+alone do not replace that barrier.</p>
+<p>Removing EXP can also change the whole-event ordering class. On gfx942, gfx950
+and gfx1151, <code>memoryOrderForObligations</code> now gives returning GLOBAL atomics the
+<code>VMEM</code> class. Combining VMEM with the former EXP/<code>UNORDERED</code> obligation made the
+whole event unordered. <code>WaveRaceState::checkVgprWrite</code> accepts overlapping destinations for
+producers in the same ordered class, independently of completion waits. A
+returning GLOBAL atomic followed by a GLOBAL load into the same VGPR can
+therefore use a final <code>vmcnt(0)</code> without a WAW report. A VALU overwrite before
+that wait still reports a VGPR write race. This ordering rule does not make an
+atomic's returned value ready for a read before its completion wait.</p>
+<p>LLVM's
+<a href="https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/GCNSubtarget.h#L431"><code>vmemWriteNeedsExpWaitcnt</code></a>
+restricts VMEM source-register locks to architectures before Sea Islands,
+predating every supported profile. Its
+<a href="https://github.com/ROCm/llvm-project/blob/32fb4582f0be6df5437ee1cdb9a38724215ede80/llvm/lib/Target/AMDGPU/AMDGPUHWEvents.cpp#L107"><code>getEventsForImpl</code></a>
+also classifies FLAT/GLOBAL operations without an EXP source-lock event.
+However, the CDNA1/CDNA2 and RDNA1/RDNA2 register summaries still describe
+EXPCNT as counting VMEM writes whose write-data has not yet been sent to the
+cache. For example, see the register-state tables in the
+<a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi100-cdna1-shader-instruction-set-architecture.pdf">CDNA1 ISA</a>
+and <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/instinct-mi200-cdna2-instruction-set-architecture.pdf">CDNA2 ISA</a>.
+These summaries and LLVM disagree about VMEM source-data accounting. The
+completion policy above does not resolve that hardware question or establish
+source-reuse guarantees on every target. The narrower rule is that a
+source-only obligation cannot serve as a destination or memory-completion
+requirement.</p>
+<p>Static waitcheck separately protects GDS source VGPRs and EXEC until an EXP
+wait on legacy targets other than CDNA4. Generated GDS metadata retains its
+LGKM and EXP obligations on those targets, but the dynamic detector's
+whole-event obligations do not implement this source-only protection. GDS data
+operations, such as DS loads, stores and atomics with <code>GDS=1</code>, are
+unimplemented and fail when executed. GWS operations (<code>ds_gws_*</code>) do execute
+with <code>GDS=1</code> on CDNA1–3 and RDNA1–3.5. They publish a zero-payload request
+through the local-memory pipeline, so their retained EXP obligation adds an
+EXPCNT token in emulation. That accounting is still not source VGPR/EXEC
+protection, and decoded-metadata and static-checker coverage do not establish
+dynamic GDS source/EXEC protection.</p>
+<p>The external
+<a href="https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration"><code>race</code> suite</a>
+runs compiler-generated returning atomics and explicit VM-only, no-wait and
+EXP-only sequences on gfx942, gfx950 and gfx1151. It also checks synchronized
+FLAT-to-LDS exchanges, missing-barrier controls and the atomic-to-GLOBAL/VALU
+ordering pair on all three targets. Paired old/new-metadata validation of that
+ordering pair was performed on gfx942. These are emulation tests. Generator tests
+cover the VMEM metadata contract across all ten profiles, while decoded C++ tests
+retain older-target GDS obligations and check the CDNA4 fallback policy.</p>
 <h2 id="flat-register-readiness">FLAT register readiness<a class="headerlink" href="#flat-register-readiness" title="Permanent link">&para;</a></h2>
 <p>FLAT contributes to VMEM when at least one lane requests global/scratch memory and
 to DS when at least one lane requests LDS memory. This conditional-participation
@@ -1804,8 +1909,16 @@ wait requirements on untested architectures or under all schedules.</p>
 <td>Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch</td>
 </tr>
 <tr>
-<td>LDS/GDS, including permutation, swizzle and DS no-op</td>
-<td>DS/legacy LGKM queue; returning forms track registers. GDS also contributes to EXP</td>
+<td>LDS, including permutation, swizzle and DS no-op</td>
+<td>DS/legacy LGKM queue; returning forms track registers</td>
+</tr>
+<tr>
+<td>GDS data operations (decoded metadata; execution unimplemented)</td>
+<td>LGKM and, on legacy targets other than CDNA4, EXP. Static waitcheck separately protects source VGPRs and EXEC</td>
+</tr>
+<tr>
+<td>GWS (<code>ds_gws_*</code>; executes on CDNA1–3 and RDNA1–3.5)</td>
+<td>Zero-payload request on the DS/legacy LGKM queue with the GDS completion class, plus EXP; no register results. Static waitcheck separately protects source VGPRs and EXEC</td>
 </tr>
 <tr>
 <td>Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries</td>

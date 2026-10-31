@@ -1853,7 +1853,8 @@ register or LDS is not deterministic due to missing <code>s_waitcnt</code> or <c
 instructions.</p>
 <h2 id="target-scope">Target scope<a class="headerlink" href="#target-scope" title="Permanent link">&para;</a></h2>
 <p>The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
 and address-dependent FLAT counter participation. This partial
@@ -2036,9 +2037,10 @@ of <code>v8</code> has a sufficient wait:</p>
 <span class="nf">flat_store_dword</span><span class="w"> </span><span class="no">v</span><span class="p">[</span><span class="mi">2</span><span class="p">:</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="no">v8</span>
 </code></pre></div>
 <p>LDS-only loads instead require <code>lgkmcnt(0)</code>. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and independent
-obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
-a nonzero wait cannot prove a result ready.</p>
+split counters. Routing preserves decoded completion ordering and the VMEM/DS
+obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
+carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
+unordered; a nonzero wait cannot prove a result ready.</p>
 <p>Functional counter acquisition and both runtime checkers use the selected memory
 domains. FLAT capacity constraints are applied after addresses are resolved.
 Before reading the address operands, neither domain is guaranteed to need a
@@ -2215,7 +2217,7 @@ regardless of the order the waves execute in:</p>
 <li><code>wait_hazard_test.cpp</code> — wait/readiness tests shared with the core checker.</li>
 <li>The <code>race</code> suite in
   <a href="https://github.com/ROCm/rocjitsu-test-corpus">ROCm/rocjitsu-test-corpus</a>
-  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
   <code>rocjitsu-test-corpus</code> workflow builds them with the corpus HIP toolchain
   and runs each case under the emulator with the <code>race</code> plugin enabled.</li>
 </ul>
@@ -2225,10 +2227,14 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
 <p>To run the HIP cases locally, follow the corpus's
 <a href="https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration">race-suite instructions</a>
 and point the wrapper at the RocJITsu build being tested. Set
-<code>ROCJITSU_RACE_CONFIG</code> to <code>tests/race-detector/race_test_config.json</code> for gfx950
-or <code>configs/gfx1151.json</code> for gfx1151, using absolute paths from this source tree.
-The original <code>RaceTest.&lt;target&gt;_&lt;name&gt;</code> selectors remain available through
-the corpus's <code>--case</code> option.</p>
+<code>ROCJITSU_RACE_CONFIG</code> to <code>tests/race-detector/race_test_gfx942_config.json</code> for gfx942,
+<code>tests/race-detector/race_test_config.json</code> for gfx950 or <code>configs/gfx1151.json</code> for
+gfx1151, using absolute paths from this source tree. The original
+<code>RaceTest.&lt;target&gt;_&lt;name&gt;</code> selectors remain available through the corpus's
+<code>--case</code> option. Shared atomic and FLAT-to-LDS cases use
+<code>RaceTest.vmem_&lt;target&gt;_&lt;name&gt;</code>, for example
+<code>--case RaceTest.vmem_gfx942_vmcnt_only</code>. Positive detection controls use the
+<code>_race</code> suffix.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>
