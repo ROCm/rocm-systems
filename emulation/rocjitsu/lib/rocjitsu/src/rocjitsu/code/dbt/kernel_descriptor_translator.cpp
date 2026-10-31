@@ -303,8 +303,11 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
 // Kernel-entry prologue construction.
 // -----------------------------------------------------------------------------
 
-void append_rdna4_salu_write(std::vector<uint32_t> &words, uint32_t word) {
-  words.push_back(word);
+void append_rdna4_salu_write(std::vector<uint32_t> &words, util::FailureOr<uint32_t> word) {
+  // Only the RDNA4 prologue calls this helper. Its SGPRs follow the descriptor's
+  // six-bit user-SGPR count, and its TTMP/inline sources are fixed valid codes.
+  assert(word.succeeded());
+  words.push_back(word.value());
   // The prologue feeds the original kernel entry, whose first few instructions
   // may immediately consume these SGPRs. GFX12 needs an explicit ALU delay for
   // scalar producer/consumer dependencies; entry prologues bypass the normal

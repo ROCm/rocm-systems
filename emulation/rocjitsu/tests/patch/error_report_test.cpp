@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include "util/diagnostic.h"
+
 #include <string>
 
 namespace rocjitsu {
@@ -29,6 +31,20 @@ TEST(ErrorReport, OverwritesPriorContents) {
   report(&err, "first");
   report(&err, "second");
   EXPECT_EQ(err, "second");
+}
+
+TEST(ErrorReport, OptionalStringSinkReceivesBorrowedEmitterDiagnostics) {
+  std::string message = "previous";
+  OptionalStringDiagnosticSink record(&message);
+  const util::DiagnosticEmitter error(record);
+  error.emit() << "first";
+  EXPECT_EQ(message, "first");
+  error.emit() << "second";
+  EXPECT_EQ(message, "second");
+
+  OptionalStringDiagnosticSink discard(nullptr);
+  const util::DiagnosticEmitter ignored(discard);
+  ignored.emit() << "ignored";
 }
 
 } // namespace

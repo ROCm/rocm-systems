@@ -55,7 +55,9 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, kOriginalWord);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_5 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_5.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_5.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
@@ -64,15 +66,21 @@ TEST(TrampolineBuilder, Emits4ByteRelocationAnchorPatch) {
   // Patched anchor is one s_branch covering the forward delta.
   // forward_simm16 = (0x200 - (0x100 + 4)) / 4 = 63.
   ASSERT_EQ(bytes->patched_anchor_bytes.size(), 4u);
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), build_s_branch(63, kArch));
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(63, kArch);
+  ASSERT_TRUE(maybe_s_branch.succeeded());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), maybe_s_branch.value());
 
   // Trampoline: [before s_nop, original word, return s_branch].
   // return_branch_offset = 0x200 + 4 + 4 = 0x208.
   // return_simm16 = (0x104 - (0x208 + 4)) / 4 = -66.
   ASSERT_EQ(bytes->trampoline_words.size(), 3u);
-  EXPECT_EQ(bytes->trampoline_words[0], build_s_nop(0, kArch));
+  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop.succeeded());
+  EXPECT_EQ(bytes->trampoline_words[0], maybe_s_nop.value());
   EXPECT_EQ(bytes->trampoline_words[1], kOriginalWord);
-  EXPECT_EQ(bytes->trampoline_words[2], build_s_branch(-66, kArch));
+  util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(-66, kArch);
+  ASSERT_TRUE(maybe_s_branch_2.succeeded());
+  EXPECT_EQ(bytes->trampoline_words[2], maybe_s_branch_2.value());
 }
 
 TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
@@ -89,7 +97,9 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 8;
   plan.original_words = {kW0, kW1};
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_6 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_6.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_6.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
@@ -97,17 +107,25 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
 
   // Patched anchor is s_branch + s_nop 0 tail (preserves the 8-byte slot).
   ASSERT_EQ(bytes->patched_anchor_bytes.size(), 8u);
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), build_s_branch(63, kArch));
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 4), build_s_nop(0, kArch));
+  util::FailureOr<uint32_t> maybe_s_branch_3 = build_s_branch(63, kArch);
+  ASSERT_TRUE(maybe_s_branch_3.succeeded());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), maybe_s_branch_3.value());
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_2.succeeded());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 4), maybe_s_nop_2.value());
 
   // Trampoline: [before s_nop, w0, w1, return s_branch].
   // return_branch_offset = 0x200 + 4 + 8 = 0x20C.
   // return_simm16 = (0x108 - (0x20C + 4)) / 4 = -66.
   ASSERT_EQ(bytes->trampoline_words.size(), 4u);
-  EXPECT_EQ(bytes->trampoline_words[0], build_s_nop(0, kArch));
+  util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_3.succeeded());
+  EXPECT_EQ(bytes->trampoline_words[0], maybe_s_nop_3.value());
   EXPECT_EQ(bytes->trampoline_words[1], kW0);
   EXPECT_EQ(bytes->trampoline_words[2], kW1);
-  EXPECT_EQ(bytes->trampoline_words[3], build_s_branch(-66, kArch));
+  util::FailureOr<uint32_t> maybe_s_branch_4 = build_s_branch(-66, kArch);
+  ASSERT_TRUE(maybe_s_branch_4.succeeded());
+  EXPECT_EQ(bytes->trampoline_words[3], maybe_s_branch_4.value());
 }
 
 // build_s_branch uses opcode 32 on RDNA3/3.5/4 and opcode 2 on CDNA1-4. If the
@@ -123,15 +141,23 @@ TEST(TrampolineBuilder, RespectsTargetArchForBranchEncoding) {
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x104;
   plan.original_words.assign(1, 0xCAFEF00Du);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kRdna)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_7 = build_s_nop(0, kRdna);
+  ASSERT_TRUE(maybe_s_nop_7.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_7.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
   ASSERT_TRUE(bytes.has_value());
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), build_s_branch(63, kRdna));
-  EXPECT_NE(word_at(bytes->patched_anchor_bytes, 0), build_s_branch(63, kCdna))
+  util::FailureOr<uint32_t> maybe_s_branch_5 = build_s_branch(63, kRdna);
+  ASSERT_TRUE(maybe_s_branch_5.succeeded());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), maybe_s_branch_5.value());
+  util::FailureOr<uint32_t> maybe_s_branch_6 = build_s_branch(63, kCdna);
+  ASSERT_TRUE(maybe_s_branch_6.succeeded());
+  EXPECT_NE(word_at(bytes->patched_anchor_bytes, 0), maybe_s_branch_6.value())
       << "Builder must use plan.arch, not a hard-coded opcode";
-  EXPECT_EQ(bytes->trampoline_words.back(), build_s_branch(-66, kRdna));
+  util::FailureOr<uint32_t> maybe_s_branch_7 = build_s_branch(-66, kRdna);
+  ASSERT_TRUE(maybe_s_branch_7.succeeded());
+  EXPECT_EQ(bytes->trampoline_words.back(), maybe_s_branch_7.value());
 }
 
 TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
@@ -149,7 +175,9 @@ TEST(TrampolineBuilder, ForwardBranchOverflowFails) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_8 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_8.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_8.value()}}};
   plan.emit_original = true;
 
   std::string err;
@@ -170,7 +198,9 @@ TEST(TrampolineBuilder, RejectsOriginalWordsSizeMismatch) {
   plan.trampoline_offset = 0x200;
   plan.return_target = 0x108;
   plan.original_words.assign(1, 0xDEADBEEFu); // ... but only one provided.
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_9 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_9.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_9.value()}}};
   plan.emit_original = true;
 
   std::string err;
@@ -211,7 +241,9 @@ TEST(TrampolineBuilder, ReturnBranchOverflowFails) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_10 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_10.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_10.value()}}};
   plan.emit_original = true;
 
   std::string err;
@@ -238,7 +270,9 @@ TEST(TrampolineBuilder, EncodedBranchesRoundTripToPlanCoordinates) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_11 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_11.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_11.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
@@ -251,7 +285,7 @@ TEST(TrampolineBuilder, EncodedBranchesRoundTripToPlanCoordinates) {
   // Return: the last trampoline word (negative immediate) decodes back to
   // return_target. This is the only assertion in the file that exercises the
   // negative-immediate sign-extension path semantically rather than by byte
-  // equality against build_s_branch(-66, ...).
+  // equality against build_s_branch(-66, ...).value().
   const uint64_t ret_pc = kTrampoline + (bytes->trampoline_words.size() - 1) * sizeof(uint32_t);
   EXPECT_EQ(resolve_sopp_target(ret_pc, bytes->trampoline_words.back()), plan.return_target);
 }
@@ -280,13 +314,17 @@ TEST(TrampolineBuilder, ForwardSimm16AtNegativeLimitSucceeds) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_12 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_12.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_12.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
   ASSERT_TRUE(bytes.has_value());
-  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0),
-            build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
+  util::FailureOr<uint32_t> maybe_s_branch_8 =
+      build_s_branch(std::numeric_limits<int16_t>::min(), kArch);
+  ASSERT_TRUE(maybe_s_branch_8.succeeded());
+  EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), maybe_s_branch_8.value());
 }
 
 TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
@@ -307,13 +345,17 @@ TEST(TrampolineBuilder, ReturnSimm16AtNegativeLimitSucceeds) {
   plan.trampoline_offset = kTrampoline;
   plan.return_target = kAnchor + 4;
   plan.original_words.assign(1, 0xDEADBEEFu);
-  plan.before_items = {InlineAsmItem{{build_s_nop(0, kArch)}}};
+  util::FailureOr<uint32_t> maybe_s_nop_13 = build_s_nop(0, kArch);
+  ASSERT_TRUE(maybe_s_nop_13.succeeded());
+  plan.before_items = {InlineAsmItem{{maybe_s_nop_13.value()}}};
   plan.emit_original = true;
 
   auto bytes = TrampolineBuilder::build(plan);
   ASSERT_TRUE(bytes.has_value());
-  EXPECT_EQ(bytes->trampoline_words.back(),
-            build_s_branch(std::numeric_limits<int16_t>::min(), kArch));
+  util::FailureOr<uint32_t> maybe_s_branch_9 =
+      build_s_branch(std::numeric_limits<int16_t>::min(), kArch);
+  ASSERT_TRUE(maybe_s_branch_9.succeeded());
+  EXPECT_EQ(bytes->trampoline_words.back(), maybe_s_branch_9.value());
 }
 
 // NOTE: the inline-nop guardrail used to live in TrampolineBuilder and was
@@ -767,7 +809,9 @@ TEST(TrampolineBuilderPlan, RdnaEnvelopeTempsUseTheWholeAllocation) {
   ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), sgprs_below(18),
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
-  const uint16_t vcc_lo = scalar_operand_vcc_lo(plan.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo = scalar_operand_vcc_lo(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_vcc_lo.succeeded());
+  const uint16_t vcc_lo = maybe_scalar_operand_vcc_lo.value();
   const auto saved =
       std::ranges::find_if(plan.special_state_saves,
                            [&](const SpecialStateSlot &slot) { return slot.operand == vcc_lo; });
@@ -810,7 +854,9 @@ TEST(TrampolineBuilderPlan, FullExecOpensTheWindowAndCostsTwoToggles) {
                                                  /*probe_body_clobbers=*/{}, &err))
       << err;
 
-  const uint16_t exec_lo = scalar_operand_exec_lo(full.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo = scalar_operand_exec_lo(full.arch);
+  ASSERT_TRUE(maybe_scalar_operand_exec_lo.succeeded());
+  const uint16_t exec_lo = maybe_scalar_operand_exec_lo.value();
   EXPECT_TRUE(std::ranges::any_of(full.special_state_saves,
                                   [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
   constexpr uint32_t kExecToggles = 2;
@@ -862,8 +908,11 @@ TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
 // op would otherwise see the guest's value in the inactive lanes.
 TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
   auto exec_saved = [](const TrampolinePlan &plan) {
+    util::FailureOr<uint16_t> exec = scalar_operand_exec_lo(plan.arch);
+    if (exec.failed())
+      return false;
     for (const SpecialStateSlot &s : plan.special_state_saves)
-      if (s.operand == scalar_operand_exec_lo(plan.arch))
+      if (s.operand == exec.value())
         return true;
     return false;
   };
@@ -1029,8 +1078,7 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedBoundaryDrainWithoutOutpu
 // A separately constructed plan can name the literal source code instead of
 // an SGPR. The failed vector builder must stop emission without returning bytes.
 TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
-  for (const auto source : {ProbeArgSource::AnchorExecLo, ProbeArgSource::AnchorExecHi,
-                            ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
+  for (const auto source : {ProbeArgSource::LogBufferPtrLo, ProbeArgSource::LogBufferPtrHi}) {
     SCOPED_TRACE(static_cast<int>(source));
     TrampolinePlan plan = make_probe_plan();
     plan.entry_storage_base = 20;
@@ -1039,24 +1087,10 @@ TEST(TrampolineBuilderEmit, LiteralArgumentSourceFailurePropagates) {
     ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
                                                    /*probe_body_clobbers=*/{}, &err))
         << err;
-    const bool high =
-        source == ProbeArgSource::AnchorExecHi || source == ProbeArgSource::LogBufferPtrHi;
-    const uint16_t invalid_base = kVectorSrcLiteral - (high ? 1 : 0);
-    if (source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi) {
-      plan.entry_storage_base = invalid_base;
-    } else {
-      const auto saved =
-          std::ranges::find_if(plan.special_state_saves, [&](const SpecialStateSlot &s) {
-            return s.operand == scalar_operand_exec_lo(plan.arch);
-          });
-      ASSERT_NE(saved, plan.special_state_saves.end());
-      saved->temp_base = invalid_base;
-    }
+    const bool high = source == ProbeArgSource::LogBufferPtrHi;
+    plan.entry_storage_base = kVectorSrcLiteral - (high ? 1 : 0);
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
-    const std::string source_name = source == ProbeArgSource::AnchorExecLo     ? "AnchorExecLo"
-                                    : source == ProbeArgSource::AnchorExecHi   ? "AnchorExecHi"
-                                    : source == ProbeArgSource::LogBufferPtrLo ? "LogBufferPtrLo"
-                                                                               : "LogBufferPtrHi";
+    const std::string source_name = high ? "LogBufferPtrHi" : "LogBufferPtrLo";
     EXPECT_EQ(err, "probe-call emission: argument 0 (" + source_name +
                        "): v_mov_b32 from a literal needs build_v_mov_b32_imm");
     EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan).has_value());
@@ -1078,11 +1112,17 @@ TEST(TrampolineBuilderEmit, ContainsTargetMaterialization) {
       build_wait_all_loads_complete(plan.arch);
   ASSERT_TRUE(maybe_wait_all_loads_complete.succeeded());
   const size_t d = maybe_wait_all_loads_complete.value().size();
-  EXPECT_EQ(w[d + 1], build_s_getpc_b64(plan.target_pair_base, plan.arch));
-  EXPECT_EQ(w[d + 2],
-            build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch));
-  EXPECT_EQ(w[d + 4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF,
-                                       plan.arch));
+  util::FailureOr<uint32_t> maybe_s_getpc_b64 = build_s_getpc_b64(plan.target_pair_base, plan.arch);
+  ASSERT_TRUE(maybe_s_getpc_b64.succeeded());
+  EXPECT_EQ(w[d + 1], maybe_s_getpc_b64.value());
+  util::FailureOr<uint32_t> maybe_s_add_u32 =
+      build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xFF, plan.arch);
+  ASSERT_TRUE(maybe_s_add_u32.succeeded());
+  EXPECT_EQ(w[d + 2], maybe_s_add_u32.value());
+  util::FailureOr<uint32_t> maybe_s_addc_u32 =
+      build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xFF, plan.arch);
+  ASSERT_TRUE(maybe_s_addc_u32.succeeded());
+  EXPECT_EQ(w[d + 4], maybe_s_addc_u32.value());
 }
 
 // The envelope calls the probe via s_swappc_b64 through the cc-derived link pair,
@@ -1101,7 +1141,9 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
   ASSERT_TRUE(maybe_wait_all_loads_complete.succeeded());
   const size_t d = maybe_wait_all_loads_complete.value().size();
   const uint32_t swappc = w[d + 6];
-  EXPECT_EQ(decode_sop1_op(swappc), sop1_op_swappc_b64(plan.arch));
+  util::FailureOr<uint32_t> maybe_sop1_op_swappc_b64 = sop1_op_swappc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_swappc_b64.succeeded());
+  EXPECT_EQ(decode_sop1_op(swappc), maybe_sop1_op_swappc_b64.value());
 
   // sdst is the link pair; it must equal the pair the ABI names, the same pair
   // the probe's s_setpc_b64 returns through.
@@ -1128,14 +1170,24 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_3 = scalar_operand_exec_lo(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_exec_lo_3.succeeded());
+  const uint16_t exec_lo = maybe_scalar_operand_exec_lo_3.value();
+  util::FailureOr<uint16_t> maybe_scalar_inline_neg_one = scalar_inline_neg_one(plan.arch);
+  ASSERT_TRUE(maybe_scalar_inline_neg_one.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b64 =
+      build_s_mov_b64(exec_lo, maybe_scalar_inline_neg_one.value(), plan.arch);
+  ASSERT_TRUE(maybe_s_mov_b64.succeeded());
+  const uint32_t widen = maybe_s_mov_b64.value();
   const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end()) << "no full-mask widen; an argument site must open the window";
 
   // The anchor-mask restore closing the window is the next EXEC write after it.
+  util::FailureOr<uint32_t> maybe_sop1_op_mov_b64 = sop1_op_mov_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_mov_b64.succeeded());
   const auto restore_at = std::ranges::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
+    return decode_sop1_op(word) == maybe_sop1_op_mov_b64.value() &&
+           decode_sop1_sdst(word) == exec_lo;
   });
   ASSERT_NE(restore_at, w.end());
 
@@ -1154,8 +1206,10 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   EXPECT_EQ(args_begin[3], arg1[1]);
 
   // And still before the call.
+  util::FailureOr<uint32_t> maybe_sop1_op_swappc_b64_2 = sop1_op_swappc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_swappc_b64_2.succeeded());
   const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+    return decode_sop1_op(word) == maybe_sop1_op_swappc_b64_2.value() &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
   ASSERT_NE(swappc, w.end());
@@ -1176,7 +1230,9 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
   ASSERT_TRUE(bytes.has_value()) << err;
 
-  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_4 = scalar_operand_exec_lo(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_exec_lo_4.succeeded());
+  const uint16_t exec_lo = maybe_scalar_operand_exec_lo_4.value();
   const auto saved = std::ranges::find_if(
       plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
@@ -1257,20 +1313,32 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_5 = scalar_operand_exec_lo(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_exec_lo_5.succeeded());
+  const uint16_t exec_lo = maybe_scalar_operand_exec_lo_5.value();
+  util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_2 = scalar_inline_neg_one(plan.arch);
+  ASSERT_TRUE(maybe_scalar_inline_neg_one_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b64_2 =
+      build_s_mov_b64(exec_lo, maybe_scalar_inline_neg_one_2.value(), plan.arch);
+  ASSERT_TRUE(maybe_s_mov_b64_2.succeeded());
+  const uint32_t widen = maybe_s_mov_b64_2.value();
   const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end());
+  util::FailureOr<uint32_t> maybe_sop1_op_swappc_b64_3 = sop1_op_swappc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_swappc_b64_3.succeeded());
   const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+    return decode_sop1_op(word) == maybe_sop1_op_swappc_b64_3.value() &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
   ASSERT_NE(swappc, w.end());
   ASSERT_LT(widen_at - w.begin(), swappc - w.begin());
 
   // No EXEC write of any kind between the widen and the call.
+  util::FailureOr<uint32_t> maybe_sop1_op_mov_b64_2 = sop1_op_mov_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_mov_b64_2.succeeded());
   const auto between = std::ranges::find_if(widen_at + 1, swappc, [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
+    return decode_sop1_op(word) == maybe_sop1_op_mov_b64_2.value() &&
+           decode_sop1_sdst(word) == exec_lo;
   });
   EXPECT_EQ(between, swappc) << "the anchor mask must not be restored before a full-exec call";
 }
@@ -1289,13 +1357,20 @@ TEST(TrampolineBuilderEmit, WithoutFullExecTheAnchorMaskIsRestoredBeforeTheCall)
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
+  util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_6 = scalar_operand_exec_lo(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_exec_lo_6.succeeded());
+  const uint16_t exec_lo = maybe_scalar_operand_exec_lo_6.value();
   const auto saved = std::ranges::find_if(
       plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
-  const uint32_t restore = build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
+  util::FailureOr<uint32_t> maybe_s_mov_b64_3 =
+      build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
+  ASSERT_TRUE(maybe_s_mov_b64_3.succeeded());
+  const uint32_t restore = maybe_s_mov_b64_3.value();
+  util::FailureOr<uint32_t> maybe_sop1_op_swappc_b64_4 = sop1_op_swappc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_swappc_b64_4.succeeded());
   const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
-    return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
+    return decode_sop1_op(word) == maybe_sop1_op_swappc_b64_4.value() &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
   ASSERT_NE(swappc, w.end());
@@ -1353,9 +1428,15 @@ TEST(TrampolineBuilderEmit, Cdna2M0RestoreIsPaddedBeforeTheOriginal) {
   ASSERT_NE(original, w.end());
   const size_t index = static_cast<size_t>(original - w.begin());
   ASSERT_GE(index, 2u);
-  EXPECT_EQ(w[index - 1], build_s_nop(0, plan.arch));
-  EXPECT_EQ(decode_sop1_op(w[index - 2]), sop1_op_mov_b32(plan.arch));
-  EXPECT_EQ(decode_sop1_sdst(w[index - 2]), scalar_operand_m0(plan.arch));
+  util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, plan.arch);
+  ASSERT_TRUE(maybe_s_nop_4.succeeded());
+  EXPECT_EQ(w[index - 1], maybe_s_nop_4.value());
+  util::FailureOr<uint32_t> maybe_sop1_op_mov_b32 = sop1_op_mov_b32(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_mov_b32.succeeded());
+  EXPECT_EQ(decode_sop1_op(w[index - 2]), maybe_sop1_op_mov_b32.value());
+  util::FailureOr<uint16_t> maybe_scalar_operand_m0 = scalar_operand_m0(plan.arch);
+  ASSERT_TRUE(maybe_scalar_operand_m0.succeeded());
+  EXPECT_EQ(decode_sop1_sdst(w[index - 2]), maybe_scalar_operand_m0.value());
 }
 
 // The return branch (trailing word) targets anchor + original_size.
@@ -1392,8 +1473,12 @@ TEST(TrampolineBuilderEmit, NoSccPreserveShrinksEnvelope) {
       build_wait_all_loads_complete(plan.arch);
   ASSERT_TRUE(maybe_wait_all_loads_complete.succeeded());
   const size_t d = maybe_wait_all_loads_complete.value().size();
-  EXPECT_EQ(decode_sop1_op(w[d]), sop1_op_getpc_b64(plan.arch));
-  EXPECT_EQ(decode_sop1_op(w[d + 5]), sop1_op_swappc_b64(plan.arch));
+  util::FailureOr<uint32_t> maybe_sop1_op_getpc_b64 = sop1_op_getpc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_getpc_b64.succeeded());
+  EXPECT_EQ(decode_sop1_op(w[d]), maybe_sop1_op_getpc_b64.value());
+  util::FailureOr<uint32_t> maybe_sop1_op_swappc_b64_5 = sop1_op_swappc_b64(plan.arch);
+  ASSERT_TRUE(maybe_sop1_op_swappc_b64_5.succeeded());
+  EXPECT_EQ(decode_sop1_op(w[d + 5]), maybe_sop1_op_swappc_b64_5.value());
   // Envelope (6) + two boundary drains (2*d) + original (1) + return branch (1).
   EXPECT_EQ(w.size(), plan.before_word_count + 2 * d + 1u + 1u);
 }
@@ -1429,6 +1514,75 @@ TEST(TrampolineBuilderEmit, ForwardBranchRangeFailureReported) {
   EXPECT_NE(err.find("forward branch"), std::string::npos);
 }
 
+TEST(TrampolineBuilder, UnsupportedArchitectureReturnsFailureWithoutPublishingBytes) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_RV32I;
+  plan.original_size = 4;
+  plan.original_words = {0xDEADBEEFu};
+  plan.anchor_offset = 0x100;
+  plan.trampoline_offset = 0x200;
+  plan.return_target = 0x104;
+  std::string error;
+  std::optional<TrampolineBytes> bytes;
+  ASSERT_NO_THROW(bytes = TrampolineBuilder::build(plan, &error));
+  EXPECT_FALSE(bytes.has_value());
+  EXPECT_EQ(error, "Unimplemented instruction: s_branch for target architecture");
+  EXPECT_EQ(plan.original_words, std::vector<uint32_t>{0xDEADBEEFu});
+}
+
+TEST(TrampolineBuilderPlan, UnsupportedSpecialOperandsLeaveReservationsUnpublished) {
+  for (unsigned special = 0; special < 3; ++special) {
+    TrampolinePlan plan;
+    plan.arch = ROCJITSU_CODE_ARCH_RV32I;
+    plan.preserve_exec = special == 0;
+    plan.preserve_vcc = special == 1;
+    plan.preserve_m0 = special == 2;
+    std::string error;
+    bool planned = true;
+    ASSERT_NO_THROW(planned = TrampolineBuilder::plan_probe_call(plan, kProbeAbi, {}, {}, &error));
+    EXPECT_FALSE(planned);
+    EXPECT_FALSE(plan.is_probe_call);
+    EXPECT_TRUE(plan.special_state_saves.empty());
+    EXPECT_EQ(plan.before_word_count, 0u);
+    EXPECT_NE(error.find(special == 0   ? "EXEC_LO"
+                         : special == 1 ? "VCC_LO"
+                                        : "M0"),
+              std::string::npos)
+        << error;
+  }
+}
+
+TEST(TrampolineBuilderEmit, OversizedScalarDestinationsReturnFailuresWithoutThrowing) {
+  for (unsigned field = 0; field < 4; ++field) {
+    TrampolinePlan plan = make_probe_plan();
+    ASSERT_TRUE(plan.is_probe_call);
+    const char *instruction = nullptr;
+    switch (field) {
+    case 0:
+      plan.target_pair_base = 128;
+      instruction = "s_getpc_b64";
+      break;
+    case 1:
+      plan.link_pair_base = 128;
+      instruction = "s_swappc_b64";
+      break;
+    case 2:
+      plan.special_state_saves.push_back({106, 128, 2});
+      instruction = "s_mov_b64";
+      break;
+    case 3:
+      plan.scc_temp = 128;
+      instruction = "s_cselect_b32";
+      break;
+    }
+    std::string error;
+    std::optional<TrampolineBytes> bytes;
+    ASSERT_NO_THROW(bytes = TrampolineBuilder::emit_probe_call(plan, &error));
+    EXPECT_FALSE(bytes.has_value());
+    EXPECT_EQ(error, std::string(instruction) + " encoding field out of range");
+  }
+}
+
 TEST(TrampolineBuilderPlan, RegisterCopiesPreserveALiveReturnLinkWithoutScratch) {
   TrampolinePlan plan = make_probe_plan();
   plan.register_saves = {
@@ -1440,15 +1594,23 @@ TEST(TrampolineBuilderPlan, RegisterCopiesPreserveALiveReturnLinkWithoutScratch)
   const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
   ASSERT_TRUE(bytes) << error;
   const std::vector<uint32_t> &words = bytes->trampoline_words;
-  const std::vector<uint32_t>::const_iterator call =
-      std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
+  const util::FailureOr<uint32_t> call_word =
+      build_s_swappc_b64(30, plan.target_pair_base, plan.arch);
+  ASSERT_TRUE(call_word.succeeded());
+  const std::vector<uint32_t>::const_iterator call = std::ranges::find(words, call_word.value());
   ASSERT_NE(call, words.end());
   for (const RegisterSave &save : plan.register_saves) {
     uint32_t store;
     uint32_t restore;
     if (save.cls == RegClass::SGPR) {
-      store = build_s_mov_b32(save.destination, save.source, plan.arch);
-      restore = build_s_mov_b32(save.source, save.destination, plan.arch);
+      const util::FailureOr<uint32_t> store_word =
+          build_s_mov_b32(save.destination, save.source, plan.arch);
+      ASSERT_TRUE(store_word.succeeded());
+      store = store_word.value();
+      const util::FailureOr<uint32_t> restore_word =
+          build_s_mov_b32(save.source, save.destination, plan.arch);
+      ASSERT_TRUE(restore_word.succeeded());
+      restore = restore_word.value();
     } else {
       const util::FailureOr<uint32_t> save_word =
           build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch);
@@ -1514,20 +1676,28 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsTargetWritesAndPreservesGetpcRelativeAddr
   const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
   ASSERT_TRUE(bytes) << error;
   const std::vector<uint32_t> &words = bytes->trampoline_words;
-  const std::vector<uint32_t>::const_iterator getpc =
-      std::ranges::find(words, build_s_getpc_b64(plan.target_pair_base, plan.arch));
+  const util::FailureOr<uint32_t> getpc_word = build_s_getpc_b64(plan.target_pair_base, plan.arch);
+  ASSERT_TRUE(getpc_word.succeeded());
+  const std::vector<uint32_t>::const_iterator getpc = std::ranges::find(words, getpc_word.value());
   ASSERT_NE(getpc, words.end());
   ASSERT_GE(words.end() - getpc, 8);
   const util::FailureOr<uint32_t> guard =
       build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe);
   ASSERT_TRUE(guard.succeeded());
   EXPECT_EQ(getpc[1], guard.value());
-  EXPECT_EQ(getpc[2],
-            build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xff, plan.arch));
-  EXPECT_EQ(getpc[4], build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xff,
-                                       plan.arch));
+  const util::FailureOr<uint32_t> add_low =
+      build_s_add_u32(plan.target_pair_base, plan.target_pair_base, 0xff, plan.arch);
+  ASSERT_TRUE(add_low.succeeded());
+  EXPECT_EQ(getpc[2], add_low.value());
+  const util::FailureOr<uint32_t> add_high =
+      build_s_addc_u32(plan.target_pair_base + 1, plan.target_pair_base + 1, 0xff, plan.arch);
+  ASSERT_TRUE(add_high.succeeded());
+  EXPECT_EQ(getpc[4], add_high.value());
   EXPECT_EQ(getpc[6], guard.value());
-  EXPECT_EQ(getpc[7], build_s_swappc_b64(plan.link_pair_base, plan.target_pair_base, plan.arch));
+  const util::FailureOr<uint32_t> call_word =
+      build_s_swappc_b64(plan.link_pair_base, plan.target_pair_base, plan.arch);
+  ASSERT_TRUE(call_word.succeeded());
+  EXPECT_EQ(getpc[7], call_word.value());
   const uint64_t pc = plan.trampoline_offset + 4 * (getpc - words.begin() + 1);
   const uint64_t delta = uint64_t{getpc[3]} | (uint64_t{getpc[5]} << 32);
   EXPECT_EQ(pc + delta, plan.probe_target_offset);
@@ -1551,14 +1721,17 @@ TEST(TrampolineBuilderEmit, Rdna4GuardsScalarSavesBeforeArgumentReads) {
         << error;
     const std::optional<TrampolineBytes> bytes = TrampolineBuilder::emit_probe_call(plan, &error);
     ASSERT_TRUE(bytes) << error;
+    const util::FailureOr<uint16_t> exec_operand = scalar_operand_exec_lo(plan.arch);
+    ASSERT_TRUE(exec_operand.succeeded());
     const std::vector<SpecialStateSlot>::const_iterator exec =
         std::ranges::find_if(plan.special_state_saves, [&](const SpecialStateSlot &save) {
-          return save.operand == scalar_operand_exec_lo(plan.arch);
+          return save.operand == exec_operand.value();
         });
     ASSERT_NE(exec, plan.special_state_saves.end());
     const std::vector<uint32_t> &words = bytes->trampoline_words;
-    const std::vector<uint32_t>::const_iterator save =
-        std::ranges::find(words, build_s_mov_b32(40, 8, plan.arch));
+    const util::FailureOr<uint32_t> save_word = build_s_mov_b32(40, 8, plan.arch);
+    ASSERT_TRUE(save_word.succeeded());
+    const std::vector<uint32_t>::const_iterator save = std::ranges::find(words, save_word.value());
     const util::FailureOr<uint32_t> argument_move =
         build_v_mov_b32_src(plan.arg_vgpr_base, exec->temp_base, plan.arch);
     ASSERT_TRUE(argument_move.succeeded());
@@ -1595,8 +1768,10 @@ TEST(TrampolineBuilderEmit, Rdna4OrdersScalarStateAcrossTheCallAndGuestResume) {
   const size_t loads = drain.value().size();
   ASSERT_GT(words.size(), loads);
   EXPECT_EQ(words[loads], wait.value());
-  const std::vector<uint32_t>::const_iterator call =
-      std::ranges::find(words, build_s_swappc_b64(30, plan.target_pair_base, plan.arch));
+  const util::FailureOr<uint32_t> call_word =
+      build_s_swappc_b64(30, plan.target_pair_base, plan.arch);
+  ASSERT_TRUE(call_word.succeeded());
+  const std::vector<uint32_t>::const_iterator call = std::ranges::find(words, call_word.value());
   ASSERT_NE(call, words.end());
   ASSERT_LT(call + loads + 1, words.end());
   EXPECT_EQ(*(call + loads + 1), wait.value());
