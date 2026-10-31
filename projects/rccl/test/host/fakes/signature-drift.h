@@ -24,9 +24,14 @@ template <typename R, typename... A>
 struct FnSigOf<std::function<R(A...)>> { using type = R(A...); };
 template <typename F> using FnSigOf_t = typename FnSigOf<F>::type;
 
+// glibc declares most of libc noexcept; std::function cannot carry that, so compare without it.
+template <typename F> struct DropNoexcept { using type = F; };
+template <typename R, typename... A>
+struct DropNoexcept<R(A...) noexcept> { using type = R(A...); };
+
 template <typename Hook, typename ProdFn>
 constexpr bool HookMatchesProd() {
-    return std::is_same_v<FnSigOf_t<Hook>, std::remove_pointer_t<ProdFn>>;
+    return std::is_same_v<FnSigOf_t<Hook>, typename DropNoexcept<std::remove_pointer_t<ProdFn>>::type>;
 }
 }  // namespace rccl_test_host
 

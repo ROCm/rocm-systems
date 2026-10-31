@@ -65,6 +65,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostRegister,               hipHostRegister);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostGetDevicePointer,       hipHostGetDevicePointer);
+ASSERT_HOOK_MATCHES_PROD(g_hipHostUnregister,             hipHostUnregister);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -431,6 +434,12 @@ std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDest
 std::function<hipError_t(hipStreamCaptureMode*)>
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
 std::function<hipError_t(void)> g_hipGetLastError = DefaultHipGetLastError;
+static hipError_t DefaultHipHostRegister(void*, size_t, unsigned int) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
+static hipError_t DefaultHipHostUnregister(void*) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*, size_t, unsigned int)> g_hipHostRegister = DefaultHipHostRegister;
+std::function<hipError_t(void**, void*, unsigned int)> g_hipHostGetDevicePointer = DefaultHipHostGetDevicePointer;
+std::function<hipError_t(void*)> g_hipHostUnregister = DefaultHipHostUnregister;
 static hipError_t DefaultHipExtLaunchKernel(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t,
                                             hipEvent_t, int) {
     FailLoudUnfaked("hip_fakes", "hipExtLaunchKernel");
@@ -705,6 +714,9 @@ void ResetHipFakes()
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
+    g_hipHostRegister               = DefaultHipHostRegister;
+    g_hipHostGetDevicePointer       = DefaultHipHostGetDevicePointer;
+    g_hipHostUnregister             = DefaultHipHostUnregister;
     g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
     g_hipLaunchKernel               = DefaultHipLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
@@ -1069,7 +1081,12 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 // hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
 // above (seam-routed) -- the develop merge added plainer duplicates here.
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
-hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipHostGetDevicePointer(void** dptr, void* hptr, unsigned int flags)
+{
+    return g_hipHostGetDevicePointer(dptr, hptr, flags);
+}
+hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags) { return g_hipHostRegister(ptr, size, flags); }
+hipError_t hipHostUnregister(void* ptr) { return g_hipHostUnregister(ptr); }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
 hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
 

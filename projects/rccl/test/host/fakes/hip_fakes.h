@@ -204,6 +204,10 @@ extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
+// Host-memory registration, which os/linux.cc's SHM device mapping drives.
+extern std::function<hipError_t(void* /*ptr*/, size_t /*size*/, unsigned int /*flags*/)> g_hipHostRegister;
+extern std::function<hipError_t(void** /*dptr*/, void* /*hptr*/, unsigned int /*flags*/)> g_hipHostGetDevicePointer;
+extern std::function<hipError_t(void* /*ptr*/)> g_hipHostUnregister;
 // hipExtLaunchKernel (what hipExtLaunchKernelGGL calls). The default aborts: an unhooked launch is a broken test.
 extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
                                 size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
