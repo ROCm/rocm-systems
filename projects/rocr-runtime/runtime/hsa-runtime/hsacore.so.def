@@ -286,6 +286,10 @@ global:
 	hsa_amd_vmem_get_vmem_info;
 	hsa_amd_signal_batch_create;
 	hsa_amd_signal_batch_destroy;
+	hsa_ven_amd_launch_descriptor_create;
+	hsa_ven_amd_launch_descriptor_destroy;
+	hsa_ven_amd_launch_descriptor_set;
+	hsa_ven_amd_launch_descriptor_set_prefetch;
 local:
     *;
 };
