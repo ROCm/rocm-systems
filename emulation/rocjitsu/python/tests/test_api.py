@@ -100,12 +100,23 @@ class PythonInstallationTest(unittest.TestCase):
                 with self.subTest(name=name), rocjitsu.Session(name) as session:
                     self.assertEqual(session.run(lambda: 42), 42)
 
-    def test_cli_uses_installed_configs(self):
-        with self.installation():
+    def test_cli_names_and_activation_paths_use_installed_configs(self):
+        with self.installation() as prefix:
             self.assertIn(
                 "thread_budget_table",
                 rocjitsu.diagnostics("gfx1201_r9700", cpu_thread_budget=1),
             )
+            # A fresh bootstrap has its real prefix; use the installed preset's
+            # path while checking global activation with the same native binary.
+            code = f"import rocjitsu; rocjitsu.enable({str(rocjitsu.config.gfx1201_r9700)!r}); assert rocjitsu.is_enabled()"
+            result = subprocess.run(
+                [sys.executable, "-m", "rocjitsu", "-c", code],
+                env={**os.environ, "PATH": str(prefix / "bin")},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_existing_file_takes_precedence_over_preset_name(self):
         with self.installation() as prefix:
@@ -139,6 +150,13 @@ with rocjitsu.Session('gfx1250_mi455x') as session:
 
 
 class PythonApiTest(unittest.TestCase):
+    def bootstrap(self, code):
+        return subprocess.run(
+            [sys.executable, "-m", "rocjitsu", "-c", code],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
 
     def test_run_closure_and_keyword_arguments(self):
         offset = 7
@@ -322,6 +340,121 @@ class PythonApiTest(unittest.TestCase):
     def test_delayed_close_with_external_reaper_cleans_descendants(self):
         self.check_delayed_close(external_reaper=True)
 
+    def test_pre_activation_directory_relative_metadata(self):
+        code = f'''import ctypes, errno, os, rocjitsu
+fd = os.open('/sys', os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for operation in (
+        lambda: os.stat('class/drm', dir_fd=fd),
+        lambda: os.stat('class/drm', dir_fd=fd, follow_symlinks=False),
+        lambda: os.readlink('class/drm/card0', dir_fd=fd),
+    ):
+        try:
+            operation()
+        except OSError as error:
+            assert error.errno == errno.ENODEV, error
+        else:
+            raise AssertionError('directory-relative discovery reached host')
+    assert not os.access('class/drm', os.F_OK, dir_fd=fd)
+finally:
+    os.close(fd)
+libc = ctypes.CDLL(None, use_errno=True)
+buf = ctypes.create_string_buffer(512)
+for name in ('fstatat', 'fstatat64'):
+    fn = getattr(libc, name)
+    fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p, ctypes.c_int]
+    assert fn(-100, b'/dev/dri/renderD199', buf, 0) == -1
+    assert ctypes.get_errno() == errno.ENODEV
+libc.statx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p]
+assert libc.statx(-100, b'/dev/dri/renderD199', 0, 0x7ff, buf) == -1
+assert ctypes.get_errno() == errno.ENODEV
+try:
+    rocjitsu.enable({str(CONFIG)!r})
+except RuntimeError as error:
+    assert 'discovery' in str(error), str(error)
+else:
+    raise AssertionError('activation after directory-relative discovery accepted')
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("call enable(config)", result.stderr)
+
+    def test_pre_activation_pci_drm_metadata(self):
+        # Deliberately nonexistent BDF/minor: failure must be ENODEV before any
+        # host lookup, and the attempted discovery must still freeze activation.
+        code = f'''import errno, os, rocjitsu
+for path in ('/sys/bus/pci/devices/ffff:ff:1f.7/drm/card199/device/vendor',
+             '/sys/devices/pci0000:ff/ffff:ff:1f.7/drm/renderD199/device/vendor'):
+    try:
+        os.open(path, os.O_RDONLY)
+    except OSError as error:
+        assert error.errno == errno.ENODEV, error
+    else:
+        raise AssertionError(path)
+try:
+    rocjitsu.enable({str(CONFIG)!r})
+except RuntimeError as error:
+    assert 'discovery' in str(error), str(error)
+else:
+    raise AssertionError('activation after PCI DRM discovery accepted')
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_global_activation_with_spawn_and_forkserver(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory, "spawn_test.py")
+            script.write_text(
+                f'''import json, multiprocessing as mp, os, pathlib, stat, sys
+import rocjitsu
+config = json.loads(pathlib.Path({str(CONFIG.with_name('gfx1250_mi455x.json'))!r}).read_text())
+rocjitsu.enable(config, cpu_thread_budget=1)
+
+def child(queue):
+    assert rocjitsu.is_enabled()
+    rocjitsu.enable(config, cpu_thread_budget=1)
+    fd = os.open('/dev/kfd', os.O_RDWR)
+    assert not stat.S_ISCHR(os.fstat(fd).st_mode)
+    os.close(fd)
+    versions = {{int(line.split()[1])
+        for path in pathlib.Path('/sys/class/kfd/kfd/topology/nodes').glob('*/properties')
+        for line in path.read_text().splitlines() if line.startswith('gfx_target_version ')}}
+    assert versions == {{0, 120500}}, versions
+    try:
+        rocjitsu.enable(config, cpu_thread_budget=2)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('changed inherited config accepted')
+    queue.put('child-ok')
+
+if __name__ == '__main__':
+    context = mp.get_context(sys.argv[1])
+    queue = context.Queue()
+    process = context.Process(target=child, args=(queue,))
+    process.start()
+    process.join(15)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        raise AssertionError('spawn child timed out')
+    assert process.exitcode == 0, process.exitcode
+    assert queue.get(timeout=5) == 'child-ok'
+    queue.close()
+    print('spawn-ok')
+'''
+            )
+            for method in ("spawn", "forkserver"):
+                with self.subTest(method=method):
+                    result = subprocess.run(
+                        [sys.executable, "-m", "rocjitsu", str(script), method],
+                        text=True,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("spawn-ok", result.stdout)
+
     def test_installed_package_does_not_inject_parent_site(self):
         with tempfile.TemporaryDirectory() as directory:
             site = Path(directory, "site-packages")
@@ -344,6 +477,77 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
                 [sys.executable, "-c", code], text=True, capture_output=True, timeout=30
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enable_cannot_replace_session_launch_configuration(self):
+        for mode in ("local", "daemon"):
+            with self.subTest(mode=mode), rocjitsu.Session(
+                CONFIG, mode=mode, cpu_thread_budget=1, capture_output=True
+            ) as session:
+                with self.assertRaisesRegex(
+                    rocjitsu.RemoteError, "native launch configuration"
+                ):
+                    session.run(rocjitsu.enable, CONFIG)
+                session.run(lambda: os.close(os.open("/dev/kfd", os.O_RDWR)))
+
+    def test_bootstrap_preserves_python_verbose_option(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "rocjitsu",
+                "-v",
+                "-c",
+                "print('python-verbose-ran')",
+            ],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("python-verbose-ran", result.stdout)
+
+    def test_pre_activation_refuses_device_and_metadata_paths(self):
+        code = f'''import ctypes, errno, os, rocjitsu
+libc = ctypes.CDLL(None, use_errno=True)
+libc.fopen.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+libc.fopen.restype = ctypes.c_void_p
+for path in ('/dev/kfd', '/dev/dri/renderD199', '/sys/class/drm/card0/device/vendor', '/sys/class/kfd/kfd/topology/nodes'):
+    for operation in (lambda: os.open(path, os.O_RDONLY), lambda: os.stat(path), lambda: os.lstat(path)):
+        try:
+            operation()
+        except OSError as error:
+            assert error.errno == errno.ENODEV, (path, error)
+        else:
+            raise AssertionError(path)
+    assert not libc.fopen(os.fsencode(path), b'r'), path
+    assert ctypes.get_errno() == errno.ENODEV
+    assert not os.access(path, os.F_OK)
+for path in ('/dev/dri', '/sys/class/drm', '/sys/class/kfd'):
+    try:
+        os.listdir(path)
+    except OSError as error:
+        assert error.errno == errno.ENODEV, (path, error)
+    else:
+        raise AssertionError(path)
+# Dirfd-relative device opens are refused too; opening /dev does not touch GPUs.
+fd = os.open('/dev', os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.open('dri/renderD199', os.O_RDONLY, dir_fd=fd)
+except OSError as error:
+    assert error.errno == errno.ENODEV, error
+else:
+    raise AssertionError('relative DRM open accepted')
+finally:
+    os.close(fd)
+try:
+    rocjitsu.enable({str(CONFIG)!r})
+except RuntimeError as error:
+    assert 'discovery' in str(error), str(error)
+else:
+    raise AssertionError('activation after discovery accepted')
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_worker_exit(self):
         with rocjitsu.Session(CONFIG) as session:
@@ -420,6 +624,28 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
             finally:
                 sys.path.remove(directory)
 
+    def test_enable_rejects_late_dlopen(self):
+        launcher = Path(rocjitsu.diagnostics()["executable"]).resolve()
+        candidates = (
+            launcher.parent / "../../librocjitsu.so",
+            launcher.parent / "../lib/librocjitsu.so",
+            launcher.parent / "../lib64/librocjitsu.so",
+        )
+        library = next(path.resolve() for path in candidates if path.exists())
+        code = f'''import ctypes, rocjitsu
+library = ctypes.CDLL({str(library)!r}, mode=ctypes.RTLD_GLOBAL)
+try:
+    rocjitsu.enable({str(CONFIG)!r})
+except RuntimeError as error:
+    assert 'preloaded' in str(error)
+else:
+    raise AssertionError('late dlopen accepted')
+'''
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_forked_child_cannot_use_parent_session(self):
         config = json.loads(CONFIG.read_text())
         config["cpu_thread_budget"] = 1
@@ -473,6 +699,10 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
                         with rocjitsu.Session(
                             CONFIG, mode="attach", env=env, capture_output=True
                         ) as session:
+                            with self.assertRaisesRegex(
+                                rocjitsu.RemoteError, "native launch configuration"
+                            ):
+                                session.run(rocjitsu.enable, CONFIG)
                             session.run(
                                 lambda: os.close(os.open("/dev/kfd", os.O_RDWR))
                             )
@@ -582,6 +812,300 @@ assert not rocjitsu.run(lambda: importlib.util.find_spec('parent_only_framework'
             with self.assertRaisesRegex(rocjitsu.RemoteError, "ModuleNotFoundError"):
                 session.run(lambda value: value, MissingModule())
             self.assertEqual(session.run(lambda: 17), 17)
+
+    def test_preload_only_rejects_configuration_and_daemon_options(self):
+        for option in (
+            "--cpu-thread-budget=0",
+            "--wait-checking=off",
+            "--node=local",
+            "--daemon",
+            "--attach",
+        ):
+            with self.subTest(option=option):
+                result = rocjitsu.cli(
+                    ["--preload-only", option, "--", sys.executable, "-c", "pass"],
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no configuration options", result.stderr)
+
+    def test_bootstrap_native_flags(self):
+        code = "import os; print(os.getpid()); os.close(os.open('/dev/kfd', os.O_RDWR))"
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "rocjitsu",
+                "--config",
+                str(CONFIG),
+                "--cpu-thread-budget",
+                "1",
+                "--",
+                "-c",
+                code,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertEqual(int(stdout.strip()), process.pid)
+
+    def test_enable_snapshot_budget_and_native_diagnostic(self):
+        code = f'''import rocjitsu, json, os, pathlib, tempfile
+try:
+    rocjitsu.enable({{'vm': {{'arch': 'invalid_arch'}}}})
+except RuntimeError as error:
+    assert 'arch' in str(error), str(error)
+else:
+    raise AssertionError('invalid config accepted')
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory, 'input.json')
+    path.write_bytes(pathlib.Path({str(CONFIG)!r}).read_bytes())
+    rocjitsu.enable(path, cpu_thread_budget=1)
+    rocjitsu.enable(path, cpu_thread_budget=1)
+    path.unlink()
+handoff = pathlib.Path(os.environ['ROCJITSU_INVOCATION_DIR'], 'config_path')
+effective = pathlib.Path(handoff.read_text().strip())
+assert json.loads(effective.read_text())['cpu_thread_budget'] == 1
+os.close(os.open('/dev/kfd', os.O_RDWR))
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enable_requires_preloading(self):
+        code = f"import rocjitsu; rocjitsu.enable({str(CONFIG)!r})"
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("python -m rocjitsu", result.stderr)
+
+    def test_enable_idempotence_and_config_change(self):
+        code = f'''import rocjitsu, json, os, pathlib, tempfile
+config = json.load(open({str(CONFIG)!r}))
+pid = os.getpid()
+rocjitsu.enable(config)
+rocjitsu.enable(config)
+rocjitsu.enable({str(CONFIG)!r})
+with tempfile.TemporaryDirectory() as directory:
+    relaxed = pathlib.Path(directory, 'relaxed.json')
+    relaxed.write_text('// native JSON comment\\n' + json.dumps(config))
+    rocjitsu.enable(relaxed)
+os.close(os.open('/dev/kfd', os.O_RDWR))
+rocjitsu.enable(config)
+assert rocjitsu.is_enabled() and pid == os.getpid()
+config['cpu_thread_budget'] = 3
+try:
+    rocjitsu.enable(config)
+except RuntimeError as error:
+    assert 'different configuration' in str(error)
+else:
+    raise AssertionError('configuration change accepted')
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enable_rejects_prior_discovery(self):
+        code = f'''import rocjitsu, os
+try:
+    os.open('/dev/kfd', os.O_RDWR)
+except OSError:
+    pass
+try:
+    rocjitsu.enable({str(CONFIG)!r})
+except RuntimeError as error:
+    assert 'discovery' in str(error), str(error)
+else:
+    raise AssertionError('late activation accepted')
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enable_bad_config_can_be_retried(self):
+        code = f'''import rocjitsu
+cases = [
+    ({{'not_a_config_field': 1}}, ''),
+    ({{'dbt_guest': {{'guest_device': {{'num_sdma_engines': 1}}}}}},
+     'dbt_guest.guest_device.num_sdma_queues_per_engine'),
+    ({{'vm': {{'arch': 'rdna4', 'gpu': {{'device': {{'num_sdma_engines': 1}}}}}}}},
+     'vm.gpu.device.num_sdma_queues_per_engine'),
+]
+for config, diagnostic in cases:
+    try:
+        rocjitsu.enable(config)
+    except RuntimeError as error:
+        assert diagnostic in str(error), str(error)
+    else:
+        raise AssertionError('bad config accepted')
+    assert not rocjitsu.is_enabled()
+rocjitsu.enable({str(CONFIG)!r})
+assert rocjitsu.is_enabled()
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_non_gpu_lookup_preserves_activation(self):
+        code = f'''import errno, os, tempfile, rocjitsu
+directory = tempfile.mkdtemp()
+os.chdir(directory)
+os.rmdir(directory)
+try:
+    os.stat('not-a-gpu-file')
+except OSError as error:
+    assert error.errno == errno.ENOENT, error
+else:
+    raise AssertionError('missing file unexpectedly exists')
+os.chdir('/')
+try:
+    os.stat('not-a-gpu-file', dir_fd=-1)
+except OSError as error:
+    assert error.errno == errno.EBADF, error
+else:
+    raise AssertionError('invalid directory descriptor accepted')
+rocjitsu.enable({str(CONFIG)!r})
+assert rocjitsu.is_enabled()
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_exec_child_after_enabling_parent_exit_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result_path = Path(directory, "child-result")
+            child_errors = Path(directory, "child-stderr")
+            Path(directory, "config_path").write_text(str(CONFIG))
+            child_code = f'''import errno, os, pathlib, sys, time
+parent = int(sys.argv[1])
+deadline = time.monotonic() + 10
+while os.getppid() == parent and time.monotonic() < deadline:
+    time.sleep(0.01)
+assert os.getppid() != parent, 'enabling parent did not exit'
+try:
+    fd = os.open('/dev/kfd', os.O_RDWR)
+except OSError as error:
+    assert error.errno == errno.ENODEV, error
+else:
+    os.close(fd)
+    raise AssertionError('child reused another config after enabling parent exit')
+pathlib.Path({str(result_path)!r}).write_text('failed-closed')
+'''
+            code = f'''import os, rocjitsu, subprocess, sys
+rocjitsu.enable({str(CONFIG.with_name('gfx1250_mi455x.json'))!r}, cpu_thread_budget=1)
+with open({str(child_errors)!r}, 'w') as errors:
+    subprocess.Popen([sys.executable, '-c', {child_code!r}, str(os.getpid())],
+                     env=dict(os.environ, ROCJITSU_RUNTIME_DIR={directory!r}),
+                     stdout=subprocess.DEVNULL, stderr=errors)
+'''
+            parent = self.bootstrap(code)
+            self.assertEqual(parent.returncode, 0, parent.stderr)
+            deadline = time.monotonic() + 10
+            while not result_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(result_path.exists(), child_errors.read_text())
+            self.assertEqual(result_path.read_text(), "failed-closed")
+
+    def test_enabled_config_reaches_exec_children(self):
+        code = f'''import rocjitsu, json, subprocess, sys
+config = json.load(open({str(CONFIG.with_name('gfx1250_mi455x.json'))!r}))
+config['cpu_thread_budget'] = 1
+rocjitsu.enable(config)
+subprocess.run([sys.executable, '-c', """
+import os, pathlib, stat
+fd = os.open('/dev/kfd', os.O_RDWR)
+assert not stat.S_ISCHR(os.fstat(fd).st_mode)
+os.close(fd)
+versions = {{int(line.split()[1])
+    for path in pathlib.Path('/sys/class/kfd/kfd/topology/nodes').glob('*/properties')
+    for line in path.read_text().splitlines() if line.startswith('gfx_target_version ')}}
+assert versions == {{0, 120500}}, versions
+"""], check=True)
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_inherited_activation_does_not_use_another_default_config(self):
+        code = f'''import errno, os, pathlib, rocjitsu, subprocess, sys, tempfile
+rocjitsu.enable({str(CONFIG.with_name('gfx1250_mi455x.json'))!r}, cpu_thread_budget=1)
+pathlib.Path(os.environ['ROCJITSU_INVOCATION_DIR'], 'config_path').unlink()
+with tempfile.TemporaryDirectory() as directory:
+    pathlib.Path(directory, 'config_path').write_text({str(CONFIG)!r})
+    environment = dict(os.environ, ROCJITSU_RUNTIME_DIR=directory)
+    subprocess.run([sys.executable, '-c', """
+import errno, os
+try:
+    descriptor = os.open('/dev/kfd', os.O_RDWR)
+except OSError as error:
+    assert error.errno == errno.ENODEV, error
+else:
+    os.close(descriptor)
+    raise AssertionError('inherited activation used another default config')
+"""], env=environment, check=True)
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_activated_directory_relative_metadata_uses_simulated_topology(self):
+        code = f'''import ctypes, os, pathlib, rocjitsu
+rocjitsu.enable({str(CONFIG)!r}, cpu_thread_budget=1)
+path = '/sys/class/kfd/kfd/topology/nodes/1/properties'
+expected = os.stat(path)
+assert expected.st_size > 0
+root = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for name in (path, path.lstrip('/')):
+        observed = os.stat(name, dir_fd=root, follow_symlinks=False)
+        assert (observed.st_dev, observed.st_ino) == (expected.st_dev, expected.st_ino)
+        assert os.access(name, os.R_OK, dir_fd=root, follow_symlinks=False)
+    # CPU-only hosts have /dev but may have no /dev/dri directory.
+    device_directory = os.open('/dev', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        expected_drm = os.stat('/dev/dri/renderD128')
+        observed_drm = os.stat('dri/renderD128', dir_fd=device_directory)
+        assert (observed_drm.st_mode, observed_drm.st_rdev) == (expected_drm.st_mode, expected_drm.st_rdev)
+    finally:
+        os.close(device_directory)
+    directory = os.open('/sys/dev/char', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        link = '/sys/dev/char/226:128'
+        def read_link(name, **options):
+            try:
+                return ('target', os.readlink(name, **options))
+            except OSError as error:
+                return ('errno', error.errno)
+        assert read_link('226:128', dir_fd=directory) == read_link(link)
+    finally:
+        os.close(directory)
+
+    # statx has a Linux-defined layout independent of libc's struct stat aliases.
+    class Statx(ctypes.Structure):
+        _fields_ = [('mask', ctypes.c_uint), ('blksize', ctypes.c_uint),
+                    ('attributes', ctypes.c_uint64), ('nlink', ctypes.c_uint),
+                    ('uid', ctypes.c_uint), ('gid', ctypes.c_uint),
+                    ('mode', ctypes.c_uint16), ('spare', ctypes.c_uint16),
+                    ('ino', ctypes.c_uint64), ('rest', ctypes.c_byte * 216)]
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.statx.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                          ctypes.c_uint, ctypes.POINTER(Statx)]
+    metadata = Statx()
+    assert ctypes.sizeof(metadata) == 256
+    assert libc.statx(root, path.lstrip('/').encode(), 0, 0x7ff,
+                      ctypes.byref(metadata)) == 0, ctypes.get_errno()
+    assert metadata.ino == expected.st_ino
+    assert metadata.mode == expected.st_mode
+    drm = os.open('/dev/dri/renderD128', os.O_RDWR)
+    try:
+        expected_drm = os.fstat(drm)
+        assert libc.statx(drm, b'', 0x1000, 0x7ff,
+                          ctypes.byref(metadata)) == 0, ctypes.get_errno()
+        assert metadata.mode == expected_drm.st_mode
+    finally:
+        os.close(drm)
+finally:
+    os.close(root)
+'''
+        result = self.bootstrap(code)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

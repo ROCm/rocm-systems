@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run with --mode worker or hardware; see ../README.md."""
+"""Run with --mode worker, global, or hardware; see ../README.md."""
 
 import argparse
 import json
@@ -22,7 +22,9 @@ def report(result, expected_arch, simulated):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("worker", "hardware"), required=True)
+    parser.add_argument(
+        "--mode", choices=("worker", "global", "hardware"), required=True
+    )
     parser.add_argument("--config", type=Path)
     parser.add_argument("--arch", required=True)
     parser.add_argument("--hardware-index", type=int)
@@ -34,6 +36,12 @@ def main():
         config["vm"]["gpu"]["device"]["marketing_name"] = (
             "Rocjitsu Python simulated " + args.arch
         )
+    if args.mode == "global":
+        before = os.getpid()
+        rocjitsu.enable(config)
+        assert os.getpid() == before
+
+    # Global activation precedes framework imports and all device discovery.
     import torch
     from toy_kernels import check, gpu_tensor
 
@@ -48,9 +56,23 @@ def main():
     )
     if args.mode == "hardware":
         hardware()
+    elif args.mode == "global":
+        for framework in ("pytorch", "triton"):
+            result = check(framework)
+            assert result["pid"] == before
+            report(result, args.arch, True)
+        rocjitsu.enable(config)
+        print("global activation retained interpreter PID", flush=True)
     else:
         if args.hardware_index is not None:
             hardware()
+            try:
+                rocjitsu.enable(config)
+            except RuntimeError as error:
+                assert "initialization" in str(error)
+                print("late global activation rejected: " + str(error), flush=True)
+            else:
+                raise AssertionError("late global activation accepted")
         for framework in ("pytorch", "triton"):
             result = rocjitsu.run(check, framework, config=config, timeout=120)
             assert result["pid"] != os.getpid()

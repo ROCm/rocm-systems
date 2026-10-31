@@ -1,10 +1,12 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Callable worker lifetimes and subprocess execution."""
+"""Callable worker lifetimes and startup-only process activation."""
 
 import atexit
 import codecs
+import ctypes
+import errno
 import os
 from pathlib import Path
 import socket
@@ -16,6 +18,9 @@ import time
 
 from ._launch import (
     Config,
+    INVOCATION_DIR_ENV,
+    PROGRAMMATIC_ENV,
+    budget_option,
     environment,
     launcher,
     launch_options,
@@ -427,3 +432,114 @@ def run(
         log_limit=log_limit,
     ) as session:
         return session.run(function, *args, timeout=timeout, **kwargs)
+
+
+_enabled_config = None
+_enabled_pid = None
+_enable_lock = threading.Lock()
+
+
+def _after_fork():
+    global _enable_lock
+    _enable_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork)
+
+
+def is_enabled():
+    """Whether this process owns global activation, including exec/spawn inheritance.
+
+    This does not report configured CLI/Session mode or GPU runtime health.
+    A fork that inherited an initialized GPU context returns False.
+    """
+    try:
+        query = ctypes.CDLL(None).rj_interposer_is_enabled
+    except AttributeError:
+        return False
+    query.argtypes = []
+    query.restype = ctypes.c_int
+    return bool(query())
+
+
+def enable(config, *, cpu_thread_budget=None):
+    """Enable process-wide simulation before GPU discovery or initialization.
+
+    Start Python with ``python -m rocjitsu script.py`` to preload the interposer.
+    This function never restarts the interpreter. Activation is one-way, and
+    changing configuration requires a new process. Keep this interpreter alive
+    until forked/exec children finish GPU work. Use Session for isolation.
+    """
+    global _enabled_config, _enabled_pid
+    budget_option(cpu_thread_budget)
+    # Check before taking a lock that could have been held across fork.
+    if _enabled_pid is not None and _enabled_pid != os.getpid():
+        if not is_enabled():
+            raise RuntimeError(
+                "Cannot enable an inherited Python GPU context after fork"
+            )
+        # An unused native context can be reconstructed by the atfork handler,
+        # notably in a forkserver. Config ownership remains with the parent.
+        _enabled_pid = os.getpid()
+    with _enable_lock:
+        candidate = Config(config)
+        try:
+            torch = sys.modules.get("torch")
+            if torch is not None and torch.cuda.is_initialized() and not is_enabled():
+                raise RuntimeError(
+                    "enable() must precede GPU initialization; use a Session for simulation"
+                )
+            try:
+                activate = ctypes.CDLL(None).rj_interposer_enable
+            except AttributeError:
+                raise RuntimeError(
+                    "Start with 'python -m rocjitsu script.py' before calling enable()"
+                ) from None
+            activate.argtypes = [
+                ctypes.c_char_p,
+                ctypes.c_char_p,
+                ctypes.POINTER(ctypes.c_uint32),
+                ctypes.c_char_p,
+                ctypes.c_size_t,
+            ]
+            activate.restype = ctypes.c_int
+            handoff = candidate.prepare_directory()
+            budget = (
+                None
+                if cpu_thread_budget is None
+                else ctypes.c_uint32(cpu_thread_budget)
+            )
+            detail = ctypes.create_string_buffer(4096)
+            status = activate(
+                os.fsencode(candidate.path),
+                os.fsencode(handoff),
+                None if budget is None else ctypes.byref(budget),
+                detail,
+                len(detail),
+            )
+            if status not in (0, errno.EALREADY):
+                reason = {
+                    errno.EBUSY: "GPU discovery has already started",
+                    errno.ENOTSUP: "the interposer must be preloaded with --preload-only",
+                    errno.EINVAL: "invalid or unsupported simulation configuration",
+                }.get(status, os.strerror(status))
+                diagnostic = detail.value.decode(errors="replace") or reason
+                raise RuntimeError(f"Cannot enable Rocjitsu: {diagnostic}")
+            if status == errno.EALREADY:
+                _enabled_pid = os.getpid()
+                return
+            # Fresh exec children inherit the config just as CLI-launched
+            # children do. The current interposer retains its activation state.
+            if status == 0:
+                os.environ[INVOCATION_DIR_ENV] = handoff
+                # Distinguish global-activation descendants from configured CLI
+                # launches; spawn can repeat an identical top-level enable().
+                os.environ[PROGRAMMATIC_ENV] = "2"
+            _enabled_config = candidate
+            _enabled_pid = os.getpid()
+            atexit.register(candidate.close)
+            candidate = None
+        finally:
+            if candidate is not None:
+                candidate.close()

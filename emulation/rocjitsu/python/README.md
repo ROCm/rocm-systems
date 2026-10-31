@@ -1,8 +1,13 @@
 # Python execution API
 
-The `rocjitsu` package runs Python GPU workloads on simulated AMD GPUs from
-scripts, tests, interactive shells, or notebooks. `run` executes a callable in
-a fresh subprocess; `Session` reuses a worker across calls.
+The `rocjitsu` package runs Python GPU workloads on simulated AMD GPUs. Use it
+from scripts, tests, interactive shells, or notebooks. It provides two execution
+styles:
+
+- `run` executes a callable in a fresh subprocess; `Session` reuses a worker
+  across calls.
+- `enable` activates simulation in the current interpreter, started through
+  `python -m rocjitsu` before GPU discovery.
 
 The package also exposes installed configuration presets, native CLI access,
 and installation diagnostics. Linux and a matching native Rocjitsu runtime are
@@ -179,7 +184,7 @@ DBT config references, use absolute paths because the mapping is materialized
 in a temporary directory.
 
 `Session` and `run` expose the launch options in the table above. Other native
-flags apply to whole programs launched with `cli()`.
+flags apply to whole programs launched with `cli()` or `python -m rocjitsu --native`.
 All launch keywords in the convenience `run` function are reserved. To pass a
 workload argument with the same name, wrap it in a closure or `functools.partial`.
 In `Session.run`, only `timeout` is reserved. The private control protocol requires
@@ -206,17 +211,86 @@ Both interpreters must have the same Python major/minor/patch and cloudpickle
 versions, compatible serialization dependencies, and access to imported workload
 modules. The calling process can continue using its physical GPU between calls.
 
-## Daemon execution
+## Main-process activation
 
-Use `Session(mode="daemon")` to start a simulator owned by that session, or
-`Session(mode="attach")` to reuse an existing daemon. Closing an attached
-session leaves the daemon running for other clients. A daemon's devices and
-configuration are fixed when it starts; Python does not request new devices
-or reconfigure a running daemon.
+Start a fresh interpreter with the bootstrap:
 
-The caller can continue using its physical GPU while submitting simulated work
-to a session. Simulation runtime measurements are not hardware performance
-measurements; avoid using simulator timings to tune GPU kernels.
+```sh
+python -m rocjitsu app.py
+# Also supported: python -m rocjitsu -m your_module
+# Equivalent native CLI invocation, using this environment's Python:
+rocjitsu --preload-only -- python app.py
+# Configure at launch for a script that does not call enable():
+python -m rocjitsu --config gpu.json --cpu-thread-budget 2 -- preconfigured_app.py
+# Every native flag is accessible without Python application wrapping:
+python -m rocjitsu --native --help
+```
+
+Then `app.py` selects the configuration before importing GPU frameworks:
+
+```python
+import rocjitsu
+rocjitsu.enable(rocjitsu.config.gfx1201_r9700)
+
+import torch
+x = torch.arange(257, device="cuda", dtype=torch.float32)
+print((x + 1).cpu())
+```
+
+`enable` activates the existing interpreter: it does not restart the script,
+change its PID, or move following statements into a subprocess. Bootstrap
+preloads the native interposer before Python starts; activation requires the
+matching native version with `--preload-only` support. Calling `enable` in an
+ordinary, unprepared interpreter raises an actionable error. In an
+interpreter whose startup command cannot be changed, use `run` or `Session`.
+
+The configured launch form selects the simulation before Python starts.
+`preconfigured_app.py` must not call `enable()`, and neither should callables
+submitted to a `Session`: those workers already have their launch configuration.
+`is_enabled()` specifically queries global activation, not configured launches.
+
+Activation is one-way and must happen before any GPU discovery or workload.
+Repeated calls with the same configuration are harmless; reconfiguration is
+rejected. A library may initialize HIP during an import or availability check,
+so activate before framework imports. GPU discovery before activation fails
+without falling back to hardware. Global activation validates and snapshots the config into a private directory;
+the original file can then be edited or removed. DBT configurations remain available
+through the normal CLI and session launcher; global activation accepts local
+simulation configs only.
+
+New exec/spawn children inherit the activated configuration and preloading.
+They may repeat `enable` with the same effective config and budget; this supports
+scripts with top-level activation used by multiprocessing `spawn` and
+`forkserver`. `is_enabled()` includes inherited global activation and returns
+false for a fork that inherited an already initialized GPU context. It reports
+global activation, not configured CLI/Session mode or runtime health.
+
+The interpreter that calls `enable()` owns its config handoff. Keep that
+interpreter alive until forked and exec children finish their GPU work. Children
+that first initialize after it exits cannot inherit its configuration.
+Forking after GPU
+initialization does not create a usable GPU context in the child; use a fresh
+interpreter, as with ordinary accelerator multiprocessing.
+
+Each inherited child initializes its own local simulator. To share one
+simulated GPU across processes, use native daemon/attach launch modes, also
+available through `Session(mode="daemon")` and `Session(mode="attach")`.
+
+`enable()` and `--preload-only` always select local simulation and cannot be
+combined with daemon or attach mode. A daemon's devices and configuration are
+fixed when it starts; Python does not request new devices or reconfigure a
+running daemon. `mode="daemon"` starts a simulator owned by that session, while
+`mode="attach"` lets multiple sessions reuse an existing simulator and leaves
+it running when they close. To use a daemon in the main interpreter, launch
+`python -m rocjitsu --daemon --config gpu.json -- app.py`, or use `--attach`
+for an existing daemon. Such an application uses its launch configuration and
+must not call `enable()`.
+
+Switching an initialized HIP/PyTorch interpreter between hardware and simulation
+is unsupported: device discovery, allocations, queues, and framework caches
+outlive Python scopes. `Session` is the supported boundary for alternating
+hardware and simulation. Simulation runtime measurements are not hardware
+performance measurements; avoid using simulator timings to tune GPU kernels.
 
 ## Notebook example
 
@@ -264,10 +338,16 @@ simulator allocation backing. With a compatible ROCm/PyTorch/Triton environment:
 ```sh
 python python/examples/check_api.py --mode worker --arch gfx1201 \
   --config configs/gfx1201_r9700.json --hardware-index 0
+python -m rocjitsu python/examples/check_api.py --mode global --arch gfx1201 \
+  --config configs/gfx1201_r9700.json
 python python/examples/check_api.py --mode worker --arch gfx1250 \
+  --config configs/gfx1250_mi455x.json
+python -m rocjitsu python/examples/check_api.py --mode global --arch gfx1250 \
   --config configs/gfx1250_mi455x.json
 ```
 
 Select the hardware index whose properties report `gfx1201`. The worker test
 with that option alternates physical PyTorch/Triton execution in one parent
-interpreter with simulated execution in the persistent worker.
+interpreter with simulated execution in the persistent worker, and verifies
+that late global activation is rejected. The global test verifies that both
+simulated frameworks execute in the PID that called `enable`.

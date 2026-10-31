@@ -18,6 +18,7 @@ from . import config as presets
 
 INVOCATION_DIR_ENV = "ROCJITSU_INVOCATION_DIR"
 DAEMON_PID_ENV = "ROCJITSU_DAEMON_PID"
+PROGRAMMATIC_ENV = "ROCJITSU_PROGRAMMATIC"
 
 
 def launcher():
@@ -81,7 +82,7 @@ class Config:
         config = presets._resolve(config)
         if isinstance(config, Mapping):
             text = json.dumps(dict(config), allow_nan=False)
-            self.directory = tempfile.mkdtemp(prefix="rocjitsu-python-")
+            self.prepare_directory()
             self.path = str(Path(self.directory) / "config.json")
             try:
                 Path(self.path).write_text(text, encoding="utf-8")
@@ -95,6 +96,11 @@ class Config:
             if not Path(self.path).is_file():
                 raise ValueError("config must name a file")
 
+    def prepare_directory(self):
+        if self.directory is None:
+            self.directory = tempfile.mkdtemp(prefix="rocjitsu-python-")
+        return self.directory
+
     def close(self):
         if self.directory is not None and self._owner == os.getpid():
             shutil.rmtree(self.directory, ignore_errors=True)
@@ -107,6 +113,7 @@ def environment(env=None):
     # Each invocation gets its own handoff. Never reuse a parent's VM/daemon.
     result.pop(INVOCATION_DIR_ENV, None)
     result.pop(DAEMON_PID_ENV, None)
+    result.pop(PROGRAMMATIC_ENV, None)
     # The chosen interpreter must have this package installed. Adding the
     # caller's package parent here would inject its entire site-packages into
     # a different ROCm environment, replacing that worker's framework stack.

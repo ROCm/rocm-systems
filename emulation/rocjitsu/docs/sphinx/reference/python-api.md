@@ -5,6 +5,7 @@ simulated AMD GPUs. Scripts, tests, interactive shells, and notebooks use the
 same API:
 
 - `run` and `Session` execute Python callables in subprocess workers.
+- `enable` activates simulation in a prepared main interpreter.
 - `config`, `cli`, and `diagnostics` expose installed presets, native commands,
   and installation information.
 
@@ -68,13 +69,49 @@ with rocjitsu.Session(
     result = sim.run(add_one)
 ```
 
+## Main-process activation
+
+Start the application with the interposer preloaded:
+
+```sh
+python -m rocjitsu app.py
+# Equivalent native CLI invocation:
+rocjitsu --preload-only -- python app.py
+```
+
+In `app.py`, activate simulation before GPU discovery or framework imports:
+
+```python
+import rocjitsu
+rocjitsu.enable(rocjitsu.config.gfx1250_mi455x)
+
+import torch
+print((torch.arange(8, device="cuda") + 1).cpu())
+```
+
+`enable` keeps execution in the same interpreter. Activation is one-way;
+changing configuration requires a new process. Importing the package alone
+does not prepare an ordinary interpreter for activation. Use `run` or `Session`
+when the calling interpreter is already running without the preload setup.
+
 ## Daemon execution
 
+`enable()` and `--preload-only` configure local simulation in the current process.
 For a simulator shared by multiple processes, use `Session(mode="daemon")` to
 start a session-owned daemon, or `Session(mode="attach")` to connect to an
 existing daemon. Closing an attached session leaves the daemon running for
 other clients. Its devices and configuration are fixed at daemon startup;
 the Python API does not request new devices or reconfigure it.
+
+For daemon execution in the main interpreter, select the mode at launch:
+
+```sh
+python -m rocjitsu --daemon --config gpu.json -- app.py
+# Or attach to an existing daemon:
+python -m rocjitsu --attach --config gpu.json -- app.py
+```
+
+These launches already configure the runtime, so `app.py` must not call `enable()`.
 
 ## Notebook example
 
@@ -85,4 +122,5 @@ IPython integration; `%pip` is the notebook equivalent of the installation
 command above.
 
 See the [package documentation](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/python/README.md)
-for installation, callable transport, launch options and errors, and the [CLI reference](rocjitsu-cli.md) for native launch modes.
+for installation, callable transport, launch options, errors and activation
+inheritance, and the [CLI reference](rocjitsu-cli.md) for native launch modes.
