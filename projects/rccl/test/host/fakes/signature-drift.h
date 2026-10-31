@@ -14,6 +14,13 @@
 // compile error. Use it in a fakes .cc once the hooks and the production
 // declarations are both visible:
 //   ASSERT_HOOK_MATCHES_PROD(g_someHook, someProdSymbol);
+//
+// ASSERT_HOOK_MATCHES_SIG is the same guarantee for an OVERLOADED production
+// symbol, where `&sym` is ambiguous and the macro above will not compile --
+// the nccl_device team accessors are each declared twice, a host overload
+// taking ncclComm_t and a device one taking ncclDevComm const&. Name the
+// overload you are standing in for by hand:
+//   ASSERT_HOOK_MATCHES_SIG(g_ncclTeamWorld, ncclTeam_t(ncclComm_t));
 
 #include <functional>
 #include <type_traits>
@@ -34,6 +41,13 @@ constexpr bool HookMatchesProd() {
     static_assert(::rccl_test_host::HookMatchesProd<decltype(hook),           \
                                                     decltype(&prod)>(),       \
                   "signature drift: " #hook " no longer matches " #prod       \
+                  " -- update the std::function hook signature to match")
+
+#define ASSERT_HOOK_MATCHES_SIG(hook, sig)                                    \
+    static_assert(std::is_same_v<::rccl_test_host::FnSigOf_t<decltype(hook)>, \
+                                 sig>,                                        \
+                  "signature drift: " #hook " no longer matches the " #sig    \
+                  " overload it stands in for"                                \
                   " -- update the std::function hook signature to match")
 
 #endif  // RCCL_TEST_HOST_SIGNATURE_DRIFT_H_
