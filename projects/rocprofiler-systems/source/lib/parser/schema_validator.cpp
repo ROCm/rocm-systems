@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <set>
@@ -34,6 +35,9 @@ namespace rocprofsys::parser
 {
 namespace
 {
+constexpr std::size_t k_max_regex_subject = 4096;
+constexpr double      k_int64_upper       = 0x1p63;
+
 std::optional<std::int64_t>
 parse_integer(std::string_view value)
 {
@@ -87,6 +91,11 @@ parse_number(std::string_view value)
 std::optional<bool>
 parse_boolean(std::string_view value)
 {
+    if(value.empty())
+    {
+        return false;
+    }
+
     constexpr auto k_tokens = std::array{
         std::pair{ std::string_view{ "true" }, true },
         std::pair{ std::string_view{ "false" }, false },
@@ -94,6 +103,8 @@ parse_boolean(std::string_view value)
         std::pair{ std::string_view{ "no" }, false },
         std::pair{ std::string_view{ "on" }, true },
         std::pair{ std::string_view{ "off" }, false },
+        std::pair{ std::string_view{ "y" }, true },
+        std::pair{ std::string_view{ "n" }, false },
         std::pair{ std::string_view{ "1" }, true },
         std::pair{ std::string_view{ "0" }, false },
     };
@@ -105,7 +116,29 @@ parse_boolean(std::string_view value)
             return result;
         }
     }
-    return std::nullopt;
+
+    const auto parsed = parse_integer(value);
+    if(!parsed)
+    {
+        return std::nullopt;
+    }
+    return *parsed != 0;
+}
+
+[[nodiscard]] std::optional<std::int64_t>
+exact_integer_bound(double bound)
+{
+    const auto lowest = static_cast<double>(std::numeric_limits<std::int64_t>::min());
+    if(bound < lowest || bound >= k_int64_upper)
+    {
+        return std::nullopt;
+    }
+    const auto as_integer = static_cast<std::int64_t>(bound);
+    if(static_cast<double>(as_integer) != bound)
+    {
+        return std::nullopt;
+    }
+    return as_integer;
 }
 
 bool
@@ -115,10 +148,26 @@ is_within_bounds(double value, const schema_param& param)
 }
 
 bool
+integer_bound_holds(std::int64_t value, const std::optional<double>& bound, bool minimum)
+{
+    if(!bound)
+    {
+        return true;
+    }
+    const auto exact = exact_integer_bound(*bound);
+    if(!exact)
+    {
+        return false;
+    }
+    return minimum ? value >= *exact : value <= *exact;
+}
+
+bool
 is_valid_integer(const schema_param& param, std::string_view value)
 {
     const auto parsed = parse_integer(value);
-    return parsed && is_within_bounds(static_cast<double>(*parsed), param);
+    return parsed && integer_bound_holds(*parsed, param.min, true) &&
+           integer_bound_holds(*parsed, param.max, false);
 }
 
 bool
@@ -135,10 +184,15 @@ matches_pattern(const schema_param& param, std::string_view value)
     {
         return true;
     }
+    if(param.pattern->size() > k_max_regex_subject || value.size() > k_max_regex_subject)
+    {
+        return false;
+    }
 
     try
     {
-        return std::regex_match(value.begin(), value.end(), std::regex{ *param.pattern });
+        const std::regex pattern{ *param.pattern };
+        return std::regex_match(value.begin(), value.end(), pattern);
     } catch(const std::regex_error&)
     {
         return false;
@@ -156,26 +210,14 @@ is_valid_choice(const schema_param& param, std::string_view value)
 bool
 is_valid_list(const schema_param& param, std::string_view value)
 {
-    if(value.empty())
+    const auto parts = split_list(value, list_separator(param));
+    if(!parts)
     {
-        return true;
+        return false;
     }
-
-    const auto separator = list_separator(param);
-    while(true)
-    {
-        const auto pos     = value.find(separator);
-        const auto element = utility::string::trim(value.substr(0, pos));
-        if(element.empty() || !is_valid_choice(param, element))
-        {
-            return false;
-        }
-        if(pos == std::string_view::npos)
-        {
-            return true;
-        }
-        value.remove_prefix(pos + separator.size());
-    }
+    return std::ranges::all_of(*parts, [&param](const std::string& element) {
+        return !element.empty() && is_valid_choice(param, element);
+    });
 }
 
 bool
@@ -187,7 +229,13 @@ values_equal(const schema_param& param, std::string_view lhs, std::string_view r
         const auto rhs_value = parse_boolean(rhs);
         return lhs_value && rhs_value && *lhs_value == *rhs_value;
     }
-    if(param.type == param_type::integer || param.type == param_type::number)
+    if(param.type == param_type::integer)
+    {
+        const auto lhs_value = parse_integer(lhs);
+        const auto rhs_value = parse_integer(rhs);
+        return lhs_value && rhs_value && *lhs_value == *rhs_value;
+    }
+    if(param.type == param_type::number)
     {
         const auto lhs_value = parse_number(lhs);
         const auto rhs_value = parse_number(rhs);
@@ -243,13 +291,13 @@ private:
         {
             return false;
         }
-        const auto value = effective_value(*param);
-        if(!value || value->empty())
+        const auto provided = m_values.find(param_id);
+        if(provided == m_values.end() || provided->second.empty())
         {
             return false;
         }
         return param->type != param_type::boolean ||
-               parse_boolean(*value).value_or(false);
+               parse_boolean(provided->second).value_or(false);
     }
 
     [[nodiscard]] bool holds(const param_condition& term) const
@@ -407,6 +455,200 @@ private:
     std::vector<violation>                        m_violations;
     std::set<std::pair<std::string, std::string>> m_reported_pairs;
 };
+
+void
+report_catalog(std::vector<violation>& errors, std::string message,
+               std::vector<std::string> params)
+{
+    errors.push_back(violation{ .level   = severity::error,
+                                .message = std::move(message),
+                                .params  = std::move(params) });
+}
+
+void
+require_known(const schema& config_schema, std::string_view owner,
+              std::string_view target, std::vector<violation>& errors)
+{
+    if(config_schema.find_param(target) != nullptr)
+    {
+        return;
+    }
+    report_catalog(
+        errors,
+        fmt::format("parameter '{}' refers to unknown parameter '{}'", owner, target),
+        { std::string{ owner }, std::string{ target } });
+}
+
+void
+require_known_ids(const schema& config_schema, std::string_view owner,
+                  const std::vector<std::string>& targets, std::vector<violation>& errors)
+{
+    for(const auto& target : targets)
+    {
+        require_known(config_schema, owner, target, errors);
+    }
+}
+
+void
+check_references(const schema& config_schema, const schema_param& param,
+                 std::vector<violation>& errors)
+{
+    if(param.depends_on)
+    {
+        require_known(config_schema, param.id, param.depends_on->param, errors);
+    }
+    require_known_ids(config_schema, param.id, param.mutually_exclusive_with, errors);
+    require_known_ids(config_schema, param.id, param.prerequisites, errors);
+    require_known_ids(config_schema, param.id, param.copy_to, errors);
+    require_known_ids(config_schema, param.id, param.fills, errors);
+    for(const auto& [target, ignored] : param.assigns)
+    {
+        static_cast<void>(ignored);
+        require_known(config_schema, param.id, target, errors);
+    }
+    for(const auto& mapping : param.maps_to)
+    {
+        require_known(config_schema, param.id, mapping.target, errors);
+    }
+    for(const auto& item : param.choices)
+    {
+        for(const auto& [target, ignored] : item.sets)
+        {
+            static_cast<void>(ignored);
+            require_known(config_schema, param.id, target, errors);
+        }
+    }
+    if(param.arg)
+    {
+        require_known_ids(config_schema, param.id, param.arg->binds, errors);
+    }
+}
+
+void
+check_argument_counts(const schema_param& param, std::vector<violation>& errors)
+{
+    if(!param.arg)
+    {
+        return;
+    }
+    const auto& argument = *param.arg;
+    if(argument.min_count && argument.max_count &&
+       *argument.min_count > *argument.max_count)
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' accepts fewer arguments than its "
+                                   "minimum",
+                                   param.id),
+                       { param.id });
+    }
+    if(argument.max_count && argument.binds.size() > *argument.max_count)
+    {
+        report_catalog(
+            errors,
+            fmt::format("parameter '{}' binds more arguments than it accepts", param.id),
+            { param.id });
+    }
+}
+
+void
+check_bounds(const schema_param& param, std::vector<violation>& errors)
+{
+    if(param.min && param.max && *param.min > *param.max)
+    {
+        report_catalog(
+            errors,
+            fmt::format("parameter '{}' has a minimum greater than its maximum",
+                        param.id),
+            { param.id });
+    }
+    if(param.type != param_type::integer)
+    {
+        return;
+    }
+    if(param.min && !exact_integer_bound(*param.min))
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' has a non-integer minimum", param.id),
+                       { param.id });
+    }
+    if(param.max && !exact_integer_bound(*param.max))
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' has a non-integer maximum", param.id),
+                       { param.id });
+    }
+}
+
+void
+check_pattern(const schema_param& param, std::vector<violation>& errors)
+{
+    if(!param.pattern || param.pattern->size() > k_max_regex_subject)
+    {
+        if(param.pattern)
+        {
+            report_catalog(errors,
+                           fmt::format("parameter '{}' has an invalid pattern", param.id),
+                           { param.id });
+        }
+        return;
+    }
+    try
+    {
+        const std::regex compiled{ *param.pattern };
+        static_cast<void>(compiled);
+    } catch(const std::regex_error&)
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' has an invalid pattern", param.id),
+                       { param.id });
+    }
+}
+
+void
+check_param_shape(const schema& config_schema, const schema_param& param,
+                  std::vector<violation>& errors)
+{
+    if(!param.category.empty() && config_schema.find_category(param.category) == nullptr)
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' uses unknown category '{}'", param.id,
+                                   param.category),
+                       { param.id, param.category });
+    }
+    if(param.env && param.env->separator.empty())
+    {
+        report_catalog(
+            errors, fmt::format("parameter '{}' has an empty list separator", param.id),
+            { param.id });
+    }
+    if(param.default_value && !is_valid_value(param, *param.default_value))
+    {
+        report_catalog(errors,
+                       fmt::format("parameter '{}' has an invalid default '{}'", param.id,
+                                   *param.default_value),
+                       { param.id });
+    }
+    check_bounds(param, errors);
+    check_pattern(param, errors);
+    check_argument_counts(param, errors);
+    check_references(config_schema, param, errors);
+}
+
+void
+check_constraint_targets(const schema& config_schema, const constraint& item,
+                         std::vector<violation>& errors)
+{
+    require_known_ids(config_schema, "constraint", item.params, errors);
+    for(const auto& term : item.when.terms)
+    {
+        require_known(config_schema, "constraint", term.param, errors);
+    }
+    for(const auto& [target, ignored] : item.forced_values)
+    {
+        static_cast<void>(ignored);
+        require_known(config_schema, "constraint", target, errors);
+    }
+}
 }  // namespace
 
 bool
@@ -429,6 +671,21 @@ std::vector<violation>
 validate_values(const schema& config_schema, const value_map_t& values)
 {
     return configuration_checker{ config_schema, values }.run();
+}
+
+std::vector<violation>
+validate_schema(const schema& config_schema)
+{
+    std::vector<violation> errors;
+    for(const auto& param : config_schema.params())
+    {
+        check_param_shape(config_schema, param, errors);
+    }
+    for(const auto& item : config_schema.constraints())
+    {
+        check_constraint_targets(config_schema, item, errors);
+    }
+    return errors;
 }
 
 }  // namespace rocprofsys::parser

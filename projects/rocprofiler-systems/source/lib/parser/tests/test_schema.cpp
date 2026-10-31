@@ -187,6 +187,16 @@ TEST(parser_schema, effect_fields_round_trip)
               (std::vector<std::string>{ "output_path", "output_prefix" }));
 }
 
+TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
+{
+    const auto parts = split_list(" alpha, beta ", ",");
+    ASSERT_TRUE(parts.has_value());
+    EXPECT_EQ(*parts, (std::vector<std::string>{ "alpha", "beta" }));
+    EXPECT_TRUE(split_list("", ",").has_value());
+    EXPECT_TRUE(split_list("", ",")->empty());
+    EXPECT_FALSE(split_list("alpha", "").has_value());
+}
+
 TEST(parser_schema, list_separator_defaults_to_comma)
 {
     auto param = make_param("list");

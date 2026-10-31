@@ -172,11 +172,12 @@ has_violation(const std::vector<violation>& violations, severity level,
 TEST(parser_schema_validator, boolean_values)
 {
     const auto param = make_param(param_type::boolean);
-    for(const auto* value : { "true", "FALSE", "Yes", "no", "on", "OFF", "1", "0" })
+    for(const auto* value :
+        { "true", "FALSE", "Yes", "no", "on", "OFF", "y", "N", "1", "0", "2", "" })
     {
         EXPECT_TRUE(is_valid_value(param, value)) << value;
     }
-    for(const auto* value : { "", "2", "truthy", " true", "y" })
+    for(const auto* value : { "truthy", " true" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -311,8 +312,8 @@ TEST(parser_schema_validator, reports_missing_required_value)
 
 TEST(parser_schema_validator, reports_mutually_exclusive_params_once)
 {
-    const auto violations =
-        validate({ { "flat_profile", "true" }, { "profile", "true" } });
+    const auto violations = validate(
+        { { "trace", "true" }, { "flat_profile", "true" }, { "profile", "true" } });
 
     const auto count = std::ranges::count_if(violations, [](const violation& item) {
         return item.message.find("mutually exclusive") != std::string::npos;
@@ -386,4 +387,102 @@ TEST(parser_schema_validator, forces_constraint_is_quiet_when_satisfied)
     const auto violations = validate(
         { { "trace", "false" }, { "flat_profile", "true" }, { "profile", "true" } });
     EXPECT_TRUE(violations.empty());
+}
+
+TEST(parser_schema_validator, a_default_does_not_enable_mutual_exclusion)
+{
+    const auto violations =
+        validate({ { "flat_profile", "true" }, { "profile", "true" } });
+    EXPECT_FALSE(has_violation(violations, severity::error, "mutually exclusive"));
+}
+
+TEST(parser_schema_validator, reports_a_two_sided_exclusion_once)
+{
+    schema value{};
+    add_checked(value, schema_param{
+                           .id                      = "left",
+                           .name                    = "Left",
+                           .description             = "Left",
+                           .type                    = param_type::boolean,
+                           .mutually_exclusive_with = { "right" },
+                       });
+    add_checked(value, schema_param{
+                           .id                      = "right",
+                           .name                    = "Right",
+                           .description             = "Right",
+                           .type                    = param_type::boolean,
+                           .mutually_exclusive_with = { "left" },
+                       });
+
+    const auto violations =
+        validate_values(value, { { "left", "true" }, { "right", "true" } });
+    const auto count = std::ranges::count_if(violations, [](const violation& item) {
+        return item.message.find("mutually exclusive") != std::string::npos;
+    });
+    EXPECT_EQ(count, 1);
+}
+
+TEST(parser_schema_validator, integer_above_two_to_the_53_respects_its_maximum)
+{
+    constexpr double k_exact_integer_limit = 9007199254740992.0;
+    auto             param                 = make_param(param_type::integer);
+    param.max                              = k_exact_integer_limit;
+    EXPECT_TRUE(is_valid_value(param, "9007199254740992"));
+    EXPECT_FALSE(is_valid_value(param, "9007199254740993"));
+}
+
+TEST(parser_schema_validator, large_integers_do_not_compare_as_doubles)
+{
+    schema value{};
+    add_checked(value, schema_param{
+                           .id          = "wide",
+                           .name        = "Wide",
+                           .description = "Wide",
+                           .type        = param_type::integer,
+                           .depends_on  = param_condition{ .param  = "wide",
+                                                           .equals = "9007199254740992" },
+                       });
+
+    const auto violations = validate_values(value, { { "wide", "9007199254740993" } });
+    EXPECT_TRUE(has_violation(violations, severity::warning, "has no effect"));
+}
+
+TEST(parser_schema_validator, rejects_an_oversized_pattern_subject)
+{
+    constexpr std::size_t k_oversized_subject = 4097;
+    auto                  param               = make_param(param_type::string);
+    param.pattern                             = "a+";
+    EXPECT_FALSE(is_valid_value(param, std::string(k_oversized_subject, 'a')));
+}
+
+TEST(parser_schema_validator, catalog_check_accepts_the_profiler_fixture)
+{
+    EXPECT_TRUE(validate_schema(make_profiler_schema()).empty());
+}
+
+TEST(parser_schema_validator, catalog_check_reports_structural_errors)
+{
+    schema value{};
+    add_checked(value, schema_param{
+                           .id            = "count",
+                           .name          = "Count",
+                           .description   = "Count",
+                           .category      = "missing",
+                           .type          = param_type::integer,
+                           .default_value = "maybe",
+                           .min           = 2.5,
+                           .max           = 1.5,
+                           .pattern       = "[",
+                           .env = env_spec{ .name = "ROCPROFSYS_COUNT", .separator = "" },
+                           .copy_to = { "absent" },
+                       });
+
+    const auto errors = validate_schema(value);
+    EXPECT_TRUE(has_violation(errors, severity::error, "unknown category"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "invalid default"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "minimum greater"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "non-integer minimum"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "invalid pattern"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "empty list separator"));
+    EXPECT_TRUE(has_violation(errors, severity::error, "unknown parameter 'absent'"));
 }
