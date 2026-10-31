@@ -53,12 +53,14 @@ std::function<void(void*, void const*)> g_ncclDevCommCopyLsaData = DefaultNcclDe
 // The externals the #included devcomm .cc files link against.
 extern "C" ncclTeam_t ncclTeamLsa(ncclComm_t comm) { return g_ncclTeamLsa(comm); }
 
-// A rail team of one rank, as on a single node.
+// A rail team of one rank, as on a single node. Tests that need a wider rail
+// set g_railStride; the default matches a single-node rail stride of 1.
+int g_railStride = 1;
 extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) {
   ncclTeam_t t{};
   t.nRanks = 1;
   t.rank = 0;
-  t.stride = 1;
+  t.stride = g_railStride;
   return t;
 }
 // No wrapper definition here: dev_runtime.cc supplies the real
@@ -68,4 +70,5 @@ extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) {
 void ResetDevcommFakes() {
   g_ncclTeamLsa = DefaultNcclTeamLsa;
   g_ncclDevCommCopyLsaData = DefaultNcclDevCommCopyLsaData;
+  g_railStride = 1;
 }

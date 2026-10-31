@@ -117,6 +117,10 @@ ncclDevCommRequirements
    .. c:member:: int ginCustomStride
 
       Specifies the rank stride when :c:member:`ginConnectionType` is :c:enumerator:`NCCL_GIN_CONNECTION_CUSTOM_STRIDE <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_CUSTOM_STRIDE>`.
+      Each rank is connected to ranks separated by this many communicator ranks.
+      The value must be positive, a multiple of :c:member:`ginMinStride`, and no greater than the rail-team stride.
+      A stride of ``0`` is rejected with :c:macro:`ncclInvalidUsage`. A stride larger than the rail team, or one that
+      is not a multiple of :c:member:`ginMinStride`, is rejected with :c:macro:`ncclInternalError`.
       Available since NCCL 2.31.
 
    .. c:member:: ncclDevResourceRequirements_t* resourceRequirementsList
