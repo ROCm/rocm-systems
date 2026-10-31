@@ -1483,10 +1483,22 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
          comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, maxP2pPeers);
     comm->p2pnChannelsPerPeer = newPpp;
   }
+  // Keep the network count before the all-to-all peer-sharing cap. Send and
+  // sendrecv can use it as a per-work part stride without changing the
+  // all-to-all default.
+  comm->p2pnChannelsPerPeerMax = comm->p2pnChannelsPerPeer;
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
     INFO(NCCL_INIT, "Tuning P2P operations with maxP2pPeers = %d", maxP2pPeers);
+    // ncclTopoGetNchannels() sizes each net peer to drive the NIC alone; concurrent remote peers
+    // share it. On 2x8 MI300X, alltoall runs 65.8 GB/s at 4 channels per peer and 72.1 at 2,
+    // while a lone sendrecv peer runs 33.0 at 4 and 18.7 at 2.
+    int netPeers = std::min(maxP2pPeers, comm->nRanks - comm->localRanks);
+    if (!saturateP2p && netPeers > 1)
+      comm->p2pnChannelsPerPeer =
+        std::min(comm->p2pnChannelsPerPeer,
+                 std::max(std::max(2, comm->minNetCount), pow2Up(divUp(comm->p2pnChannelsPerPeer, netPeers))));
     while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
@@ -1551,6 +1563,7 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
   // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+  comm->p2pnChannelsPerPeerMax = std::min(comm->p2pnChannelsPerPeerMax, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
   // skips the tpP2pNChannels clamp, so arch-specific p2p caps can diverge).

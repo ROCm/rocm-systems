@@ -95,7 +95,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       size_t bytes = isSend ? work->sendBytes : work->recvBytes;
       int nParts = isSend ? work->nSendChannels : work->nRecvChannels;
       int part = ncclP2pChannelToPart(work->nP2pChannels, work->channelBase, ncclShmem.channelId,
-                                      ncclShmem.comm.p2pnChannelsPerPeer, ncclShmem.comm.nNodes,
+                                      1 << work->p2pPartsLog2, ncclShmem.comm.nNodes,
                                       ncclShmem.comm.p2pChannelShiftSize);
       hasWork = (part < nParts);
       if (nParts != 0) {
