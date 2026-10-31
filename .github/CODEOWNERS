@@ -1,9 +1,15 @@
 # CI ownership
 /.azuredevops/                                                        @ROCm/external-ci
 /.github/                                                             @ROCm/rocm-systems-reviewers
+/.github/workflows/amdsmi-*.yml                                       @ROCm/smi-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
-/.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/workflows/*rccl*                                             @ROCm/rccl-ci
+/.github/scripts/*rccl*                                               @ROCm/rccl-ci
+/.github/scripts/tests/*rccl*                                         @ROCm/rccl-ci
+/.github/scripts/allowlist/*rccl*                                     @ROCm/rccl-ci
+/.github/actions/rccl-resolve-coco-run/                               @ROCm/rccl-ci
+/.github/actions/rccl-checkout-coco-harness/                          @ROCm/rccl-ci
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -63,7 +69,7 @@
 /projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
 
 # Media Libs
-/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther
+/projects/rocdecode/                                                  @kiritigowda @AryanSalmanpour @rrawther @jeffqjiangNew
 /projects/rocjpeg/                                                    @kiritigowda @AryanSalmanpour @rrawther
 
 # Experimental

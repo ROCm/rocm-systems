@@ -143,6 +143,10 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
     return false;
   }
 
+  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) {
+    return false;
+  }
+
   return true;
 }
 

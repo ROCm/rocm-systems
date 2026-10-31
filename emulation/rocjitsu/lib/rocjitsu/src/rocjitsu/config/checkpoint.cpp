@@ -10,13 +10,13 @@
 
 #include "checkpoint_generated.h"
 #include "flatbuffers/flatbuffers.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <fstream>
 #include <limits>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu {
@@ -32,23 +32,28 @@ namespace {
 /// operands, so reading them back as TTMPs needs no per-architecture test.
 constexpr uint32_t kLegacyTtmpSgprBase = 108;
 
-flatbuffers::Offset<flatbuffers::Vector<uint8_t>>
+util::FailureOr<flatbuffers::Offset<flatbuffers::Vector<uint8_t>>>
 serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
-                     uint32_t base, uint32_t lane_count) {
+                     uint32_t base, uint32_t lane_count, util::DiagnosticEmitter emit_error) {
   if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
-    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+    return emit_error.emit() << "Invalid VGPR checkpoint lane count";
   const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
   const size_t block_bytes = static_cast<size_t>(cu.vgpr_allocation_block_size()) * register_bytes;
   uint8_t *serialized = nullptr;
   const auto offset = builder.CreateUninitializedVector<uint8_t>(block_bytes, &serialized);
   size_t offset_bytes = 0;
+  bool invalid_storage = false;
   cu.for_each_raw_vgpr(base, cu.vgpr_allocation_block_size(), [&](std::span<const uint32_t> lanes) {
-    if (lanes.size() < lane_count)
-      throw std::runtime_error("VGPR storage is narrower than the checkpoint wave");
+    if (lanes.size() < lane_count) {
+      invalid_storage = true;
+      return;
+    }
     std::ranges::copy_n(reinterpret_cast<const uint8_t *>(lanes.data()), register_bytes,
                         serialized + offset_bytes);
     offset_bytes += register_bytes;
   });
+  if (invalid_storage)
+    return emit_error.emit() << "VGPR storage is narrower than the checkpoint wave";
   return offset;
 }
 
@@ -56,10 +61,11 @@ serialize_vgpr_block(flatbuffers::FlatBufferBuilder &builder, const amdgpu::Comp
 /// Zero source registers are skipped to preserve lazy backing; this is a full
 /// restore, rather than a merge, only while the destination begins entirely
 /// zeroed.
-void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
-                                            const flatbuffers::Vector<uint8_t> &stored,
-                                            uint32_t stored_lane_count,
-                                            uint32_t architectural_wave_size) {
+util::Result restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_t base,
+                                                    const flatbuffers::Vector<uint8_t> &stored,
+                                                    uint32_t stored_lane_count,
+                                                    uint32_t architectural_wave_size,
+                                                    util::DiagnosticEmitter emit_error) {
   const auto bytes = std::span(reinterpret_cast<const std::byte *>(stored.data()), stored.size());
   const uint32_t register_count = cu.vgpr_allocation_block_size();
 
@@ -77,14 +83,15 @@ void restore_vgpr_block_into_zeroed_storage(amdgpu::ComputeUnitCore &cu, uint32_
     }
   }
   if ((lane_count != 32 && lane_count != 64) || lane_count > cu.vgpr_storage_lane_count())
-    throw std::runtime_error("Invalid VGPR checkpoint lane count");
+    return emit_error.emit() << "Invalid VGPR checkpoint lane count";
   const size_t register_bytes = static_cast<size_t>(lane_count) * sizeof(uint32_t);
   if (stored.size() != static_cast<size_t>(register_count) * register_bytes)
-    throw std::runtime_error("Invalid VGPR checkpoint payload size");
+    return emit_error.emit() << "Invalid VGPR checkpoint payload size";
   for (uint32_t reg = 0; reg < register_count; ++reg) {
     cu.restore_raw_vgprs_into_zeroed_storage(
         base + reg, 1, bytes.subspan(static_cast<size_t>(reg) * register_bytes, register_bytes));
   }
+  return util::Result::success();
 }
 
 /// @brief Serialize the SoC configuration into a FlatBuffer SimulationConfig.
@@ -119,10 +126,10 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         // means unbounded for a new checkpoint, while field absence remains the
         // legacy signal that restore should use ComputeUnitCore's native default.
         builder.ForceDefaults(true);
-        fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
-                                            cu_cfg.functional_quantum,
-                                            se->compute_unit(0)->scratch_slots_per_cu());
+        fb_cu = fb::CreateComputeUnitConfig(
+            builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf, cu_cfg.vgprs_per_wf,
+            cu_cfg.lds_size_kb, cu_cfg.functional_quantum,
+            se->compute_unit(0)->scratch_slots_per_cu(), cu_cfg.gws_wait_limit);
         builder.ForceDefaults(false);
       }
     }
@@ -152,17 +159,18 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
 }
 
 /// @brief Reconstruct a VirtualMachine::Config from a stored FlatBuffer config.
-VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_config) {
+util::FailureOr<VirtualMachine::Config>
+config_from_checkpoint(const fb::SimulationConfig *fb_config, util::DiagnosticEmitter emit_error) {
   VirtualMachine::Config vm_config{};
 
   if (!fb_config || !fb_config->vm())
-    throw std::runtime_error("Checkpoint missing simulation config");
+    return emit_error.emit() << "Checkpoint missing simulation config";
 
   auto *vm = fb_config->vm();
   if (vm->arch())
     vm_config.soc.arch = parse_arch(vm->arch()->str());
   if (vm_config.soc.arch == ROCJITSU_CODE_ARCH_INVALID)
-    throw std::runtime_error("Checkpoint has missing or invalid architecture");
+    return emit_error.emit() << "Checkpoint has missing or invalid architecture";
   vm_config.soc.exec_mode =
       parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 
@@ -188,6 +196,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           // old omitted zero would otherwise be reinterpreted as 1024.
           if (flatbuffers::IsFieldPresent(cu, fb::ComputeUnitConfig::VT_FUNCTIONAL_QUANTUM))
             cu_cfg.functional_quantum = cu->functional_quantum();
+          cu_cfg.gws_wait_limit = cu->gws_wait_limit();
           vm_config.soc.scratch_slots_per_cu = cu->scratch_slots_per_cu();
         }
       }
@@ -206,11 +215,12 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
 
 } // namespace
 
-void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
-                     const simdojo::SimulationEngine::Config &engine_config,
-                     uint32_t cpu_dispatch_threads, uint32_t cpu_thread_budget,
-                     std::span<const ExecutionThreadChoice> thread_allocations,
-                     bool legacy_auto_dispatch, int32_t async_helper_threads) {
+util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
+                             const simdojo::SimulationEngine::Config &engine_config,
+                             uint32_t cpu_dispatch_threads, util::DiagnosticEmitter emit_error,
+                             uint32_t cpu_thread_budget,
+                             std::span<const ExecutionThreadChoice> thread_allocations,
+                             bool legacy_auto_dispatch, int32_t async_helper_threads) {
   flatbuffers::FlatBufferBuilder builder(1024 * 1024);
 
   // Serialize compute unit states across all XCDs and their shader engines.
@@ -219,6 +229,9 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
     for (auto *se : xcd->shader_engines()) {
       for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         auto *cu = se->compute_unit(ci);
+        if (cu->gws_device().tracked_process_count() != 0)
+          return emit_error.emit() << "Cannot checkpoint GWS resource state: the shared table "
+                                      "is not part of the checkpoint format";
         std::vector<flatbuffers::Offset<fb::WavefrontState>> wf_offsets;
         for (uint32_t i = 0; i < cu->num_wf_slots(); ++i) {
           const auto *w = cu->wf(i);
@@ -243,16 +256,19 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
           // it would make an ordinary throttled queue unable to checkpoint, and
           // blame a debugger that is not attached.
           if (w->in_trap_handler() || w->debug_stopped())
-            throw std::runtime_error(
-                "Cannot checkpoint " + cu->name() + " wf" + std::to_string(w->wf_id()) +
-                ": the wave is in a trap handler or stopped for a debugger, and that state "
-                "is not part of the checkpoint format");
+            return emit_error.emit()
+                   << "Cannot checkpoint " << cu->name() << " wf" << w->wf_id()
+                   << ": the wave is in a trap handler or stopped for a debugger, and that state "
+                      "is not part of the checkpoint format";
 
           std::vector<uint32_t> sgprs(w->num_sgprs());
           cu->sgpr_file().copy_to(w->sgpr_alloc().base, w->num_sgprs(),
                                   std::as_writable_bytes(std::span(sgprs)));
           auto sgprs_vec = builder.CreateVector(sgprs);
-          auto vgprs_vec = serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size());
+          util::FailureOr<flatbuffers::Offset<flatbuffers::Vector<uint8_t>>> vgprs_vec =
+              serialize_vgpr_block(builder, *cu, w->vgpr_alloc().base, w->wf_size(), emit_error);
+          if (vgprs_vec.failed())
+            return util::Result::failure();
 
           // TTMPs are their own file, so they are not covered by sgprs_vec.
           std::array<uint32_t, 16> ttmps{};
@@ -270,7 +286,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
           auto wfs = fb::CreateWavefrontState(
               builder, w->wf_id(), w->wg_id(), w->pc, w->exec_raw(), w->vcc(), w->m0(),
-              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec, w->mode_raw(),
+              w->is_halted(), w->status_raw(), sgprs_vec, vgprs_vec.value(), w->mode_raw(),
               w->wave_sched_mode_raw(), ttmps_vec, wg_coord_vec, w->kernel_wave_size(),
               w->wf_size(), w->setreg_vgpr_msb_hazard());
           wf_offsets.push_back(wfs);
@@ -278,8 +294,11 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
-        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0,
-                                              cu->config().functional_quantum, true);
+        auto cus = fb::CreateComputeUnitState(
+            builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
+            cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().gws_wait_limit);
         cu_offsets.push_back(cus);
       }
     }
@@ -317,34 +336,46 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
   // Write to file.
   std::ofstream f(path, std::ios::binary);
   if (!f.is_open())
-    throw std::runtime_error("Cannot open checkpoint file for writing: " + path);
+    return emit_error.emit() << "Cannot open checkpoint file for writing: " << path;
   f.write(reinterpret_cast<const char *>(builder.GetBufferPointer()), builder.GetSize());
+  f.flush();
+  if (!f)
+    return emit_error.emit() << "Failed to write checkpoint file: " << path;
+  f.close();
+  if (!f)
+    return emit_error.emit() << "Failed to close checkpoint file: " << path;
+  return util::Result::success();
 }
 
-LoadedConfig restore_checkpoint(const std::string &path) {
+util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
+                                                 util::DiagnosticEmitter emit_error) {
   // Read binary file.
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f.is_open())
-    throw std::runtime_error("Cannot open checkpoint file: " + path);
+    return emit_error.emit() << "Cannot open checkpoint file: " << path;
   auto pos = f.tellg();
   if (pos <= 0)
-    throw std::runtime_error("Empty or unreadable checkpoint file: " + path);
+    return emit_error.emit() << "Empty or unreadable checkpoint file: " << path;
   auto size = static_cast<size_t>(pos);
   f.seekg(0, std::ios::beg);
   std::vector<uint8_t> buf(size);
   if (!f.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(size)))
-    throw std::runtime_error("Failed to read checkpoint file: " + path);
+    return emit_error.emit() << "Failed to read checkpoint file: " << path;
 
   flatbuffers::Verifier verifier(buf.data(), buf.size());
   if (!fb::VerifySimulationCheckpointBuffer(verifier))
-    throw std::runtime_error("Invalid checkpoint format: " + path);
+    return emit_error.emit() << "Invalid checkpoint format: " << path;
   auto *checkpoint = fb::GetSimulationCheckpoint(buf.data());
 
   // Rebuild SoC and engine config from the stored configuration.
   if (!checkpoint->config())
-    throw std::runtime_error("Checkpoint missing config section: " + path);
+    return emit_error.emit() << "Checkpoint missing config section: " << path;
   auto *fb_config = checkpoint->config();
-  VirtualMachine::Config vm_config = config_from_checkpoint(fb_config);
+  util::FailureOr<VirtualMachine::Config> maybe_vm_config =
+      config_from_checkpoint(fb_config, emit_error);
+  if (maybe_vm_config.failed())
+    return util::Result::failure();
+  auto vm_config = std::move(maybe_vm_config).value();
   simdojo::SimulationEngine::Config engine_config{};
   engine_config.max_ticks = fb_config->max_ticks();
   engine_config.num_threads = fb_config->num_threads();
@@ -368,24 +399,33 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       result.thread_allocations.push_back(
           {choice->num_threads(), choice->cpu_dispatch_threads(), choice->async_helper_threads()});
   const auto &xcd = vm_config.soc.xcd;
-  auto checked_capacity = [](uint64_t n) {
+  auto checked_capacity = [emit_error](uint64_t n) -> util::FailureOr<uint32_t> {
     if (n > std::numeric_limits<uint32_t>::max())
-      throw std::invalid_argument("Checkpoint execution capacity exceeds uint32 range");
+      return emit_error.emit() << "Checkpoint execution capacity exceeds uint32 range";
     return static_cast<uint32_t>(n);
   };
-  const uint32_t cus =
+  util::FailureOr<uint32_t> maybe_cus =
       checked_capacity(uint64_t{xcd.num_shader_engines} * xcd.shader_engine.num_compute_units);
+  if (maybe_cus.failed())
+    return util::Result::failure();
+  const uint32_t cus = maybe_cus.value();
   // The stored topology is uniform: each nonempty XCD contributes CUs-1 workers
   // to the shared pool, whose inclusive width also counts one caller.
-  const uint32_t capacity =
+  util::FailureOr<uint32_t> maybe_capacity =
       checked_capacity(1 + uint64_t{vm_config.soc.num_xcds} * (std::max(cus, 1u) - 1));
+  if (maybe_capacity.failed())
+    return util::Result::failure();
+  const uint32_t capacity = maybe_capacity.value();
   const uint32_t host_threads = amdgpu::available_host_threads();
-  result.execution_threads = resolve_execution_threads(
+  util::FailureOr<ExecutionThreadAllocation> allocation = resolve_execution_threads(
       {result.cpu_thread_budget, result.requested_engine_threads, result.cpu_dispatch_threads,
        result.async_helper_threads},
       host_threads, vm_config.soc.num_xcds, std::span(&capacity, 1),
-      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations,
+      configured_async_mma_supported(vm_config.soc.arch), result.thread_allocations, emit_error,
       result.exec_mode == simdojo::ExecMode::CLOCKED);
+  if (allocation.failed())
+    return util::Result::failure();
+  result.execution_threads = std::move(allocation).value();
   // Before allocation tables, explicit zero selected a dispatch-only host
   // budget. An absent vector identifies that policy; a present empty vector
   // intentionally selects the new serial fallback.
@@ -431,8 +471,19 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       if (!cu_state)
         continue;
       auto *cu = all_cus[i];
+      if (cu_state->gws_wait_limit())
+        cu->set_gws_wait_limit(*cu_state->gws_wait_limit());
       if (cu_state->functional_quantum_present())
         cu->set_functional_quantum(cu_state->functional_quantum());
+      using amdgpu::MemoryWaitDiagnostics;
+      const auto memory_checks = cu_state->memory_wait_checks();
+      const auto xcnt_checks = cu_state->xcnt_checks();
+      cu->restore_wait_diagnostics(
+          memory_checks
+              ? (*memory_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
+              : cu->config().memory_wait_diagnostics,
+          xcnt_checks ? (*xcnt_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
+                      : cu->config().xcnt_diagnostics);
       if (auto *wf_states = cu_state->wavefronts()) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =
@@ -444,7 +495,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           auto *wf = cu->dispatch_wf_at(wf_state->wf_id(), wf_state->wg_id(), wf_state->pc(),
                                         num_sgprs, num_vgprs, wave_size);
           if (!wf)
-            throw std::runtime_error("Failed to restore wavefront into its recorded slot");
+            return emit_error.emit() << "Failed to restore wavefront into its recorded slot";
 
           wf->set_exec_raw(wf_state->exec());
           wf->set_vcc_raw(wf_state->vcc());
@@ -502,9 +553,13 @@ LoadedConfig restore_checkpoint(const std::string &path) {
 
           // dispatch_wf_at() has just allocated this block, so RegisterFile::allocate()'s
           // zero-state postcondition satisfies the sparse restore helper's precondition.
-          if (auto *vgprs = wf_state->vgprs())
-            restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs,
-                                                   wf_state->vgpr_lane_count(), wf->wf_size());
+          if (auto *vgprs = wf_state->vgprs()) {
+            if (restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs,
+                                                       wf_state->vgpr_lane_count(), wf->wf_size(),
+                                                       emit_error)
+                    .failed())
+              return util::Result::failure();
+          }
         }
       }
     }

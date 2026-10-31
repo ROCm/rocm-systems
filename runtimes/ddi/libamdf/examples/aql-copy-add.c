@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* Direct AQL execution qualification for the GFX1201 Linux KFD provider.
@@ -236,7 +237,7 @@ static int create_buffer(struct workload *w, struct buffer *buffer,
       (local ? AMDF_MEMORY_FLAG_DEVICE_LOCAL : 0);
   create.access_count = 1;
   create.accesses = &access;
-  CALL(w->api->memory_create(scope, &create, &buffer->memory));
+  CALL(w->api->memory_create(scope, &create, &buffer->memory, NULL));
 
   amdf_memory_map_info_t map;
   INIT(map, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO);
@@ -275,7 +276,7 @@ static int check_pair(struct workload *w, struct buffer *buffer,
   INIT(host, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   INIT(device, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
-  host.value.host_mapping = buffer->mapping;
+  host.value.host.mapping = buffer->mapping;
   device.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
   device.value.device.memory = buffer->memory;
   device.value.device.queue_family_ordinal = w->family;
@@ -358,7 +359,7 @@ static int create_queue(struct workload *w, amdf_queue_producer_mode_t mode,
   queue.scratch.maximum_wave_count = w->scratch_wave_count;
   CALL(w->gpu->user_queue_create(w->device, &queue, &w->queue));
 
-  amdf_status_t scratch_destroy = w->api->memory_destroy(w->scratch.memory);
+  amdf_status_t scratch_destroy = w->api->memory_destroy(w->scratch.memory, NULL);
   if (scratch_destroy == AMDF_STATUS_OK) w->scratch.memory = NULL;
   REQUIRE(scratch_destroy == amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
 
@@ -1164,7 +1165,7 @@ static int release_buffer(struct workload *w, struct buffer *buffer) {
     buffer->mapping = NULL;
   }
   if (buffer->memory != NULL) {
-    CALL(w->api->memory_destroy(buffer->memory));
+    CALL(w->api->memory_destroy(buffer->memory, NULL));
     buffer->memory = NULL;
   }
   return 0;

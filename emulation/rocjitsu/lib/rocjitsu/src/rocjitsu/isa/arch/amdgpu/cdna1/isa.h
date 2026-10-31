@@ -18,17 +18,19 @@ class Wavefront;
 }
 namespace cdna1 {
 
-/// @brief CDNA1 ISA traits (GFX908, Wave64, no AccVGPR, GFX9 S_WAITCNT).
+/// @brief CDNA1 ISA traits (GFX908, Wave64, separate AccVGPR file, GFX9 S_WAITCNT).
 ///
-/// @details Inherits all defaults from `amdgpu::CdnaIsaBase`:
+/// @details Inherits scalar and vector defaults from `amdgpu::CdnaIsaBase`:
 ///   - WF_SIZE = 64, MAX_SGPRS = 102, MAX_VGPRS = 256
-///   - MAX_ACC_VGPRS = 0   (CDNA1 has no AccVGPR file; MFMA writes to VGPRs)
 ///   - WAITCNT_LGKMCNT_MASK = 0x0F  (GFX9 4-bit lgkmcnt at [11:8])
+/// Overrides MAX_ACC_VGPRS_PER_WF to 256 (CDNA1 ISA chapter 7: MFMA writes ACC).
 ///
 /// StatusReg uses the shared `amdgpu::CdnaStatusReg` layout.  CDNA1 hardware
 /// does not expose COND_DBG_USER / COND_DBG_SYS but those bits are inert in
 /// simulation.
 struct Isa : amdgpu::CdnaIsaBase {
+  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
+      256; ///< Separate accumulator bank, encoded from 768.
   using Decoder = cdna1::Decoder;
   using MachineInst = cdna1::MachineInst;
   using OperandType = cdna1::OperandType;
@@ -39,7 +41,6 @@ struct Isa : amdgpu::CdnaIsaBase {
   // operand.cpp; bodies forward to the anonymous-namespace helpers.
   static std::optional<uint32_t> resolved_vgpr_offset(OperandType opr_type, int ev);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace cdna1

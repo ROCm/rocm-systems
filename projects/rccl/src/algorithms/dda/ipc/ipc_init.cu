@@ -313,7 +313,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(nActiveRanks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = dda::common::IpcGpuBarrier::mallocAndInit(nActiveRanks, nBlocksMax, comm->rank, comm->bootstrap,
+                                                               dda::common::DdaKernelParams{comm->abortFlagDev});
   if (!barrierPair.first) {
     WARN("ncclDdaIpcCommInit: IpcGpuBarrier::mallocAndInit failed");
     localReady = false;

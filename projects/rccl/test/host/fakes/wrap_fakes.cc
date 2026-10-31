@@ -54,7 +54,6 @@
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion);
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
-ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
 ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
@@ -145,16 +144,7 @@ const bool ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS] = {true, true, true, tru
 // build intentionally models the unrestricted case for every generated entry.
 char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {};
 
-// ncclCommCount: real behaviour by default (de-risks future tests),
-// but a controllable seam so rcclGetAlgoInfo's NCCLCHECK(ncclCommCount(...))
-// failure arm (never exercised -- every prior test let this succeed) can be
-// proven too.
-static ncclResult_t DefaultCommCount(const ncclComm_t comm, int* count) {
-  if (count) *count = comm ? comm->nRanks : 0;
-  return ncclSuccess;
-}
-std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCount;
-ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
+// ncclCommCount (g_commCount) is init.cc's, so it lives in comm_fakes.cc.
 
 static ncclResult_t DefaultEnsureHierarchicalComms(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms = DefaultEnsureHierarchicalComms;
@@ -224,14 +214,14 @@ bool isSymmetricKernelRequestedWin(struct ncclComm* comm, ncclFunc_t coll, int s
 // rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
 // linked here), same abort-floor-turned-seam treatment as the rest. Default
 // false: DDA not taken, letting CE-registered/symmetric/plain-kernel run.
-static bool DefaultAllReduceShouldTakeDdaPath(const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) {
+static bool DefaultAllReduceShouldTakeDdaPath(const struct ncclComm*, size_t, ncclDataType_t, bool, bool) {
   return false;
 }
-std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool)> g_allReduceShouldTakeDdaPath =
+std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath =
     DefaultAllReduceShouldTakeDdaPath;
 bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t dt, bool symEligible,
-                                    bool ceAllReduceAllowed, bool query) {
-  return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, ceAllReduceAllowed, query);
+                                    bool query) {
+  return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, query);
 }
 
 // ncclDdaNranksRelaxEnabled: real body lives in ipc_init.cu, a .cu that is not

@@ -3059,6 +3059,19 @@ HIP_PUBLIC_API hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* 
                                                             attrsIdxs, numAttrs, failIdx, stream);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExtMemcpyBatchAsync_fn(
+      dsts, srcs, sizes, sizesDst, waits, signals,
+      count, attrs, attrsIdxs, numAttrs, stream);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream) {
   TRY;
@@ -3192,6 +3205,11 @@ HIP_PUBLIC_API hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLi
   return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetModule_fn(pMod, library);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   TRY;
@@ -3258,6 +3276,12 @@ HIP_PUBLIC_API hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
 HIP_PUBLIC_API hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr,
+                                                         int value, int device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
@@ -3366,10 +3390,14 @@ hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int nu
   return hip::GetHipDispatchTable()->hipModuleEnumerateFunctions_fn(functions, numFunctions, mod);
   CATCH;
 }
-
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
                                              hipFlushGPUDirectRDMAWritesScope scope) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
+  CATCH;
+}
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetCacheConfig_fn(kernel, config, dev);
   CATCH;
 }

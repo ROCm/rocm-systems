@@ -48,11 +48,14 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -109,11 +112,14 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -170,11 +176,14 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -231,11 +240,14 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -292,11 +304,14 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -353,11 +368,14 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -414,11 +432,14 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -474,11 +495,14 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -534,11 +558,14 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -595,11 +622,14 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -656,11 +686,14 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -717,11 +750,14 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -778,11 +814,14 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -839,11 +878,14 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -900,11 +942,14 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -961,11 +1006,14 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1024,6 +1072,8 @@ VCmpxFF32Vopc::VCmpxFF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1089,6 +1139,8 @@ VCmpxLtF32Vopc::VCmpxLtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1154,6 +1206,8 @@ VCmpxEqF32Vopc::VCmpxEqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1219,6 +1273,8 @@ VCmpxLeF32Vopc::VCmpxLeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1284,6 +1340,8 @@ VCmpxGtF32Vopc::VCmpxGtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1349,6 +1407,8 @@ VCmpxLgF32Vopc::VCmpxLgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1414,6 +1474,8 @@ VCmpxGeF32Vopc::VCmpxGeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1479,6 +1541,8 @@ VCmpxOF32Vopc::VCmpxOF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1544,6 +1608,8 @@ VCmpxUF32Vopc::VCmpxUF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1609,6 +1675,8 @@ VCmpxNgeF32Vopc::VCmpxNgeF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1675,6 +1743,8 @@ VCmpxNlgF32Vopc::VCmpxNlgF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1741,6 +1811,8 @@ VCmpxNgtF32Vopc::VCmpxNgtF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1807,6 +1879,8 @@ VCmpxNleF32Vopc::VCmpxNleF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1873,6 +1947,8 @@ VCmpxNeqF32Vopc::VCmpxNeqF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -1939,6 +2015,8 @@ VCmpxNltF32Vopc::VCmpxNltF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -2005,6 +2083,8 @@ VCmpxTruF32Vopc::VCmpxTruF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -2049,6 +2129,7 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2084,6 +2165,7 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2119,6 +2201,7 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2154,6 +2237,7 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2189,6 +2273,7 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2224,6 +2309,7 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2259,6 +2345,7 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2294,6 +2381,7 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2329,6 +2417,7 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2364,6 +2453,7 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2399,6 +2489,7 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2434,6 +2525,7 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2469,6 +2561,7 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2504,6 +2597,7 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2539,6 +2633,7 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2574,6 +2669,7 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3259,11 +3355,14 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3320,11 +3419,14 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3381,11 +3483,14 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3442,11 +3547,14 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3503,11 +3611,14 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3564,11 +3675,14 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3625,11 +3739,14 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3685,11 +3802,14 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3746,6 +3866,8 @@ VCmpClassF32Vopc::VCmpClassF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -3809,11 +3931,16 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3871,11 +3998,16 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3933,11 +4065,16 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3995,11 +4132,16 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4057,11 +4199,16 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4119,11 +4266,16 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4181,6 +4333,8 @@ VCmpClassF16Vopc::VCmpClassF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4245,6 +4399,8 @@ VCmpxFI32Vopc::VCmpxFI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4310,6 +4466,8 @@ VCmpxLtI32Vopc::VCmpxLtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4375,6 +4533,8 @@ VCmpxEqI32Vopc::VCmpxEqI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4440,6 +4600,8 @@ VCmpxLeI32Vopc::VCmpxLeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4505,6 +4667,8 @@ VCmpxGtI32Vopc::VCmpxGtI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4570,6 +4734,8 @@ VCmpxNeI32Vopc::VCmpxNeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4635,6 +4801,8 @@ VCmpxGeI32Vopc::VCmpxGeI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4700,6 +4868,8 @@ VCmpxTI32Vopc::VCmpxTI32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4765,6 +4935,8 @@ VCmpxClassF32Vopc::VCmpxClassF32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -4832,12 +5004,16 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4898,12 +5074,16 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -4964,12 +5144,16 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5030,12 +5214,16 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5096,12 +5284,16 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5162,12 +5354,16 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -5228,6 +5424,8 @@ VCmpxClassF16Vopc::VCmpxClassF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -5272,6 +5470,7 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5307,6 +5506,7 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5342,6 +5542,7 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5377,6 +5578,7 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5412,6 +5614,7 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5447,6 +5650,7 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5482,6 +5686,7 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5517,6 +5722,7 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5609,11 +5815,16 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5671,11 +5882,16 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5733,11 +5949,16 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5795,11 +6016,16 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5857,11 +6083,16 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5919,11 +6150,16 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6335,12 +6571,16 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6401,12 +6641,16 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6467,12 +6711,16 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6533,12 +6781,16 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6599,12 +6851,16 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6665,12 +6921,16 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6727,11 +6987,14 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6788,11 +7051,14 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6849,11 +7115,14 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6910,11 +7179,14 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6971,11 +7243,14 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7032,11 +7307,14 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7093,11 +7371,14 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7153,11 +7434,14 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7214,11 +7498,14 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7276,11 +7563,14 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7338,11 +7628,14 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7400,11 +7693,14 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7462,11 +7758,14 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7524,11 +7823,14 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7586,11 +7888,14 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7647,11 +7952,14 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7710,6 +8018,8 @@ VCmpxFU32Vopc::VCmpxFU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7775,6 +8085,8 @@ VCmpxLtU32Vopc::VCmpxLtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7840,6 +8152,8 @@ VCmpxEqU32Vopc::VCmpxEqU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7905,6 +8219,8 @@ VCmpxLeU32Vopc::VCmpxLeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -7970,6 +8286,8 @@ VCmpxGtU32Vopc::VCmpxGtU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8035,6 +8353,8 @@ VCmpxNeU32Vopc::VCmpxNeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8100,6 +8420,8 @@ VCmpxGeU32Vopc::VCmpxGeU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8165,6 +8487,8 @@ VCmpxTU32Vopc::VCmpxTU32Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8231,6 +8555,8 @@ VCmpxFF16Vopc::VCmpxFF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8297,6 +8623,8 @@ VCmpxLtF16Vopc::VCmpxLtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8363,6 +8691,8 @@ VCmpxEqF16Vopc::VCmpxEqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8429,6 +8759,8 @@ VCmpxLeF16Vopc::VCmpxLeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8495,6 +8827,8 @@ VCmpxGtF16Vopc::VCmpxGtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8561,6 +8895,8 @@ VCmpxLgF16Vopc::VCmpxLgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8627,6 +8963,8 @@ VCmpxGeF16Vopc::VCmpxGeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8693,6 +9031,8 @@ VCmpxOF16Vopc::VCmpxOF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -8736,6 +9076,7 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8771,6 +9112,7 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8806,6 +9148,7 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8841,6 +9184,7 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8876,6 +9220,7 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8911,6 +9256,7 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8946,6 +9292,7 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8981,6 +9328,7 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9036,11 +9384,14 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9098,11 +9449,14 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9160,11 +9514,14 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9222,11 +9579,14 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9284,11 +9644,14 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9346,11 +9709,14 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9408,11 +9774,14 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9470,11 +9839,14 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       vcc = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      vcc.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9846,6 +10218,8 @@ VCmpxUF16Vopc::VCmpxUF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9912,6 +10286,8 @@ VCmpxNgeF16Vopc::VCmpxNgeF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -9979,6 +10355,8 @@ VCmpxNlgF16Vopc::VCmpxNlgF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10046,6 +10424,8 @@ VCmpxNgtF16Vopc::VCmpxNgtF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10113,6 +10493,8 @@ VCmpxNleF16Vopc::VCmpxNleF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10180,6 +10562,8 @@ VCmpxNeqF16Vopc::VCmpxNeqF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10247,6 +10631,8 @@ VCmpxNltF16Vopc::VCmpxNltF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
@@ -10314,6 +10700,8 @@ VCmpxTruF16Vopc::VCmpxTruF16Vopc(const MachineInst *inst)
     sdwa_sd_ = sw->sd;
     if (sw->sd)
       exec = Operand(64, OperandType::OPR_SREG, sw->sdst);
+    if (sw->sd)
+      exec.set_wave_mask();
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }

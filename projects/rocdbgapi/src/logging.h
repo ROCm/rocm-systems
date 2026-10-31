@@ -510,6 +510,7 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (amd_dbgapi_changed_t)                                                    \
   F (amd_dbgapi_client_process_info_t)                                        \
   F (amd_dbgapi_cluster_id_t)                                                 \
+  F (amd_dbgapi_cluster_info_t)                                               \
   F (amd_dbgapi_code_object_id_t)                                             \
   F (amd_dbgapi_code_object_info_t)                                           \
   F (amd_dbgapi_core_state_data_t)                                            \
@@ -533,6 +534,10 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (amd_dbgapi_process_id_t)                                                 \
   F (amd_dbgapi_process_info_t)                                               \
   F (amd_dbgapi_progress_t)                                                   \
+  F (amd_dbgapi_property_id_t)                                                \
+  F (amd_dbgapi_property_info_t)                                              \
+  F (amd_dbgapi_property_scope_t)                                             \
+  F (amd_dbgapi_property_type_t)                                              \
   F (amd_dbgapi_queue_id_t)                                                   \
   F (amd_dbgapi_queue_info_t)                                                 \
   F (amd_dbgapi_queue_state_t)                                                \
@@ -571,6 +576,7 @@ to_string (detail::parameter_t<detail::query_ref<T>, name, kind> param)
   F (detail::query_ref<amd_dbgapi_event_info_t>)                              \
   F (detail::query_ref<amd_dbgapi_instruction_kind_t>)                        \
   F (detail::query_ref<amd_dbgapi_process_info_t>)                            \
+  F (detail::query_ref<amd_dbgapi_property_info_t>)                           \
   F (detail::query_ref<amd_dbgapi_queue_info_t>)                              \
   F (detail::query_ref<amd_dbgapi_register_info_t>)                           \
   F (detail::query_ref<amd_dbgapi_register_class_info_t>)                     \
