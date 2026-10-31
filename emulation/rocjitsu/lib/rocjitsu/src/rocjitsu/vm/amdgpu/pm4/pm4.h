@@ -6,6 +6,8 @@
 /// @file
 /// @brief PM4 packets, shader registers and submission lifetime state.
 
+#include "util/diagnostic.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -140,7 +142,8 @@ struct Pm4Submission {
   static constexpr uint32_t kMaxIndirectDepth = 64;
   static constexpr uint32_t kMaxIndirectExpansions = 4096;
   std::shared_ptr<Pm4FailureState> failure = std::make_shared<Pm4FailureState>();
-  std::function<bool()> ready;
+  /// Return false for pending dependencies; emit the reason and fail for a failed dependency.
+  std::function<util::FailureOr<bool>(util::DiagnosticEmitter)> ready;
   std::function<void(bool)> complete;
 };
 

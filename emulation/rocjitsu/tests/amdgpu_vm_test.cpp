@@ -10077,7 +10077,7 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
   EXPECT_FALSE(adapter.unregister_address_space(address_space));
   amdgpu::Pm4Submission submission;
-  submission.ready = [] { return false; };
+  submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
   uint32_t callbacks = 0;
   submission.complete = [&](bool success) {
     EXPECT_FALSE(success);
@@ -10110,7 +10110,7 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
     queue.process_id = 7;
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     amdgpu::Pm4Submission submission;
-    submission.ready = [] { return false; };
+    submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
     submission.complete = [&, i](bool success) {
       EXPECT_FALSE(success);
       ++callbacks[i];
