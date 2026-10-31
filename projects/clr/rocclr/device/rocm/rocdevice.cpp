@@ -1842,6 +1842,20 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AMD_AGENT_INFO_PM4_EMULATION query failed.");
   }
 
+  struct {
+    uint32_t low;
+    uint32_t high;
+  } luid = {};
+  // Only the WDDM (DXG) thunk reports an adapter LUID; KFD leaves it zero.
+  dxg_ = IS_WINDOWS ||
+         ((HSA_STATUS_SUCCESS ==
+           Hsa::agent_get_info(bkendDevice_,
+                               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID), &luid)) &&
+          ((luid.low | luid.high) != 0));
+  dxg_aql_ = dxg_ && !pm4_emulation_;
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "DXG: %d, DXG native AQL: %d, PM4 emulation: %d", dxg_,
+          dxg_aql_, pm4_emulation_);
+
   info_.hasExpertSchedMode_ = false;
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
