@@ -212,6 +212,8 @@ do_host_tests() {
     "rccl-UnitTestsMicroNetIbCastDataPath:$SCRIPT_DIR/host_tests_micro_net_ib_cast_data_path.xml"
     "rccl-UnitTestsMicroNet:$SCRIPT_DIR/host_tests_micro_net.xml"
     "rccl-UnitTestsMicroMisc:$SCRIPT_DIR/host_tests_micro_misc.xml"
+    "rccl-UnitTestsMicroNetIbCastConnect:$SCRIPT_DIR/host_tests_micro_net_ib_cast_connect.xml"
+    "rccl-UnitTestsMicroNetIbCastQpSharing:$SCRIPT_DIR/host_tests_micro_net_ib_cast_qp_sharing.xml"
     "rccl-UnitTestsMicroP2pResiliency:$SCRIPT_DIR/host_tests_micro_p2p_resiliency.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs

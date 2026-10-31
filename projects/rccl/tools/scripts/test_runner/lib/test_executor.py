@@ -3334,6 +3334,8 @@ class TestExecutor:
                        "rccl-UnitTestsMicroNetIbCastDataPath",
                        "rccl-UnitTestsMicroNet",
                        "rccl-UnitTestsMicroMisc",
+                       "rccl-UnitTestsMicroNetIbCastConnect",
+                       "rccl-UnitTestsMicroNetIbCastQpSharing",
                        "rccl-UnitTestsMicroP2pResiliency"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
