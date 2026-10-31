@@ -680,61 +680,74 @@ int ddaInitRunReduceScatterCheck(int rank, int nranks, ncclComm* comm)
 // what makes this catch a transposed exchange -- a payload keyed on the sender
 // alone would look identical whether the kernel read row r or column r. At 4
 // ranks the largest value is 44, exactly representable in float.
+//
+// Two per-pair sizes, one either side of the single-block cutoff
+// (ddaAlltoAllSingleBlockGrid, 8 KiB per pair): below it the kernel stages the
+// whole send buffer into scratch itself, sized by the rank count; above it the
+// host copies first. Those are separate instantiations, so one size alone would
+// leave the other unexercised at a non-8 rank count.
 int ddaInitRunAllToAllCheck(int rank, int nranks, ncclComm* comm)
 {
     hipStream_t stream = nullptr;
     DDA_INIT_CHILD_HC(hipStreamCreate(&stream));
 
-    const size_t count = kDdaInitCollectiveCount;  // elements per rank pair
-    const size_t bytes = count * sizeof(float) * static_cast<size_t>(nranks);
+    // 4 KiB per pair (in-kernel staging) and 256 KiB per pair (host pre-copy).
+    const size_t counts[] = {1024, kDdaInitCollectiveCount};
 
-    void* sendbuff = nullptr;
-    void* recvbuff = nullptr;
-    DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
-    DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
-
-    std::vector<float> host(count * static_cast<size_t>(nranks), 0.0f);
-    for (int d = 0; d < nranks; ++d)
+    for (size_t ci = 0; ci < sizeof(counts) / sizeof(counts[0]); ++ci)
     {
-        const float v = static_cast<float>((rank + 1) * 10 + (d + 1));
-        for (size_t k = 0; k < count; ++k)
+        const size_t count = counts[ci];  // elements per rank pair
+        const size_t bytes = count * sizeof(float) * static_cast<size_t>(nranks);
+
+        void* sendbuff = nullptr;
+        void* recvbuff = nullptr;
+        DDA_INIT_CHILD_HC(hipMalloc(&sendbuff, bytes));
+        DDA_INIT_CHILD_HC(hipMalloc(&recvbuff, bytes));
+
+        std::vector<float> host(count * static_cast<size_t>(nranks), 0.0f);
+        for (int d = 0; d < nranks; ++d)
         {
-            host[static_cast<size_t>(d) * count + k] = v;
-        }
-    }
-    DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
-    DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
-
-    const ncclResult_t a2a =
-        ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, comm, stream);
-    if (a2a != ncclSuccess)
-    {
-        printf("[rank %d] ncclAllToAllDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, a2a,
-               ncclGetErrorString(a2a));
-        return kDdaInitChildFail;
-    }
-    DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
-
-    std::vector<float> out(count * static_cast<size_t>(nranks), 0.0f);
-    DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
-
-    for (int src = 0; src < nranks; ++src)
-    {
-        const float expected = static_cast<float>((src + 1) * 10 + (rank + 1));
-        for (size_t k = 0; k < count; ++k)
-        {
-            const size_t i = static_cast<size_t>(src) * count + k;
-            if (out[i] != expected)
+            const float v = static_cast<float>((rank + 1) * 10 + (d + 1));
+            for (size_t k = 0; k < count; ++k)
             {
-                printf("[rank %d] alltoall chunk-from-%d element %zu: expected %.1f, got %.1f\n",
-                       rank, src, k, expected, out[i]);
-                return kDdaInitChildFail;
+                host[static_cast<size_t>(d) * count + k] = v;
             }
         }
+        DDA_INIT_CHILD_HC(hipMemcpy(sendbuff, host.data(), bytes, hipMemcpyHostToDevice));
+        DDA_INIT_CHILD_HC(hipMemset(recvbuff, 0, bytes));
+
+        const ncclResult_t a2a =
+            ncclAllToAllDdaIpc(sendbuff, recvbuff, count, ncclFloat32, comm, stream);
+        if (a2a != ncclSuccess)
+        {
+            printf("[rank %d] ncclAllToAllDdaIpc(count=%zu) failed: %d (%s)\n", rank, count, a2a,
+                   ncclGetErrorString(a2a));
+            return kDdaInitChildFail;
+        }
+        DDA_INIT_CHILD_HC(hipStreamSynchronize(stream));
+
+        std::vector<float> out(count * static_cast<size_t>(nranks), 0.0f);
+        DDA_INIT_CHILD_HC(hipMemcpy(out.data(), recvbuff, bytes, hipMemcpyDeviceToHost));
+
+        for (int src = 0; src < nranks; ++src)
+        {
+            const float expected = static_cast<float>((src + 1) * 10 + (rank + 1));
+            for (size_t k = 0; k < count; ++k)
+            {
+                const size_t i = static_cast<size_t>(src) * count + k;
+                if (out[i] != expected)
+                {
+                    printf("[rank %d] alltoall count=%zu chunk-from-%d element %zu: expected %.1f, got %.1f\n",
+                           rank, count, src, k, expected, out[i]);
+                    return kDdaInitChildFail;
+                }
+            }
+        }
+
+        DDA_INIT_CHILD_HC(hipFree(sendbuff));
+        DDA_INIT_CHILD_HC(hipFree(recvbuff));
     }
 
-    DDA_INIT_CHILD_HC(hipFree(sendbuff));
-    DDA_INIT_CHILD_HC(hipFree(recvbuff));
     DDA_INIT_CHILD_HC(hipStreamDestroy(stream));
     return kDdaInitChildOk;
 }
