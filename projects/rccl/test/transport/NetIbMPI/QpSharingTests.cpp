@@ -645,11 +645,21 @@ TEST_F(NetIbMPITest, QpShareStressSharedRqSaturation) {
                                       tagRoundBase + c, mhandles[c], &reqs[c]);
                 }
             }
+            // Stop at the first stalled request: waiting out kStressTimeoutMs on
+            // every remaining one costs nconns x 60 s, longer than the
+            // category timeout, and the process would be killed before the
+            // other tests in its filter report.
+            bool waitOk = true;
             for (int c = 0; c < established; c++) {
                 int sz = 0;
-                EXPECT_EQ(WaitForCompletion(reqs[c], &sz, kStressTimeoutMs), ncclSuccess)
-                    << "round " << round << " conn " << c;
+                if (WaitForCompletion(reqs[c], &sz, kStressTimeoutMs) != ncclSuccess) {
+                    ADD_FAILURE() << "round " << round << " conn " << c << " did not complete";
+                    waitOk = false;
+                    break;
+                }
             }
+            ASSERT_TRUE(RankAgree(waitOk)) << "request stalled on at least one rank (round "
+                                           << round << ")";
 
             MPI_Barrier(MPI_COMM_WORLD);
             if (rank == 0) {

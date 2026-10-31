@@ -3598,6 +3598,8 @@ protected:
         if (!before.valid() || !after.valid()) {
             GTEST_LOG_(WARNING) << "RDMA resource counting unavailable on this node; "
                                 << "leak check skipped for: " << label;
+            // A skipped check otherwise looks exactly like a clean one.
+            RecordProperty("rdma_leak_check", "skipped");
             return;
         }
         EXPECT_EQ(after.qp, before.qp)

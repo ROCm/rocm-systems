@@ -564,10 +564,11 @@
     "qpshare_base": {
       "extends": "gtest_base",
       "timeout": 600,
-      "description": "QP-sharing base (RCCL_IB_QP_SHARING_ENABLE master switch + RCCL_IB_COMM_NGROUPS). No tests here; children extend and set the tunables. NIC merging is turned off because the suite connects on device 0 and reasons about one physical IB device per rank. The CAST scheduler is deliberately left off: the QP-sharing tests skip themselves when RCCL_IB_QP_SCHED_ENABLE=1, so these configs extend gtest_base rather than cast_base. RCCL_IB_QP_SHARING_ENABLE, RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_DEPTH_MULTIPLIER are all RCCL_PARAMs and are cached for the process lifetime, which is why each value is a separate config rather than a case inside one run.",
+      "description": "QP-sharing base (RCCL_IB_QP_SHARING_ENABLE master switch + RCCL_IB_COMM_NGROUPS). No tests here; children extend and set the tunables. NIC merging is turned off because the suite connects on device 0 and reasons about one physical IB device per rank. The CAST scheduler is deliberately left off: the QP-sharing tests skip themselves when RCCL_IB_QP_SCHED_ENABLE=1, so these configs extend gtest_base rather than cast_base. RCCL_IB_QP_SHARING_ENABLE, RCCL_IB_COMM_NGROUPS and RCCL_IB_QP_DEPTH_MULTIPLIER are all RCCL_PARAMs and are cached for the process lifetime, which is why each value is a separate config rather than a case inside one run. RCCL_IB_QP_SHARING_VALIDATE_POOL=1 runs IbCastValidateSharedQpPool each time the plugin's last finalize() drops netRefCount to 0 (every test's TearDown), so a leaked pool slot or commId is reported by the suite whose subject is pool bookkeeping; in a debug build its assert aborts the binary on the first leak.",
       "env_variables": {
         "NCCL_IB_MERGE_NICS": "0",
-        "RCCL_IB_QP_SHARING_ENABLE": "1"
+        "RCCL_IB_QP_SHARING_ENABLE": "1",
+        "RCCL_IB_QP_SHARING_VALIDATE_POOL": "1"
       }
     },
 
