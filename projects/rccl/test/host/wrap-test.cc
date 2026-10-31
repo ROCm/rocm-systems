@@ -1763,6 +1763,8 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
+  t.ddaArLLOneShotMinRanks = 16;
+  t.ddaArLLOneShotMaxBytes = 4 * kKiB;
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
@@ -6962,6 +6964,78 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
+// The LL one-shot AllReduce keeps RCCL_DDA_LL_ONESHOT_THRESHOLD's default below
+// the table's ddaArLLOneShotMinRanks and stops at ddaArLLOneShotMaxBytes from there.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_CappedFromSixteenRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_CappedFromSixteenRanks",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        rcclArchThresholds table = MakeRankScaledTable();
+        comm->archThresholds = &table;
+        const std::pair<int, size_t> cases[] = {{2, 1 * kMiB},  {8, 1 * kMiB},  {15, 1 * kMiB},
+                                                {16, 4 * kKiB}, {32, 4 * kKiB}, {64, 4 * kKiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
+        }
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr));
+        table.ddaArLLOneShotMaxBytes = 8 * kKiB;
+        EXPECT_EQ(8 * kKiB, rcclDdaLLOneShotThreshold(comm)) << "the cap is the table's";
+        table.ddaArLLOneShotMinRanks = 0;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "0 ranks turns it off";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The rank cap is an arch-table entry, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        g_loadParam = ForceParam("RCCL_IGNORE_ARCH_TABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 32;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL_ONESHOT_THRESHOLD wins at every rank count, even at
+// its default value.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_EnvWinsOverRankCap",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "1048576");
+        g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(1) << 20);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        for (int nRanks : {8, 16, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// An empty value is not a setting, so the rank cap stays in force.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_EmptyEnvIsUnset",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 32;
+        EXPECT_EQ(4 * kKiB, rcclDdaLLOneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
 // no budget or no table keep the init cap.
 TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
@@ -7768,6 +7842,88 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+// gfx1250 DPX: the AllReduce LL128 tier and its two-shot stop at nRanks x 2 MiB
+// from 8 ranks; SPX keeps 256 MiB.
+TEST(WrapMicrotestIsolated, DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> cases[] = {{4, 256 * kMiB}, {8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << c.first;
+          EXPECT_EQ(c.second, rcclDdaLL128TwoShotThreshold(comm)) << c.first;
+        }
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        for (int nRanks : {8, 16, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "SPX " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX: the LL one-shot AllReduce stops at 4 KiB from 16 ranks; SPX keeps the 1 MiB default.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLLOneShotThreshold_Gfx1250DpxRankCap",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<int, size_t> cases[] = {{8, 1 * kMiB}, {15, 1 * kMiB}, {16, 4 * kKiB}, {32, 4 * kKiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
+        }
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        for (int nRanks : {16, 32, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "SPX " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx1250 DPX: DDA LL128 takes AllReduce up to its cap; one 16-byte shard past
+// it, the regular Ring/Tree selection takes it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250DpxLL128StopsAtCap",
+      []() {
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
+        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
+                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                   return true;
+                                 });
+        // Tree, not the fake's default Ring, marks an answer from the regular Ring/Tree selection.
+        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
+                                              ncclSimInfo_t*) {
+          task->algorithm = NCCL_ALGO_TREE;
+          task->protocol = NCCL_PROTO_LL128;
+          task->nMaxChannels = 1;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeArDdaComm(8);
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> cases[] = {{8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll128, SelectAllReduceDdaAlgo(comm, c.second)) << c.first;
+          EXPECT_EQ(NCCL_ALGO_TREE, SelectAllReduceDdaAlgo(comm, c.second + (size_t)c.first * 16)) << c.first;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
 
 // gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
