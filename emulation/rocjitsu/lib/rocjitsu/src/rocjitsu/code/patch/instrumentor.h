@@ -30,7 +30,7 @@
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance,
-/// AfterInst / BlockEntry / BlockExit kinds.
+/// BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
 /// and a layout/negotiation stage will appear between planning and splicing.
@@ -72,8 +72,9 @@ class LivenessAnalysis;
 /// Internal enum mirroring the future public `rj_code_instrument_kind_t`.
 /// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
 /// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
-/// boundary kinds require a callable probe. AfterInst, BlockEntry, and BlockExit
-/// remain reserved and are rejected.
+/// boundary kinds require a callable probe. AfterInst calls a probe after a
+/// relocated instruction, observing its resulting state; bank-changing anchors
+/// are rejected. BlockEntry and BlockExit remain reserved.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -172,6 +173,8 @@ struct InstrumentationPatch {
 /// @brief Production attribution from an original anchor to its emitted bytes.
 /// @details Offsets are relative to .text. KernelEntry has no relocated guest
 /// instruction, so guest_size is zero and guest_offset names its return branch.
+/// AfterInst maps the relocated guest before its instrumentation range; ordinary
+/// BeforeInst maps it after that range. Probe bodies are shared separately.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
@@ -259,9 +262,13 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
-///   - @p pt.kind is BeforeInst, KernelEntry, or KernelExit. Boundaries require
+///   - @p pt.kind is BeforeInst, AfterInst, KernelEntry, or KernelExit. Boundaries require
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
 ///     that KernelEntry names the sole kernel's descriptor entry.
+///   - AfterInst requires a callable probe and an anchor that preserves VGPR
+///     bank selection, since liveness proves bank state before the anchor.
+///     @p setreg_vgpr_msb_fixup selects the concrete target's MODE-write behavior;
+///     the default conservatively applies gfx1250's clobber semantics on CDNA5.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
 ///   - @p pt.probe_args is empty without a probe: an inline-nop site has
@@ -271,7 +278,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out = nullptr);
+                rj_code_arch_t arch, std::string *error_out = nullptr,
+                bool setreg_vgpr_msb_fixup = true);
 
 /// @brief Build a TrampolinePlan from a validated site.
 ///
