@@ -4,6 +4,29 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.3.0
+
+### Added
+
+- **Added VR temperatures to `amd-smi metric` temperature output**.  
+  - Added VRGFX, VRSOC, and VRMEM temperatures to metric output:
+```shell
+$ amd-smi metric --temperature -g 0
+GPU: 0
+    TEMPERATURE:
+        EDGE: N/A
+        HOTSPOT: 46 °C
+        MEM: 35 °C
+        HBM_STACKS: [35 °C, 31 °C, 32 °C, 31 °C, 34 °C, 33 °C, 31 °C, N/A, N/A, N/A, N/A, N/A]
+        VRGFX: N/A
+        VRMEM: N/A
+        VRSOC: 42 °C
+        MID: [N/A, N/A]
+        AID: [43 °C, 45 °C]
+        XCD:
+            XCP_0: [32 °C, 30 °C, 33 °C, 28 °C, 32 °C, 31 °C, 31 °C, 29 °C]
+```
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

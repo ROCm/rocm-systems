@@ -1502,6 +1502,27 @@ class MetricCommands:
                         gpu_id,
                         e.get_error_info(),
                     )
+                try:
+                    temperature_vrgfx = gpu_metric.get("temperature_vrgfx", "N/A")
+                except Exception as e:
+                    temperature_vrgfx = "N/A"
+                    logging.debug(
+                        "Failed to get current VRGFX temperature for gpu %s | %s", gpu_id, str(e)
+                    )
+                try:
+                    temperature_vrmem = gpu_metric.get("temperature_vrmem", "N/A")
+                except Exception as e:
+                    temperature_vrmem = "N/A"
+                    logging.debug(
+                        "Failed to get current VRMEM temperature for gpu %s | %s", gpu_id, str(e)
+                    )
+                try:
+                    temperature_vrsoc = gpu_metric.get("temperature_vrsoc", "N/A")
+                except Exception as e:
+                    temperature_vrsoc = "N/A"
+                    logging.debug(
+                        "Failed to get current VRSOC temperature for gpu %s | %s", gpu_id, str(e)
+                    )
 
                 # Use partition-scoped data when partition metrics were fetched.
                 if gpu_partition_metrics is not None:
@@ -1510,6 +1531,9 @@ class MetricCommands:
                         "hotspot": temperature_hotspot_current,
                         "mem": temperature_vram_current,
                         "hbm_stacks": "N/A",
+                        "vrgfx": temperature_vrgfx,
+                        "vrmem": temperature_vrmem,
+                        "vrsoc": temperature_vrsoc,
                         "mid": gpu_partition_metrics.get("temperature_mid", "N/A"),
                         "aid": "N/A",  # AID temps not in partition metrics
                         "xcd": "N/A",
@@ -1532,6 +1556,9 @@ class MetricCommands:
                         "hotspot": temperature_hotspot_current,
                         "mem": temperature_vram_current,
                         "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
+                        "vrgfx": temperature_vrgfx,
+                        "vrmem": temperature_vrmem,
+                        "vrsoc": temperature_vrsoc,
                         "mid": gpu_metric.get("temperature_mid", "N/A"),
                         "aid": gpu_metric.get("temperature_aid", "N/A"),
                         "xcd": "N/A",

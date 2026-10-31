@@ -44,6 +44,8 @@ _SKIP_REASON = f"amd-smi CLI not found (looked in {amdsmi_path})"
 
 NA = "N/A"
 
+_VR_TEMPERATURE_KEYS = ("vrgfx", "vrmem", "vrsoc")
+
 
 class _FakeClkType:
     GFX = "GFX"
@@ -522,6 +524,15 @@ class TestMachineFormatsAreNeverFiltered(_MetricGpuHarness):
                 )
                 self.assertEqual(values, with_flag)
 
+    def test_vr_temperatures_survive_in_machine_formats(self):
+        # v1.6 cannot carry vrgfx/vrmem; human output drops them, scripts still get the keys.
+        for output in _FakeLogger.MACHINE_FORMATS:
+            with self.subTest(output=output):
+                values = self.run_metric(version=(1, 6), output=output)
+                for key in _VR_TEMPERATURE_KEYS:
+                    self.assertKeyPresent(values, "temperature", key)
+                    self.assertEqual(values["temperature"][key], NA)
+
     def test_a_section_the_version_empties_survives_in_machine_formats(self):
         # v1.3 can populate no throttle row, so human output drops the section.
         for output in _FakeLogger.MACHINE_FORMATS:
@@ -554,6 +565,15 @@ class TestShowUnsupportedRestoresTheOldOutput(_MetricGpuHarness):
             if isinstance(section_value, dict):
                 self.assertLessEqual(set(section_value), set(kept[section]))
         self.assertLessEqual(set(dropped), set(kept))
+
+    def test_show_unsupported_keeps_the_vr_temperatures_the_default_drops(self):
+        default = self.run_metric(version=(1, 6), output="human")
+        with_flag = self.run_metric(show_unsupported=True, version=(1, 6), output="human")
+        for key in ("vrgfx", "vrmem"):
+            self.assertKeyAbsent(default, "temperature", key)
+        for key in _VR_TEMPERATURE_KEYS:
+            self.assertKeyPresent(with_flag, "temperature", key)
+            self.assertEqual(with_flag["temperature"][key], NA)
 
 
 class TestDefaultFilteringOnKnownVersion(_MetricGpuHarness):
@@ -598,6 +618,35 @@ class TestDefaultFilteringOnKnownVersion(_MetricGpuHarness):
             self.assertKeyPresent(values, "usage", key)
 
         self.assertMachineFormatsUnfiltered(version=(1, 6))
+
+    def test_v13_keeps_the_vr_temperatures(self):
+        # v1.0-v1.3 carry all three VR sensors, so "N/A" there is a real answer.
+        values = self.run_metric(version=(1, 3), output="human")
+        for key in _VR_TEMPERATURE_KEYS:
+            self.assertKeyPresent(values, "temperature", key)
+
+        self.assertMachineFormatsUnfiltered(version=(1, 3))
+
+    def test_v16_drops_vrgfx_and_vrmem_but_keeps_vrsoc(self):
+        values = self.run_metric(version=(1, 6), output="human")
+        for key in ("vrgfx", "vrmem"):
+            self.assertKeyAbsent(values, "temperature", key)
+        self.assertKeyPresent(values, "temperature", "vrsoc")
+
+        self.assertMachineFormatsUnfiltered(version=(1, 6))
+
+    def test_a_suppressed_vr_temperature_holding_a_reading_is_still_printed(self):
+        readings = {"temperature_vrgfx": 75, "temperature_vrmem": 68, "temperature_vrsoc": 72}
+        original = self.interface.amdsmi_get_gpu_metrics_info
+        self.interface.amdsmi_get_gpu_metrics_info = lambda *_a, **_k: {**original(), **readings}
+        self.addCleanup(setattr, self.interface, "amdsmi_get_gpu_metrics_info", original)
+
+        degree = "\N{DEGREE SIGN}C"
+        values = self.run_metric(version=(1, 6), output="human")
+        self.assertEqual(
+            [values["temperature"][key] for key in _VR_TEMPERATURE_KEYS],
+            [f"75 {degree}", f"68 {degree}", f"72 {degree}"],
+        )
 
     def test_a_suppressed_path_holding_a_reading_is_still_printed(self):
         # The all-N/A gate, end to end: v1.3 has none of the residency
@@ -933,6 +982,15 @@ class TestPerGpuSuppression(unittest.TestCase):
         for row in rows:
             for column in self._VERSION_ABSENT_COLUMNS:
                 self.assertIn(column, row, f"{column} was filtered out of CSV")
+
+    def test_csv_keeps_the_vr_temperature_columns(self):
+        # vrgfx/vrmem are version-absent on v1.6 but must stay columns on every row.
+        for versions in ([(1, 6), (1, 6)], [(1, 3), (1, 6)]):
+            with self.subTest(versions=versions):
+                for row in self._csv_rows(versions):
+                    for column in _VR_TEMPERATURE_KEYS:
+                        self.assertIn(column, row, f"{column} was filtered out of CSV")
+                        self.assertEqual(row[column], NA)
 
     def test_csv_header_does_not_depend_on_the_flag(self):
         for versions in ([(1, 3), (1, 3)], [(1, 3), (1, 6)]):
