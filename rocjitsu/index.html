@@ -605,6 +605,34 @@
   
   
     <li class="md-nav__item">
+      <a href="python-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python execution API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="configuration/" class="md-nav__link">
         
   
@@ -1958,6 +1986,7 @@ real hardware. Supports three execution strategies:</p>
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
+python/                 Python callable execution and sessions
 tools/rocjitsu/         CLI (local, daemon, attach modes)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
@@ -2026,6 +2055,8 @@ See
 <span class="w">  </span>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import torch; x = torch.randn(4, 4, device='cuda'); print(x @ x)"</span>
 </code></pre></div>
 <p>See <a href="building/">docs/building.md</a> for container setup with PyTorch.</p>
+<p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/python/README.md">Python API</a> provides <code>rocjitsu.run</code> and persistent <code>Session</code>
+workers. Scripts, tests, interactive shells, and notebooks use the same library.</p>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <h3 id="getting-started">Getting started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h3>
 <table>
@@ -2055,6 +2086,10 @@ See
 <tr>
 <td><a href="qemu-vfio/">QEMU VFIO-user compute</a></td>
 <td>Run a gfx1250 guest and qualify a GEMM workload</td>
+</tr>
+<tr>
+<td><a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/python/README.md">Python API</a></td>
+<td>Configuration presets, callable workers, and sessions</td>
 </tr>
 <tr>
 <td><a href="rocjitsu-cli/">CLI &amp; Transport</a></td>
