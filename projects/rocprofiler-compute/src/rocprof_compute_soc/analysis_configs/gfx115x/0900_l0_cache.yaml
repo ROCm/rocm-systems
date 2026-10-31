@@ -28,8 +28,8 @@ Panel Config:
         # (one TCP per WGP, 2 CUs per WGP on RDNA3.x). AVG/MIN/MAX apply per sample.
         GL0 Busy (TCP):
           avg: 100 * SUM(TCP_GATE_EN2) / SUM(GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))
-          min: 100 * MIN(TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
-          max: 100 * MAX(TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
+          min: MIN(100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
+          max: MAX(100 * TCP_GATE_EN2 / (GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2))))
           unit: Percent
 
   # =========================================================================
@@ -81,8 +81,8 @@ Panel Config:
       metric:
         Hit Rate:
           avg: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
-          min: 100 * MIN((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
-          max: 100 * MAX((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          min: MIN(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
+          max: MAX(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum)
           unit: Percent
 
   # =========================================================================

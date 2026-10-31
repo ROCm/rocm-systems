@@ -25,8 +25,8 @@ Panel Config:
       metric:
         Utilization:
           avg: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_BUSY_CYCLE_sum / GC_EA_SE_CYCLE_sum)
           unit: Percent
 
   - metric_table:
@@ -41,43 +41,43 @@ Panel Config:
       metric:
         DRAM Bandwidth - Read:
           avg: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         DRAM Bandwidth - Write:
           avg: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Bandwidth - Read:
           avg: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         IO Bandwidth - Write:
           avg: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Bandwidth - Read:
           avg: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         HDM Bandwidth - Write:
           avg: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Bandwidth - Read:
           avg: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GMI Bandwidth - Write:
           avg: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
-          max: MAX(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum * 32 / (End_Timestamp - Start_Timestamp))
+          min: MIN(32 * GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(32 * GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
 
   - metric_table:
@@ -158,33 +158,33 @@ Panel Config:
       metric:
         EA Stalled by SDP:
           avg: 100 * SUM(GC_EA_SE_SARB_STALLED_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_SARB_STALLED_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
         EA Stalled by SDP - IO Read:
           avg: 100 * SUM(GC_EA_SE_STALL_IO_RD_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_STALL_IO_RD_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
         EA Stalled by SDP - IO Write:
           avg: 100 * SUM(GC_EA_SE_STALL_IO_WR_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_STALL_IO_WR_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
         EA Stalled by SDP - DRAM:
           avg: 100 * SUM(GC_EA_SE_STALL_DRAM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_STALL_DRAM_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
         EA Stalled by SDP - GMI:
           avg: 100 * SUM(GC_EA_SE_STALL_GMI_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_STALL_GMI_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
         EA Stalled by SDP - HDM:
           avg: 100 * SUM(GC_EA_SE_STALL_HDM_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)
-          min: 100 * MIN(GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum)
-          max: 100 * MAX(GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          min: MIN(100 * GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum)
+          max: MAX(100 * GC_EA_SE_STALL_HDM_sum / GC_EA_SE_BUSY_CYCLE_sum)
           unit: Percent
 
   metrics_description:

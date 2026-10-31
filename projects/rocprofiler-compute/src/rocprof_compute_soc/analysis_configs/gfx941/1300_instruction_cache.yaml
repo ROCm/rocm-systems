@@ -53,8 +53,8 @@ Panel Config:
           unit: (Requests + $normUnit)
         Cache Hit Rate:
           avg: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
-          min: 100 * MIN(SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
-          max: 100 * MAX(SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
+          min: MIN(100 * SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
+          max: MAX(100 * SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
           unit: Percent
         Instruction Fetch Latency:
           avg: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
@@ -73,8 +73,8 @@ Panel Config:
       metric:
         L1I-L2 Bandwidth:
           avg: 64 * SUM(SQC_TC_INST_REQ) / SUM(End_Timestamp - Start_Timestamp)
-          min: 64 * MIN(SQC_TC_INST_REQ / (End_Timestamp - Start_Timestamp))
-          max: 64 * MAX(SQC_TC_INST_REQ / (End_Timestamp - Start_Timestamp))
+          min: MIN(64 * SQC_TC_INST_REQ / (End_Timestamp - Start_Timestamp))
+          max: MAX(64 * SQC_TC_INST_REQ / (End_Timestamp - Start_Timestamp))
           unit: Gbps
   metrics_description:
     Bandwidth Utilization: The number of bytes looked up in the L1I cache, as a percent

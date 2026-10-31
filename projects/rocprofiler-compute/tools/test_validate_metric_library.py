@@ -530,19 +530,6 @@ def test_variant_position_must_exist(shipped_copy, monkeypatch):
     assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
 
 
-def test_unknown_measured_peak_is_an_error(shipped_copy):
-    """gfx908 has no roofline benchmark, so its row peaks are not checked; a typo
-    still is."""
-    library, configs = shipped_copy("gfx908")
-    replace_in(
-        configs / "gfx908" / "0400_roofline.yaml",
-        "$LDSBw_empirical_peak",
-        "$LDSBz_empirical_peak",
-    )
-    errors = validate(library, configs)
-    assert any("peak $LDSBz_empirical_peak is neither" in e for e in errors)
-
-
 @pytest.mark.parametrize(
     "peak, shown",
     [

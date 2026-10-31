@@ -911,18 +911,11 @@ def _peak_errors(
 
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
     is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
-    A row's measured peak is skipped where the roofline benchmark does not measure that
-    ceiling on the arch (always, on an arch without a benchmark); a ceiling that is no
-    roofline.csv column is still an error.
     """
-    unmeasured = mi_gpu_specs.get_all_roofline_columns() - _arch_ceilings(arch)
     errors = []
     shown_fields = defaultdict(set)
     for row, metric_id in zip(rows, metric_ids):
         if row.peak is None or metric_id is None:
-            continue
-        ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
-        if ceiling and ceiling.group(1) in unmeasured:
             continue
         metric = library.metrics[metric_id]
         fields = [
