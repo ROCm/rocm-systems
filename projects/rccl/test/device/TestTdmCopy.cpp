@@ -8,7 +8,7 @@
 //
 // tdmCopy.h exposes four device entry points plus a wait and a host/device
 // capability query. This file exercises every one of them and the internal
-// [head][aligned 256B rows][tail] partitioning of detail::issue():
+// [vector head][TDM chunks] partitioning of detail::issue():
 //
 //   * IsTdmCopySupported()  - host and device capability query
 //   * tdmCopy()             - blocking, block-collective (all warps)
@@ -249,8 +249,8 @@ protected:
 TEST_P(TdmBlockCopyTest, Blocking)  { run<false>(GetParam()); }
 TEST_P(TdmBlockCopyTest, Async)     { run<true>(GetParam());  }
 
-// A broad gamut hitting: pure aligned bulk; head+bulk+tail; tail-only (n<256B);
-// head-only (head clamped by n); tiny LDS (< 256B, vector fallback); LDS that
+// A broad gamut hitting: pure aligned bulk; head plus chunks; copies under 256B;
+// head-only (head clamped by n); tiny LDS (< MIN_SLOT, vector fallback); LDS that
 // only feeds a subset of warps; single-warp blocks; and awkward remainders.
 INSTANTIATE_TEST_SUITE_P(
   Gamut, TdmBlockCopyTest,
@@ -280,17 +280,19 @@ INSTANTIATE_TEST_SUITE_P(
   ),
   [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
 
-// Independent offsets across the slot layouts, on one warp so that the window is the whole budget: one slot (just
-// under and at MIN_SLOT), two slots when shifting (at 2 * MIN_SLOT and above), and two slots regardless (16KB+).
-// With doff 0 the destination sits kGuard bytes past an allocation boundary, so delta = (soff - kGuard) % 256.
+// Independent offsets across the slot layouts, on one warp so that the window is the whole budget: one slot (at
+// MIN_SLOT and just under 2 * MIN_SLOT), two slots when shifting (at 2 * MIN_SLOT and above), and two slots regardless
+// (16KB+). With doff 0 the destination sits kGuard bytes past an allocation boundary, so delta = (soff - kGuard) % 256;
+// soff 116 and 127 give delta 244 and 255, where the LDS offset o reaches ALIGN. The _short copies are one partial
+// chunk past the head, which is up to 384 bytes.
 std::vector<BlockCase> offsetSlotCases() {
-  const int soffs[] = {0, 1, 2, 3, 4, 5, 7, 128, 131, 255};
+  const int soffs[] = {0, 1, 2, 3, 4, 5, 7, 116, 127, 128, 131, 255};
   const size_t ldsSizes[] = {544, 1087, 1088, 4096, 16384, 65536};
   std::vector<BlockCase> v;
   for (size_t lds : ldsSizes) {
     for (int soff : soffs) {
       const std::string tag = "lds" + std::to_string(lds) + "_soff" + std::to_string(soff);
-      v.push_back({300, lds, soff, 0, 32, tag + "_short"});
+      v.push_back({600, lds, soff, 0, 32, tag + "_short"});
       v.push_back({3 * lds + 37, lds, soff, 0, 32, tag + "_long"});
     }
   }
