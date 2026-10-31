@@ -310,6 +310,14 @@ do_kernel_count_guards() {
   "$venv/bin/python" -m pytest "$RCCL_ROOT/test/kernel-count/tests" -v
 }
 
+# Run the tuner embed-script guard (test/test_embed_tuner_configs.py).
+do_tuner_embed_guards() {
+  echo "==> Tuner-embed guards (pytest: test/test_embed_tuner_configs.py)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_embed_tuner_configs.py" -v
+}
+
 # Run the accl-profiler reporter suite. It covers accl_report.py's loss banner
 # and its refusal to read pre-rename summaries -- pure host Python, no GPU.
 do_accl_report_guards() {
@@ -348,6 +356,7 @@ do_guards() {
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
+  do_tuner_embed_guards || rc=1
   do_accl_report_guards || rc=1
   do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
