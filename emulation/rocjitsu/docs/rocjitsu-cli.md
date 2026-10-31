@@ -79,16 +79,16 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 ```bash
 # Local mode: in-process simulation
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 
 # Attach to running daemon
-rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \
