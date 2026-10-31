@@ -4,6 +4,8 @@ description: "Documentation review subagent. Checks docs, comments, help text, d
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Documentation Review — amd-smi
@@ -41,3 +43,7 @@ Return findings as a markdown list:
 **[F-N] [Severity]: [Issue Title]** (`file:line`)
 - Explanation and impact
 - **Fix:** [fix] or **Option A/B** with recommendation
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "empty".

@@ -4,6 +4,8 @@ description: "Maintainer-lens review subagent and pre-flight check. Predicts the
 tools: execute/runInTerminal, execute/getTerminalOutput, read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Maintainer-Lens Review — amd-smi
@@ -564,3 +566,7 @@ any that would be empty:
 
 The verdict is ✅ only when no ❌ or ⚠️ finding remains; 💡 nits are listed but
 do not block.
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "devices".

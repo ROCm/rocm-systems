@@ -4,6 +4,8 @@ description: "Architecture review subagent. Checks design patterns, API consiste
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Architecture Review — amd-smi
@@ -81,3 +83,7 @@ Return findings as a markdown list:
 **[F-N] [Severity]: [Issue Title]** (`file:line`)
 - Explanation and impact
 - **Fix:** [fix] or **Option A/B** with recommendation
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "failed".

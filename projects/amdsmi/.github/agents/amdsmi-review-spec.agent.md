@@ -4,6 +4,8 @@ description: "Spec-conformance review subagent. Checks the diff against its orig
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages, execute/runInTerminal, atlassian/*
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Spec Conformance Review — amd-smi
@@ -69,3 +71,7 @@ or the skipped note. Then findings as a markdown list:
 - Spec says: "[quoted spec line]"
 - Diff does: [what the code does]
 - **Fix:** [fix] or **Option A/B** with recommendation
+
+## Test-only rule
+
+- In CHANGELOG.md, flag every use of the word "sensor".
