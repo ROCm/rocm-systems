@@ -10427,9 +10427,9 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
 
 // ---------------------------------------------------------------------------
 // RCCL_DDA_NRANKS_RELAX participant-count floor (rccl_wrap.cc AllGather /
-// ReduceScatter selectors).
+// ReduceScatter / AlltoAll selectors).
 //
-// Both selectors pick their DDA floor with
+// All three selectors pick their DDA floor with
 //     const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
 // and hand it to rcclDdaEnabled(). Nothing else in this binary reads
 // g_ddaNranksRelaxEnabled, so every other case runs at the stock 8-rank floor

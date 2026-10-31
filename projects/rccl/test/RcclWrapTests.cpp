@@ -2656,11 +2656,13 @@ TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
 // End-to-end wiring of the relaxed floor for AlltoAll: with RCCL_DDA_NRANKS_RELAX=1
 // a 4-rank comm reaches the DDA AlltoAll path, where the TooFewRanks test above
 // shows it does not by default. Mirrors RcclAllReduceDdaDecision.Gfx950_FourRanks_
-// RelaxOn_TakesDda below. This exercises the real ddaMinRanks argument at
-// rcclAlltoAllShouldTakeDdaPath()'s own call site in collectives.cc directly --
-// unlike the DdaAlltoAllThresholdTests suite, which only goes through the
-// testRcclDdaAlltoAllThresholdEnabled() mirror and would not notice if that
-// argument were dropped or hardcoded back to 8.
+// RelaxOn_TakesDda below. This pins the ddaMinRanks argument in
+// rcclAlltoAllShouldTakeDdaPath() (collectives.cc), unlike the
+// DdaAlltoAllThresholdTests suite, which only goes through the
+// testRcclDdaAlltoAllThresholdEnabled() mirror. Note that helper no longer
+// has a caller in src/: live AlltoAll dispatch runs through
+// rcclSelectAlltoAll(), whose floor WrapMicrotestIsolated.
+// SelectAlltoAll_DdaNranksRelaxOpensFourRankFloor (host/wrap-test.cc) pins.
 TEST(RcclAlltoAllDdaDecision, Gfx950_FourRanks_RelaxOn_TakesDda)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
