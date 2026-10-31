@@ -1134,6 +1134,120 @@ make -j $(nproc) rccl-UnitTestsMicro
 # Coverage: see the Coverage section (run under LLVM_PROFILE_FILE, then llvm-cov).
 ```
 
+### `rccl-UnitTestsHostAll` — one front door for every host binary
+
+The host tree builds many small binaries on purpose (see
+[Why a separate test binary](#why-a-separate-test-binary)), and every new unit
+under test tends to add another. Anything outside this directory that wants to
+*run* them therefore ends up keeping its own copy of the binary list, and those
+copies drift: a new binary silently goes unrun, and its coverage silently goes
+unreported.
+
+`rccl-UnitTestsHostAll` (`host_test_dispatch.cc`) removes the lists. It is not
+a test binary; it is a gtest-shaped front door that discovers its
+`rccl-UnitTestsMicro*` siblings **at run time** and forks the ones that own a
+selected case:
+
+```bash
+# Everything, as one report:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_output=xml:host.xml
+
+# What it can run (the union of every binary's cases):
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_list_tests
+
+# One suite, wherever it lives:
+./build/release/test/host/rccl-UnitTestsHostAll --gtest_filter='*RmaCeInitTest.*'
+```
+
+Case names are qualified with the owning binary's suffix — 
+`MicroInitUncached/InitMicrotest.Case` — because the multi-arm binaries
+(`-uncached`, `-faultinj`, `-devlinker`, `-roctx`) publish identical
+`Suite.Case` names and would otherwise collide into one identity when they all
+report through one front door. The dashes are folded away (`MicroInitUncached`,
+not `MicroInit-uncached`) because gtest splits a `--gtest_filter` at its first
+`-`, so a qualifier carrying one could never be named by a positive pattern.
+
+The qualifier is part of the name a filter has to match, so a pattern written
+against one binary does **not** carry over unchanged: `P2pMicrotest.*` (as in
+`test_categories_micro.yaml`) matches nothing here, because every published name
+begins `<Qualifier>/`. Lead with `*` to mean "in whichever binary owns it", or
+name the qualifier to mean one arm:
+
+```bash
+# Wherever it lives:
+--gtest_filter='*P2pMicrotest.*'
+# Only the uncached arm's copy:
+--gtest_filter='MicroInitUncached/InitMicrotest.*'
+```
+
+A filter that selects nothing is not an error — gtest exits 0 for one too, and
+the shared categories yaml depends on that, since each binary is handed every
+category's patterns and most match none of them. The front door prints the
+qualification rule when it happens, so a pattern that silently selected nothing
+says why.
+
+The filter itself is resolved by **gtest**, not by the dispatcher: it registers
+the qualified names as empty tests and reads back `should_run()`. gtest exposes
+no matcher any other way (`UnitTestOptions::FilterMatchesTest` is declared only
+in `src/gtest-internal-inl.h`, which is not installed), and a reimplementation
+drifts — the first one here selected `DISABLED_` cases that gtest would not have
+run.
+
+Each child is then handed an **exact `:`-joined list of its own case names**,
+never the caller's pattern: the pattern is written against qualified names, and
+in a multi-arm binary (`rccl-UnitTestsMicroInit*`) it would also match the
+identically named cases of the arm it was meant to exclude. Two exceptions keep
+that list manageable — when every case a binary could run is selected it is sent
+`*` instead, which is shorter in the logs and is why its `DISABLED_` cases do
+not force a list; and a list longer than ~60,000 characters is split across
+several invocations of that binary, because the kernel caps one argv entry at
+`MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
+which the biggest binary's 2,199 case names would exceed.
+
+### What the children inherit
+
+gtest configures itself from `GTEST_*` variables as well as from flags, and that
+is dangerous in a dispatcher, because this process reads them too. Every such
+variable is one of two things:
+
+- **Consumed** — the dispatcher acts on it and re-expresses the decision as an
+  explicit per-child flag, so the children never see the variable. A child that
+  saw it would decide the same question a *second* time, over a case list that
+  has already been narrowed, and exit 0 having run a fraction of it.
+  `GTEST_FILTER` (resolved over the qualified names), `GTEST_OUTPUT` (becomes
+  the merged report), `GTEST_ALSO_RUN_DISABLED_TESTS` (decides the selection)
+  and the three `GTEST_*SHARD*` variables (sharding happens once) are consumed.
+- **Forwarded** — it means the same thing in a child and changes nothing about
+  which cases run: `GTEST_COLOR`, `GTEST_BRIEF`, `GTEST_REPEAT`,
+  `GTEST_DEATH_TEST_STYLE` and the like.
+
+An **unknown** `GTEST_*` variable is consumed and named on stderr. That is the
+safe default of the two: a variable a future gtest adds costs a redundant strip
+and a line of output, where inheriting it could silently cost coverage. Nothing
+here has to be updated for gtest to stay *correct* — the table in
+`host_test_dispatch.cc` only buys back the forwarding of variables we have
+decided are harmless. Non-`GTEST_` variables are never touched.
+
+The strip happens **in each child, between `fork()` and `exec()`**, not in the
+dispatcher. Two reasons: the dispatcher goes on using the originals after the
+first fork (it shards over them), and putting it at the fork sites means there
+is no ordering in `main()` to get right and a fork site added later inherits the
+guarantee by construction.
+
+For coverage, each child inherits `LLVM_PROFILE_FILE` and drops its own
+`.profraw` as usual. What a harness cannot know is which binaries those
+profiles came from — `llvm-cov` needs an `--object` per binary and silently
+discards a profile whose object is missing — so the dispatcher appends every
+binary it ran to `coverage-objects.txt` in the profile directory. That file,
+not a list maintained in the harness, is the object set.
+
+Adding a host test binary therefore needs no change outside this directory.
+
+`run_host_tests.sh` keeps driving the binaries individually: it writes each
+one's profiles into its own `coverage/<binary>/` subdirectory to produce the
+per-binary reports CI publishes, which a single shared profile directory could
+not reconstruct.
+
 ## Standalone host-only build (no full librccl build)
 
 `test/host/CMakeLists.txt` is dual-mode. Alongside the in-RCCL-build target
