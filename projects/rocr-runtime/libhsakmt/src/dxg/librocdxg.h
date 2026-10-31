@@ -143,6 +143,7 @@ struct hsakmtRuntime {
       uint64_t is_svm_api_supported : 1;
       uint64_t disable_wait_timeout_ : 1;
       uint64_t sdma_gpu_poll_ : 1;
+      uint64_t coop_queue_ : 1;
     };
     uint64_t settings_bits_ = 0;
   };
