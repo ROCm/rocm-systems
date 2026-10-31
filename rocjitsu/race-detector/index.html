@@ -1917,9 +1917,9 @@ rocjitsu config file (<code>my_config.json</code>):</p>
 <p>You should see output:</p>
 <div class="highlight"><pre><span></span><code>RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==&gt;  ds_write_b32 v0, v1  ; &lt;-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==&gt;  ds_read_b32 v1, v1  ; &lt;-- wave 0 lane 0
+  ==&gt;  0x7f6a1e801010  ds_write_b32 v0, v1  ; &lt;-- wave 1
+       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
+  ==&gt;  0x7f6a1e80101c  ds_read_b32 v1, v1  ; &lt;-- wave 0 lane 0
 END_RACE
 </code></pre></div>
 <p>This tells you that dispatch 1 of <code>transpose_lds</code> reported a race: wave 1 wrote
@@ -1928,6 +1928,30 @@ without a barrier in between. The <code>kernel</code> field is a compact display
 <code>symbol</code> is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports <code>?</code> for the unresolved field. The fix is to add
 <code>__syncthreads()</code> between the write and the read.</p>
+<p>Each trace line shows an instruction's GPU virtual address, which varies
+between runs, and its disassembly. The trace lists instructions that the
+reporting wave (here wave 0) executed, oldest first. <code>==&gt;</code> marks entries matching
+the PC and captured encoding of either instruction involved in the race, and
+the <code>&lt;--</code> annotation names the wave and lane that performed that access. When the
+conflicting instruction ran in another wave, as with wave 1's <code>ds_write_b32</code>
+above, the marker is placed where the reporting wave executed the same bytes
+at the same address, if such an entry is present. Repeated executions of identical
+bytes at the same address are not distinguished; the displayed span ends at the
+first matching racing access after its first marker.</p>
+<p>The race detector retains the last 256 instructions of each wave. If the
+reporting wave has no entry matching the conflicting PC and encoding, the report
+prints the retained producer instruction first with a <code>(before trace window)</code>
+note. This can mean the instruction has left the trace, but it can also mean that
+another wave executed an instruction the reporting wave never executed. The note
+does not establish that the conflict is more than 256 instructions old.</p>
+<p>For example, if another wave's producer is at <code>0x1000</code> and the reporting wave's
+trace contains only its racing access at <code>0x3000</code>, the producer appears with
+<code>(before trace window)</code> and <code>0 instructions not recorded</code>. That count is the
+number of retained reporting-wave entries skipped before the first displayed
+marker, not the number of instructions since the producer ran.</p>
+<p>Traces longer than 32 instructions show only their first and last 16. Each trace
+row is disassembled from its own captured bytes, so it remains accurate if the
+kernel's code is later overwritten or unmapped.</p>
 <h3 id="running-your-own-application">Running your own application<a class="headerlink" href="#running-your-own-application" title="Permanent link">&para;</a></h3>
 <p>Replace the binary path with your application. This works with any ROCm workload
 — compiled HIP/HSA binaries, Python scripts using PyTorch or JAX, multi-process

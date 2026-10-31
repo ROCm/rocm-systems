@@ -1366,6 +1366,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#retaining-instruction-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retaining instruction information
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1997,6 +2008,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#retaining-instruction-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retaining instruction information
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2211,7 +2233,8 @@ instruction, and this plugin copies each mnemonic on first sight rather than
 storing the view. A plugin that keys a long-lived map on the view will read
 freed memory;
 <code>InstructionMixPluginTest.OwnsMnemonicStorageWhenTheSourceIsNotStatic</code> pins the
-behaviour.</p>
+behaviour. See <a href="#retaining-instruction-information">Retaining instruction information</a>
+for the other borrowed parts of an <code>Instruction</code>.</p>
 <h3 id="kernel-logging-plugin">Kernel Logging Plugin<a class="headerlink" href="#kernel-logging-plugin" title="Permanent link">&para;</a></h3>
 <p>The logging plugin records kernel dispatch metadata and detects MMA
 (matrix multiply-accumulate) instruction usage:</p>
@@ -2559,6 +2582,57 @@ continue receiving SGPR read callbacks unless they explicitly opt out.</p>
 before publishing the group to simulation components. <code>add()</code> is not
 thread-safe, and the group must remain immutable while callbacks may dispatch
 concurrently.</p>
+<h3 id="retaining-instruction-information">Retaining instruction information<a class="headerlink" href="#retaining-instruction-information" title="Permanent link">&para;</a></h3>
+<p>The <code>Instruction</code> passed to instruction and memory hooks is borrowed and is
+valid only during the callback. So are the views it returns: <code>raw_encoding()</code>
+points to encoding words owned by the decoder or the instruction, and
+<code>mnemonic()</code> can view a member of the instruction (see the note on mnemonic
+storage above). Copy anything you keep before the callback returns.
+<code>Instruction::disassemble()</code> is different: it formats a new <code>std::string</code> on
+each call, and the caller owns the result, so a plugin may keep it.</p>
+<p>Formatting text for every executed instruction is expensive when little of it
+is ever printed. A plugin that needs text only when it reports something can
+instead copy the instruction's PC and encoding as it executes, and disassemble
+the copy when the report is written. Validate the encoding before copying it:
+<code>raw_encoding()</code> is null when the instruction has no encoding, and the copy
+needs <code>size()</code> to be a positive multiple of four bytes that fits the buffer.
+An encoding is at most four words (the CU's 16-byte fetch window). The example
+rejects anything else at capture, as the race detector does, so every stored
+copy can be disassembled.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">LastInstruction</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WavefrontState</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">pc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="p">{};</span>
+<span class="w">  </span><span class="kt">size_t</span><span class="w"> </span><span class="n">word_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="c1">// Zero until the wave executes an instruction.</span>
+<span class="p">};</span>
+
+<span class="kt">void</span><span class="w"> </span><span class="nf">onAmdgpuBeforeExecuteInstruction</span><span class="p">(</span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">pc</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">Instruction</span><span class="w"> </span><span class="o">&amp;</span><span class="n">inst</span><span class="p">,</span>
+<span class="w">                                      </span><span class="n">amdgpu</span><span class="o">::</span><span class="n">Wavefront</span><span class="w"> </span><span class="o">&amp;</span><span class="n">wf</span><span class="p">)</span><span class="w"> </span><span class="k">override</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="o">&amp;</span><span class="n">last</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="k">static_cast</span><span class="o">&lt;</span><span class="n">LastInstruction</span><span class="w"> </span><span class="o">*&gt;</span><span class="p">(</span><span class="n">wf</span><span class="p">.</span><span class="n">plugin_state</span><span class="p">(</span><span class="n">slot_index</span><span class="p">()));</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inst</span><span class="p">.</span><span class="n">size</span><span class="p">();</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">inst</span><span class="p">.</span><span class="n">raw_encoding</span><span class="p">()</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">)</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span>
+<span class="w">      </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">size_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">bytes</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">))</span>
+<span class="w">    </span><span class="k">throw</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">logic_error</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">format</span><span class="p">(</span><span class="s">"instruction at PC {:#x} has no valid encoding"</span><span class="p">,</span><span class="w"> </span><span class="n">pc</span><span class="p">));</span>
+<span class="w">  </span><span class="n">last</span><span class="p">.</span><span class="n">pc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pc</span><span class="p">;</span>
+<span class="w">  </span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="k">sizeof</span><span class="p">(</span><span class="kt">uint32_t</span><span class="p">);</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">copy_n</span><span class="p">(</span><span class="n">inst</span><span class="p">.</span><span class="n">raw_encoding</span><span class="p">(),</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="p">,</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">.</span><span class="n">begin</span><span class="p">());</span>
+<span class="p">}</span>
+
+<span class="c1">// Later, when a report about this wave needs text:</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">wf</span><span class="p">.</span><span class="n">disassemble_instruction</span><span class="p">(</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">span</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">words</span><span class="p">).</span><span class="n">first</span><span class="p">(</span><span class="n">last</span><span class="p">.</span><span class="n">word_count</span><span class="p">),</span><span class="w"> </span><span class="n">last</span><span class="p">.</span><span class="n">pc</span><span class="p">);</span>
+<span class="w">  </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>Wavefront::disassemble_instruction</code> decodes the copy with the wave's CU target
+decoder, so a standalone plugin module can use it without linking the
+simulator. Call it on the CU execution thread, for example from one of that
+wave's synchronous hooks. It throws <code>std::logic_error</code> if the encoding is empty,
+truncated, or cannot be decoded. Because the text comes from the copied bytes,
+it describes the instruction that executed even if the code was later
+overwritten or unmapped. The race detector formats its instruction traces this
+way.</p>
 <h2 id="adding-a-new-plugin">Adding a new plugin<a class="headerlink" href="#adding-a-new-plugin" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Implement <code>ExecutionPlugin</code> in a new subdirectory. The plugin class
@@ -2587,6 +2661,8 @@ concurrently.</p>
    hooks. Keep the default <code>false</code> for ordered event state or complete
    architectural snapshots. One non-opted-in plugin disables async execution
    for the entire group.</li>
+<li>Copy any instruction data that the plugin keeps beyond a callback; see
+   <a href="#retaining-instruction-information">Retaining instruction information</a>.</li>
 </ol>
 <h2 id="asynchronous-arithmetic">Asynchronous arithmetic<a class="headerlink" href="#asynchronous-arithmetic" title="Permanent link">&para;</a></h2>
 <p>Plugins default to synchronous execution. <code>supports_async_instructions()</code> opts
