@@ -95,6 +95,9 @@ struct TrampolinePlan {
   std::vector<InlineAsmItem> before_items;
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// Execute the relocated anchor before the callable envelope.
+  /// With emit_original=false, both placements emit only the envelope.
+  bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
   bool patch_anchor = true;
@@ -202,6 +205,10 @@ struct TrampolineBytes {
   std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
   uint32_t original_byte_offset = 0;
+  /// Call envelope relative to trampoline start, excluding the relocated guest
+  /// instruction and resume branch. Both fields are zero for inline plans.
+  uint32_t call_envelope_byte_offset = 0;
+  uint32_t call_envelope_byte_size = 0;
 };
 
 class TrampolineBuilder {
@@ -257,15 +264,19 @@ public:
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
   /// @param abi                 Probe ABI; supplies the link pair.
-  /// @param live_at_anchor      Registers live immediately before the anchor.
+  /// @param live_at_anchor      Registers live at the selected observation point.
+  ///                           For post-instruction placement, the caller must
+  ///                           supply the live-after state, including anchor
+  ///                           definitions that the callback must preserve.
+  ///                           The builder does not compute liveness.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
   [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);
 
-  /// @brief Emit a planned probe call: envelope, relocated original, return
-  ///        branch.
+  /// @brief Emit a planned probe call before or after the relocated original,
+  ///        followed by a return branch when requested.
   ///
   /// Requires @p plan.is_probe_call (i.e. plan_probe_call() succeeded). Builds
   /// the call envelope from the planned resources and @p plan.probe_target_offset
