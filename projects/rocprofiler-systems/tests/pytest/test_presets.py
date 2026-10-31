@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [pytest.mark.presets]
 
@@ -225,6 +225,265 @@ class TestDomainFlags(RocprofsysTest):
                 "ls",
             ],
             pass_regex=["ROCPROFSYS_AMD_SMI_METRICS=temp,power"],
+        )
+
+
+# ============================================================================
+# Domain flag artifacts on a real GPU workload (transpose). TestDomainFlags
+# above only proves flag -> env mapping on `ls`; these check the Perfetto and
+# RocPD content the GPU/ROCm flags are supposed to produce, including what a
+# narrower flag must leave out.
+# ============================================================================
+
+def _echoed_settings(pass_regex: list[str]) -> dict[str, object]:
+    """Settings the launcher echoed as ROCPROFSYS_KEY=value.
+
+    Banner regexes such as the preset name are not settings.
+    """
+    expected: dict[str, object] = {}
+    for entry in pass_regex:
+        if not entry.startswith("ROCPROFSYS_") or "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        if value == "true":
+            expected[key] = True
+        elif value == "false":
+            expected[key] = False
+        else:
+            expected[key] = value
+    return expected
+
+
+_RULE_FILES = {
+    "baseline": "default-rules.json",
+    "amd-smi": "transpose/amd-smi-rules.json",
+}
+
+# trace-hpc disables sampling in the preset JSON; re-enable it for GPU metrics.
+_PRESET_SAMPLING_ENV = {
+    "ROCPROFSYS_USE_SAMPLING": "ON",
+    "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+}
+
+# The "Preset:" banner is only printed from -v 1.
+_VERBOSE_1 = ["-v", "1"]
+
+_ALL_ROCM = (
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,"
+    "kernel_dispatch,memory_copy,scratch_memory"
+)
+
+# Perfetto GPU counter tracks that must / must not be present: (present, absent).
+_ALL_GPU_COUNTERS = (["GFX Busy", "Temperature", "Power", "Memory Usage"], [])
+_TEMP_POWER_COUNTERS = (
+    ["Temperature", "Power"],
+    ["GFX Busy", "Memory Usage", "GFX Clock"],
+)
+_BUSY_MEM_COUNTERS = (["GFX Busy", "Memory Usage"], ["Temperature", "Power"])
+_BUSY_COUNTERS = (["GFX Busy"], ["Temperature", "Power", "Memory Usage"])
+_TRACE_GPU_COUNTERS = (
+    ["GFX Busy", "Temperature", "Power", "Memory Usage"],
+    ["GFX Clock", "Memory Clock"],
+)
+
+# --gpus picks a subset of devices, which only shows with more than one GPU.
+_MULTI_GPU = pytest.mark.multi_gpu(2)
+
+# flag_args, pass_regex, seed_env, perfetto_categories, rules, gpu_counters
+DOMAIN_ARTIFACT_CASES = [
+    pytest.param(
+        ["--gpu"],
+        ["ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "amd-smi"],
+        _ALL_GPU_COUNTERS,
+        id="gpu_bare",
+    ),
+    pytest.param(
+        ["--gpu=temp,power"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=temp,power"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "gpu-metrics-selected"],
+        _TEMP_POWER_COUNTERS,
+        id="gpu_temp_power",
+    ),
+    pytest.param(
+        ["--gpu=busy,mem_usage"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=busy,mem_usage"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "gpu-metrics-busy-mem"],
+        _BUSY_MEM_COUNTERS,
+        id="gpu_busy_mem_usage",
+    ),
+    pytest.param(
+        ["--gpu=busy"],
+        ["ROCPROFSYS_AMD_SMI_METRICS=busy"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "gpu-metrics-busy-only"],
+        _BUSY_COUNTERS,
+        id="gpu_busy_only",
+    ),
+    pytest.param(
+        ["--rocm"],
+        [_ALL_ROCM],
+        None,
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        ["baseline"],
+        None,
+        id="rocm_bare",
+    ),
+    pytest.param(
+        ["--rocm=hip,kernel,memory"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy"],
+        None,
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        ["baseline"],
+        None,
+        id="rocm_hip_kernel_memory",
+    ),
+    pytest.param(
+        ["--rocm=hip,kernel"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "rocm-hip-kernel"],
+        None,
+        id="rocm_hip_kernel",
+    ),
+    pytest.param(
+        ["--rocm=hip"],
+        ["ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api"],
+        None,
+        ["hip_runtime_api"],
+        # No baseline: its kernels checks need kernel_dispatch, which --rocm=hip drops.
+        ["rocm-hip-api"],
+        None,
+        id="rocm_hip_only",
+    ),
+    pytest.param(
+        ["--gpu", "--gpus=0"],
+        ["ROCPROFSYS_SAMPLING_GPUS=0", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "sampling-target-gpu0"],
+        None,
+        id="gpu_with_gpus_0",
+        marks=_MULTI_GPU,
+    ),
+    pytest.param(
+        ["--gpu", "--gpus=0-1"],
+        ["ROCPROFSYS_SAMPLING_GPUS=0-1", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "sampling-target-gpu-range"],
+        None,
+        id="gpu_with_gpus_range",
+        marks=_MULTI_GPU,
+    ),
+    pytest.param(
+        ["--gpu", "--rocm"],
+        [
+            "ROCPROFSYS_USE_AMD_SMI=true",
+            _ALL_ROCM,
+        ],
+        None,
+        ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
+        ["baseline", "amd-smi"],
+        _ALL_GPU_COUNTERS,
+        id="gpu_rocm",
+    ),
+    pytest.param(
+        ["--preset=trace-hpc", "--gpu=temp,power", "--gpus=0", *_VERBOSE_1],
+        [
+            r"Preset:\s+trace-hpc",
+            "ROCPROFSYS_SAMPLING_GPUS=0",
+            "ROCPROFSYS_USE_AMD_SMI=true",
+        ],
+        _PRESET_SAMPLING_ENV,
+        ["hip_runtime_api", "kernel_dispatch"],
+        # trace-hpc keeps busy/mem_usage/power/temp; --gpu=temp,power does not replace that list.
+        ["baseline", "sampling-target-gpu0", "gpu-metrics-trace-gpu-preset"],
+        _TRACE_GPU_COUNTERS,
+        id="preset_domain_and_target",
+        marks=_MULTI_GPU,
+    ),
+    pytest.param(
+        ["--preset=trace-gpu", *_VERBOSE_1],
+        [r"Preset:\s+trace-gpu", "ROCPROFSYS_USE_AMD_SMI=true"],
+        None,
+        ["hip_runtime_api"],
+        # trace-gpu enables only busy/mem_usage/power/temp (see
+        # source/bin/common/presets/trace-gpu.json), so the clocks must be absent.
+        ["baseline", "gpu-metrics-trace-gpu-preset"],
+        _TRACE_GPU_COUNTERS,
+        id="trace_gpu_preset",
+    ),
+    pytest.param(
+        ["--preset=trace-gpu", "--gpus=0", *_VERBOSE_1],
+        [
+            r"Preset:\s+trace-gpu",
+            "ROCPROFSYS_SAMPLING_GPUS=0",
+            "ROCPROFSYS_USE_AMD_SMI=true",
+        ],
+        None,
+        ["hip_runtime_api"],
+        ["baseline", "sampling-target-gpu0"],
+        None,
+        id="trace_gpu_preset_with_gpus",
+        marks=_MULTI_GPU,
+    ),
+]
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sampling
+@pytest.mark.domain_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("domain-flags-artifacts")
+class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex, seed_env, perfetto_categories, rules, gpu_counters",
+        DOMAIN_ARTIFACT_CASES,
+    )
+    def test_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        flag_args,
+        pass_regex,
+        seed_env,
+        perfetto_categories,
+        rules,
+        gpu_counters,
+    ):
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, flag_args)
+        self.assert_regex(result, pass_regex=pass_regex)
+        assert_resolved_settings(result, _echoed_settings(pass_regex))
+
+        present, absent = gpu_counters or ([], [])
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto domain slices",
+            categories=perfetto_categories,
+            counter_names_present=present or None,
+            fail_regex=[rf"GPU \[\d+\] {name}" for name in absent] or None,
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[
+                validation_rules_dir
+                / _RULE_FILES.get(name, f"domain-flags/{name}-rules.json")
+                for name in rules
+            ],
         )
 
 
@@ -574,4 +833,82 @@ class TestSamplingTargetFlags(RocprofsysTest):
                 "ROCPROFSYS_SAMPLING_GPUS=0",
                 "ROCPROFSYS_USE_AMD_SMI=true",
             ],
+        )
+
+
+@pytest.fixture
+def cpu_workload(rocprof_config) -> str:
+    try:
+        return str(rocprof_config.get_target_executable("parallel-overhead"))
+    except FileNotFoundError:
+        pytest.skip("parallel-overhead example not built")
+
+
+# --cpu / --cpus record host frequency counters. parallel-overhead can finish
+# inside the default 0.5s sampling delay, so start sampling at 0.1s.
+@pytest.mark.timeout(120)
+@pytest.mark.sys_run
+@pytest.mark.domain_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("cpu-target-flags")
+class TestCpuTargetFlags(RocprofsysTest):
+    @pytest.mark.parametrize(
+        "cpus, rules",
+        [
+            pytest.param("0-3", "cpu-frequency-sampled", id="range"),
+            pytest.param("none", "cpu-frequency-none", id="none"),
+        ],
+    )
+    def test_cpus_selects_frequency_counters(
+        self, domain_backend_flag_env, validation_rules_dir, cpu_workload, cpus, rules
+    ):
+        result = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            env={**domain_backend_flag_env, "ROCPROFSYS_SAMPLING_DELAY": "0.1"},
+            run_args=[
+                "--cpu",
+                f"--cpus={cpus}",
+                "--",
+                cpu_workload,
+                "20",
+                "2",
+                "100000",
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_FREQ=100"])
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_SAMPLING_CPUS": cpus,
+                "ROCPROFSYS_SAMPLING_FREQ": 100,
+            },
+        )
+        if (
+            cpus != "none"
+            and "Agent not found" in result.test_output
+            and "type: CPU" in result.test_output
+        ):
+            pytest.skip(
+                "CPU agent unavailable; settings checked, frequency counters "
+                "not sampled on this host"
+            )
+        if cpus == "none":
+            self.assert_perfetto(
+                result,
+                subtest_name="CPU workload recorded",
+                label_substrings=["fib"],
+            )
+        else:
+            self.assert_perfetto(
+                result,
+                subtest_name="CPU frequency counters",
+                label_substrings=["fib"],
+                counter_names_present=["Frequency (S)"],
+            )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=[validation_rules_dir / "domain-flags" / f"{rules}-rules.json"],
         )
