@@ -42,9 +42,24 @@ else()
         CACHE STRING
         "Upstream SQLite3 git tag to check out"
     )
+    # Windows amalgamation zip. Bump URL + SHA256 together with SQLITE3_GIT_TAG.
+    set(SQLITE3_AMALGAMATION_URL
+        "https://www.sqlite.org/2024/sqlite-amalgamation-3450300.zip"
+        CACHE STRING
+        "URL of the prebuilt sqlite.org amalgamation zip used on Windows"
+    )
+    set(SQLITE3_AMALGAMATION_SHA256
+        "ea170e73e447703e8359308ca2e4366a3ae0c4304a8665896f068c736781c651"
+        CACHE STRING
+        "Expected SHA256 of SQLITE3_AMALGAMATION_URL"
+    )
 
-    find_package(Git REQUIRED)
-    find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
+    # Windows downloads the official amalgamation zip. Linux clones and runs
+    # upstream autotools, which needs git and make.
+    if(NOT WIN32)
+        find_package(Git REQUIRED)
+        find_program(MAKE_COMMAND NAMES make gmake REQUIRED)
+    endif()
 
     set(SQLITE3_SOURCE_DIR "${PROJECT_BINARY_DIR}/external/sqlite3")
     set(SQLITE3_AMALG_C "${SQLITE3_SOURCE_DIR}/sqlite3.c")
@@ -59,6 +74,8 @@ else()
             ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
             -DMAKE_COMMAND=${MAKE_COMMAND} -DSQLITE3_GIT_URL=${SQLITE3_GIT_URL}
             -DSQLITE3_GIT_TAG=${SQLITE3_GIT_TAG}
+            -DSQLITE3_AMALGAMATION_URL=${SQLITE3_AMALGAMATION_URL}
+            -DSQLITE3_AMALGAMATION_SHA256=${SQLITE3_AMALGAMATION_SHA256}
             -DSQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR} -P
             ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
         DEPENDS ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
@@ -90,7 +107,16 @@ else()
             SQLITE_OMIT_SHARED_CACHE=1
     )
 
-    target_compile_options(profiler-hub-sqlite3-shared PRIVATE -O2 -fPIC)
+    if(MSVC)
+        # A separate SQLite DLL must export its C API. MSVC does not export
+        # symbols from a SHARED library unless they are marked dllexport.
+        target_compile_definitions(
+            profiler-hub-sqlite3-shared
+            PRIVATE "SQLITE_API=__declspec(dllexport)"
+        )
+    else()
+        target_compile_options(profiler-hub-sqlite3-shared PRIVATE -O2 -fPIC)
+    endif()
 
     set_target_properties(
         profiler-hub-sqlite3-shared
