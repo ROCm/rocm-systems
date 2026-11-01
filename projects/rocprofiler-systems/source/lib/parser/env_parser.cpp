@@ -51,13 +51,14 @@ env_parser::parse(const schema& config_schema) const
         {
             continue;
         }
-        if(!is_valid_value(param, *value))
+        const auto stored = canonical_choice(param, *value);
+        if(!is_valid_value(param, stored))
         {
             result.errors.push_back(
                 fmt::format("invalid value '{}' for {}", *value, param.env->name));
             continue;
         }
-        result.values.emplace(param.id, *value);
+        result.values.emplace(param.id, stored);
     }
     return result;
 }
