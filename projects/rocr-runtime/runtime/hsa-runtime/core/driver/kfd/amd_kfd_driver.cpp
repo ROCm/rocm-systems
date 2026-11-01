@@ -1153,8 +1153,35 @@ hsa_status_t KfdDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* read
 
 
 hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
-  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize) == nullptr) {
     return HSA_STATUS_ERROR;
+  }
+  if (HSAKMT_CALL(hsaKmtSetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetPersistingCacheInfo(uint32_t node_id, uint64_t* cache_size,
+                                               uint64_t* max_cache_size) const {
+  if (cache_size == nullptr && max_cache_size == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheInfo) == nullptr) {
+    return HSA_STATUS_ERROR;
+  }
+
+  HsaPersistingCacheInfo info = {};
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheInfo)(node_id, &info) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  if (cache_size) {
+    *cache_size = info.CurrentSize;
+  }
+  if (max_cache_size) {
+    *max_cache_size = info.MaxSize;
+  }
   return HSA_STATUS_SUCCESS;
 }
 

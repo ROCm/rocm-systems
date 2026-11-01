@@ -39,6 +39,12 @@
 
 #include "fmm.h"
 
+// AMDGPU_INFO ioctl query id reporting the per-AID persisting GL2 cache
+// maximum (in bytes). Not yet present in upstream libdrm headers.
+#ifndef AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX
+#define AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX 0x25
+#endif
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicyCtx(HsaKFDContext *ctx,
 						  HSAuint32 Node,
 					      HSAuint32 DefaultPolicy,
@@ -292,8 +298,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryCtx(HsaKFDContext *ctx,
 // DRM_IOCTL_AMDGPU_VM (amdgpu_vm_ioctl -> AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE),
 // not through a KFD ioctl. So the request must be issued on the per-node DRM
 // render fd, not on the KFD device fd.
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSizeCtx(HsaKFDContext *ctx,
-												HSAuint32 Node,
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node,
 												HSAuint64 CacheSize) {
 	union drm_amdgpu_vm args = {0};
 	int drm_fd;
@@ -301,27 +306,125 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSizeCtx(HsaKFDContext *ctx,
 
 	CHECK_KFD_OPEN();
 
-	pr_debug("[%s] node %d size %lu\n", __func__, Node, CacheSize);
+	pr_info("[%s] ENTER: Node=%d, CacheSize=%lu\n", __func__, Node, CacheSize);
 
-	/* Get the amdgpu render-node fd for this KFD node */
-	drm_fd = hsakmt_fmm_get_drm_render_fd(ctx, Node);
+	drm_fd = hsakmt_fmm_get_drm_render_fd(&hsakmt_primary_kfd_ctx, Node);
 	if (drm_fd < 0) {
-		pr_err("[%s] invalid node ID: %d\n", __func__, Node);
+		pr_err("[%s] FAILED: invalid node ID: %d\n", __func__, Node);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	}
 
 	args.in.op = AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE;
-	if (CacheSize > UINT32_MAX)
+	if (CacheSize > UINT32_MAX) {
+		pr_err("[%s] FAILED: CacheSize exceeds UINT32_MAX\n", __func__);
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
 	args.in.size = (uint32_t)CacheSize;
 
 	ret = drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_VM, &args);
 	if (ret) {
-		pr_err("[%s] DRM_IOCTL_AMDGPU_VM GL2 persisting failed: %d\n", __func__, ret);
+		pr_err("[%s] FAILED: DRM_IOCTL_AMDGPU_VM returned %d (errno=%d: %s)\n",
+			   __func__, ret, errno, strerror(errno));
 		return HSAKMT_STATUS_ERROR;
 	}
 
+	pr_info("[%s] SUCCESS: Set persisting cache size to %lu bytes\n", __func__, CacheSize);
 	return HSAKMT_STATUS_SUCCESS;
+}
+
+// Query both the current and maximum persisting GL2 cache sizes for a GPU node.
+// Either field in Info may be left at its initial value if that particular query
+// fails (e.g. kernel does not support it); the call returns success as long as
+// at least one query succeeds.
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetPersistingCacheInfo(HSAuint32 Node,
+												HsaPersistingCacheInfo *Info) {
+	union drm_amdgpu_vm vm_args = {0};
+	amdgpu_device_handle dev_handle;
+	uint32_t raw_max = 0;
+	int drm_fd;
+	int ret;
+	bool current_ok = false;
+	bool max_ok = false;
+
+	CHECK_KFD_OPEN();
+
+	pr_info("[%s] ENTER: Node=%d\n", __func__, Node);
+
+	if (!Info) {
+		pr_err("[%s] FAILED: Info pointer is NULL\n", __func__);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	Info->CurrentSize = 0;
+	Info->MaxSize = 0;
+
+	/* Query current persisting cache size via DRM render node ioctl */
+	drm_fd = hsakmt_fmm_get_drm_render_fd(&hsakmt_primary_kfd_ctx, Node);
+	if (drm_fd < 0) {
+		pr_err("[%s] FAILED: invalid node ID: %d\n", __func__, Node);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	vm_args.in.op = AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE_GET;
+	ret = drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_VM, &vm_args);
+	if (ret) {
+		pr_info("[%s] CurrentSize query failed (errno=%d), kernel may not support GL2_PERSISTING_L2_CACHE_GET\n",
+				__func__, errno);
+	} else {
+		Info->CurrentSize = vm_args.out.size;
+		current_ok = true;
+	}
+
+	/* Query maximum persisting cache size via amdgpu_query_info */
+	if (hsakmt_fmm_get_amdgpu_device_handle(&hsakmt_primary_kfd_ctx, Node,
+						(void **)&dev_handle) == HSAKMT_STATUS_SUCCESS) {
+		ret = amdgpu_query_info(dev_handle,
+					AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX,
+					sizeof(raw_max), &raw_max);
+		if (ret) {
+			pr_info("[%s] MaxSize query failed (errno=%d), kernel may not support AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX\n",
+					__func__, errno);
+		} else {
+			Info->MaxSize = raw_max;
+			max_ok = true;
+		}
+	} else {
+		pr_err("[%s] failed to get device handle for node %d\n", __func__, Node);
+	}
+
+	if (!current_ok && !max_ok)
+		return HSAKMT_STATUS_ERROR;
+
+	pr_info("[%s] SUCCESS: CurrentSize=%lu, MaxSize=%lu for Node=%d\n",
+			__func__, (unsigned long)Info->CurrentSize,
+			(unsigned long)Info->MaxSize, Node);
+	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetPersistingCacheSize(HSAuint32 Node,
+												HSAuint64 *CacheSize) {
+	HsaPersistingCacheInfo info = {0};
+	HSAKMT_STATUS status;
+
+	if (!CacheSize)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	status = hsaKmtGetPersistingCacheInfo(Node, &info);
+	*CacheSize = info.CurrentSize;
+	return status;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetPersistingCacheSizeMax(HSAuint32 Node,
+														HSAuint64 *MaxCacheSize) {
+	HsaPersistingCacheInfo info = {0};
+	HSAKMT_STATUS status;
+
+	if (!MaxCacheSize)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	status = hsaKmtGetPersistingCacheInfo(Node, &info);
+	*MaxCacheSize = info.MaxSize;
+	return status;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
@@ -973,12 +1076,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 	CHECK_KFD_OPEN();
 
 	return hsaKmtGetAMDGPUDeviceHandleCtx(&hsakmt_primary_kfd_ctx, NodeId, DeviceHandle);
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node,
-												HSAuint64 CacheSize)
-{
-	return hsaKmtSetPersistingCacheSizeCtx(&hsakmt_primary_kfd_ctx, Node, CacheSize);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,
