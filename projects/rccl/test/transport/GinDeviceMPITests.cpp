@@ -26,6 +26,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
+#include "gin/gin_type_env.h"
 #endif
 
 #include <algorithm>
@@ -192,6 +193,35 @@ std::string ginMixedBackendSkipReason() {
   }
   return "";
 }
+
+#ifdef ENABLE_ROCSHMEM_GIN
+uint64_t listedGinTypes() {
+  uint64_t listed = 0;
+  if (const char* list = std::getenv("NCCL_GIN_TYPES")) ncclGinParseTypeList(list, &listed);
+  return listed;
+}
+
+bool ginTypeListed(uint64_t listed, ncclGinType_t type) { return (listed >> type) & 1; }
+
+// AICOMRCCL-3418: single-node Anvil SDMA, and NIC backends on one node need intranet mode.
+std::string gdaAlongsideSkipReason() {
+  std::string local = ginEnvDisabledReason();
+  if (local.empty()) local = cuMemReason();
+  if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
+    local = "Requires NCCL_GIN_TYPE unset so NCCL_GIN_TYPES selects the backends";
+  const uint64_t listed = listedGinTypes();
+  if (local.empty() && (!ginTypeListed(listed, NCCL_GIN_TYPE_ROCSHMEM_GDA) ||
+                        !(ginTypeListed(listed, NCCL_GIN_TYPE_ANVIL_SDMA) ||
+                          ginTypeListed(listed, NCCL_GIN_TYPE_PROXY))))
+    local = "Requires NCCL_GIN_TYPES to list rocSHMEM GDA (6) with Anvil SDMA (7) and/or the proxy (2)";
+  // Both split MPI_COMM_TYPE_SHARED, so every rank calls them.
+  std::string single = singleNodeReason();
+  std::string intranet = intranetReason();
+  if (local.empty() && ginTypeListed(listed, NCCL_GIN_TYPE_ANVIL_SDMA)) local = std::move(single);
+  if (local.empty()) local = std::move(intranet);
+  return mpiCoordinatedSkipReason(!local.empty(), local.empty() ? nullptr : local.c_str());
+}
+#endif
 
 // Host progress threads exist only on the PROXY backend.
 std::string proxyNthreadsSkipReason() {
@@ -508,8 +538,10 @@ __global__ void alltoallKernel(
 class GinMPIDeviceTests : public MPITestBase {
  protected:
   // Minimal 64-byte put + waitSignal round-trip from rank 0 to rank 1 on the
-  // caller's comm and stream. Contains ASSERT_MPI_*, so it must be the
-  // caller's last statement.
+  // caller's comm and stream. A ginType other than NONE must also be the
+  // backend the DevComm binds. Contains ASSERT_MPI_* and rank-1-only asserts,
+  // so it must be the caller's last statement or be followed by
+  // ASSERT_MPI_TRUE(!HasFatalFailure()).
   void runPutWaitRoundTrip(ncclComm_t comm, hipStream_t stream,
                            ncclGinType_t ginType = NCCL_GIN_TYPE_NONE) {
     int rank = -1, nRanks = -1;
@@ -555,6 +587,9 @@ class GinMPIDeviceTests : public MPITestBase {
     auto devCommCleanup = makeScopeGuard([&]() {
       (void)ncclDevCommDestroy(comm, &devComm);
     });
+    if (ginType != NCCL_GIN_TYPE_NONE) {
+      ASSERT_MPI_EQ(static_cast<int>(ginType), static_cast<int>(devComm.ginNetDeviceTypes[0]));
+    }
     // proxyNthreads is written only by ncclGinConnectOnce, which this create
     // reaches. Reading it before a GIN DevComm exists observes the calloc zero
     // whenever the internal sym-kernel DevComm did not already connect.
@@ -1102,6 +1137,61 @@ TEST_F(GinMPIDeviceTests, Log_ReportsBackendPerComm) {
   EXPECT_EQ(childBefore + 1, countOccurrences(log, childLine)) << "expected: " << childLine << "\nactual log:\n"
                                                                << log;
 }
+
+#ifdef ENABLE_ROCSHMEM_GIN
+// AICOMRCCL-3418: run with NCCL_GIN_TYPES=6,7 and 6,2; each listed backend completes a put + signal.
+TEST_F(GinMPIDeviceTests, MixedBackends_GdaAlongside) {
+  if (auto reason = gdaAlongsideSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  // Default-backend order: Anvil SDMA, then rocSHMEM GDA, then the proxy.
+  const uint64_t listed = listedGinTypes();
+  std::vector<ncclGinType_t> types;
+  for (ncclGinType_t type : {NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_GIN_TYPE_PROXY}) {
+    if (ginTypeListed(listed, type)) types.push_back(type);
+  }
+  const ncclGinType_t expectedDefault = types.front();
+
+  const ncclGinState& ginState = comm->sharedRes->ginState;
+  for (ncclGinType_t type : types) {
+    SCOPED_TRACE("listed GIN type " + std::to_string(type));
+    ASSERT_MPI_TRUE(activeGinBackend(comm, type) != nullptr);
+  }
+  for (int i = 0; i < ginState.numActiveBackends; i++) {
+    SCOPED_TRACE("active GIN type " + std::to_string(ginState.backends[i].ginType));
+    ASSERT_MPI_TRUE(ginTypeListed(listed, ginState.backends[i].ginType));
+  }
+  ASSERT_MPI_EQ(static_cast<int>(expectedDefault), static_cast<int>(ginState.backends[0].ginType));
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  EXPECT_EQ(expectedDefault, props.ginType);
+  for (ncclGinType_t type : types) EXPECT_TRUE(props.ginSupport[type]) << "ginSupport[" << type << "]";
+
+  {
+    ncclDevCommRequirements reqs = defaultGinReqs();
+    reqs.ginSignalCount = 1;
+    ncclDevComm devComm{};
+    ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+    auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
+    ASSERT_MPI_EQ(static_cast<int>(expectedDefault), static_cast<int>(devComm.ginNetDeviceTypes[0]));
+  }
+
+  for (ncclGinType_t type : types) {
+    SCOPED_TRACE("put + signal on GIN type " + std::to_string(type));
+    runPutWaitRoundTrip(comm, stream, type);
+    // The round trip ends in a rank-1-only byte check; agree before the next one.
+    ASSERT_MPI_TRUE(!HasFatalFailure());
+  }
+}
+#endif
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
   int n = ginEnvContextCount();
@@ -8180,6 +8270,7 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
 
   // Default backend (ginType unset on the DevComm) and an explicit PROXY one.
   runPutWaitRoundTrip(comm, getActiveStream());
+  ASSERT_MPI_TRUE(!HasFatalFailure());
   runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
 }
 
