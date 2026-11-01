@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -179,7 +180,6 @@ Vopd::Vopd(const MachineInst *inst)
       srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
       srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
-  raw_encoding_ = words;
   word0_ = words[0];
   word1_ = words[1];
 
@@ -259,6 +259,10 @@ Vopd::Vopd(const MachineInst *inst)
   srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
   opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
+  // Own the encoding so the decoded-instruction cache can keep this
+  // instruction after the fetch window it was decoded from is gone.
+  std::memcpy(raw_words_.data(), words, size_);
+  raw_encoding_ = raw_words_.data();
   init_operands();
   // Evaluate the qualified operand restrictions once, at decode.
   const bool vopd3 = format_ == Format::Vopd3;
