@@ -234,11 +234,6 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
     return CL_INVALID_D3D9_RESOURCE_KHR;
   }
 
-  // GetDevice() rather than GetContainer(): a surface that is a level of a texture
-  // reports the texture as its container, whereas the owning device is always
-  // reachable. The base IDirect3DDevice9 is enough here - CreateQuery and
-  // CreateOffscreenPlainSurface both live on it - so plain D3D9 and DXVA adapters
-  // work alongside D3D9Ex.
   IDirect3DDevice9* pDev9 = nullptr;
   if (D3D_OK != pD3D9res->GetDevice(&pDev9) || nullptr == pDev9) {
     LogError("D3D9 interop: IDirect3DSurface9::GetDevice failed");
@@ -582,13 +577,6 @@ bool D3D9Object::copyOrigToShared() {
     return false;
   }
   // Flush D3D queues and make sure D3D stuff is finished.
-  //
-  // GetData returns S_FALSE while the query is still pending and leaves the output buffer
-  // untouched, so only its return value can end this wait. The previous condition also tested an
-  // uninitialised `data`: whenever that stack slot happened to hold a non-zero value the && went
-  // false on the first iteration and the wait returned with the StretchRect still in flight,
-  // handing OpenCL a surface whose copy had not landed. That is an intermittent
-  // wrong-data failure, not a hang.
   pQuery_->Issue(D3DISSUE_END);
   BOOL data = FALSE;
   HRESULT queryHr;

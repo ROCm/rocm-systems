@@ -81,11 +81,6 @@ class IAmdDxExtCLInterop : public IAmdDxExtInterface {
                                    VOID* pSrd, UINT* pSrdSize) = 0;
 };
 
-// The D3D9 user-mode driver exposes its own, much smaller OpenCL interop interface under the
-// same extension ID. It is NOT the combined interface above: the vtable holds four methods,
-// the resource type is IDirect3DResource9, and the gpu mask is passed by value. Obtained from
-// the IAmdDxExt returned by AmdDxExtCreate9. Mirrors AmdDxExtOpenCLInteropApi.h in the dx9p
-// driver - the layout must stay in lockstep with it.
 interface IDirect3DResource9;
 
 class IAmdDxExtCLInterop9 : public IAmdDxExtInterface {

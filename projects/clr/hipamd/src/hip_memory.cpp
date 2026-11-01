@@ -205,7 +205,6 @@ hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
 
   amd::Context& amdContext = *hip::getCurrentDevice()->asContext();
 #ifdef _WIN32
-  // HIP has no equivalent of the CL_MEM_* flags, so the Buffer base gets none.
   auto ext_buffer = new (amdContext)
       amd::ExternalBuffer(amdContext, memHandleDesc->size, memHandleDesc->handle.win32.handle,
                           static_cast<amd::ExternalMemory::HandleType>(memHandleDesc->type),

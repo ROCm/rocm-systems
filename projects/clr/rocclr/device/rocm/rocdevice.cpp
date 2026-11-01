@@ -4966,6 +4966,9 @@ bool Device::createExtSemaphore(void** extSemaphore,
     return false;
   }
 
+#if !IS_WINDOWS
+  return false;
+#else
   // The KMD object type turns on this: a timeline semaphore is a monitored
   // fence, a binary one a legacy sync object. Vulkan rejects the wrong flavour
   // at import ("Failed to import semaphore in Vulkan"), so it has to be
@@ -4988,6 +4991,7 @@ bool Device::createExtSemaphore(void** extSemaphore,
   holder->osHandle = reinterpret_cast<amd::Os::FileDesc>(osHandle);
   holder->ntHandle = nt;
   *extSemaphore = holder;
+#endif
   return true;
 }
 

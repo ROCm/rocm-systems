@@ -95,14 +95,6 @@ RUNTIME_ENTRY(cl_int, clGetPlatformIDs,
 RUNTIME_EXIT
 
 //! Union of one of the per-device interop handle-type lists across the platform.
-//
-// These used to be fixed tables here, which was only correct while ROCr was the sole
-// backend. Which handle types can actually be imported depends on the backend that
-// initialized: ROCr routes through libhsakmt, which rejects KMT semaphore handles,
-// while PAL opens them via OpenExternalSharedQueueSemaphore and accepts both. So the
-// platform answer has to be assembled from the devices rather than decided at compile
-// time. Order is preserved and duplicates dropped; the lists are a handful of entries,
-// so the linear search costs nothing.
 template <typename T, typename Selector>
 static std::vector<T> unionOfDeviceHandleTypes(Selector select) {
   std::vector<T> types;
@@ -169,9 +161,6 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
           "cl_khr_dx9_media_sharing "
           "cl_khr_external_memory_win32 "
           "cl_khr_external_semaphore_win32 "
-          // Kept under the same guard as the backends: rocsettings.cpp and palsettings.cpp only
-          // enableExtension() these inside _WIN32, so advertising them at platform level
-          // elsewhere would promise capabilities no device on the platform reports.
           "cl_khr_semaphore "
           "cl_khr_external_memory "
           "cl_khr_external_semaphore "
@@ -528,13 +517,6 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
       }
 
       // cl_khr_device_uuid.
-      //
-      // The UUID must be byte-identical to the one AMD's Vulkan driver reports in
-      // VkPhysicalDeviceIDProperties::deviceUUID, otherwise CL-Vulkan interop clients
-      // cannot pair up the two handles for the same GPU. That driver builds it from the
-      // PCI address as four little-endian uint32s - domain, bus, device, function - so
-      // this must too. ROCr's own HSA_AMD_AGENT_INFO_UUID is an ASCII string and would
-      // never match, so info_.uuid_ is deliberately not used here.
       case CL_DEVICE_UUID_KHR: {
         const auto& info = as_amd(device)->info();
         const uint32_t pciAddress[4] = {info.pciDomainID,
@@ -588,8 +570,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
       }
 
       // cl_khr_external_memory / cl_khr_external_semaphore handle-type lists. All four
-      // are plain arrays and may legitimately be empty, which clGetInfoVector reports as
-      // a zero size rather than an error.
+      // are plain arrays and may legitimately be empty.
       case CL_DEVICE_EXTERNAL_MEMORY_IMPORT_HANDLE_TYPES_KHR:
         return clGetInfoVector(as_amd(device)->info().externalMemoryImportHandleTypes_,
                                param_value_size, param_value, param_value_size_ret);

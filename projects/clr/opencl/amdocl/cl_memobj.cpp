@@ -10,6 +10,7 @@
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
 #include "platform/external_memory.hpp"
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
