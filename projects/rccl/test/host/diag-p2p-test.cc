@@ -1958,7 +1958,7 @@ TEST_F(DiagP2pMicrotest, Run_DestinationLocalFailure_IsBlamedOnSourceWrite) {
   EXPECT_EQ(run.myResults[2].verifyGot, 0u);
 }
 
-TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunError) {
+TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedButNotReturnedWithoutRunError) {
   BuildLeaderComm();
   const auto printed = [](int result) {
     return [result](const DiagP2pRunScene& run) {
@@ -1968,6 +1968,8 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunErr
     };
   };
   const int none = ncclDiagP2pReasonNone;
+  // Cleanup runs after the last collective, so these faults are printed but not returned: the run
+  // itself succeeded, so ncclDiagP2pRun returns ncclSuccess and init is not failed.
   ExpectEachFault(
       comm_.get(), localRanks_, none,
       {
@@ -1976,12 +1978,12 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunErr
           {"ipcClose", [](DiagP2pRunScene* r) { r->failIpcClose = true; }},
           {"restoreDevice", [](DiagP2pRunScene* r) { r->failSetDeviceCall = 2; }},
       },
-      printed(ncclUnhandledCudaError), ncclUnhandledCudaError);
+      printed(ncclUnhandledCudaError), ncclSuccess);
   ExpectEachFault(
       comm_.get(), localRanks_, none,
       {{"importsFreedBarrier", [](DiagP2pRunScene* r) { r->failStage = DiagP2pStage::kFreed; }}},
-      printed(ncclRemoteError), ncclRemoteError);
-  // Later stream and device faults must not overwrite the first cleanup error.
+      printed(ncclRemoteError), ncclSuccess);
+  // Later stream and device faults must not overwrite the first printed cleanup error.
   std::vector<DiagP2pFault> deviceFrees;
   for (int nth = 1; nth <= 4; nth++) {
     deviceFrees.push_back({"deviceFree" + std::to_string(nth), [nth](DiagP2pRunScene* r) {
@@ -1990,7 +1992,8 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunErr
                              r->failSetDeviceCall = 2;
                            }});
   }
-  ExpectEachFault(comm_.get(), localRanks_, none, deviceFrees, printed(ncclSystemError), ncclSystemError);
+  ExpectEachFault(comm_.get(), localRanks_, none, deviceFrees, printed(ncclSystemError), ncclSuccess);
+  // A run error still propagates and wins over the (printed) cleanup error.
   DiagP2pRunScene run(comm_.get(), localRanks_);
   run.failStreamDestroy = true;
   run.failStage = DiagP2pStage::kReported;
@@ -1998,13 +2001,14 @@ TEST_F(DiagP2pMicrotest, Run_CleanupFailures_PrintedAndReturnedOnlyWithoutRunErr
   EXPECT_EQ(run.out, DiagP2pOkLine(12) + DiagP2pCleanupLine(0, ncclUnhandledCudaError));
 }
 
-// ROCm gaps: cuMem same-process import and handle release fail; fix flips this.
+// ROCm gaps: cuMem same-process import fails (reported) and handle release fails (printed in cleanup),
+// but the run itself completes, so ncclDiagP2pRun returns ncclSuccess and init is not failed.
 TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
   BuildLeaderComm();
   peers_[3].pidHash = peers_[0].pidHash;
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   DiagP2pRunScene run(comm_.get(), localRanks_);
-  EXPECT_EQ(run.Run(), ncclInternalError);
+  EXPECT_EQ(run.Run(), ncclSuccess);
   EXPECT_EQ(run.directMap, 1);
   EXPECT_EQ(run.remoteCounts, (std::vector<int>{2, 2}));
   EXPECT_EQ(run.Reasons(), (std::vector<int>{0, ncclDiagP2pReasonImport, 0, 0}));
