@@ -222,7 +222,8 @@ struct formatter<rocprofiler::hsa::rocprofiler_packet>
             case 0:
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
                 // Vendor specific packet - check AMD format
-                if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+                if(pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+                   pkt.ext_kernel_dispatch.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
                     return fmt::format_to(ctx.out(), "{}", pkt.ext_kernel_dispatch);
 #endif
                 return fmt::format_to(ctx.out(), "{}", pkt.ext_amd_aql_pm4);
