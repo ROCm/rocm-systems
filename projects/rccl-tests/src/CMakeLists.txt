@@ -149,8 +149,14 @@ if (ENABLE_DEVICE_API)
     # RCCL_SOURCE_DIR is resolved once by the parent CMakeLists (mono-repo layout
     # probe), so there is no second copy of that assumption here.
     set(_rccl_device_inc "")
+    get_filename_component(_rccl_pkg_prefix "${RCCL_DIR}/../../.." ABSOLUTE)
     if (DEFINED ENV{RCCL_INSTALL_PREFIX})
         set(_rccl_device_inc "$ENV{RCCL_INSTALL_PREFIX}/include")
+    elseif (RCCL_DIR AND EXISTS "${_rccl_pkg_prefix}/include/nccl.h")
+        # Prefer the RCCL that find_package() resolved. ROCM_PATH is prepended
+        # to CMAKE_PREFIX_PATH, so scanning that list first would pick ROCm's
+        # own (possibly older) nccl_device headers.
+        set(_rccl_device_inc "${_rccl_pkg_prefix}/include")
     else()
         foreach(_rccl_prefix IN LISTS CMAKE_PREFIX_PATH)
             if (EXISTS "${_rccl_prefix}/include/nccl.h")
@@ -181,27 +187,6 @@ if (ENABLE_DEVICE_API)
             endforeach()
         endif()
     endforeach()
-endif()
-if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
-    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM_GIN)
-    target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    # --whole-archive: librccl.so (ENABLE_ROCSHMEM_GIN) leaves rocshmem host
-    # symbols unresolved (--allow-shlib-undefined).  The executable must pull
-    # in ALL rocshmem symbols (not just those it references directly) so that
-    # -rdynamic exports them for librccl.so to resolve at runtime.
-    target_link_libraries(alltoall_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
-
-    # GIN-SDMA hybrid AllGather (all_gather_perf -D 3): same device-RDC link as
-    # alltoall_perf so the GinHybridAllGatherKernel resolves the GIN device backend.
-    if (ENABLE_DEVICE_API)
-      target_compile_definitions(all_gather_perf PRIVATE ENABLE_DEVICE_API)
-    endif()
-    target_compile_options(all_gather_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
-    target_link_libraries(all_gather_perf PRIVATE
-        -Wl,--whole-archive roc::rocshmem -Wl,--no-whole-archive)
-    target_link_options(all_gather_perf PRIVATE -fgpu-rdc --hip-link -rdynamic)
 endif()
 if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem AND RCCL_SOURCE_DIR)
     add_executable(gin_rocshmem_gda_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_rocshmem_gda_factory_test.cu)

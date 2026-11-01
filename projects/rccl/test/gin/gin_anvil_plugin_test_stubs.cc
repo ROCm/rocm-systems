@@ -251,7 +251,9 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
   }
   // Single-process sim: keep the caller's own slot and give every empty slot
   // peer data. Peers report what the caller did, so agreement votes (fabric
-  // offset, LSA threshold) see matching ranks; 0xA5 only when there is no source.
+  // offset, LSA threshold) see matching ranks. An all-zero buffer means the
+  // caller voted all zeros (e.g. LSA disabled with threshold 0), so peers do
+  // too; filling it with 0xA5 would turn that into a nonzero "enabled" vote.
   unsigned char* bytes = static_cast<unsigned char*>(allData);
   std::vector<unsigned char> zero(slot, 0);
   const unsigned char* src = nullptr;
@@ -259,14 +261,10 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
     const unsigned char* p = bytes + static_cast<size_t>(i) * slot;
     if (memcmp(p, zero.data(), slot) != 0) src = p;
   }
-  for (int i = 0; i < nranks; ++i) {
+  for (int i = 0; src != nullptr && i < nranks; ++i) {
     unsigned char* p = bytes + static_cast<size_t>(i) * slot;
     if (p == src || memcmp(p, zero.data(), slot) != 0) continue;
-    if (src) {
-      memcpy(p, src, slot);
-    } else {
-      memset(p, 0xA5, slot);
-    }
+    memcpy(p, src, slot);
   }
   // The LSA agreement vote starts with size_t threshold and is wider than the
   // int-only agreements. Override rank 1 after replication to model processes
