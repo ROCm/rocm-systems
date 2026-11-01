@@ -3273,9 +3273,14 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
+// A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
+// fails, as it does under a capture on another thread) is left alone, buffer
+// and charge both: the charge goes back only once the runtime has let go.
+// Freeing a registration would leave it aimed at freed heap.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
+    size_t size = 0;
     AllocKind kind = AllocKind::Device;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -3284,7 +3289,7 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         kind = it->second.kind;
         if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
         host_ptr = it->second.live_ptr;
-        ctx.host_budget.release(it->second.size);
+        size = it->second.size;
         ctx.alloc_map.erase(it);
         auto rb = ctx.host_reg_bufs.find(rec);
         if (rb != ctx.host_reg_bufs.end()) {
@@ -3293,11 +3298,12 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         }
     }
     if (kind == AllocKind::HostMalloc) {
-        (void)hipHostFree(host_ptr);
+        if (hipHostFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    (void)hipHostUnregister(buf);
+    if (hipHostUnregister(buf) != hipSuccess) return;
+    ctx.host_budget.release(size);
 #ifdef _WIN32
     _aligned_free(buf);
 #else
@@ -3420,24 +3426,27 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
-    // we must free it even if the alloc_map entry was already removed.
+    // Leave the maps and the backing buffer alone until the runtime call
+    // succeeds. A failed unregister did not release the registration, so
+    // freeing the buffer would leave alloc_map aimed at freed heap.
     void* buf = nullptr;
     {
-        std::unique_lock lk(ctx.map_mutex);
+        std::shared_lock lk(ctx.map_mutex);
         auto it = ctx.host_reg_bufs.find(a->hostPtr);
-        if (it != ctx.host_reg_bufs.end()) {
-            buf = it->second;
-            ctx.host_reg_bufs.erase(it);
-        }
+        if (it != ctx.host_reg_bufs.end()) buf = it->second;
     }
 
     void* live = buf ? buf : ctx.lookup_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
+    if (r != hipSuccess) return r;
 
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.host_reg_bufs.erase(a->hostPtr);
+    }
+    ctx.remove_alloc(a->hostPtr);
 #ifdef _WIN32
     _aligned_free(buf);
 #else

@@ -11,7 +11,8 @@
  * Handler-level tests for the host-memory budget (--max-host-bytes): the
  * budgeted blob and code-object cache (PlaybackContext::cache_file, behind
  * load_blob and load_code_object) and the host-allocation handlers' refusal
- * paths. None reaches a HIP call, so no GPU is needed.
+ * paths. No case needs a GPU; the few that reach a HIP call expect its failure
+ * without one.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,6 +24,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -254,28 +256,57 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
  * Test Description
  * ----------------
  *   - Recording a pinned allocation again at an address that still holds one,
- *     through the dispatch entries replay calls, frees the old entry and gives
- *     its charge back before the new one is charged. The new allocation is
- *     over budget here so no HIP allocation is made: only the replaced entry's
- *     release is observed, which a handler that skips the free leaves at 60.
+ *     through the dispatch entries replay calls, drops the old entry. The new
+ *     allocation is over budget here so no HIP allocation is made: only the
+ *     replaced entry's release is observed.
+ *   - The old charge goes back only if the runtime let go of the buffer. A
+ *     hipHostMalloc entry's buffer is freed (a null live pointer frees
+ *     cleanly where a runtime is up, and fails without one, which the charge
+ *     must then follow); a failing hipHostFree keeps the charge, as a failing
+ *     hipHostUnregister does for a hipHostRegister entry, and the buffer is
+ *     left alone. The seeds are not pinned, so the failures need no GPU.
  */
 TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
-  auto run = [](uint32_t api, auto& rec) {
+  auto run = [](uint32_t api, auto& rec, AllocKind kind, void* live, size_t expect_used) {
     PlaybackContext ctx;
     ctx.host_budget.set_cap(100);
     REQUIRE(ctx.charge_host(60, "seed"));
-    ctx.record_alloc(0x5000, nullptr, 60, AllocKind::HostMalloc);
+    ctx.record_alloc(0x5000, live, 60, kind);
+    if (kind == AllocKind::HostRegister) ctx.host_reg_bufs[0x5000] = live;
     REQUIRE(ctx.host_budget.used() == 60);
     rec.get()->ptr = 0x5000;
     rec.get()->size = 101;
     (void)hrr_test::capture_stderr([&] { (void)hrr_playback_dispatch[api](ctx, rec.bytes()); });
     CHECK_FALSE(ctx.has_alloc(0x5000));
-    CHECK(ctx.host_budget.used() == 0);
+    CHECK(ctx.host_budget.used() == expect_used);
   };
+
+  // hipHostFree(nullptr) succeeds with a runtime up and fails without one.
+  const size_t freed_used = hipHostFree(nullptr) == hipSuccess ? 0 : 60;
   hrr_test::ExactRecord<hrr_args_hipHostMalloc> hm;
-  run(HRR_API_HIPHOSTMALLOC, hm);
+  run(HRR_API_HIPHOSTMALLOC, hm, AllocKind::HostMalloc, nullptr, freed_used);
   hrr_test::ExactRecord<hrr_args_hipMallocHost> mh;
-  run(HRR_API_HIPMALLOCHOST, mh);
+  run(HRR_API_HIPMALLOCHOST, mh, AllocKind::HostMalloc, nullptr, freed_used);
+
+  // hipHostFree refuses a pointer the runtime does not own: the charge stays
+  // and the buffer is not touched.
+  void* plain = std::malloc(64);
+  REQUIRE(plain != nullptr);
+  std::memset(plain, 0x5A, 64);
+  hrr_test::ExactRecord<hrr_args_hipHostMalloc> hm_plain;
+  run(HRR_API_HIPHOSTMALLOC, hm_plain, AllocKind::HostMalloc, plain, 60);
+  // Under AddressSanitizer a freed buffer fails this read.
+  CHECK(static_cast<unsigned char*>(plain)[0] == 0x5A);
+  std::free(plain);
+
+  // hipHostUnregister refuses a buffer that was never registered: same result.
+  void* reg = std::malloc(64);
+  REQUIRE(reg != nullptr);
+  std::memset(reg, 0x5A, 64);
+  hrr_test::ExactRecord<hrr_args_hipHostMalloc> hm_reg;
+  run(HRR_API_HIPHOSTMALLOC, hm_reg, AllocKind::HostRegister, reg, 60);
+  CHECK(static_cast<unsigned char*>(reg)[0] == 0x5A);
+  std::free(reg);
 }
 
 /**
