@@ -1101,6 +1101,7 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   static const bool envSet = rcclEnvIsSet("RCCL_FORCE_CE");
   const int64_t param = rcclParamForceCe();
   if (param == 0) return false;
+  if (param != 0 && IsArchMatch(comm->archName, "gfx1250")) return false;
   if (envSet) return true;
   if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) return true;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
