@@ -48,6 +48,12 @@ module:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
     tags: [launch]
+  Unit_hipModuleLaunchKernel_Extra_ShortBufferWarning:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: uses AMD runtime logging and launch_kernel_module.code, built on Linux only
+    tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_default
     disabled:

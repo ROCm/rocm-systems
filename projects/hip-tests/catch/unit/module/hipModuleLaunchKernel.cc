@@ -324,3 +324,62 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Verify_Capture) {
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamDestroy(stream));
 }
+
+#if HT_AMD && !HT_WIN
+#include "../errorHandling/OutCapture.hh"
+
+// Launches Delay(uint32_t interval, uint32_t ticks_per_ms) through the 'extra'
+// path with the given buffer size and returns the runtime's warning-level log.
+static std::string LaunchDelayWithExtraSize(hipFunction_t f, size_t size) {
+  struct {
+    uint32_t interval;
+    uint32_t ticks_per_ms;
+  } args{1, 0};
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
+
+  HIP_CHECK(hipExtDisableLogging());
+  OutCapture capture;
+  capture.startCapture();
+  HIP_CHECK(hipExtSetLoggingParams(2, 0, -1));
+  HIP_CHECK(hipExtEnableLogging());
+  HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipExtDisableLogging());
+  return capture.stopCapture();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Launches a kernel through 'extra' with HIP_LAUNCH_PARAM_BUFFER_SIZE smaller
+ *    than its arguments and checks the runtime warns about it, then checks a
+ *    correctly sized launch logs no such warning.
+ *  - The missing argument (ticks_per_ms) is zero-filled, which is harmless for
+ *    the Delay kernel, so the short launch still completes.
+ * Test source
+ * ------------------------
+ *  - unit/module/hipModuleLaunchKernel.cc
+ * Test requirements
+ * ------------------------
+ *  - AMD platform, Linux
+ */
+HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Extra_ShortBufferWarning) {
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+  hipFunction_t f = GetKernel(mg.module(), "Delay");
+  const std::string token = "HIP_LAUNCH_PARAM_BUFFER_SIZE is";
+
+  SECTION("Short buffer logs a warning") {
+    const std::string log = LaunchDelayWithExtraSize(f, sizeof(uint32_t));
+    INFO("Captured log: " << log);
+    REQUIRE(log.find("Delay expects 8 bytes") != std::string::npos);
+    REQUIRE(log.find(token + " 4") != std::string::npos);
+  }
+
+  SECTION("Correctly sized buffer logs no warning") {
+    const std::string log = LaunchDelayWithExtraSize(f, 2 * sizeof(uint32_t));
+    INFO("Captured log: " << log);
+    REQUIRE(log.find(token) == std::string::npos);
+  }
+}
+#endif
