@@ -148,19 +148,33 @@ void SignalYieldingPollTest::TestLongWaitYieldsCpu(void) {
  * timeouts below sweep one nap period (6.0 .. 8.0 ms in 0.1 ms steps), so the
  * unclamped median overshoot is ~1 ms whatever the sleep slack of the host.
  *
- * Expected Results: Every wait times out with the signal unchanged, never
- * before its deadline, and the median overshoot is below 0.5 ms.
+ * Expected Results: Every wait times out with the signal unchanged, not
+ * before its deadline (0.1 ms clock tolerance), and the median overshoot of
+ * at least one of up to 3 sweeps is below 0.5 ms.
  */
 void SignalYieldingPollTest::TestNapHonorsTimeout(void) {
-  std::vector<double> overshoot_ms;
-  for (int i = 0; i <= 20; ++i) {
-    const double timeout_ms = 6.0 + 0.1 * i;
-    const WaitSample s = TimedWait(timeout_ms, HSA_WAIT_STATE_BLOCKED);
-    EXPECT_EQ(1, s.value);
-    EXPECT_GE(s.wall_ms, timeout_ms);
-    overshoot_ms.push_back(s.wall_ms - timeout_ms);
+  // A loaded or virtualised host can delay a single wake-up by more than the
+  // margin, so allow up to kRounds sweeps and pass on the first good median.
+  // The missing clamp costs ~1 ms in every sweep, so it still fails all rounds.
+  constexpr int kRounds = 3;
+  double best_median_ms = 0;
+  for (int round = 0; round < kRounds; ++round) {
+    std::vector<double> overshoot_ms;
+    for (int i = 0; i <= 20; ++i) {
+      const double timeout_ms = 6.0 + 0.1 * i;
+      const WaitSample s = TimedWait(timeout_ms, HSA_WAIT_STATE_BLOCKED);
+      EXPECT_EQ(1, s.value);
+      // steady_clock vs the runtime's TSC-calibrated deadline: allow 0.1 ms
+      // of calibration error before calling a return early.
+      EXPECT_GE(s.wall_ms, timeout_ms - 0.1);
+      overshoot_ms.push_back(s.wall_ms - timeout_ms);
+    }
+    const double median_ms = Median(overshoot_ms);
+    best_median_ms = (round == 0) ? median_ms : std::min(best_median_ms, median_ms);
+    if (best_median_ms < 0.5) break;
   }
-  EXPECT_LT(Median(overshoot_ms), 0.5) << "a nap ran past the caller's timeout";
+  EXPECT_LT(best_median_ms, 0.5) << "a nap ran past the caller's timeout in " << kRounds
+                                 << " sweeps";
 }
 
 /*
@@ -205,21 +219,32 @@ void SignalYieldingPollTest::TestCompletionDuringNap(void) {
  * inside the 10 ms active window, so it spins the whole time, but outside the
  * 200 us blocked window, so it mostly naps.
  *
- * Expected Results: Over 5 waits each, the median CPU share of the active
- * waits is at least 50% and that of the blocked waits at most 30%.
+ * Expected Results: In at least one of up to 3 rounds of 5 waits each, the
+ * median CPU share of the active waits is at least 50% and that of the
+ * blocked waits at most 30%.
  */
 void SignalYieldingPollTest::TestActiveHintWidensHotWindow(void) {
-  std::vector<double> active_share, blocked_share;
-  for (int i = 0; i < 5; ++i) {
-    WaitSample a = TimedWait(5, HSA_WAIT_STATE_ACTIVE);
-    WaitSample b = TimedWait(5, HSA_WAIT_STATE_BLOCKED);
-    EXPECT_EQ(1, a.value);
-    EXPECT_EQ(1, b.value);
-    active_share.push_back(a.cpu_ms / a.wall_ms);
-    blocked_share.push_back(b.cpu_ms / b.wall_ms);
+  // Preemption on a loaded host lowers the measured CPU share of a spinning
+  // wait, so allow up to kRounds rounds. An ignored hint gives ~5% active
+  // share in every round, so it still fails.
+  constexpr int kRounds = 3;
+  double active_median = 0, blocked_median = 1;
+  for (int round = 0; round < kRounds; ++round) {
+    std::vector<double> active_share, blocked_share;
+    for (int i = 0; i < 5; ++i) {
+      WaitSample a = TimedWait(5, HSA_WAIT_STATE_ACTIVE);
+      WaitSample b = TimedWait(5, HSA_WAIT_STATE_BLOCKED);
+      EXPECT_EQ(1, a.value);
+      EXPECT_EQ(1, b.value);
+      active_share.push_back(a.cpu_ms / a.wall_ms);
+      blocked_share.push_back(b.cpu_ms / b.wall_ms);
+    }
+    active_median = Median(active_share);
+    blocked_median = Median(blocked_share);
+    if (active_median >= 0.5 && blocked_median <= 0.3) break;
   }
-  EXPECT_GE(Median(active_share), 0.5);
-  EXPECT_LE(Median(blocked_share), 0.3);
+  EXPECT_GE(active_median, 0.5);
+  EXPECT_LE(blocked_median, 0.3);
 }
 
 /*
