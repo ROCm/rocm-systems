@@ -119,7 +119,8 @@ __launch_bounds__(512)
 constexpr int kDdaA2APeerUnroll = 8;
 
 // Copies 16 B lines i = begin, begin + stride, ... < end, loading each full group of kDdaA2APeerUnroll lines first.
-// SysLoad / SysStore use system-scope loads / stores, so data shared with other GPUs needs no cache flush.
+// SysLoad / SysStore use system-scope loads / stores, so data shared with other GPUs needs no cache flush. A
+// system-scope store per 16 B line is slow across nodes, though, so the peer-major push stores plainly.
 template <bool SysLoad, bool SysStore, typename T>
 __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begin, size_t end, size_t stride) {
   constexpr int kUnroll = kDdaA2APeerUnroll;
@@ -226,7 +227,7 @@ __launch_bounds__(512)
     for (size_t p = 0; p <= nPieces; ++p) {
       if (p < nPieces) {
          auto [lo, hi] = piece(p);
-         ddaA2APeerCopy<false, true>(dst, src, lo, hi, stride);
+         ddaA2APeerCopy<false, false>(dst, src, lo, hi, stride);
       }
       if (p > 0 && drainHere) {
         barrier.waitPeer(srcRank, epoch, static_cast<unsigned>(p - 1));
