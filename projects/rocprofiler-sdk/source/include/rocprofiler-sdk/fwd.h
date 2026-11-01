@@ -904,17 +904,41 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
  */
 typedef struct rocprofiler_kernel_dispatch_info_t
 {
-    uint64_t                  size;         ///< Size of this struct (minus reserved padding)
-    rocprofiler_agent_id_t    agent_id;     ///< Agent ID where kernel is launched
-    rocprofiler_queue_id_t    queue_id;     ///< Queue ID where kernel packet is enqueued
-    rocprofiler_kernel_id_t   kernel_id;    ///< Kernel identifier
-    rocprofiler_dispatch_id_t dispatch_id;  ///< unique id for each dispatch
-    uint32_t                  private_segment_size;
-    uint32_t                  group_segment_size;
-    rocprofiler_dim3_t        workgroup_size;        ///< runtime workgroup size (grid * threads)
-    rocprofiler_dim3_t        grid_size;             ///< runtime grid size
-    uint8_t                   reserved_padding[56];  // reserved for extensions w/o ABI break
+    uint64_t                    size;         ///< Size of this struct (minus reserved padding)
+    rocprofiler_agent_id_t      agent_id;     ///< Agent ID where kernel is launched
+    rocprofiler_queue_id_t      queue_id;     ///< Queue ID where kernel packet is enqueued
+    rocprofiler_kernel_id_t     kernel_id;    ///< Kernel identifier
+    rocprofiler_dispatch_id_t   dispatch_id;  ///< unique id for each dispatch
+    uint32_t                    private_segment_size;
+    uint32_t                    group_segment_size;
+    rocprofiler_dim3_t          workgroup_size;  ///< runtime workgroup size (grid * threads)
+    rocprofiler_dim3_t          grid_size;       ///< runtime grid size
+    rocprofiler_graph_exec_id_t graph_exec_id;   ///< HIP graph exec that launched it, or 0
+    rocprofiler_graph_node_id_t graph_node_id;   ///< ordinal within that graph launch
+    uint64_t                    capture_correlation_id;  ///< HIP call that captured it, or 0
+    uint8_t                     reserved_padding[32];    // reserved for extensions w/o ABI break
 
+    /// @var graph_exec_id
+    /// @brief The ::rocprofiler_graph_exec_id_t of the hipGraphLaunch that enqueued this dispatch,
+    /// as in the ::ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH records; a handle of 0 when the dispatch
+    /// was not enqueued by a graph launch. Check that `size` covers this field before reading it.
+    ///
+    /// @var graph_node_id
+    /// @brief Zero-based ordinal of this dispatch among the kernel dispatches and memory copies
+    /// that its graph launch enqueued on the launching thread, in enqueue order (the numbering of
+    /// rocprofv3's `graph_node_id`). It identifies the same node across launches of one
+    /// ::rocprofiler_graph_exec_id_t under the conditions the rocprofv3 documentation gives for
+    /// HIP graph attribution. Meaningful only when graph_exec_id is nonzero.
+    ///
+    /// @var capture_correlation_id
+    /// @brief The internal correlation id of the HIP runtime API call (a kernel launch on a
+    /// capturing stream) whose stream capture created this dispatch's graph node, so a tool can
+    /// join a replayed dispatch to that call's record and to the external correlation ids and
+    /// ranges active when it was captured. 0 when unknown: the dispatch was not enqueued by a graph
+    /// launch, its node was not created by stream capture on the capturing thread, the launching
+    /// HIP call was not traced, or the dispatch's kernel does not match the next captured kernel
+    /// node of its launch (the check that keeps a changed launch order from producing a wrong id).
+    ///
     /// @var group_segment_size
     /// @brief Runtime group memory segment size. Size of  group segment memory (static + runtime)
     /// required by the kernel (per work-group), in bytes. AKA: LDS size
