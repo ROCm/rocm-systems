@@ -136,10 +136,10 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
   NCCLCHECK(ncclGinIbGdrSupport(&gdrSupport, type == NCCL_GIN_TYPE_GDAKI));
   if (!gdrSupport) return ncclInternalError;
 
-  ncclNetCommConfig_t* netCommConfig = nullptr;
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
-  netCommConfig->trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
-  *ctx = netCommConfig;
+  struct ncclIbNetCtx* netCtx = nullptr;
+  NCCLCHECK(ncclCalloc(&netCtx, 1));
+  netCtx->config.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+  *ctx = netCtx;
   return ncclSuccess;
 }
 

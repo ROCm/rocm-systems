@@ -24,6 +24,16 @@ The focused `rj_decode_fuzz`, `rj_execution_fuzz`, and `rj_code_object_fuzz`
 binaries remain the preferred entry points for dedicated campaigns and crash
 minimization.
 
+The canonical [rocjitsu-fuzz workflow](../../../../.github/workflows/rocjitsu-fuzz.yml)
+runs this target after relevant updates land on `ROCm/rocm-systems`'s `develop`
+branch. It exercises sequential 32-worker ASan+UBSan and TSan campaigns and
+reports the outcome on the merged pull request. Add the
+`rocjitsu-presubmit-fuzz` label to a same-repository pull request to request the
+same campaigns before merging. The workflow can also be started manually from
+the Actions UI. A manual run on a pull request head updates the same presubmit
+report when GitHub associates that commit with exactly one open pull request
+targeting `develop`.
+
 ## Build and test
 
 From this directory's project root (`emulation/rocjitsu`):

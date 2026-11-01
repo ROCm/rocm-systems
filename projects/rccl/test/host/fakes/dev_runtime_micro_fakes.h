@@ -31,16 +31,8 @@
 #include <cstdint>
 #include <functional>
 
-
-
-
-
-
-
-
-// Team shape seen by ncclDevrWorldToLsaRank's symmetric arm. Default to the
-// comm's own contiguous stride-1 team; override for strided/offset layouts.
-extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld;
+// The ncclTeam* accessors (g_ncclTeamWorld and friends) are in
+// fakes/nccl_device_core_fakes.h.
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
@@ -57,6 +49,10 @@ extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBoot
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend;
 extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
+extern std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce;
+extern std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
+                                  uint32_t)>
+    g_devrGinDevCommSetup;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS],
                                   uint32_t[NCCL_GIN_MAX_ACTIVE_BACKENDS], int, bool, int)>
@@ -83,11 +79,10 @@ extern std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_d
 extern std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos;
 extern std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport;
 
-// The CFT seams 2.31 added: the two team accessors, the two sizes
-// ncclDevrInitOnce caches, and whether the RMA proxy is in play. Defaults
-// describe a comm without CFT and without the proxy; see dev_runtime_micro_fakes.cc.
-extern std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft;
-extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem;
+// The CFT seams 2.31 added: the two sizes ncclDevrInitOnce caches, and whether
+// the RMA proxy is in play. Defaults describe a comm without CFT and without the
+// proxy; see dev_runtime_micro_fakes.cc. (The CFT team accessors it also added
+// are in fakes/nccl_device_core_fakes.h with the rest of the ncclTeam* family.)
 extern std::function<int(struct ncclComm*)> g_devrComputeCftSize;
 extern std::function<int(struct ncclComm*)> g_devrComputeCftMcSize;
 
