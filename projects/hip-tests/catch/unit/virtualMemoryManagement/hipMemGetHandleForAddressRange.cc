@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+ #include "ipc_socket_com.hh"
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
@@ -695,7 +696,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
     ipcSocketCom sockObj(false);
-    int shHandle;
+    hipShareableHdl  shHandle;
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
     REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
@@ -798,7 +799,7 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
     ipcSocketCom sockObj(false);
-    int shHandle;
+    hipShareableHdl shHandle;
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
     REQUIRE(write(fdSig[1], &sig, sizeof(int)) >= 0);
