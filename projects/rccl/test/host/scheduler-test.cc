@@ -34,7 +34,15 @@ const char* ncclAlgNameForSymk(int) { return "sym-kernel"; }
 
 // Hipify renames the allgatherv one to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc has the basename.
 #include ALLGATHERV_SCHED_CC_PATH
+
+// Seams for symmetric_sched.cc's argsBuf calloc/free, so tests can fail the allocation and see the error paths
+// release it. SchedulerMicrotest installs the recorders below into g_microCalloc/g_microFree.
+static bool g_symSchedCallocFail = false;
+static void* g_symSchedLastCalloc = nullptr;
+static std::vector<void*> g_symSchedFreed;
+#include "fakes/alloc_seam.h"
 #include SYMMETRIC_SCHED_CC_PATH
+#include "fakes/alloc_seam_undef.h"
 
 namespace {
 constexpr int kBaselineChannels = 4;
@@ -214,6 +222,15 @@ class SchedulerMicrotest : public ::testing::Test {
   // Suite-wide generous default: the canonical sym_kernels_fakes.cc default is false, silently halting classification.
   void SetUp() override {
     g_symkAvailable = [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; };
+    g_microCalloc = [](size_t n, size_t size) -> void* {
+      if (g_symSchedCallocFail) return nullptr;
+      g_symSchedLastCalloc = ::calloc(n, size);
+      return g_symSchedLastCalloc;
+    };
+    g_microFree = [](void* p) {
+      if (p != nullptr) g_symSchedFreed.push_back(p);
+      ::free(p);
+    };
   }
   void TearDown() override {
     ResetEnqueueFakes();          // this file's own enqueue_fakes.{h,cc} seams
@@ -223,6 +240,10 @@ class SchedulerMicrotest : public ::testing::Test {
     ResetBootstrapStubs();       // covers g_bootstrapAllGather
     ResetDevRuntimeFakes();      // covers g_devrFindWindow/g_devrInitOnce/g_devrWindowHasSysmemSegment
     ResetTuningFakes();          // g_tuningCompute's canonical reset (its default is ncclSystemError, not success)
+    g_symSchedCallocFail = false;  // TU-local argsBuf seams
+    g_symSchedLastCalloc = nullptr;
+    g_symSchedFreed.clear();
+    ResetAllocSeam();
   }
 
   // symBatchAligned16B reads only comm->rank.
@@ -2832,6 +2853,26 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_MakeDevWork_Fails_PropagatesEr
                              });
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
   EXPECT_EQ(makeDevWorkCalls, 1);  // task2 is never reached once task1's ncclSymkMakeDevWork call fails
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  ASSERT_NE(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(g_symSchedFreed, std::vector<void*>({g_symSchedLastCalloc}));  // fail: releases the unpublished argsBuf
+}
+
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsAllocFails_ReturnsSystemErrorWithoutBuildingWork) {
+  SymmetricTaskScheduler_Scene scene;
+  ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
+  ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
+                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+                               ++makeDevWorkCalls;
+                               return ncclSuccess;
+                             });
+  g_symSchedCallocFail = true;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSystemError);
+  EXPECT_EQ(makeDevWorkCalls, 0);
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  EXPECT_EQ(ncclIntruQueueHead(&scene.symTaskQueue), &task);  // nothing was dequeued
 }
 
 // The first for-loop pass on a fresh channel always sets sChannelId/nChannels directly (not via fracHi).
@@ -2958,15 +2999,18 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_IsSymLastBreak_StopsPackingLoo
   EXPECT_EQ(makeDevWorkCalls, 1);
 }
 
-TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_SkipsTailCode) {
+// Every batch's final task carries isSymLast, so exhausting the channels before it is an internal error, not a
+// silent success with no kernel args.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ChannelExhaustion_NotIsSymLast_ReturnsInternalErrorAndFreesArgs) {
   SymmetricTaskScheduler_Scene scene;
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
   task.nMaxChannels = 1;
   task.isSymLast = 0;  // not last: the exhaustion check below actually gets reached
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
-  // ncclSuccess here is a production bug: the goto fail at symmetric_sched.cc:442 never sets ret first.
-  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
   EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+  ASSERT_NE(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(g_symSchedFreed, std::vector<void*>({g_symSchedLastCalloc}));
 }
 
 // Cross-task continuation (symmetric_sched.cc:400-410): task1 ends via "<", leaving task2 to start mid-channel.

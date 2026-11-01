@@ -954,13 +954,13 @@ TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_NoDataDirectPath_KeepsThePl
   EXPECT_EQ(IbCastDevs[0].capsProvider.mlx5.dataDirect, 0);
 }
 
-// The error returns past the fail: label, so the device list and the open context are never released.
-// Pins AICOMRCCL-3090; a fix flips this pin.
-TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_KnownBug_DataDirectLookupErrorLeaksTheDeviceList) {
+// The error goes through the fail: label, so the device list and the open context are released (AICOMRCCL-3090).
+TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectLookupErrorReleasesTheDeviceListAndContext) {
   DataDirect(ncclSystemError);
   EXPECT_EQ(Init(), ncclSystemError);
-  EXPECT_EQ(World().freeDeviceList.calls, 0);
-  EXPECT_EQ(World().hcas[0].closes, 0);
+  EXPECT_EQ(World().freeDeviceList.calls, 1);
+  EXPECT_EQ(World().hcas[0].closes, 1);
+  EXPECT_EQ(IbCastNDevs, 0);
 }
 
 TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectOff_SkipsTheProbe) {

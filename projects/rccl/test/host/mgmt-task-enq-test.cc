@@ -109,17 +109,35 @@ TEST_F(MgmtTaskEnqMicrotest, Enqueue_JoinsCommsInCommHashOrder) {
   EXPECT_EQ(high.get(), low->groupNext[ncclGroupTaskTypeMgmtTask]);
 }
 
-// ncclGroupCommJoin already stored this comm's mode, so the mixed-mode check never fires.
-// Pins AICOMRCCL-2979; a fix flips this pin.
-TEST_F(MgmtTaskEnqMicrotest, Enqueue_KnownBug_MixedBlockingModesAreNotRejected) {
+// The rejected comm must stay out of the group list: callers (commGrow, ncclCommInitChildComm)
+// free it on failure, and a linked freed comm is a use-after-free at ncclGroupEnd.
+TEST_F(MgmtTaskEnqMicrotest, Enqueue_MixedBlockingModesAreRejectedWithoutJoining) {
   auto blocking = MakeComm(3, 1);
   auto nonblocking = MakeComm(9, 0);
   ncclAsyncJob a{};
   ncclAsyncJob b{};
   EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&a, TaskFunc, Destroy, blocking.get()));
-  EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get()));
-  EXPECT_EQ(0, ncclGroupBlocking);
-  EXPECT_EQ(&b, ncclIntruQueueHead(&nonblocking->mgmtTaskQueue));
+  EXPECT_EQ(ncclInvalidArgument, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get()));
+  EXPECT_EQ(1, ncclGroupBlocking);
+  EXPECT_EQ(blocking.get(), ncclGroupCommHead[ncclGroupTaskTypeMgmtTask]);
+  EXPECT_EQ(nullptr, blocking->groupNext[ncclGroupTaskTypeMgmtTask]);
+  EXPECT_EQ(reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID), nonblocking->groupNext[ncclGroupTaskTypeMgmtTask]);
+  EXPECT_EQ(nullptr, ncclIntruQueueHead(&nonblocking->mgmtTaskQueue));
+  ASSERT_EQ(1u, g_destroyed.size());
+  EXPECT_EQ(&b, g_destroyed[0]);
+}
+
+TEST_F(MgmtTaskEnqMicrotest, Enqueue_DestroyingCommJoinsAGroupOfTheOtherMode) {
+  auto blocking = MakeComm(3, 1);
+  auto destroying = MakeComm(9, 0);
+  destroying->destroyFlag = 1;
+  ncclAsyncJob a{};
+  ncclAsyncJob b{};
+  EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&a, TaskFunc, Destroy, blocking.get()));
+  EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, destroying.get()));
+  EXPECT_EQ(&b, ncclIntruQueueHead(&destroying->mgmtTaskQueue));
+  EXPECT_EQ(destroying.get(), blocking->groupNext[ncclGroupTaskTypeMgmtTask]);
+  EXPECT_EQ(1, ncclGroupBlocking);
   EXPECT_TRUE(g_destroyed.empty());
 }
 

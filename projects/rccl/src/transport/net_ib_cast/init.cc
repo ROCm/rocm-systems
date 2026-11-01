@@ -503,7 +503,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                 TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
               } else {
                 WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
-                return res;
+                // No port of this device has been recorded yet, so the context is still ours to close.
+                (void)wrap_ibv_close_device(context);
+                ret = res;
+                goto fail;
               }
             }
           }
@@ -540,7 +543,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                           ret, fail);
             if (dev == 1) {
               snprintf(IbCastDevs[IbCastNDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX));
+              NCCLCHECKGOTO(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX), ret, fail);
               strncpy(IbCastDevs[IbCastNDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
             }
@@ -553,7 +556,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].mrCache.capacity = 0;
             IbCastDevs[IbCastNDevs].mrCache.population = 0;
             IbCastDevs[IbCastNDevs].mrCache.slots = NULL;
-            NCCLCHECK(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats));
+            NCCLCHECKGOTO(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats), ret, fail);
 
             IbCastDevs[IbCastNDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
             IbCastDevs[IbCastNDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;

@@ -4078,7 +4078,16 @@ TEST_F(EnqueueMicrotest, RedOpCreate_RecorderFailure_Propagates) {
 // AllGatherV branch and without GPU allocation.
 struct CollTaskComm {
   std::unique_ptr<ncclComm> storage{new ncclComm{}};
-  CollTaskComm() { storage->nRanks = 4; }
+  CollTaskComm() {
+    storage->nRanks = 4;
+    ncclMemoryStackConstruct(&storage->memScoped);
+    // memPermanent is load-bearing, not decorative; see BatchPlanComm for why.
+    ncclMemoryStackConstruct(&storage->memPermanent);
+  }
+  ~CollTaskComm() {
+    ncclMemoryStackDestruct(&storage->memScoped);
+    ncclMemoryStackDestruct(&storage->memPermanent);
+  }
   ncclComm* get() { return storage.get(); }
 };
 
