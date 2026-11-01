@@ -37,7 +37,12 @@ double Median(std::vector<double> v) {
 }  // namespace
 
 SignalYieldingPollTest::SignalYieldingPollTest(bool yielding_poll)
-    : TestBase(), yielding_poll_(yielding_poll), timestamp_frequency_(0), signal_({0}) {
+    : TestBase(),
+      yielding_poll_(yielding_poll),
+      env_saved_(false),
+      env_was_set_(false),
+      timestamp_frequency_(0),
+      signal_({0}) {
   set_num_iteration(1);
   set_title(yielding_poll ? "RocR Signal Yielding Poll Test"
                           : "RocR Signal Default Busy-Wait Test");
@@ -47,10 +52,25 @@ SignalYieldingPollTest::SignalYieldingPollTest(bool yielding_poll)
       "HSA_ENABLE_YIELDING_POLL=1.");
 }
 
-SignalYieldingPollTest::~SignalYieldingPollTest(void) {}
+SignalYieldingPollTest::~SignalYieldingPollTest(void) { RestoreEnv(); }
+
+void SignalYieldingPollTest::RestoreEnv() {
+  if (!env_saved_) return;
+  if (env_was_set_) {
+    rocrtst::SetEnv(kYieldingPollEnv, prior_env_.c_str());
+  } else {
+    unsetenv(kYieldingPollEnv);
+  }
+  env_saved_ = false;
+}
 
 void SignalYieldingPollTest::SetUp(void) {
   // The flag is read in hsa_init(), so it must be set before TestBase::SetUp().
+  // Remember the caller's value so Close()/the destructor can restore it.
+  const char* prior = getenv(kYieldingPollEnv);
+  env_was_set_ = (prior != nullptr);
+  prior_env_ = prior ? prior : "";
+  env_saved_ = true;
   if (yielding_poll_) {
     rocrtst::SetEnv(kYieldingPollEnv, "1");
   } else {
@@ -87,7 +107,7 @@ void SignalYieldingPollTest::Close() {
     signal_.handle = 0;
   }
   TestBase::Close();
-  unsetenv(kYieldingPollEnv);
+  RestoreEnv();
 }
 
 SignalYieldingPollTest::WaitSample SignalYieldingPollTest::TimedWait(double timeout_ms,

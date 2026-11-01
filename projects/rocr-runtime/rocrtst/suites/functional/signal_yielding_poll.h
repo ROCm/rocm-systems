@@ -8,6 +8,7 @@
 #define ROCRTST_SUITES_FUNCTIONAL_SIGNAL_YIELDING_POLL_H_
 
 #include <cstdint>
+#include <string>
 
 #include "common/base_rocr.h"
 #include "hsa/hsa.h"
@@ -61,7 +62,15 @@ class SignalYieldingPollTest : public TestBase {
   // reports the returned value, the wall time and the waiting thread's CPU time.
   WaitSample TimedWait(double timeout_ms, hsa_wait_state_t hint);
 
+  // Puts HSA_ENABLE_YIELDING_POLL back to the value it had before SetUp().
+  // Called from Close() and the destructor (the latter also runs when the
+  // test is skipped before Close()); does nothing if already restored.
+  void RestoreEnv();
+
   bool yielding_poll_;
+  bool env_saved_;
+  bool env_was_set_;
+  std::string prior_env_;
   uint64_t timestamp_frequency_;
   hsa_signal_t signal_;
 };
