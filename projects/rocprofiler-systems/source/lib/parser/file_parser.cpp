@@ -85,13 +85,14 @@ read_entry(const schema& config_schema, const std::string& key,
             fmt::format("unsupported value for parameter '{}'", param->id));
         return;
     }
-    if(!is_valid_value(*param, *text))
+    const auto stored = canonical_choice(*param, *text);
+    if(!is_valid_value(*param, stored))
     {
         result.errors.push_back(
             fmt::format("invalid value '{}' for parameter '{}'", *text, param->id));
         return;
     }
-    result.values.insert_or_assign(param->id, *text);
+    result.values.insert_or_assign(param->id, stored);
 }
 }  // namespace
 

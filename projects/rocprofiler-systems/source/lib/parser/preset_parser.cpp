@@ -23,13 +23,14 @@ preset_parser::parse(const schema& config_schema, const settings_t& settings) co
                 fmt::format("unknown environment variable '{}'", variable));
             continue;
         }
-        if(!is_valid_value(*param, value))
+        const auto stored = canonical_choice(*param, value);
+        if(!is_valid_value(*param, stored))
         {
             result.errors.push_back(
                 fmt::format("invalid value '{}' for {}", value, variable));
             continue;
         }
-        result.values.insert_or_assign(param->id, value);
+        result.values.insert_or_assign(param->id, stored);
     }
     return result;
 }
