@@ -1185,6 +1185,18 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
         void* mhandle = nullptr;
         ASSERT_EQ(RegisterMemory(comm, buf, kTransferSize, NCCL_PTR_HOST, &mhandle),
                   ncclSuccess);
+        void* request = nullptr;
+        auto mrGuard = RCCLTestGuards::makeScopeGuard([&]() {
+            if (request) {
+                // A failed wait does not cancel the request. Retain its MR and
+                // buffer until this isolated test process exits.
+                mhandle = nullptr;
+                bufGuard.release();
+            } else if (mhandle) {
+                (void)DeregisterMemory(comm, mhandle);
+                mhandle = nullptr;
+            }
+        });
 
         if (rank == 1) {
             fillHostBufferWithPattern<uint8_t>(buf, kTransferSize, makeBytePattern(seed));
@@ -1192,23 +1204,26 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
             memset(buf, 0xDE, kTransferSize);
         }
 
-        void* req = nullptr;
         if (rank == 0) {
             void* rb[1] = {buf}; size_t rs[1] = {kTransferSize};
             int rt[1] = {tag}; void* rh[1] = {mhandle};
-            ASSERT_EQ(PostRecv(recvComms[c], 1, rb, rs, rt, rh, &req), ncclSuccess);
-            ASSERT_NE(req, nullptr);
+            ASSERT_EQ(PostRecv(recvComms[c], 1, rb, rs, rt, rh, &request), ncclSuccess);
+            ASSERT_NE(request, nullptr);
         }
 
         if (rank == 1) {
-            void* sendReq = nullptr;
-            PostSendWithRetry(sendComms[c], buf, kTransferSize, tag, mhandle, &sendReq);
+            PostSendWithRetry(sendComms[c], buf, kTransferSize, tag, mhandle, &request);
+            int sendSize[1] = {0};
+            ASSERT_EQ(WaitForCompletion(request, sendSize, kLargeTransferTimeoutMs), ncclSuccess)
+                << listens[c].label << " send timed out";
+            request = nullptr;
         }
 
         if (rank == 0) {
             int csz[1] = {0};
-            ASSERT_EQ(WaitForCompletion(req, csz, kLargeTransferTimeoutMs), ncclSuccess)
+            ASSERT_EQ(WaitForCompletion(request, csz, kLargeTransferTimeoutMs), ncclSuccess)
                 << listens[c].label << " recv timed out";
+            request = nullptr;
             EXPECT_EQ(csz[0], (int)kTransferSize)
                 << listens[c].label << " size mismatch";
 
@@ -1220,7 +1235,16 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
                             << ": expected " << (int)errExp << " got " << (int)errGot;
         }
 
-        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        void* mhandleToDeregister = mhandle;
+        mhandle = nullptr;
+        const ncclResult_t deregResult = DeregisterMemory(comm, mhandleToDeregister);
+        if (deregResult != ncclSuccess) {
+            // The scope guard must not retry a failed deregistration or free
+            // memory that the transport may still associate with this MR.
+            bufGuard.release();
+            ADD_FAILURE() << listens[c].label << " deregistration failed with status "
+                          << deregResult;
+        }
     }
 
     // === Phase 4: Close ALL ===
