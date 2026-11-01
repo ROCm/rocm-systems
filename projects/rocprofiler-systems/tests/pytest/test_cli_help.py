@@ -372,7 +372,6 @@ HELP_CASES = [
         [
             r"{prog} --help=profiling",
             r"--profile-format",
-            r"--profile-diff",
             r"See also",
         ],
         id="topic_profiling",

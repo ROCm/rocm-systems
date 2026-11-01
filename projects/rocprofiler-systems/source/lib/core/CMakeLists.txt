@@ -19,6 +19,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/wall_clock_report.cpp
 )
 
 set(core_headers
@@ -48,6 +49,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/track_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/wall_clock_report.hpp
 )
 
 add_library(rocprofiler-systems-core-library STATIC)

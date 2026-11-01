@@ -27,6 +27,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed.
+
 ### Resolved issues
 
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
@@ -37,6 +46,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   exceptions from instrumentation setup are now caught in `main`, reported as
   `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
   terminating.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
 - Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
   programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
   allocatable array bounds as DWARF location expression blocks rather than integer
@@ -57,6 +68,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
   values) are no longer attached to Perfetto slices. They will be available through the
   timemory output formats.
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
