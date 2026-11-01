@@ -12,13 +12,7 @@
 Panel Config:
   id: 1500
   title: Central Hub (CH)
-  description: |-
-    Central Hub (CH) metrics for gfx1250. The CH manages traffic between shader
-    engines and GL2 cache. CHA handles request arbitration, CHC handles
-    buffering and GL2 interface.
-
   data source:
-
   - metric_table:
       id: 1501
       title: CHA Utilization
