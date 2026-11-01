@@ -136,6 +136,7 @@ Device::Device(hsa_agent_t bkendDevice)
       gpuvm_segment_max_alloc_(0),
       alloc_granularity_(0),
       xferQueue_(nullptr),
+      coopQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
       numOfVgpus_(0),
@@ -258,8 +259,10 @@ Device::~Device() {
     glb_ctx_ = nullptr;
   }
 
-  // Destroy transfer queue FIRST (before destroying queues in pool)
-  // because its destructor will call releaseQueue()
+  // Destroy internal queues FIRST (before destroying queues in pool)
+  // because their destructors will call releaseQueue()
+  delete coopQueue_;
+  coopQueue_ = nullptr;
   delete xferQueue_;
   xferQueue_ = nullptr;
 
@@ -1925,18 +1928,15 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
-  bool cooperative = false;
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
                          (settings().dynamic_queues_ >= 2);
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {
-    // In HIP mode the device queue will be allocated for the cooperative launches only
-    cooperative = amd::IS_HIP && settings().enableCoopGroups_;
     profiling = amd::IS_HIP;
   }
   // Initialization of heap and other resources occur during the command
@@ -1947,6 +1947,10 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
       new VirtualGPU(*this, profiling, cooperative, q ? queue->cuMask() : defaultCuMask,
                      q ? queue->priority() : amd::CommandQueue::Priority::Normal,
                      dedicated_queue);
+
+  if (!q && !cooperative) {
+    virtualDevice->PinQueue();
+  }
 
   if (!virtualDevice->create()) {
     delete virtualDevice;
@@ -3377,9 +3381,9 @@ VirtualGPU* Device::xferQueue() const {
   Device* thisDevice = const_cast<Device*>(this);
   std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
+    thisDevice->xferQueue_ =
+        reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice(nullptr, /*cooperative=*/false));
     if (!thisDevice->xferQueue_) {
-      LogError("Couldn't create the device transfer manager!");
       return;
     }
     if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
@@ -3393,6 +3397,29 @@ VirtualGPU* Device::xferQueue() const {
   }
   xferQueue_->enableSyncBlit();
   return xferQueue_;
+}
+
+// ================================================================================================
+VirtualGPU* Device::coopQueue() const {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(coopQueueOnce_, [thisDevice]() {
+    // Create virtual device for cooperative launches
+    thisDevice->coopQueue_ = reinterpret_cast<VirtualGPU*>(
+        thisDevice->createVirtualDevice(nullptr, amd::IS_HIP && thisDevice->settings().enableCoopGroups_));
+    if (!thisDevice->coopQueue_) {
+      return;
+    }
+    if (thisDevice->coopQueue_->gpu_queue() == nullptr) {
+      thisDevice->coopQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+    }
+  });
+  if (!coopQueue_) {
+    LogError("Couldn't create the cooperative queue!");
+    return nullptr;
+  }
+  coopQueue_->enableSyncBlit();
+  return coopQueue_;
 }
 
 // ================================================================================================
