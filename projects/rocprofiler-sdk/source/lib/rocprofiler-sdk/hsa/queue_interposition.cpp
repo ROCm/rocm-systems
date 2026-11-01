@@ -142,6 +142,10 @@ lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
     if(!_state && create_if_missing)
     {
         auto _created = create_queue_state(queue, true);
+        // Record emission requires a registered Queue, which only queue creation supplies.
+        // A queue predating the first dispatch-tracing context has none, so its packets
+        // would execute uninstrumented. Called with no registry lock held.
+        if(_created) queue_controller_adopt_existing_queue(queue);
         // A queue discovered dynamically (never seen at hsa_queue_create) was
         // never windowed, so first_owner can no longer be trusted anywhere -- the
         // documented "owner we never windowed" invariant. Disable signal-less

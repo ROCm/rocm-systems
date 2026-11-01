@@ -25,12 +25,17 @@
 """
 test_early_hip_late_dispatch.py -- Execute driver for the baseline anytime test.
 
-This is the in-scope "anytime initialization" scenario: rocprofiler-sdk is already
-present in the process (an early tool is LD_PRELOAD'd by CMake), and a SECOND tool
-configures itself as a client mid-process via rocprofiler_force_configure().
+The "anytime initialization" scenario: a tool configures itself as a client mid-process
+via rocprofiler_force_configure(), after streams already exist and work has already run.
 
-  Tool A (early): LD_PRELOAD'd by CMake, traces HIP_API_BUFFERED only. Output file and
-                  contexts are set in the CMake environment.
+Two tests share this driver and differ only in whether CMake preloads an early tool, so
+Tool A is present in one and absent in the other. With it, rocprofiler-sdk is already in
+the process when the streams are created; without it, nothing holds the SDK until Tool B
+registers.
+
+  Tool A (early): LD_PRELOAD'd by CMake when the test configures one, traces
+                  HIP_API_BUFFERED only. Output file and contexts come from the
+                  CMake environment.
   Tool B (late):  dlopen'd by this script after some work has already run, traces
                   KERNEL_DISPATCH_BUFFERED (+ CODE_OBJECT). Gets its own contexts and
                   output file via os.environ, snapshotted at force_configure time.
@@ -40,7 +45,7 @@ Flow (all in one process; no subprocess, so the in-process tools observe the GPU
     create NUM_STREAMS HIP streams      <- queues exist before Tool B registers
     Phase 1: NUM_STREAMS x PHASE1_ITERS kernels   (only Tool A active)
     --- register Tool B via json_tool_force_configure() ---
-    Phase 2: NUM_STREAMS x PHASE2_ITERS kernels   (Tool A + Tool B active)
+    Phase 2: NUM_STREAMS x PHASE2_ITERS kernels   (Tool B active, Tool A if present)
 
 Expectations (checked by validate.py):
   - Tool A captured HIP API records and ZERO kernel dispatches (it did not enable them).
@@ -100,7 +105,7 @@ def main():
     print(f"Created {NUM_STREAMS} HIP streams (before Tool B registers)")
 
     # Phase 1: work BEFORE Tool B registers. Tool B must not see these dispatches.
-    print(f"\n--- Phase 1: {NUM_STREAMS * PHASE1_ITERS} kernels (Tool A only) ---")
+    print(f"\n--- Phase 1: {NUM_STREAMS * PHASE1_ITERS} kernels (before Tool B) ---")
     _launch_all(kernels, PHASE1_ITERS)
 
     # Register Tool B late, in this same process. Set its contexts + output file first so
@@ -118,7 +123,7 @@ def main():
 
     # Phase 2: work AFTER Tool B registers, on the SAME pre-existing streams. Tool B must
     # capture exactly these dispatches.
-    print(f"\n--- Phase 2: {NUM_STREAMS * PHASE2_ITERS} kernels (Tool A + Tool B) ---")
+    print(f"\n--- Phase 2: {NUM_STREAMS * PHASE2_ITERS} kernels (Tool B registered) ---")
     _launch_all(kernels, PHASE2_ITERS)
 
     kernels.hip_kernels_destroy_streams()
