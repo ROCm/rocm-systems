@@ -47,22 +47,33 @@ inline constexpr PartitionID INVALID_PARTITION_ID = std::numeric_limits<Partitio
 
 /// @brief Reason the simulation stopped.
 enum class ExitReason : uint8_t {
-  COMPLETED,    ///< Normal completion (all children halted or max_ticks reached).
+  COMPLETED,    ///< Normal completion, tick limit, or finite-run primary stall.
   EXIT_REQUEST, ///< A component called request_exit().
   INTERRUPTED,  ///< External interrupt (ctrl-C, watchdog, debugger).
+};
+
+/// @brief Structured cause for a successful simulation completion.
+enum class ExitCause : uint8_t {
+  NONE,                    ///< No recorded engine-driven completion, including the default state.
+  QUIESCENCE,              ///< No primary or queued work remains.
+  ALL_PRIMARIES_COMPLETED, ///< Every registered primary released and work drained.
+  MAX_TICKS,               ///< The configured finite tick horizon was reached.
+  ACTIVE_PRIMARY_STALL,    ///< A primary remained registered with no work before the horizon.
 };
 
 /// @brief Information about why the simulation stopped.
 class ExitStatus {
 public:
   ExitStatus() = default;
-  ExitStatus(ExitReason r, Tick t, std::string msg, int c = 0)
-      : reason(r), tick(t), message(std::move(msg)), code(c) {}
+  ExitStatus(ExitReason reason, Tick tick, std::string message, int code = 0,
+             ExitCause cause = ExitCause::NONE)
+      : reason(reason), tick(tick), message(std::move(message)), code(code), cause(cause) {}
 
   ExitReason reason = ExitReason::COMPLETED;
-  Tick tick = 0;       ///< Simulation tick at which the exit occurred.
-  std::string message; ///< Human-readable reason.
-  int code = 0;        ///< Exit code (0 = success).
+  Tick tick = 0;                     ///< Simulation tick at which the exit occurred.
+  std::string message;               ///< Human-readable reason.
+  int code = 0;                      ///< Exit code (0 = success).
+  ExitCause cause = ExitCause::NONE; ///< Machine-readable successful completion cause.
 };
 
 } // namespace simdojo

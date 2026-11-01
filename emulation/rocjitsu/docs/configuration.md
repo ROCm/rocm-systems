@@ -101,7 +101,7 @@ The example above is intentionally minimal.
 
 | Field | Type | Description |
 |---|---|---|
-| `max_ticks` | int | Maximum simulation ticks (0 = unlimited) |
+| `max_ticks` | int | Finite tick horizon (0 = unlimited). A finite run also stops if an active primary has no queued work before the limit. |
 | `num_threads` | int | Simdojo engine partitions (one per XCD when partitioned). Omit for the default. |
 | `cpu_dispatch_threads` | int | Inclusive functional dispatch width per SoC. Omitted/0 selects a preferred allocation; 1 forces serial dispatch. Clamped to the shared SoC pool capacity. |
 | `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |

@@ -16,14 +16,14 @@ if(NOT seed_result EQUAL 0)
 endif()
 file(GLOB emitted_seeds LIST_DIRECTORIES false "${seed_directory}/*.bin")
 list(LENGTH emitted_seeds emitted_seed_count)
-if(NOT emitted_seed_count EQUAL 6)
+if(NOT emitted_seed_count EQUAL 7)
     message(
         FATAL_ERROR
-        "expected 6 multiplexer seeds, found ${emitted_seed_count}"
+        "expected 7 multiplexer seeds, found ${emitted_seed_count}"
     )
 endif()
 
-foreach(target IN ITEMS decode execution code-object)
+foreach(target IN ITEMS decode execution code-object concurrent-dispatch)
     execute_process(
         COMMAND "${FUZZ_EXECUTABLE}" --input "${seed_directory}/${target}.bin"
         RESULT_VARIABLE replay_result

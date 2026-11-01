@@ -467,6 +467,7 @@ add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 add_subdirectory(fuzz/code_object)
 add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/concurrent_dispatch)
 add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

@@ -244,6 +244,8 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
   return seeds[static_cast<size_t>(target)];
 }
 
+} // namespace
+
 uint32_t terminating_instruction(FuzzTarget target) {
   switch (target_info(target).arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
@@ -271,8 +273,6 @@ uint32_t terminating_instruction(FuzzTarget target) {
   }
 }
 
-} // namespace
-
 std::optional<FuzzTarget> parse_target(std::string_view name) {
   for (size_t index = 0; index < kTargets.size(); ++index)
     if (kTargets[index].name == name)
@@ -281,6 +281,10 @@ std::optional<FuzzTarget> parse_target(std::string_view name) {
 }
 
 std::string_view target_name(FuzzTarget target) { return target_info(target).name; }
+
+rj_code_arch_t target_arch(FuzzTarget target) { return target_info(target).arch; }
+
+rj_code_target_id_t target_id(FuzzTarget target) { return target_info(target).id; }
 
 bool targets_cover_amdgpu_execution_registry() {
   for (const IsaTargetDescriptor &descriptor : default_isa_target_registry().targets()) {

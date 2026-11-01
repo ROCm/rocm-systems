@@ -31,6 +31,7 @@ RJ_DIAGNOSTIC_POP
 #include <elf.h>
 #include <exception>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <string>
@@ -2723,6 +2724,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   ComputeQueueRecord &state = *queue;
 
   size_t index = 0;
+  std::deque<DispatchEntry>::iterator cancel_begin = state.entries.end();
   for (std::deque<DispatchEntry>::iterator entry = state.entries.begin();
        entry != state.entries.end();) {
     if (entry->dispatch_id != dispatch_id) {
@@ -2737,9 +2739,35 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
     if (index < state.next_dispatch_idx)
       --state.next_dispatch_idx;
     entry = state.entries.erase(entry);
+    cancel_begin = entry;
+    break;
   }
   if (!found)
     return false;
+
+  // A terminal fault closes this queue. Packets after the failed dispatch can
+  // neither execute nor publish success, so retire that blocked tail locally
+  // while preserving any older entries that still have completion work to do.
+  // A faulted shard can still be in the fan-out inbox; dispatch IDs are ordered,
+  // so locate the first admitted successor in that case.
+  if (cancel_begin == state.entries.end()) {
+    cancel_begin = std::ranges::find_if(state.entries, [dispatch_id](const DispatchEntry &entry) {
+      return entry.dispatch_id >= dispatch_id;
+    });
+  }
+  const size_t retained_entries =
+      static_cast<size_t>(std::distance(state.entries.begin(), cancel_begin));
+  for (auto entry = cancel_begin; entry != state.entries.end(); ++entry) {
+    entry->terminal_faulted = true;
+    if (entry->grid_completion)
+      entry->grid_completion->mark_faulted();
+    dispatch_launch_metadata_.erase(entry->dispatch_id);
+    erase_cluster_workgroups(entry->dispatch_id);
+    for (ComputeUnitCore *cu : cus_)
+      cu->abort_dispatch(entry->dispatch_id);
+  }
+  state.entries.erase(cancel_begin, state.entries.end());
+  state.next_dispatch_idx = std::min(state.next_dispatch_idx, retained_entries);
 
   dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
   queue->faulted = true;
@@ -2776,6 +2804,12 @@ void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t proc
                                    .outcome = outcome});
     }
   }
+  // The local fault path can run from a CU-idle callback after removing the
+  // dispatch that kept this internal queue primary alive. Re-enter the ordinary
+  // doorbell teardown path so it observes the now-empty queue and releases the
+  // primary instead of leaving a finite run stopped as an active-primary stall.
+  if (engine())
+    engine()->schedule_event_now(doorbell_event());
 }
 
 // INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is

@@ -464,7 +464,9 @@ drained) before terminating, ensuring in-flight cross-partition messages
 are fully delivered.
 
 **max_ticks**: in multi-threaded mode, checked by the barrier completion
-function when `global_lbts >= max_ticks`.
+function when `global_lbts >= max_ticks`. If all partitions become idle first
+while a primary remains active, the finite run stops at the last processed tick
+with `ExitCause::ACTIVE_PRIMARY_STALL` rather than waiting for future async work.
 
 ### Wall-Clock Pacing
 
@@ -528,8 +530,9 @@ reporting.
 The simulation reports its termination reason through `ExitStatus`, a
 first-class value type.
 
-- `ExitReason::COMPLETED` - normal completion (all primaries done or
-  max_ticks reached)
+- `ExitReason::COMPLETED` - a successful engine stop; `ExitStatus::cause`
+  distinguishes all primaries done, ordinary quiescence, `max_ticks`, and a
+  finite-run active-primary stall
 - `ExitReason::EXIT_REQUEST` - a component called `request_exit()`
 - `ExitReason::INTERRUPTED` - external interrupt (ctrl-C, watchdog)
 
@@ -557,18 +560,19 @@ engine()->primary_release();
 engine()->primary_retain();
 ```
 
-The simulation ends gracefully when **all** registered primaries have
-called `primary_release()`. This is checked via a unified
-`check_termination()` helper alongside `max_ticks` and quiescence
-detection. The exit reason is `COMPLETED` with a descriptive message
-distinguishing the trigger.
+An unlimited simulation ends gracefully when **all** registered primaries
+have called `primary_release()`. This is checked via a unified
+`check_termination()` helper alongside `max_ticks` and quiescence detection.
+Successful exits use `ExitReason::COMPLETED`; `ExitStatus::cause` distinguishes
+primary completion, ordinary quiescence, tick exhaustion, and a finite-run
+active-primary stall without depending on the diagnostic message.
 
-Primaries also suppress quiescence termination: if any primary is registered
-but has not yet signaled OK, the engine will not exit when the event queue
-is empty. In single-threaded mode, the worker blocks on a condition variable
-until an async event or shutdown arrives. In multi-threaded mode, the
-barrier continues cycling and `check_termination()` defers exit until all
-primaries signal done AND the system is fully quiescent.
+Primaries suppress quiescence termination in unlimited runs: if any primary is
+registered but has not yet signaled OK, the engine waits for an async event or
+shutdown. A finite run does not wait for future foreign-thread publications
+once every partition has become idle before `max_ticks`; it returns
+`ExitCause::ACTIVE_PRIMARY_STALL` at the last processed tick. Reaching the
+limit itself returns `ExitCause::MAX_TICKS` instead.
 
 This complements `request_exit()`: primaries are the cooperative
 termination path (consensus); `request_exit()` is the unilateral force
@@ -600,8 +604,11 @@ For GUI, debugger, or test harness use. Single-threaded only. On the first
 call, starts all components (initialization happens in `create()`). Each
 subsequent call drains async events and advances to the next event time,
 processing all events at that timestamp. Ticks without scheduled events
-are skipped. Returns true if the simulation can continue. If the queue is
-empty but primaries are registered, returns true so the caller can poll.
+are skipped. Returns true if the simulation can continue. If the queue is empty
+but primaries are registered, an unlimited run returns true so the caller can
+poll. A finite run instead returns false with
+`ExitCause::ACTIVE_PRIMARY_STALL` at the last processed tick; inspect
+`last_exit().cause` to distinguish that stop.
 
 ---
 
