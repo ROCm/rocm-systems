@@ -4,7 +4,6 @@
 #include "parser/preset_parser.hpp"
 #include "parser/parse_result.hpp"
 #include "parser/schema.hpp"
-#include "parser/schema_validator.hpp"
 
 #include <fmt/format.h>
 
@@ -23,14 +22,7 @@ preset_parser::parse(const schema& config_schema, const settings_t& settings) co
                 fmt::format("unknown environment variable '{}'", variable));
             continue;
         }
-        const auto stored = canonical_choice(*param, value);
-        if(!is_valid_value(*param, stored))
-        {
-            result.errors.push_back(
-                fmt::format("invalid value '{}' for {}", value, variable));
-            continue;
-        }
-        result.values.insert_or_assign(param->id, stored);
+        result.store_if_valid(*param, value);
     }
     return result;
 }

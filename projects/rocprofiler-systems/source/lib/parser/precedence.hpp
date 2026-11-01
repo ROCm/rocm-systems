@@ -6,6 +6,7 @@
 #include "parser/config_store.hpp"
 #include "parser/schema.hpp"
 
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -30,10 +31,9 @@ using resolved_config = std::map<std::string, resolved_value, std::less<>>;
 /**
  * Merge sources so a higher config_source replaces a lower one for the same parameter.
  *
- * Order is default_value, preset, file, environment, then command_line. Environment
- * outranks a preset on purpose. A rocprof-sys preset today overrides exported
- * ROCPROFSYS_* variables; this resolver does not. Sources of equal rank keep their
- * input order, and the later one wins.
+ * Order is default_value, file, environment, preset, then command_line. A preset
+ * overrides the environment and the configuration file, matching rocprof-sys today.
+ * Sources of equal rank keep their input order, and the later one wins.
  */
 [[nodiscard]] resolved_config
 resolve_precedence(std::vector<sourced_values> sources);
