@@ -15,8 +15,8 @@ struct ncclComm;
 // false to use the legacy IPC path
 bool ncclDdaUseFabricPath(struct ncclComm* comm);
 
-// Returns true when the Anvil SDMA GIN plugin should use fabric DDA peer
-// memory for this comm (MI455 single-clique path).
+// Returns true when the Anvil SDMA GIN plugin should register buffers through
+// exported fabric VMM handles for this comm (MI455 single-clique path).
 bool ginAnvilUseFabricMem(struct ncclComm* comm);
 
 // True when peer user windows are reachable via LSA-flat fabric mapping for this comm.

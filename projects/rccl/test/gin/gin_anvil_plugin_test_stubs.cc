@@ -195,9 +195,6 @@ uint32_t ncclDebugLevelMask = (1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION);
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
 
-int64_t rcclParamDdaLL() { return 1; }
-int64_t rcclParamDdaLLThreshold() { return 64 * 1024; }
-
 // Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
 // GPU probe. This binary never needs cuMem, so report it unsupported.
 int ncclCuMemRuntimeSupported() { return 0; }
@@ -254,7 +251,7 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
   }
   // Single-process sim: keep the caller's own slot and give every empty slot
   // peer data. Peers report what the caller did, so agreement votes (fabric
-  // offset, LL threshold) see matching ranks; 0xA5 only when there is no source.
+  // offset, LSA threshold) see matching ranks; 0xA5 only when there is no source.
   unsigned char* bytes = static_cast<unsigned char*>(allData);
   std::vector<unsigned char> zero(slot, 0);
   const unsigned char* src = nullptr;
@@ -271,7 +268,7 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
       memset(p, 0xA5, slot);
     }
   }
-  // The LL agreement vote starts with size_t threshold and is wider than the
+  // The LSA agreement vote starts with size_t threshold and is wider than the
   // int-only agreements. Override rank 1 after replication to model processes
   // that parsed different per-rank environment values.
   if (GinAnvilPluginStubs::g.bootstrapPeerThresholdSet && nranks > 1 && slot >= sizeof(size_t) + sizeof(int)) {

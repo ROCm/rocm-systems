@@ -75,11 +75,6 @@ int ncclTeamRankToWorld(ncclComm_t, ncclTeam_t team, int rank) { return rank * t
 
 void ncclSetThreadName(std::thread&, const char*, ...) {}
 
-// ncclGinDevCommSetup reads the Anvil GPU context back for the fabric AllToAll
-// lane. No backend here is Anvil SDMA, so these only close the link.
-hipError_t hipMemcpy(void*, const void*, size_t, hipMemcpyKind) { return hipErrorNotSupported; }
-const char* hipGetErrorString(hipError_t) { return "hip stub"; }
-
 #include "fakes/gin_vtable_fake.h"
 
 namespace {
@@ -168,12 +163,10 @@ TEST_F(GinHostFinalizeTest, MarksClosedBeforeClosingAnyHandle) {
 
 TEST_F(GinHostFinalizeTest, ResetsHostStateButKeepsBackendRecords) {
   struct ncclGinState* gs = ginState();
-  // Finalize walks the list to erase fabric AllToAll lanes, so the node must be
-  // readable; it is not heap-allocated, so a free of it would also fail.
-  struct ncclGinStateDevComm devCommNode{};
+  auto* devCommsSentinel = reinterpret_cast<struct ncclGinStateDevComm*>(0x4444);
   gs->proxyNthreads = 3;
   gs->proxyThreadsCreated = true;  // no joinable threads: the join loop skips them
-  gs->devComms = &devCommNode;
+  gs->devComms = devCommsSentinel;
   gs->asyncResult = ncclSystemError;
   gs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
   gs->writePending.store(true);

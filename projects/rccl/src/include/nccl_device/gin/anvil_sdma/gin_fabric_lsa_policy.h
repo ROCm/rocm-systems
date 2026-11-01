@@ -10,9 +10,15 @@
 #ifndef _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LSA_POLICY_H_
 #define _NCCL_DEVICE_GIN_ANVIL_SDMA_GIN_FABRIC_LSA_POLICY_H_
 
+// Host-only helpers below need <cerrno>/<cstdlib>. They are included here, at
+// file scope, rather than next to their users further down: those users sit
+// inside namespace gin::fabric, and a consumer of the installed copy that
+// reaches this header before libc would otherwise declare std, getenv and
+// strtoull inside gin::fabric.
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include "gin_fabric_ll_policy.h"
+#include <cstdlib>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #define GIN_FABRIC_LSA_HD __host__ __device__
@@ -75,23 +81,23 @@ GIN_FABRIC_LSA_HD inline bool ginFabricLsaAlltoAllSizeOk(int nRanks, size_t perC
   return true;
 }
 
-// GPU pick for gin-sdma device-API A2A (measured 1p4g MI455):
-//   LL  : total size <= fabric LL threshold (default 256 KiB)
-//   LSA : only if opted in and LL not taken, total size <= LSA threshold
+// GPU pick for gin-sdma device-API A2A:
+//   LSA : only if opted in, total size <= LSA threshold
 //   put : otherwise (Anvil SDMA / gin.put). Default leaves LSA off because the
-//         256 KiB–32 MiB LSA band is slower than gin.put on this platform.
-enum class GinFabricA2AAlgo : int { Put = 0, Ll = 1, Lsa = 2 };
+//         256 KiB–32 MiB LSA band measured slower than gin.put on 1p4g MI455.
+enum class GinFabricA2AAlgo : int { Put = 0, Lsa = 1 };
 
-GIN_FABRIC_LSA_HD inline GinFabricA2AAlgo ginFabricA2ASelectAlgo(bool ctxOk, uint32_t llOn, uint32_t lsaOn, int nRanks,
-                                                                size_t perChunkBytes, size_t llThreshold,
-                                                                size_t llScratchBytes, size_t lsaThreshold) {
-  if (ctxOk && llOn != 0 && ginFabricLlAlltoAllSizeOk(nRanks, perChunkBytes, llThreshold, llScratchBytes)) {
-    return GinFabricA2AAlgo::Ll;
-  }
+GIN_FABRIC_LSA_HD inline GinFabricA2AAlgo ginFabricA2ASelectAlgo(bool ctxOk, uint32_t lsaOn, int nRanks,
+                                                                size_t perChunkBytes, size_t lsaThreshold) {
   if (ctxOk && lsaOn != 0 && ginFabricLsaAlltoAllSizeOk(nRanks, perChunkBytes, lsaThreshold)) {
     return GinFabricA2AAlgo::Lsa;
   }
   return GinFabricA2AAlgo::Put;
+}
+
+// Clique-wide VMM fabric path (shared with ginAnvilUseFabricMem).
+inline bool ginAnvilUseFabricMemPredicate(bool ddaFabricPath, int cliqueSize, int nRanks, bool cuMemEnabled) {
+  return ddaFabricPath && cliqueSize == nRanks && cuMemEnabled;
 }
 
 GIN_FABRIC_LSA_HD inline bool ginFabricLsaA2ACapablePredicate(bool fabricMemPath, bool mnnvl, bool fabricHandles,
@@ -104,15 +110,19 @@ GIN_FABRIC_LSA_HD inline bool ginFabricLsaA2ACapablePredicate(bool fabricMemPath
 
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 
-#include <cstdlib>
-
 // Matches host GIN A2A GIN_A2A_SDMA_MIN_BYTES: LSA below this per-peer size, SDMA at/above.
 constexpr size_t kGinFabricLsaA2ADefaultMaxPerPeer = (size_t)8 * 1024 * 1024;
 
-inline bool ginFabricLsaA2AOptInFromEnv() {
-  const char* e = getenv("RCCL_GIN_FABRIC_LSA_A2A");
-  if (!e || !e[0]) e = getenv("NCCL_GIN_FABRIC_LSA_A2A");
-  return e && atoi(e) != 0;
+inline bool parseGinFabricThresholdEnv(const char* name, unsigned long long* val) {
+  const char* e = getenv(name);
+  if (!e || !e[0]) return false;
+  if (*e < '0' || *e > '9') return false;
+  errno = 0;
+  char* end = nullptr;
+  unsigned long long v = strtoull(e, &end, 10);
+  if (end == e || *end != '\0' || errno == ERANGE) return false;
+  *val = v;
+  return true;
 }
 
 // -1 = unset (off), 0 = force off, 1 = force on.
@@ -125,15 +135,14 @@ inline int ginFabricLsaA2AEnvMode() {
 
 inline bool ginFabricLsaA2AWantEnabled(bool capable) {
   if (!capable) return false;
-  // 1p4g MI455: LSA between the LL cap and 8 MiB/peer is slower than gin.put.
   // Unset stays off; RCCL_GIN_FABRIC_LSA_A2A=1 opts in.
   return ginFabricLsaA2AEnvMode() == 1;
 }
 
 inline size_t resolveGinFabricLsaThresholdAlltoAll(int nRanks) {
   unsigned long long val = 0;
-  if (parseGinFabricLLThresholdEnv("RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL", &val) ||
-      parseGinFabricLLThresholdEnv("NCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL", &val)) {
+  if (parseGinFabricThresholdEnv("RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL", &val) ||
+      parseGinFabricThresholdEnv("NCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL", &val)) {
     return (size_t)val;
   }
   if (nRanks < 2) return 0;

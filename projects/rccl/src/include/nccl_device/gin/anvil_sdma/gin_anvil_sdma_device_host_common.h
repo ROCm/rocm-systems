@@ -12,10 +12,10 @@
 
 struct ncclGinAnvilIpcBufEntry;
 
-#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 117
+#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 118
 
 /** Must match host plugin and device kernel build; checked on device. */
-#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17115u
+#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17116u
 
 /** Default SDMA threshold (bytes). Transfers of at most this size use inlined IPC flat stores;
  *  larger transfers use direct Anvil SDMA. */
@@ -47,25 +47,11 @@ struct ncclGinAnvilSdmaGPUContext {
   uintptr_t* signal_remote_addrs;  // [nRanks] peer signal region bases (GDA signal_raddrs pattern)
   uint32_t ipcSignalPeer;          // 1=shader IPC atomic signalPeer, 0=SDMA ATOMIC packet (default)
 
-  // Private device-API DDA lane. Unlike ncclDevComm, this backend-owned
-  // context can evolve without changing the public device-communicator ABI.
-  void** fabricA2APeerScratch;
-  // GIN-owned epoch cells for fabric LL A2A. Not comm->ddaLLEpochDev (host DDA).
-  uint32_t* fabricA2ALlEpoch;
-  size_t fabricA2AScratchBytes;
-  size_t fabricA2ALlThreshold;
-  int fabricA2ALlEpochLen;
-  uint32_t fabricA2AEnabled;
-
   // Opt-in direct LSA-flat-from-fabric AllToAll (peer recv windows via fabric LSA map).
+  // Unlike ncclDevComm, this backend-owned context can evolve without changing
+  // the public device-communicator ABI.
   uint32_t fabricA2ALsaEnabled;
   size_t fabricA2ALsaThreshold;
-
-  // Device mutex for one in-flight fabric-LL AllToAll on this GIN context.
-  // 0 = free; otherwise the owning kernel's launchId. Inflight counts LL CTAs.
-  // A second overlapping launch must fail, not fall back to gin.put.
-  uint32_t fabricA2ALlBusy;
-  uint32_t fabricA2ALlInflight;
 };
 
 /** Current size of the context above, in bytes, on the LP64 targets RCCL builds for.
@@ -78,7 +64,7 @@ struct ncclGinAnvilSdmaGPUContext {
  *  compile error instead. When you change the layout, bump the magic and update
  *  this constant in the same commit.
  */
-#define NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES 176
+#define NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES 120
 
 #if defined(__cplusplus)
 static_assert(sizeof(struct ncclGinAnvilSdmaGPUContext) == NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES,

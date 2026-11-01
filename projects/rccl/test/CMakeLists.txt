@@ -530,7 +530,6 @@ if(BUILD_TESTS)
     set(_GIN_ANVIL_PLUGIN_SRCS
       ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_plugin_anvil_sdma.cc
       ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_anvil_ipc_table_host.cc
-      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_fabric_a2a_lane.cc
     )
     set_source_files_properties(${_GIN_ANVIL_PLUGIN_SRCS} PROPERTIES GENERATED TRUE)
 
@@ -738,18 +737,6 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
-
-  add_executable(rccl-UnitTestsGinFabricLLPolicy gin/gin_fabric_ll_policy_test.cpp)
-  set_source_files_properties(gin/gin_fabric_ll_policy_test.cpp PROPERTIES LANGUAGE CXX)
-  target_include_directories(rccl-UnitTestsGinFabricLLPolicy PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/include)
-  target_compile_definitions(rccl-UnitTestsGinFabricLLPolicy PRIVATE GIN_FABRIC_LL_POLICY_HOST_TEST)
-  target_link_libraries(rccl-UnitTestsGinFabricLLPolicy PRIVATE
-    ${GTEST_BOTH_LIBRARIES} Threads::Threads)
-  set_target_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
-  add_test(NAME rccl-UnitTestsGinFabricLLPolicy COMMAND rccl-UnitTestsGinFabricLLPolicy)
-  set_tests_properties(rccl-UnitTestsGinFabricLLPolicy PROPERTIES LABELS "unit")
 
   add_executable(rccl-UnitTestsGinFabricLsaPolicy gin/gin_fabric_lsa_policy_test.cpp)
   set_source_files_properties(gin/gin_fabric_lsa_policy_test.cpp PROPERTIES LANGUAGE CXX)

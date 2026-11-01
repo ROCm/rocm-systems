@@ -72,13 +72,6 @@ constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
 char kGfx1250[] = "gfx1250";
 
-// The scratch VMM allocation is the DDA head (kScratchBytes, ddaScratchBytes)
-// plus the GIN device-API LL tail, so peer mappings and fills are this size.
-size_t ScratchAllocBytes() {
-  return static_cast<size_t>(kScratchBytes) +
-         gin::fabric::ginFabricLlA2AGinRegionBytes(kNRanks, gin::fabric::resolveGinFabricLLThresholdAlltoAll());
-}
-
 // ncclCuMemAlloc zeros a new VMM buffer with hipMemsetAsync before it is tracked.
 // Fabric init zeros that scratch again; this fails the second fill.
 void FailFabricScratchZeroing() {
@@ -86,7 +79,7 @@ void FailFabricScratchZeroing() {
   FailWhen(
       g_hipMemsetAsync,
       [seen](void*, int, size_t bytes, hipStream_t) mutable {
-        return bytes == ScratchAllocBytes() && ++seen == 2;
+        return bytes == static_cast<size_t>(kScratchBytes) && ++seen == 2;
       },
       hipErrorInvalidValue);
 }
@@ -292,7 +285,6 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_HandsEveryResourceToComm
   EXPECT_NE(comm_->ddaFabricMemHandler, nullptr);
   ASSERT_NE(comm_->ddaScratch, nullptr);
   EXPECT_EQ(comm_->ddaScratchBytes, static_cast<size_t>(kScratchBytes));
-  EXPECT_EQ(comm_->ddaScratchAllocBytes, ScratchAllocBytes());
   EXPECT_TRUE(comm_->ddaScratchIsVmm);
   EXPECT_EQ(ledger_.reserved.count(comm_->ddaScratch), 1u);
   EXPECT_NE(comm_->ddaPeerPtrsDev, nullptr);
@@ -403,7 +395,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeerTablesHoldOwnScratch
   }
   std::set<void*> scratchMappings;
   for (const auto& entry : ledger_.reserved) {
-    if (entry.second == ScratchAllocBytes() && entry.first != comm_->ddaScratch) {
+    if (entry.second == static_cast<size_t>(kScratchBytes) && entry.first != comm_->ddaScratch) {
       scratchMappings.insert(entry.first);
     }
   }
@@ -461,7 +453,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_ZeroesScratchAndEpochCel
 
   EXPECT_TRUE(std::any_of(fillStart, fillSync, [&](const FillStep& step) {
     return step.step == Step::Memset && step.dst == comm_->ddaScratch && step.value == 0 &&
-           step.bytes == ScratchAllocBytes() && step.stream == epoch->stream;
+           step.bytes == static_cast<size_t>(kScratchBytes) && step.stream == epoch->stream;
   })) << "scratch not zeroed on the epoch stream within the synchronized fill";
 }
 
@@ -713,7 +705,7 @@ INSTANTIATE_TEST_SUITE_P(
                        g_hipMemCreate,
                        [](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
                           unsigned long long) {
-                         return size == ScratchAllocBytes();
+                         return size == static_cast<size_t>(kScratchBytes);
                        },
                        hipErrorOutOfMemory);
                  },

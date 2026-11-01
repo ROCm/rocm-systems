@@ -14,7 +14,6 @@
 
 #include "gin/gin_host_anvil_sdma.h"
 #include "gin/gin_bootstrap_agree.h"
-#include "gin/gin_fabric_a2a_host.h"
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "alloc.h"
@@ -24,7 +23,6 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
-#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
 #include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
@@ -156,6 +154,30 @@ static ncclResult_t ginAnvilAllgatherFabricVote(struct ncclComm* comm, GinAnvilF
   return allOk ? ncclSuccess : ncclSystemError;
 }
 
+// Arms the fabric LSA AllToAll lane only if every rank opted in with the same
+// threshold. The device kernel picks LSA or gin.put from that threshold, and
+// LSA's barriers are collective, so ranks with different values would split
+// between the two bodies and hang. *allEnabled is 0 unless the allgather
+// succeeded and every vote matched; a non-success return is the allgather's own
+// failure, not a negative vote.
+static ncclResult_t ginAnvilAgreeLsaA2A(struct ncclComm* comm, int localEnabled, size_t localThreshold,
+                                        int* allEnabled) {
+  *allEnabled = 0;
+  struct Vote {
+    size_t threshold;
+    int enabled;
+  };
+  const Vote local{localThreshold, localEnabled ? 1 : 0};
+  int agreed = 1;
+  NCCLCHECK(ncclGinBootstrapAgree(comm, local, [&agreed](Vote const* votes, int n) {
+    for (int i = 0; i < n; ++i) {
+      if (!votes[i].enabled || votes[i].threshold != votes[0].threshold) agreed = 0;
+    }
+  }));
+  *allEnabled = agreed;
+  return ncclSuccess;
+}
+
 // Per-rank comm objects whose LSA-signal peer connectivity has already been
 // validated once. A process may own multiple ranks with the same commHash.
 static std::set<struct ncclComm*> ginAnvilConnCheckedComms;
@@ -197,8 +219,6 @@ struct ginAnvilGinCtx {
   int sdmaChannelStride;
   uintptr_t** signal_remote_addrs_dev;
   void* signalSpanLsaSelf;
-  // Fabric AllToAll lane, armed on logical context 0 only (see createContext).
-  void** fabricA2APeerScratchDev;
 };
 
 static void ginAnvilSignalSpanRefInc(void* spanLsaSelf) {
@@ -265,8 +285,6 @@ static void ginAnvilFreeGinCtx(ginAnvilGinCtx* ctx) {
   }
   ginAnvilSignalSpanRefDec(ctx->signalSpanLsaSelf);
   if (ctx->counters) CUDACHECKIGNORE(hipFree(ctx->counters));
-  if (ctx->gpuCtxHost && ctx->gpuCtxHost[0].fabricA2ALlEpoch) CUDACHECKIGNORE(hipFree(ctx->gpuCtxHost[0].fabricA2ALlEpoch));
-  if (ctx->fabricA2APeerScratchDev) CUDACHECKIGNORE(hipFree(ctx->fabricA2APeerScratchDev));
   if (ctx->gpuCtxDev) CUDACHECKIGNORE(hipFree(ctx->gpuCtxDev));
   free(ctx->signal_remote_addrs_dev);
   delete[] ctx->gpuCtxHost;
@@ -318,11 +336,6 @@ void ncclGinAnvilPluginTestResetHostState(void) {
   }
   fabricBufferHandles.clear();
   fabricBufferRefcount.clear();
-  // The fabric A2A lane table is process-global like the maps above, so a lane
-  // published by one test would otherwise still be visible to the next one.
-  // Production teardown erases per devComm instead (ncclGinHostFinalize), which
-  // is why this is the only caller of the clear-all entry point.
-  ncclGinFabricA2ALaneClearAll();
 }
 
 int ncclGinAnvilPluginTestLiveInitCtxCount(void) {
@@ -1457,96 +1470,19 @@ static ncclResult_t ginAnvilCreateContext(void* collComm, ncclGinConfig_t* confi
     ncclGinAnvilIpcTableGetDevice(&gpuCtx->ipcTable, &gpuCtx->ipcTableCount);
   }
 
-  // Every logical context would share one DDA scratch tail, and the busy lock
-  // that serializes it lives in a single context, so only context 0 (what
-  // devComm.ginHandles[0] points at) gets the fabric lane. The others use gin.put.
+  // Only context 0 (what devComm.ginHandles[0] points at) gets the fabric LSA
+  // lane, since that is the context the device-API AllToAll reads. The others
+  // use gin.put.
   if (ginAnvilUseFabricMem(cctx->comm)) {
     ncclGinAnvilSdmaGPUContext* gpuCtx = &ctx->gpuCtxHost[0];
-    const size_t llThreshold = gin::fabric::resolveGinFabricLLThresholdAlltoAll();
-    const gin::fabric::GinFabricA2ACommState commState{
-        cctx->comm->ddaFabricMemHandler,
-        (void**)cctx->comm->ddaPeerPtrsDev,
-        cctx->comm->ddaLLEpochDev,
-        cctx->comm->ddaScratch,
-        cctx->comm->ddaScratchBytes,
-        cctx->comm->ddaScratchAllocBytes,
-        cctx->comm->ddaLLEpochLen,
-        cctx->comm->nRanks};
-    ncclGinFabricA2ALane lane{};
-    int localEnabled =
-        gin::fabric::ginFabricA2ALaneTryBuild(commState, rcclParamDdaLL() != 0, llThreshold, &lane) ? 1 : 0;
-    if (localEnabled) {
-      uint32_t* ginEpoch = nullptr;
-      const size_t epochBytes = sizeof(uint32_t) * (size_t)lane.llEpochLen;
-      if (lane.llEpochLen < 1 || hipMalloc(&ginEpoch, epochBytes) != hipSuccess ||
-          hipMemset(ginEpoch, 0, epochBytes) != hipSuccess) {
-        if (ginEpoch) (void)hipFree(ginEpoch);
-        localEnabled = 0;
-      } else {
-        gpuCtx->fabricA2ALlEpoch = ginEpoch;
-        gpuCtx->fabricA2ALlEpochLen = lane.llEpochLen;
-      }
-    }
-    // Peer-scratch hipMalloc is rank-local. Vote it with the LL agree (same as
-    // epoch) so a failed rank never NCCLCHECKGOTOs out between the two
-    // allgathers and leave peers blocked in the LSA vote.
-    if (localEnabled) {
-      size_t regionBytes = 0;
-      if (ginFabricA2ALaneBuildPeerScratchDev(cctx->comm, &ctx->fabricA2APeerScratchDev, &regionBytes) !=
-          ncclSuccess) {
-        if (ctx->fabricA2APeerScratchDev) {
-          CUDACHECKIGNORE(hipFree(ctx->fabricA2APeerScratchDev));
-          ctx->fabricA2APeerScratchDev = nullptr;
-        }
-        if (gpuCtx->fabricA2ALlEpoch) {
-          CUDACHECKIGNORE(hipFree(gpuCtx->fabricA2ALlEpoch));
-          gpuCtx->fabricA2ALlEpoch = nullptr;
-          gpuCtx->fabricA2ALlEpochLen = 0;
-        }
-        localEnabled = 0;
-      } else {
-        gpuCtx->fabricA2APeerScratch = ctx->fabricA2APeerScratchDev;
-        gpuCtx->fabricA2AScratchBytes = regionBytes;
-      }
-    }
-    int allEnabled = 0;
-    // Agree both eligibility and geometry. llThreshold determines each rank's
-    // DDA allocation and the offset added to peer scratch bases; a boolean-only
-    // vote could arm ranks with incompatible carve offsets.
-    NCCLCHECKGOTO(
-        ncclGinFabricA2ALaneAgreeEnabledAndThreshold(cctx->comm, localEnabled, llThreshold, &allEnabled), ret,
-        fail);
-    if (allEnabled) {
-      gpuCtx->fabricA2ALlThreshold = lane.llThreshold;
-      gpuCtx->fabricA2AEnabled = 1;
-    } else {
-      if (gpuCtx->fabricA2ALlEpoch) {
-        CUDACHECKIGNORE(hipFree(gpuCtx->fabricA2ALlEpoch));
-        gpuCtx->fabricA2ALlEpoch = nullptr;
-        gpuCtx->fabricA2ALlEpochLen = 0;
-      }
-      if (ctx->fabricA2APeerScratchDev) {
-        CUDACHECKIGNORE(hipFree(ctx->fabricA2APeerScratchDev));
-        ctx->fabricA2APeerScratchDev = nullptr;
-        gpuCtx->fabricA2APeerScratch = nullptr;
-        gpuCtx->fabricA2AScratchBytes = 0;
-      }
-      if (cctx->comm->ddaFabricMemHandler == nullptr || cctx->comm->ddaPeerPtrsDev == nullptr ||
-          cctx->comm->ddaLLEpochDev == nullptr || cctx->comm->ddaScratch == nullptr) {
-        WARN("GIN A2A: fabric small-msg lane unavailable: missing DDA fabric resources");
-      }
-    }
-
-    {
-      const size_t lsaThreshold = gin::fabric::resolveGinFabricLsaThresholdAlltoAll(ctx->nRanks);
-      const bool lsaCapable = ginFabricLsaA2ACapable(cctx->comm, ctx->nRanks) && lsaThreshold > 0;
-      const int localLsaEnabled = gin::fabric::ginFabricLsaA2AWantEnabled(lsaCapable) ? 1 : 0;
-      int allLsaEnabled = 0;
-      NCCLCHECKGOTO(ncclGinFabricA2ALaneAgreeEnabled(cctx->comm, localLsaEnabled, &allLsaEnabled), ret, fail);
-      if (allLsaEnabled) {
-        gpuCtx->fabricA2ALsaEnabled = 1;
-        gpuCtx->fabricA2ALsaThreshold = lsaThreshold;
-      }
+    const size_t lsaThreshold = gin::fabric::resolveGinFabricLsaThresholdAlltoAll(ctx->nRanks);
+    const bool lsaCapable = ginFabricLsaA2ACapable(cctx->comm, ctx->nRanks) && lsaThreshold > 0;
+    const int localLsaEnabled = gin::fabric::ginFabricLsaA2AWantEnabled(lsaCapable) ? 1 : 0;
+    int allLsaEnabled = 0;
+    NCCLCHECKGOTO(ginAnvilAgreeLsaA2A(cctx->comm, localLsaEnabled, lsaThreshold, &allLsaEnabled), ret, fail);
+    if (allLsaEnabled) {
+      gpuCtx->fabricA2ALsaEnabled = 1;
+      gpuCtx->fabricA2ALsaThreshold = lsaThreshold;
     }
   }
 

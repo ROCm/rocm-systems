@@ -73,9 +73,9 @@
       "args": ""
     },
     {
-      "name": "rccl-gin-fabric-ll-policy-ut",
+      "name": "rccl-gin-fabric-lsa-policy-ut",
       "kind": "fixtures",
-      "bin": "rccl-UnitTestsGinFabricLLPolicy",
+      "bin": "rccl-UnitTestsGinFabricLsaPolicy",
       "env": [],
       "args": ""
     },

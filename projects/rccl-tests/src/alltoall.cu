@@ -12,10 +12,8 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
-#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_a2a_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
-#include "nccl_device/gin/anvil_sdma/gin_fabric_ll_policy.h"
 #include "nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h"
 #endif
 #endif
@@ -288,31 +286,9 @@ using bf16 = __hip_bfloat16;
 #include <cuda_bf16.h>
 using bf16 = __nv_bfloat16;
 #endif
-#include <cstdlib>
-using ::gin::fabric::kGinFabricLlAgMaxBlocksPerPeer;
-using ::gin::fabric::kGinFabricLlA2ADefaultMaxBpp;
-using ::gin::fabric::ginFabricLlAlltoAllBlocksPerPeer;
-using ::gin::fabric::ginFabricLlAlltoAllSizeOk;
 using ::gin::fabric::ginFabricLsaA2ALaunchConfig;
-using ::gin::fabric::ginFabricLsaAlltoAllSizeOk;
 using ::gin::fabric::ginFabricA2ASelectAlgo;
 using ::gin::fabric::GinFabricA2AAlgo;
-
-// Cap on fabric-LL blocks-per-peer (1–8). Default 4. Hard max 8.
-static int AlltoAllGinFabricLlMaxBpp() {
-  static int cached = -1;
-  if (cached >= 0) return cached;
-  const char* e = getenv("RCCL_GIN_FABRIC_LL_A2A_MAX_BPP");
-  if (!e || !e[0]) e = getenv("NCCL_GIN_FABRIC_LL_A2A_MAX_BPP");
-  int v = kGinFabricLlA2ADefaultMaxBpp;
-  if (e && e[0]) {
-    char* end = nullptr;
-    const long n = strtol(e, &end, 10);
-    if (end != e && end && *end == '\0' && n >= 1 && n <= kGinFabricLlAgMaxBlocksPerPeer) v = (int)n;
-  }
-  cached = v;
-  return cached;
-}
 
 // Copies the Anvil-SDMA backend context out of the GIN device handle.
 // layoutMagic is the first field and is fetched and checked on its own before
@@ -340,17 +316,14 @@ static GinFabricA2AAlgo AlltoAllGinFabricAlgoHost(ncclDevComm* devComm, size_t c
   }
   ncclGinAnvilSdmaGPUContext ctx{};
   if (!AlltoAllGinReadAnvilCtx(devComm, &ctx)) return GinFabricA2AAlgo::Put;
-  return ginFabricA2ASelectAlgo(true, ctx.fabricA2AEnabled, ctx.fabricA2ALsaEnabled, devComm->nRanks,
-                                count * wordSize(type), ctx.fabricA2ALlThreshold, ctx.fabricA2AScratchBytes,
+  return ginFabricA2ASelectAlgo(true, ctx.fabricA2ALsaEnabled, devComm->nRanks, count * wordSize(type),
                                 ctx.fabricA2ALsaThreshold);
 }
 
 // --device_timing still uses a gin.put-only 1D timed kernel; skip it when the
-// production path would take fabric LL or LSA-direct. Production does not use
-// these helpers.
-static bool AlltoAllGinFabricSmallMsgEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
-  const GinFabricA2AAlgo algo = AlltoAllGinFabricAlgoHost(devComm, count, type);
-  return algo == GinFabricA2AAlgo::Ll || algo == GinFabricA2AAlgo::Lsa;
+// production path would take LSA-direct. Production does not use these helpers.
+static bool AlltoAllGinFabricLsaEligibleHost(ncclDevComm* devComm, size_t count, ncclDataType_t type) {
+  return AlltoAllGinFabricAlgoHost(devComm, count, type) == GinFabricA2AAlgo::Lsa;
 }
 #endif
 
@@ -399,52 +372,16 @@ __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWin
   ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, (int)blockIdx.x, (int)gridDim.x);
 }
 
-// One launch; the GPU picks fabric LL vs LSA-flat vs gin.put from the Anvil
-// backend context + size (LL first on 1p4g MI455). The host only sizes a covering 2D grid.
-template <typename T, int NRANKS_CT>
+// One launch; the GPU picks LSA-flat vs gin.put from the Anvil backend context
+// + size. The host only sizes a covering 2D grid.
+template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
-                                  size_t count, int ginPutCtas, int llMaxBpp, uint32_t llLaunchId,
-                                  struct ncclDevComm devComm) {
+                                  size_t count, int ginPutCtas, struct ncclDevComm devComm) {
   auto* ctx = reinterpret_cast<ncclGinAnvilSdmaGPUContext*>(devComm.ginHandles[0]);
   const size_t perChunkBytes = count * sizeof(T);
   const bool ctxOk = ctx != nullptr && ctx->layoutMagic == NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC;
-  const GinFabricA2AAlgo algo =
-      ginFabricA2ASelectAlgo(ctxOk, ctxOk ? ctx->fabricA2AEnabled : 0, ctxOk ? ctx->fabricA2ALsaEnabled : 0,
-                             devComm.nRanks, perChunkBytes, ctxOk ? ctx->fabricA2ALlThreshold : 0,
-                             ctxOk ? ctx->fabricA2AScratchBytes : 0, ctxOk ? ctx->fabricA2ALsaThreshold : 0);
-  if (algo == GinFabricA2AAlgo::Ll) {
-    // This is still the GIN AllToAll test (-D 3): what is borrowed from DDA is
-    // the LL packet protocol body, not the host-launched DDA collective. The
-    // peer scratch table and the epoch cells come from the Anvil GIN context
-    // (fabricA2APeerScratch / fabricA2ALlEpoch), which the plugin carves out of
-    // the tail of ddaScratch, so this path shares neither packet cells nor an
-    // epoch counter with host DDA LL.
-    const size_t slotPkts = gin::fabric::ginFabricLlA2ASlotPkts(devComm.nRanks, ctx->fabricA2AScratchBytes);
-    const size_t nPk = perChunkBytes >> 3;
-    // Compact GIN tail is 2*nRanks*slotPkts packets. Indexing the kDdaLLMaxBytes host
-    // DDA stride into that mapping is a GPU page fault (Test#5 hang).
-    if (slotPkts != 0 && nPk <= slotPkts) {
-      int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
-      if (llMaxBpp > 0 && bpp > llMaxBpp) bpp = llMaxBpp;
-      // Covering grid is max(nRanks, deviceCtaCount) x max(LL bpp, LSA chunks).
-      // Extra CTAs must not wait on the busy lock or fall through to gin.put.
-      if ((int)blockIdx.x >= devComm.nRanks || (int)blockIdx.y >= bpp) return;
-      const bool ownLl = dda::common::ginFabricLlBusyAcquire(ctx, llLaunchId);
-      if (!ownLl) {
-        // Overlapping GIN LL on this context is illegal: mixed LL/put hangs.
-        if (threadIdx.x == 0) __builtin_trap();
-        return;
-      }
-      T* sendPtr = static_cast<T*>(ncclGetLsaPointer(sendwin, sendoffset, devComm.lsaRank));
-      T* recvPtr = static_cast<T*>(ncclGetLsaPointer(recvwin, recvoffset, devComm.lsaRank));
-      dda::common::ddaAllToAllFabricLLBody<T, NRANKS_CT>(
-          reinterpret_cast<T**>(ctx->fabricA2APeerScratch), recvPtr, sendPtr, perChunkBytes, devComm.rank,
-          devComm.nRanks, ctx->fabricA2ALlEpoch, ctx->fabricA2ALlEpochLen, dda::common::ddaLLNoAbort{}, bpp, slotPkts);
-      dda::common::ginFabricLlBusyRelease(ctx, llLaunchId);
-      return;
-    }
-  }
-
+  const GinFabricA2AAlgo algo = ginFabricA2ASelectAlgo(ctxOk, ctxOk ? ctx->fabricA2ALsaEnabled : 0, devComm.nRanks,
+                                                       perChunkBytes, ctxOk ? ctx->fabricA2ALsaThreshold : 0);
   if (algo == GinFabricA2AAlgo::Lsa) {
     ::gin::fabric::ginFabricLsaAlltoAllBody(sendwin, sendoffset, recvwin, recvoffset, perChunkBytes, devComm);
     return;
@@ -454,7 +391,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   ginAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, /*root*/ 0, devComm, (int)blockIdx.x, ginPutCtas);
 }
 
-// gin.put-only 1D entry for types that do not take the fabric-LL path.
+// gin.put-only 1D entry for types that do not take the fabric LSA path.
 template <typename T>
 __global__ void GinAlltoAllPutKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset,
                                      size_t count, int root, struct ncclDevComm devComm) {
@@ -466,37 +403,19 @@ static testResult_t AlltoAllLaunchGinA2A(void* sendbuff, size_t sendoffset, void
                                          size_t count, ncclDevComm* devComm, cudaStream_t stream) {
   const size_t perChunkBytes = count * sizeof(T);
   const int gx = devComm->nRanks > deviceCtaCount ? devComm->nRanks : deviceCtaCount;
-  const int llMaxBpp = AlltoAllGinFabricLlMaxBpp();
-  // Covering 2D grid only: the GPU (not the host) selects LSA vs LL vs gin.put.
-  // grid.y is max(LL bpp, LSA chunks) so either small-message body has enough CTAs.
-  int bpp = ginFabricLlAlltoAllBlocksPerPeer(perChunkBytes);
-  if (bpp > llMaxBpp) bpp = llMaxBpp;
+  // Covering 2D grid only: the GPU (not the host) selects LSA vs gin.put, so
+  // grid.y covers the LSA chunks and gin.put uses row 0.
   int lsaChunks = 0;
   int lsaThreads = 0;
   size_t lsaChunkBytes = 0;
   ginFabricLsaA2ALaunchConfig(devComm->nRanks, perChunkBytes, &lsaChunks, &lsaThreads, &lsaChunkBytes);
   (void)lsaThreads;
   (void)lsaChunkBytes;
-  int gy = bpp > lsaChunks ? bpp : lsaChunks;
-  if (gy < 1) gy = 1;
+  const int gy = lsaChunks < 1 ? 1 : lsaChunks;
   dim3 block(256);
   dim3 grid((unsigned)gx, (unsigned)gy);
-  static uint32_t llLaunchSeq = 1;
-  uint32_t llLaunchId = llLaunchSeq++;
-  if (llLaunchId == 0) llLaunchId = llLaunchSeq++;
-  if (devComm->nRanks == 4) {
-    GinAlltoAllKernel<T, 4><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
-                                                        *devComm);
-  } else if (devComm->nRanks == 8) {
-    GinAlltoAllKernel<T, 8><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
-                                                        *devComm);
-  } else {
-    GinAlltoAllKernel<T, 0><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
-                                                        recvoffset, count, deviceCtaCount, llMaxBpp, llLaunchId,
-                                                        *devComm);
-  }
+  GinAlltoAllKernel<T><<<grid, block, 0, stream>>>((ncclWindow_t)sendbuff, sendoffset, (ncclWindow_t)recvbuff,
+                                                   recvoffset, count, deviceCtaCount, *devComm);
   CUDACHECK(cudaGetLastError());
   return testSuccess;
 }
@@ -696,10 +615,10 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 // Device-side (in-kernel wall_clock64) timing for AllToAll (GIN SDMA and Hybrid
 // tiers). Opt-in via --device_timing: launches the persistent timed kernel once
 // for the current size, brackets only the (skip+loop) steady-state collectives.
-// Fabric LSA-direct and DDA LL small-message paths are selected on the GPU
-// inside GinAlltoAllKernel; the timed kernel is gin.put-only and is skipped
-// here when the production path would take either small-message body. Hybrid
-// still uses <<<deviceCtaCount, 512>>>; GIN gin.put timing uses that same 1D grid.
+// The fabric LSA-direct path is selected on the GPU inside GinAlltoAllKernel;
+// the timed kernel is gin.put-only and is skipped here when the production path
+// would take LSA. Hybrid still uses <<<deviceCtaCount, 512>>>; GIN gin.put
+// timing uses that same 1D grid.
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec) {
   if (!deviceTimingMode) return testSuccess;
@@ -715,13 +634,13 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
   // GinAlltoAllTimedKernel is gin.put-only; skip it when the production GPU
-  // path would take LSA-direct or fabric LL (same size/capability gates).
+  // path would take LSA-direct (same size/capability gates).
   // gin_devtime::measure launches the timed kernel on every local GPU, so the
   // gate is evaluated per devComm rather than on element 0 alone: with -g > 1
   // one GPU's lane state must not decide the measurement for its siblings.
   if (deviceImpl == 3) {
     for (int i = 0; i < args->nGpus; i++) {
-      if (AlltoAllGinFabricSmallMsgEligibleHost(args->devComms + i, count, type)) return testSuccess;
+      if (AlltoAllGinFabricLsaEligibleHost(args->devComms + i, count, type)) return testSuccess;
     }
   }
 #endif
