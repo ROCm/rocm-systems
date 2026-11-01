@@ -118,12 +118,15 @@ class XgmiCommands:
                     "link_type": "N/A",
                     "links": [],
                 }
-                xgmi_metrics_info = {"links": []}
+                metric_links = []
 
                 try:
                     xgmi_metrics_info = amdsmi_interface.amdsmi_get_link_metrics(src_gpu)
-                    bitrate = xgmi_metrics_info["links"][0]["bit_rate"]
-                    max_bandwidth = xgmi_metrics_info["links"][0]["max_bandwidth"]
+                    metric_links = xgmi_metrics_info["links"][
+                        : xgmi_metrics_info.get("num_links", 0)
+                    ]
+                    bitrate = metric_links[0]["bit_rate"] if metric_links else "N/A"
+                    max_bandwidth = metric_links[0]["max_bandwidth"] if metric_links else "N/A"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     bitrate = "N/A"
                     max_bandwidth = "N/A"
@@ -158,7 +161,7 @@ class XgmiCommands:
                     }
 
                     found = False
-                    for link in xgmi_metrics_info["links"]:
+                    for link in metric_links:
                         if link["bdf"] == dest_gpu_bdf:
                             # Accumulate read/write if multiple links have the same bdf
                             dest_link_dict["read"] += link["read"]
@@ -375,13 +378,21 @@ class XgmiCommands:
 
                     # Find all link indexes in xgmi_metrics_info for this destination
                     link_indexes = []
-                    for idx, link in enumerate(xgmi_metrics_info["links"]):
+                    for idx, link in enumerate(
+                        xgmi_metrics_info["links"][: xgmi_metrics_info.get("num_links", 0)]
+                    ):
                         if link["bdf"] == dest_gpu_bdf:
                             link_indexes.append(idx)
 
                     # Use the found link index to get the status if valid
-                    if link_indexes and len(link_indexes) <= len(
-                        src_link_status_map.get(src_gpu_bdf, [])
+                    if dest_gpu_bdf == src_gpu_bdf:
+                        status = "SELF"
+                    elif (
+                        xgmi_metrics_info.get("num_links", 0)
+                        == amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+                        and len(src_link_status_map.get(src_gpu_bdf, []))
+                        >= amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+                        and link_indexes
                     ):
                         statuses = []
                         for link_idx in link_indexes:
@@ -395,8 +406,6 @@ class XgmiCommands:
                             status = "/".join(statuses)
                         else:
                             status = "N/A"
-                    elif dest_gpu_bdf == src_gpu_bdf:
-                        status = "SELF"
                     else:
                         status = "N/A"
 
