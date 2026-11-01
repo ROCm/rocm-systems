@@ -10,7 +10,7 @@ CXXFLAGS += -g2 -ggdb3 -rdynamic -funwind-tables -fno-omit-frame-pointer
 endif
 
 SOURCES := accl_profiler.cc
-LDFLAGS := -lpthread
+LDFLAGS := -lpthread -ldl
 
 all: $(PLUGIN_SO)
 
