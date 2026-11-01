@@ -2889,11 +2889,13 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	return mem;
 }
 
-/* Returns true if the calling process set an explicit NUMA memory policy
- * (e.g. via numactl -m / set_mempolicy). When it did, ROCr should not override
- * it with a per-agent mbind; the process policy governs host placement.
+/* Returns true if the calling thread has an explicit NUMA memory policy
+ * (e.g. via numactl -m / set_mempolicy). Linux mempolicy is per-thread;
+ * numactl sets it before exec so every thread inherits it, which covers the
+ * common case. When set, ROCr should not override it with a per-agent mbind;
+ * the policy governs host placement.
  */
-static bool process_has_explicit_mempolicy(void)
+static bool thread_has_explicit_mempolicy(void)
 {
 	int mode = MPOL_DEFAULT;
 
@@ -2924,13 +2926,14 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			return 0;
 	}
 
-	/* Honor an explicit process memory policy (e.g. numactl -m): if the
-	 * application set one, leave placement to that policy instead of forcing
-	 * the per-agent node. HSA_FORCE_MBIND=1 restores the legacy per-agent
-	 * binding. Returning 0 lets the allocation proceed under the process
-	 * policy (also correct for NoSubstitute).
+	/* Honor an explicit memory policy (e.g. numactl -m) for substitutable
+	 * host allocations: leave placement to that policy instead of forcing the
+	 * per-agent node. Strict (NoSubstitute) allocations - e.g. the udmabuf APU
+	 * path - keep their hard per-agent bind and error handling below.
+	 * HSA_FORCE_MBIND=1 restores the legacy per-agent binding.
 	 */
-	if (!hsakmt_force_mbind && process_has_explicit_mempolicy())
+	if (!hsakmt_force_mbind && !mflags.ui32.NoSubstitute &&
+	    thread_has_explicit_mempolicy())
 		return 0;
 
 	num_node = numa_max_node() + 1;
