@@ -184,6 +184,10 @@ cases:
   Unit_HRR_GraphWorkload_Direct: {}
   Unit_HRR_HostAliasesRoundtrip: {}
   Unit_HRR_HostAliases_Direct: {}
+  Unit_HRR_HostBudgetManagedRoundtrip: {}
+  Unit_HRR_HostBudgetManaged_Direct: {}
+  Unit_HRR_HostBudgetMemCreateRoundtrip: {}
+  Unit_HRR_HostBudgetMemCreate_Direct: {}
   Unit_HRR_HostFreeRoundtrip: {}
   Unit_HRR_HostFree_Direct: {}
   Unit_HRR_HostMemRoundtrip: {}
