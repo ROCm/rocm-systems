@@ -18,8 +18,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
          simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
       coherence_(std::move(coherence)) {
-  if (!coherence_)
-    throw std::invalid_argument("XCD requires a cache-coherence domain");
+  assert(coherence_ && "XCD requires a cache-coherence domain");
   set_weight(0); // Structural container, not a work-producing component.
   auto xcd_name = this->name();
 
@@ -99,19 +98,21 @@ void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
 
 void Xcd::set_l2_cache(L2Cache *l2) {
   l2_cache_ = l2;
-  if (l2_cache_)
-    l2_cache_->set_coherence_domain(coherence_);
+  if (l2_cache_ && coherence_)
+    (void)l2_cache_->set_coherence_domain(coherence_);
 }
 
-void Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+util::Result Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                       util::DiagnosticEmitter emit_error) {
   if (!coherence)
-    throw std::invalid_argument("XCD requires a cache-coherence domain");
+    return emit_error.emit() << "XCD requires a cache-coherence domain";
+  if (l2_cache_ && l2_cache_->set_coherence_domain(coherence, emit_error).failed())
+    return util::Result::failure();
   coherence_ = std::move(coherence);
-  if (l2_cache_)
-    l2_cache_->set_coherence_domain(coherence_);
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       compute_unit->set_l2(l2_cache_);
+  return util::Result::success();
 }
 
 void Xcd::initialize() {

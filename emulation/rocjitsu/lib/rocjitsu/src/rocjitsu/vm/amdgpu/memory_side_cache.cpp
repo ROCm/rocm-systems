@@ -6,7 +6,6 @@
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
-#include "util/except.h"
 
 #include <algorithm>
 #include <bit>
@@ -23,8 +22,7 @@ MemorySideCache::MemorySideCache(std::string name, std::shared_ptr<DeviceCacheCo
                                  GpuMemory *legacy_maintenance_memory)
     : simdojo::Component(std::move(name)), coherence_(std::move(coherence)),
       legacy_maintenance_memory_(legacy_maintenance_memory) {
-  if (!coherence_)
-    throw util::ConfigError("memory-side cache requires a coherence domain");
+  assert(coherence_ && "memory-side cache requires a coherence domain");
   req_ = add_port(std::make_unique<simdojo::Port>("req", 0, this, simdojo::PortDirection::OUT,
                                                   simdojo::PortProtocol::MEMORY));
   coherence_->register_memory_side_cache(this);
@@ -32,11 +30,12 @@ MemorySideCache::MemorySideCache(std::string name, std::shared_ptr<DeviceCacheCo
 
 MemorySideCache::~MemorySideCache() { coherence_->unregister_memory_side_cache(this); }
 
-void MemorySideCache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence) {
+util::Result MemorySideCache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                                   util::DiagnosticEmitter emit_error) {
   if (!coherence)
-    throw util::ConfigError("memory-side cache requires a coherence domain");
+    return emit_error.emit() << "memory-side cache requires a coherence domain";
   if (coherence == coherence_)
-    return;
+    return util::Result::success();
   coherence_->unregister_memory_side_cache(this);
   {
     std::unique_lock access_lock(access_gate_);
@@ -44,6 +43,7 @@ void MemorySideCache::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence>
   }
   coherence_ = std::move(coherence);
   coherence_->register_memory_side_cache(this);
+  return util::Result::success();
 }
 
 void WriterPreferredAccessGate::lock_shared() {
@@ -368,8 +368,7 @@ VmAccessOutcome MemorySideCache::flush_dirty_locked() {
 }
 
 VmAccessOutcome MemorySideCache::flush_dirty_to_legacy_backing_locked() {
-  if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr)
-    throw util::ConfigError("memory-side cache has no legacy maintenance backing");
+  assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(
       [this, &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {

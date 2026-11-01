@@ -28,19 +28,27 @@ class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
                                           public PhysicalMemoryAccess {
 public:
   Binding(std::shared_ptr<GpuMemory> memory, uint32_t vmid,
-          LegacyAddressSpaceRegistration registration, std::shared_ptr<void> frontend_lifetime)
+          const LegacyAddressSpaceRegistration &registration,
+          std::shared_ptr<void> frontend_lifetime)
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
         vmid_(vmid), original_request_mutex_(registration.request_mutex),
-        mutation_epoch_(std::move(registration.mutation_epoch)),
-        frontend_lifetime_(std::move(frontend_lifetime)) {
-    address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
-                                     registration.page_table_generation,
-                                     std::move(registration.request_mutex),
-                                     std::move(registration.page_table_cache_state));
+        mutation_epoch_(registration.mutation_epoch),
+        frontend_lifetime_(std::move(frontend_lifetime)) {}
+
+  util::Result initialize(LegacyAddressSpaceRegistration registration,
+                          util::DiagnosticEmitter emit_error) {
+    if (address_space_
+            ->register_process(vmid_, registration.page_table, registration.page_table_mutex,
+                               registration.page_table_generation,
+                               std::move(registration.request_mutex),
+                               std::move(registration.page_table_cache_state), emit_error)
+            .failed())
+      return util::Result::failure();
     address_space_->set_process_client_pid(vmid_, registration.client_pid);
     address_space_->set_process_mem_fd(vmid_, registration.client_mem_fd);
     address_space_->set_process_passthrough(vmid_, registration.passthrough);
     address_space_->set_process_fault_reporter(vmid_, registration.fault_reporter);
+    return util::Result::success();
   }
 
   [[nodiscard]] bool try_write_private_dwords(PhysicalMemoryAccess &physical,
@@ -338,18 +346,19 @@ bool LegacyGpuVmAdapter::set_memory(std::shared_ptr<GpuMemory> memory) {
   return true;
 }
 
-AddressSpaceHandle
-LegacyGpuVmAdapter::register_address_space(uint32_t vmid,
-                                           LegacyAddressSpaceRegistration registration,
-                                           std::shared_ptr<void> frontend_lifetime) {
+AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
+    uint32_t vmid, LegacyAddressSpaceRegistration registration,
+    std::shared_ptr<void> frontend_lifetime, util::DiagnosticEmitter emit_error) {
   if (registration.page_table == nullptr || registration.page_table_mutex == nullptr)
     return {};
   std::lock_guard lock(mutex_);
   remove_stale_locked();
   if (memory_ == nullptr || bindings_.contains(vmid))
     return {};
-  auto binding = std::make_shared<Binding>(memory_, vmid, std::move(registration),
-                                           std::move(frontend_lifetime));
+  auto binding =
+      std::make_shared<Binding>(memory_, vmid, registration, std::move(frontend_lifetime));
+  if (binding->initialize(std::move(registration), emit_error).failed())
+    return {};
   const AddressSpaceHandle handle = gpu_vm_->register_address_space(
       vmid, binding, binding,
       [binding](uint64_t address, VmAccessKind) { binding->report_fault(address); }, true);

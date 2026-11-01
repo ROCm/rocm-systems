@@ -1197,8 +1197,9 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   scheduler.shutdown();
   ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
   {
-    [[maybe_unused]] DeviceCacheMaintenanceLease maintenance =
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         coherence->acquire_cache_maintenance(DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_TRUE(maintenance.succeeded());
   }
   EXPECT_EQ(mapping.data()[0], 0x5cu);
   EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
