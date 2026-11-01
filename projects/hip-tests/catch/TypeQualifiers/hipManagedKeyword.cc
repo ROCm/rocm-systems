@@ -17,6 +17,7 @@ __managed__ float m_B[N];
 __managed__ int m_X = 0;
 __managed__ int m_pa_before = 0;
 __managed__ int m_pa_after = 0;
+__managed__ int m_reset = 0;
 
 static __global__ void managed_add(size_t size) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -28,6 +29,8 @@ static __global__ void managed_add(size_t size) {
 static __global__ void managed_inc() { atomicAdd(&m_X, 1.0f); }
 
 static __global__ void managed_touch(int* p) { (void)*p; }
+
+static __global__ void managed_assign(int value) { m_reset = value; }
 
 HIP_TEST_CASE(Unit_hipManagedKeyword_SingleGpu) {
   int numDevices = 0;
@@ -98,4 +101,33 @@ HIP_TEST_CASE(Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel) {
   REQUIRE(attrs.hostPointer != nullptr);
   REQUIRE(attrs.devicePointer != nullptr);
   REQUIRE(attrs.hostPointer == attrs.devicePointer);
+}
+
+// A managed global is usable again after a device reset. Declared last: the
+// reset invalidates the managed globals the cases above share.
+HIP_TEST_CASE(Unit_hipManagedKeyword_AfterDeviceReset) {
+  CHECK_MANAGED_MEMORY_SUPPORT
+
+  int numDevices = 0;
+  HIP_CHECK(hipGetDeviceCount(&numDevices));
+
+  // Managed memory is allocated on first launch, so this is what the reset frees.
+  managed_assign<<<1, 1>>>(42);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(m_reset == 42);
+
+  HIP_CHECK(hipDeviceReset());
+
+  // Memory shared by several devices outlives the reset of any one of them, so
+  // the contents are still there and the pointer is still good.
+  if (numDevices > 1) {
+    REQUIRE(m_reset == 42);
+  }
+
+  // With one device the memory was freed, so only the new value is defined.
+  managed_assign<<<1, 1>>>(7);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(m_reset == 7);
 }

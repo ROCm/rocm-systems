@@ -691,6 +691,43 @@ hipError_t StatCO::InitManagedVarDevicePtr(int deviceId) {
 }
 
 // ================================================================================================
+void StatCO::ResetManagedVarDevicePtr() {
+  std::scoped_lock lock(sclock_);
+  bool released_any = false;
+  for (auto& [_, managed_vars] : managedVars_) {
+    for (auto& managed_var : managed_vars) {
+      // Flag clear means the slot still holds the host allocation it was
+      // registered with, which is not managed memory and which
+      // FindDeferredManagedVar() matches on.
+      if (!managed_var->GetAllocFlag()) {
+        continue;
+      }
+      auto** slot = static_cast<void**>(managed_var->GetManagedVarPtr());
+      if (slot == nullptr || *slot == nullptr) {
+        continue;
+      }
+      // Still mapped, so something other than this device owns it and it stays
+      // usable. Clearing it would leak the allocation and lose its contents.
+      if (amd::MemObjMap::FindMemObj(*slot) != nullptr) {
+        continue;
+      }
+      *slot = nullptr;
+      managed_var->SetAllocFlag(false);
+      released_any = true;
+    }
+  }
+  if (!released_any) {
+    return;
+  }
+  // Freed managed memory is unreachable from every device, not just the one it
+  // belonged to, so re-arm them all. Release pairs with the acquire in
+  // InitManagedVarDevicePtr().
+  for (size_t i = 0; i < managedVarsDevicePtrInitializedSize_; ++i) {
+    managedVarsDevicePtrInitialized_[i].store(false, std::memory_order_release);
+  }
+}
+
+// ================================================================================================
 Var* StatCO::FindDeferredManagedVar(const void* ptr) {
   std::scoped_lock lock(sclock_);
   for (const auto& [_, vars] : managedVars_) {

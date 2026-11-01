@@ -189,6 +189,12 @@ class StatCO : public CodeObject {
   // pointer to the alocated managed memory has to be copied to the address of symbol
   hipError_t InitManagedVarDevicePtr(int deviceId);
 
+  // Drops the host pointer and allocation state of every managed variable whose
+  // memory is no longer mapped, and re-arms the per-device init flags so the
+  // next launch allocates them again through InitManagedVarDevicePtr().
+  // Variables whose memory is still mapped are left alone.
+  void ResetManagedVarDevicePtr();
+
   // Find a deferred managed var whose mmap address equals ptr
   Var* FindDeferredManagedVar(const void* ptr);
 
