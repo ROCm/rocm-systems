@@ -881,6 +881,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
     fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
+    fakes/gin_fabric_a2a_fakes.cc        # fabric AllToAll lane gate and table
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1016,6 +1017,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_GIN_HOST_FINALIZE_SOURCE_FILES
     gin-host-finalize-test.cc
     fakes/os_fakes.cc
+    fakes/gin_fabric_a2a_fakes.cc        # fabric AllToAll lane gate and table
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1160,6 +1162,7 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_scheduler_fakes.cc
     fakes/os_fakes.cc
     fakes/rocmwrap_fakes.cc              # rocmLibraryInit (gdr.cc DMA-BUF probe)
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real GetGcnArchName/IsArchMatch (gin.cc verbs skip)
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc             # rcclUseAinic, NET_OPTIONAL_RECV_COMPLETION
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc             # real parser for the multiplane map
