@@ -2012,6 +2012,7 @@ class CodeGenerator:
             #include "{generated_arch}/execution_backend.h"
             #include "{generated_arch}/insts.h"
             #include "{generated_arch}/operand.h"
+            #include "rocjitsu/vm/amdgpu/wavefront.h"
 
             #include <array>
 
@@ -2021,12 +2022,26 @@ class CodeGenerator:
 
             template <typename Derived>
             void execute_with_backend(Instruction &instruction, void *context) {{
+              auto &wf = *static_cast<Isa::Context *>(context);
+              for (int i = 0; i < instruction.num_src_operands(); ++i) {{
+                if (!instruction.src_operand(i)->execution_backend_available()) {{
+                  wf.report_instruction_execution_error(
+                      amdgpu::InstructionExecutionError::MissingExecutionBackend);
+                  return;
+                }}
+              }}
+              for (int i = 0; i < instruction.num_dst_operands(); ++i) {{
+                if (!instruction.dst_operand(i)->execution_backend_available()) {{
+                  wf.report_instruction_execution_error(
+                      amdgpu::InstructionExecutionError::MissingExecutionBackend);
+                  return;
+                }}
+              }}
               // execute_impl may construct temporary operands (for example,
               // indexed SOP1/VOP1 sources). Re-enter the ISA scope so those
               // operands capture the same backend as decode-time operands.
               ScopedIsaExecutionBackend scope(&execution_backend());
-              static_cast<Derived &>(instruction).execute_impl(
-                  *static_cast<Isa::Context *>(context));
+              static_cast<Derived &>(instruction).execute_impl(wf);
             }}
 
             constexpr size_t kInstructionCallbackCount =
@@ -16670,6 +16685,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  static const void *full_execution_backend();\n'
                 '  /// @brief Validate that every full-simulator operand callback is present.\n'
                 '  static bool full_execution_backend_complete();\n'
+                '  bool execution_backend_available() const override;\n'
             )
             execution_backend_ctor_init = (
                 ',\n'
@@ -16963,6 +16979,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
 
         if self.isa_spec.profile.split_execution_sources:
             class_impl.model.append(cgen.Line(textwrap.dedent('''\
+                    bool Operand::execution_backend_available() const {
+                      // Captured tables are the immutable full table or null; no
+                      // independently populated/partial tables are supported.
+                      return execution_backend_ != nullptr &&
+                             rocjitsu::Operand::execution_backend_available();
+                    }
+
                     bool Operand::simd_capable() const {
                       decltype(ExecutionBackend::simd_capable) callback =
                           execution_backend_ ? execution_backend_->simd_capable : nullptr;
@@ -16973,8 +16996,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                   uint32_t count, uint32_t *out) const {
                       decltype(ExecutionBackend::read_lane_chunk) callback =
                           execution_backend_ ? execution_backend_->read_lane_chunk : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane_base, count, out);
                     }
 
@@ -16983,32 +17008,40 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                    uint64_t mask) const {
                       decltype(ExecutionBackend::write_lane_chunk) callback =
                           execution_backend_ ? execution_backend_->write_lane_chunk : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane_base, count, vals, mask);
                     }
 
                     uint32_t Operand::read_scalar(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::read_scalar) callback =
                           execution_backend_ ? execution_backend_->read_scalar : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf);
                     }
 
                     uint32_t Operand::read_lane(const amdgpu::Wavefront &wf, uint32_t lane) const {
                       decltype(ExecutionBackend::read_lane) callback =
                           execution_backend_ ? execution_backend_->read_lane : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf, lane);
                     }
 
                     void Operand::write_scalar(amdgpu::Wavefront &wf, uint32_t val) const {
                       decltype(ExecutionBackend::write_scalar) callback =
                           execution_backend_ ? execution_backend_->write_scalar : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, val);
                     }
 
@@ -17016,8 +17049,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                              uint32_t val) const {
                       decltype(ExecutionBackend::write_lane) callback =
                           execution_backend_ ? execution_backend_->write_lane : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane, val);
                     }
 
@@ -17025,8 +17060,10 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                   uint32_t lane) const {
                       decltype(ExecutionBackend::read_lane64) callback =
                           execution_backend_ ? execution_backend_->read_lane64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf, lane);
                     }
 
@@ -17034,24 +17071,30 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                uint64_t val) const {
                       decltype(ExecutionBackend::write_lane64) callback =
                           execution_backend_ ? execution_backend_->write_lane64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, lane, val);
                     }
 
                     uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {
                       decltype(ExecutionBackend::read_scalar64) callback =
                           execution_backend_ ? execution_backend_->read_scalar64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return 0;
+                      }
                       return (this->*callback)(wf);
                     }
 
                     void Operand::write_scalar64(amdgpu::Wavefront &wf, uint64_t val) const {
                       decltype(ExecutionBackend::write_scalar64) callback =
                           execution_backend_ ? execution_backend_->write_scalar64 : nullptr;
-                      if (!callback)
-                        throw std::logic_error("operand execution backend is not linked");
+                      if (!callback) {
+                        report_missing_execution_backend(wf);
+                        return;
+                      }
                       (this->*callback)(wf, val);
                     }
 
@@ -17684,7 +17727,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    amdgpu::RegisterAccess(wf).write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
             '    return;\n'
             '  }\n'
-            '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
+            '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
             '}\n'
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
@@ -17698,7 +17741,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             '    amdgpu::RegisterAccess(wf).write_vgpr64(idx, lane, val);\n'
             '    return;\n'
             '  }\n'
-            '  throw std::logic_error("write_lane64 called on non-VGPR operand type");\n'
+            '  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
             '}\n'
             '\n'
             'uint64_t Operand::read_scalar64(const amdgpu::Wavefront &wf) const {\n'
@@ -18024,7 +18067,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],
@@ -18051,7 +18093,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],
@@ -18079,7 +18120,6 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ('util/except.h', False),
                     ('format', True),
                     ('optional', True),
-                    ('stdexcept', True),
                     ('string', True),
                 ],
                 [],

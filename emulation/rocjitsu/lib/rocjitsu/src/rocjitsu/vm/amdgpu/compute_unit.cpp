@@ -118,6 +118,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "invalid instruction encoding";
   case InstructionExecutionError::UnsupportedOperandValue:
     return "unsupported operand value";
+  case InstructionExecutionError::MissingExecutionBackend:
+    return "operand execution backend is not linked";
   case InstructionExecutionError::UnimplementedInstruction:
     return "unimplemented instruction";
   }

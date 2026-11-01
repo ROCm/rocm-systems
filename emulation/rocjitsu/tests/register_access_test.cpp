@@ -10,10 +10,24 @@
 /// in execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
@@ -34,6 +48,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -172,6 +187,180 @@ struct Fixture {
   uint32_t sgpr_base() const { return wf->sgpr_alloc().base; }
   uint32_t vgpr_base() const { return wf->vgpr_alloc().base; }
 };
+
+template <typename OperandT>
+void check_derived_operand_rejections(Fixture &fx, const IsaExecutionBackend &backend) {
+  using Kind = decltype(std::declval<OperandT>().opr_type_);
+  ASSERT_TRUE(OperandT::full_execution_backend_complete());
+  RegisterAccess registers(*fx.wf);
+  const uint32_t sentinel = 0xA5A5A5A5u;
+  fx.cu->write_vgpr(fx.vgpr_base(), 0, sentinel);
+  fx.cu->write_vgpr(fx.vgpr_base(), 1, sentinel);
+  fx.cu->write_sgpr(fx.sgpr_base(), sentinel);
+  auto check_failure = [&](auto action, InstructionExecutionError expected) {
+    fx.wf->clear_instruction_execution_error();
+    const std::size_t reads_before = fx.plugin->reads.size();
+    const std::size_t scalar_reads_before = fx.plugin->scalar_reads.size();
+    action();
+    EXPECT_EQ(fx.wf->instruction_execution_error(), expected);
+    EXPECT_EQ(fx.plugin->reads.size(), reads_before);
+    EXPECT_EQ(fx.plugin->scalar_reads.size(), scalar_reads_before);
+    EXPECT_TRUE(fx.plugin->writes.empty());
+    EXPECT_TRUE(fx.plugin->scalar_writes.empty());
+    // Readback is observed too, so check access events before verifying storage.
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), sentinel);
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 1), sentinel);
+    EXPECT_EQ(fx.cu->read_sgpr(fx.sgpr_base()), sentinel);
+  };
+  {
+    ScopedIsaExecutionBackend model_scope(nullptr);
+    OperandT op(32, Kind::OPR_VGPR, 0);
+    EXPECT_FALSE(op.execution_backend_available());
+    EXPECT_FALSE(op.simd_capable());
+    uint32_t out[] = {sentinel, sentinel};
+    const uint32_t values[] = {1, 2};
+    const auto missing = InstructionExecutionError::MissingExecutionBackend;
+    check_failure([&] { (void)registers.read_scalar(op); }, missing);
+    check_failure([&] { (void)registers.read_scalar64(op); }, missing);
+    check_failure([&] { (void)registers.read_lane(op, 0); }, missing);
+    check_failure([&] { (void)registers.read_lane64(op, 0); }, missing);
+    check_failure([&] { registers.read_chunk(op, 0, 2, out); }, missing);
+    EXPECT_EQ(out[0], sentinel);
+    EXPECT_EQ(out[1], sentinel);
+    check_failure([&] { registers.write_scalar(op, 1); }, missing);
+    check_failure([&] { registers.write_scalar64(op, 1); }, missing);
+    check_failure([&] { registers.write_lane(op, 0, 1); }, missing);
+    check_failure([&] { registers.write_lane64(op, 0, 1); }, missing);
+    check_failure([&] { registers.write_chunk(op, 0, 2, values, 3); }, missing);
+  }
+  {
+    ScopedIsaExecutionBackend execution_scope(&backend);
+    OperandT op(32, Kind::OPR_SIMM32, 0);
+    ASSERT_TRUE(op.is_writable());
+    const auto unsupported = InstructionExecutionError::UnsupportedOperandValue;
+    const uint32_t values[] = {1, 2};
+    check_failure([&] { registers.write_lane(op, 0, 1); }, unsupported);
+    check_failure([&] { registers.write_lane64(op, 0, 1); }, unsupported);
+    check_failure([&] { registers.write_chunk(op, 0, 2, values, 3); }, unsupported);
+  }
+  fx.wf->clear_instruction_execution_error();
+}
+
+TEST(RegisterAccessTest, DerivedOperandRejectionsRetainFailureWithoutAccessOrObservation) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  {
+    SCOPED_TRACE("cdna1");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna1::Operand>(fx, cdna1::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna2");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna2::Operand>(fx, cdna2::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna3");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna3::Operand>(fx, cdna3::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna4");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna4::Operand>(fx, cdna4::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("cdna5");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<cdna5::Operand>(fx, cdna5::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna1");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna1::Operand>(fx, rdna1::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna2");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna2::Operand>(fx, rdna2::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna3");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna3::Operand>(fx, rdna3::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna3_5");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna3_5::Operand>(fx, rdna3_5::execution_backend()));
+  }
+  {
+    SCOPED_TRACE("rdna4");
+    ASSERT_NO_FATAL_FAILURE(
+        check_derived_operand_rejections<rdna4::Operand>(fx, rdna4::execution_backend()));
+  }
+}
+
+TEST(RegisterAccessTest, ExecutionCallbackRejectsMissingCapturedBackendBeforeReadingOrWriting) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
+  fx.cu->write_vgpr(fx.vgpr_base(), 0, 0xA5A5A5A5u);
+  for (bool destination : {false, true}) {
+    DecodeResult result = cdna4::Decoder::decode(&word, {});
+    ASSERT_TRUE(result.succeeded());
+    auto instruction = std::move(result).value();
+    ASSERT_NE(instruction->execute, nullptr);
+    auto *operand = const_cast<cdna4::Operand *>(static_cast<const cdna4::Operand *>(
+        destination ? instruction->dst_operand(0) : instruction->src_operand(0)));
+    ASSERT_NE(operand, nullptr);
+    {
+      ScopedIsaExecutionBackend model_scope(nullptr);
+      *operand = cdna4::Operand(32, cdna4::OperandType::OPR_VGPR, destination ? 0 : 1);
+    }
+    fx.wf->clear_instruction_execution_error();
+    const std::size_t reads_before = fx.plugin->reads.size();
+    instruction->execute(*instruction, fx.wf);
+    EXPECT_EQ(fx.wf->instruction_execution_error(),
+              InstructionExecutionError::MissingExecutionBackend);
+    EXPECT_EQ(fx.plugin->reads.size(), reads_before);
+    EXPECT_TRUE(fx.plugin->writes.empty());
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0xA5A5A5A5u);
+    EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
+  }
+}
+
+TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBeforeEffects) {
+  Fixture fx;
+  ASSERT_NE(fx.wf, nullptr);
+  constexpr uint32_t word = 0x7E000301u;
+  DecodeResult result = cdna4::Decoder::decode(&word, {});
+  ASSERT_TRUE(result.succeeded());
+  auto instruction = std::move(result).value();
+  ASSERT_NE(instruction->execute, nullptr);
+  auto *source = const_cast<Operand *>(instruction->src_operand(0));
+  ASSERT_NE(source, nullptr);
+  std::optional<cdna4::Operand> missing;
+  {
+    ScopedIsaExecutionBackend model_scope(nullptr);
+    missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
+  }
+  cdna4::Operand intermediate(32, cdna4::OperandType::OPR_VGPR, 1);
+  fx.cu->write_vgpr(fx.vgpr_base(), 0, 0xA5A5A5A5u);
+  {
+    ScopedOperandDelegate inner(intermediate, &*missing);
+    ScopedOperandDelegate outer(*source, &intermediate);
+    instruction->execute(*instruction, fx.wf);
+    EXPECT_EQ(fx.wf->instruction_execution_error(),
+              InstructionExecutionError::MissingExecutionBackend);
+    EXPECT_TRUE(fx.plugin->reads.empty());
+    EXPECT_TRUE(fx.plugin->writes.empty());
+    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0xA5A5A5A5u);
+  }
+  EXPECT_EQ(source->delegate(), nullptr);
+  EXPECT_EQ(intermediate.delegate(), nullptr);
+  EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
+}
 
 TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
   Operand source(32, 1);

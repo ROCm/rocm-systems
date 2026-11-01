@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 
-#include <stdexcept>
+#include <cassert>
 
 namespace rocjitsu {
+
+void Operand::report_missing_execution_backend(const amdgpu::Wavefront &wf) {
+  wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::MissingExecutionBackend);
+}
 
 Result Operand::emit_encoding_error(const util::DiagnosticEmitter &emit_error) const {
   switch (encoding_error_) {
@@ -33,35 +38,39 @@ std::optional<RegisterRef> Operand::to_register_ref() const { return std::nullop
 std::optional<RegClass> Operand::to_special_reg_class() const { return std::nullopt; }
 
 uint32_t Operand::read_scalar(const amdgpu::Wavefront & /*wf*/) const {
-  throw std::logic_error("read_scalar not implemented for this operand type");
+  assert(false && "read_scalar not implemented for this operand type");
+  return 0;
 }
 
 uint32_t Operand::read_lane(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane*/) const {
-  throw std::logic_error("read_lane not implemented for this operand type");
+  assert(false && "read_lane not implemented for this operand type");
+  return 0;
 }
 
 void Operand::write_scalar(amdgpu::Wavefront & /*wf*/, uint32_t /*val*/) const {
-  throw std::logic_error("write_scalar not implemented for this operand type");
+  assert(false && "write_scalar not implemented for this operand type");
 }
 
 void Operand::write_lane(amdgpu::Wavefront & /*wf*/, uint32_t /*lane*/, uint32_t /*val*/) const {
-  throw std::logic_error("write_lane not implemented for this operand type");
+  assert(false && "write_lane not implemented for this operand type");
 }
 
 uint64_t Operand::read_lane64(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane*/) const {
-  throw std::logic_error("read_lane64 not implemented for this operand type");
+  assert(false && "read_lane64 not implemented for this operand type");
+  return 0;
 }
 
 void Operand::write_lane64(amdgpu::Wavefront & /*wf*/, uint32_t /*lane*/, uint64_t /*val*/) const {
-  throw std::logic_error("write_lane64 not implemented for this operand type");
+  assert(false && "write_lane64 not implemented for this operand type");
 }
 
 uint64_t Operand::read_scalar64(const amdgpu::Wavefront & /*wf*/) const {
-  throw std::logic_error("read_scalar64 not implemented for this operand type");
+  assert(false && "read_scalar64 not implemented for this operand type");
+  return 0;
 }
 
 void Operand::write_scalar64(amdgpu::Wavefront & /*wf*/, uint64_t /*val*/) const {
-  throw std::logic_error("write_scalar64 not implemented for this operand type");
+  assert(false && "write_scalar64 not implemented for this operand type");
 }
 
 } // namespace rocjitsu
