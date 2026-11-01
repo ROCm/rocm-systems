@@ -96,7 +96,9 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief s_trap: the issue loop enters the trap handler instead of executing it.
+  SOFTWARE_TRAP = (1ULL << 30)
 };
 
 class BasicBlock;
