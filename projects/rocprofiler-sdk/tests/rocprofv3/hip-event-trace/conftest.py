@@ -30,6 +30,7 @@ from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
 from rocprofiler_sdk.pytest_utils.rocpd_reader import RocpdReader
 from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
+from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 
 def pytest_addoption(parser):
@@ -49,6 +50,16 @@ def pytest_addoption(parser):
         action="store",
         default="hip-event-trace/hip-events-trace/out_results.otf2",
         help="Input OTF2",
+    )
+    parser.addoption(
+        "--pftrace-stream-input",
+        action="store",
+        help="Perfetto trace converted from rocpd with the default (stream) grouping",
+    )
+    parser.addoption(
+        "--pftrace-queue-input",
+        action="store",
+        help="Perfetto trace converted from rocpd with --group-by-queue",
     )
 
 
@@ -75,3 +86,14 @@ def otf2_data(request):
     if not os.path.isfile(filename):
         return pytest.skip("hip event tracing unavailable")
     return OTF2Reader(filename).read()[0]
+
+
+@pytest.fixture
+def pftrace_reader(request, grouping):
+    filename = request.config.getoption(f"--pftrace-{grouping}-input")
+    if filename is None:
+        pytest.fail(
+            f"--pftrace-{grouping}-input argument is required but was not provided"
+        )
+    with PerfettoReader(filename) as reader:
+        yield reader
