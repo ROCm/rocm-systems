@@ -27,16 +27,16 @@ concept config_value =
 /**
  * Where a stored value came from.
  *
- * Listed from lowest precedence to highest: command_line overrides environment,
- * which overrides file, preset, and default_value. This store records the source
+ * Listed from lowest precedence to highest: command_line overrides preset, which
+ * overrides environment, file, and default_value. This store records the source
  * but does not apply precedence; a later resolver decides whether to replace a value.
  */
 enum class config_source : std::uint8_t
 {
     default_value = 0,
-    preset,
     file,
     environment,
+    preset,
     command_line,
 };
 
