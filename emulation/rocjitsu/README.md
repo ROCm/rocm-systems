@@ -176,6 +176,7 @@ workers. Scripts, tests, interactive shells, and notebooks use the same library.
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
+| [Fault Injection](docs/fault-injection.md) | Offline mutation architecture, features, target coverage, and limitations |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 | [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 

@@ -46,7 +46,7 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────────┐│
 │  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: splice + grow .text with trampoline cave, emit││
+│  │  ELF mutation: grow .text, fix ELF references, emit           ││
 │  └──────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -72,7 +72,9 @@ ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |  make_trampoline_plan() + TrampolineBuilder::build()
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  splice anchors + append trampoline caves into .text + emit()
+      |  collect original-text anchor edits; retarget KernelEntry stub
+      |  apply_checked_text_edits() for collected anchor edits
+      |  append cave + CodeObjectPatcher::replace_text() + emit()
       v
 InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -85,9 +87,9 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Lazy CFG construction: blocks are decoded on the first call that needs them via `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)`. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured `ValidationResult` / `InstrumentedCodeObject` error, not a crash.
+- Lazy CFG construction: the first call that needs blocks selects a decoder from the source object's concrete target and builds the CFG with `BasicBlock::build`. Legacy objects without a concrete target use `Decoder::create(arch)`. Decoder creation or source-target admission failures surface as structured `ValidationResult` / `InstrumentedCodeObject` errors, not a crash.
 - `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`.
-- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `append_words()` each trampoline after the original bytes as a local code cave, and grow the section in one `replace_text()` call. Returns `InstrumentedCodeObject` with ELF bytes, diagnostics, production site maps, and planned resources.
+- `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. After every site succeeds, it applies the original-text anchor replacements together through `apply_checked_text_edits()`. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines to the resulting `.text`, then grows the section in one `CodeObjectPatcher::replace_text()` call. Returns `InstrumentedCodeObject` with ELF bytes, diagnostics, production site maps, and planned resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -95,6 +97,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
+- The source object's target must belong to the requested architecture. For a legacy object without a concrete target, a known ELF MACH family must also match; an unknown MACH family is not rejected by this comparison. A concrete target selects its own decoder features, so gfx1251 does not use the gfx1250 architecture default. See `Instrumentor::ensure_blocks_built()` and the source-target regressions in `tests/patch/instrumentor_test.cpp`.
 - `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
@@ -205,13 +208,15 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The DBI orchestrator reads the original payload via
-`text_bytes()`, assembles the new `.text` locally (each anchor spliced in place,
-then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
-every trampoline appended after the original bytes with `append_words()` /
-`append_nop_padding()`), and applies it with a single `replace_text()`. A patch
-carrying an entry prologue first calls `redirect_kernel_entry()` to point the
-descriptor at the stub, at the descriptor's original file offset, before
+Owns ELF-level mutations. The DBI orchestrator applies original-text anchor
+replacements through `apply_checked_text_edits()` and uses the checked `.text`
+to assemble its local output. Entry-only callbacks retain the original text and
+retarget the entry-stub branch. The orchestrator then appends the probe bodies,
+the `s_nop`-padded entry-prologue stub if there is one, and every trampoline with
+`append_words()` / `append_nop_padding()`, and applies the result with a single
+`replace_text()`. A patch carrying an entry prologue first calls
+`redirect_kernel_entry()` to point the descriptor at the stub, at the
+descriptor's original file offset, before
 `replace_text()` shifts the entry field with everything else. After text
 replacement, it adds the `.rocjitsu.kernarg` record when entry storage is used.
 
@@ -376,10 +381,10 @@ ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index
 
 For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 
-1. **Lazy block decode:** On the first stage that needs the CFG, `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)` populates `blocks_`. Unsupported arch surfaces as a fatal error here.
+1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder (or the architecture default for a legacy object). `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or source mismatch surfaces as a fatal error here.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
 3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
-4. **Assemble + replace:** Once every site preflighted, copy `.text` into a local buffer, `memcpy` each `patched_anchor_bytes` into its `anchor_offset`, then `append_words()` every trampoline after the original bytes as a local code cave. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries).
+4. **Assemble + replace:** Once every site preflighted, apply original-text anchor edits through the shared checked-edit transaction, borrowing the unchanged full-text instruction index. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
 5. **Emit:** `patcher.emit()` returns the patched ELF.
 
 The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:

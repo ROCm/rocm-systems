@@ -107,7 +107,8 @@ static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1200) == 3);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1201) == 4);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1250) == 5);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1251) == 6);
-static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_GFX1100) == 7);
+static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_NUM_TARGETS) == 8);
 static_assert(static_cast<int>(ROCJITSU_CODE_TARGET_INVALID) == INT32_MAX);
 static_assert(sizeof(rj_code_target_id_t) == sizeof(int32_t));
 static_assert(std::is_same_v<std::underlying_type_t<rj_code_target_id_t>, int32_t>);
@@ -428,7 +429,7 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
       ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
-      ROCJITSU_CODE_TARGET_GFX1251,
+      ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_TARGET_GFX1100,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
     const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);

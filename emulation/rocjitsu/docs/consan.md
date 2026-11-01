@@ -407,3 +407,22 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+## Fault injection
+
+The independent offline fault-injection library can remove a qualified complete
+barrier from an AMDGPU code object. It uses shared DBI checked edits and does not
+require the ConSan compiler, runtime, or analyzer. See
+[Fault injection](fault-injection.md) for its architecture, library interface,
+current features, target/wave coverage, and limitations.
+
+Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
+then execution/capture → analyze. Do not reuse pristine prepared artifacts or
+capture bindings. Preparation may reject a target or program profile that the
+mutation library admits; detector admission is independent of mutation admission.
+
+Mutation success reports emission after input qualification. It establishes
+neither execution nor detector qualification: removing a barrier does not prove
+that a race occurs, that a particular execution observes it, or that ConSan
+reports it. Qualify those stages separately using the normal capture and analysis
+workflow.

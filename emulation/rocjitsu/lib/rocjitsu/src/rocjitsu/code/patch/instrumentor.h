@@ -42,7 +42,9 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/patch/checked_text_edits.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
@@ -524,10 +526,9 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // .text-relative byte offsets that cannot be trampoline anchors because they
-  // are among the following instructions covered by an s_clause. The s_clause
-  // instruction itself is rejected by is_relocatable_anchor().
-  std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // Owns the complete text index. text_edits_ borrows it and is destroyed first.
+  InstructionBoundaries instruction_boundaries_;
+  std::unique_ptr<CheckedTextEditContext> text_edits_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
