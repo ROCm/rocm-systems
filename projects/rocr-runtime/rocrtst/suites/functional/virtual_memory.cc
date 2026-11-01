@@ -2921,11 +2921,12 @@ static bool FabricHandlesSupported() {
 // Queries hsa_amd_pointer_info() on a mapped VMM address. Both variants are exercised:
 // without an accessible-agent list, and with one, which is what rocprofiler-sdk's copy
 // interceptor uses when it attributes a hipMemcpyAsync.
-static void QueryVmemPointerInfo(void* addr) {
+static void QueryVmemPointerInfo(void* addr, hsa_agent_t expected_owner) {
   hsa_amd_pointer_info_t info = {};
   info.size = sizeof(info);
   ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info, nullptr, nullptr, nullptr));
   EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  EXPECT_EQ(info.agentOwner.handle, expected_owner.handle);
 
   hsa_amd_pointer_info_t info_agents = {};
   info_agents.size = sizeof(info_agents);
@@ -2933,7 +2934,22 @@ static void QueryVmemPointerInfo(void* addr) {
   hsa_agent_t* accessible = nullptr;
   ASSERT_SUCCESS(hsa_amd_pointer_info(addr, &info_agents, malloc, &num_agents, &accessible));
   EXPECT_EQ(info_agents.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  EXPECT_EQ(info_agents.agentOwner.handle, expected_owner.handle);
   if (accessible != nullptr) free(accessible);
+}
+
+// Asks the imported handle itself which device backs it. Uses hsa_amd_vmem_get_vmem_info
+// rather than pointer_info, so the check is independent of the pointer_info under test.
+[[nodiscard]] static bool VmemImportResolvedAgent(hsa_amd_vmem_alloc_handle_t imported_handle,
+                                                  hsa_agent_t* agent) {
+  hsa_amd_vmem_handle_info_t info = {};
+  info.size = sizeof(info);
+  if (hsa_amd_vmem_get_vmem_info(imported_handle, &info) != HSA_STATUS_SUCCESS ||
+      info.agent.handle == 0) {
+    return false;
+  }
+  *agent = info.agent;
+  return true;
 }
 
 void VirtMemoryTestBasic::FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent,
@@ -2973,11 +2989,14 @@ void VirtMemoryTestBasic::FabricImportedHandlePointerInfo(hsa_agent_t gpu_agent,
   ASSERT_SUCCESS(hsa_amd_vmem_map(addr, alloc_size, 0, imported_handle, 0));
 
   /* ROCM-30769: an imported handle has no local MemoryRegion, so resolving an agent owner
-   * through it dereferences NULL. */
+   * through it dereferences NULL.
+   *
+   * A fabric import carries no dmabuf, so its placement is never recovered and must return
+   * no owner. */
   if (verbosity() > 0) {
     std::cout << "    Pointer info on fabric-imported VA " << addr << std::endl;
   }
-  QueryVmemPointerInfo(addr);
+  QueryVmemPointerInfo(addr, hsa_agent_t{0});
 
   EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
   EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
@@ -3015,7 +3034,65 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
   if (verbosity() > 0) {
     std::cout << "    Pointer info on dmabuf-imported VA " << addr << std::endl;
   }
-  QueryVmemPointerInfo(addr);
+  hsa_agent_t resolved_agent = {};
+  const bool placement_known = VmemImportResolvedAgent(imported_handle, &resolved_agent);
+  if (placement_known) {
+    EXPECT_EQ(resolved_agent.handle, gpu_agent.handle)
+        << "imported handle resolved to a device other than the exporter";
+  } else if (verbosity() > 0) {
+    std::cout << "    Import placement not recoverable on this system - owner not checked."
+              << std::endl;
+  }
+
+  /* pointer_info reports no owner for an import: the handle has no local MemoryRegion to
+   * resolve one through. Owner coverage comes from hsa_amd_vmem_get_vmem_info above. */
+  QueryVmemPointerInfo(addr, hsa_agent_t{0});
+
+  EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+  EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
+}
+
+// A host-backed import has no GPU owner to report.
+void VirtMemoryTestBasic::HostBackedImportedHandlePointerInfo(hsa_agent_t gpu_agent,
+                                                              hsa_amd_memory_pool_t cpu_pool) {
+  rocrtst::pool_info_t pool_i;
+  ASSERT_SUCCESS(rocrtst::AcquirePoolInfo(cpu_pool, &pool_i));
+  if (!pool_i.alloc_allowed || pool_i.segment != HSA_AMD_SEGMENT_GLOBAL) return;
+
+  const size_t alloc_size = pool_i.alloc_granule;
+  hsa_amd_vmem_alloc_handle_t exported_handle;
+  ASSERT_SUCCESS(
+      hsa_amd_vmem_handle_create(cpu_pool, alloc_size, MEMORY_TYPE_NONE, 0, &exported_handle));
+
+  int dmabuf_fd = -1;
+  /* Exporting host memory requires a GPU to pin it through, which not every configuration
+   * supports. Treat a failed export as "not applicable here" rather than a failure. */
+  if (hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle, 0) != HSA_STATUS_SUCCESS) {
+    if (verbosity() > 0) {
+      std::cout << "    Host-backed dmabuf export not supported - Skipping." << std::endl;
+    }
+    EXPECT_SUCCESS(hsa_amd_vmem_handle_release(exported_handle));
+    return;
+  }
+  ASSERT_GE(dmabuf_fd, 0);
+
+  hsa_amd_vmem_alloc_handle_t imported_handle;
+  ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
+  ASSERT_EQ(close(dmabuf_fd), 0);
+
+  void* addr = nullptr;
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addr, alloc_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addr, alloc_size, 0, imported_handle, 0));
+
+  hsa_amd_memory_access_desc_t access_desc = {HSA_ACCESS_PERMISSION_RW, gpu_agent};
+  EXPECT_SUCCESS(hsa_amd_vmem_set_access(addr, alloc_size, &access_desc, 1));
+
+  if (verbosity() > 0) {
+    std::cout << "    Pointer info on host-backed imported VA " << addr << std::endl;
+  }
+  QueryVmemPointerInfo(addr, hsa_agent_t{0});
 
   EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
   EXPECT_SUCCESS(hsa_amd_vmem_handle_release(imported_handle));
@@ -3066,6 +3143,18 @@ void VirtMemoryTestBasic::TestImportedHandlePointerInfo(void) {
     DmaBufImportedHandlePointerInfo(gpu, gpu_pool);
     if (fabric_supported) {
       FabricImportedHandlePointerInfo(gpu, gpu_pool);
+    }
+  }
+
+  // Host-backed imports must keep reporting no owner. One CPU agent is enough.
+  std::vector<hsa_agent_t> cpus;
+  ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateCPUAgents, &cpus));
+  if (!cpus.empty()) {
+    hsa_amd_memory_pool_t cpu_pool = {};
+    ASSERT_SUCCESS(
+        hsa_amd_agent_iterate_memory_pools(cpus[0], rocrtst::GetGlobalMemoryPool, &cpu_pool));
+    if (cpu_pool.handle != 0) {
+      HostBackedImportedHandlePointerInfo(gpus[0], cpu_pool);
     }
   }
 
