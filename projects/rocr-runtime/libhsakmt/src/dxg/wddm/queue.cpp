@@ -87,6 +87,12 @@ static inline uint64_t LoadSyncValue(const uint64_t* sync_addr) {
   return rocr::atomic::Load(sync_addr, std::memory_order_acquire);
 }
 
+static constexpr uint32_t kPoisonFenceHiDword = 0xFFFFFFFFu;
+
+static inline bool IsFencePoisoned(const uint64_t* sync_addr) {
+  return sync_addr && (LoadSyncValue(sync_addr) >> 32) == kPoisonFenceHiDword;
+}
+
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr)) return HSA_STATUS_ERROR;
 
@@ -220,11 +226,22 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
-    // Stall detection: check both rptr and GPU fence since rptr stalls during CpuWait.
+    // Check both rptr and GPU fence since rptr stalls during CpuWait.
+    uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+    uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+    uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
+
+    if (IsFencePoisoned(queue->sync_addr)) {
+      if (queue->thread_stop_.exchange(true)) return;
+      pr_err("GPU memory fault detected: monitored fence poisoned (0x%" PRIx64
+             ") rptr=%" PRIu64 " wptr=%" PRIu64 "\n",
+             current_fence, current_rptr, current_wptr);
+      queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      return;
+    }
+
+    // Time-based stall detection is only a heuristic; gate it on the wait-timeout policy.
     if (!dxg_runtime->disable_wait_timeout_) {
-      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
-      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
-      uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
       if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
         last_fence = current_fence;
@@ -1246,8 +1263,18 @@ hsa_status_t ComputeQueue::Process(void) {
     // and re-evaluating here can never name a value this queue has not
     // submitted yet.
     uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
+    if (IsFencePoisoned(sync_addr)) {
+      pending_signals_.clear();
+      HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+    }
     if (LoadSyncValue(sync_addr) < reuse_fence) {
       if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
     }
 
     ret = SwitchAql2PM4();
@@ -1265,12 +1292,22 @@ hsa_status_t ComputeQueue::Process(void) {
     // Without platform atomics the GPU cannot decrement signals itself, so the
     // AqlToPm4Thread does it on the CPU once the submission has retired.
     if (!platform_atomic_support_ && !pending_signals_.empty()) {
+      if (IsFencePoisoned(sync_addr)) {
+        pending_signals_.clear();
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+      }
       if (LoadSyncValue(sync_addr) < sync_point) {
         if (!device->CpuWait(&syncobj, &sync_point, 1, false)) {
           pr_err("GPU fence wait failed (sync_addr=%" PRIu64 " expected=%" PRIu64 ")\n",
                  LoadSyncValue(sync_addr), sync_point);
           pending_signals_.clear();
           return HSA_STATUS_ERROR;
+        }
+        if (IsFencePoisoned(sync_addr)) {
+          pending_signals_.clear();
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
       }
       for (uint64_t* addr : pending_signals_)
