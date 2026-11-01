@@ -414,8 +414,13 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 // Returns true when the DDA fast path should be attempted for this arch/size.
 // `threshold` is the per-collective cap from rcclDdaEntryThreshold(). 0 disables
 // DDA for the call.
+// minRanks is the participant-count floor. It defaults to 8, the full single-node
+// clique. Only the AllReduce IPC path passes a relaxed floor of 2, and only when
+// RCCL_DDA_NRANKS_RELAX=1; AllGather/ReduceScatter/AllToAll always use the default,
+// so the gate stays uniform for them. This is the authoritative description of the
+// rule -- the call sites reference it rather than restating it.
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
-                    bool query = false, const char* prefix = nullptr);
+                    bool query = false, const char* prefix = nullptr, int minRanks = 8);
 
 // Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
 // the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is

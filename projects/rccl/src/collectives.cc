@@ -16,6 +16,8 @@
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_shuffle.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -229,8 +231,11 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
                                     bool query) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
+  // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+  const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : nccl_dda_detail::kDdaNranks;
   const bool result = !symEligible &&
-                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce),
+                                     /*query=*/false, /*prefix=*/nullptr, ddaMinRanks);
   if (!result && !query) {
     if (symEligible)
       INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
