@@ -83,6 +83,8 @@ jobs:
       id-token: write
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb # 2026-08-18
+    outputs:
+      ll_cache_bits: ${{ steps.ll_cache_bits.outcome }}
     env:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
@@ -172,6 +174,19 @@ jobs:
             --build-dir TheRock/build \
             --stage all
 
+      # Reported by ll-cache-bit-gate, so a failure doesn't skip the test
+      # suites. dist/ keeps the unsplit lib.
+      - name: LL cache-bit guard
+        id: ll_cache_bits
+        continue-on-error: true
+        env:
+          ROCM_PATH: ${{ github.workspace }}/TheRock/build/dist/rocm
+          RCCL_LIB: ${{ github.workspace }}/TheRock/build/dist/rocm/lib/librccl.so
+          RCCL_LL_GUARD_REQUIRED: 1
+        run: |
+          python3 -m pip install -r projects/rccl/test/ll-cache-bits/requirements.txt
+          python3 -m pytest projects/rccl/test/ll-cache-bits/tests -v -rs
+
       - name: Post Build Upload
         if: always()
         run: |
@@ -180,6 +195,16 @@ jobs:
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
             --upload
+
+  ll-cache-bit-gate:
+    name: LL cache-bit gate
+    needs: [therock-build-linux]
+    if: ${{ !cancelled() && needs.therock-build-linux.outputs.ll_cache_bits == 'failure' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo "LL cache-bit guard failed; see its step in Build Linux Packages." >&2
+          exit 1
 
   therock-test-linux-multi-node:
     name: "Test multi-node"

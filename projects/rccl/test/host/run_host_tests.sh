@@ -22,8 +22,9 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          device-table unittest, the kernel-count and accl-reporter
-#                   pytest suites, the tools/scripts/test_runner unittests
+#   guards          device-table unittest, the kernel-count, accl-reporter and
+#                   ll-cache-bits detector pytest suites, the
+#                   tools/scripts/test_runner unittests
 #                   (which include the rccl-device-compile driver cases),
 #                   src/include/test_poison_hip_atomics.py,
 #                   test/test_makefile_depflags.py, and the
@@ -320,6 +321,15 @@ do_accl_report_guards() {
   "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_accl_report.py" -v
 }
 
+# Run the ll-cache-bits detector tests. The ISA guard itself needs a built
+# librccl.so, so it runs in the TheRock RCCL build job instead.
+do_ll_cache_bits_guards() {
+  echo "==> LL cache-bit detector (pytest: test/ll-cache-bits)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/ll-cache-bits/tests" -m detector -v
+}
+
 # Run the RcclReplayer host checks (g++ only, no MPI or HIP); nothing else builds tools/.
 do_replayer_guards() {
   echo "==> RcclReplayer host checks (make -C tools/RcclReplayer test)"
@@ -338,18 +348,19 @@ do_test_runner_guards() {
 }
 
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
-# kernel-count and accl-reporter pytest suites, the tools/scripts/test_runner
-# unittests, the __hip_atomic_* poison compile probe, then the RcclReplayer host
-# checks. Collected with `|| rc=1` rather than run back to back so that under
-# `set -e` an early failure still leaves the later guards running and reported,
-# instead of aborting the phase at the first one. Same idiom as do_host_tests
-# above.
+# kernel-count, accl-reporter and ll-cache-bits pytest suites, the
+# tools/scripts/test_runner unittests, the __hip_atomic_* poison compile probe,
+# then the RcclReplayer host checks. Collected with `|| rc=1` rather than run
+# back to back so that under `set -e` an early failure still leaves the later
+# guards running and reported, instead of aborting the phase at the first one.
+# Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_accl_report_guards || rc=1
+  do_ll_cache_bits_guards || rc=1
   do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
   do_replayer_guards || rc=1
