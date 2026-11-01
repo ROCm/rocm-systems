@@ -492,6 +492,8 @@ if(CLANG_TIDY_EXE)
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
+            --extra-arg=-I${CMAKE_SOURCE_DIR}/source
+            --extra-arg=-I${CMAKE_SOURCE_DIR}/source/common
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Running clang-tidy static analysis..."
@@ -504,6 +506,8 @@ if(CLANG_TIDY_EXE)
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
+            --extra-arg=-I${CMAKE_SOURCE_DIR}/source
+            --extra-arg=-I${CMAKE_SOURCE_DIR}/source/common
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Running clang-tidy with auto-fix..."
@@ -517,9 +521,15 @@ else()
 endif()
 
 # ------------------------------------------------------------ #
-# Tests and Benchmarks
+# Tests, benchmarks, and integration examples
 # ------------------------------------------------------------ #
 
+# tests/ turns on unit tests, benchmarks, or both from the options above.
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+# The examples are the launchers for the pytest integration suite.
+if(PROFILER_HUB_BUILD_TESTS)
+    add_subdirectory(examples)
 endif()
