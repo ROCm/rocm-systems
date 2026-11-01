@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Tests for ddaLL128StoreWire / ddaLL128PollWire, the wire used by every DDA LL128 receive.
+// Tests for ddaLL128StoreWire / ddaLL128PollWire, the wire used by every DDA LL128 receive, and for
+// ddaLL128RsWaitBatch, the batched poll of the LL128 reduce-scatter.
 // On gfx1250 the poll keeps the payload from the load that saw the flags, so these check that
 // a poll never returns payload older than its flags.
 //
@@ -14,6 +15,8 @@
 //   WriterOn*NeverYieldsOldPayload - a writer on another CU or a peer GPU fills the slice while
 //                the receiver polls; no returned word may be older than its flags
 //   AbortEndsPoll - a raised abort flag ends the poll
+//   WaitBatch* - the batched poll returns every valid entry's payload under the current flag, waits for a
+//                late entry, ignores an invalid entry that never gets the flag, and ends on abort
 //
 // The host raises the abort flag after kWatchdog, so a broken poll fails instead of hanging.
 
@@ -27,6 +30,7 @@
 #include "../common/ResourceGuards.hpp"
 #include "DeviceTestBase.hpp"
 #include "algorithms/dda/device/CollCommon_ll128.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting {
@@ -188,6 +192,91 @@ __global__ void pollUnwrittenSlice(uint64_t* wire, DdaKernelParams params, int* 
   if (lane == 0) *returned = ok ? 1 : 0;
 }
 
+struct BatchResult {
+  int returned;                   // 1 if the wait reported every valid flag current, 0 on abort
+  unsigned long long mismatches;  // valid entries' words that differ from the payload stored under the flag
+};
+
+// The current flag of the batch tests, and the one a stale entry carries.
+constexpr uint64_t kBatchFlag = 0x2b0000002bull;
+constexpr uint64_t kStaleFlag = kBatchFlag - 1;
+// A stale entry k carries tag k + kStaleTag, so a wait that returns it early shows up as mismatches.
+constexpr uint32_t kStaleTag = 100;
+
+// Slice k of a batch laid out back to back.
+__device__ inline uint64_t* batchSlice(uint64_t* wire, int k) {
+  return wire + (size_t)k * kDdaLL128WireWordsPerSlice;
+}
+
+// Stores this lane's words of a slice tagged `tag` under `flag`, as ddaLL128StoreWire lays them out.
+__device__ void storeTagged(uint64_t* slice, int lane, uint32_t tag, uint64_t flag) {
+  const bool flagLane = ddaLL128IsFlagLane(lane);
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    dda::common::ddaLL128StoreAtomic16B(laneSlot(slice, lane) + u * kDdaLL128Warp, payloadWord(tag, lane, u),
+                                        flagLane ? flag : payloadWord(tag, lane, u + 1));
+  }
+}
+
+// Entries in currentMask get tag k under kBatchFlag, entries in staleMask tag k + kStaleTag under kStaleFlag.
+template <int kBatch>
+__global__ void fillBatch(uint64_t* wire, int currentMask, int staleMask) {
+  const int lane = threadIdx.x;
+  for (int k = 0; k < kBatch; ++k) {
+    if ((currentMask >> k) & 1) {
+      storeTagged(batchSlice(wire, k), lane, k, kBatchFlag);
+    } else if ((staleMask >> k) & 1) {
+      storeTagged(batchSlice(wire, k), lane, k + kStaleTag, kStaleFlag);
+    }
+  }
+}
+
+// Block 0 waits on the batch, reading every entry as the runtime-rank kernel does, and checks each valid entry holds
+// tag k under kBatchFlag. Block 1, if launched, stores entry `late` once block 0 has started waiting.
+template <int kBatch>
+__global__ void waitBatchLive(uint64_t* wire, int validMask, int late, uint32_t* started, DdaKernelParams params,
+                              BatchResult* out) {
+  const int lane = threadIdx.x;
+  if (blockIdx.x == 1) {
+    if (waitAtLeast(started, 1, params)) {
+      for (int p = 0; p < 64; ++p) {
+        __builtin_amdgcn_s_sleep(127);
+      }
+      storeTagged(batchSlice(wire, late), lane, late, kBatchFlag);
+    }
+    return;
+  }
+  const bool flagLane = ddaLL128IsFlagLane(lane);
+  const uint64_t* lines[kBatch];
+  bool valid[kBatch];
+  bool read[kBatch];
+  for (int k = 0; k < kBatch; ++k) {
+    lines[k] = batchSlice(wire, k);
+    valid[k] = ((validMask >> k) & 1) != 0;
+    read[k] = true;
+  }
+  if (lane == 0) {
+    __scoped_atomic_store_n(started, 1u, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+  }
+  uint64_t vr[kBatch][kDdaLL128WordsPerThread];
+  const bool ok = dda::common::ddaLL128RsWaitBatch(lines, valid, read, 2 * lane, kBatchFlag, flagLane, params, vr);
+  unsigned long long mismatches = 0;
+  for (int k = 0; k < kBatch; ++k) {
+    if (!ok || !valid[k]) {
+      continue;
+    }
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+      mismatches += vr[k][u] != payloadWord(k, lane, u);
+      mismatches += vr[k][u + 1] != (flagLane ? kBatchFlag : payloadWord(k, lane, u + 1));
+    }
+  }
+  if (mismatches != 0) {
+    atomicAdd(&out->mismatches, mismatches);
+  }
+  if (lane == 0) {
+    out->returned = ok ? 1 : 0;
+  }
+}
+
 // Zeroed scratch from the allocator the DDA fabric scratch uses; peer GPUs can access it.
 RCCLTestGuards::HipMemBufferAutoGuard allocScratch(size_t bytes) {
   void* p = nullptr;
@@ -329,6 +418,65 @@ protected:
     HIP_EXPECT(err);
     return hWire;
   }
+
+  // Fills a batch per currentMask and staleMask (others stay zeroed, never flagged), then waits on it with validMask.
+  // With late >= 0 a second block stores that entry under the current flag once the wait has begun.
+  template <int kBatch>
+  BatchResult WaitBatch(int currentMask, int staleMask, int validMask, int late, bool raiseAbort, bool& timedOut) {
+    auto wire = allocScratch((size_t)kBatch * kDdaLL128WireWordsPerSlice * sizeof(uint64_t));
+    auto started = allocScratch(sizeof(uint32_t));
+    DeviceBuffer<BatchResult> result(1);
+    result.upload(BatchResult{-1, 0});
+    AbortFlag abort;
+    if (raiseAbort) {
+      abort.raise();
+    }
+    auto stream = makeStream();
+    auto drain = drainOnExit(abort, {{0, stream.get()}});
+
+    uint64_t* w = static_cast<uint64_t*>(wire.get());
+    hipLaunchKernelGGL((fillBatch<kBatch>), dim3(1), dim3(kDdaLL128Warp), 0, stream.get(), w, currentMask, staleMask);
+    HIP_EXPECT(hipGetLastError());
+    hipLaunchKernelGGL((waitBatchLive<kBatch>), dim3(late >= 0 ? 2 : 1), dim3(kDdaLL128Warp), 0, stream.get(), w,
+                       validMask, late, static_cast<uint32_t*>(started.get()), abort.params(), result.ptr);
+    HIP_EXPECT(hipGetLastError());
+    timedOut = waitOrAbort({{0, stream.get()}}, abort);
+    return result.download();
+  }
+
+  template <int kBatch>
+  void ExpectWaitBatchCases() {
+    constexpr int kAll = (1 << kBatch) - 1;
+    constexpr int kLast = kBatch - 1;
+    bool timedOut = false;
+    {
+      SCOPED_TRACE("all flags current");
+      const BatchResult r = WaitBatch<kBatch>(kAll, 0, kAll, -1, false, timedOut);
+      EXPECT_FALSE(timedOut);
+      EXPECT_EQ(r.returned, 1);
+      EXPECT_EQ(r.mismatches, 0ull);
+    }
+    {
+      SCOPED_TRACE("entry 1 lands late");
+      const BatchResult r = WaitBatch<kBatch>(kAll & ~2, 2, kAll, 1, false, timedOut);
+      EXPECT_FALSE(timedOut);
+      EXPECT_EQ(r.returned, 1);
+      EXPECT_EQ(r.mismatches, 0ull) << "the wait returned before the late entry's flag was current";
+    }
+    {
+      SCOPED_TRACE("invalid last entry never flagged");
+      const BatchResult r = WaitBatch<kBatch>(kAll & ~(1 << kLast), 0, kAll & ~(1 << kLast), -1, false, timedOut);
+      EXPECT_FALSE(timedOut) << "an invalid entry blocked the wait";
+      EXPECT_EQ(r.returned, 1);
+      EXPECT_EQ(r.mismatches, 0ull);
+    }
+    {
+      SCOPED_TRACE("abort while entry 0 is stale");
+      const BatchResult r = WaitBatch<kBatch>(kAll & ~1, 1, kAll, -1, true, timedOut);
+      EXPECT_FALSE(timedOut);
+      EXPECT_EQ(r.returned, 0) << "an aborted wait must report it did not see the flags";
+    }
+  }
 };
 
 TEST_F(DdaLL128PollWire, CooperativeLoadOnGfx1250) {
@@ -433,6 +581,14 @@ TEST_F(DdaLL128PollWire, AbortEndsPoll) {
   HIP_CHECK(hipGetLastError());
   EXPECT_FALSE(waitOrAbort({{0, stream.get()}}, abort));
   EXPECT_EQ(returned.download(), 0) << "an aborted poll must report it did not see the flags";
+}
+
+TEST_F(DdaLL128PollWire, WaitBatchOfTwo) {
+  ExpectWaitBatchCases<2>();
+}
+
+TEST_F(DdaLL128PollWire, WaitBatchOfThree) {
+  ExpectWaitBatchCases<3>();
 }
 
 } // namespace RcclUnitTesting
