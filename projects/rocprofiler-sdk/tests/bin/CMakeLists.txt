@@ -62,9 +62,7 @@ if(rocjpeg_FOUND AND rocjpeg_VERSION VERSION_GREATER 0.6.0)
 endif()
 if(rocshmem_FOUND AND rocshmem_VERSION VERSION_GREATER_EQUAL 3.3.0)
     # rocshmem >= 3.3.0 introduced the full host-stream API set that rocshmem-demo
-    # exercises (quiet/sync_all/alltoallmem/broadcastmem/getmem/putmem/putmem_signal/
-    # signal_wait_until on_stream). Skip the subdir on older installs so the build does
-    # not break.
+    # exercises. Skip the subdir on older installs so the build does not break.
     add_subdirectory(rocshmem)
 endif()
 add_subdirectory(hipfile)
