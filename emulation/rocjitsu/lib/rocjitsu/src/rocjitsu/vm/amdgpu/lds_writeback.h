@@ -14,14 +14,14 @@
 /// Generated execute_impl() code describes each plain load with constants, so
 /// the opcode's destination format is a template parameter.
 ///
-/// Census writebacks by EXEC shape (wave64, one mark per two lanes):
+/// Census writebacks by EXEC shape (wave64, one mark per two lanes), most
+/// common first:
 ///
-///   Coverage  share
-///   Wave      65.6%  ████████████████████████████████
-///   FewLanes  29.4%  ·····█··························  almost always one lane
-///   Chunks     5.0%  ████████████████████████········  mostly a 48-lane prefix
+///   Wave      ████████████████████████████████  most writebacks
+///   FewLanes  ·····█··························  many; almost always one lane
+///   Chunks    ████████████████████████········  a few; mostly a 48-lane prefix
 ///
-/// and by format: b32 83.9%, b128 7.9%, u16 5.6%, b64 2.5%, the rest 0.1%.
+/// and by format: mostly b32, then b128, u16 and b64; the rest are rare.
 ///
 /// The data is read 16 lanes at a time: lanes 16g..16g+15 are lane-major at
 /// group[g], in staging or in place in LDS (LdsStagedLoad::group).
@@ -29,10 +29,9 @@
 /// Two implementations with the same levels:
 ///   Isa::scalar  below; plain C++, builds anywhere;
 ///   Isa::avx2    lds_writeback_avx2.h; the default in AVX2 builds.
-/// Standalone comparison over the DS-pattern census
-/// (~/rj-lds-patterns/microbench/writeback, Ryzen 9 9950X), ns per writeback,
-/// census mix / runs16: per-lane baseline 29.2 / 26.6, scalar 9.1 / 5.1,
-/// avx2 6.2 / 4.3.
+/// Against the per-lane writeback they replace, both cost several times less
+/// on the census mix. avx2 leads scalar there: 8-lane shuffles on b64, b128
+/// and u16, and masked b32 stores where scalar's EXEC branches mispredict.
 
 #ifndef ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_H_
 #define ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_H_
@@ -152,9 +151,10 @@ template <DstFormat F>
 [[gnu::always_inline]] inline void store64(uint8_t *p, uint64_t v);
 
 /// A function per wave size, so each gets its own register allocation: with
-/// both waves inlined into one function, scalar u16 spilled its constants
-/// (6.7 -> 10.8 ns). It builds the Target itself: receiving one by value
-/// costs store-forwarding stalls (b32 full 3.5 -> 8.3 ns).
+/// both waves inlined into one function, scalar u16 spilled its constants and
+/// got much slower. It builds the Target itself: receiving one by value costs
+/// two store-forwarding stalls per call, which more than doubled a b32 full
+/// wave.
 template <DstFormat F, uint32_t Wave>
 RJ_NOINLINE void for_wave(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
                           const uint8_t *const *groups) {
@@ -164,14 +164,15 @@ RJ_NOINLINE void for_wave(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
 template <uint32_t Wave> [[gnu::always_inline]] inline Coverage choose(uint64_t exec) {
   if (exec == kAll<Wave>)
     return Coverage::Wave;
-  // Walking all 8-lane chunks for these instead: 3.3 -> 4.1 ns on the cell.
+  // Walking all 8-lane chunks for these instead is measurably slower.
   if (std::popcount(exec) <= 4)
     return Coverage::FewLanes;
   return Coverage::Chunks;
 }
 
-/// By EXEC shape. On the census mix these branches mispredict 0.26 times per
-/// call; avx2::by_exec stores b32 under a mask instead (0.03).
+/// By EXEC shape. On the census mix these branches mispredict about once
+/// every four calls; avx2::by_exec stores b32 under a mask instead and almost
+/// never does.
 template <DstFormat F, uint32_t Wave> void by_exec(const Target<F, Wave> &t, uint64_t exec) {
   switch (choose<Wave>(exec)) {
   case Coverage::Wave:
@@ -219,7 +220,7 @@ void store_lanes(const Target<F, Wave> &t, uint32_t first) {
   } else if constexpr (kForm<F> == Form::Extend) {
     extend<F, Wave, N>(t, first);
   } else {
-    // b96 and d16: 0.11% of the census together.
+    // b96 and d16: rare in the census.
     for (uint32_t l = 0; l < N; ++l)
       lane<F, Wave>(t, first + l);
   }
@@ -227,15 +228,15 @@ void store_lanes(const Target<F, Wave> &t, uint32_t first) {
 
 /// The lanes in `lanes`, one at a time. A branch-free form for up to four
 /// lanes (lowest, second lowest, second highest, highest) is slower on the
-/// FewLanes cell (3.7 vs 3.3 ns) and within 0.1 ns on the mix.
+/// FewLanes cell and no better on the mix.
 template <DstFormat F, uint32_t Wave> void store_active(const Target<F, Wave> &t, uint64_t lanes) {
   for (; lanes; lanes &= lanes - 1)
     lane<F, Wave>(t, std::countr_zero(lanes));
 }
 
 /// Fully active 8-lane chunks as store_lanes<8>, the rest one lane at a time:
-/// the 48-lane prefix is six chunks. store_active over all of EXEC instead:
-/// b32 Chunks cell 6.8 -> 10.0 ns.
+/// the 48-lane prefix is six chunks. store_active over all of EXEC instead is
+/// much slower on the b32 Chunks cell.
 template <DstFormat F, uint32_t Wave> void store_chunks(const Target<F, Wave> &t, uint64_t exec) {
   for (uint32_t c = 0; c < Wave / 8; ++c) {
     const uint64_t chunk = uint64_t{0xFF} << (8 * c);
@@ -256,8 +257,8 @@ void block(const Target<F, Wave> &t, uint32_t first) {
 /// b64, b128: a 64-bit load holds one lane's dwords for two registers, so two
 /// lanes give one 64-bit store per register:
 ///   a = │L0.r0 L0.r1│  b = │L1.r0 L1.r1│   ->   v0 │L0.r0 L1.r0│   v1 │L0.r1 L1.r1│
-/// A 32-bit copy per register and lane instead: b128 full 29.7 vs 21.0 ns,
-/// b64 15.6 vs 10.8. Without full unrolling: b128 28.5, b64 12.7.
+/// A 32-bit copy per register and lane instead, or this loop not fully
+/// unrolled, is much slower on full b64 and b128 waves.
 template <DstFormat F, uint32_t Wave, uint32_t N>
 void pairs(const Target<F, Wave> &t, uint32_t first) {
   const uint8_t *s = src(t, first);

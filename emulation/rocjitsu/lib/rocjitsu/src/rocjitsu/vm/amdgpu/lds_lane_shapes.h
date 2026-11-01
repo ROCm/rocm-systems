@@ -25,8 +25,9 @@
 ///     over an in-limit range touches exactly the bytes lane by lane would.
 ///
 /// Layout: the proofs' logic (early rejects, bounds, plans) is written once, at
-/// the bottom. Only the lane loops under it, in `lanes`, have two bodies: AVX2
-/// intrinsics, and plain C++ for hosts without AVX2.
+/// the bottom. Only the lane loops under it have two bodies, side by side:
+///   lanes::scalar  plain C++, builds anywhere;
+///   lanes::avx2    intrinsics; the default (lanes::host) in AVX2 builds.
 
 #ifndef ROCJITSU_VM_AMDGPU_LDS_LANE_SHAPES_H_
 #define ROCJITSU_VM_AMDGPU_LDS_LANE_SHAPES_H_
@@ -72,14 +73,76 @@ struct LanesPlan {
 
 namespace lanes {
 
+// Plain C++: each a flat loop over lanes into one accumulator, the form clang
+// still turns into vectors where it can (SSE, NEON, AVX2). Nested group/lane
+// loops or several accumulators make it shuffle lanes instead: loads were
+// noticeably slower on the census mix until every proof took this form.
+namespace scalar {
+
+/// x, hidden from the optimizer. Without it v[0] ^ v[0] folds to 0 and the
+/// remaining 31 or 63 lanes get shuffled into vectors, which made broadcast
+/// stores markedly slower.
+[[gnu::always_inline]] inline uint32_t opaque(uint32_t x) {
+  asm("" : "+r"(x));
+  return x;
+}
+
+/// Whether lane g+j holds vgpr[g] + j*Width in every 16-lane group.
+template <uint32_t Width, uint32_t Span>
+[[gnu::always_inline]] inline bool ramps(const uint32_t *vgpr) {
+  uint32_t first[Span / 16];
+  for (uint32_t group = 0; group < Span / 16; ++group)
+    first[group] = vgpr[group * 16];
+  uint32_t mismatch = 0;
+  for (uint32_t lane = 0; lane < Span; ++lane)
+    mismatch |= (vgpr[lane] - (lane % 16) * Width) ^ first[lane / 16];
+  return mismatch == 0;
+}
+
+/// Whether vgpr[i + 16] == vgpr[i] + 8 for every i < 16.
+[[gnu::always_inline]] inline bool columns(const uint32_t *vgpr) {
+  uint32_t mismatch = 0;
+  for (uint32_t lane = 0; lane < 16; ++lane)
+    mismatch |= vgpr[lane + 16] ^ (vgpr[lane] + 8);
+  return mismatch == 0;
+}
+
+/// Whether every lane of the span equals lane 0.
+template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint32_t *vgpr) {
+  const uint32_t base = opaque(vgpr[0]);
+  uint32_t mismatch = 0;
+  for (uint32_t lane = 0; lane < Span; ++lane)
+    mismatch |= vgpr[lane] ^ base;
+  return mismatch == 0;
+}
+
+/// max over the first N lanes of (vgpr[l] + offset) mod 2^32.
+template <uint32_t N>
+[[gnu::always_inline]] inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
+  uint32_t highest = 0;
+  for (uint32_t lane = 0; lane < N; ++lane)
+    highest = std::max(highest, vgpr[lane] + offset);
+  return highest;
+}
+
+/// Whether (vgpr[l] + offset) mod 2^32 <= last for each of the first N lanes.
+template <uint32_t N>
+[[gnu::always_inline]] inline bool all_at_most(const uint32_t *vgpr, uint32_t offset,
+                                               uint32_t last) {
+  return max_lane<N>(vgpr, offset) <= last;
+}
+
+} // namespace scalar
+
 #if RJ_HOST_HAS_AVX2
 
 // Intrinsics: the same instructions the plain bodies compile to on a good day.
 // They are here for control: clang's vectorization of the plain bodies broke
-// silently four times while they were written (several accumulators, a folded
-// lane, an out-of-line proof, lane kernels split out), each costing 5-80% on
-// some path. Stores with these bodies: 11.67 ns on the census mix against
-// 12.45 with the plain ones (lds_store/mkm3-run7.txt).
+// silently several times while they were written (several accumulators, a
+// folded lane, an out-of-line proof, lane kernels split out), each time making
+// some path much slower. With these bodies stores are faster in every census
+// class, and they held steady through the changes that broke the plain ones.
+namespace avx2 {
 
 [[gnu::always_inline]] inline __m256i lanes8(const uint32_t *vgpr) {
   return _mm256_loadu_si256(reinterpret_cast<const __m256i *>(vgpr));
@@ -93,7 +156,6 @@ template <uint32_t Width> [[gnu::always_inline]] inline __m256i steps(uint32_t j
                            (j + 4) * Width, (j + 5) * Width, (j + 6) * Width, (j + 7) * Width);
 }
 
-/// Whether lane g+j holds vgpr[g] + j*Width in every 16-lane group.
 template <uint32_t Width, uint32_t Span>
 [[gnu::always_inline]] inline bool ramps(const uint32_t *vgpr) {
   __m256i mismatch = _mm256_setzero_si256();
@@ -108,7 +170,6 @@ template <uint32_t Width, uint32_t Span>
   return none(mismatch);
 }
 
-/// Whether vgpr[i + 16] == vgpr[i] + 8 for every i < 16.
 [[gnu::always_inline]] inline bool columns(const uint32_t *vgpr) {
   const __m256i eight = _mm256_set1_epi32(8);
   __m256i mismatch = _mm256_setzero_si256();
@@ -119,7 +180,6 @@ template <uint32_t Width, uint32_t Span>
   return none(mismatch);
 }
 
-/// Whether every lane of the span equals lane 0.
 template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint32_t *vgpr) {
   const __m256i base = _mm256_set1_epi32(static_cast<int>(vgpr[0]));
   __m256i mismatch = _mm256_setzero_si256();
@@ -129,7 +189,6 @@ template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint3
   return none(mismatch);
 }
 
-/// max over the first N lanes of (vgpr[l] + offset) mod 2^32.
 template <uint32_t N>
 [[gnu::always_inline]] inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
   const __m256i bias = _mm256_set1_epi32(static_cast<int>(offset));
@@ -143,9 +202,8 @@ template <uint32_t N>
   return static_cast<uint32_t>(_mm_cvtsi128_si32(x));
 }
 
-/// Whether (vgpr[l] + offset) mod 2^32 <= last for each of the first N lanes.
-/// Tested in-register: folding to one max first, as max_lane does, cost loads
-/// 0.25 ns on the census mix (12.23 -> 12.47, lds_load/mkm3-scalar-intrinsics.txt).
+/// Tested in-register: folding to one max first, as max_lane does and as the
+/// scalar body may, made the load census mix measurably slower.
 template <uint32_t N>
 [[gnu::always_inline]] inline bool all_at_most(const uint32_t *vgpr, uint32_t offset,
                                                uint32_t last) {
@@ -158,70 +216,19 @@ template <uint32_t N>
   return none(_mm256_xor_si256(_mm256_max_epu32(highest, bound), bound));
 }
 
+} // namespace avx2
+
+namespace host = avx2;
 #else
-
-// Plain C++: each a flat loop over lanes into one accumulator, the form clang
-// still turns into vectors where it can (SSE, NEON). Nested group/lane loops
-// or several accumulators make it shuffle lanes instead: loads 13.92 ->
-// 12.44 ns on the census mix once every proof took this form
-// (lds_load/mkm3-scalar-final.txt).
-
-/// x, hidden from the optimizer. Without it v[0] ^ v[0] folds to 0 and the
-/// remaining 31 or 63 lanes get shuffled into vectors: broadcast b128 store
-/// 15.2 -> 10.3 cycles with it (lds_store --drive 1172).
-[[gnu::always_inline]] inline uint32_t opaque(uint32_t x) {
-  asm("" : "+r"(x));
-  return x;
-}
-
-template <uint32_t Width, uint32_t Span>
-[[gnu::always_inline]] inline bool ramps(const uint32_t *vgpr) {
-  uint32_t first[Span / 16];
-  for (uint32_t group = 0; group < Span / 16; ++group)
-    first[group] = vgpr[group * 16];
-  uint32_t mismatch = 0;
-  for (uint32_t lane = 0; lane < Span; ++lane)
-    mismatch |= (vgpr[lane] - (lane % 16) * Width) ^ first[lane / 16];
-  return mismatch == 0;
-}
-
-[[gnu::always_inline]] inline bool columns(const uint32_t *vgpr) {
-  uint32_t mismatch = 0;
-  for (uint32_t lane = 0; lane < 16; ++lane)
-    mismatch |= vgpr[lane + 16] ^ (vgpr[lane] + 8);
-  return mismatch == 0;
-}
-
-template <uint32_t Span> [[gnu::always_inline]] inline bool all_same(const uint32_t *vgpr) {
-  const uint32_t base = opaque(vgpr[0]);
-  uint32_t mismatch = 0;
-  for (uint32_t lane = 0; lane < Span; ++lane)
-    mismatch |= vgpr[lane] ^ base;
-  return mismatch == 0;
-}
-
-template <uint32_t N>
-[[gnu::always_inline]] inline uint32_t max_lane(const uint32_t *vgpr, uint32_t offset) {
-  uint32_t highest = 0;
-  for (uint32_t lane = 0; lane < N; ++lane)
-    highest = std::max(highest, vgpr[lane] + offset);
-  return highest;
-}
-
-template <uint32_t N>
-[[gnu::always_inline]] inline bool all_at_most(const uint32_t *vgpr, uint32_t offset,
-                                               uint32_t last) {
-  return max_lane<N>(vgpr, offset) <= last;
-}
-
+namespace host = scalar;
 #endif
 
 } // namespace lanes
 
 // ---------------------------------------------------------------------------
-// The proofs. Forced inline: they are building blocks, and an out-of-line
-// proof returning an optional put a call on the scattered store path (store
-// broadcast 14.4 vs 10.8 cycles, b128 scattered 65 vs 50).
+// The proofs, on lanes::host. Forced inline: they are building blocks, and an
+// out-of-line proof returning an optional put a call on the scattered store
+// path, which made broadcast and scattered b128 stores markedly slower.
 // ---------------------------------------------------------------------------
 
 /// The highest start address whose Width bytes end inside the limit, clamped
@@ -235,8 +242,8 @@ template <uint32_t N>
 template <uint32_t Width, uint32_t Span>
 [[gnu::always_inline]] inline std::optional<BlockPlan>
 prove_blocks(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
-  // Every other shape fails here and skips the full proof: load census mix
-  // 12.44 -> 12.14 ns (lds_load/mkm3-scalar-final.txt).
+  // Every other shape fails here and skips the full proof, which alone made
+  // the load census mix measurably faster.
   if (vgpr[1] != vgpr[0] + Width)
     return std::nullopt;
   // The OR is >= every base, so one compare bounds all groups. It can reject a
@@ -246,19 +253,19 @@ prove_blocks(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
     bases |= vgpr[group] + offset;
     highest = std::max(highest, vgpr[group] + offset);
   }
-  if (uint64_t{bases} + 16 * Width > limit || !lanes::ramps<Width, Span>(vgpr))
+  if (uint64_t{bases} + 16 * Width > limit || !lanes::host::ramps<Width, Span>(vgpr))
     return std::nullopt;
   return BlockPlan{uint64_t{highest} + 16 * Width};
 }
 
 /// Accepts: lanes 16-31 repeat lanes 0-15's shape, 8 bytes higher.
 ///   ▃▁▆▂█▄▇▅ ▃▁▆▂█▄▇▅                      (scattered, but in matching pairs)
-/// b64 read2 looks scattered lane to lane, but this holds for 54.5% of read2.
+/// b64 read2 looks scattered lane to lane, but this holds for many of them.
 [[gnu::always_inline]] inline std::optional<ColumnPlan>
 prove_column_pairs(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
   // Most b64 loads already fail on lane 0: no loop for them.
-  if (limit < 16 || vgpr[16] != vgpr[0] + 8 || !lanes::columns(vgpr) ||
-      !lanes::all_at_most<16>(vgpr, offset, last_start(limit, 16)))
+  if (limit < 16 || vgpr[16] != vgpr[0] + 8 || !lanes::host::columns(vgpr) ||
+      !lanes::host::all_at_most<16>(vgpr, offset, last_start(limit, 16)))
     return std::nullopt;
   return ColumnPlan{};
 }
@@ -269,7 +276,7 @@ template <uint32_t Width, uint32_t Span>
 [[gnu::always_inline]] inline std::optional<BroadcastPlan>
 prove_broadcast(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
   const uint64_t end = uint64_t{uint32_t(vgpr[0] + offset)} + Width;
-  if (!lanes::all_same<Span>(vgpr) || end > limit)
+  if (!lanes::host::all_same<Span>(vgpr) || end > limit)
     return std::nullopt;
   return BroadcastPlan{end};
 }
@@ -278,15 +285,15 @@ prove_broadcast(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
 ///   ──────── limit - Width
 ///   ▅▁▇▂▃▆▄▂
 /// One bounds pass, so the copies after it need no check per lane. Checking
-/// each lane instead cost b64 loads 15.1 -> 21.6 ns (lds_load/mkm3-scalar-1.txt).
+/// each lane instead made b64 loads much slower.
 template <uint32_t Width, uint32_t Span>
 [[gnu::always_inline]] inline std::optional<LanesPlan>
 prove_lanes(const uint32_t *vgpr, uint32_t offset, uint64_t limit) {
-  if (limit < Width || !lanes::all_at_most<Span>(vgpr, offset, last_start(limit, Width)))
+  if (limit < Width || !lanes::host::all_at_most<Span>(vgpr, offset, last_start(limit, Width)))
     return std::nullopt;
   // Loads read neither field, so for them both passes below compile away.
-  return LanesPlan{uint64_t{lanes::max_lane<Span>(vgpr, offset)} + Width,
-                   uint64_t{lanes::max_lane<Span>(vgpr, 0)} + offset > UINT32_MAX};
+  return LanesPlan{uint64_t{lanes::host::max_lane<Span>(vgpr, offset)} + Width,
+                   uint64_t{lanes::host::max_lane<Span>(vgpr, 0)} + offset > UINT32_MAX};
 }
 
 } // namespace lds_shapes

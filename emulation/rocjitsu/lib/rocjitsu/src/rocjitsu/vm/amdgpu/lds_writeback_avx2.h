@@ -10,11 +10,11 @@
 ///   Level 2  8 lanes of each destination register, per format
 ///   Level 3  EXEC masks and loads
 ///
-/// Its 2.9 ns lead over scalar on the census mix: about 1 ns from the cells,
-/// where 8-lane shuffles take a third of scalar's instructions on b128, b64,
-/// u16 and Chunks (b128: 182 vs 579 per call) and scalar is 0.2-0.5 ns faster
-/// on b32 Wave and FewLanes; the rest appears only on the mix, which is where
-/// scalar's EXEC-shape branches mispredict (0.26 vs 0.03 per call).
+/// Where its lead over scalar on the census mix comes from: part from the
+/// cells, where 8-lane shuffles take a third of scalar's instructions on b128,
+/// b64, u16 and Chunks (scalar is slightly faster on b32 Wave and FewLanes);
+/// the larger part appears only on the mix, where scalar's EXEC-shape branches
+/// mispredict and the masked b32 stores here do not.
 
 #ifndef ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_AVX2_H_
 #define ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_AVX2_H_
@@ -47,11 +47,10 @@ template <DstFormat F>
 // Level 1: by EXEC shape.
 // ---------------------------------------------------------------------------
 
-/// b32 always takes Masked: its EXEC is a full wave in 49.5% of the census and
-/// FewLanes in 29.3%, so a branch on it mispredicts (mix 6.3 -> 7.9 ns with
-/// one, though b32 Wave alone drops 3.8 -> 3.5). Other formats are a full wave
-/// almost always, and masked stores there cost the mix 1.5 ns (7.8 -> 6.3 with
-/// plain stores).
+/// b32 always takes Masked: its EXEC is often a full wave and often a few
+/// lanes, so a branch on it mispredicts and costs the mix far more than it
+/// saves on full b32 waves. Other formats are a full wave almost always, where
+/// plain stores are clearly faster than masked ones.
 template <DstFormat F, uint32_t Wave> [[gnu::always_inline]] inline Stores choose(uint64_t exec) {
   if (kStride<F> != 4 && exec == kAll<Wave>)
     return Stores::Plain;
@@ -67,8 +66,8 @@ template <DstFormat F, uint32_t Wave> void by_exec(const Target<F, Wave> &t, uin
   }
 }
 
-/// Stores as a template parameter, not a branch in the loop: b64 full 8.1 ->
-/// 5.8 ns.
+/// Stores as a template parameter, not a branch in the loop: a branch there
+/// made full b64 waves much slower.
 template <DstFormat F, uint32_t Wave, Stores S>
 void store_chunks(const Target<F, Wave> &t, uint64_t exec) {
   for (uint32_t c = 0; c < Wave / 8; ++c) {
@@ -132,7 +131,7 @@ void transpose(const uint8_t *src, __m256i *v) {
   v[3] = _mm256_castps_si256(_mm256_shuffle_ps(t2, t3, 0xEE));
 }
 
-/// b96 is 0.07% of the census: a gather instead of a third transpose.
+/// b96 is rare in the census: a gather instead of a third transpose.
 void gather(const uint8_t *src, __m256i *v) {
   const __m256i lane = _mm256_setr_epi32(0, 12, 24, 36, 48, 60, 72, 84);
   for (uint32_t r = 0; r < 3; ++r)
