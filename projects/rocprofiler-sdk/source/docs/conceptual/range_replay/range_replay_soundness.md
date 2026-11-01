@@ -167,10 +167,15 @@ snapshot does not capture — unified or managed memory, fine-grained or host me
 virtual-memory-mapped allocations, or a value the host recomputed inside the range. Such a range
 passes every check and is replayed, and its passes quietly describe different inputs.
 
-Setting `ROCPROF_RANGE_REPLAY_VERIFY` turns on a check for exactly that residue. The executor reads
-GPU-backed snapshot regions back to host memory when needed, hashes each snapshot region (FNV-1a)
-after the application's execution and again after the final replayed pass, and reports how many
-regions differ as the `CLOSE` callback's `divergence_count`.
+Setting `ROCPROF_RANGE_REPLAY_VERIFY` turns on a check for exactly that residue. The executor hashes
+each snapshot region after the application's execution and again after the final replayed pass, and
+reports how many regions differ as the `CLOSE` callback's `divergence_count`. Hashing uses the
+SSE4.2 CRC32 instruction when the host provides it and falls back to FNV-1a otherwise; the digests
+are compared only against digests produced by the same binary in the same process and are never
+persisted, so the hash function may change between releases. The check costs one extra
+device-to-host copy of the snapshot per digest plus the hash itself; with the CRC32 path the copy
+dominates, and on hosts without SSE4.2 the fallback hash is slower than the copy and dominates
+instead.
 
 Regions are ordered by device address before hashing, because the allocation inventory itself is
 unordered and the two snapshots must compare positionally. A region-count mismatch is reported as
