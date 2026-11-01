@@ -677,16 +677,24 @@ VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome L2Cache::flush_dirty_locked() {
+VmAccessOutcome L2Cache::flush_address_space(uint32_t vmid) {
+  auto maintenance_lock = acquire_cache_maintenance();
+  const VmAccessOutcome outcome = flush_dirty_locked(vmid);
+  if (outcome == VmAccessOutcome::Complete)
+    cache_.invalidate_all(vmid);
+  return outcome;
+}
+
+VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
 
   uint32_t dirty_count = 0;
   uint64_t min_addr = std::numeric_limits<uint64_t>::max(), max_addr = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
-  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr,
+  cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr, vmid,
                          &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    if (outcome != VmAccessOutcome::Complete)
+    if ((vmid && tag.vmid != *vmid) || outcome != VmAccessOutcome::Complete)
       return;
     // Each dirty line is written back under its own owning vmid.
     outcome = publish_dirty_bytes(line_addr, data, tag.vmid);

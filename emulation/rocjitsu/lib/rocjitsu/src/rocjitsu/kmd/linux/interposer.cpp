@@ -2791,13 +2791,14 @@ public:
         queue.fences.emplace(sequence, finished);
         pending_queue = key;
       }
-      submission.ready = [this, dependencies = std::move(dependencies)]() mutable {
+      submission.ready = [this, dependencies = std::move(dependencies)](
+                             util::DiagnosticEmitter emit_error) mutable -> util::FailureOr<bool> {
         std::lock_guard lock(fd_mutex_);
         for (auto &dependency : dependencies) {
           if (!dependency.fence)
             dependency.fence = syncobj_fence_locked(*dependency.entry, dependency.point);
           if (dependency.fence && dependency.fence->is_failed())
-            throw std::runtime_error("PM4 submission dependency failed");
+            return emit_error.emit() << "PM4 submission dependency failed";
           if (!dependency.fence || !dependency.fence->is_signaled())
             return false;
         }
