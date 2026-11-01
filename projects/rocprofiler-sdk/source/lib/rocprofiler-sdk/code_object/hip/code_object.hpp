@@ -59,6 +59,18 @@ using isa_names_t                    = std::vector<const std::string*>;
 using kernel_symbol_hip_device_map_t = std::unordered_map<std::string, std::string>;
 using comgr_code_object_vec_t        = std::vector<amd_comgr_code_object_info_t>;
 
+using kernel_symbol_kernarg_map_t = std::unordered_map<std::string, std::vector<kernarg_region_t>>;
+
+// What one code object's amdhsa metadata says, read in a single pass over its kernel list. Kernels
+// are keyed by both their symbol name and their metadata name, which differ between code object
+// versions ("<symbol>.kd" versus the function name). A kernel absent from
+// `kernarg_pointer_regions` has no argument list to read.
+struct code_object_metadata_t
+{
+    kernel_symbol_hip_device_map_t kernel_symbol_device_map = {};
+    kernel_symbol_kernarg_map_t    kernarg_pointer_regions  = {};
+};
+
 constexpr unsigned HIP_FAT_MAGIC      = 0x48495046;  // HIPF
 constexpr unsigned HIP_FAT_MAGIC_HIPK = 0x4B504948;  // HIPK
 
@@ -100,6 +112,12 @@ get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset
 
 kernel_symbol_hip_device_map_t
 get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size);
+
+// Both metadata maps of an ELF code object image (a loaded .hsaco, not a fat binary). The image is
+// only read here: whatever is derived from it has to outlive the call, because the loader reports
+// the application's own buffer and the application may free it once the executable is frozen.
+code_object_metadata_t
+get_metadata_from_executable(const void* executable, size_t executable_size);
 
 }  // namespace hip
 }  // namespace code_object
