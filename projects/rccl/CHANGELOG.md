@@ -184,6 +184,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed multi-receive `irecv` failing with a fatal network error in the `IB` transport when `NCCL_IB_USE_INLINE=1`.
 * Fixed Anvil SDMA (`NCCL_GIN_TYPE=7`) GIN contexts sharing signal cells across logical contexts on a connection, which let a consecutive `ncclGinAllContexts` barrier return early on a stale count. Each logical context now has its own signals.
 * Fixed GIN signal shadows being sized for the requested context count instead of the rounded-up `ginContextCount`, which let the last contexts write past the shadow region when the GIN connection count does not divide the requested context count.
+* Fixed `ibv_reg_mr_iova2 failed with error Invalid argument` on AMD AINIC when several communicators open P2P network connections without GPU Direct RDMA, for example Direct AllGather with `NCCL_PXN_DISABLE=1`. The host-memory shared P2P pools used 4 KiB pages, so each 256 MiB pool took 65,536 of the NIC's per-LIF page-table entries. They now use 2 MiB pages; `RCCL_NET_SHARED_HOST_HUGEPAGES` (default `1`) set to `0` restores the previous allocation.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

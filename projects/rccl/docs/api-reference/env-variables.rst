@@ -617,6 +617,16 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
+        | Backs the host-memory shared P2P network staging pools (used by
+          connections without GPU Direct RDMA) with 2 MiB pages, so each
+          pool takes fewer NIC memory-registration page-table entries.
+          Falls back to the regular pinned host allocation if the huge-page
+          allocation or registration fails. Hosts with transparent huge
+          pages set to ``never`` get 4 KiB pages either way.
+      - | ``1``: Use 2 MiB pages (default).
+        | ``0``: Use the regular pinned host allocation.
+
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
           ``IB`` network transport (``net_ib``). By default, the proxy fences
