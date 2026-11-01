@@ -91,6 +91,7 @@ bool SameBarrier(const Barrier& a, const Barrier& b) {
 extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;
 extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold;
+extern std::function<size_t(const ncclComm*)> g_rcclDdaLLOneShotThreshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks;
 extern std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported;

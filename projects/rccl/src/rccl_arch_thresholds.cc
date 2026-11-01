@@ -430,7 +430,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [2] AllGather       -- ddaLL128Max total (DPX)
     1ULL*1024*1024,      // [3] ReduceScatter   -- beats Ring through 16M/32M at 16/32 (1M/rank);
                          //                        Ring LL128 wins from 32M/64M (DPX)
-    0,                   // [4] AllReduce       -- ddaLL128Max total
+    2ULL*1024*1024,      // [4] AllReduce       -- Ring LL128 beats the two-shot above nRanks x 2M at 16/32 ranks (DPX)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -455,6 +455,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 256ULL*1024,
+  // From 16 ranks the LL one-shot pushes the whole message to every peer, so the LL two-shot wins above 4K (DPX).
+  .ddaArLLOneShotMinRanks = 16,
+  .ddaArLLOneShotMaxBytes = 4ULL*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,

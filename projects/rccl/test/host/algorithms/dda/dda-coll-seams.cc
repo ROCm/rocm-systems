@@ -20,6 +20,7 @@ RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) 
 static size_t DefaultDdaLLThreshold(const ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
 static size_t DefaultDdaLL128Threshold(const ncclComm*, ncclFunc_t) { return 0; }  // DDA_LL128 unset, no table: off
 static size_t DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }
+static size_t DefaultDdaLLOneShotThreshold(const ncclComm*) { return (size_t)rcclParamDdaLLOneShotThreshold(); }
 static size_t DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }
 static int DefaultDdaFabricVmmBlocks(const ncclComm* comm) { return comm != nullptr ? comm->ddaFabricMaxBlocks : 0; }
 static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
@@ -39,6 +40,7 @@ static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t dat
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
+std::function<size_t(const ncclComm*)> g_rcclDdaLLOneShotThreshold = DefaultDdaLLOneShotThreshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
 std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
 std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
@@ -46,6 +48,7 @@ std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLLTwoShotThreshold(comm); }
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm) { return g_rcclDdaLLOneShotThreshold(comm); }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128TwoShotThreshold(comm); }
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) { return g_rcclDdaFabricVmmBlocks(comm); }
 bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
@@ -57,6 +60,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
   g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
   g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
+  g_rcclDdaLLOneShotThreshold = DefaultDdaLLOneShotThreshold;
   g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
   g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
   g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
