@@ -1143,6 +1143,14 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_AG_THREADS``
+        | Threads per block for the DDA LL128 AllGather kernel (gfx1250). When ``0``
+          (default), the block size follows the bytes each rank pushes: 128 threads
+          up to 4 MiB, 256 up to 16 MiB, and 512 above.
+      - | ``0``: Pick the block size automatically (default).
+        | ``N``: Use ``N`` threads per block. ``N`` must be a multiple of 32 up to
+          1024; any other value falls back to the automatic choice.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
