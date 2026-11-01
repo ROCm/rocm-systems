@@ -13,7 +13,7 @@
 
 #include <cstddef>
 
-int ncclSymkModelCtasEnvOverride();
+int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId);
 
 struct ncclSymkLsaEstimate {
   double ctaSelectionTimeUs;
