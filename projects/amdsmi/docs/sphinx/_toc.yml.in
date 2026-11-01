@@ -67,6 +67,8 @@ subtrees:
     title: Reliability, availability, serviceability (RAS)
   - file: conceptual/test-design.md
     title: Test suite design
+  - file: conceptual/apu-identification-design.md
+    title: APU identification design
 
 - caption: Tutorials
   entries:
