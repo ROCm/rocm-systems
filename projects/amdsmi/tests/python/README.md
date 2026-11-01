@@ -151,6 +151,8 @@ Notes:
 | `ROCM_HOME` | ROCm install root, used when `AMDSMI_PATH` is unset. |
 | `ROCM_PATH` | Fallback ROCm install root (default `/opt/rocm`). |
 | `NO_COLOR` | If set, disables ANSI colors in the summary (see <https://no-color.org/>). |
+| `AMDSMI_ALLOW_DESTRUCTIVE_TESTS` | Set to `1` to run `test_memory_partition_cycle.py` and the NPS cycle in `amdsmitst`'s `TestMemoryPartitionReadWrite`, which stage NPS modes and unload and reload amdgpu. Needs root with CAP_SYS_MODULE, modprobe in /usr/sbin or /sbin, and amdgpu loaded as a module with no other user; with the flag set, a missing requirement fails before anything is staged. Skipped otherwise. See [Memory-partition coverage](../README.md#memory-partition-coverage). |
+| `AMDSMI_TEST_ALWAYS_RELOAD` | Set to `1`, with the variable above, to reload amdgpu even when a mode was rejected or already active. For debugging. |
 
 The resolved path must contain the `amdsmi` package. If a system-installed
 `amdsmi` shadows the intended build, the runner prints an explicit remediation

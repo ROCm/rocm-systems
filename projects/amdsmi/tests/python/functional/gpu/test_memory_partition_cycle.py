@@ -27,20 +27,23 @@ phase below therefore opens its own AmdsmiSession rather than caching a handle.
 
 Requirements
 ------------
-- Root privileges  (modprobe requires root)
-- kmod installed   (modprobe must be on PATH, only if AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1)
-- No GPU workloads running during the run
-- AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1  (test_cycle_memory_partition_modes only --
-  without it, every mode is still staged and its status checked, but the
-  driver is never reloaded, so nothing is actually applied or verified)
+- Root privileges with CAP_SYS_MODULE  (modprobe loads and unloads amdgpu)
+- kmod installed   (modprobe in /usr/sbin or /sbin)
+- amdgpu loaded as a module, not built into the kernel
+- No other process holding amdgpu (GPU workloads, display servers, agents)
+- AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1  (both tests skip without it: with current
+  library and amdgpu releases a staged mode cannot be cancelled, only applied by
+  the next driver reload, so staging one without reloading leaves it for whoever
+  reloads next)
+
+With the flag set, an unmet requirement fails the test before any mode is staged.
 
 Usage
 -----
   1. Install amd-smi-lib & amd-smi-lib-test packages
-  2. sudo /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py \
+  2. sudo AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 \
+         /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py \
          -k test_cycle_memory_partition_modes -v
-     Add AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 to also reload the driver and verify
-     each mode was actually applied.
 """
 
 import os
@@ -60,15 +63,24 @@ _DEVICE_POLL_SEC = 2
 # A modprobe stuck in the driver stays in uninterruptible sleep and ignores
 # SIGKILL, so the reap after a timeout needs its own bound.
 _REAP_TIMEOUT_SEC = 10
+# Rounds the accelerator profile restore makes; BUSY is retried.
+_PROFILE_ATTEMPTS = 10
+_PROFILE_RETRY_SEC = 2
+
+# modprobe runs from a fixed directory with a fixed environment, so neither PATH nor
+# variables such as MODPROBE_OPTIONS from the caller (for example through sudo -E) apply.
+_MODPROBE_DIRS = "/usr/sbin:/sbin"
+_MODPROBE_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
+_CAP_SYS_MODULE = 16
+_AMDGPU_REFCNT = "/sys/module/amdgpu/refcnt"
+_AMDGPU_INITSTATE = "/sys/module/amdgpu/initstate"
 
 # Debug: reload even when the mode was rejected or already active. Only takes
-# effect alongside AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 below -- that gate is
-# checked first everywhere this is read, so this alone never touches modprobe.
+# effect alongside AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 below -- without that gate
+# every test here skips, so this alone never touches modprobe.
 _ALWAYS_RELOAD = os.environ.get("AMDSMI_TEST_ALWAYS_RELOAD") == "1"
 
-# Opt-in: test_cycle_memory_partition_modes unloads/reloads amdgpu on live
-# hardware. Without this, it still stages every mode and checks the status
-# each write returns, but never actually reloads the driver.
+# Opt-in: every test here stages modes and reloads amdgpu on live hardware.
 _ALLOW_DESTRUCTIVE_TESTS = os.environ.get("AMDSMI_ALLOW_DESTRUCTIVE_TESTS") == "1"
 
 _BANNER_WIDTH = 70
@@ -80,6 +92,43 @@ _NPS_MODES = {
     for name, partition_type, _ in common.MEMORY_PARTITION_TYPES
     if name != "UNKNOWN"
 }
+
+
+def _modprobe_path():
+    """modprobe in /usr/sbin or /sbin, or None when kmod is not installed there."""
+    return shutil.which("modprobe", path=_MODPROBE_DIRS)
+
+
+def _run_modprobe(*args):
+    """Start ``modprobe *args``; the only process this module launches."""
+    return subprocess.Popen([_modprobe_path(), *args], env=_MODPROBE_ENV)
+
+
+def _read_first_line(path):
+    """First line of *path*, or "" when it cannot be read."""
+    try:
+        with open(path, encoding="ascii") as f:
+            return f.readline().strip()
+    except OSError:
+        return ""
+
+
+def _amdgpu_refcount():
+    """amdgpu's module refcount, or -1 when it is built in, not loaded, or unreadable."""
+    value = _read_first_line(_AMDGPU_REFCNT)
+    return int(value) if value.isdigit() else -1
+
+
+def _can_load_modules():
+    """True when this process holds CAP_SYS_MODULE."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("CapEff:"):
+                    return bool(int(line.split()[1], 16) >> _CAP_SYS_MODULE & 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    return False
 
 
 class AmdsmiSession:
@@ -107,6 +156,12 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         if os.geteuid() != 0:
             raise unittest.SkipTest("Memory partition tests need root/admin")
         cls.common = common.Common(common.verbose)
+
+    def setUp(self):
+        # The mode that may be staged for the next reload, or None; only a reload clears it.
+        self._staged_mode = None
+        # The accelerator profiles are restored only on top of the restored memory partition.
+        self._memory_restored = False
 
     def tearDown(self):
         try:
@@ -226,10 +281,41 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
     # -- policy -------------------------------------------------------------
 
     @staticmethod
+    def _reload_blocker():
+        """Why amdgpu cannot be reloaded, or None. Callers must hold no open session."""
+        if not _modprobe_path():
+            return "modprobe not found in /usr/sbin or /sbin (install kmod)"
+        if not _can_load_modules():
+            return "this process cannot load kernel modules (needs root with CAP_SYS_MODULE)"
+        if _read_first_line(_AMDGPU_INITSTATE) != "live":
+            return (
+                "amdgpu is not a loaded module (it may be built into the kernel), "
+                "so it cannot be reloaded"
+            )
+        refcount = _amdgpu_refcount()
+        if refcount < 0:
+            return "amdgpu refcnt is unreadable"
+        if refcount:
+            return (
+                f"amdgpu is in use by another process (refcnt {refcount}); "
+                "the NPS cycle needs the GPUs idle"
+            )
+        return None
+
+    def _require_destructive(self):
+        """Skip without the flag; with it, fail before staging if amdgpu cannot be reloaded."""
+        if not _ALLOW_DESTRUCTIVE_TESTS:
+            self.skipTest(
+                "AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; a staged mode would wait for the "
+                "next driver reload by anyone"
+            )
+        blocker = self._reload_blocker()
+        if blocker:
+            self.fail(f"{blocker}; nothing was staged")
+
+    @staticmethod
     def _reload_skip_reason(mode, staged, current):
         """Why a reload would change nothing, or None when one is needed."""
-        if not _ALLOW_DESTRUCTIVE_TESTS:
-            return "AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staged only, skipping driver reload"
         if _ALWAYS_RELOAD:
             return None
         if not staged:
@@ -240,11 +326,11 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
 
     # -- mutations ----------------------------------------------------------
 
-    def _stage_mode(self, mode):
+    def _stage_mode(self, mode, active):
         """Stage *mode* on every device. False when no device accepted it.
 
-        A hardware-dependent rejection is an expected status rather than a test
-        failure.
+        *active* is the mode the devices run now. A hardware-dependent rejection is
+        an expected status rather than a test failure.
         """
         # INVAL is how a device declines a mode it cannot do, and a handle without
         # the partition APIs answers NOT_SUPPORTED; neither is a test failure.
@@ -253,13 +339,26 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
             amdsmi.AmdSmiStatus.INVAL,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
         ]
+        was_staged = self._staged_mode
+        # The library skips a request for the active mode. Any other may stay staged even
+        # when a later device fails the sweep, so assume it is until the sweep returns.
+        if mode != active:
+            self._staged_mode = mode
         successfully_set = self._for_each_gpu(
             "amdsmi_set_gpu_memory_partition_mode",
             lambda gpu: amdsmi.amdsmi_set_gpu_memory_partition_mode(gpu, _NPS_MODES[mode]),
             accept=accept,
             params=f", memory_partition_type={mode}",
         )
+        if not successfully_set:
+            self._staged_mode = was_staged
         return bool(successfully_set)
+
+    def _staged_warning(self):
+        """What a failed reload leaves behind, for the failure message."""
+        if self._staged_mode is None:
+            return ""
+        return f"; {self._staged_mode} is still staged, and the next amdgpu load applies it"
 
     def _reload_driver(self):
         """Unload then reload amdgpu. shell=False, so there is no injection surface.
@@ -269,39 +368,60 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         may hold /dev/dri descriptors that would make ``modprobe -r`` fail with
         "module in use".
         """
+        self.assertTrue(
+            _ALLOW_DESTRUCTIVE_TESTS, "reloading amdgpu needs AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1"
+        )
         self._separator("Reload driver")
         with AmdsmiSession():
             expected = self._physical_gpu_count()
+        blocker = self._reload_blocker()
+        if blocker:
+            self.fail(f"{blocker}{self._staged_warning()}")
         self.common.print("  Reloading driver, this may take some time...")
         started = time.monotonic()
-        for argv in (["modprobe", "-r", "amdgpu"], ["modprobe", "amdgpu"]):
-            command = " ".join(argv)  # log text only; never handed to a shell
-            self.common.print(f"  {command} (timeout {_MODPROBE_TIMEOUT_SEC}s)")
-            leg_started = time.monotonic()
-            proc = subprocess.Popen(argv)
-            try:
-                returncode = proc.wait(timeout=_MODPROBE_TIMEOUT_SEC)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                try:
-                    proc.wait(timeout=_REAP_TIMEOUT_SEC)
-                except subprocess.TimeoutExpired:
-                    self.fail(
-                        f"{command} timed out after {_MODPROBE_TIMEOUT_SEC}s and ignored "
-                        f"SIGKILL: the module load is stuck inside the driver and cannot be "
-                        f"cancelled, so the node needs a reboot. See dmesg and "
-                        f"/sys/module/amdgpu/initstate."
-                    )
-                self.fail(f"{command} timed out after {_MODPROBE_TIMEOUT_SEC}s")
-            if returncode != 0:
-                self.fail(f"{command} exited {returncode}; check dmesg")
-            self.common.print(f"    took {time.monotonic() - leg_started:.1f}s")
+        error = self._modprobe("-r", "amdgpu")
+        if error:
+            self.fail(f"{error}{self._staged_warning()}")
+        # Never leave the driver unloaded: try the load twice, unless modprobe is stuck.
+        error = self._modprobe("amdgpu")
+        if error and "SIGKILL" not in error:
+            error = self._modprobe("amdgpu")
+        if error:
+            staged = f" up in {self._staged_mode}" if self._staged_mode else ""
+            self.fail(
+                f"{error}; amdgpu is not loaded, and its next load may bring the GPUs{staged}"
+            )
         probe_started = time.monotonic()
         self._wait_for_devices(expected)
+        self._staged_mode = None
         self.common.print(
             f"  {expected} physical GPUs re-enumerated in {time.monotonic() - probe_started:.1f}s"
         )
         self.common.print(f"  Driver reloaded in {time.monotonic() - started:.1f}s total")
+
+    def _modprobe(self, *args):
+        """Run ``modprobe *args`` to completion; return an error message, or None."""
+        command = " ".join(("modprobe", *args))  # log text only; never handed to a shell
+        self.common.print(f"  {command} (timeout {_MODPROBE_TIMEOUT_SEC}s)")
+        leg_started = time.monotonic()
+        proc = _run_modprobe(*args)
+        try:
+            returncode = proc.wait(timeout=_MODPROBE_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=_REAP_TIMEOUT_SEC)
+            except subprocess.TimeoutExpired:
+                return (
+                    f"{command} timed out after {_MODPROBE_TIMEOUT_SEC}s and ignored SIGKILL: "
+                    "it is stuck inside the driver and cannot be cancelled, so the node needs "
+                    f"a reboot. See dmesg and {_AMDGPU_INITSTATE}"
+                )
+            return f"{command} timed out after {_MODPROBE_TIMEOUT_SEC}s"
+        if returncode != 0:
+            return f"{command} exited {returncode}; check dmesg"
+        self.common.print(f"    took {time.monotonic() - leg_started:.1f}s")
+        return None
 
     def _wait_for_devices(self, expected):
         """Block until *expected* physical GPUs (sockets) re-enumerate after a reload.
@@ -332,23 +452,24 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         """Put the device back on the memory partition mode the run started with."""
         self._separator(f"Restore memory partition ({mode})")
         if not self.common.check_amdgpu_driver():
+            if self._staged_mode is not None:
+                self.fail(
+                    f"amdgpu is not loaded; its next load may apply {self._staged_mode}, not {mode}"
+                )
             self.common.print(f"  amdgpu is not loaded; cannot restore {mode} -- node left as-is")
             return
-        if not _ALLOW_DESTRUCTIVE_TESTS:
-            # No reload ever ran, so the active mode says nothing about what is
-            # staged. Always re-stage `mode` so a later reload (by anyone) comes
-            # up on it, even if the run aborted before reaching its own restage.
-            if not self._stage_mode(mode):
-                self.fail(f"could not stage restore back to {mode}")
-            self.common.print(f"  staged {mode}; no reload performed (destructive tests disabled)")
-            return
-        if self._agreed_mode(self._read_modes()) == mode and not _ALWAYS_RELOAD:
+        if self._staged_mode is not None:
+            # Re-requesting the active mode would not cancel it, so apply it first.
+            self._reload_driver()
+        active = self._agreed_mode(self._read_modes())
+        if active == mode and not _ALWAYS_RELOAD:
             self.common.print(f"  already on {mode}; nothing to restore")
         else:
-            if not self._stage_mode(mode):
+            if not self._stage_mode(mode, active):
                 self.fail(f"could not stage restore back to {mode}")
             self._reload_driver()
             self._assert_all_on(self._read_modes(), mode, "restore failed")
+        self._memory_restored = True
 
     def _restore_accelerator_profiles(self, profiles):
         """Re-apply the accelerator profiles captured before the cycle.
@@ -360,29 +481,43 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         if not profiles:
             return
         self._separator("Restore accelerator partition")
-        if not self.common.check_amdgpu_driver():
-            self.common.print("  amdgpu is not loaded; cannot restore the accelerator profile")
+        if not self._memory_restored:
+            self.common.print(
+                "  memory partition was not restored; the accelerator profile is not restored"
+            )
             return
         self.common.print(f"  Restoring : {self._describe_profiles(profiles)}")
-        wanted = iter(profiles)
-        # Handles without a profile are skipped below, so only a handle that
-        # lacks the API entirely may decline the write.
-        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
-        with AmdsmiSession() as gpus, self.common.status_sweep():
-            for i, gpu in enumerate(gpus):
-                current = amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpu)
-                if self._profile_of(current) is None:
-                    continue
-                target = next(wanted, None)
-                if target is None:
+        # Shared rounds: read every GPU, set each one that differs, then wait once. A profile
+        # change replaces the partition devices, so every round opens a new session.
+        current = []
+        for attempt in range(1, _PROFILE_ATTEMPTS + 1):
+            with AmdsmiSession() as gpus:
+                owners = []  # (handle, profile) for each handle that owns a profile
+                for gpu in gpus:
+                    profile = self._profile_of(
+                        amdsmi.amdsmi_get_gpu_accelerator_partition_profile(gpu)
+                    )
+                    if profile is not None:
+                        owners.append((gpu, profile))
+                current = [profile for _, profile in owners]
+                if current == profiles or attempt == _PROFILE_ATTEMPTS:
                     break
-                index, name = target
-                msg = (
-                    "\t### amdsmi_set_gpu_accelerator_partition_profile("
-                    f"gpu={i}, profile={name}, index={index}):"
-                )
-                with self.common.expect_status(msg, accept):
-                    amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpu, index)
+                for i, ((gpu, profile), (index, name)) in enumerate(zip(owners, profiles)):
+                    if profile[0] == index:
+                        continue
+                    self.common.print(
+                        "\t### amdsmi_set_gpu_accelerator_partition_profile("
+                        f"gpu={i}, profile={name}, index={index}): attempt {attempt}"
+                    )
+                    try:
+                        amdsmi.amdsmi_set_gpu_accelerator_partition_profile(gpu, index)
+                    except amdsmi.AmdSmiLibraryException as e:
+                        if e.get_error_code() != amdsmi.AmdSmiStatus.BUSY:
+                            self.fail(f"restoring the {name} accelerator profile failed: {e}")
+            time.sleep(_PROFILE_RETRY_SEC)
+        self.assertEqual(
+            current, profiles, f"accelerator profiles not restored after {_PROFILE_ATTEMPTS} rounds"
+        )
 
     def _assert_all_on(self, modes, mode, context):
         """Fail unless every handle that reported a mode reports *mode*."""
@@ -401,21 +536,25 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
 
         Documented in docs/conceptual/partition.md: the set call alone does not apply
         the change, and the system keeps the old configuration until the next driver
-        load. Nothing here reloads, so nothing should change.
+        load. Nothing here reloads, so nothing should change until the restore.
         """
         self.common.print_func_name("")
+        self._require_destructive()
         self._separator("Set without reload")
 
         before = self._read_modes()
         original = self._agreed_mode(before)
-        # A staged mode stays pending until the next driver load, re-staging the original
-        # clears it. Registered before any set so a failure below cannot leave it armed.
-        if original in _NPS_MODES:
-            self.addCleanup(self._stage_mode, original)
+        if original not in _NPS_MODES:
+            self.skipTest(f"No settable memory partition mode to restore: {before}")
+        accelerator = self._read_accelerator_profiles()
+        # Registered before any set so a failure below cannot leave a mode staged.
+        # LIFO: the reload resets the accelerator profile, so it is restored last.
+        self.addCleanup(self._restore_accelerator_profiles, accelerator)
+        self.addCleanup(self._restore_memory_partition, original)
 
         for mode in _NPS_MODES:
             with self.subTest(mode=mode):
-                staged = self._stage_mode(mode)
+                staged = self._stage_mode(mode, original)
                 self.assertEqual(
                     self._read_modes(),
                     before,
@@ -428,20 +567,14 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
 
     def test_cycle_memory_partition_modes(self):
         self.common.print_func_name("")
-        if not _ALLOW_DESTRUCTIVE_TESTS:
-            self.common.print(
-                "  AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staging + status checks run, but the "
-                "driver is never reloaded, so nothing is actually applied or verified.\n"
-                "  Set AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1 to also reload the driver and verify "
-                "each mode."
-            )
-        elif not shutil.which("modprobe"):
-            self.skipTest("Cycling memory partition modes needs modprobe (install kmod)")
+        self._require_destructive()
 
         # -- Phase 1: what the device reports today -------------------------
         self._separator("Current memory partition")
         modes = self._read_modes()
         original = self._agreed_mode(modes)
+        if original not in _NPS_MODES:
+            self.skipTest(f"No settable memory partition mode to restore: {modes}")
         caps = self._read_caps()
         accelerator = self._read_accelerator_profiles()
 
@@ -455,25 +588,20 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         self.common.print(f"  Current mode : {original} (on {len(modes)} sockets)")
         self.common.print(f"  Accelerator  : {self._describe_profiles(accelerator)}")
         self.common.print(f"  Attempting   : {', '.join(candidates)}")
-        if original is None and modes:
-            self.common.print(f"  Devices disagree on the current mode: {modes}")
 
-        if original in _NPS_MODES:
-            # Cleanups run LIFO, so registering the accelerator profile first runs
-            # it last -- the memory reload resets it to the new mode's default.
-            self.addCleanup(self._restore_accelerator_profiles, accelerator)
-            # A no-op when nothing changed, so a device that rejects every mode
-            # is never reloaded on the way out.
-            self.addCleanup(self._restore_memory_partition, original)
-        elif original is not None:
-            self.common.print(f"  {original!r} is not a settable mode; it cannot be restored")
+        # Cleanups run LIFO, so registering the accelerator profile first runs
+        # it last -- the memory reload resets it to the new mode's default.
+        self.addCleanup(self._restore_accelerator_profiles, accelerator)
+        # A no-op when nothing changed, so a device that rejects every mode
+        # is never reloaded on the way out.
+        self.addCleanup(self._restore_memory_partition, original)
 
         # -- Phase 2: stage / reload / verify, once per mode ----------------
         current = original
         applied = []
         for mode in candidates:
             self._separator(f"Set memory partition -> {mode}")
-            staged = self._stage_mode(mode)
+            staged = self._stage_mode(mode, current)
 
             skipped = self._reload_skip_reason(mode, staged, current)
             if skipped:
@@ -500,10 +628,5 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
         self._separator("Summary")
         if applied:
             self.common.print(f"  Modes applied : {', '.join(applied)}")
-        elif not _ALLOW_DESTRUCTIVE_TESTS:
-            self.common.print(
-                "  AMDSMI_ALLOW_DESTRUCTIVE_TESTS not set; staged every mode but skipped "
-                "reload/verify"
-            )
         else:
             self.common.print("  No mode was settable; validated the reported status instead")
