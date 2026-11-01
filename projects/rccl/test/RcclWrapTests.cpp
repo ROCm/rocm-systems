@@ -2965,7 +2965,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
 
 // The rank-scaled caps from the 8-64 rank H13 sweep (AICOMRCCL-1756): below 8 ranks
 // the totals stay in force, from 8 ranks each tier grows with the comm and is
-// clipped at 256 MiB.
+// clipped at 256 MiB (112 MiB for ReduceScatter).
 TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -2982,7 +2982,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 64 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
@@ -2992,8 +2992,10 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
-                EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), std::min(n * 8 * MiB, 112 * MiB))
+                    << nRanks;
+                EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB)
+                    << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
