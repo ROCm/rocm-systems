@@ -807,8 +807,9 @@ complete_signal_less_dispatch(kfd::signal_less_hub_t::proven&& proven)
     }
 }
 
+template <typename CompletionT>
 bool
-submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
+submit_to_task_group(CompletionT& proven)
 {
     if(registration::get_fini_status() != 0) return false;
 
@@ -820,7 +821,7 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
 
     // task_group_t::async takes a std::function, which must be copy-constructible;
     // the payload is move-only, so it travels in a shared_ptr.
-    auto _held = std::make_shared<kfd::signal_less_hub_t::proven>(std::move(proven));
+    auto _held = std::make_shared<CompletionT>(std::move(proven));
 
     // Counted before the submit, not inside the task: `inflight` is what every drain polls, so
     // work that is queued but not yet counted is work a drain reports as absent.
@@ -829,7 +830,10 @@ submit_to_task_group(kfd::signal_less_hub_t::proven& proven)
         // Armed first: a throwing tool callback must not strand the counter every drain polls.
         auto _dtor = common::scope_destructor{
             [&mon]() { mon.inflight.fetch_sub(1, std::memory_order_release); }};
-        complete_signal_less_dispatch(std::move(*_held));
+        if constexpr(std::is_same_v<CompletionT, kfd::signal_less_hub_t::proven>)
+            complete_signal_less_dispatch(std::move(*_held));
+        else
+            kfd::run_complete_signal_less_batch(*_held, complete_signal_less_dispatch);
     });
     return true;
 }
@@ -854,9 +858,11 @@ is_dispatch_packet(const rocprofiler_packet& pkt)
 // keys" is answered here. If ANY packet fails, the WHOLE batch keeps the signal
 // path.
 //
-// keys_out is indexed BY PACKET INDEX, so registration uses the exact keys the
-// hub validated here rather than re-deriving them from a second doorbell lookup
-// that could observe a different generation.
+// keys_out is indexed BY PACKET INDEX, so registration uses this ownership
+// snapshot instead of re-deriving keys from a second doorbell lookup. Eligibility
+// checks slot quarantine and the admission latch (lock-free in the common case);
+// registration validates keys atomically before publication and replays signal
+// instrumentation on refusal.
 bool
 signal_less_batch_eligible(Queue*                                            queue,
                            const rocprofiler_packet*                         packets,
@@ -883,16 +889,16 @@ signal_less_batch_eligible(Queue*                                            que
     const uint32_t _slot = (*_w)->slot;
 
     keys_out->assign(num_packets, std::nullopt);
-    auto _flat = std::vector<kfd::correlation_key>{};
+    size_t dispatch_count = 0;
     for(uint64_t i = 0; i < num_packets; ++i)
     {
         if(!is_dispatch_packet(packets[i])) continue;
         auto _key = kfd::correlation_key{
             _slot, static_cast<uint32_t>((base_pkt_index + i) & 0xFFFFFFFFULL), _gpu};
         (*keys_out)[i] = _key;
-        _flat.emplace_back(_key);
+        ++dispatch_count;
     }
-    if(_flat.empty())
+    if(dispatch_count == 0)
     {
         keys_out->clear();
         return false;
@@ -903,7 +909,7 @@ signal_less_batch_eligible(Queue*                                            que
     // doorbell_tls handoff process_doorbell_impl set before calling the interceptor.
     auto*      _st       = get_doorbell_tls().state;
     const bool _eligible = kfd::owner_registry().slot_uniquely_owned(_gpu, _slot) &&
-                           kfd::signal_less_hub().can_register_batch(_flat) &&
+                           kfd::signal_less_hub().can_register_batch(_gpu, _slot) &&
                            !(_st != nullptr && _st->admission_closed);
 
     if(_eligible)
@@ -1159,7 +1165,7 @@ write_interceptor(Queue*                                queue,
         return;
     }
 
-    ROCP_INFO << fmt::format("write_interceptor called with pkt_count={}", pkt_count);
+    ROCP_TRACE << fmt::format("write_interceptor called with pkt_count={}", pkt_count);
 
     auto _contexts = context::get_active_contexts(context_filter);
 
@@ -1516,15 +1522,14 @@ write_interceptor(Queue*                                queue,
 
         // Register the whole batch BEFORE the writer publishes any packet, so a
         // firmware record can never arrive for a dispatch the hub has not seen.
-        // Cap-evicted closed-window entries leave via _evicted, released here AFTER
-        // m_mu is dropped (the hub's no-destroy-under-lock contract).
+        // Admission never evicts, so nothing is released here.
         const auto _signal_less_count = _signal_less_regs.size();
-        auto       _evicted           = std::vector<kfd::signal_less_hub_t::leaked>{};
         if(_signal_less_batch &&
-           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs), _evicted))
+           !kfd::signal_less_hub().register_batch(std::move(_signal_less_regs)))
         {
-            // Reachable on a slot quarantined between eligibility and here, or the
-            // per-GPU cap exceeded with no eligible victim. The batch skipped its
+            // Reachable when the slot was quarantined or the process-wide disable
+            // latch was set between eligibility and here, or on a live-key collision
+            // (same key already PENDING under an open window). The batch skipped its
             // signal instrumentation, so replay exactly the !_signal_less_batch signal
             // path per dispatch and fall through to the normal signal-path completion.
             // No id retirement here: register_batch did not consume _signal_less_regs on
@@ -1550,25 +1555,20 @@ write_interceptor(Queue*                                queue,
             }
             // Clear BEFORE the post-loop block so it builds the async waiter unchanged.
             _signal_less_batch = false;
-            ROCP_WARNING << "KFD dispatch-log: signal-less batch registration refused; falling "
-                            "back to the signal path for these dispatches";
+            // No record is lost (the signal path completes these), so this is
+            // informational, and it only fires on the rare quarantine/disable/
+            // collision races: log the 1st, 2nd, 4th, 8th, ... refusal, not every
+            // one. The exact total is in the register-refused counter.
+            static auto _refusals = std::atomic<uint64_t>{0};
+            const auto  _nth      = _refusals.fetch_add(1, std::memory_order_relaxed) + 1;
+            ROCP_WARNING_IF((_nth & (_nth - 1)) == 0) << fmt::format(
+                "KFD dispatch-log: signal-less batch registration refused ({} batch(es) so far); "
+                "falling back to the signal path for these dispatches",
+                _nth);
         }
         else if(_signal_less_batch)
         {
             kfd::note_signal_less(kfd::signal_less_counter::entry_registered, _signal_less_count);
-        }
-
-        // Cap eviction is loud accepted coverage loss: count it, warn (rate-limited by
-        // the census cadence), and latch losses (INV-L1) before any finalize can see
-        // the ledgered ids. Off-lock; _evicted's payloads release at scope end.
-        if(!_evicted.empty())
-        {
-            kfd::note_signal_less(kfd::signal_less_counter::cap_evicted, _evicted.size());
-            kfd::note_signal_less_losses();
-            ROCP_WARNING << fmt::format(
-                "KFD dispatch-log: per-GPU hub cap evicted {} closed-window entry(ies); those "
-                "dispatches emit no record",
-                _evicted.size());
         }
 
         // A signal-less batch has no completion signal to wait on.
@@ -1582,7 +1582,7 @@ write_interceptor(Queue*                                queue,
             current_signal_value =
                 get_core_table()->hsa_signal_load_scacquire_fn(last_completion_signal);
 
-            ROCP_INFO << fmt::format(
+            ROCP_TRACE << fmt::format(
                 "  Enqueued batch with completion signal {{.handle={}}} with value {}",
                 last_completion_signal.handle,
                 current_signal_value);
@@ -1759,11 +1759,11 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     const uint64_t pkt_count = drained;
     const uint64_t scan_end  = scan_pos + drained;
 
-    ROCP_INFO << fmt::format("{} :: pkt_count={} (scan_pos={}, scan_end={})",
-                             __FUNCTION__,
-                             pkt_count,
-                             scan_pos,
-                             scan_end);
+    ROCP_TRACE << fmt::format("{} :: pkt_count={} (scan_pos={}, scan_end={})",
+                              __FUNCTION__,
+                              pkt_count,
+                              scan_pos,
+                              scan_end);
 
     // A tool's enqueue callback runs inside write_interceptor below and may dispatch again, re-
     // entering this function on the same thread. Save the outer frame's handoff record and put it
@@ -2319,6 +2319,13 @@ bool
 submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p)
 {
     return hsa::queue_interposition::submit_to_task_group(p);
+}
+
+bool
+submit_complete_signal_less_dispatch(signal_less_batch_t& batch)
+{
+    if(batch.empty()) return true;
+    return hsa::queue_interposition::submit_to_task_group(batch);
 }
 
 void
