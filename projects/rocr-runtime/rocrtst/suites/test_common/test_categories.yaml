@@ -135,9 +135,6 @@ test_categories:
       - "rocrtstFunc.Queue_Create_Batch_Test"
       - "rocrtstFunc.Queue_Create_SDMA_Create_Destroy_Test"
       - "rocrtstFunc.Queue_Create_Invalid_Args_Test"
-      - "rocrtstFunc.TrapHandler_NoTrap"
-      - "rocrtstFunc.TrapHandler_Abort"
-      - "rocrtstFunc.TrapHandler_Generic"
       - "rocrtstNeg.Memory_Negative_Tests"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
@@ -145,9 +142,32 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
+      # Moved to the "isolated" category below. Listed here as well so that a
+      # pattern added later cannot pull them back into this process.
+      - "rocrtstFunc.TrapHandler_NoTrap"
+      - "rocrtstFunc.TrapHandler_Abort"
+      - "rocrtstFunc.TrapHandler_Generic"
     labels:
       - "standard"
       - "pr"
+
+  isolated:
+    description: >-
+      Tests that can abort or hang the process they run in. Each category is one
+      ctest entry running one binary, so a test that aborts takes down every
+      other result in its category. These run in their own process to bound that
+      blast radius. Carries the same labels as "standard" so that whatever label
+      CI selects on for the per-PR run also selects this category.
+    test_patterns:
+      - "rocrtstFunc.TrapHandler_NoTrap"
+      - "rocrtstFunc.TrapHandler_Abort"
+      - "rocrtstFunc.TrapHandler_Generic"
+    exclude:
+      - "rocrtstFunc.Memory_Max_Mem"
+    labels:
+      - "standard"
+      - "pr"
+      - "isolated"
 
   comprehensive:
     description: "Extended testing - Run nightly (target: < 2 hours)"
@@ -391,6 +411,7 @@ exclude_gpu:
     labels:
       - "quick"
       - "standard"
+      - "isolated"
       - "comprehensive"
       - "full"
       - "ex_gpu_gfx950"
@@ -401,5 +422,6 @@ execution_settings:
   category_timeouts:
     quick: 300
     standard: 1800
+    isolated: 600
     comprehensive: 7200
     full: 14400
