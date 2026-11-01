@@ -165,7 +165,8 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint32_t gridId = 0, uint32_t numGrids = 0,
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
                                   uint32_t firstDevice = 0,
-                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr);
+                                  const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr,
+                                  const amd::CUEnableConfig* cuEnableConfig = nullptr);
 
 // ================================================================================================
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
@@ -688,7 +689,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
                             size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
                             hipEvent_t stopEvent, int flags, dim3 clusterDim = {1, 1, 1},
                             bool clusterDimsSpecified = false,
-                            const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr) {
+                            const amd::DynDataPrefetchConfig* dynDataPrefetchConfig = nullptr,
+                            const amd::CUEnableConfig* cuEnableConfig = nullptr) {
   if (hostFunction == nullptr) {
     return hipErrorInvalidDeviceFunction;
   }
@@ -736,7 +738,7 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   }
 
   return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
-                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig);
+                                flags, 0, 0, 0, 0, 0, 0, dynDataPrefetchConfig, cuEnableConfig);
 }
 
 // ================================================================================================
