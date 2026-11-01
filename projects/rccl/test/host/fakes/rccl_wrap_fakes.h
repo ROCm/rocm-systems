@@ -17,6 +17,7 @@
 
 #include "nccl.h"
 #include "nccl_common.h"
+#include "rccl_common.h"  // rcclA2aInPlaceSite
 
 struct ncclComm;
 struct ncclReg;
@@ -156,6 +157,23 @@ extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThre
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;  // 0
 extern std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold;  // kDdaVmmBaseDefault, UNDRIVEN
 extern std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap;
+
+// gfx1250 in-place AllToAll helpers (rccl_common.h): CeScratchInPlace and the guard answer from these hooks
+// (default: no CE-Scratch, guard passes); the guard records what it was told. RegisteredCeRefused returns
+// g_rcclAlltoAllRegisteredCeRefused for in-place calls and false out of place.
+extern std::function<bool(const ncclComm*, const void*, const void*)> g_rcclAlltoAllCeScratchInPlace;
+extern std::function<ncclResult_t(const ncclComm*, const void*, const void*, size_t)> g_rcclAlltoAllInPlaceGuard;
+extern int g_rcclAlltoAllInPlaceGuardCalls;
+extern rcclA2aInPlaceSite g_rcclAlltoAllInPlaceGuardSite;
+extern bool g_rcclAlltoAllInPlaceGuardCapturing;
+extern bool g_rcclAlltoAllInPlaceGuardRegisteredCe;
+extern bool g_rcclAlltoAllRegisteredCeRefused;
+
+// taskAppend's CE arms: fail loud until g_rcclTaskAppendCeFaked; then rcclForceCeScratchEnabled and
+// rcclNcclAlgoEnvIsSet answer these, and the CE 2-shot cap / CE AllGather window are off.
+extern bool g_rcclTaskAppendCeFaked;
+extern bool g_rcclForceCeScratchEnabled;
+extern bool g_rcclNcclAlgoEnvIsSet;
 
 void ResetRcclWrapFakes();
 

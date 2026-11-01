@@ -327,6 +327,33 @@ void rcclNetRegCommit(struct ncclComm*, struct ncclReg*, int numSegments) {
   g_rcclNetRegCommitLastSegments = numSegments;
 }
 
+// gfx1250 in-place AllToAll helpers taskAppend and rawTaskAppend call (rccl_common.h); see rccl_wrap_fakes.h.
+static bool DefaultA2aCeScratchInPlace(const ncclComm*, const void*, const void*) { return false; }
+static ncclResult_t DefaultA2aInPlaceGuard(const ncclComm*, const void*, const void*, size_t) { return ncclSuccess; }
+std::function<bool(const ncclComm*, const void*, const void*)> g_rcclAlltoAllCeScratchInPlace =
+    DefaultA2aCeScratchInPlace;
+std::function<ncclResult_t(const ncclComm*, const void*, const void*, size_t)> g_rcclAlltoAllInPlaceGuard =
+    DefaultA2aInPlaceGuard;
+int g_rcclAlltoAllInPlaceGuardCalls = 0;
+rcclA2aInPlaceSite g_rcclAlltoAllInPlaceGuardSite = rcclA2aSiteAlltoAll;
+bool g_rcclAlltoAllInPlaceGuardCapturing = false;
+bool g_rcclAlltoAllInPlaceGuardRegisteredCe = false;
+bool g_rcclAlltoAllRegisteredCeRefused = false;
+bool rcclAlltoAllCeScratchInPlace(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
+  return g_rcclAlltoAllCeScratchInPlace(comm, sendbuff, recvbuff);
+}
+bool rcclAlltoAllRegisteredCeRefused(const ncclComm*, const void* sendbuff, const void* recvbuff) {
+  return g_rcclAlltoAllRegisteredCeRefused && sendbuff == recvbuff;
+}
+ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff, const void* recvbuff,
+                                      size_t totalBytes, rcclA2aInPlaceSite site, bool capturing, bool registeredCe) {
+  ++g_rcclAlltoAllInPlaceGuardCalls;
+  g_rcclAlltoAllInPlaceGuardSite = site;
+  g_rcclAlltoAllInPlaceGuardCapturing = capturing;
+  g_rcclAlltoAllInPlaceGuardRegisteredCe = registeredCe;
+  return g_rcclAlltoAllInPlaceGuard(comm, sendbuff, recvbuff, totalBytes);
+}
+
 void ResetRcclWrapFakes() {
   g_rcclParamDdaLL = 1;
   g_rcclParamDdaLL128 = kDdaThresholdUnset;
@@ -392,6 +419,16 @@ void ResetRcclWrapFakes() {
   g_rcclNetGraphRegSegmentCount = DefaultNetRegSegmentCount;
   g_rcclNetRegCommitCalls = 0;
   g_rcclNetRegCommitLastSegments = 0;
+  g_rcclTaskAppendCeFaked = false;
+  g_rcclAlltoAllCeScratchInPlace = DefaultA2aCeScratchInPlace;
+  g_rcclAlltoAllInPlaceGuard = DefaultA2aInPlaceGuard;
+  g_rcclAlltoAllInPlaceGuardCalls = 0;
+  g_rcclAlltoAllInPlaceGuardSite = rcclA2aSiteAlltoAll;
+  g_rcclAlltoAllInPlaceGuardCapturing = false;
+  g_rcclAlltoAllInPlaceGuardRegisteredCe = false;
+  g_rcclAlltoAllRegisteredCeRefused = false;
+  g_rcclForceCeScratchEnabled = false;
+  g_rcclNcclAlgoEnvIsSet = false;
 }
 
 bool g_validHsaScratch = true;
@@ -435,11 +472,22 @@ void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rc
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
+// taskAppend's CE arms (src/enqueue/enqueue.cc) read the next four. They fail loud unless a test opts in with
+// g_rcclTaskAppendCeFaked; then the CE 2-shot cap is 0 and the CE AllGather window is off, and forced CE-Scratch
+// and NCCL_ALGO answer from their seams.
+bool g_rcclTaskAppendCeFaked = false;
+bool g_rcclForceCeScratchEnabled = false;
+bool g_rcclNcclAlgoEnvIsSet = false;
+static void TaskAppendCeFakedOrFailLoud(const char* fn) {
+  if (!g_rcclTaskAppendCeFaked) FailLoudUnfaked("rccl_wrap_fakes", fn);
+}
 bool rcclForceCeScratchEnabled(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
+  TaskAppendCeFakedOrFailLoud("rcclForceCeScratchEnabled");
+  return g_rcclForceCeScratchEnabled;
 }
 size_t rcclCeAr2ShotMax(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
+  TaskAppendCeFakedOrFailLoud("rcclCeAr2ShotMax");
+  return 0;
 }
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
@@ -448,10 +496,12 @@ size_t rcclCeArNonRegCap(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
 }
 bool rcclNcclAlgoEnvIsSet() {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
+  TaskAppendCeFakedOrFailLoud("rcclNcclAlgoEnvIsSet");
+  return g_rcclNcclAlgoEnvIsSet;
 }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
+  TaskAppendCeFakedOrFailLoud("rcclAllGatherCeRegisteredWindow");
+  return false;
 }
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51
