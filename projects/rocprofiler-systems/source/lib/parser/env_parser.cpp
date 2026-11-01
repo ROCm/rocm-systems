@@ -6,6 +6,8 @@
 #include "parser/schema.hpp"
 #include "parser/schema_validator.hpp"
 
+#include "common/string_utility.hpp"
+
 #include <fmt/format.h>
 
 #include <cstdlib>
@@ -51,11 +53,16 @@ env_parser::parse(const schema& config_schema) const
         {
             continue;
         }
-        const auto stored = canonical_choice(param, *value);
+        const auto text = std::string{ utility::string::trim(*value) };
+        if(param.type == param_type::enumeration_list && text.empty())
+        {
+            continue;
+        }
+        const auto stored = canonical_choice(param, text);
         if(!is_valid_value(param, stored))
         {
             result.errors.push_back(
-                fmt::format("invalid value '{}' for {}", *value, param.env->name));
+                fmt::format("invalid value '{}' for {}", text, param.env->name));
             continue;
         }
         result.values.emplace(param.id, stored);
