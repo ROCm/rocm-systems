@@ -15,26 +15,6 @@
 #define DXGI_FORMAT_P010 104
 #define GROUP_SIZE 256
 
-const static char strKernel[] =
-    "__constant sampler_t imageSampler = CLK_NORMALIZED_COORDS_FALSE | "
-    "CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST; \n"
-    "__kernel void image2imageCopy(                                            "
-    "                             \n"
-    "   __read_only image2d_t input,                                           "
-    "                             \n"
-    "   __write_only image2d_t output)                                         "
-    "                             \n"
-    "{                                                                         "
-    "                             \n"
-    "   int2 coord = (int2)(get_global_id(0), get_global_id(1));               "
-    "                             \n"
-    "   uint4 temp = read_imageui(input, imageSampler, coord);                 "
-    "                             \n"
-    "   write_imageui(output, coord, temp);                                    "
-    "                             \n"
-    "}                                                                         "
-    "                             \n";
-
 OCLDX11YUY2::OCLDX11YUY2() : OCLDX11Common() {
   _numSubTests = 4;
   blockSizeX = GROUP_SIZE;
@@ -45,7 +25,6 @@ OCLDX11YUY2::~OCLDX11YUY2() {}
 
 void OCLDX11YUY2::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   dxDX11Texture = 0;
-  clImage2DOut = 0;
   _openTest = test;
   // Initialize random number seed
   srand((unsigned int)time(NULL));
@@ -72,8 +51,6 @@ void OCLDX11YUY2::open(unsigned int test, char* units, double& conversion, unsig
     }
   }
 
-  CompileKernel();
-  AllocateOpenCLImage();
 }
 
 void OCLDX11YUY2::run(void) {
@@ -139,22 +116,6 @@ void OCLDX11YUY2::run(void) {
   testInterop();
 }
 
-void OCLDX11YUY2::AllocateOpenCLImage() {
-  cl_int status = 0;
-
-  cl_image_format format{};
-  format.image_channel_order = CL_R;
-  format.image_channel_data_type =
-      (dxFormat == DXGI_FORMAT_NV12) ? CL_UNSIGNED_INT8 : CL_UNSIGNED_INT16;
-  cl_image_desc descr{};
-  descr.image_type = CL_MEM_OBJECT_IMAGE2D;
-  descr.image_width = WIDTH;
-  descr.image_height = HEIGHT + HEIGHT / 2;
-
-  clImage2DOut = clCreateImage(context_, CL_MEM_WRITE_ONLY, &format, &descr, NULL, &status);
-  CHECK_RESULT((status != CL_SUCCESS), "AllocateOpenCLImage() failed");
-}
-
 void OCLDX11YUY2::testInterop() {
   // alloc
   cl_int clStatus = 0;
@@ -166,12 +127,6 @@ void OCLDX11YUY2::testInterop() {
   clEnqueueAcquireD3D11ObjectsKHR(_queue, 1, &clImage2D, 0, NULL, &clEvent);
   clStatus = clWaitForEvents(1, &clEvent);
   clReleaseEvent(clEvent);
-
-  CopyOpenCLImage(clImage2D);
-  bool ImageReadWorks = CheckCLImage(clImage2D);
-  bool bKernelWorks = CheckCLImage(clImage2DOut);
-  CHECK_RESULT_NO_RETURN((ImageReadWorks != true), "CheckCLImage(clImage2D) failed");
-  CHECK_RESULT_NO_RETURN((bKernelWorks != true), "CheckCLImage(clImage2DOut) failed");
 
   cl_mem planeY = clGetPlaneFromImageAMD(context_, clImage2D, 0, &clStatus);
   CHECK_RESULT((clStatus != CL_SUCCESS),
@@ -202,68 +157,8 @@ void OCLDX11YUY2::testInterop() {
 }
 
 unsigned int OCLDX11YUY2::close(void) {
-  if (clImage2DOut) clReleaseMemObject(clImage2DOut);
   if (dxDX11Texture) dxDX11Texture->Release();
   return OCLDX11Common::close();
-}
-
-bool OCLDX11YUY2::CheckCLImage(cl_mem clImage) {
-  cl_int clStatus = 0;
-
-  size_t pitch = 0;
-  clStatus = clGetImageInfo(clImage, CL_IMAGE_ROW_PITCH, sizeof(pitch), &pitch, NULL);
-  pitch *= 2;
-
-  cl_image_format format;
-  clStatus = clGetImageInfo(clImage, CL_IMAGE_FORMAT, sizeof(format), &format, NULL);
-
-  size_t height;
-  clStatus = clGetImageInfo(clImage, CL_IMAGE_HEIGHT, sizeof(height), &height, NULL);
-
-  CHECK_RESULT_NO_RETURN(height != (HEIGHT + HEIGHT / 2),
-                         "CheckCLImage: height!=(HEIGHT+HEIGHT/2)");
-
-  char* pTempBuffer = new char[(HEIGHT + HEIGHT / 2) * pitch];
-
-  size_t origin[] = {0, 0, 0};
-  size_t region[] = {WIDTH, HEIGHT + HEIGHT / 2, 1};
-  clStatus = clEnqueueReadImage(_queue, clImage, 1, origin, region, pitch, 0, pTempBuffer, 0, 0, 0);
-
-  ::clFinish(_queue);
-
-  // test
-
-  bool bBreak = false;
-  for (int y = 0; y < HEIGHT && !bBreak; y++) {
-    char* pLine = (char*)pTempBuffer + y * pitch;
-    char* pLineUV = (char*)pTempBuffer + y * pitch + HEIGHT * pitch;
-
-    for (int x = 0; x < WIDTH; x++) {
-      if (*pLine != 0x7F)  // Y
-      {
-        bBreak = true;
-        break;
-      }
-      pLine++;
-      if (y < HEIGHT / 2 && x < WIDTH / 2) {
-        if (*pLineUV != 0x1F)  // U
-        {
-          bBreak = true;
-          break;
-        }
-        pLineUV++;
-        if (*pLineUV != 0x2F)  // V
-        {
-          bBreak = true;
-          break;
-        }
-        pLineUV++;
-      }
-    }
-  }
-  delete[] pTempBuffer;
-
-  return !bBreak;
 }
 
 bool OCLDX11YUY2::CheckCLImageY(cl_mem clImage) {
@@ -355,74 +250,6 @@ bool OCLDX11YUY2::CheckCLImageUV(cl_mem clImage) {
   delete[] pTempBuffer;
 
   return !bBreak;
-}
-
-void OCLDX11YUY2::CopyOpenCLImage(cl_mem clImageSrc) {
-  cl_int status = 0;
-
-  // Set appropriate arguments to the kernel2D
-
-  // input buffer image
-  status = clSetKernelArg(kernel_, 0, sizeof(cl_mem), &clImageSrc);
-  CHECK_RESULT((status != CL_SUCCESS),
-               "CopyOpenCLImage() failed at "
-               "clSetKernelArg(kernel_,0,sizeof(cl_mem),&clImageSrc)");
-  status = clSetKernelArg(kernel_, 1, sizeof(cl_mem), &clImage2DOut);
-  CHECK_RESULT((status != CL_SUCCESS),
-               "CopyOpenCLImage() failed at "
-               "clSetKernelArg(kernel_,1,sizeof(cl_mem),&clImage2DOut)");
-
-  // Enqueue a kernel run call.
-  size_t global_work_offset[] = {0, 0};
-  size_t globalThreads[] = {WIDTH, HEIGHT + HEIGHT / 2};
-  size_t localThreads[] = {blockSizeX, blockSizeY};
-
-  // status =
-  // clEnqueueNDRangeKernel(_queue,kernel_,2,NULL,globalThreads,localThreads,0,NULL,0);
-  status = clEnqueueNDRangeKernel(_queue, kernel_, 2, NULL, globalThreads, NULL, 0, NULL, 0);
-  CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clEnqueueNDRangeKernel");
-
-  status = clFinish(_queue);
-  CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clFinish");
-}
-
-void OCLDX11YUY2::CompileKernel() {
-  cl_int status = 0;
-
-  size_t kernelSize = sizeof(strKernel);
-  const char* strs = (const char*)&strKernel[0];
-
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strs, &kernelSize, &status);
-
-  status = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
-  if (status != CL_SUCCESS) {
-    if (status == CL_BUILD_PROGRAM_FAILURE) {
-      cl_int logStatus;
-      size_t buildLogSize = 0;
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
-                                        buildLogSize, NULL, &buildLogSize);
-      std::string buildLog;
-      buildLog.resize(buildLogSize);
-
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
-                                        buildLogSize, &buildLog[0], NULL);
-      printf("%s", buildLog.c_str());
-    }
-    return;
-  }
-  // get a kernel object handle for a kernel with the given name
-  kernel_ = _wrapper->clCreateKernel(program_, "image2imageCopy", &status);
-
-  size_t kernel2DWorkGroupSize = 0;
-  status = clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId], CL_KERNEL_WORK_GROUP_SIZE,
-                                    sizeof(size_t), &kernel2DWorkGroupSize, 0);
-
-  if ((blockSizeX * blockSizeY) > kernel2DWorkGroupSize) {
-    if (blockSizeX > kernel2DWorkGroupSize) {
-      blockSizeX = kernel2DWorkGroupSize;
-      blockSizeY = 1;
-    }
-  }
 }
 
 bool OCLDX11YUY2::formatSupported() {

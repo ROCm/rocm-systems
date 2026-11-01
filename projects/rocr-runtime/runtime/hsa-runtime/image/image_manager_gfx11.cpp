@@ -310,25 +310,7 @@ hsa_status_t ImageManagerGfx11::PopulateImageSrd(Image& image,
     uint32_t srd_height = w2.f.HEIGHT;
     uint32_t img_width  = static_cast<uint32_t>(image.desc.width) - 1;
     uint32_t img_height = static_cast<uint32_t>(image.desc.height ? image.desc.height : 1) - 1;
-    // A view may also be TALLER than the descriptor it was built from: the full-resource view of
-    // an imported NV12/P010 texture is described by its Y plane (the UMD cannot describe a whole
-    // planar resource), and the chroma rows simply continue past the Y extent. That is only
-    // meaningful for a LINEAR surface, where a row is just base + y * pitch and extending the
-    // height stays within the same allocation; for a tiled one the extra rows have no defined
-    // address, so never grow those. ADDR_SW_LINEAR is 0 (ADDR_SW_LINEAR_GENERAL does not fit the
-    // 5-bit field).
-    // ...but only for a 4:2:0 planar full-resource view, which is identifiable without knowing
-    // the source API's format: same width, and exactly 1.5x the height (Y rows plus H/2 rows of
-    // chroma). Anything else that is merely taller than its descriptor is a genuine mismatch and
-    // must not be silently widened.
-    SQ_IMG_RSRC_WORD3 w3;
-    w3.u32All = image.srd[3];
-    const uint32_t srd_h = srd_height + 1;
-    const uint32_t img_h = img_height + 1;
-    const bool planar_full_view = (img_width == srd_width) && ((srd_h % 2) == 0) &&
-                                  (img_h == srd_h + srd_h / 2);
-    const bool grow_linear = (w3.f.SW_MODE == 0) && planar_full_view;
-    if (img_width < srd_width || img_height < srd_height || grow_linear) {
+    if (img_width < srd_width || img_height < srd_height) {
       w1.f.WIDTH    = img_width & 0x3u;
       w2.f.WIDTH_HI = img_width >> 2;
       w2.f.HEIGHT   = img_height;
