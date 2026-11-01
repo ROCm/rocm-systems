@@ -18,20 +18,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 import argparse
 import os
-import shutil
 import sys
 import platform
-import glob
-import pandas as pd
-from pathlib import Path
 
 __license__ = "MIT"
 __version__ = "1.0"
 __status__ = "Shipping"
+
+# Printed by the videoDecode sample when the GPU's VCN cannot handle the stream's
+# codec -- AV1 on gfx90a, say. That is a property of the hardware, not a decoder
+# fault, so these streams are counted separately from errors and from streams that
+# failed to finish. test/CMakeLists.txt keys its CTest skips off the same message.
+UNSUPPORTED_CODEC_MESSAGE = 'Codec not supported on GPU, skipping!'
 
 
 def run_and_log(cmd, logFilePath):
@@ -41,13 +42,19 @@ def run_and_log(cmd, logFilePath):
     # or shell metacharacters reach the sample unmangled.
     # universal_newlines (not the 3.7+ 'text' alias) keeps this working on the
     # python3 3.6 that ships with SLES 15 and RHEL 8.
+    # Returns the exit status and whether the sample reported the codec as
+    # unsupported, so the caller can tell a hardware skip from a real failure
+    # without matching on an exit code the sample does not document.
+    sawUnsupportedCodec = False
     with open(logFilePath, 'a') as logf:
         p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, universal_newlines=True)
         for line in p.stdout:
             print(line, end='')
             logf.write(line)
+            if UNSUPPORTED_CODEC_MESSAGE in line:
+                sawUnsupportedCodec = True
         p.wait()
-    return p.returncode
+    return p.returncode, sawUnsupportedCodec
 
 
 # Import arguments
@@ -102,16 +109,16 @@ if(os.path.isfile(run_rocDecode_app)):
 else:
     print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
     print("Build the sample first, or pass --videodecode_exe to point at it.\n")
-    exit()
+    sys.exit(1)
 
 if os.path.exists(filesDir) and not os.path.isfile(filesDir):
     # Checking if the directory is empty or not
     if not os.listdir(filesDir):
         print("\nERROR: Empty directory - no videos to decode")
-        exit()
+        sys.exit(1)
 else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
-    exit()
+    sys.exit(1)
 
 if os.path.exists(resultsPath+'/rocDecode_output.log'):
     os.remove(resultsPath+'/rocDecode_output.log')
@@ -129,10 +136,17 @@ md5ListSize = len(md5FileList)
 
 if streamListSize == 0:
     print("Error: Empty stream file folder\n")
-    exit()
+    sys.exit(1)
 if streamListSize != md5ListSize:
     print("Error: Bit stream file number and MD5 file number do not match\n")
-    exit()
+    sys.exit(1)
+
+# A decoder that prints a matching digest and then exits non-zero -- crashing on
+# teardown, say -- would otherwise be counted as a pass purely on the strength of
+# its own output. Record the exit status alongside the digest comparison and keep
+# going, so one bad process does not cut the sweep short.
+decoderErrors = []
+hardwareSkips = []
 
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
@@ -142,7 +156,11 @@ for i in range(streamListSize):
         cmd.append(bsReaderOption)
     cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
     logFilePath = resultsPath + '/rocDecode_output.log'
-    run_and_log(cmd, logFilePath)
+    returnCode, unsupportedCodec = run_and_log(cmd, logFilePath)
+    if unsupportedCodec:
+        hardwareSkips.append(streamFileList[i])
+    elif returnCode != 0:
+        decoderErrors.append((streamFileList[i], returnCode))
     print("======================================================================================\n")
 
 fileString = 'Input file'
@@ -171,15 +189,58 @@ with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
             failNum += 1
         line = logFile.readline()
 
+    skipNum = len(hardwareSkips)
+    unfinishedNum = streamListSize - passNum - failNum - skipNum
     print("Conformance test completed on the", streamListSize, "streams:")
     print("     - The number of passing streams is", passNum)
     print("     - The number of failing streams is", failNum)
-    print("     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
+    print("     - The number of streams skipped as unsupported by this GPU is " + str(skipNum))
+    print("     - The number of streams that did not finish decoding is " + str(unfinishedNum))
+    print("     - The number of streams whose decoder exited non-zero is " + str(len(decoderErrors)))
     resultFile.write("\n===================================================\n")
     resultFile.write("Conformance test result summary on the " + str(streamListSize) + " streams:\n")
     resultFile.write("===================================================")
     resultFile.write("\n     - The number of passing streams is " + str(passNum))
     resultFile.write("\n     - The number of failing streams is " + str(failNum))
-    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
+    resultFile.write("\n     - The number of streams skipped as unsupported by this GPU is " + str(skipNum))
+    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(unfinishedNum))
+    resultFile.write("\n     - The number of streams whose decoder exited non-zero is " + str(len(decoderErrors)))
+    for streamName in hardwareSkips:
+        resultFile.write("\n         " + streamName + " skipped: codec unsupported")
+    for streamName, returnCode in decoderErrors:
+        resultFile.write("\n         " + streamName + " exited " + str(returnCode))
     resultFile.close()
 logFile.close()
+
+# Report the outcome through the exit code so callers -- CI jobs in particular --
+# can tell a clean sweep from a failing one without scraping stdout.
+#
+# A pass count above the stream count cannot come from decoding this run's streams: it means the
+# tally was taken over output that is not all from this run. That happens when another run shares
+# the results directory, because run_and_log appends to rocDecode_output.log. Treat it as a failure
+# rather than letting it through as a negative unfinishedNum, which reads as a pass.
+if passNum > streamListSize:
+    print("\nERROR: reported " + str(passNum) + " passing streams out of " + str(streamListSize) + ".")
+    print("       The tally is inconsistent, so these results are not usable. Pass a dedicated")
+    print("       --results_directory and re-run with nothing else decoding on this machine.")
+    sys.exit(1)
+
+if decoderErrors:
+    print("\nThe decoder exited non-zero on " + str(len(decoderErrors)) + " stream(s):")
+    for streamName, returnCode in decoderErrors:
+        print("     " + streamName + " exited " + str(returnCode))
+
+if hardwareSkips:
+    print("\n" + str(skipNum) + " stream(s) were skipped: this GPU does not support their codec.")
+
+# Nothing was decoded, but nothing was wrong either -- this GPU simply cannot play
+# this codec. Report it as a skip rather than claiming a pass for work not done.
+if skipNum == streamListSize:
+    print("\nConformance test SKIPPED: no stream in this set is supported by this GPU")
+    sys.exit(0)
+
+if failNum > 0 or unfinishedNum > 0 or decoderErrors:
+    print("\nConformance test FAILED")
+    sys.exit(1)
+
+print("\nConformance test PASSED")
