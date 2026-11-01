@@ -162,6 +162,23 @@ Build unit tests for RDC tool
     $ cd build/rdctst_tests
     $ ./rdctst
 
+To see how long RDC takes to read telemetry on your system, run the poll latency
+test alone. It reads 9 common fields (GPU clock, temperatures, power,
+utilization, memory usage and ECC error counts) from every GPU 20 times, 100 ms
+apart, and prints the median, 95th percentile and maximum time per poll. In
+embedded mode it times the collection from the GPUs and the reads of the latest
+values; in standalone mode, the reads from ``rdcd``. The numbers are also
+recorded as test properties, for example in the file that
+``--gtest_output=json`` writes (with ``-b``, the file keeps only the standalone
+run). The test fails only when no value can be read.
+
+.. code-block:: shell
+
+    $ ./rdctst --gtest_filter=rdctstReadOnly.TestRdcPollLatency
+
+In standalone mode, ``-s`` and ``-p`` select the ``rdcd`` to measure. Without
+them, ``rdctst`` stops any running ``rdcd`` and starts its own.
+
 Test
 ----
 
