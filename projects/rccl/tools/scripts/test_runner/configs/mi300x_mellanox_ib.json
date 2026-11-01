@@ -4345,6 +4345,23 @@
       "extends": "net_ib_stress_inline",
       "env_variables": { "NCCL_NET": "ib-cast" }
     },
+    "rccl_ep_python_dispatch": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/rccl_ep",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": "auto",
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "RcclEp_Python_Dispatch_ScaleDtype",
+          "description": "ElasticBuffer.dispatch fp8 scale cast to contiguous float32 (single-process, stubbed lib)",
+          "test_filter": "ALL"
+        }
+      ]
+    },
     "nccl4py_build_smoke": {
       "extends": "default",
       "is_pytest": true,
@@ -6027,6 +6044,12 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_inline_cast",
+      "enabled": true
+    },
+    {
+      "name": "RCCL EP Python Dispatch Scale Dtype",
+      "description": "Single-process pytest of ElasticBuffer.dispatch fp8 scale dtype handling with a stubbed library",
+      "config": "rccl_ep_python_dispatch",
       "enabled": true
     },
     {
