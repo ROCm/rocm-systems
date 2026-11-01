@@ -22,6 +22,7 @@
  */
 #include "KFDSVMRangeTest.hpp"
 #include <poll.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <vector>
 #include "PM4Queue.hpp"
@@ -625,6 +626,87 @@ TEST_P(KFDSVMRangeTest, SplitVramRangeTest) {
 
     ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
         this->SplitVramRangeTest(gpuNode);
+    }));
+
+    TEST_END
+}
+
+void KFDSVMRangeTest::SplitVramRestoreBoundaryTest(int gpuNode) {
+
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
+    if (m_FamilyId < FAMILY_AI) {
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
+        return;
+    }
+
+    if (!GetVramSize(gpuNode)) {
+        LOG() << "Skipping test: No VRAM found." << std::endl;
+        return;
+    }
+
+    HSAint32 enable = -1;
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &enable), gpuNode);
+    if (enable) {
+        LOG() << "Skipping test: restore worker boundary rebuild is XNACK off only." << std::endl;
+        return;
+    }
+
+    const unsigned int alignment = 2 * 1024 * 1024;
+    const unsigned int bufSize = 2 * 1024 * 1024;
+    const unsigned int splitSize = 64 * 1024;
+    const unsigned int mapSize = bufSize + alignment;
+    char *map = reinterpret_cast<char *>(mmap(0, mapSize, PROT_READ | PROT_WRITE,
+                                              MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+    ASSERT_NE_GPU(MAP_FAILED, map, gpuNode);
+    uintptr_t pBufAddr = (reinterpret_cast<uintptr_t>(map) + alignment - 1) &
+                         ~(static_cast<uintptr_t>(alignment) - 1);
+
+    for (unsigned int i = 0; i < bufSize / PAGE_SIZE; i++)
+        memset(reinterpret_cast<void *>(pBufAddr + i * PAGE_SIZE), 0x10 + i, PAGE_SIZE);
+
+    EXPECT_SUCCESS_GPU(RegisterSVMRange(gpuNode, reinterpret_cast<void *>(pBufAddr), bufSize, gpuNode,
+                                        HSA_SVM_FLAG_HOST_ACCESS |
+                                        HSA_SVM_FLAG_COHERENT), gpuNode);
+
+    EXPECT_SUCCESS_GPU(RegisterSVMRange(gpuNode, reinterpret_cast<void *>(pBufAddr), splitSize, gpuNode,
+                                        HSA_SVM_FLAG_HOST_ACCESS |
+                                        HSA_SVM_FLAG_COHERENT |
+                                        HSA_SVM_FLAG_GPU_RO), gpuNode);
+
+    SDMAQueue sdmaQueue;
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+
+    HsaSVMRange resultBuffer(2 * PAGE_SIZE, gpuNode);
+    char *result = resultBuffer.As<char *>();
+    memset(result, 0, 2 * PAGE_SIZE);
+
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                result, reinterpret_cast<void *>(pBufAddr), PAGE_SIZE));
+    sdmaQueue.Wait4PacketConsumption();
+
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                result + PAGE_SIZE, reinterpret_cast<void *>(pBufAddr + splitSize), PAGE_SIZE));
+    sdmaQueue.Wait4PacketConsumption();
+
+    EXPECT_EQ_GPU(0x10, result[0], gpuNode);
+    EXPECT_EQ_GPU(0x20, result[PAGE_SIZE], gpuNode);
+
+    EXPECT_SUCCESS_GPU(sdmaQueue.Destroy(), gpuNode);
+    munmap(map, mapSize);
+
+}
+
+TEST_P(KFDSVMRangeTest, SplitVramRestoreBoundaryTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL)
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SplitVramRestoreBoundaryTest(gpuNode);
     }));
 
     TEST_END

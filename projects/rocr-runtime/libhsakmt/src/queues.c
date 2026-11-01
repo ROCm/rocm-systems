@@ -634,6 +634,10 @@ static int handle_concrete_asic(HsaKFDContext *ctx,
 		 * kfd_queue_buffer_svm_get().
 		 */
 		bool svm_save_area = !node.Capability2.ui32.StallOnRetryFault;
+#ifdef USE_DRM_AMDGPU_SVM
+		/* KFD validates the save area against KFD SVM ranges, not DRM SVM. */
+		svm_save_area = false;
+#endif
 
 		/* Allocate unified memory for context save restore
 		 * area on dGPU.
