@@ -1280,6 +1280,26 @@ int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
   return std::min(cap, want);
 }
 
+int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128ThreadsMinBytes, table->ddaAgLL128ThreadsMaxBytes)) {
+    return 0;
+  }
+  return table->ddaAgLL128Threads;
+}
+
+int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
+  if (comm == nullptr) return 0;
+  const int cap = comm->ddaFabricMaxBlocks;
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr || table->ddaAgLL128MaxBlocks <= 0 ||
+      !rcclWindowFits(totalBytes, table->ddaAgLL128MaxBlocksMinBytes, table->ddaAgLL128MaxBlocksMaxBytes)) {
+    return cap;
+  }
+  return std::min(cap, table->ddaAgLL128MaxBlocks);
+}
+
 // Widest window any enabled DDA tier can serve for this collective. The entry
 // gate only decides whether the per-tier checks run, so a tier tuned off (0)
 // must not hide the tiers that are still on: gfx1250 ReduceScatter has

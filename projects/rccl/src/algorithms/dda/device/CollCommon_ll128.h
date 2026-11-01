@@ -139,11 +139,9 @@ __device__ __forceinline__ void ddaLL128Store16B(uint64_t* dst, uint64_t lo, uin
 #else
   __builtin_nontemporal_store(u.v, (v4u_gptr)dst);
 #endif
-  asm volatile("" ::: "memory");
 }
 
 __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
-  asm volatile("" ::: "memory");
   union {
     v4u v;
     uint64_t w[2];
@@ -169,7 +167,6 @@ __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t l
   u.w[1] = hi;
   __builtin_amdgcn_cooperative_atomic_store_8x16B(
     (v4i_gptr)dst, u.v, __ATOMIC_RELAXED, RCCL_SYSTEM_SYNCSCOPE);
-  asm volatile("" ::: "memory");
 #else
   ddaLL128Store16B(dst, lo, hi);
 #endif
@@ -177,7 +174,6 @@ __device__ __forceinline__ void ddaLL128StoreAtomic16B(uint64_t* dst, uint64_t l
 
 __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
 #if RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-  asm volatile("" ::: "memory");
   union {
     v4i v;
     uint64_t w[2];
@@ -187,6 +183,9 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
   lo = u.w[0];
   hi = u.w[1];
 #else
+  // Plain loads are not atomic, so without this the compiler may hoist a poll's
+  // read out of its loop.
+  asm volatile("" ::: "memory");
   ddaLL128Load16B(src, lo, hi);
 #endif
 }
@@ -205,6 +204,28 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
                         regs[2 * g], regs[2 * g + 1]);
     }
   }
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
+    if (flag) regs[2 * g] = regs[2 * g - 1];
+}
+
+// ddaLL128LoadRegs without per-lane branches, so all four loads are in flight before the warp waits.
+// A lane with no chunk of its own reads an in-bounds one that is overwritten or never unpacked.
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRegsBatched(
+    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const int ix = ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+    const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
+    ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
+  }
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
+  // Without it the scheduler moves the shuffle below up between the loads, and the
+  // loads after the shuffle wait for the ones before it.
+  __builtin_amdgcn_sched_barrier(0);
+#endif
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
     if (flag) regs[2 * g] = regs[2 * g - 1];
@@ -240,6 +261,26 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
 #endif
+  return true;
+}
+
+// ddaLL128PollWire with every load issued before any flag check, and no second read.
+// Skipping the second read relies on cooperative loads reading each 128-byte line as one unit.
+__device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
+                                                        uint64_t flag, int wid, DdaKernelParams params) {
+  const bool flagLane = ddaLL128IsFlagLane(wid);
+  int spins = 0;
+  bool needReload;
+  do {
+    if (params.abortSpinTick(spins)) return false;
+    needReload = false;
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+      ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+#pragma unroll
+    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+      needReload |= flagLane && (vr[u + 1] != flag);
+  } while (__any(needReload));
   return true;
 }
 
