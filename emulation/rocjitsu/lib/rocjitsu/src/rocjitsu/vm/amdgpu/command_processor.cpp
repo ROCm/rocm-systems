@@ -715,7 +715,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint64_t global_wave_idx = static_cast<uint64_t>(global_wg_id) * waves_per_wg + wf_index_in_wg;
     uint64_t scratch_slot = global_wave_idx;
     if (pkt.pm4_abi) {
-      auto lease = pkt.pm4_scratch_pool->acquire();
+      auto report = [](std::string_view message) { util::Logger::warn(message); };
+      util::FailureOr<std::shared_ptr<uint32_t>> maybe_lease =
+          pkt.pm4_scratch_pool->acquire(util::DiagnosticEmitter(report));
+      if (maybe_lease.failed())
+        return VmAccessOutcome::Faulted;
+      std::shared_ptr<uint32_t> lease = std::move(maybe_lease.value());
       scratch_slot = *lease;
       wf->set_scratch_lease(std::move(lease));
     } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {

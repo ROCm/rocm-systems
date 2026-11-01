@@ -6,6 +6,9 @@
 /// @file
 /// @brief PM4 packets, shader registers and submission lifetime state.
 
+#include "util/diagnostic.h"
+#include "util/result.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -13,7 +16,6 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -87,20 +89,27 @@ public:
     std::lock_guard lock(mutex_);
     return free_.size() >= count;
   }
-  std::shared_ptr<uint32_t> acquire() {
-    auto slot = std::make_unique<uint32_t>();
+  /// @brief Lease one slot until the last shared owner releases it.
+  /// @details Exhaustion returns failure without changing existing leases.
+  /// The pool must itself have shared ownership. Allocation failures may still throw.
+  /// @param emit_error Destination for failure diagnostics.
+  util::FailureOr<std::shared_ptr<uint32_t>> acquire(util::DiagnosticEmitter emit_error = {}) {
+    std::unique_ptr<uint32_t> slot;
     {
-      std::lock_guard lock(mutex_);
-      if (free_.empty())
-        throw std::runtime_error("PM4 scratch pool exhausted");
+      std::unique_lock lock(mutex_);
+      if (free_.empty()) {
+        lock.unlock();
+        return emit_error.emit() << "PM4 scratch pool exhausted";
+      }
+      slot = std::make_unique<uint32_t>();
       *slot = free_.back();
       free_.pop_back();
     }
-    return {slot.release(), [pool = shared_from_this()](uint32_t *slot) {
-              std::lock_guard lock(pool->mutex_);
-              pool->free_.push_back(*slot);
-              delete slot;
-            }};
+    return std::shared_ptr<uint32_t>{slot.release(), [pool = shared_from_this()](uint32_t *slot) {
+                                       std::lock_guard lock(pool->mutex_);
+                                       pool->free_.push_back(*slot);
+                                       delete slot;
+                                     }};
   }
 
 private:

@@ -32,6 +32,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/plugins/instruction_family.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 #include <gtest/gtest.h>
@@ -1845,13 +1846,27 @@ TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
   auto *wave = cu1->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu1->begin_workgroup(0, 0, 1);
-  EXPECT_THROW(xcd.adopt_gws_store(replacement), std::logic_error);
-  EXPECT_THROW(xcd.command_processor()->set_gws_device(replacement), std::logic_error);
+  cu1->gws_sema_p(*wave, 0);
+  ASSERT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(xcd.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace XCD GWS store with active waves or workgroups");
+  EXPECT_TRUE(xcd.command_processor()->set_gws_device(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace GWS store with active waves or workgroups");
+  // Exercise no-CP store replacement using the same live CUs.
+  amdgpu::Xcd standalone("standalone");
+  standalone.add_shader_engine(xcd.shader_engine(0));
+  const auto standalone_store = standalone.gws_device();
+  EXPECT_TRUE(standalone.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(standalone.gws_device(), standalone_store);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
+  cu1->gws_sema_v(*wave, 0);
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(xcd.gws_device(), old);
   EXPECT_EQ(&cu0->gws_device(), old.get());
   EXPECT_EQ(&cu1->gws_device(), old.get());
   wave->halt();
-  EXPECT_NO_THROW(xcd.adopt_gws_store(replacement));
+  ASSERT_TRUE(xcd.adopt_gws_store(replacement).succeeded());
   EXPECT_EQ(&cu0->gws_device(), replacement.get());
   EXPECT_EQ(&cu1->gws_device(), replacement.get());
 }
