@@ -321,6 +321,39 @@ class TestCpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary("amdsmi_cpu_apb_enable", "Processors", "cpu_apb_enable")
 
+    def test_performance_get_cpu_apb_status(self):
+        self.common.print_func_name("")
+        i = 0
+        ret = amdsmi.amdsmi_get_cpu_handles()
+        processor_handles = ret["processor_handles"]
+
+        if len(processor_handles) == 0:
+            self.common.print("No CPU sockets on machine")
+        else:
+            for processor in processor_handles:
+                self._log_test_start("amdsmi_get_cpu_apb_status", "Processor", i)
+                stats = self._measure_api_performance(
+                    amdsmi.amdsmi_get_cpu_apb_status, f"get_cpu_apb_status_processor_{i}", processor
+                )
+
+                self.perf_results[f"get_cpu_apb_status_processor_{i}"] = stats
+
+                if stats["successful_runs"] > 0:
+                    self._print_performance_results(stats)
+                else:
+                    self.common.print(
+                        f"  Processor {i}: All calls failed - "
+                        f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                    )
+
+                i = i + 1  # increment inside loop
+
+            self._log_test_completion("Processor", i)
+
+        self._log_performance_summary(
+            "amdsmi_get_cpu_apb_status", "Processors", "get_cpu_apb_status"
+        )
+
     def test_performance_first_online_core_on_cpu_socket(self):
         self.common.print_func_name("")
         i = 0
@@ -1831,6 +1864,41 @@ class TestCpuBenchmark(unittest.TestCase):
             "amdsmi_set_cpu_df_pstate_range", "Processors", "set_cpu_df_pstate_range"
         )
 
+    def test_performance_get_cpu_df_pstate_range(self):
+        self.common.print_func_name("")
+        i = 0
+        ret = amdsmi.amdsmi_get_cpu_handles()
+        processor_handles = ret["processor_handles"]
+
+        if len(processor_handles) == 0:
+            self.common.print("No CPU sockets on machine")
+        else:
+            for processor in processor_handles:
+                self._log_test_start("amdsmi_get_cpu_df_pstate_range", "Processor", i)
+                stats = self._measure_api_performance(
+                    amdsmi.amdsmi_get_cpu_df_pstate_range,
+                    f"get_cpu_df_pstate_range_processor_{i}",
+                    processor,
+                )
+
+                self.perf_results[f"get_cpu_df_pstate_range_processor_{i}"] = stats
+
+                if stats["successful_runs"] > 0:
+                    self._print_performance_results(stats)
+                else:
+                    self.common.print(
+                        f"  Processor {i}: All calls failed - "
+                        f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                    )
+
+                i = i + 1  # increment inside loop
+
+            self._log_test_completion("Processor", i)
+
+        self._log_performance_summary(
+            "amdsmi_get_cpu_df_pstate_range", "Processors", "get_cpu_df_pstate_range"
+        )
+
     def test_performance_set_cpu_gmi3_link_width_range(self):
         self.common.print_func_name("")
 
@@ -2105,6 +2173,39 @@ class TestCpuBenchmark(unittest.TestCase):
 
         self._log_performance_summary(
             "amdsmi_set_cpu_xgmi_width", "Processors", "set_cpu_xgmi_width"
+        )
+
+    def test_performance_get_cpu_xgmi_width(self):
+        self.common.print_func_name("")
+        i = 0
+        ret = amdsmi.amdsmi_get_cpu_handles()
+        processor_handles = ret["processor_handles"]
+
+        if len(processor_handles) == 0:
+            self.common.print("No CPU sockets on machine")
+        else:
+            for processor in processor_handles:
+                self._log_test_start("amdsmi_get_cpu_xgmi_width", "Processor", i)
+                stats = self._measure_api_performance(
+                    amdsmi.amdsmi_get_cpu_xgmi_width, f"get_cpu_xgmi_width_processor_{i}", processor
+                )
+
+                self.perf_results[f"get_cpu_xgmi_width_processor_{i}"] = stats
+
+                if stats["successful_runs"] > 0:
+                    self._print_performance_results(stats)
+                else:
+                    self.common.print(
+                        f"  Processor {i}: All calls failed - "
+                        f"{stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                    )
+
+                i = i + 1  # increment inside loop
+
+            self._log_test_completion("Processor", i)
+
+        self._log_performance_summary(
+            "amdsmi_get_cpu_xgmi_width", "Processors", "get_cpu_xgmi_width"
         )
 
 
