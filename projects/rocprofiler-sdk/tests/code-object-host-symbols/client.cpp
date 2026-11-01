@@ -27,8 +27,9 @@
  *
  * A host function id identifies a symbol, not a notification of that symbol, so
  * every subscribed context must be handed the same id for a given symbol, and the
- * ids must stay unique. This tool subscribes two contexts to code object tracing
- * and verifies both properties.
+ * ids must stay unique. The tool also verifies that host- and device-symbol
+ * subscriptions are independent: a host-only context must not receive device
+ * notifications, and a device-only context must not receive host notifications.
  */
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -53,11 +54,28 @@ using host_symbol_data_t =
 // kernel id -> host function id, as observed by one context
 using host_symbol_map_t = std::map<uint64_t, uint64_t>;
 
-constexpr size_t num_contexts = 2;
+constexpr size_t num_host_contexts   = 2;
+constexpr size_t num_device_contexts = 1;
+constexpr size_t num_contexts        = num_host_contexts + num_device_contexts;
 
 std::mutex                                         symbols_mutex;
-std::map<uint64_t, host_symbol_map_t>              symbols_by_context;
-std::array<rocprofiler_context_id_t, num_contexts> client_contexts = {};
+std::map<uint64_t, host_symbol_map_t>              host_symbols_by_context;
+std::array<uint64_t, num_contexts>                 device_symbol_counts = {};
+std::array<rocprofiler_context_id_t, num_contexts> client_contexts     = {};
+
+bool
+is_host_context(uint64_t context_handle)
+{
+    for(size_t i = 0; i < num_host_contexts; ++i)
+        if(client_contexts[i].handle == context_handle) return true;
+    return false;
+}
+
+bool
+is_device_context(uint64_t context_handle)
+{
+    return client_contexts[num_host_contexts].handle == context_handle;
+}
 
 void
 codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -65,13 +83,31 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                          void* /* callback_data */)
 {
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER) return;
     if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
+
+    if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        auto lock = std::lock_guard<std::mutex>{symbols_mutex};
+        if(!is_device_context(record.context_id.handle))
+        {
+            std::cerr << "ERROR: A host-only context received a device symbol notification\n";
+            std::abort();
+        }
+        ++device_symbol_counts[num_host_contexts];
+        return;
+    }
+
+    if(record.operation != ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER) return;
+    if(!is_host_context(record.context_id.handle))
+    {
+        std::cerr << "ERROR: A device-only context received a host symbol notification\n";
+        std::abort();
+    }
 
     const auto* data = static_cast<host_symbol_data_t*>(record.payload);
 
     auto  lock     = std::lock_guard<std::mutex>{symbols_mutex};
-    auto& symbols  = symbols_by_context[record.context_id.handle];
+    auto& symbols  = host_symbols_by_context[record.context_id.handle];
     auto  existing = symbols.emplace(data->kernel_id, data->host_function_id);
     if(!existing.second && existing.first->second != data->host_function_id)
     {
@@ -87,17 +123,27 @@ tool_fini(void* /* tool_data */)
 {
     auto lock = std::lock_guard<std::mutex>{symbols_mutex};
 
-    std::cout << "\n=== ROCProfiler Host Symbol Id Test Results ===\n";
-    std::cout << "Contexts that observed host symbols: " << symbols_by_context.size() << "\n";
+    std::cout << "\n=== ROCProfiler Host Symbol Subscription Test Results ===\n";
+    std::cout << "Host contexts that observed host symbols: " << host_symbols_by_context.size()
+              << "\n";
+    const auto device_symbol_count = device_symbol_counts[num_host_contexts];
+    std::cout << "Device-only device symbols:               " << device_symbol_count << "\n";
 
-    if(symbols_by_context.size() != num_contexts)
+    if(host_symbols_by_context.size() != num_host_contexts)
     {
-        std::cerr << "ERROR: Expected " << num_contexts << " contexts to observe host symbols, got "
-                  << symbols_by_context.size() << "\n";
+        std::cerr << "ERROR: Expected " << num_host_contexts
+                  << " host-only contexts to observe host symbols, got "
+                  << host_symbols_by_context.size() << "\n";
         std::abort();
     }
 
-    const auto& reference = symbols_by_context.begin()->second;
+    if(device_symbol_count == 0)
+    {
+        std::cerr << "ERROR: The device-only context observed no device symbols\n";
+        std::abort();
+    }
+
+    const auto& reference = host_symbols_by_context.begin()->second;
     std::cout << "Host symbols per context:            " << reference.size() << "\n";
 
     if(reference.empty())
@@ -107,7 +153,7 @@ tool_fini(void* /* tool_data */)
     }
 
     // every context must have been handed the same id for a given symbol
-    for(const auto& [context_handle, symbols] : symbols_by_context)
+    for(const auto& [context_handle, symbols] : host_symbols_by_context)
     {
         if(symbols != reference)
         {
@@ -146,14 +192,23 @@ tool_fini(void* /* tool_data */)
         std::abort();
     }
 
-    std::cout << "Test PASSED: Successfully verified host function id assignment!\n";
+    std::cout << "Test PASSED: Successfully verified host function ids and subscription "
+                 "isolation!\n";
 }
 
 int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 {
-    for(auto& context : client_contexts)
+    constexpr auto host_operation =
+        rocprofiler_tracing_operation_t{ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER};
+    constexpr auto device_operation =
+        rocprofiler_tracing_operation_t{ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER};
+
+    for(size_t i = 0; i < client_contexts.size(); ++i)
     {
+        auto& context      = client_contexts[i];
+        auto  operations   = i < num_host_contexts ? &host_operation : &device_operation;
+
         if(rocprofiler_create_context(&context) != ROCPROFILER_STATUS_SUCCESS)
         {
             std::cerr << "Failed to create context\n";
@@ -162,8 +217,8 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 
         if(rocprofiler_configure_callback_tracing_service(context,
                                                           ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                                                          nullptr,
-                                                          0,
+                                                          operations,
+                                                          1,
                                                           codeobj_tracing_callback,
                                                           tool_data) != ROCPROFILER_STATUS_SUCCESS)
         {
@@ -186,8 +241,9 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
         }
     }
 
-    std::cout << "ROCProfiler host symbol id tool initialized with " << num_contexts
-              << " contexts\n";
+    std::cout << "ROCProfiler code object subscription tool initialized with "
+              << num_host_contexts << " host-only and " << num_device_contexts
+              << " device-only contexts\n";
     return 0;
 }
 }  // namespace

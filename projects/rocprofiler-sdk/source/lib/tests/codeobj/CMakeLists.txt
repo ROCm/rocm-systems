@@ -20,6 +20,23 @@ target_compile_definitions(
 configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)
 
+# Exercise optional API lookup against a DSO and its dependency, even with released COMGR
+# runtimes that do not export the optional API.
+add_library(codeobj-metadata-dependency SHARED metadata_lookup_fixture.cpp)
+add_library(codeobj-metadata-owner SHARED metadata_lookup_fixture.cpp)
+target_compile_definitions(codeobj-metadata-owner PRIVATE CODEOBJ_METADATA_OWNER=1)
+target_link_libraries(codeobj-metadata-owner PRIVATE codeobj-metadata-dependency)
+foreach(_TARGET codeobj-metadata-dependency codeobj-metadata-owner)
+    target_link_libraries(${_TARGET} PRIVATE rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
+    set_target_properties(
+        ${_TARGET}
+        PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+                   CXX_VISIBILITY_PRESET default
+                   INSTALL_RPATH "$ORIGIN")
+    install(TARGETS ${_TARGET} LIBRARY DESTINATION ${PKG_TEST_BIN_DIR} COMPONENT tests)
+endforeach()
+add_dependencies(codeobj-library-tests codeobj-metadata-owner)
+
 # Compile a HIP kernel with debug info to test DWARF inline annotation. Two-step: compile
 # to offload bundle, then unbundle to get the GPU ELF.
 find_program(
