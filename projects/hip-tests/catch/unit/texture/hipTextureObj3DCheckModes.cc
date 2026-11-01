@@ -6,7 +6,6 @@
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #include <hip_test_common.hh>
-#include <hip_test_features.hh>
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
 
@@ -15,8 +14,6 @@
  * @{
  * @ingroup TextureTest
  */
-
-bool LinearFilter3D = false;
 
 template <bool normalizedCoords>
 __global__ void tex3DKernel(float* outputData, hipTextureObject_t textureObject, int width,
@@ -91,10 +88,6 @@ static void runTest(const int width, const int height, const int depth, const fl
   if (res != hipSuccess) {
     HIP_CHECK(hipFreeArray(arr));
     free(hData);
-    if (res == hipErrorNotSupported && LinearFilter3D) {
-      WARN("Skipping section: 3D linear texture filter is not supported on this device.");
-      return;
-    }
     result = false;
     REQUIRE(result);
     return;
@@ -159,13 +152,6 @@ line1:
  */
 HIP_TEST_CASE(Unit_hipTextureObj3DCheckModes) {
   CHECK_IMAGE_SUPPORT
-
-  int device = 0;
-  hipDeviceProp_t props;
-  HIPCHECK(hipGetDeviceProperties(&props, device));
-  if (CheckIfFeatSupported(CTFeatures::CT_FEATURE_TEXTURES_NOT_SUPPORTED, props.gcnArchName)) {
-    LinearFilter3D = true;
-  }
 
   SECTION("hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, 256, 256, -3.9, 6.1, 9.5);
