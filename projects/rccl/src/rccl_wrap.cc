@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #if defined(ENABLE_ROCSHMEM_GIN)
+#include "algorithms/gin/gin_all_gather.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #endif
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -975,6 +976,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       break;
     case rcclAddonAlgos_t::RCCL_A2A_GIN_SDMA:
       *algoName = "A2A-GIN";
+      break;
+    case rcclAddonAlgos_t::RCCL_AG_GIN_SDMA:
+      *algoName = "AG-GIN";
       break;
     default:
       WARN("Invalid algorithm value: %d", algo);
@@ -2086,6 +2090,15 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     ncclSymRegType_t winRegType;
     NCCLCHECK(ncclGetSymRegType(sendWin, recvWin, &winRegType));
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
+    // GIN allgather owns both symmetric windows and runs before the symmetric
+    // kernel/CE/DDA alternatives, matching the GIN AllReduce selection order.
+#if defined(ENABLE_ROCSHMEM_GIN)
+    if (ncclAllGatherGinSdmaEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+      decision->algo = RCCL_AG_GIN_SDMA;
+      decision->nMaxChannels = 1;
+      return rcclSelectDone("AG", query, decision);
+    }
+#endif
     // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
     // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
     const bool agSymkRequested =
