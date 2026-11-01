@@ -5,6 +5,7 @@
 
 #include "parser/schema.hpp"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -20,7 +21,8 @@ namespace rocprofsys::parser
  *
  * choices() and default_value() describe the catalog. accepts() checks one
  * textual value, including a separator-joined list. The built-in catalogs are
- * the known ROCm domain, runtime, GPU metric, and hardware-counter names.
+ * the ROCm domain, runtime, and GPU metric names the runtime accepts. A
+ * hardware-counter name is any non-empty text.
  */
 class value_provider_interface
 {
@@ -40,8 +42,11 @@ public:
     [[nodiscard]] virtual std::optional<std::string> default_value(
         const schema_param& param) const = 0;
 
-    /// @return true when @p value is empty for a string or enumeration_list, or
-    ///         each element is one of choices(). allow_custom accepts any non-empty text.
+    /// @return true when @p value is allowed for @p param.
+    /// Empty text is allowed for a string or an enumeration_list and refused
+    /// for an enumeration. Without allow_custom, each element must appear in
+    /// choices(). With allow_custom, a list only requires non-empty elements,
+    /// and one enumeration value may be any non-empty text.
     [[nodiscard]] virtual bool accepts(const schema_param& param,
                                        std::string_view    value) const;
 
@@ -59,9 +64,6 @@ public:
     value_provider_registry& operator=(const value_provider_registry&) = delete;
     value_provider_registry(value_provider_registry&&)                 = delete;
     value_provider_registry& operator=(value_provider_registry&&)      = delete;
-
-    /// Process-wide registry. Starts empty; call add_builtins() to install the catalogs.
-    [[nodiscard]] static value_provider_registry& instance();
 
     /// @return false, leaving the registry unchanged, when the name is empty or taken.
     bool add(std::unique_ptr<value_provider_interface> provider);

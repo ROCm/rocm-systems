@@ -4,8 +4,6 @@
 #include "parser/value_provider.hpp"
 #include "parser/schema.hpp"
 
-#include "common/string_utility.hpp"
-
 #include <algorithm>
 #include <memory>
 #include <mutex>
@@ -28,27 +26,9 @@ is_listed(const std::vector<std::string>& choices, std::string_view value)
 bool
 every_element_present(std::string_view value, std::string_view separator)
 {
-    if(value.empty())
-    {
-        return true;
-    }
-    if(separator.empty())
-    {
-        return true;
-    }
-    while(true)
-    {
-        const auto position = value.find(separator);
-        if(utility::string::trim(value.substr(0, position)).empty())
-        {
-            return false;
-        }
-        if(position == std::string_view::npos)
-        {
-            return true;
-        }
-        value.remove_prefix(position + separator.size());
-    }
+    const auto parts = split_list(value, separator).value_or(std::vector<std::string>{});
+    return std::ranges::all_of(
+        parts, [](const std::string& element) { return !element.empty(); });
 }
 
 bool
@@ -59,20 +39,14 @@ elements_are_listed(const std::vector<std::string>& choices, std::string_view va
     {
         return is_listed(choices, value);
     }
-    while(true)
+    const auto parts = split_list(value, separator).value_or(std::vector<std::string>{});
+    if(parts.empty())
     {
-        const auto position = value.find(separator);
-        const auto element  = utility::string::trim(value.substr(0, position));
-        if(element.empty() || !is_listed(choices, element))
-        {
-            return false;
-        }
-        if(position == std::string_view::npos)
-        {
-            return true;
-        }
-        value.remove_prefix(position + separator.size());
+        return is_listed(choices, value);
     }
+    return std::ranges::all_of(parts, [&choices](const std::string& element) {
+        return !element.empty() && is_listed(choices, element);
+    });
 }
 }  // namespace
 
@@ -98,13 +72,6 @@ value_provider_interface::accepts(const schema_param& param, std::string_view va
     const auto available = choices(param);
     return is_list ? elements_are_listed(available, value, separator)
                    : is_listed(available, value);
-}
-
-value_provider_registry&
-value_provider_registry::instance()
-{
-    static value_provider_registry s_registry;
-    return s_registry;
 }
 
 bool

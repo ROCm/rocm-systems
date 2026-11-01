@@ -81,9 +81,13 @@ TEST(parser_value_provider, builtins_accept_known_names_and_lists)
     const auto param = domain_param();
 
     const auto fallback = domains->default_value(param).value_or("");
-    EXPECT_EQ(fallback, "hip_runtime_api,kernel_dispatch,memory_copy");
+    EXPECT_EQ(fallback,
+              "hip_runtime_api,marker_api,kernel_dispatch,memory_copy,scratch_memory");
     EXPECT_TRUE(domains->accepts(param, fallback));
-    EXPECT_TRUE(domains->accepts(param, "hsa_api"));
+    EXPECT_TRUE(domains->accepts(param, "hip_api"));
+    EXPECT_TRUE(domains->accepts(param, "roctx"));
+    EXPECT_TRUE(domains->accepts(param, "rccl_api"));
+    EXPECT_FALSE(domains->accepts(param, "hsa_activity"));
     EXPECT_FALSE(domains->accepts(param, "not_a_domain"));
     EXPECT_FALSE(domains->accepts(param, "hsa_api,not_a_domain"));
 
@@ -96,8 +100,55 @@ TEST(parser_value_provider, builtins_accept_known_names_and_lists)
     EXPECT_TRUE(runtime->accepts(runtimes, "mpi;openmp"));
     EXPECT_TRUE(runtime->accepts(runtimes, ""));
     EXPECT_FALSE(runtime->accepts(runtimes, "mpi;;openmp"));
-    EXPECT_NE(registry.find("gpu_metrics"), nullptr);
-    EXPECT_NE(registry.find("hw_counters"), nullptr);
+}
+
+TEST(parser_value_provider, gpu_metrics_use_the_runtime_names)
+{
+    value_provider_registry registry;
+    install_builtins(registry);
+    auto metric           = schema_param{};
+    metric.type           = param_type::enumeration;
+    metric.value_provider = "gpu_metrics";
+    const auto* metrics   = registry.find("gpu_metrics");
+    ASSERT_NE(metrics, nullptr);
+    EXPECT_TRUE(metrics->accepts(metric, "temp"));
+    EXPECT_TRUE(metrics->accepts(metric, "busy"));
+    EXPECT_TRUE(metrics->accepts(metric, "mem_usage"));
+    EXPECT_FALSE(metrics->accepts(metric, "temperature"));
+    EXPECT_FALSE(metrics->accepts(metric, "utilization"));
+    EXPECT_FALSE(metrics->accepts(metric, "memory"));
+
+    metric.type = param_type::string;
+    EXPECT_TRUE(metrics->accepts(metric, "busy, temp, power, mem_usage"));
+}
+
+TEST(parser_value_provider, hw_counters_accept_any_non_empty_name)
+{
+    value_provider_registry registry;
+    install_builtins(registry);
+    auto counter           = schema_param{};
+    counter.type           = param_type::enumeration;
+    counter.value_provider = "hw_counters";
+    const auto* counters   = registry.find("hw_counters");
+    ASSERT_NE(counters, nullptr);
+    EXPECT_TRUE(counters->choices(counter).empty());
+    EXPECT_TRUE(counters->accepts(counter, "SQ_WAVES"));
+    EXPECT_TRUE(counters->accepts(counter, "PAPI_TOT_CYC"));
+    EXPECT_FALSE(counters->accepts(counter, ""));
+    EXPECT_FALSE(counters->accepts(counter, "   "));
+}
+
+TEST(parser_value_provider, provider_backed_enumeration_uses_the_catalog)
+{
+    value_provider_registry registry;
+    install_builtins(registry);
+    const auto  param   = domain_param(param_type::enumeration);
+    const auto* domains = registry.find("rocm_domains_sdk");
+    ASSERT_NE(domains, nullptr);
+    EXPECT_TRUE(param.choices.empty());
+    EXPECT_TRUE(domains->accepts(param, "scratch_memory"));
+    EXPECT_FALSE(domains->accepts(param, "hsa_activity"));
+    EXPECT_FALSE(domains->accepts(param, ""));
 }
 
 TEST(parser_value_provider, allow_custom_accepts_unlisted_text)
@@ -118,13 +169,15 @@ TEST(parser_value_provider, missing_provider_is_not_found)
     EXPECT_EQ(registry.find("rocm_domains_sdk"), nullptr);
 }
 
-TEST(parser_value_provider, instance_builtins_are_idempotent)
+TEST(parser_value_provider, builtins_are_idempotent)
 {
-    auto& registry = value_provider_registry::instance();
+    value_provider_registry registry;
     registry.add_builtins();
+    const auto* counters = registry.find("hw_counters");
+    ASSERT_NE(counters, nullptr);
     registry.add_builtins();
-    EXPECT_EQ(&value_provider_registry::instance(), &registry);
-    EXPECT_NE(registry.find("hw_counters"), nullptr);
+    EXPECT_EQ(registry.find("hw_counters"), counters);
+    EXPECT_NE(registry.find("parallel_runtimes"), nullptr);
 }
 
 TEST(parser_value_provider, schema_records_the_provider_name)
