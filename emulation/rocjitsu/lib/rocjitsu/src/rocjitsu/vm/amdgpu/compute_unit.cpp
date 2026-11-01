@@ -1962,16 +1962,16 @@ template <bool EnableAsync>
 
   active->trace_inst_count_++;
 
-  util::StringDiagnostic decode_error;
   const bool debugger_active = debug_active();
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
-                                                    decode_error.emitter(), reuse_decoded);
+                                                    decode_error_.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", decode_error.message());
+                     ",0x", words[3], "]", std::dec, " what=", decode_error_.message());
+    decode_error_({});
     // Let the queue owner observe the illegal instruction before retiring the
     // wave. A debugger may claim the exception before the runtime sees it.
     if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
@@ -2011,7 +2011,6 @@ ComputeUnitCore::issue_decoded_instruction(
   // Decoding bypasses reuse exactly while a debugger is attached.
   const bool debugger_active = !reuse_decoded;
   Instruction *inst = decoded.value().get();
-  std::string execution_failure_detail;
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
@@ -2019,7 +2018,8 @@ ComputeUnitCore::issue_decoded_instruction(
         window->drain();
     }
     fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(), execution_failure_detail);
+                          active->instruction_execution_error(), execution_failure_detail_);
+    execution_failure_detail_.clear();
   };
   // Operand resolution outside execute_instruction() participates in the same
   // per-instruction failure contract as the generated execution callback.
@@ -2248,7 +2248,7 @@ ComputeUnitCore::issue_decoded_instruction(
 
   const uint32_t executing_process = active->process_id();
   const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail);
+      execute_instruction(inst, *active, &execution_failure_detail_);
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
