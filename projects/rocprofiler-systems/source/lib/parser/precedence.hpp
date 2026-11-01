@@ -30,13 +30,16 @@ using resolved_config = std::map<std::string, resolved_value, std::less<>>;
 /**
  * Merge sources so a higher config_source replaces a lower one for the same parameter.
  *
- * Order is default_value, preset, file, environment, then command_line. Sources of
- * equal rank keep their input order, and the later one wins.
+ * Order is default_value, preset, file, environment, then command_line. Environment
+ * outranks a preset on purpose. A rocprof-sys preset today overrides exported
+ * ROCPROFSYS_* variables; this resolver does not. Sources of equal rank keep their
+ * input order, and the later one wins.
  */
 [[nodiscard]] resolved_config
 resolve_precedence(std::vector<sourced_values> sources);
 
 /// Store each resolved value under the source that supplied it.
+/// Every value is checked before the first write. A rejection leaves the store unchanged.
 void
 apply_resolved(config_store& store, const resolved_config& resolved);
 

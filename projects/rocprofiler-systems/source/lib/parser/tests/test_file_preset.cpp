@@ -11,10 +11,14 @@
 #include <nlohmann/json.hpp>  // NOLINT(misc-include-cleaner): json::parse
 #include <nlohmann/json_fwd.hpp>
 
+#include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -62,15 +66,16 @@ class scoped_temp_file
 {
 public:
     explicit scoped_temp_file(const std::string& contents)
-    : m_path(std::filesystem::path{ ::testing::TempDir() } /
-             (std::string{
-                  ::testing::UnitTest::GetInstance()->current_test_info()->name() } +
-              ".json"))
+    : m_path(make_path())
     {
         std::ofstream{ m_path } << contents;
     }
 
-    ~scoped_temp_file() { std::filesystem::remove(m_path); }
+    ~scoped_temp_file()
+    {
+        std::error_code error;
+        std::filesystem::remove(m_path, error);
+    }
 
     scoped_temp_file(const scoped_temp_file&)            = delete;
     scoped_temp_file& operator=(const scoped_temp_file&) = delete;
@@ -80,6 +85,15 @@ public:
     [[nodiscard]] std::string path() const { return m_path.string(); }
 
 private:
+    [[nodiscard]] static std::filesystem::path make_path()
+    {
+        const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        const auto  name = std::string{ info == nullptr ? "parser" : info->name() };
+        static std::atomic<std::uint64_t> serial{ 0 };
+        return std::filesystem::path{ ::testing::TempDir() } /
+               (name + "-" + std::to_string(serial.fetch_add(1)) + ".json");
+    }
+
     std::filesystem::path m_path;
 };
 
@@ -162,6 +176,35 @@ TEST(parser_file, stores_a_choice_alias_as_the_choice_value)
     EXPECT_EQ(parsed.values.at("components"), "wall_clock;cpu_clock");
 }
 
+TEST(parser_file, rejects_an_array_for_a_scalar_parameter)
+{
+    const auto document = nlohmann::json::parse(R"({
+        "trace": [true],
+        "freq": [1, 2],
+        "components": ["wall_clock"]
+    })");
+
+    const auto parsed = file_parser{}.parse(make_schema(), document);
+    EXPECT_EQ(parsed.values.at("components"), "wall_clock");
+    EXPECT_EQ(parsed.values.find("trace"), parsed.values.end());
+    EXPECT_EQ(parsed.values.find("freq"), parsed.values.end());
+    ASSERT_EQ(parsed.errors.size(), 2U);
+    EXPECT_NE(parsed.errors.front().find("does not accept an array"), std::string::npos);
+}
+
+TEST(parser_file, rejects_a_parameter_named_by_two_keys)
+{
+    const auto document = nlohmann::json::parse(R"({
+        "trace": true,
+        "ROCPROFSYS_TRACE": false
+    })");
+
+    const auto parsed = file_parser{}.parse(make_schema(), document);
+    EXPECT_EQ(parsed.values.find("trace"), parsed.values.end());
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_NE(parsed.errors.front().find("more than one key"), std::string::npos);
+}
+
 TEST(parser_preset, stores_a_choice_alias_as_the_choice_value)
 {
     schema value{};
@@ -229,4 +272,18 @@ TEST(parser_precedence, apply_resolved_keeps_the_winning_source)
     EXPECT_EQ(store.get("trace"), "on");
     EXPECT_EQ(store.source_of("trace"), config_source::environment);
     EXPECT_EQ(store.source_of("freq"), config_source::environment);
+}
+
+TEST(parser_precedence, apply_resolved_writes_nothing_when_a_value_is_invalid)
+{
+    auto       store    = config_store{ make_schema() };
+    const auto resolved = resolved_config{
+        { "trace",
+          resolved_value{ .value = "on", .source = config_source::environment } },
+        { "freq", resolved_value{ .value = "9", .source = config_source::environment } }
+    };
+
+    EXPECT_THROW(apply_resolved(store, resolved), std::runtime_error);
+    EXPECT_FALSE(store.contains("trace"));
+    EXPECT_FALSE(store.contains("freq"));
 }
