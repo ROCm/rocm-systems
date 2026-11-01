@@ -20,7 +20,6 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_text.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/config_store.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/parse_result.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.cpp
