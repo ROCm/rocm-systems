@@ -568,8 +568,12 @@ constexpr SectionHeaderInfo SectionHeaderInfoTable[] =
 ///@{
 /// @returns true if the given binary blob identifies as an ELF file.
 /// @param [in] pData/binary  The binary blob to check.
-inline bool IsElf(const void*      pData)  { return static_cast<const FileHeader*>(pData)->ei_magic == ElfMagic; }
+inline bool IsElf(const void* pData)  { return static_cast<const FileHeader*>(pData)->ei_magic == ElfMagic; }
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
 inline bool IsElf(Span<const void> binary)
+#else
+inline bool IsElf(ConstByteSpan binary)
+#endif
     { return (binary.SizeInBytes() >= sizeof(Util::Elf::FileHeader)) && IsElf(binary.Data()); }
 ///@}
 

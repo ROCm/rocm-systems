@@ -23,6 +23,7 @@
 ///                                     (GFX11/12: op=1 is s_setkill; s_endpgm moved to op=48)
 
 #include "decode_test_util.h"
+#include "gfx11_mimg_test_common.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
@@ -32,9 +33,11 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -45,6 +48,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
@@ -55,6 +59,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vop3.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -67,6 +72,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <barrier>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -76,6 +82,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -105,7 +112,7 @@ constexpr uint32_t make_cdna1_sop1(uint32_t sdst, uint32_t ssrc0) {
 TEST(OperandLayoutTest, DeferredSelectorStateFitsExistingPadding) {
   EXPECT_EQ(sizeof(Operand), 32u);
   EXPECT_EQ(sizeof(cdna5::Operand), 80u);
-  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 512u);
+  EXPECT_EQ(sizeof(cdna5::VAddF32Vop3), 480u);
 }
 
 TEST(OperandLayoutTest, DecodedVectorRegistersExcludeScalarAndLiteralSelectors) {
@@ -533,9 +540,9 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
   };
   constexpr TestCase cases[] = {
       {{{0xD0400000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_load v0, s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
+       "image_load v0, v0, s[0:7] th:TH_LOAD_BYPASS scope:SCOPE_SYS"},
       {{{0xD0418000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
-       "image_store v0, s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
+       "image_store v0, v0, s[0:7] th:TH_STORE_BYPASS scope:SCOPE_SYS"},
       {{{0xD0430000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
        "image_atomic_add_uint v0, s[0:7] th:TH_ATOMIC_NT_RETURN scope:SCOPE_SYS"},
       {{{0xE446C000u, 0x003C0000u, 0x00000000u, 0x00000000u}},
@@ -548,6 +555,25 @@ TEST(DecoderSmokeTest, Gfx1201ImageCachePolicyUsesOperationKind) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->disassemble(), tc.expected_disassembly);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx1201SingleImageAddressUsesCanonicalRegisterSpelling) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &[dim, a16] :
+       {std::pair{amdgpu::kImageDim1d, false}, std::pair{amdgpu::kImageDim2d, true}}) {
+    for (const bool load : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "dim=" << unsigned{dim} << " a16=" << a16 << " load=" << load);
+      const auto words = rdna4::build_vimage(
+          load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
+          {.dim = dim, .a16 = a16, .dmask = 1, .vdata = 8, .vaddr0 = 4, .vaddr1 = 9});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(inst->disassemble(),
+                load ? "image_load v8, v4, s[0:7]" : "image_store v8, v4, s[0:7]");
+    }
   }
 }
 
@@ -728,7 +754,7 @@ TEST(DecoderSmokeTest, ImageAtomicsSeparatePayloadFromOptionalReturn) {
               EXPECT_NE(decoded.value()->disassemble().find("[v20, v21]"), std::string::npos)
                   << decoded.value()->disassemble();
             }
-            InstDefUse def_use(*decoded.value());
+            InstDefUse def_use(*decoded.value(), 64);
             for (unsigned word = 0; word < 5; ++word) {
               const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(8 + word), 1};
               EXPECT_EQ(def_use.uses.contains(reg), word < payload_words);
@@ -1238,6 +1264,51 @@ TEST(RdnaMimgDecodeTest, NsaStorePreservesExtensionAndNextInstruction) {
   }
 }
 
+TEST(RdnaMimgDecodeTest, BvhWidthsAndDependenciesIgnoreDimSizing) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    SCOPED_TRACE(static_cast<unsigned>(arch));
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const bool bvh64 : {false, true}) {
+      for (const bool a16 : {false, true}) {
+        for (const bool nsa : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "bvh64=" << bvh64 << " a16=" << a16 << " nsa=" << nsa);
+          const uint8_t vaddr_words = bvh64 ? (a16 ? 9 : 12) : (a16 ? 8 : 11);
+          // Canonical NSA groups that collectively name the same contiguous
+          // v[9:9+vaddr_words-1] control used by the non-NSA form.
+          const uint32_t nsa_word =
+              bvh64 ? (a16 ? 0x000f0c0b : 0x120f0c0b) : (a16 ? 0x000e0b0a : 0x110e0b0a);
+          const test::Gfx11MimgEncoding mimg{
+              .nsa = nsa, .a16 = a16, .vaddr = 9, .vdata = 4, .srsrc = 1, .nsa_word = nsa_word};
+          util::StringDiagnostic error;
+          auto decoded = [&]() -> DecodeResult {
+            if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+              return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
+                  *decoder, rdna3::build_mimg,
+                  bvh64 ? rdna3::kImageBvh64IntersectRayMimg : rdna3::kImageBvhIntersectRayMimg,
+                  mimg, error.emitter());
+            return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
+                *decoder, rdna3_5::build_mimg,
+                bvh64 ? rdna3_5::kImageBvh64IntersectRayMimg : rdna3_5::kImageBvhIntersectRayMimg,
+                mimg, error.emitter());
+          }();
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          std::unique_ptr<Instruction> inst = std::move(decoded).value();
+          ASSERT_NE(inst, nullptr);
+          EXPECT_EQ(inst->size(), nsa ? 12 : 8);
+          ASSERT_EQ(inst->num_src_operands(), 2);
+          EXPECT_EQ(inst->src_operand(0)->size_bits(), vaddr_words * 32);
+
+          InstDefUse def_use(*inst, 64);
+          EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 9, vaddr_words}));
+          EXPECT_FALSE(
+              def_use.uses.contains({RegClass::VGPR, static_cast<uint16_t>(9 + vaddr_words), 1}));
+        }
+      }
+    }
+  }
+}
+
 TEST(Rdna35MimgDecodeTest, PartialNsaUsesOneExtensionDword) {
   struct TestCase {
     std::array<uint32_t, 6> words;
@@ -1332,7 +1403,7 @@ TEST(Rdna35MimgDecodeTest, FixedFormWidthsDriveDefUse) {
     EXPECT_EQ(inst->dst_operand(0)->size_bits(), 128);
     EXPECT_EQ(inst->src_operand(0)->size_bits(), test.vaddr_words * 32);
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, test.vdata_base, 4}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, test.vaddr_base, test.vaddr_words}));
     EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, test.srsrc_base, test.srsrc_words}));
@@ -1904,7 +1975,7 @@ TEST(Rdna3DecodeTest, GlobalFlatAllOnesSaddrIsNull) {
     EXPECT_EQ(fieldless_srcs, 1);
   }
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::SGPR, 0x7F, 2}));
@@ -1934,6 +2005,58 @@ make_vopdxy_pair(uint8_t opx, uint8_t opy, uint16_t srcx0 = vopd_src0_vgpr(1), u
           (static_cast<uint32_t>(vsrcy1) << 9) | (srcy0 & 0x1FFu),
       literal,
   };
+}
+
+TEST(InstructionDisassemblyTest, ConcurrentFormattingReturnsIndependentText) {
+  const struct {
+    rj_code_arch_t arch;
+    std::array<uint32_t, 3> words;
+    const char *expected;
+  } cases[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, {S_NOP, 0, 0}, "s_nop 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA3_5,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       {0xC8D006FFu, 0x04020080u, 0x4F7FFFFEu},
+       "v_dual_mul_f32 v4, 0x4f7ffffe, v3 :: v_dual_mov_b32 v3, 0"},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       {0xCF455083u, 0x00000086u, 0x0A000001u},
+       "v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0"},
+  };
+  for (const auto &tc : cases) {
+    SCOPED_TRACE(tc.arch);
+    auto decoder = Decoder::create(tc.arch);
+    ASSERT_NE(decoder, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, tc.words.data()));
+    ASSERT_NE(inst, nullptr);
+
+    constexpr size_t thread_count = 4;
+    std::barrier start(thread_count);
+    std::array<std::string, thread_count> text;
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < thread_count; ++i) {
+      threads.emplace_back([&, i] {
+        start.arrive_and_wait();
+        for (int repeat = 0; repeat < 32; ++repeat) {
+          text[i] = inst->disassemble();
+          EXPECT_EQ(text[i], tc.expected);
+        }
+      });
+    }
+    for (auto &thread : threads)
+      thread.join();
+
+    text[0].clear();
+    EXPECT_EQ(inst->disassemble(), tc.expected);
+    inst.reset();
+    decoder.reset();
+    for (size_t i = 1; i < thread_count; ++i)
+      EXPECT_EQ(text[i], tc.expected);
+  }
 }
 
 class RdnaVopdDecodeSmokeTest : public ::testing::TestWithParam<VopdDecodeCase> {};
@@ -2445,6 +2568,94 @@ INSTANTIATE_TEST_SUITE_P(
       return std::string(info.param.arch_name);
     });
 
+class VopdExecutionFailureTest : public ::testing::TestWithParam<RdnaVopdExecutionCase> {};
+
+TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
+  const auto &tc = GetParam();
+  amdgpu::GpuMemory gpu_mem("vopd_failure_mem");
+  amdgpu::L2Cache l2("vopd_failure_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = tc.arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("vopd_failure", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x1000, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(tc.arch);
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << tc.arch_name << " invalid_x=" << invalid_x);
+    const auto words = make_vopdxy_pair(invalid_x ? 14 : 8, invalid_x ? 8 : 14);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+    // Bypass decoder validation deliberately to exercise the execution fallback.
+    const auto *backend = tc.arch == ROCJITSU_CODE_ARCH_RDNA3     ? &rdna3::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rdna3_5::execution_backend()
+                          : tc.arch == ROCJITSU_CODE_ARCH_RDNA4   ? &rdna4::execution_backend()
+                                                                  : &cdna5::execution_backend();
+    ScopedIsaExecutionBackend execution_backend_scope{backend};
+    const auto construct =
+        [&]<typename Vopd, typename MachineInst>() -> std::unique_ptr<Instruction> {
+      return std::make_unique<Vopd>(reinterpret_cast<const MachineInst *>(words.data()));
+    };
+    std::unique_ptr<Instruction> inst;
+    switch (tc.arch) {
+    case ROCJITSU_CODE_ARCH_RDNA3:
+      inst = construct.operator()<rdna3::Vopd, rdna3::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA3_5:
+      inst = construct.operator()<rdna3_5::Vopd, rdna3_5::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_RDNA4:
+      inst = construct.operator()<rdna4::Vopd, rdna4::MachineInst>();
+      break;
+    case ROCJITSU_CODE_ARCH_CDNA5:
+      inst = construct.operator()<cdna5::Vopd, cdna5::MachineInst>();
+      break;
+    default:
+      FAIL() << "unexpected VOPD architecture";
+    }
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(inst->execute, nullptr);
+    for (uint64_t exec : {uint64_t{0}, uint64_t{0xAAAA'AAAA}}) {
+      wf->set_exec(exec);
+      wf->set_vcc(0x87654321);
+      wf->write_scc(1);
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 5; ++reg)
+          cu->write_vgpr(base + reg, lane, 100u * reg + lane);
+      }
+      wf->clear_instruction_execution_error();
+      ASSERT_NO_THROW(inst->execute(*inst, wf));
+      EXPECT_EQ(wf->instruction_execution_error(),
+                exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
+                     : amdgpu::InstructionExecutionError::None);
+      EXPECT_EQ(wf->exec(), exec);
+      EXPECT_EQ(wf->vcc(), 0x87654321u);
+      EXPECT_EQ(wf->read_scc(), 1u);
+      EXPECT_EQ(wf->pc, 0x1000u);
+      EXPECT_FALSE(wf->is_halted());
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane);
+        EXPECT_EQ(cu->read_vgpr(base + 1, lane), 100u + lane);
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AllArchitectures, VopdExecutionFailureTest,
+    ::testing::Values(RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3, "rdna3"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_RDNA4, "rdna4"},
+                      RdnaVopdExecutionCase{ROCJITSU_CODE_ARCH_CDNA5, "cdna5"}),
+    [](const ::testing::TestParamInfo<RdnaVopdExecutionCase> &info) {
+      return info.param.arch_name;
+    });
+
 void expect_sleep_yields_before_quantum_expires(rj_code_arch_t arch, uint32_t sleep_encoding) {
   constexpr uint64_t kCodeAddress = 0x2000;
 
@@ -2585,7 +2796,7 @@ TEST(CdnaSmemDecodeTest, SgprOffsetFormExposesOffsetRegister) {
       ASSERT_NE(inst, nullptr) << arch;
       EXPECT_EQ(inst->disassemble(), tc.text) << arch;
 
-      InstDefUse def_use(*inst);
+      InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 5, 1})) << arch << " " << tc.text;
     }
   }
@@ -2604,7 +2815,7 @@ TEST(Cdna3DecodeTest, DsRead2st64AccDestinationUsesAccumulatorRegisterClass) {
   EXPECT_EQ(inst->mnemonic(), "ds_read2st64_b32");
   EXPECT_EQ(inst->disassemble(), "ds_read2st64_b32 acc[62:63], v243 offset0:70 offset1:71");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 62, 2}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 62, 2}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 243, 1}));
@@ -2686,7 +2897,7 @@ TEST(Cdna3DecodeTest, MfmaAccCdUsesAccumulatorRegisterClassForCAndD) {
   EXPECT_EQ(inst->disassemble(),
             "v_mfma_f32_32x32x8_bf16 acc[136:151], acc[84:85], acc[82:83], acc[136:151]");
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::ACC_VGPR, 136, 16}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::VGPR, 136, 16}));
   EXPECT_TRUE(def_use.uses.contains({RegClass::ACC_VGPR, 84, 2}));
@@ -2714,7 +2925,7 @@ TEST(Cdna3DecodeTest, MfmaAccBitsSelectIndependentMultiplicandBanks) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_32x32x8_bf16");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({tc.src0_class, 84, 2})) << inst->disassemble();
     EXPECT_TRUE(def_use.uses.contains({tc.src1_class, 82, 2})) << inst->disassemble();
   }
@@ -2851,7 +3062,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2860,7 +3071,7 @@ TEST(Gfx1250DecodeTest, FlatVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "flat_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 1, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2899,7 +3110,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
       }
     EXPECT_EQ(fieldless_srcs, 1);
   }
-  InstDefUse saddr_def_use(*saddr_inst);
+  InstDefUse saddr_def_use(*saddr_inst, 64);
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(saddr_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_TRUE(saddr_def_use.uses.contains({RegClass::SGPR, 6, 2}));
@@ -2908,7 +3119,7 @@ TEST(Gfx1250DecodeTest, GlobalVaddrWidthFollowsSaddrMode) {
   ASSERT_NE(vector_only_inst, nullptr);
   EXPECT_EQ(vector_only_inst->mnemonic(), "global_load_b64");
   EXPECT_EQ(vector_only_inst->num_src_operands(), 2); // vaddr + gpumem
-  InstDefUse vector_only_def_use(*vector_only_inst);
+  InstDefUse vector_only_def_use(*vector_only_inst, 64);
   EXPECT_TRUE(vector_only_def_use.uses.contains({RegClass::VGPR, 10, 2}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 1}));
   EXPECT_FALSE(vector_only_def_use.uses.contains({RegClass::SGPR, 124, 2}));
@@ -2928,7 +3139,7 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "global_store_b64");
   EXPECT_EQ(inst->disassemble(), "global_store_b64 v10, v[2:3], s[6:7]");
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
 }
@@ -2950,7 +3161,7 @@ TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
   EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
   EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
   EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
 }
@@ -2968,7 +3179,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4DecodesStandaloneVop3pSuffix) {
   EXPECT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
   EXPECT_EQ(inst->size(), sizeof(words));
 
-  InstDefUse def_use(*inst);
+  InstDefUse def_use(*inst, 64);
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 36, 4}));
 }
 
@@ -2995,7 +3206,7 @@ TEST(Cdna4DecodeTest, MfmaF8f6f4SourceWidthsFollowFormatSelectors) {
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(inst->mnemonic(), "v_mfma_f32_16x16x128_f8f6f4");
 
-    InstDefUse def_use(*inst);
+    InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 0, register_count}));
     EXPECT_FALSE(
         def_use.uses.contains({RegClass::VGPR, 0, static_cast<uint8_t>(register_count + 1)}));

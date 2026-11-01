@@ -727,7 +727,7 @@ refactoring changes don't need an entry. Changes to the Python bindings go in
 [python/CHANGELOG.md](python/CHANGELOG.md) instead.
 
 Add the entry to the topmost (unreleased) version, under the matching
-heading: `Added`, `Changed`, `Resolved issues`, `Removed`, or `Known issues`.
+heading: `Added`, `Changed`, `Fixed`, `Removed`, or `Known issues`.
 Write it for users, like the existing entries: say what changed, and what
 users have to do differently, if anything.
 

@@ -64,7 +64,7 @@ quiet_warnings=false
 #                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
 build_rocshmem_gin=false
-rocshmem_mono_hash="f636cc5be66716349dd9ed42eebb7b4d651fbb20"
+rocshmem_mono_hash="723d405cc7d0739f96a47feaa72f64bf2bad1e5c"
 custom_cmake_options=""
 
 # #################################################
