@@ -301,6 +301,9 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
     enable_mwaitx_ = (var == "0") ? false : true;
 
+    var = os::GetEnvVar("HSA_ENABLE_YIELDING_POLL");
+    enable_yielding_poll_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
 
@@ -503,6 +506,8 @@ class Flag {
 
   bool image_print_srd() const { return image_print_srd_; }
 
+  bool enable_yielding_poll() const { return enable_yielding_poll_; }
+
   bool check_mwaitx(bool mwaitx_supported) {
     if (enable_mwaitx_ && !mwaitx_supported) enable_mwaitx_ = false;
 
@@ -637,6 +642,7 @@ class Flag {
   bool override_cpu_affinity_;
   bool image_print_srd_;
   bool enable_mwaitx_;
+  bool enable_yielding_poll_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
   bool dev_mem_queue_buf_;
