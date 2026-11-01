@@ -47,7 +47,7 @@ export default function ChartPointSelector({
         filterOptions={filterOptions}
         getOptionKey={(option) => option.id}
         getOptionLabel={(option) => option.run ? `${runSelectionLabel(option.run)} · ${option.target} · ${option.mode} · ${option.status}` : option.label}
-        renderOption={({ key, ...props }, option) => <Box component="li" key={key} {...props} sx={{ py: 0.9, alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
+        renderOption={({ key, ...props }, option) => <Box component="li" key={key} {...props} sx={{ py: '7px', alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
           {option.run ? <RunOptionDetails run={option.run} result={`${option.target} · ${option.mode} · ${option.status}${option.status === 'completed' ? ` · ${formatDuration(option.record?.test.durationSeconds)}` : ''}`} /> : option.label}
         </Box>}
         isOptionEqualToValue={(option, value) => option.id === value.id}

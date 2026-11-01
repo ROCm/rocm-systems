@@ -96,6 +96,17 @@ function createSlots(dayKeys, runs, range) {
   });
 }
 
+// Day-slot layout shared by Overview and Benchmarks: commit-time days, one run per day
+// except 1W, which keeps every run inside its day. Days without runs have run: null.
+export function selectDaySlots(runs, generatedAt, rangeId) {
+  const resolved = resolveHistoryRange(rangeId, { compatibility: true });
+  const sorted = sortRunsByCommit(runs);
+  const window = dateWindow(sorted, sorted.length ? null : generatedAt, resolved);
+  const within = sorted.filter((run) => dayTime(dayFor(run)) >= dayTime(window.startDay) && dayTime(dayFor(run)) <= dayTime(window.anchorDay));
+  const slots = createSlots(window.dayKeys, selectRuns(within, resolved.id), resolved.id);
+  return { range: resolved.id, ...window, slots, axisMax: resolved.id === '1W' ? window.dayKeys.length : Math.max(0, slots.length - 1) };
+}
+
 // Shared Overview projection; catalog scoping preserves the UTC window.
 // catalogId=null selects Shared benchmarks; an explicit immutable catalog ID scopes
 // candidate runs without moving the UTC window. Hover is intentionally not input.

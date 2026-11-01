@@ -6,7 +6,7 @@ export function createReactRootSurface() {
   const document = new EventTarget();
   const container = new EventTarget();
   Object.assign(container, { nodeType: 1, tagName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: document });
-  Object.assign(document, { nodeType: 9, body: container, activeElement: null, defaultView: browser });
+  Object.assign(document, { nodeType: 9, querySelector: () => null, body: container, activeElement: null, defaultView: browser });
   browser.HTMLElement = class {};
   browser.HTMLIFrameElement = class extends browser.HTMLElement {};
   browser.document = document;

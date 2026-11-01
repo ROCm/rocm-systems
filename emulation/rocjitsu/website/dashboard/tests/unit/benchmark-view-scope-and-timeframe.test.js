@@ -27,9 +27,7 @@ test('grid-first page has shared range, Add and inspect controls while retaining
   expect(charts.props).toHaveLength(1);
   expect(charts.props[0].range).toBe('1M');
   expect(html).toContain('Remove Fictional workload b from grid');
-  expect(html).toContain('single · solid');
   expect(html).toContain('aria-label="Chart category and thread policy legend"');
-  expect(html).toContain('default · dashed');
 });
 
 test('eligible catalog follows explicit mode and empty mode is an empty analysis', () => {

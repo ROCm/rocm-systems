@@ -3,6 +3,7 @@ import { fixtureRunPath } from '../fixtures/runPath.js';
 import { act, Children, createElement, isValidElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import App from '../../src/App.jsx';
 import BenchmarksView from '../../src/components/views/BenchmarksView.jsx';
@@ -229,7 +230,7 @@ it('UI-004 preserves standalone initialBenchmarkIds and distinguishes controlled
   const data = adaptPublishedDashboardData(createMaintainedPublication()).data;
   const filters = { targets: ['gfx1250'], suites: data.suites, modes: ['single', 'default'] };
   const onBenchmarksChange = vi.fn();
-  const markup = (props) => renderToStaticMarkup(createElement(BenchmarksView, { data, filters, onBenchmarksChange, ...props }));
+  const markup = (props) => renderToStaticMarkup(themed(BenchmarksView, { data, filters, onBenchmarksChange, ...props }));
   const initialEmpty = markup({ initialBenchmarkIds: [] });
   expect(initialEmpty).not.toContain('data-testid="benchmark-grid-card"');
   const initialMissing = markup({ initialBenchmarkIds: ['exact-missing-id'] });

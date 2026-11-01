@@ -8,7 +8,7 @@ for (const range of [null, '1W']) {
     const cards = page.getByTestId('benchmark-grid-card');
     await expect(cards).toHaveCount(3);
     for (const card of await cards.all()) {
-      const values = await readChart(card.getByRole('img'), (chart) => chart.getOption().series.filter((series) => series.type === 'line').flatMap((series) => series.data.map((point) => point?.value).filter(Number.isFinite)));
+      const values = await readChart(card.getByRole('img'), (chart) => chart.getOption().series.filter((series) => series.type === 'line').flatMap((series) => series.data.map((point) => point?.value?.[1]).filter(Number.isFinite)));
       expect(values.length).toBeGreaterThan(0);
       const id = card.getByRole('heading').locator('xpath=following-sibling::*[1]');
       await expect(id).toBeVisible();

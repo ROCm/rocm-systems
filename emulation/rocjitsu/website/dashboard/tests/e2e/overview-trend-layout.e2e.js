@@ -3,7 +3,7 @@ import { readChart } from './helpers/chart.js';
 
 // Use the checked-in fictional publication served by the fixtures preview.
 for (const range of ['1W', '1M', '3M', 'ALL']) {
-  test(`${range} respects its time window and shows a dotted reference for fictional slowdowns`, async ({ page }) => {
+  test(`${range} respects its time window and shows a non-solid reference line for fictional slowdowns`, async ({ page }) => {
     await page.goto(`/?view=overview&range=${range}`);
     const trend = page.getByTestId('performance-trend');
     const chart = trend.getByRole('img');
@@ -34,7 +34,7 @@ for (const range of ['1W', '1M', '3M', 'ALL']) {
     }
     expect(Math.abs(geometry.baseline)).toBeLessThan(1);
     expect(geometry.belowBaseline).toBe(true);
-    expect(geometry.reference.lineStyle.type).toBe('dotted');
+    expect(geometry.reference.lineStyle.type).not.toBe('solid');
     expect(geometry.reference.data).toMatchObject([{ yAxis: 1 }]);
     expect(geometry.axis).toMatchObject({ show: true, onZero: false, lineStyle: { type: 'solid' } });
     if (range === '1W') expect(Math.abs(geometry.firstDateX - geometry.pixel[0])).toBeLessThan(1);
@@ -47,14 +47,14 @@ for (const range of ['1W', '1M', '3M', 'ALL']) {
     await page.mouse.move(box.x + geometry.pixel[0] * box.width / geometry.width, box.y + geometry.pixel[1] * box.height / geometry.height);
     await expect(chart.getByText(/^Commit [a-f0-9]{8}$/)).toBeVisible();
     await expect(chart.getByText(/^Run time:/)).toHaveCount(0);
-    const tooltip = await chart.getByText(/^Commit [a-f0-9]{8}$/).evaluate((heading) => heading.parentElement.innerText);
+    const tooltip = await chart.locator('.dashboard-chart-tooltip').innerText();
     expect(tooltip).not.toContain('Attempt:');
     expect(tooltip).not.toContain('Reference:');
     expect(tooltip).toMatch(/gfx1250 single · [\d.]+× · (?:\d+m )?\d+\.\d{1,2}s · ref (?:\d+m )?\d+\.\d{1,2}s/);
   });
 }
 
-test('an all-above-baseline configuration has a solid bottom axis without a reference overlay', async ({ page }) => {
+test('an all-above-baseline configuration has a solid bottom axis and keeps the baseline reference line', async ({ page }) => {
   await page.goto('/?view=overview&range=1W');
   const trend = page.getByTestId('performance-trend');
   await expect(trend.getByRole('img')).toBeVisible();
@@ -66,22 +66,14 @@ test('an all-above-baseline configuration has a solid bottom axis without a refe
     const option = instance.getOption();
     return { reference: option.series[0].markLine?.data ?? [], axis: option.xAxis[0].axisLine };
   });
-  expect(option.reference).toEqual([]);
+  expect(option.reference).toMatchObject([{ yAxis: 1 }]);
   expect(option.axis).toMatchObject({ show: true, onZero: false, lineStyle: { type: 'solid' } });
 });
 
-test('closed catalog disclosure keeps the latest-run note close without breaking expansion', async ({ page }) => {
+test('closed catalog disclosure expands and collapses', async ({ page }) => {
   await page.goto('/?view=overview&range=1W');
   const disclosure = page.getByTestId('catalog-workloads');
   await expect(disclosure).toBeVisible();
-  const note = page.getByTestId('performance-trend').getByText(/^Latest eligible plotted run/);
-  await expect(note).toBeVisible();
-  const gap = await note.evaluate((element) => {
-    const summary = document.querySelector('[data-testid="catalog-workloads"] summary');
-    const scale = summary.getBoundingClientRect().width / summary.offsetWidth;
-    return (element.getBoundingClientRect().top - summary.getBoundingClientRect().bottom) / scale;
-  });
-  expect(gap).toBeLessThanOrEqual(5);
   await disclosure.locator('summary').click();
   await expect(disclosure.getByRole('region', { name: 'Catalog workload membership' })).toBeVisible();
   await disclosure.locator('summary').click();

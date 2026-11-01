@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker, runPicker } from './helpers/runPicker.js';
 import { expectNoDocumentOverflow, openDashboard, ready } from './helpers/dashboard.js';
 
 const branchName = 'users/RattataKing/test-branch';
@@ -73,8 +74,8 @@ test('feedback: exact fictional branch, no heading count badge and leftward coll
     expect(centeredInput).toBeLessThan(1);
     await search.fill(branchName);
     await page.getByRole('button', { name: new RegExp(`^View branch ${branchName},`) }).click();
-    const candidate = await page.getByTestId('candidate-selected-identity').textContent();
-    const reference = await page.getByTestId('reference-selected-identity').textContent();
+    const candidate = await runPicker(page, 'candidate').inputValue();
+    const reference = await runPicker(page, 'reference').inputValue();
     const url = page.url();
     const detail = page.locator('#branch-detail');
     const expanded = await detail.boundingBox();
@@ -86,8 +87,8 @@ test('feedback: exact fictional branch, no heading count badge and leftward coll
     expect(collapsed.x).toBeLessThan(expanded.x);
     expect(collapsed.width).toBeGreaterThan(expanded.width);
     await expect(search).toHaveValue(branchName);
-    await expect(page.getByTestId('candidate-selected-identity')).toHaveText(candidate);
-    await expect(page.getByTestId('reference-selected-identity')).toHaveText(reference);
+    await expect(runPicker(page, 'candidate')).toHaveValue(candidate);
+    await expect(runPicker(page, 'reference')).toHaveValue(reference);
     expect(page.url()).toBe(url);
     await reopen.press('Enter');
     await expect(list).toBeVisible();
@@ -138,9 +139,9 @@ test('feedback: Abs/Pct headers sort raw deltas and full comparison navigation r
   });
   expect(await page.evaluate(() => scrollY)).toBeGreaterThan(0);
   await open.click();
-  await expect(page.getByRole('tab', { name: 'Run Comparison', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
+  await expect(page.getByRole('tab', { name: 'Run comparison', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
+  await expectRunPicker(page, 'baseline-run', 'fictional-develop-20');
   await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
   expect(errors).toEqual([]);
 });

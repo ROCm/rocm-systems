@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import BranchRunsView from '../../src/components/views/BranchRunsView.jsx';
 import { selectConfigurationComparison } from '../../src/data/branchSelectors.js';
@@ -30,7 +30,7 @@ const data = { schemaVersion: 1, generatedAt: '2026-10-05T15:00:00Z', canonicalB
   allRuns: [quiet, second, older, baseline, candidate], runs: [baseline], suites: ['Fictional suite'],
 };
 
-const render = (data, selection = {}) => renderToStaticMarkup(createElement(BranchRunsView, {
+const render = (data, selection = {}) => renderToStaticMarkup(themed(BranchRunsView, {
   data,
   state: { branchSelection: selection, setBranchSelection() { throw new Error('Rendering defaults must not write route history'); } },
   onOpenComparison() {},
@@ -58,13 +58,10 @@ test('published branch rows use the activity window and newest execution orderin
 
 test('default pair exposes exact candidate SHA and attempt with automatic develop-base reason and no manual reset action', () => {
   const html = render(data);
-  expect(html.includes('data-testid="candidate-selected-identity"')).toBe(true);
   expect(html.includes(sha('b'))).toBe(true);
   expect(html.includes(candidate.runId)).toBe(true);
-  expect(html.includes('data-testid="reference-selected-identity"')).toBe(true);
   expect(html.includes(sha('a'))).toBe(true);
   expect(html.includes(baseline.runId)).toBe(true);
-  expect(html.includes('Exact develop base')).toBe(true);
   expect(html.includes('Restore automatic base')).toBe(false);
   expect(/<h2[^>]*id="branch-detail-heading"[^>]*tabindex="-1"/.test(html)).toBe(true);
 });

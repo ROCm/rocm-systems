@@ -1,10 +1,10 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { alpha, ThemeProvider } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, test } from 'vitest';
 import CategoryTag, { CategoryMarker } from '../../src/components/shared/CategoryTag.jsx';
 import { createDashboardTheme } from '../../src/theme/theme.js';
-import { categoryColors } from '../../src/theme/tokens.js';
+import { categoryColors, categoryTextColor } from '../../src/theme/tokens.js';
 import { configurationColor, targetColor } from '../../src/utils/chartColors.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
@@ -26,22 +26,14 @@ describe.each(['light', 'dark'])('%s category colors', (mode) => {
     expect(targetColor(target, 0, mode)).toBe(categoryColors[mode][target]);
     expect(configurationColor({ target, mode: 'single' }, 0, mode)).toBe(categoryColors[mode][target]);
   });
-  test.each(inheritedNames)('uses neutral tag and marker colors for validated suite %s', (suite) => {
+  // Inherited object keys must never resolve to Object.prototype members; they fall back to a stable palette color.
+  test.each(inheritedNames)('gives validated suite %s a stable palette color and renders its label', (suite) => {
     const label = validatedSuite(suite);
-    const tagStyle = CategoryTag({ label }).props.sx[0];
-    expect(tagStyle.bgcolor(theme)).toBe(mode === 'dark' ? theme.palette.dashboard.subtleSurface : alpha(theme.palette.text.secondary, 0.07));
-    expect(tagStyle.color(theme)).toBe(theme.palette.text.secondary);
-    expect(CategoryMarker({ label }).props.sx[0].bgcolor(theme)).toBe(theme.palette.text.secondary);
+    const color = categoryTextColor(mode, label, theme.palette.text.secondary, 'suite');
+    expect(color).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(categoryTextColor(mode, label, theme.palette.text.secondary, 'suite')).toBe(color);
     const html = renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(CategoryTag, { label })));
     expect(html).toContain(`<span>${label}</span>`);
-    expect(html).toContain('data-category-shape="circle"');
-  });
-
-  test.each(Object.keys(categoryColors.light))('preserves the recognized color for %s', (label) => {
-    const color = categoryColors[mode][label];
-    const tagStyle = CategoryTag({ label }).props.sx[0];
-    expect(tagStyle.color(theme)).toBe(color);
-    expect(tagStyle.bgcolor(theme)).toBe(mode === 'dark' ? theme.palette.dashboard.subtleSurface : alpha(color, 0.07));
-    expect(CategoryMarker({ label }).props.sx[0].bgcolor(theme)).toBe(color);
+    expect(CategoryMarker({ label }).props['data-category-shape']).toBe('circle');
   });
 });

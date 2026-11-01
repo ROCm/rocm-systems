@@ -18,7 +18,7 @@ test('shared search fields include run and source identity plus raw and displaye
 
 function compareFilter(options, query) {
   const selector = RunSelector({ label: 'Candidate run', options, value: null, onChange() {} });
-  return selector.props.children[0].props.filterOptions(options, { inputValue: query });
+  return selector.props.children.props.filterOptions(options, { inputValue: query });
 }
 
 test.each(['attempt-needle', 'BRANCH-NEEDLE', 'message-needle', 'abcdef1', 'gfx1250', 'default', '2026-10-04', '2026-10-05'])('both pickers search common field %s', (query) => {

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { openDashboard } from './helpers/dashboard.js';
 
 async function expectRunStyle(page, picker) {
@@ -16,7 +17,7 @@ test('all run pickers share the comparison option layout and retain exact run se
   const reference = page.getByRole('combobox', { name: 'Reference', exact: true });
   await reference.fill('fictional-develop-20');
   await page.getByRole('option').first().click();
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'reference', 'fictional-develop-20');
   await openDashboard(page, '/?view=compare');
   for (const label of ['Candidate run', 'Baseline run']) await expectRunStyle(page, page.getByRole('combobox', { name: label, exact: true }));
   await openDashboard(page, '/?view=benchmarks');

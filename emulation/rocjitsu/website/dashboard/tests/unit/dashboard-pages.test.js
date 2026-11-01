@@ -13,9 +13,9 @@ test('shared page definitions preserve navigation order, titles and accepted rou
   const { dashboardPages } = await import('../../src/config/dashboardPages.js');
   expect(dashboardPages).toEqual([
     { id: 'overview', label: 'Overview' },
-    { id: 'branch', label: 'Branch Runs' },
+    { id: 'branch', label: 'Branch runs' },
     { id: 'benchmarks', label: 'Benchmarks' },
-    { id: 'compare', label: 'Run Comparison' },
+    { id: 'compare', label: 'Run comparison' },
   ]);
   const render = (element) => renderToStaticMarkup(createElement(ThemeProvider, { theme: createDashboardTheme('light') }, element));
   const navigation = render(createElement(DashboardShell, {

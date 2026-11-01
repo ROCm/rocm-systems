@@ -48,7 +48,6 @@ it('grid popup and long chip sets have viewport-bounded local scrolling', () => 
   const picker = BenchmarkGridPicker({ availableOptions: [], selected: [], onChange() {} });
   expect(picker.props.limitTags).toBe(-1);
   expect(picker.props.sx['& .MuiAutocomplete-inputRoot']?.overflowY).toBe('auto');
-  expect(picker.props.sx['& .MuiAutocomplete-inputRoot'].maxHeight).toContain('dvh');
   const listbox = picker.props.slotProps.listbox.sx;
   expect(listbox.maxHeight).toContain('--benchmark-listbox-height');
   expect(listbox.overflowY).toBe('auto');

@@ -1,5 +1,6 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { expect, test } from '@playwright/test';
+import { expectRunPicker } from './helpers/runPicker.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { formatDuration, formatPercent } from '../../src/utils/formatters.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
@@ -126,7 +127,7 @@ for (const width of [1440, 900, 390]) test(`comparison metric painted values rem
     await testInfo.attach(`metrics-${width}-${theme}-${scenario}-scrolled`, { body: await page.screenshot(), contentType: 'image/png' });
     expect(metricContainmentFailures(geometry), 'painted values must fit their own content bounds without adjacent/caption/commit collision').toEqual([]);
     if (scenario === 'ordinary') expect(geometry.every((cell) => new Set(cell.value.map((line) => line.top)).size === 1)).toBe(true);
-    const commits = page.getByTestId('comparison-metric-aggregate-change').getByTestId('compared-commits');
+    const commits = page.getByTestId('compared-commits');
     if (hasPair) await expect(commits).toBeVisible();
     else await expect(commits).toHaveCount(0);
     if (scenario === 'extreme' && width === 1440 && theme === 'light') {
@@ -165,8 +166,8 @@ for (const width of [1440, 900, 390]) test(`comparison metric painted values rem
 const metricValue = (page, name) => page.getByTestId(`comparison-metric-${name}`).locator(':scope > .MuiTypography-root').nth(1);
 
 async function expectPair(page, candidate, baseline) {
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText(candidate);
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText(baseline);
+  await expectRunPicker(page, 'candidate-run', candidate);
+  await expectRunPicker(page, 'baseline-run', baseline);
   await expect.poll(() => {
     const params = new URL(page.url()).searchParams;
     return [params.get('compareCandidate'), params.get('compareBaseline')];
@@ -276,12 +277,12 @@ test('branch-only publications keep comparison filters usable and long linked id
   await expect(page.getByRole('checkbox', { name: 'single', exact: true })).toBeChecked();
   await expect(duration.locator('[data-configuration]')).toHaveCount(1);
   await expect(duration.locator('[data-configuration="gfx1250/single"]')).toContainText('No shared workloads');
-  await expect(duration.locator('[data-configuration="gfx1250/single"] p').last()).toHaveText('No shared workloads');
+  await expect(duration.locator('[data-configuration="gfx1250/single"] > :last-child')).toHaveText('No shared workloads');
   await expect(page.getByTestId('speedup-empty-state')).toBeVisible();
   await expect(page.getByTestId('performance-trend').getByRole('img')).toHaveCount(0);
   await expect(page.getByTestId('recent-runs-table').locator('tbody tr')).toHaveCount(0);
   await expect(page.getByTestId('largest-changes').locator('[data-change-state]')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Run Comparison', exact: true }).click();
+  await page.getByRole('tab', { name: 'Run comparison', exact: true }).click();
   await expectPair(page, candidate.publication.id, baseline.publication.id);
   await expect(page.getByRole('checkbox', { name: 'single', exact: true })).toBeEnabled();
   await expect(metricValue(page, 'comparable')).toHaveText('4');

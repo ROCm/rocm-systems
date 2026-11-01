@@ -1,10 +1,10 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { alpha, ThemeProvider } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
 import { describe, expect, test, vi } from 'vitest';
 import BenchmarkHistoryChart from '../../src/components/benchmarks/BenchmarkHistoryChart.jsx';
 import { createDashboardTheme } from '../../src/theme/theme.js';
-import { categoryColors } from '../../src/theme/tokens.js';
+import { categoryColor } from '../../src/theme/tokens.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { selectBenchmarkSeries } from '../../src/data/selectors.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
@@ -35,16 +35,17 @@ describe.each(['light', 'dark'])('%s benchmark history category colors', (mode) 
       data, filters, benchmark: { id: 'a', name: 'Fictional GEMM' },
     })));
     const option = captured.chart.option;
-    const expectedColors = viewModel.series.map((series) => ['gfx1250', 'gfx950'].includes(series.target) ? categoryColors[mode][series.target] : series.color);
+    const expectedColors = viewModel.series.map((series) => categoryColor(mode, series.target, series.color, 'target'));
     expect(option.color).toEqual(expectedColors);
     const lines = option.series.filter((series) => series.type === 'line');
     const selections = option.series.filter((series) => series.name.endsWith(' selected points'));
     for (const [index, color] of expectedColors.entries()) {
       expect(typeof color).toBe('string');
       expect(lines[index].lineStyle.color).toBe(color);
-      expect(lines[index].lineStyle.shadowColor).toBe(alpha(color, 0.22));
-      expect(lines[index].itemStyle.color).toBe(color);
-      expect(selections[index].itemStyle.color).toBe(color);
+      // Hollow single points keep the series color on the border; default points fill with it.
+      const marker = lines[index].symbol === 'diamond' ? 'borderColor' : 'color';
+      expect(lines[index].itemStyle[marker]).toBe(color);
+      expect(selections[index].itemStyle[marker]).toBe(color);
     }
   });
 });

@@ -20,7 +20,7 @@ for (const display of displays) {
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto('/');
-      const expectedScale = 0.7392;
+      const expectedScale = 0.75;
       const zoom = () => page.locator('body').evaluate((body) => Number(getComputedStyle(body).zoom));
       await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
       await expect(page.getByTestId('performance-trend')).toBeVisible();
@@ -75,14 +75,14 @@ for (const screen of [{ width: 1920, height: 1080 }, { width: 3840, height: 2160
       const page = await context.newPage();
       await page.goto('/');
       const zoom = () => page.locator('body').evaluate((body) => Number(getComputedStyle(body).zoom));
-      const expectedScale = screen.width === 1920 ? 0.7392 : 1.064448;
+      const expectedScale = screen.width === 1920 ? 0.75 : 1.08;
       await expect.poll(zoom).toBeCloseTo(expectedScale, 5);
       const cdp = await context.newCDPSession(page);
       // Keep physical viewport width fixed while CSS width shrinks and DPR rises.
       // This is metric emulation, not a native toolbar-zoom test.
       for (const [factor, zoomedScale] of screen.width === 1920
-        ? [[1.25, 0.7392], [1.5, 0.7392], [2, 0.7392], [1, 0.7392]]
-        : [[1.25, 0.8515584], [1.5, 0.7392], [2, 0.7392], [1, 1.064448]]) {
+        ? [[1.25, 0.75], [1.5, 0.75], [2, 0.75], [1, 0.75]]
+        : [[1.25, 0.864], [1.5, 0.75], [2, 0.75], [1, 1.08]]) {
         await cdp.send('Emulation.setDeviceMetricsOverride', {
           width: screen.width / factor, height: screen.height / factor,
           screenWidth: screen.width, screenHeight: screen.height,
@@ -106,7 +106,7 @@ test('desktop resizing follows one continuous width formula', async ({ browser }
     const page = await context.newPage();
     await page.goto('/');
     const cdp = await context.newCDPSession(page);
-    for (const [width, expectedScale] of [[1280, 0.7392], [1920, 0.7392], [2560, 0.7392], [3000, 0.8316], [3440, 0.953568], [1920, 0.7392]]) {
+    for (const [width, expectedScale] of [[1280, 0.75], [1920, 0.75], [2560, 0.75], [3000, 0.84375], [3440, 0.9675], [1920, 0.75]]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', {
         width, height: 900, screenWidth: 3440, screenHeight: 1440,
         deviceScaleFactor: 1.5, mobile: false,
@@ -137,10 +137,8 @@ for (const pixelRatio of [1, 2, 3]) {
         return { textHeight, layoutWidth: document.body.clientWidth };
       });
       // Visible CSS geometry is the acceptance target, not a copy of the formula.
-      expect(geometry.textHeight).toBeGreaterThan(10.3);
-      expect(geometry.textHeight).toBeLessThan(10.4);
-      expect(geometry.layoutWidth).toBeGreaterThan(2596);
-      expect(geometry.layoutWidth).toBeLessThan(2599);
+      expect(geometry.textHeight).toBeCloseTo(14 * 0.75, 1);
+      expect(geometry.layoutWidth).toBeCloseTo(1920 / 0.75, 0);
     } finally {
       await context.close();
     }
@@ -152,7 +150,7 @@ test('popup geometry and text follow applied density, including CSS fallback', a
   await page.goto('/');
   await expect(page.getByTestId('performance-trend')).toBeVisible();
   await page.evaluate(() => document.documentElement.style.removeProperty('--dashboard-scale'));
-  await expect(page.locator('body')).toHaveCSS('zoom', '0.7392');
+  await expect(page.locator('body')).toHaveCSS('zoom', '0.75');
   await page.evaluate(() => document.body.style.setProperty('--dashboard-density', '0.9'));
   await expect(page.locator('body')).toHaveCSS('zoom', '0.9');
   const picker = page.getByRole('combobox').first();

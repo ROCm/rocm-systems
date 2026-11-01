@@ -157,7 +157,7 @@ test('keyboard result details distinguish positive completion, failed, timeout a
     const dialog = await inspectResult(page, name, runId, 'gfx1250', mode);
     await expect(dialog.getByText(status, { exact: true })).toBeVisible();
     await expect(dialog.getByText(runId, { exact: true })).toBeVisible();
-    await expect(dialog.getByText('Run Provenance', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Run provenance', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Environment', { exact: true })).toBeVisible();
     await expect(dialog.getByText('auxiliary.sdk', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Thread policy', { exact: true }).locator('..')).toContainText(mode);
@@ -176,5 +176,5 @@ test('keyboard result details distinguish positive completion, failed, timeout a
   await expect(page.getByRole('button', { name: 'Close details', exact: true })).toHaveCount(0);
   await expect(absent.getByRole('alert')).toContainText('Unavailable · gfx950 · default · fictional-develop-12');
   await expect(absent.getByRole('alert')).toContainText('not a failed or zero-duration measurement');
-  await expect(absent.getByText('Run Provenance', { exact: true })).toHaveCount(0);
+  await expect(absent.getByText('Run provenance', { exact: true })).toHaveCount(0);
 });

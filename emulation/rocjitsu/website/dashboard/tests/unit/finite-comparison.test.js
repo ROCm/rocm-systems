@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import ConfigurationMatrix from '../../src/components/branch/ConfigurationMatrix.jsx';
 import BenchmarkDifferences from '../../src/components/branch/BenchmarkDifferences.jsx';
 import { selectConfigurationComparison } from '../../src/data/branchSelectors.js';
@@ -40,8 +40,8 @@ test('valid positive wire durations retain measurements when derived percentages
   const comparison = selectConfigurationComparison(candidate, baseline, { ...selection, suites: filters.suites });
   const summary = configurationState(candidate, baseline, comparison, selection.target, selection.mode);
   expect(summary.matched).toBe(4);
-  const matrix = renderToStaticMarkup(createElement(ConfigurationMatrix, { candidate, reference: baseline, selection, suites: filters.suites, onSelect() {} }));
-  const differences = renderToStaticMarkup(createElement(BenchmarkDifferences, { comparison, summary, candidate, reference: baseline, selection, suites: filters.suites, suiteOptions: filters.suites, query: '', onOpenComparison() {} }));
+  const matrix = renderToStaticMarkup(themed(ConfigurationMatrix, { candidate, reference: baseline, selection, suites: filters.suites, onSelect() {} }));
+  const differences = renderToStaticMarkup(themed(BenchmarkDifferences, { comparison, summary, candidate, reference: baseline, selection, suites: filters.suites, suiteOptions: filters.suites, query: '', onOpenComparison() {} }));
   for (const html of [matrix, differences]) {
     expect(html).toContain('Percentage unavailable');
     expect(html).not.toContain('zero reference runtime');

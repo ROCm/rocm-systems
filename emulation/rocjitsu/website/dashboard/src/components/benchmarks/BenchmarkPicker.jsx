@@ -1,3 +1,4 @@
+import { fontWeights } from '../../theme/typography';
 import { matchAnchorWidth } from '../shared/dropdownGeometry';
 import {
   Autocomplete,
@@ -69,14 +70,14 @@ export function BenchmarkGridPicker({
       renderOption={(props, option, state) => {
         const { key, ...optionProps } = props;
         return (
-          <Box component="li" key={key} {...optionProps} sx={{ gap: 1, py: 0.75 }}>
-            <Box component="span" aria-hidden="true" sx={{ display: 'inline-flex', p: 0.25, pointerEvents: 'none', color: state.selected ? 'primary.main' : 'text.secondary' }}>
+          <Box component="li" key={key} {...optionProps} sx={{ gap: 1, py: '6px' }}>
+            <Box component="span" aria-hidden="true" sx={{ display: 'inline-flex', p: '2px', pointerEvents: 'none', color: state.selected ? 'dashboard.selectionAccent' : 'text.secondary' }}>
               {state.selected ? <CheckBoxIcon fontSize="small" /> : <CheckBoxOutlineBlankIcon fontSize="small" />}
             </Box>
             <ListItemText
               primary={option.name}
               secondary={<><Box component="span" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{option.id}</Box>{[option.operation, formatDataType(option.problem?.dtype)].filter(Boolean).join(' · ')}</>}
-              slotProps={{ primary: { variant: 'body2', fontWeight: 650 }, secondary: { variant: 'caption' } }}
+              slotProps={{ primary: { variant: 'body2', fontWeight: fontWeights.emphasized }, secondary: { variant: 'caption' } }}
             />
           </Box>
         );
@@ -85,6 +86,7 @@ export function BenchmarkGridPicker({
         <TextField
           {...params}
           label="Benchmarks to graph"
+
           placeholder={selected.length === 0 ? 'Search and select benchmarks…' : ''}
           helperText={`${selected.length} of ${maximum} benchmarks selected · ${availableOptions.length} available in the selected targets / suites · Search all; up to 50 matches shown`}
         />
@@ -94,7 +96,7 @@ export function BenchmarkGridPicker({
         popper: { modifiers: [matchAnchorWidth, benchmarkViewport, { name: 'flip', options: { padding: 8 } }, { name: 'preventOverflow', options: { padding: 8 } }] },
         listbox: { sx: { maxHeight: 'min(340px, var(--benchmark-listbox-height, calc(100dvh - 16px)))', overflowY: 'auto', overscrollBehavior: 'contain', '& .MuiAutocomplete-option': { overflowWrap: 'anywhere' } } },
       }}
-      sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { maxHeight: 'min(240px, 30dvh)', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}
+      sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { height: 'min(120px, 20dvh)', minHeight: 44, alignContent: 'flex-start', alignItems: 'flex-start', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}
     />
   );
 }

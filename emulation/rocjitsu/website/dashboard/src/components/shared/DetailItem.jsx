@@ -1,3 +1,4 @@
+import { fontSizes } from '../../theme/typography';
 import { Box, Typography } from '@mui/material';
 
 export default function DetailItem({ label, children }) {
@@ -6,14 +7,14 @@ export default function DetailItem({ label, children }) {
       <Typography
         component="div"
         variant="overline"
-        sx={{ color: 'text.secondary', fontSize: '11px', lineHeight: '20px' }}
+        sx={{ color: 'text.secondary', fontSize: fontSizes.caption, lineHeight: '20px' }}
       >
         {label}
       </Typography>
       <Typography
         variant="body2"
         component="div"
-        sx={{ mt: 0.25, lineHeight: '21px', overflowWrap: 'anywhere' }}
+        sx={{ mt: '2px', lineHeight: '21px', overflowWrap: 'anywhere' }}
       >
         {children ?? '—'}
       </Typography>

@@ -5,7 +5,7 @@ import './index.css';
 
 // Density follows CSS viewport width, not physical pixels: equal browser windows
 // keep equal text/layout sizes across displays. Browser zoom can still reflow.
-const MIN_DASHBOARD_SCALE = 0.7392;
+const MIN_DASHBOARD_SCALE = 0.75;
 const BASELINE_VIEWPORT_WIDTH = 1920;
 const VIEWPORT_FIT_FACTOR = 0.72;
 

@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import raw from '../fixtures/fictional-producer-run.json' with { type: 'json' };
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
@@ -9,7 +9,7 @@ import { createFeedbackPublication } from '../fixtures/feedback-publication.js';
 test('interrupted fixture displays its run time and ordinary Fail status', () => {
   const { data } = adaptPublishedDashboardData(createFeedbackPublication());
   const run = data.runs.find((run) => run.runId === 'fictional-unfinished-develop');
-  const html = renderToStaticMarkup(createElement(RecentRuns, {
+  const html = renderToStaticMarkup(themed(RecentRuns, {
     data: { ...data, runs: [run] },
     filters: { targets: data.targets, suites: data.suites, modes: data.modes },
   }));
@@ -33,7 +33,7 @@ function renderStatus(finishedAt, status) {
     index: { generatedAt: '2026-10-22T12:00:00Z', runFiles: ['runs/default-branch/fictional-status.json'] },
     runs: [run],
   });
-  const html = renderToStaticMarkup(createElement(RecentRuns, {
+  const html = renderToStaticMarkup(themed(RecentRuns, {
     data, filters: { targets: data.targets, suites: data.suites, modes: data.modes },
   }));
   expect(run).toEqual(before);
