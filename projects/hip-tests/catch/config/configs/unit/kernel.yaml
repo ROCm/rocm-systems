@@ -86,9 +86,6 @@ kernel:
     tags: [launch, P1]
   Unit_hipGridLaunch_ExceedMaxGridDim_Negative:
     <<: *level_default
-    disabled:
-      targets: [amd_windows, amd_linux, amd_wsl]
-      reason: "AIRUNTIME-2892 - needs to be further investigated; see also AIRUNTIME-2862. gfx1030 (amd_linux) FAIL 3/3: hipErrorInvalidConfiguration not returned for an oversize grid. gfx1201 (amd_windows) FAIL: err == hipErrorInvalidConfiguration -> 0 == 9. gfx1201 (amd_wsl) FAIL: err == hipErrorInvalidConfiguration -> 0 == 9."
     tags: [launch]
   Unit_hipExtDynDataPrefetch_NegativeTests:
     <<: *level_default

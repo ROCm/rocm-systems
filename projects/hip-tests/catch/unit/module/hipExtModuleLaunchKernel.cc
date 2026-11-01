@@ -271,6 +271,35 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Negative_Parameters) {
   ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Launch with a globalWorkSizeY that is a non multiple of localWorkSizeY, picked so the
+ * launch needs maxGridDimY + 1 workgroups while globalWorkSizeY / localWorkSizeY is only
+ * maxGridDimY. hipExtModuleLaunchKernel returns hipErrorInvalidConfiguration, because the
+ * partial final workgroup still counts towards the grid limit.
+ * Test source
+ * ------------------------
+ *    - catch\unit\module\hipExtModuleLaunchKernel.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_ExceedMaxGridDim_NonUniform) {
+  const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
+  // 2 * maxGridY + 1 has to fit the uint32_t globalWorkSizeY parameter.
+  if (maxGridY > (UINT_MAX - 1u) / 2u) {
+    HIP_SKIP_TEST("maxGridDimY is too large to express a grid that exceeds it.");
+  }
+
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
+  const auto kernel = GetKernel(mg.module(), "NOPKernel");
+  HIP_CHECK_ERROR(hipExtModuleLaunchKernel(kernel, 1, 2u * maxGridY + 1u, 1, 1, 2, 1, 0, nullptr,
+                                           nullptr, nullptr, nullptr, nullptr, 0u),
+                  hipErrorInvalidConfiguration);
+}
+
 /**
  * Test Description
  * ------------------------
