@@ -6273,7 +6273,10 @@ protected:
     peers[0].totalGlobalMem = 1u << 20;
     comm->peerInfo = peers.data();
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wmissing-field-initializers"
     props = NCCL_COMM_PROPERTIES_INITIALIZER;
+#pragma GCC diagnostic pop
   }
 
   void TearDown() override {

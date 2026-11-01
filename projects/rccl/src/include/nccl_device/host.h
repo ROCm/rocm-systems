@@ -182,24 +182,24 @@ static_assert(sizeof(ncclCommProperties_t) == 152, "ncclCommProperties_t size ch
     sizeof(ncclCommProperties_t),                  /* size */ \
     NCCL_API_MAGIC,                                /* magic */ \
     NCCL_VERSION_CODE,                             /* version */ \
-    0,                                            /* rank */ \
-    0,                                            /* nRanks */ \
-    0,                                            /* cudaDev */ \
-    0,                                            /* nvmlDev */ \
-    false,                                        /* deviceApiSupport */ \
-    false,                                        /* multimemSupport */ \
+    0,                                             /* rank */ \
+    0,                                             /* nRanks */ \
+    0,                                             /* cudaDev */ \
+    0,                                             /* nvmlDev */ \
+    false,                                         /* deviceApiSupport */ \
+    false,                                         /* multimemSupport */ \
     NCCL_GIN_TYPE_NONE,                            /* ginType */ \
-    0,                                            /* nLsaTeams */ \
-    false,                                        /* hostRmaSupport */ \
+    0,                                             /* nLsaTeams */ \
+    false,                                         /* hostRmaSupport */ \
     NCCL_GIN_TYPE_NONE,                            /* railedGinType */ \
-    0,                                            /* commHash */ \
-    0,                                            /* ginMinStride */ \
+    0,                                             /* commHash */ \
+    0,                                             /* ginMinStride */ \
     NCCL_GIN_CONNECTION_NONE,                      /* ginConnectionType */ \
-    {false},                                      /* ginSupport */ \
-    0,                                            /* devCommRuntimeVersionSize */ \
-    false,                                        /* cftSupport */ \
-    false,                                        /* cftMulticastSupport */ \
-    false,                                        /* cftCountedSupport */ \
+    {false},                                       /* ginSupport */ \
+    0,                                             /* devCommRuntimeVersionSize */ \
+    false,                                         /* cftSupport */ \
+    false,                                         /* cftMulticastSupport */ \
+    false,                                         /* cftCountedSupport */ \
   }
 
 ////////////////////////////////////////////////////////////////////////////////
