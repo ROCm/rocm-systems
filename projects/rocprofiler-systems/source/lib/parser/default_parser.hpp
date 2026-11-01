@@ -9,6 +9,7 @@
 namespace rocprofsys::parser
 {
 /// Reads each parameter's default_value. Parameters without one are skipped.
+/// Catalog defects belong to validate_schema(); this parser does not report them.
 class default_parser
 {
 public:
