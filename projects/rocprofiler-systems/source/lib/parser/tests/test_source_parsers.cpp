@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <string>
@@ -36,6 +37,33 @@ void
 add_param(schema& value, schema_param param)
 {
     ASSERT_TRUE(value.add_param(std::move(param)));
+}
+
+void
+expect_unset(const value_map_t& values, std::initializer_list<std::string_view> ids)
+{
+    for(const auto param_id : ids)
+    {
+        EXPECT_EQ(values.find(std::string{ param_id }), values.end());
+    }
+}
+
+[[nodiscard]] std::optional<std::string>
+blank_environment(std::string_view name)
+{
+    if(name == "ROCPROFSYS_FREQ")
+    {
+        return std::string{ "  2  " };
+    }
+    if(name == "ROCPROFSYS_EVENTS" || name == "ROCPROFSYS_LABEL")
+    {
+        return std::string{ "   " };
+    }
+    if(name == "ROCPROFSYS_TRACE" || name == "ROCPROFSYS_OUTPUT")
+    {
+        return std::string{};
+    }
+    return std::nullopt;
 }
 
 void
@@ -99,7 +127,7 @@ TEST(parser_default, reads_only_parameters_with_defaults)
     EXPECT_EQ(parsed.values, (value_map_t{ { "trace", "true" } }));
 }
 
-TEST(parser_default, stores_the_default_without_checking_the_catalog)
+TEST(parser_default, rejects_a_default_the_catalog_refuses)
 {
     schema value{};
     auto   param        = make_param("freq", param_type::integer);
@@ -108,8 +136,10 @@ TEST(parser_default, stores_the_default_without_checking_the_catalog)
     add_param(value, std::move(param));
 
     const auto parsed = default_parser{}.parse(value);
-    EXPECT_TRUE(parsed.errors.empty());
-    EXPECT_EQ(parsed.values.at("freq"), "9");
+    EXPECT_TRUE(parsed.values.empty());
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_NE(parsed.errors.front().find("invalid value '9' for parameter 'freq'"),
+              std::string::npos);
 }
 
 TEST(parser_env, reads_set_variables_and_skips_unset_ones)
@@ -157,33 +187,10 @@ TEST(parser_env, trims_values_and_skips_an_empty_list)
     add_param(value, std::move(label));
     add_param(value, std::move(path));
 
-    const auto lookup = [](std::string_view name) -> std::optional<std::string> {
-        if(name == "ROCPROFSYS_FREQ")
-        {
-            return std::string{ "  2  " };
-        }
-        if(name == "ROCPROFSYS_EVENTS" || name == "ROCPROFSYS_LABEL")
-        {
-            return std::string{ "   " };
-        }
-        if(name == "ROCPROFSYS_TRACE")
-        {
-            return std::string{};
-        }
-        if(name == "ROCPROFSYS_OUTPUT")
-        {
-            return std::string{};
-        }
-        return std::nullopt;
-    };
-
-    const auto parsed = env_parser{ lookup }.parse(value);
+    const auto parsed = env_parser{ blank_environment }.parse(value);
     EXPECT_EQ(parsed.values.at("freq"), "2");
-    EXPECT_EQ(parsed.values.find("events"), parsed.values.end());
-    EXPECT_EQ(parsed.values.at("trace"), "");
-    EXPECT_EQ(parsed.values.at("label"), "");
-    ASSERT_EQ(parsed.errors.size(), 1U);
-    EXPECT_NE(parsed.errors.front().find("ROCPROFSYS_OUTPUT"), std::string::npos);
+    expect_unset(parsed.values, { "events", "trace", "label", "output" });
+    EXPECT_TRUE(parsed.errors.empty());
 }
 
 TEST(parser_cli, accepts_separate_and_equals_values)
@@ -243,6 +250,8 @@ TEST(parser_cli, reports_a_missing_or_invalid_value)
     ASSERT_EQ(missing.errors.size(), 1U);
     EXPECT_NE(missing.errors.front().find("requires a value"), std::string::npos);
     ASSERT_EQ(invalid.errors.size(), 1U);
+    EXPECT_NE(invalid.errors.front().find("invalid value '9' for parameter 'freq'"),
+              std::string::npos);
     EXPECT_TRUE(invalid.values.empty());
 }
 
@@ -360,16 +369,19 @@ TEST(parser_cli, accepts_a_negative_number_and_rejects_overflow)
     ASSERT_EQ(overflow.errors.size(), 1U);
 }
 
-TEST(parser_cli, flag_accepts_a_following_boolean_token)
+TEST(parser_cli, flag_does_not_consume_the_next_token)
 {
-    const auto disabled = parse_cli({ "--trace", "false" });
-    const auto enabled  = parse_cli({ "--trace", "--freq", "2" });
+    const auto with_word = parse_cli({ "--trace", "true" });
+    EXPECT_EQ(with_word.values.at("trace"), "true");
+    EXPECT_TRUE(with_word.command.empty());
+    ASSERT_EQ(with_word.errors.size(), 1U);
+    EXPECT_NE(with_word.errors.front().find("unexpected argument 'true'"),
+              std::string::npos);
 
-    EXPECT_TRUE(disabled.errors.empty());
-    EXPECT_EQ(disabled.values.at("trace"), "false");
-    EXPECT_TRUE(disabled.command.empty());
-    EXPECT_EQ(enabled.values.at("trace"), "true");
-    EXPECT_EQ(enabled.values.at("freq"), "2");
+    const auto with_command = parse_cli({ "--trace", "--", "true" });
+    EXPECT_TRUE(with_command.errors.empty());
+    EXPECT_EQ(with_command.values.at("trace"), "true");
+    EXPECT_EQ(with_command.command, (std::vector<std::string>{ "true" }));
 }
 
 TEST(parser_cli, accepts_an_empty_equals_value)
@@ -398,12 +410,58 @@ TEST(parser_cli, accepts_a_short_flag_bundle)
     EXPECT_EQ(parsed.values.at("json"), "true");
 }
 
-TEST(parser_cli, plain_argument_starts_the_command)
+TEST(parser_cli, plain_argument_is_unexpected)
 {
     const auto parsed = parse_cli({ "--bogus", "5" });
-    ASSERT_EQ(parsed.errors.size(), 1U);
+    ASSERT_EQ(parsed.errors.size(), 2U);
     EXPECT_NE(parsed.errors.front().find("--bogus"), std::string::npos);
-    EXPECT_EQ(parsed.command, (std::vector<std::string>{ "5" }));
+    EXPECT_NE(parsed.errors.back().find("unexpected argument '5'"), std::string::npos);
+    EXPECT_TRUE(parsed.command.empty());
+}
+
+TEST(parser_cli, list_stops_at_the_separator_and_rejects_a_bare_command)
+{
+    const auto separated = cli_parser{ { "--events", "ins", "cycles", "--", "./app" },
+                                       unknown_option::report }
+                               .parse(make_event_schema());
+    EXPECT_TRUE(separated.errors.empty());
+    EXPECT_EQ(separated.values.at("events"), "ins,cyc");
+    EXPECT_EQ(separated.command, (std::vector<std::string>{ "./app" }));
+
+    const auto bare =
+        cli_parser{ { "--events", "ins", "cycles", "./app" }, unknown_option::report }
+            .parse(make_event_schema());
+    EXPECT_EQ(bare.values.at("events"), "ins,cyc");
+    EXPECT_TRUE(bare.command.empty());
+    ASSERT_EQ(bare.errors.size(), 1U);
+    EXPECT_NE(bare.errors.front().find("unexpected argument './app'"), std::string::npos);
+}
+
+TEST(parser_cli, optional_value_does_not_override_the_default)
+{
+    schema value{};
+    auto   verbose        = make_param("verbose", param_type::integer);
+    verbose.default_value = "0";
+    verbose.arg = arg_spec{ .name = "--verbose", .min_count = 0, .max_count = 1 };
+    add_param(value, std::move(verbose));
+
+    const auto parsed =
+        cli_parser{ { "--verbose", "--", "./app" }, unknown_option::report }.parse(value);
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.find("verbose"), parsed.values.end());
+    EXPECT_EQ(parsed.command, (std::vector<std::string>{ "./app" }));
+
+    const auto defaults = default_parser{}.parse(value);
+    EXPECT_EQ(defaults.values.at("verbose"), "0");
+}
+
+TEST(parser_cli, required_value_stops_at_the_separator)
+{
+    const auto parsed = parse_cli({ "--output", "--", "./app" });
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_NE(parsed.errors.front().find("requires a value"), std::string::npos);
+    EXPECT_EQ(parsed.values.find("output"), parsed.values.end());
+    EXPECT_EQ(parsed.command, (std::vector<std::string>{ "./app" }));
 }
 
 TEST(parser_cli, arguments_from_skips_the_program_name)
