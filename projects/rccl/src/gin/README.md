@@ -120,6 +120,47 @@ Scripts and jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not A
 - **GDA on AlltoAllPivot**: works via the specialized kernel path (per-arch
   bitcode injection via `--rocshmem-bitcode`).
 
+## Resource sharing modes
+
+`ncclGin` is constructed with a `ncclGinResourceSharingMode`
+(`ncclGinResourceSharingMode` in `nccl_device/gin/gin_device_common.h`) that tells
+the backend how a queue pair's send queue (SQ) is shared across the GPU threads
+that post to it. It only changes the SQ's internal synchronization, not *who*
+posts (a single elected lane still posts for the whole coop):
+
+| Mode | Value | Meaning |
+|------|-------|---------|
+| `GPU` | 0 | SQ shared grid-wide; keep the SQ lock. Library default. |
+| `CTA` | 1 | SQ shared within a CTA; keep the lock (no cheaper CTA-scope lock exists yet). |
+| `THREAD` | 2 | Exclusive QP ownership; drop the SQ lock. |
+
+`THREAD` elides a per-WQE lock (on rocSHMEM GDA, an agent-scope CAS + acquire/release
+fence), so it is the fast path when a QP has a single poster. It is the RCCL/rocSHMEM
+analogue of DOCA's `doca_gpu_dev_verbs_resource_sharing_mode`.
+
+Each backend maps the mode onto its own QP primitive:
+
+| Backend | How the mode is applied |
+|---------|-------------------------|
+| rocSHMEM GDA | `PostOpt{ThreadSafe<bool>}`: THREAD -> `ThreadSafe<false>` (no lock), GPU/CTA -> `ThreadSafe<true>` (lock). rocSHMEM has only an agent-scope lock, so CTA folds into GPU. |
+| GDAKI (DOCA) | Templated on the DOCA `resource_sharing_mode` enum; all three modes map to distinct DOCA values. |
+| Anvil SDMA, IB proxy | Ignored (no SQ lock to elide); correct regardless of the mode. |
+
+### rocSHMEM GDA THREAD precondition (stronger than GDAKI)
+
+At the moment, on the rocSHMEM GDA backend, **every logical context aliases the same per-peer QP
+array** (`gin_plugin_rocshmem_gda.cc` sets `gpuCtx->qps = cctx->gpu_qp_ptrs` for
+all contexts; only signals/counters are striped per `contextId`). So there is one
+SQ per peer for the *whole grid* -- unlike GDAKI, where `handle[contextId].gdqp`
+is a distinct QP per context.
+
+Consequently `THREAD` is safe here only when a **single coop posts to each peer
+across the entire grid** (e.g. all GIN confined to one CTA). The usual
+GDAKI-friendly pattern of one context per CTA does **not** give each CTA its own
+SQ on this backend, and a multi-CTA barrier that signals/flushes `qps[peer]` from
+every CTA would race under THREAD -- such callers must use `GPU` mode. True
+per-CTA QP parity is deferred to a GDA QP refactor.
+
 ## Writing tests that use the GIN device API
 
 Test executables that compile GIN device templates (e.g. `alltoall.cu`

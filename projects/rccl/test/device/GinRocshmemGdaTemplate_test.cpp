@@ -204,6 +204,20 @@ static size_t readSignalCount() {
   return s;
 }
 
+// Posts (RMA + AMO) the mock saw with the SQ lock engaged (PostOpt ThreadSafe).
+// THREAD resource-sharing elides the lock, so this is 0 in THREAD mode and > 0 in
+// GPU/CTA mode -- the assertion that proves the mode actually reached the QP.
+static void resetThreadSafePostCount() {
+  size_t z = 0;
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(rocshmem::QueuePairMock::thread_safe_post_count), &z, sizeof(z)));
+}
+
+static size_t readThreadSafePostCount() {
+  size_t c = 0;
+  HIP_EXPECT(hipMemcpyFromSymbol(&c, HIP_SYMBOL(rocshmem::QueuePairMock::thread_safe_post_count), sizeof(c)));
+  return c;
+}
+
 static void resetThreadfenceCount() {
   size_t z = 0;
   HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_gdaStubThreadfenceCount), &z, sizeof(z)));
@@ -706,7 +720,144 @@ TEST_F(GinRocshmemGdaTemplateTest, PutValue_SelectLogicalContextSignalStripe) {
       << "contextId=1 PutValue must deliver the signal into the context-1 stripe";
 }
 
-// G16: VA signals (AICOMRCCL-3180) target a cell in the dst window, never the indexed signal buffer.
+// G16: THREAD resource-sharing mode drives callImpl<false> (SQ lock elided).
+// The mock QueuePair ignores ThreadSafe, so THREAD must be behavior-identical to
+// the default GPU mode: same data lands, same signal delivered. These three cases
+// mirror G1/G3/G9 with resourceSharingMode = THREAD to exercise the otherwise
+// unreached unlocked post path in ncclGinApi_Put/PutValue::call.
+__global__ void kernelPutDataThread(GdaHarness* h, size_t bytes) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ginCtx.resourceSharingMode = NCCL_GIN_RESOURCE_SHARING_THREAD;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_ThreadModeDataLandsAtRemote) {
+  constexpr int kN = 64;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0xA0 + i);
+  GdaEnv env(kN);
+  env.src.copyFrom(pat);
+  env.dst.zero();
+  env.build();
+  resetThreadSafePostCount();
+  kernelPutDataThread<<<1, 1>>>(env.dHarness.ptr, kN);
+  syncAndCheck();
+  auto got = env.dst.copyTo();
+  for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  EXPECT_EQ(readThreadSafePostCount(), 0ULL);  // THREAD elides the SQ lock -> callImpl<false>
+}
+
+__global__ void kernelPutSignalAddThread(GdaHarness* h) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ginCtx.resourceSharingMode = NCCL_GIN_RESOURCE_SHARING_THREAD;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 1;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, 32, sig, ncclGinSignalAdd, 7, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_ThreadModeSignalAddDeliversArg) {
+  GdaEnv env(32);
+  env.src.zero();
+  env.build();
+  resetSignalCount();
+  kernelPutSignalAddThread<<<1, 1>>>(env.dHarness.ptr);
+  syncAndCheck();
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched, same as GPU mode
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[1], 7ULL);
+  EXPECT_EQ(sigs[0], 0ULL);
+}
+
+__global__ void kernelPutValueSignalThread(GdaHarness* h, uint32_t val) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ginCtx.resourceSharingMode = NCCL_GIN_RESOURCE_SHARING_THREAD;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_INDEXED;
+  sig.indexedSignal.signalId = 2;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0, val, sig,
+      ncclGinSignalAdd, 4, false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, PutValue_ThreadModeWithSignal) {
+  GdaEnv env(sizeof(uint32_t));
+  env.dst.zero();
+  env.build();
+  resetPutValCount();
+  resetSignalCount();
+  const uint32_t kVal = 0x12345678u;
+  kernelPutValueSignalThread<<<1, 1>>>(env.dHarness.ptr, kVal);
+  syncAndCheck();
+  EXPECT_EQ(readPutValCount(), 1ULL);  // put inlined, same as GPU mode
+  EXPECT_EQ(readSignalCount(), 1ULL);  // signal dispatched
+  auto got = env.dst.copyTo();
+  uint32_t observed = 0;
+  std::memcpy(&observed, got.data(), sizeof(observed));
+  EXPECT_EQ(observed, kVal);
+  auto sigs = env.signals.copyTo();
+  EXPECT_EQ(sigs[2], 4ULL);
+}
+
+// G17: the CTA and (explicit) GPU sharing modes both route to callImpl<true>
+// (locked), like the zero-initialized default. Prove each enum value initializes
+// and dispatches to a correct, data-equivalent put -- the whole mode dimension
+// (GPU default / explicit GPU / CTA / THREAD) is then covered.
+__global__ void kernelPutDataMode(GdaHarness* h, size_t bytes, uint8_t mode) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ginCtx.resourceSharingMode = mode;
+  ncclGinSignalDescriptor sig{};
+  sig.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA>::call(
+      ginCtx, ncclCoopThread{}, 1, true, reinterpret_cast<ncclGinWindow_t>(&h->dstMh), 0,
+      reinterpret_cast<ncclGinWindow_t>(&h->srcMh), 0, bytes, sig, ncclGinSignalInc, 0, false, 0,
+      false, nullptr, cuda::thread_scope_system, cuda::thread_scope_system);
+}
+
+// Self-contained (does its own device sync, so it is not tied to the fixture's
+// syncAndCheck member): launch a mode-tagged put and assert the data lands.
+static auto expectModeDataLands = [](uint8_t mode) {
+  constexpr int kN = 64;
+  std::vector<uint8_t> pat(kN);
+  for (int i = 0; i < kN; ++i) pat[static_cast<size_t>(i)] = static_cast<uint8_t>(0xA0 + i);
+  GdaEnv env(kN);
+  env.src.copyFrom(pat);
+  env.dst.zero();
+  env.build();
+  resetThreadSafePostCount();
+  kernelPutDataMode<<<1, 1>>>(env.dHarness.ptr, kN, mode);
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  auto got = env.dst.copyTo();
+  for (int i = 0; i < kN; ++i) EXPECT_EQ(got[static_cast<size_t>(i)], pat[static_cast<size_t>(i)]);
+  EXPECT_GT(readThreadSafePostCount(), 0ULL);  // GPU/CTA keep the SQ lock -> callImpl<true>
+};
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_GpuModeDataLandsAtRemote) {
+  expectModeDataLands(NCCL_GIN_RESOURCE_SHARING_GPU);
+}
+
+TEST_F(GinRocshmemGdaTemplateTest, Put_CtaModeDataLandsAtRemote) {
+  expectModeDataLands(NCCL_GIN_RESOURCE_SHARING_CTA);
+}
+
+// G18: VA signals (AICOMRCCL-3180) target a cell in the dst window, never the indexed signal buffer.
 constexpr size_t kVaSignalOff = 256;
 constexpr size_t kVaWindowBytes = kVaSignalOff + sizeof(uint64_t);
 
@@ -758,7 +909,7 @@ TEST_F(GinRocshmemGdaTemplateTest, VaSignal_PutSignalsWindowCell) {
   }
 }
 
-// G17: ResetSignal clears a VA signal's cell through the window's local VA.
+// G19: ResetSignal clears a VA signal's cell through the window's local VA.
 __global__ void kernelResetVaSignal(GdaHarness* h) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
