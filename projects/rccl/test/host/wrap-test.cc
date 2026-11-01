@@ -1651,6 +1651,44 @@ TEST(WrapMicrotestIsolated, UpdateRemoteFlushAlgoProto_ScaledBufferRaisesReduceS
       });
 }
 
+TEST(WrapMicrotestIsolated, ScaleCollLl128BuffSize_OnlyOnTunedNodeCounts) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ScaleCollLl128BuffSize_OnlyOnTunedNodeCounts",
+      []() {
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        for (int nNodes = 1; nNodes <= 33; nNodes += nNodes < 17 ? 1 : 16) {
+          ncclComm* comm = MakeRemoteFlushTuneComm(nNodes, nNodes * 8);
+          rcclScaleCollLl128BuffSize(comm);
+          const bool tuned = (nNodes >= 2 && nNodes <= 8) || nNodes == 16;
+          EXPECT_EQ((tuned ? 4 : 1) * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << nNodes << " nodes";
+          EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize) << nNodes << " nodes";
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+TEST(WrapMicrotestIsolated, ScaleCollLl128BuffSize_ScalesTheSendRecvSize) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ScaleCollLl128BuffSize_ScalesTheSendRecvSize",
+      []() {
+        ScopedHook loadParam(g_loadParam, ForceFlagTune());
+        ncclComm* comm = MakeRemoteFlushTuneComm(2, 16);
+        comm->buffSizes[NCCL_PROTO_LL128] = 2 * kLl128BuffSize;
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(4 * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "4x the send/recv size";
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(4 * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "a second call does not compound";
+        EXPECT_EQ(kLl128BuffSize, comm->p2pLl128BuffSize);
+        DeleteCommWithArch(comm);
+
+        comm = MakeRemoteFlushTuneComm(9, 72);
+        comm->buffSizes[NCCL_PROTO_LL128] = 2 * kLl128BuffSize;
+        rcclScaleCollLl128BuffSize(comm);
+        EXPECT_EQ(2 * kLl128BuffSize, comm->buffSizes[NCCL_PROTO_LL128]) << "untuned: buffer left as it was";
+        DeleteCommWithArch(comm);
+      });
+}
+
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_ScaledLl128BufferReduceScatterTo7MiB) {
   // rcclUpdateCollectiveProtocol picks LL128 up to 7 MiB per rank once the collective LL128 buffer is scaled,
