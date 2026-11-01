@@ -42,7 +42,6 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
@@ -50,6 +49,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <type_traits>
+#include <utility>
 
 #define ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL 1
 
@@ -373,14 +373,16 @@ async_copy_handler(hsa_signal_value_t, void* arg);
  * When both HSA agents are GPU type, the agent handles alone are not sufficient to determine
  * the true transfer direction. OpenMP RTL (libomptarget) pins host memory and registers it
  * under a GPU agent, causing HSA to report src_agent == dst_agent (both GPU) even for
- * HOST<->DEVICE transfers. In that case, hsa_amd_pointer_info::agentOwner is consulted to
- * recover the true direction (fix for ROCM-9863).
+ * HOST<->DEVICE transfers, while a peer copy passes two different GPU agents. In that case,
+ * hsa_amd_pointer_info is used to classify each pointer as host or device memory
+ * (ROCM-9863, ROCM-30981).
  */
 copy_metadata
 get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                   hsa_agent_t      _hsa_src_agent,
                   const void*      _dst_address,
                   const void*      _src_address,
+                  bool             _pointers_are_direct,
                   std::string_view _name)
 {
     auto        _copy_meta      = copy_metadata{};
@@ -408,9 +410,16 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                 _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
             else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
             {
-                // ROCM-9863: when both HSA agents are GPU type, inspect the actual ownership
-                // of each pointer with hsa_amd_pointer_info to disambiguate HOST<->DEVICE
-                // copies that OpenMP RTL routes through a GPU-registered host staging buffer.
+                // hsa_amd_pointer_info reports what each pointer actually is:
+                //   HSA_EXT_POINTER_TYPE_UNKNOWN - unregistered host memory
+                //   HSA_EXT_POINTER_TYPE_LOCKED  - pinned host memory; agentOwner is the
+                //                                  agent it was locked for, may be a GPU
+                //   everything else              - ROCr allocation owned by agentOwner
+                //
+                // ROCM-9863: OpenMP offload transfers reported as DEVICE_TO_DEVICE.
+                // ROCM-30981: peer copies reported as HOST_TO_DEVICE / DEVICE_TO_HOST
+                // because agentOwner was compared against an agent handle of the copy
+                // rather than classified on its own.
                 auto _src_info = hsa_amd_pointer_info_t{};
                 auto _dst_info = hsa_amd_pointer_info_t{};
                 _src_info.size = sizeof(hsa_amd_pointer_info_t);
@@ -430,12 +439,41 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                          HSA_STATUS_SUCCESS);
                 }
 
-                // A pointer is considered GPU device memory if its agentOwner matches
-                // the GPU agent handle passed to the copy operation.
-                const bool _src_is_device =
-                    _src_query_ok && (_src_info.agentOwner == _hsa_src_agent);
-                const bool _dst_is_device =
-                    _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
+                auto _is_device_memory = [](bool _query_ok, const hsa_amd_pointer_info_t& _info) {
+                    // both HSA agents are GPUs, so assume device memory when the
+                    // allocation cannot be inspected
+                    if(!_query_ok) return true;
+
+                    // locked and unknown pointers are host memory regardless of
+                    // agentOwner, which is the agent the memory was locked for
+                    if(_info.type == HSA_EXT_POINTER_TYPE_UNKNOWN ||
+                       _info.type == HSA_EXT_POINTER_TYPE_LOCKED)
+                        return false;
+
+                    const auto* _owner = agent::get_rocprofiler_agent(_info.agentOwner);
+                    return (_owner == nullptr) || (_owner->type == ROCPROFILER_AGENT_TYPE_GPU);
+                };
+
+                auto _get_device_owner =
+                    [](bool                          _query_ok,
+                       const hsa_amd_pointer_info_t& _info) -> const rocprofiler_agent_t* {
+                    if(!_query_ok || _info.agentOwner.handle == 0) return nullptr;
+
+                    switch(_info.type)
+                    {
+                        case HSA_EXT_POINTER_TYPE_HSA:
+                        case HSA_EXT_POINTER_TYPE_IPC:
+                        case HSA_EXT_POINTER_TYPE_GRAPHICS: break;
+                        default: return nullptr;
+                    }
+
+                    const auto* _owner = agent::get_rocprofiler_agent(_info.agentOwner);
+                    return (_owner && _owner->type == ROCPROFILER_AGENT_TYPE_GPU) ? _owner
+                                                                                  : nullptr;
+                };
+
+                const bool _src_is_device = _is_device_memory(_src_query_ok, _src_info);
+                const bool _dst_is_device = _is_device_memory(_dst_query_ok, _dst_info);
 
                 if(!_src_is_device && _dst_is_device)
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
@@ -443,6 +481,21 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
                 else
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
+
+                // P2P agents may be ordered for SDMA routing instead of pointer direction.
+                // Reorder only when direct pointer owners prove the same pair is reversed.
+                if(_pointers_are_direct &&
+                   _copy_meta.direction == ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE)
+                {
+                    const auto* _src_owner = _get_device_owner(_src_query_ok, _src_info);
+                    const auto* _dst_owner = _get_device_owner(_dst_query_ok, _dst_info);
+
+                    if(_src_owner && _dst_owner &&
+                       _copy_meta.src_agent.handle != _copy_meta.dst_agent.handle &&
+                       _src_owner->id.handle == _copy_meta.dst_agent.handle &&
+                       _dst_owner->id.handle == _copy_meta.src_agent.handle)
+                        std::swap(_copy_meta.src_agent, _copy_meta.dst_agent);
+                }
             }
             else
                 ROCP_CI_LOG(WARNING)
@@ -826,12 +879,14 @@ append_batch_traced_copy_data(traced_copy_data_vec_t& _traced_copies,
                               const void*             _dst_address,
                               const void*             _src_address,
                               uint64_t                _bytes_copied,
+                              bool                    _pointers_are_direct,
                               std::string_view        _name)
 {
     if(_bytes_copied == 0) return false;
 
     auto _traced_copy = traced_copy_data{};
-    auto _copy_meta = get_copy_metadata(_dst_agent, _src_agent, _dst_address, _src_address, _name);
+    auto _copy_meta   = get_copy_metadata(
+        _dst_agent, _src_agent, _dst_address, _src_address, _pointers_are_direct, _name);
 
     if(!populate_traced_copy_data(_traced_copy,
                                   _copy_meta,
@@ -865,6 +920,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                                   _copy_op.dst_list[i],
                                                   _copy_op.src_list[i],
                                                   _copy_op.size_list[i],
+                                                  true,
                                                   _name);
                 }
             }
@@ -876,6 +932,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                               _copy_op.dst,
                                               _copy_op.src,
                                               _copy_op.size,
+                                              true,
                                               _name);
             }
             break;
@@ -888,6 +945,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                               _copy_op.dst_list[i],
                                               _copy_op.src,
                                               _copy_op.size,
+                                              true,
                                               _name);
             }
             break;
@@ -902,6 +960,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                                   _copy_op.dst_list[i],
                                                   _copy_op.src_list[i],
                                                   _copy_op.size_list[i],
+                                                  true,
                                                   _name);
                     append_batch_traced_copy_data(_traced_copies,
                                                   _copy_op.src_agent,
@@ -909,6 +968,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                                   _copy_op.src_list[i],
                                                   _copy_op.dst_list[i],
                                                   _copy_op.size_list[i],
+                                                  true,
                                                   _name);
                 }
             }
@@ -920,6 +980,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                               _copy_op.dst,
                                               _copy_op.src,
                                               _copy_op.src_size,
+                                              true,
                                               _name);
                 append_batch_traced_copy_data(_traced_copies,
                                               _copy_op.src_agent,
@@ -927,6 +988,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                               _copy_op.src,
                                               _copy_op.dst,
                                               _copy_op.dst_size,
+                                              true,
                                               _name);
             }
             break;
@@ -939,6 +1001,7 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
                                           _copy_op.dst,
                                           _copy_op.src,
                                           _copy_op.size,
+                                          false,
                                           _name);
             break;
         default: break;
@@ -1097,6 +1160,7 @@ async_copy_impl(Args... args)
                                             std::get<src_agent_idx>(_tied_args),
                                             compute_address(std::get<dst_addr_idx>(_tied_args)).ptr,
                                             compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
+                                            OpIdx != async_copy_rect_id,
                                             meta_type::name);
 
         if(!populate_traced_copy_data(_traced_copy,
