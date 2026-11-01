@@ -34,6 +34,13 @@ Full documentation for AMD Debugger API is available at
  - `gfx1172`
  - `gfx11-7-generic`
 
+### Changed
+- The Windows DLL is now named after the library's major and minor
+  version, as in `rocm-dbgapi-0-82.dll`.  Windows has no equivalent of
+  ELF symbol versioning, so a consumer built against one version would
+  otherwise load a later, incompatible DLL of the same name.  The import
+  library keeps its unversioned name, so nothing changes at link time.
+
 ## rocm-dbgapi-0.82.0
 ### Added
 - `amd_dbgapi_cluster_get_info` to query various information about a given
