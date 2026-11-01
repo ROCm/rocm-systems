@@ -20,6 +20,10 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Added
+
+- `storage_t` accepts a RocPD schema version. The two-argument constructor still writes schema 3.0.1. `version_t{}` selects the newest embedded schema. An unknown version fails initialization.
+
 ### Changed
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
