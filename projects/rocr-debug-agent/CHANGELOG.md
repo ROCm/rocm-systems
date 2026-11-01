@@ -3,6 +3,14 @@
 Full documentation for the ROCR Debug Agent library is available at
 [rocm.docs.amd.com/rocr_debug_agent](https://rocm.docs.amd.com/projects/rocr_debug_agent/en/latest/).
 
+## ROCR Debug Agent 2.2.2 for ROCm 10.3
+
+### Changed
+- Invalid or missing-argument command-line options now print a specific error
+  message and exit cleanly, instead of dumping generic usage and aborting.
+  This changes the exit behavior from `SIGABRT` to a clean `exit(EXIT_FAILURE)`,
+  which may affect scripts or tools that check the process exit status.
+
 ## ROCR Debug Agent 2.2.1 for ROCm 10.3
 
 - After printing the waves on `SIGQUIT`, the agent resumes them and the
