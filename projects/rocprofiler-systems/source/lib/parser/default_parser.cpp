@@ -17,7 +17,7 @@ default_parser::parse(const schema& config_schema) const
         {
             continue;
         }
-        result.values.emplace(param.id, *param.default_value);
+        result.store_if_valid(param, *param.default_value);
     }
     return result;
 }

@@ -27,15 +27,16 @@ enum class unknown_option : std::uint8_t
  * A value option accepts both "--name value" and "--name=value"; arg.assign_style
  * records the preferred form and does not reject the other. min_count and max_count
  * select how many following tokens belong to the option. Unset counts mean one
- * value, or none for a flag. A following token that starts with '-' is the next
- * option, not a value. Tokens are joined with the list separator, unless binds
- * names the parameter that receives each token. Choice aliases are stored as the
- * choice value. A flag with no value stores "true". It also accepts a following
- * boolean token ("--flag false") or "--flag=false". A following option is left
- * alone. An integer or number may be negative ("--num -5"). A single-letter flag
- * bundle such as "-qv" is accepted when every letter is a flag argument. "--" ends
- * option parsing. A token that does not start with '-' does too: that token and
- * everything after it are the command and are not parsed.
+ * value, or none for a flag. An enumeration list with no max_count keeps reading
+ * valid elements until an option, "--", or a token that is not a valid element.
+ * A following token that starts with '-' is the next option, not a value. Tokens
+ * are joined with the list separator, unless binds names the parameter that
+ * receives each token. Choice aliases are stored as the choice value. A flag
+ * stores "true" and does not consume the next token. "--flag=false" still sets
+ * the value. An integer or number may be negative ("--num -5"). A single-letter
+ * flag bundle such as "-qv" is accepted when every letter is a flag argument.
+ * "--" ends option parsing, and only the tokens after it are the command. A token
+ * before "--" that is not an option is an unexpected argument.
  */
 class cli_parser
 {
