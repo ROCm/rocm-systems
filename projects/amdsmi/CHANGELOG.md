@@ -8,6 +8,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added `amdsmi_is_gpu_apu()` in C, Python, and Rust**.  
+  - Identifies integrated GPUs using the native Linux amdgpu fusion flag, without memory-size heuristics or a HIP context. GPU handles retain the `AMD_GPU` processor type.
+  - Unavailable identification, including on WSL, reports `AMDSMI_STATUS_NOT_SUPPORTED` rather than classifying the GPU as discrete. Existing structure layouts and ASIC flags are unchanged.
+  - `amd-smi` now uses it to pick the memory pool it reports for an APU, replacing its own copy of the flag test.
+
 - **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
   - Returns link weight, status, type, hop count, and framebuffer-sharing data.
   - Matches the existing host interface; includes Python and Rust bindings.
@@ -170,6 +175,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Optimized
 
 ### Resolved Issues
+
+- **Fixed processor cleanup during AMD SMI shutdown**.  
+  - Releases AI-NIC processors and sockets in NIC-only sessions, clears processor tracking, and resets NIC context state so reinitialization does not retain stale handles.
+
+- **Fixed incremental builds leaving staged Python files out of date**.  
+  - Refreshes the staged package after source edits, preventing stale exports or implementations from causing import errors after an API rename.
+
+- **Fixed typed processor enumeration returning GPUs for unhandled processor types**.  
+  - Concrete types with no processors, including `AMD_APU`, now return an empty list. `UNKNOWN` and out-of-range types return `AMDSMI_STATUS_INVAL`. Use `amdsmi_is_gpu_apu()` on `AMD_GPU` handles to identify APUs ([#8476](https://github.com/ROCm/rocm-systems/issues/8476)).
+  - Migration: callers that passed `UNKNOWN` as a wildcard must pass `AMD_GPU`; `UNKNOWN` is rejected instead of returning the GPU list.
 
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
