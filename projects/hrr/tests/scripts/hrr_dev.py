@@ -35,7 +35,7 @@ EMULATOR_JOBS = (
     {
         "family": "gfx950",
         "arch": "gfx950",
-        "config": "emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json",
+        "config": "emulation/rocjitsu/configs/gfx950_mi350x_kmd_2gpu.json",
     },
     {
         "family": "gfx125x",

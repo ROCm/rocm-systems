@@ -185,14 +185,16 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx90a_mi210_kmd.json` | Single CDNA2 GPU, daemon or KFD mode. |
 | `gfx942_cdna3.json` | Single CDNA3 GPU, standalone simulation. |
 | `gfx942_cdna3_kmd.json` | Single CDNA3 GPU, daemon or KFD mode. |
-| `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
-| `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
-| `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
+| `gfx950_mi350x.json` | Single CDNA4 GPU, standalone simulation. |
+| `gfx950_mi350x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
+| `gfx950_mi350x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
 | `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
 | `gfx1201_r9700.json` | Single RDNA4 GPU, standalone simulation. |
+
+`gfx950_mi355x.json`, `gfx950_mi355x_kmd.json` and `gfx950_mi355x_kmd_2gpu.json` are deprecated copies of the `gfx950_mi350x*` configs. Despite their names, they describe an MI350X (PCI device ID `0x75a0`). They remain only so that existing callers keep working; use the `gfx950_mi350x*` names instead. The `gfx950_mi355x*` configs will later describe an MI355X (PCI device ID `0x75a3`); see [#14644](https://github.com/ROCm/rocm-systems/issues/14644).
 
 
 Standalone configs (without `_kmd` in the name) are used with
@@ -213,5 +215,5 @@ Multi-GPU configs define multiple SoCs, each with a distinct GPU ID and
 location ID. Every GPU receives its own command processor, memory
 subsystem, and cache hierarchy. In daemon mode, the simulated driver
 manages all GPUs and routes KFD ioctls to the correct device based on
-`gpu_id`. The `gfx950_mi355x_kmd_2gpu.json` config provides a working
+`gpu_id`. The `gfx950_mi350x_kmd_2gpu.json` config provides a working
 two-GPU configuration used with RCCL collective tests.
