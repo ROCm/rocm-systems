@@ -28,8 +28,8 @@
 
 // Push model: each rank writes its chunks into peers' scratch instead of reading from them.
 // Env: RCCL_DDA_A2A_PUSH, 1 (default) = push, 0 = pull (stage sendbuff into the own scratch, peers read it).
-// RCCL_DDA_A2A_TDM: 1 (default) moves that exchange through the tensor data mover on gfx1250 when the pointers and
-// the per-rank byte count are 256-byte aligned (8 KiB tiles); otherwise, or with 0, the vector push runs.
+// RCCL_DDA_A2A_TDM: 1 (default) moves that exchange through the tensor data mover on gfx1250 (8 KiB tiles, any
+// alignment); otherwise, or with 0, the vector push runs.
 RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 1);
 RCCL_PARAM(DdaA2ATdm, "DDA_A2A_TDM", 1);
 // RCCL_DDA_A2A_PUSH_PEER=1 (default, with RCCL_DDA_A2A_PUSH=1): peer-major push.
@@ -129,11 +129,11 @@ static bool ddaAllToAllFabricTdmEligible(ncclComm* comm, const void* sendbuff, c
       !IsArchMatch(comm->archName, "gfx1250")) {
     return false;
   }
-  if ((bytesPerRank % dda::common::kDdaA2ATdmAlign) != 0) return false;
-  auto aligned = [](const void* p) {
-    return (reinterpret_cast<uintptr_t>(p) % dda::common::kDdaA2ATdmAlign) == 0;
-  };
-  return aligned(sendbuff) && aligned(recvbuff) && aligned(comm->ddaScratch);
+  // Any alignment: the TDM transfers peel an unaligned head and tail (Aligned=false).
+  (void)sendbuff;
+  (void)recvbuff;
+  (void)bytesPerRank;
+  return true;
 }
 
 // Opt this instantiation into the full dynamic LDS once; each launch then asks for only what it needs.

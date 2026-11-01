@@ -57,7 +57,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int peer = (selfRank + static_cast<int>(item % nRanks)) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(
+        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
             sendbuff + static_cast<size_t>(peer) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
@@ -69,7 +69,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int peer = (selfRank + static_cast<int>(item % nRanks)) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(
+        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
             window + u * TileBytes, peerScratch[peer] + selfSlot + off, n);
       }
     }
@@ -90,7 +90,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int src = (selfRank - static_cast<int>(item % nRanks) + nRanks) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(
+        tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
             selfScratch + static_cast<size_t>(src) * bytesPerRank + off, window + u * TileBytes, n);
       }
     }
@@ -102,7 +102,7 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
         const int src = (selfRank - static_cast<int>(item % nRanks) + nRanks) % nRanks;
         const size_t off = (item / nRanks) * TileBytes;
         const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(
+        tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(
             window + u * TileBytes, recvbuff + static_cast<size_t>(src) * bytesPerRank + off, n);
       }
     }
@@ -169,7 +169,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
         if (t < nTiles) {
           const size_t off = t * TileBytes;
           const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-          tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(src + off,
+          tdm::asyncLoadToLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(src + off,
                                                                                       window + u * TileBytes, n);
         }
       }
@@ -180,7 +180,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
         if (t < nTiles) {
           const size_t off = t * TileBytes;
           const size_t n = bytesPerRank - off < TileBytes ? bytesPerRank - off : TileBytes;
-          tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/true>(window + u * TileBytes,
+          tdm::asyncStoreFromLDS<SyncPolicy::Async, kDdaA2ATdmPolicy, /*Aligned=*/false>(window + u * TileBytes,
                                                                                          dst + off, n);
         }
       }
