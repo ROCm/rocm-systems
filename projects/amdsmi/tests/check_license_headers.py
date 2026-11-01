@@ -22,12 +22,11 @@ Run manually:
     python3 projects/amdsmi/tests/check_license_headers.py FILE...    # check given
 """
 
-from __future__ import annotations
-
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 HERE = Path(__file__).resolve()
 PROJECT_ROOT = HERE.parents[1]  # projects/amdsmi
@@ -81,7 +80,7 @@ EXCLUDE_EXACT = frozenset(
 )
 
 
-def base_ext(rel: str) -> tuple[str, str]:
+def base_ext(rel: str) -> Tuple[str, str]:
     """(extension, basename) for ``rel``.
 
     ``.in`` build templates keep their ``.in`` extension, so they are not
@@ -90,7 +89,7 @@ def base_ext(rel: str) -> tuple[str, str]:
     return os.path.splitext(rel)[1], os.path.basename(rel)
 
 
-def comment_leader(rel: str) -> str | None:
+def comment_leader(rel: str) -> Optional[str]:
     """Comment leader for the file's language, or None if not in a source language."""
     ext, base = base_ext(rel)
     if ext in SLASH_EXT:
@@ -150,12 +149,12 @@ def has_orphaned_block_tail(text: str, leader: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _tracked_files() -> list[str]:
+def _tracked_files() -> List[str]:
     out = subprocess.check_output(["git", "-C", str(PROJECT_ROOT), "ls-files"])
     return out.decode().splitlines()
 
 
-def _to_rel(arg: str) -> str | None:
+def _to_rel(arg: str) -> Optional[str]:
     """Normalize a CLI/pre-commit path to a project-relative path, or None."""
     p = Path(arg)
     if not p.is_absolute():
@@ -166,7 +165,7 @@ def _to_rel(arg: str) -> str | None:
         return None
 
 
-def main(argv: list[str]) -> int:
+def main(argv: List[str]) -> int:
     rels = [r for r in (_to_rel(a) for a in argv) if r] if argv else _tracked_files()
     missing = []
     orphaned = []
