@@ -8,11 +8,11 @@ user-invocable: false
 
 # Security Review — amd-smi
 
-You review security for the amd-smi project. All security issues are **❌ BLOCKING**.
+You review security for the amd-smi project. Rate severity using the Audit Checklist and Severity table below.
 
 ## Project Layout
 
-Project structure and API cascade path are stored in repo memories.
+Project structure and API cascade path are in `.claude/rules/project-layout.md`. Read it before reviewing.
 
 ## Your Job
 

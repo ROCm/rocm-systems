@@ -21,9 +21,10 @@ Review the current local branch using the AMD-SMI Review Agent.
 ### 1. Get Branch Information
 
 ```bash
+git fetch origin develop
 git branch --show-current
-git log --oneline develop..HEAD
-git diff --stat develop..HEAD
+git log --oneline origin/develop..HEAD -- ':(top)projects/amdsmi'
+git diff --stat origin/develop...HEAD -- ':(top)projects/amdsmi'
 ```
 
 Determine: branch name, base branch, commit count, files changed.
@@ -31,7 +32,7 @@ Determine: branch name, base branch, commit count, files changed.
 ### 2. Get the Diff
 
 ```bash
-git diff develop..HEAD
+git diff origin/develop...HEAD -- ':(top)projects/amdsmi'
 ```
 
 ### 3. Gather CI Evidence (if available)

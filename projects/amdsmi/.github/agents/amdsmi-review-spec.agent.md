@@ -1,7 +1,7 @@
 ---
 name: amdsmi-review-spec
 description: "Spec-conformance review subagent. Checks the diff against its originating spec/issue/PRD — missing requirements, scope creep, implemented-but-wrong. Use when: spec conformance, requirement coverage, scope creep vs spec."
-tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages, execute/runInTerminal, atlassian/*
+tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal, atlassian/*
 model: "Claude Opus 5.5"
 user-invocable: false
 ---
@@ -20,15 +20,19 @@ requirement, or quietly adding behavior nobody asked for.
 
 Find the originating spec, in this order. Stop at the first one that exists:
 
-1. **Confluence (primary)** — the team's specs live in Confluence. If a Confluence
+1. **Spec from the dispatch** — a spec path passed by the dispatching agent.
+2. **Confluence** — the team's specs live in Confluence. If a Confluence
    MCP server is configured, use it to fetch the page referenced in the PR/commit
    (a Confluence URL, page title, or ticket key). Each user is expected to have
    their Confluence MCP set up; if it is not configured, note that and fall back.
-2. **Linked issue** — `Closes #N`, `Fixes #N`, a Jira/ticket key in the commit
+3. **Linked issue** — `Closes #N`, `Fixes #N`, a Jira/ticket key in the commit
    messages or PR description.
-3. **Session spec** — `${TMPDIR:-/tmp}/amdsmi-agent-specs/YYYY-MM-DD-<topic>-design.md` matching the
+4. **Session spec** — `${TMPDIR:-/tmp}/amdsmi-agent-specs/YYYY-MM-DD-<topic>-design.md` matching the
    branch/feature name.
-4. **User-supplied path** — a spec path passed in the dispatch.
+
+If a Confluence page also exists, compare it with the spec you used. List each
+Confluence requirement the spec drops or changes as ⚠️ "differs from Confluence
+— user must confirm". Never assume a difference was approved.
 
 If **no spec can be found**, do not invent one. Report exactly:
 `SPEC: none found — spec-conformance review skipped` and stop. Missing-spec is a
