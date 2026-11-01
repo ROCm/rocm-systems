@@ -16,11 +16,13 @@ namespace rocprofsys::parser
  *
  * The whole string must parse as the parameter's type. Numbers must be finite and
  * within min/max, and enumerations must name a choice unless custom values are
- * allowed. An enumeration_list is split on list_separator(); each trimmed element
- * must be a valid choice, and an empty string is the empty list. Boolean tokens
- * (true/false, yes/no, on/off, y/n, t/f, 1/0) are matched case-insensitively. Any
- * other integer is true when it is not zero. An empty boolean is not a value.
- * pattern is stored and is not applied.
+ * allowed. A parameter that names a value_provider does not require a static
+ * choice; the provider accepts or refuses the value later. An enumeration_list
+ * is split on list_separator(); each trimmed element must be a valid choice, and
+ * an empty string is the empty list. Boolean tokens (true/false, yes/no, on/off,
+ * y/n, t/f, 1/0) are matched case-insensitively. Any other integer is true when
+ * it is not zero. An empty boolean is not a value. pattern is stored and is not
+ * applied.
  */
 [[nodiscard]] bool
 is_valid_value(const schema_param& param, std::string_view value);
