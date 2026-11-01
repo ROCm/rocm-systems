@@ -524,11 +524,19 @@ if(BUILD_TESTS)
   if(ENABLE_ROCSHMEM_GIN AND ROCM_VERSION VERSION_GREATER_EQUAL "60400")
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsGinAnvilPlugin rccl-UnitTestsGinRocshmemGdaPlugin)
 
+    # The plugin sources are written with CUDA names (CUdeviceptr, CUresult, ...)
+    # that only their hipified copies rename, and they call host-only helpers a
+    # device pass cannot see. Compile the hipified copies host-only, as librccl does.
+    set(_GIN_ANVIL_PLUGIN_SRCS
+      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_plugin_anvil_sdma.cc
+      ${PROJECT_BINARY_DIR}/hipify/src/gin/gin_anvil_ipc_table_host.cc
+    )
+    set_source_files_properties(${_GIN_ANVIL_PLUGIN_SRCS} PROPERTIES GENERATED TRUE)
+
     add_executable(rccl-UnitTestsGinAnvilPlugin
       gin/GinAnvilPlugin_test.cpp
       gin/gin_anvil_plugin_test_stubs.cc
-      ../src/gin/gin_plugin_anvil_sdma.cc
-      ../src/gin/gin_anvil_ipc_table_host.cc
+      ${_GIN_ANVIL_PLUGIN_SRCS}
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
@@ -582,6 +590,15 @@ if(BUILD_TESTS)
       add_test(NAME ${_gin_plugin_test} COMMAND ${_gin_plugin_test})
       set_tests_properties(${_gin_plugin_test} PROPERTIES LABELS "unit;gpu")
     endforeach()
+
+    # Appended after the shared include dirs, so the hipified headers still win.
+    target_include_directories(rccl-UnitTestsGinAnvilPlugin PRIVATE
+      ${PROJECT_BINARY_DIR}/hipify/src
+      ${PROJECT_SOURCE_DIR}/src
+      ${PROJECT_SOURCE_DIR}/src/include
+    )
+    target_compile_options(rccl-UnitTestsGinAnvilPlugin PRIVATE --offload-host-only)
+    target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE GIN_ANVIL_PLUGIN_UNIT_TEST)
 
     # Exercise the production HIP launchers and kernels independently of the
     # host-plugin stubs above.
@@ -720,6 +737,17 @@ if(BUILD_TESTS)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
+
+  add_executable(rccl-UnitTestsGinFabricLsaPolicy gin/gin_fabric_lsa_policy_test.cpp)
+  set_source_files_properties(gin/gin_fabric_lsa_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinFabricLsaPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_link_libraries(rccl-UnitTestsGinFabricLsaPolicy PRIVATE
+    ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinFabricLsaPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinFabricLsaPolicy COMMAND rccl-UnitTestsGinFabricLsaPolicy)
+  set_tests_properties(rccl-UnitTestsGinFabricLsaPolicy PROPERTIES LABELS "unit")
 
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
@@ -1136,6 +1164,11 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
+
+    # No ${PROJECT_SOURCE_DIR}/src here: it would precede RCCL_COMMON_INCLUDE_DIRS
+    # below, which carries ${PROJECT_BINARY_DIR}/hipify/src, so every graph/,
+    # algorithms/ and gin/ header this suite reaches through comm.h would resolve
+    # to the untranslated source instead of the hipify-staged copy.
 
     # plugin/net_reload_plugin.cpp is compiled into rccl-UnitTestsMPI so
     # RmaExternalPluginPutSignalMPITests can load its ncclRmaPlugin_v13 in-process

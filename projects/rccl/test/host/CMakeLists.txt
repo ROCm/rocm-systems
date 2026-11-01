@@ -1175,6 +1175,7 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_scheduler_fakes.cc
     fakes/os_fakes.cc
     fakes/rocmwrap_fakes.cc              # rocmLibraryInit (gdr.cc DMA-BUF probe)
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real GetGcnArchName/IsArchMatch (gin.cc verbs skip)
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc             # rcclUseAinic, NET_OPTIONAL_RECV_COMPLETION
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc             # real parser for the multiplane map

@@ -16,6 +16,7 @@
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
+#include "nccl_device/impl/comm__types.h"
 #include "nccl_device/net_device.h"
 #include "plugin/nccl_gin.h"
 
@@ -97,6 +98,12 @@ class GinAnvilPluginTest : public ::testing::Test {
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
     ASSERT_EQ(plugin_.connect(ictx, handles.data(), nranks, ginRank, listen, coll), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
+  }
+
+  void setupFabricComm(int nRanks) {
+    mockComm_.comm.nRanks = nRanks;
+    mockComm_.comm.rank = 0;
+    GinAnvilPluginStubs::SetBootstrapNranks(nRanks);
   }
 
   void startTwoRankGin(void** ictx, void** coll, void** ginCtx) {
@@ -311,6 +318,112 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   EXPECT_NE(hostCtx.counters, nullptr);
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, CreateContext_PublishesDeviceFabricLsaA2ALane) {
+  ScopedEnv lsaEnv("RCCL_GIN_FABRIC_LSA_A2A", "1");
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(true);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 1u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 4u * 8u * 1024u * 1024u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// The device kernel picks LSA or gin.put from the threshold, so a rank that
+// parsed a different RCCL_GIN_FABRIC_LSA_THRESHOLD_ALLTOALL must keep every
+// rank off LSA.
+TEST_F(GinAnvilPluginTest, CreateContext_LsaThresholdMismatchDisablesLane) {
+  ScopedEnv lsaEnv("RCCL_GIN_FABRIC_LSA_A2A", "1");
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(true);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  GinAnvilPluginStubs::SetBootstrapPeerThreshold(128u * 1024u);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 0u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, CreateContext_LsaEnvUnsetDisablesLane) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricLsaCapable(true);
+  mockComm_.comm.MNNVL = 1;
+  mockComm_.comm.devrState.lsaSize = 4;
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx{};
+  ASSERT_EQ(hipMemcpy(&hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  EXPECT_EQ(hostCtx.fabricA2ALsaEnabled, 0u);
+  EXPECT_EQ(hostCtx.fabricA2ALsaThreshold, 0u);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, CreateContext_FabricAgreeBootstrapFail) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  setupFabricComm(4);
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 4);
+  GinAnvilPluginStubs::SetBootstrapFail(true);
+
+  ncclGinConfig_t cfg{};
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  EXPECT_NE(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
@@ -740,6 +853,74 @@ TEST_F(GinAnvilPluginTest, CloseColl_AfterSignalBind) {
 
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  plugin_.finalize(ictx);
+}
+
+TEST_F(GinAnvilPluginTest, RegMrSym_FabricRefcountAndExchangeFail) {
+  GinAnvilPluginStubs::SetUseFabricMem(true);
+  GinAnvilPluginStubs::SetFabricVmmQueryOk(true);
+  GinAnvilPluginStubs::SetFabricRetainOk(true);
+  // Fabric registration runs only when the GIN team spans the whole communicator.
+  mockComm_.comm.nRanks = 1;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+
+  void* data = reinterpret_cast<void*>(0x80001000ULL);
+
+  // Expects every fabric map to hold `entries` keys, `data` to hold `refcount`
+  // references, and `live` stub handlers to exist.
+  auto expectFabric = [&](size_t entries, int refcount, int live) {
+    ncclGinAnvilFabricTestState st{};
+    ncclGinAnvilPluginTestFabricState(coll, data, &st);
+    EXPECT_EQ(st.handlers, entries);
+    EXPECT_EQ(st.handles, entries);
+    EXPECT_EQ(st.refcounts, entries);
+    EXPECT_EQ(st.refcount, refcount);
+    EXPECT_EQ(GinAnvilPluginStubs::LiveFabricHandlers(), live);
+  };
+
+  // A failed exchange publishes nothing, and FabricSetupGuard deletes the
+  // handler it allocated.
+  GinAnvilPluginStubs::SetFabricExchangeFail(true);
+  void* mhFail = nullptr;
+  void* ghFail = nullptr;
+  EXPECT_NE(plugin_.regMrSym(coll, data, 4096, 0, 0, &mhFail, &ghFail), ncclSuccess);
+  GinAnvilPluginStubs::SetFabricExchangeFail(false);
+  {
+    SCOPED_TRACE("after failed exchange");
+    expectFabric(0, 0, 0);
+  }
+
+  void* mh1 = nullptr;
+  void* gh1 = nullptr;
+  void* mh2 = nullptr;
+  void* gh2 = nullptr;
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh1, &gh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first registration");
+    expectFabric(1, 1, 1);
+  }
+  // The second registration of the same buffer reuses the published handler.
+  ASSERT_EQ(plugin_.regMrSym(coll, data, 4096, 0, 0, &mh2, &gh2), ncclSuccess);
+  EXPECT_NE(mh1, mh2);
+  {
+    SCOPED_TRACE("after second registration");
+    expectFabric(1, 2, 1);
+  }
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh1), ncclSuccess);
+  {
+    SCOPED_TRACE("after first deregistration");
+    expectFabric(1, 1, 1);
+  }
+  // Dropping the last reference erases all three entries and deletes the handler.
+  EXPECT_EQ(plugin_.deregMrSym(coll, mh2), ncclSuccess);
+  {
+    SCOPED_TRACE("after last deregistration");
+    expectFabric(0, 0, 0);
+  }
+  plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
 

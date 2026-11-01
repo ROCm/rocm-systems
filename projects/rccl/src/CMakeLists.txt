@@ -225,8 +225,8 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/gin/gin_bootstrap_agree.h
   include/dv_dlopen.h
-  include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
   include/git_version.h
   include/graph.h
@@ -282,6 +282,8 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
   include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h
   include/nccl_device/gin_barrier.h
   include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h
