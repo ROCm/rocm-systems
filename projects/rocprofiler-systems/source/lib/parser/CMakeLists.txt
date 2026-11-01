@@ -79,3 +79,6 @@ endif()
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
+
+add_executable(parser-demo ${CMAKE_CURRENT_SOURCE_DIR}/examples/parser_demo.cpp)
+target_link_libraries(parser-demo PRIVATE rocprofiler-systems-parser)
