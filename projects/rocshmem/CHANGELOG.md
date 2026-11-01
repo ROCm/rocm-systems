@@ -30,6 +30,10 @@
     * `rocshmem_signal_wait_until`
 
 ### Resolved issues
+* Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
+  A fence now skips the proxy when every non-blocking network operation queued on its context is already covered
+  by a completed fence or quiet, and otherwise sends one proxy fence per wavefront.
+  The `fence_*` functional tests now run on RO.
 * Fixed lost updates and hangs on the RO backend when more blocking operations
   are in flight on one context than its proxy queue holds. A blocking call now
   waits on its own status flag instead of re-reading it from the queue slot,
