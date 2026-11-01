@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/stream.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #include <gtest/gtest.h>
@@ -10,6 +18,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <ios>
 #include <utility>
 #include <vector>
 
@@ -33,8 +42,28 @@ void load(Program &program, uint8_t dst = 0) {
   append(program, inst); // global_load_b32 vdst, v8, s[0:1].
 }
 
-void ds_load(Program &program, uint8_t dst = 0) {
-  program.insert(program.end(), {0xd8d80000u, (uint32_t(dst) << 24) | 8u});
+void ds_load(Program &program, uint8_t dst = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    append(program, rdna3::build_ds(rdna3::kDsLoadB32Ds, {.addr = 8, .vdst = dst}));
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    append(program, rdna3_5::build_ds(rdna3_5::kDsLoadB32Ds, {.addr = 8, .vdst = dst}));
+  else
+    append(program, rdna4::build_vds(rdna4::kDsLoadB32Vds, {.addr = 8, .vdst = dst}));
+}
+
+void direct_load(Program &program, rj_code_arch_t arch, bool parameter) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+    append(program,
+           rdna3::build_ldsdir(parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir,
+                               {.vdst = 2}));
+  else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+    append(program, rdna3_5::build_ldsdir(parameter ? rdna3_5::kLdsParamLoadLdsdir
+                                                    : rdna3_5::kLdsDirectLoadLdsdir,
+                                          {.vdst = 2}));
+  else
+    append(program,
+           rdna4::build_vdsdir(parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir,
+                               {.vdst = 2}));
 }
 
 WaitcheckStreamReport analyze(const Program &program,
@@ -213,6 +242,43 @@ TEST(WaitcheckStream, EveryUnorderedPendingLoadProtectsItsDestination) {
   EXPECT_EQ(overwrite.diagnostics[2].required_count, 0u);
 }
 
+TEST(WaitcheckStream, LdsDirectAndParameterResultsUseQualifiedWritebackOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool first_parameter : {false, true})
+      for (bool second_parameter : {false, true}) {
+        SCOPED_TRACE(arch);
+        SCOPED_TRACE(first_parameter);
+        SCOPED_TRACE(second_parameter);
+        Program program;
+        for (bool parameter : {first_parameter, second_parameter})
+          direct_load(program, arch, parameter);
+        const auto report = analyze(program, arch);
+        ASSERT_FALSE(report.incomplete);
+        EXPECT_TRUE(report.diagnostics.empty());
+      }
+}
+
+TEST(WaitcheckStream, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool direct_first : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(direct_first);
+      Program program;
+      for (unsigned i = 0; i < 2; ++i) {
+        if (direct_first != static_cast<bool>(i))
+          direct_load(program, arch, /*parameter=*/false);
+        else
+          ds_load(program, 2, arch);
+      }
+      const auto report = analyze(program, arch);
+      ASSERT_FALSE(report.incomplete);
+      ASSERT_EQ(report.diagnostics.size(), 1u);
+      EXPECT_EQ(report.diagnostics[0].counter,
+                direct_first ? amdgpu::WaitCounterKind::Exp : amdgpu::WaitCounterKind::Ds);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+    }
+}
+
 TEST(WaitcheckStream, DsOverwritesRequireAWait) {
   Program program;
   ds_load(program);
@@ -293,6 +359,26 @@ TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependenc
   }
 }
 
+TEST(WaitcheckStream, BranchStackInstructionsStopTheStream) {
+  // S_CBRANCH_I_FORK has no PC destination operand, so only its branch flag
+  // marks it as a control-flow transfer.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (uint32_t instruction : {
+             0xB86A0002u, // s_cbranch_i_fork vcc, 2
+             0x9480246Au, // s_cbranch_g_fork vcc, s[36:37]
+             0xBE802E22u, // s_cbranch_join s34
+         }) {
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " instruction=" << instruction);
+      const auto report = analyze({instruction}, arch);
+      ASSERT_TRUE(report.incomplete);
+      EXPECT_EQ(report.incomplete->offset, 0u);
+      EXPECT_EQ(report.instructions_analyzed, 0u);
+      EXPECT_NE(report.incomplete->reason.find("control flow"), std::string::npos)
+          << report.incomplete->reason;
+    }
+  }
+}
+
 TEST(WaitcheckStream, TrapTemporaryUsesAndOverwritesAreIncomplete) {
   for (uint32_t instruction : {0xbe84006cu, 0xbeec0004u}) {
     const auto report = analyze({instruction}, ROCJITSU_CODE_ARCH_CDNA3);
@@ -331,6 +417,112 @@ TEST(WaitcheckStream, FlatLoadRequiresBothMemoryCounters) {
   report = analyze(program);
   EXPECT_FALSE(report.incomplete);
   EXPECT_TRUE(report.diagnostics.empty());
+}
+
+TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool flat_first : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(flat_first);
+      Program program;
+      for (unsigned i = 0; i < 2; ++i) {
+        const uint8_t data = 8 + i;
+        if (flat_first != static_cast<bool>(i)) {
+          // v[0:1] has no address-space proof and may point into the LDS aperture.
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+            append(program, cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                               {.saddr = 124, .vsrc = data, .vaddr = 0}));
+          else
+            append(program, rdna4::build_vflat(rdna4::kFlatStoreB32Vflat,
+                                               {.saddr = 124, .vsrc = data, .vaddr = 0}));
+        } else {
+          if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+            append(program, cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
+                                                 {.saddr = 124, .vsrc = data, .vaddr = 4}));
+          else
+            append(program, rdna4::build_vglobal(rdna4::kGlobalStoreB32Vglobal,
+                                                 {.saddr = 124, .vsrc = data, .vaddr = 4}));
+        }
+      }
+      if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+        program.push_back(0xbfc50000u); // s_wait_xcnt 0; isolate the VM_VSRC lifetime.
+      constexpr uint32_t store_zero = 0xbfc10000u;
+      constexpr uint32_t store_one = 0xbfc10001u;
+      constexpr uint32_t ds_zero = 0xbfc60000u;
+      constexpr uint32_t ds_one = 0xbfc60001u;
+      constexpr uint32_t source_zero = 0xbf88ffe3u; // depctr_vm_vsrc(0).
+      struct WaitCase {
+        Program waits;
+        bool flat_pending;
+        bool global_pending;
+      };
+      const WaitCase cases[] = {
+          {{store_one}, true, true},
+          {{store_zero}, true, false},
+          {{ds_zero}, true, true},
+          {{ds_zero, store_one}, true, true},
+          {{store_one, ds_zero}, true, true},
+          {{ds_one, store_zero}, true, false},
+          {{store_zero, ds_one}, true, false},
+          {{ds_zero, store_zero}, false, false},
+          {{store_zero, ds_zero}, false, false},
+          {{source_zero}, false, false},
+      };
+      for (const auto &test : cases) {
+        SCOPED_TRACE(::testing::PrintToString(test.waits));
+        Program waited = program;
+        waited.insert(waited.end(), test.waits.begin(), test.waits.end());
+        waited.push_back(v_mov(8, 10));
+        waited.push_back(v_mov(9, 10));
+        const auto report = analyze(waited, arch, /*expert_scheduling=*/true);
+        ASSERT_FALSE(report.incomplete);
+        std::vector<uint16_t> expected;
+        if (flat_first ? test.flat_pending : test.global_pending)
+          expected.push_back(8);
+        if (flat_first ? test.global_pending : test.flat_pending)
+          expected.push_back(9);
+        EXPECT_EQ(report.diagnostics.size(), expected.size());
+        if (report.diagnostics.size() != expected.size())
+          continue;
+        for (size_t i = 0; i < expected.size(); ++i) {
+          EXPECT_EQ(report.diagnostics[i].counter, amdgpu::WaitCounterKind::VmVsrc);
+          EXPECT_EQ(report.diagnostics[i].reg, (RegisterRef{RegClass::VGPR, expected[i], 1}));
+          EXPECT_EQ(report.diagnostics[i].access, WaitcheckAccess::Write);
+        }
+      }
+    }
+}
+
+TEST(WaitcheckStream, FlatLoadSourcesRequireBothCompletionRoutes) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    SCOPED_TRACE(arch);
+    Program program;
+    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      append(program,
+             cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 8}));
+      program.push_back(0xbfc50000u); // s_wait_xcnt 0; isolate the VM_VSRC lifetime.
+    } else {
+      append(program,
+             rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vdst = 2, .vaddr = 8}));
+    }
+    for (const Program &waits :
+         {Program{0xbfc00000u}, Program{0xbfc60000u}, Program{0xbfc00000u, 0xbfc60000u},
+          Program{0xbfc60000u, 0xbfc00000u}, Program{0xbf88ffe3u}}) {
+      SCOPED_TRACE(::testing::PrintToString(waits));
+      Program waited = program;
+      waited.insert(waited.end(), waits.begin(), waits.end());
+      waited.push_back(v_mov(8, 10));
+      const auto report = analyze(waited, arch, /*expert_scheduling=*/true);
+      ASSERT_FALSE(report.incomplete);
+      const bool pending = waits.size() == 1 && waits[0] != 0xbf88ffe3u;
+      ASSERT_EQ(report.diagnostics.size(), pending ? 1u : 0u);
+      if (pending) {
+        EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::VmVsrc);
+        EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 8, 1}));
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      }
+    }
+  }
 }
 
 TEST(WaitcheckStream, ExpertModeProtectsVmemAddressSources) {
@@ -391,6 +583,41 @@ TEST(WaitcheckStream, LegacyTargetsDecodeTheirOwnPackedWaitLayouts) {
     EXPECT_FALSE(report.incomplete);
     EXPECT_TRUE(report.diagnostics.empty());
   }
+}
+
+TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
+  // GDS=1 is reserved on CDNA4 (ISA Table 57); that half of the test checks
+  // defensive classification rather than an executable CDNA4 GDS contract.
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    // ds_read_b32 v0, v1 gds; s_waitcnt lgkmcnt(0); read v0; overwrite v1.
+    Program program{0xd86d0000u, 1u, 0xbf8cc07fu, v_mov(3, 0), v_mov(1, 2)};
+    const auto report = analyze(program, arch);
+    ASSERT_FALSE(report.incomplete);
+    EXPECT_EQ(report.instructions_analyzed, 4u);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      EXPECT_TRUE(report.diagnostics.empty());
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 1u);
+      EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Exp);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
+      EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt expcnt(0)");
+      program.insert(program.end() - 1, 0xbf8ccf0fu); // s_waitcnt expcnt(0).
+      const auto waited = analyze(program, arch);
+      ASSERT_FALSE(waited.incomplete);
+      EXPECT_TRUE(waited.diagnostics.empty());
+    }
+  }
+
+  // Removing EXP must preserve the CDNA4 returned-value dependency on LGKM.
+  const auto missing_wait = analyze({0xd86d0000u, 1u, v_mov(3, 0)}, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(missing_wait.incomplete);
+  ASSERT_EQ(missing_wait.diagnostics.size(), 1u);
+  EXPECT_EQ(missing_wait.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
+  EXPECT_EQ(missing_wait.diagnostics[0].access, WaitcheckAccess::Read);
+  EXPECT_EQ(missing_wait.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(missing_wait.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
 }
 
 TEST(WaitcheckStream, CdnaPreservesCommittedAndLiveInGenerations) {
@@ -603,8 +830,8 @@ TEST(WaitcheckStream, BothWaveSizesAcceptOrdinaryMemoryStreams) {
   Program program;
   load(program);
   program.insert(program.end(), {0xbfc00000u, v_mov(1, 0)});
-  for (uint32_t wave : {32u, 64u}) {
-    const auto report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, false, wave);
+  for (uint32_t wave_size : {32u, 64u}) {
+    const auto report = analyze(program, ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
     EXPECT_FALSE(report.incomplete);
     EXPECT_TRUE(report.diagnostics.empty());
   }
@@ -723,9 +950,10 @@ TEST(WaitcheckStream, RelativeRegisterOperandsAreIncomplete) {
 }
 
 TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
-  // Carry outputs (add/subtract/multiply-add) and f32/f64 divide-scale define s2
-  // in Wave32 and s[2:3] in Wave64. Encodings checked with LLVM's assembler.
-  const std::array<std::array<uint32_t, 2>, 10> encodings{{{0xd7000200u, 0x02020501u},
+  // Carry outputs (add/subtract/multiply-add), f32/f64 divide-scale and a VOP3
+  // compare define s2 in Wave32 and s[2:3] in Wave64. Encodings checked with
+  // LLVM's assembler.
+  const std::array<std::array<uint32_t, 2>, 11> encodings{{{0xd7000200u, 0x02020501u},
                                                            {0xd7010200u, 0x02020501u},
                                                            {0xd7020200u, 0x02020501u},
                                                            {0xd5200200u, 0x00120501u},
@@ -734,15 +962,16 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
                                                            {0xd6fc0200u, 0x040e0501u},
                                                            {0xd6fd0200u, 0x041a0902u},
                                                            {0xd6fe0200u, 0x040e0501u},
-                                                           {0xd6ff0200u, 0x040e0501u}}};
+                                                           {0xd6ff0200u, 0x040e0501u},
+                                                           {0xd44a0002u, 0x02020501u}}};
   for (const std::array<uint32_t, 2> &encoding : encodings) {
-    for (uint32_t wave : {32u, 64u}) {
+    for (uint32_t wave_size : {32u, 64u}) {
       for (uint32_t loaded : {2u, 3u}) {
         const auto report =
             analyze({0xf4000002u | (loaded << 6), 0xf8000000u, encoding[0], encoding[1]},
-                    ROCJITSU_CODE_ARCH_RDNA4, false, wave);
+                    ROCJITSU_CODE_ARCH_RDNA4, false, wave_size);
         ASSERT_FALSE(report.incomplete);
-        const bool conflicts = wave == 64 || loaded == 2;
+        const bool conflicts = wave_size == 64 || loaded == 2;
         ASSERT_EQ(report.diagnostics.size(), conflicts ? 1u : 0u);
         if (conflicts) {
           EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
@@ -753,16 +982,70 @@ TEST(WaitcheckStream, ScalarMaskDestinationsFollowWaveWidth) {
   }
 }
 
+TEST(WaitcheckStream, Cdna5CompareDestinationIsOneSgprAtEitherWaveSize) {
+  // gfx1250 decodes v_cmp_eq_u32_e64 s2, v1, v2 as s2 alone, so Wave64 (the
+  // default options) must not widen it to s[2:3]. Encodings checked with LLVM's
+  // assembler.
+  for (uint32_t wave_size : {32u, 64u}) {
+    for (uint32_t loaded : {2u, 3u}) {
+      const auto report =
+          analyze({0xf4000002u | (loaded << 6), 0xf8000000u, 0xd44a0002u, 0x00020501u},
+                  ROCJITSU_CODE_ARCH_CDNA5, false, wave_size);
+      ASSERT_FALSE(report.incomplete);
+      const bool conflicts = loaded == 2;
+      ASSERT_EQ(report.diagnostics.size(), conflicts ? 1u : 0u);
+      if (conflicts) {
+        EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+        EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      }
+    }
+  }
+}
+
 TEST(WaitcheckStream, LegacyMadScalarDestinationsFollowWaveWidth) {
   // RDNA3/3.5 use v_mad_{u64_u32,i64_i32}; RDNA4 adds _co to their names.
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     for (uint32_t opcode : {0xd6fe0200u, 0xd6ff0200u}) {
-      for (uint32_t wave : {32u, 64u}) {
+      for (uint32_t wave_size : {32u, 64u}) {
         for (uint32_t loaded : {2u, 3u}) {
-          const auto report = analyze(
-              {0xf4000002u | (loaded << 6), 0xf8000000u, opcode, 0x040e0501u}, arch, false, wave);
+          const auto report =
+              analyze({0xf4000002u | (loaded << 6), 0xf8000000u, opcode, 0x040e0501u}, arch, false,
+                      wave_size);
           ASSERT_FALSE(report.incomplete);
-          EXPECT_EQ(report.diagnostics.size(), wave == 64 || loaded == 2 ? 1u : 0u);
+          EXPECT_EQ(report.diagnostics.size(), wave_size == 64 || loaded == 2 ? 1u : 0u);
+        }
+      }
+    }
+  }
+}
+
+TEST(WaitcheckStream, ScalarMaskSourcesFollowWaveWidth) {
+  // src2 names s8 (s[8:9] in Wave64) as the v_cndmask_b32 selector and the
+  // v_add_co_ci_u32 carry-in, but s[8:9] in either wave size as the 64-bit
+  // addend of v_mad_co_u64_u32 (v_mad_u64_u32 on RDNA3/3.5). Encodings
+  // checked with LLVM's disassembler.
+  constexpr uint32_t kSources = 257u | (258u << 9) | (8u << 18); // v1, v2, s8.
+  struct Case {
+    uint32_t word0;
+    bool wave_mask;
+  };
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const Case &tc :
+         {Case{0xd5010000u, true}, Case{0xd5200200u, true}, Case{0xd6fe0200u, false}}) {
+      for (uint32_t wave : {32u, 64u}) {
+        for (uint32_t loaded : {8u, 9u}) {
+          SCOPED_TRACE(testing::Message()
+                       << std::hex << tc.word0 << std::dec << " wave" << wave << " s" << loaded);
+          const auto report = analyze(
+              {0xf4000002u | (loaded << 6), 0xf8000000u, tc.word0, kSources}, arch, false, wave);
+          ASSERT_FALSE(report.incomplete);
+          const bool reads = !tc.wave_mask || wave == 64 || loaded == 8;
+          ASSERT_EQ(report.diagnostics.size(), reads ? 1u : 0u);
+          if (reads) {
+            EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Read);
+            EXPECT_EQ(report.diagnostics[0].reg.index, loaded);
+          }
         }
       }
     }

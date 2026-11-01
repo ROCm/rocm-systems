@@ -143,6 +143,7 @@ void Device::Reset() {
     }
   }
   flags_ = hipDeviceScheduleSpin;
+  devices()[0]->UpdateGroupMemCarveout(-1);
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
@@ -785,7 +786,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Caching behavior
   deviceProps.globalL1CacheSupported = 1;
   deviceProps.localL1CacheSupported = 1;
-  deviceProps.persistingL2CacheMaxSize = info.l2CacheSize_;
+  deviceProps.persistingL2CacheMaxSize = info.persistingL2CacheMaxSize_;
   deviceProps.reservedSharedMemPerBlock = 0;
   deviceProps.sharedMemPerBlockOptin = info.localMemSizePerCU_;
 

@@ -140,6 +140,13 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
+
+// [RCCL] Anvil SDMA reaches a GIN peer only through its slot in this rank's LSA window, and every
+// rail peer of the GIN kernels is outside the LSA team.
+static bool ncclSymkGinBackendUnsupported(struct ncclComm* comm) {
+  ncclGinType_t ginType = NCCL_GIN_TYPE_NONE;
+  return ncclGetRailedGinType(comm, &ginType) == ncclSuccess && ginType == NCCL_GIN_TYPE_ANVIL_SDMA;
+}
 // [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
 // Data Mover on gfx1250. On by default as in NCCL 2.31; ncclSymkTmaAvailable() still
 // confines them to gfx1250 builds whose SDK ships the TDM descriptor header.
@@ -250,7 +257,14 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     struct ncclDevResourceRequirements ginOutboxReq = {};
     struct ncclDevResourceRequirements rsGinAccumReq = {};
     struct ncclDevResourceRequirements railSignalReq = {};
-    if (ncclParamSymGinKernelsEnable() && ncclTeamLsa(comm).nRanks < comm->nRanks) {
+    const bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
+    symk->ginBackendUnsupported = needGin && ncclSymkGinBackendUnsupported(comm);
+    if (symk->ginBackendUnsupported && ncclParamSymGinKernelsEnable()) {
+      INFO(NCCL_INIT, "Symmetric GIN kernels disabled: the Anvil SDMA GIN backend cannot reach rail peers outside "
+                      "the LSA team (lsaSize=%d, nRanks=%d)",
+           ncclTeamLsa(comm).nRanks, comm->nRanks);
+    }
+    if (ncclParamSymGinKernelsEnable() && needGin && !symk->ginBackendUnsupported) {
       int maxBlocks;
       size_t bufSize;
       getRequirements_gin(comm, &maxBlocks, &bufSize);
@@ -394,7 +408,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   // Tma kernel degrades to normal selection instead of ending up with an empty mask.
   if (ncclSymkTmaForced(comm) && (kmask & kernelMask_Tma) != 0) kmask &= kernelMask_Tma;
 
-  bool hasGin = ncclParamSymGinKernelsEnable() != 0;
+  bool hasGin = ncclParamSymGinKernelsEnable() != 0 && !comm->symkState.ginBackendUnsupported;
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;

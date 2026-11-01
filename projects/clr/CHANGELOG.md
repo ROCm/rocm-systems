@@ -2,6 +2,17 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
+## HIP 7.18.0 for ROCm 10.3.0
+
+### Resolved issues
+
+* Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
+* `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+
+### Changed
+
+* After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
@@ -28,6 +39,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Fixed a host-blocking issue in `hipMemcpyBatchAsync` that could occur when the API was repeatedly issued on a stream containing a long-running kernel. The implementation now reserves only the total descriptor space required for each dispatch in the kernel argument pool, preventing pool exhaustion and eliminating unnecessary host waits for kernel completion.
 * Resolved a segmentation fault in `hipStreamEndCapture` during multi-stream capture caused by a bookkeeping cycle among capture participants. The fix tracks capture participants in a single origin-stream-owned set, eliminating recursive traversal of forked streams during capture finalization and improving stream capture stability.
 * Resolved a potential deadlock between `hipMallocAsync` and `hipEventSynchronize` during concurrent multi-threaded execution.
+* Fixed incorrect calculations when using the type `bool` for `cooperative_groups::exclusive_scan`. The implementation now correctly handles the identity value for the first active lane and prevents unintended type conversions from `bool` to `int`.
 
 ### Optimized
 

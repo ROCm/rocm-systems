@@ -1,0 +1,46 @@
+# CTest categories for host-only src/transport/ microtests.
+#
+# Every suite in this binary starts with the source unit's stem.
+test_categories:
+  quick: &micro_transport_quick
+    description: "Smoke - host-only src/transport/ micro-tests, sub-second."
+    test_patterns:
+      - "NetIb*"
+      - "RmaSocket*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600
