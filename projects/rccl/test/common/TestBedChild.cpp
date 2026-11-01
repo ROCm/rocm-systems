@@ -13,8 +13,10 @@
 #include "comm.h"
 
 #include <algorithm>
+#include <csignal>
 #include <thread>
 #include <execinfo.h>
+#include <sys/wait.h>
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -92,6 +94,16 @@ namespace RcclUnitTesting
     this->childReadFd   = -1;
   }
 
+  TestBedChild::~TestBedChild()
+  {
+    if (this->pid > 0)
+    {
+      kill(this->pid, SIGKILL);
+      while (waitpid(this->pid, nullptr, 0) == -1 && errno == EINTR) {}
+    }
+    ClosePipes();
+  }
+
   int TestBedChild::InitPipes()
   {
     // Prepare parent->child pipe
@@ -149,8 +161,7 @@ namespace RcclUnitTesting
         // The payload length is unknown, so the stream cannot be resynchronized:
         // report the failure to the parent, then stop.
         TEST_ERROR("Child %d received invalid command ID: %d", this->childId, command);
-        status = TEST_FAIL;
-        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        SendReply(command, TEST_FAIL);
         goto stop;
       }
 
@@ -169,24 +180,23 @@ namespace RcclUnitTesting
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
       case CHILD_LAUNCH_GRAPHS   : status = LaunchGraphs();         break;
       case CHILD_DEALLOCATE_MEM  : status = DeallocateMem();        break;
-      case CHILD_DESTROY_COMMS   : status = DestroyComms();         break;
+      case CHILD_DESTROY_COMMS   : status = DestroyCommsCommand();  break;
       case CHILD_DESTROY_GRAPHS  : status = DestroyGraphs();        break;
       case CHILD_QUERY_SYMMETRIC : status = QuerySymmetricSupport(retValBuf); break;
+      case CHILD_WARMUP          : status = Warmup();               break;
       case CHILD_STOP            : goto stop;
       default:
         TEST_ERROR("Child %d received unknown command ID: %d", this->childId, command);
-        status = TEST_FAIL;
-        RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status));
+        SendReply(command, TEST_FAIL);
         goto stop;
       }
 
       // Send back acknowledgement to parent
       if (status == TEST_FAIL)
         TEST_ERROR("Child %d failed on command [%s]:", this->childId, ChildCommandNames[command]);
-      if (RcclUnitTesting::safe_pipe_write(childWriteFd, &status, sizeof(status)) < 0) {
-        TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
-        break;
-      }
+      if (status != TEST_SUCCESS && !this->comms.empty())
+        this->commsFailed = true;
+      if (!SendReply(command, status)) break;
       if (retValBuf.size() > 0 &&
           RcclUnitTesting::safe_pipe_write(childWriteFd, retValBuf.data(), retValBuf.size()) < 0) {
         TEST_ERROR("Child %d write return value to parent failed: %s", this->childId, strerror(errno));
@@ -194,8 +204,14 @@ namespace RcclUnitTesting
       }
     }
   stop:
-    // Ensure communicators are destroyed before child process exits
-    if (!this->comms.empty()) DestroyComms();
+    // Comms still live here mean the parent skipped DestroyComms (a test that
+    // stopped early, or a lost parent), so a peer may have failed: abort rather
+    // than finalize, which would wait on that peer until the teardown deadline.
+    if (!this->comms.empty())
+    {
+      this->commsFailed = true;
+      DestroyComms();
+    }
 
     if (verbose) TEST_INFO("Child %d exiting execution loop", this->childId);
 
@@ -210,6 +226,17 @@ namespace RcclUnitTesting
 #else
     exit(0);
 #endif
+  }
+
+  bool TestBedChild::SendReply(int const command, ErrCode const status)
+  {
+    Reply const reply = {command, ++this->replySeq, status};
+    if (RcclUnitTesting::safe_pipe_write(childWriteFd, &reply, sizeof(reply)) < 0)
+    {
+      TEST_ERROR("Child %d write to parent failed: %s", this->childId, strerror(errno));
+      return false;
+    }
+    return true;
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)
@@ -246,6 +273,20 @@ namespace RcclUnitTesting
     }
     retValBuf.resize(sizeof(supported));
     memcpy(retValBuf.data(), &supported, sizeof(supported));
+    return TEST_SUCCESS;
+  }
+
+  ErrCode TestBedChild::Warmup()
+  {
+    if (!this->comms.empty())
+    {
+      TEST_ERROR("Child %d: Warmup requires a worker without live comms", this->childId);
+      return TEST_FAIL;
+    }
+    int device = this->childId;
+    ncclComm_t comm = nullptr;
+    CHILD_NCCL_CALL(ncclCommInitAll(&comm, 1, &device), "ncclCommInitAll Warmup");
+    CHILD_NCCL_CALL(ncclCommDestroy(comm), "ncclCommDestroy Warmup");
     return TEST_SUCCESS;
   }
 
@@ -488,13 +529,8 @@ namespace RcclUnitTesting
     PIPE_READ(streamIdx);
     PIPE_READ(options);
 
-    if (!this->IsValidGroupId(groupId, "SetCollectiveArgs")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "SetCollectiveArgs", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -549,13 +585,8 @@ namespace RcclUnitTesting
     PIPE_READ(userRegistered);
     PIPE_READ(groupId);
 
-    if (!this->IsValidGroupId(groupId, "AllocateMem")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "AllocateMem", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -595,14 +626,8 @@ namespace RcclUnitTesting
     PIPE_READ(prepDataFuncOffset);
     CollFuncPtr const prepDataFunc = CollFuncPtrFromOffset(prepDataFuncOffset);
 
-    if (!this->IsValidGroupId(groupId, "PrepareData")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + comms.size() <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "PrepareData", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
     for (int collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
@@ -1037,20 +1062,36 @@ namespace RcclUnitTesting
     using Clock = std::chrono::high_resolution_clock;
     if (this->verbose) TEST_INFO("Starting sychronization and timing");
     const auto start = Clock::now();
-    while (!streamsToComplete.empty() && usElapsed < timeoutUs)
+    hipError_t streamError = hipSuccess;
+    while (!streamsToComplete.empty() && usElapsed < timeoutUs && streamError == hipSuccess)
     {
       for (int i = 0; i < streamsToComplete.size(); i++)
       {
-        if (hipStreamQuery(streamsToComplete[i]) == hipSuccess)
+        hipError_t const queryResult = hipStreamQuery(streamsToComplete[i]);
+        if (queryResult == hipSuccess)
         {
           streamsToComplete.erase(streamsToComplete.begin() + i);
           i--;
         }
+        else if (queryResult != hipErrorNotReady)
+        {
+          streamError = queryResult;
+          break;
+        }
       }
       usElapsed = duration_cast<microseconds>(Clock::now() - start).count();
-      if (!streamsToComplete.empty()) {
+      if (!streamsToComplete.empty() && streamError == hipSuccess) {
         std::this_thread::sleep_for(std::chrono::microseconds(10));
       }
+    }
+
+    // A faulted stream never completes; fail now instead of waiting out the timeout.
+    if (streamError != hipSuccess)
+    {
+      TEST_ERROR("Child %d collective stream failed with HIP error %s; aborting communicators",
+                 this->childId, hipGetErrorString(streamError));
+      this->AbortComms();
+      return TEST_FAIL;
     }
 
     // timed out
@@ -1122,19 +1163,8 @@ namespace RcclUnitTesting
 
     if (this->verbose) TEST_INFO("Child %d begins ValidateResults()", this->childId);
 
-    if (globalRank < this->rankOffset || (this->rankOffset +  static_cast<int>(comms.size()) <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-    int const localRank = globalRank - rankOffset;
-    if (!this->IsValidGroupId(groupId, "ValidateResults")) return TEST_FAIL;
-    if (localRank >= static_cast<int>(this->collArgs[groupId].size()))
-    {
-      TEST_ERROR("Child %d Rank %d: localRank %d out of bounds for groupId %d (size: %zu)",
-               this->childId, globalRank, localRank, groupId, this->collArgs[groupId].size());
-      return TEST_FAIL;
-    }
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "ValidateResults", localRank)) return TEST_FAIL;
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
     CHECK_HIP(hipDeviceSynchronize());
 
@@ -1234,7 +1264,6 @@ namespace RcclUnitTesting
     // cannot leave rank ids to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
-    if (!this->IsValidGroupId(groupId, "DeregisterMem")) return TEST_FAIL;
 
     if (numRanks > this->totalRanks)
     {
@@ -1242,18 +1271,9 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
 
-    std::vector<int> localRanks;
-    localRanks.reserve(numRanks);
-    for (int globalRank : globalRanks)
-    {
-      if (globalRank < this->rankOffset ||
-          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
-      {
-        TEST_ERROR("Child %d does not contain deregistration rank %d", this->childId, globalRank);
-        return TEST_FAIL;
-      }
-      localRanks.push_back(globalRank - this->rankOffset);
-    }
+    std::vector<int> localRanks(numRanks);
+    for (int i = 0; i < numRanks; ++i)
+      if (!this->ResolveTarget(globalRanks[i], groupId, collId, "DeregisterMem", localRanks[i])) return TEST_FAIL;
 
     // A single child can own multiple communicator ranks. Deregister all of
     // them in one group, mirroring RegisterMem(), before the parent allows any
@@ -1414,20 +1434,31 @@ namespace RcclUnitTesting
     PIPE_READ(groupId);
     PIPE_READ(collId);
 
-    if (!this->IsValidGroupId(groupId, "DeallocateMem")) return TEST_FAIL;
-    if (globalRank < this->rankOffset || (this->rankOffset + static_cast<int>(comms.size()) <= globalRank))
-    {
-      TEST_ERROR("Child %d does not contain rank %d", this->childId, globalRank);
-      return TEST_FAIL;
-    }
-
-    int const localRank = globalRank - rankOffset;
+    int localRank;
+    if (!this->ResolveTarget(globalRank, groupId, collId, "DeallocateMem", localRank)) return TEST_FAIL;
     return this->DeallocateMemInternal(groupId, collId, localRank);
+  }
+
+  ErrCode TestBedChild::DestroyCommsCommand()
+  {
+    int abortComms = 0;
+    PIPE_READ(abortComms);
+    if (abortComms) this->commsFailed = true;
+    return DestroyComms();
   }
 
   ErrCode TestBedChild::DestroyComms()
   {
     if (this->verbose) TEST_INFO("Child %d begins DestroyComms", this->childId);
+
+    // After a failure, abort before anything synchronizes the device: a kernel
+    // still waiting on a broken peer only exits once its comm is aborted.
+    if (this->commsFailed &&
+        std::any_of(this->comms.begin(), this->comms.end(), [](ncclComm_t c) { return c != nullptr; }))
+    {
+      TEST_WARN("Child %d aborting communicators after an earlier failure", this->childId);
+      this->AbortComms();
+    }
 
     // Graphs are captured on this config's streams; free any that DestroyGraphs
     // did not, before the streams go. A pooled worker would otherwise keep them
@@ -1544,8 +1575,23 @@ namespace RcclUnitTesting
       }
     }
 
+    // Free buffers the test did not release with DeallocateMem. The next
+    // InitComms drops them without freeing, so a pooled worker would leak them.
+    for (auto& groupArgs : this->collArgs)
+    {
+      for (size_t localRank = 0; localRank < groupArgs.size(); ++localRank)
+      {
+        if (localRank < this->deviceIds.size()) (void)hipSetDevice(this->deviceIds[localRank]);
+        for (CollectiveArgs& collArg : groupArgs[localRank])
+        {
+          if (collArg.DeallocateMem() != TEST_SUCCESS) status = TEST_FAIL;
+        }
+      }
+    }
+
     this->comms.clear();
     this->streams.clear();
+    this->commsFailed = false;
     if (this->verbose) TEST_INFO("Child %d finishes DestroyComms", this->childId);
     return status;
   }
@@ -1556,6 +1602,27 @@ namespace RcclUnitTesting
     TEST_ERROR("Child %d %s received invalid groupId %d (config has %zu group calls)",
                this->childId, handler, groupId, this->collArgs.size());
     return false;
+  }
+
+  bool TestBedChild::ResolveTarget(int const globalRank, int const groupId, int const collId,
+                                   char const* handler, int& localRank) const
+  {
+    if (!this->IsValidGroupId(groupId, handler)) return false;
+    localRank = globalRank - this->rankOffset;
+    if (globalRank < this->rankOffset || localRank >= static_cast<int>(this->comms.size()) ||
+        localRank >= static_cast<int>(this->collArgs[groupId].size()))
+    {
+      TEST_ERROR("Child %d %s does not contain rank %d", this->childId, handler, globalRank);
+      return false;
+    }
+    int const numColls = static_cast<int>(this->collArgs[groupId][localRank].size());
+    if (collId < -1 || collId >= numColls)
+    {
+      TEST_ERROR("Child %d %s received invalid collId %d (group %d has %d collectives)",
+                 this->childId, handler, collId, groupId, numColls);
+      return false;
+    }
+    return true;
   }
 
   void TestBedChild::AbortComms()
@@ -1713,7 +1780,6 @@ namespace RcclUnitTesting
     // not leave rank ids in the pipe to be decoded as the next command.
     std::vector<int> globalRanks(numRanks);
     for (int& globalRank : globalRanks) PIPE_READ(globalRank);
-    if (!this->IsValidGroupId(groupId, "RegisterMem")) return TEST_FAIL;
 
     if (numRanks > this->totalRanks)
     {
@@ -1721,18 +1787,9 @@ namespace RcclUnitTesting
       return TEST_FAIL;
     }
 
-    std::vector<int> localRanks;
-    localRanks.reserve(numRanks);
-    for (int globalRank : globalRanks)
-    {
-      if (globalRank < this->rankOffset ||
-          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
-      {
-        TEST_ERROR("Child %d does not contain registration rank %d", this->childId, globalRank);
-        return TEST_FAIL;
-      }
-      localRanks.push_back(globalRank - this->rankOffset);
-    }
+    std::vector<int> localRanks(numRanks);
+    for (int i = 0; i < numRanks; ++i)
+      if (!this->ResolveTarget(globalRanks[i], groupId, collId, "RegisterMem", localRanks[i])) return TEST_FAIL;
 
     // Group registration across the selected local ranks managed by this child.
     CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart RegisterMem");

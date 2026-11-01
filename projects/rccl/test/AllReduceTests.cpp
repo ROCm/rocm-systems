@@ -467,7 +467,7 @@ namespace RcclUnitTesting
                                         -1);
               testBed.AllocateMem(inPlace, useManagedMem);
               testBed.PrepareData();
-              testBed.ExecuteCollectives({}, useHipGraph);
+              testBed.ExecuteCollectives({}, -1, useHipGraph);
               testBed.ValidateResults(isCorrect);
               testBed.DeallocateMem();
           }

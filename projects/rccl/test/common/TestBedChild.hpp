@@ -7,6 +7,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 #include <unistd.h>
 #include "CollectiveArgs.hpp"
@@ -37,10 +38,11 @@ namespace RcclUnitTesting
       CHILD_REGISTER_MEM     = 12, // RegisterMem()
       CHILD_QUERY_SYMMETRIC  = 13, // QuerySymmetricSupport()
       CHILD_DEREGISTER_MEM   = 14, // DeregisterMem()
-      NUM_CHILD_COMMANDS     = 15
+      CHILD_WARMUP           = 15, // Warmup()
+      NUM_CHILD_COMMANDS     = 16
     };
 
-    char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
+    static constexpr char const* ChildCommandNames[NUM_CHILD_COMMANDS] =
     {
       "GET_UNIQUE_ID",
       "INIT_COMMS",
@@ -56,7 +58,23 @@ namespace RcclUnitTesting
       "STOP",
       "REGISTER_MEM",
       "QUERY_SYMMETRIC",
-      "DEREGISTER_MEM"
+      "DEREGISTER_MEM",
+      "WARMUP"
+    };
+
+    static char const* CommandName(int const command)
+    {
+      return (command >= 0 && command < NUM_CHILD_COMMANDS) ? ChildCommandNames[command] : "INVALID";
+    }
+
+    // Header of every reply, followed by the command's return value (if any). A
+    // reply the parent missed would shift every later status onto the wrong
+    // command; command and seq let the parent detect that instead.
+    struct Reply
+    {
+      int      command;  // command being answered
+      uint32_t seq;      // replies this child has sent, including this one
+      int      status;   // ErrCode
     };
 
     // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
@@ -86,6 +104,7 @@ namespace RcclUnitTesting
     int parentReadFd;
     int childWriteFd;
     int childReadFd;
+    uint32_t replySeq = 0;  // Replies sent (in the child) / read (in the parent) so far
 
     // These varibles may change based on commands issued by parent
     int totalRanks = 0;                                               // Total ranks
@@ -102,9 +121,16 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
     std::vector<std::vector<std::vector<bool>>> graphEnabled;
     MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
+    bool commsFailed = false;                                         // A command failed since comms were created: abort, not finalize
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
+    TestBedChild(TestBedChild const&) = delete;
+    TestBedChild& operator=(TestBedChild const&) = delete;
+
+    // Parent side: kills and reaps a process teardown did not reap (pid > 0),
+    // then closes the pipes. Whoever reaps pid must set it to -1 first.
+    ~TestBedChild();
 
     // Prepare parent/child communication pipes - to be executed by parent process
     int InitPipes();
@@ -149,7 +175,11 @@ namespace RcclUnitTesting
     // Release allocated memory
     ErrCode DeallocateMem();
 
-    // Destroys RCCL communicators
+    // Reads the parent's abort request, then calls DestroyComms()
+    ErrCode DestroyCommsCommand();
+
+    // Destroys RCCL communicators. Aborts them instead of finalizing when
+    // commsFailed is set, so a broken peer cannot block the teardown barrier.
     ErrCode DestroyComms();
 
     // Destroys graphs
@@ -163,7 +193,14 @@ namespace RcclUnitTesting
     // Returns (as int) whether every local comm reports symmetric kernel support
     ErrCode QuerySymmetricSupport(std::vector<char>& retValBuf);
 
+    // Pool workers only (childId == pinned device): creates and destroys a 1-rank
+    // comm so RCCL's device code is loaded before the worker's first real config.
+    ErrCode Warmup();
+
   private:
+    // Writes the reply header for command; false if the parent pipe is gone.
+    bool SendReply(int command, ErrCode status);
+
     // Per-collective registration bodies for RegisterMem(): symmetric windows
     // (ncclCommWindowRegister) and user buffer registration (ncclCommRegister).
     ErrCode RegisterMemSymmetric(int localRank, CollectiveArgs& collArg);
@@ -185,6 +222,11 @@ namespace RcclUnitTesting
 
     // Rejects a pipe-supplied groupId that does not index the current config.
     bool IsValidGroupId(int groupId, char const* handler) const;
+
+    // Maps a pipe-supplied globalRank onto this child's localRank. Rejects a groupId
+    // or collId (-1 = all) that does not index the current config, or a rank this
+    // child does not own.
+    bool ResolveTarget(int globalRank, int groupId, int collId, char const* handler, int& localRank) const;
 
     // Destroys any live graph / graph-exec handles for groupId after syncing
     // the owning devices.

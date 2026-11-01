@@ -7,12 +7,55 @@
 #include "PtrUnion.hpp"
 #include "api_trace.h"
 #include "DeviceDataOps.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 namespace RcclUnitTesting
 {
   // Threads per block for the device data-op kernels.
   static constexpr size_t kDeviceKernelBlockSize = 256;
   // Default Ut device-data element-count threshold (1Mi) when UT_DEVICE_DATA_MIN_ELEMS is unset.
   static constexpr long long kDefaultDeviceDataMinElems = (1LL << 20);
+  // Resident blocks per CU for MismatchReduceKernel; enough to saturate HBM.
+  static constexpr int kMismatchBlocksPerCu = 8;
+
+  namespace
+  {
+    // Per-thread, per-device IsEqualDevice scratch, freed at process exit. Words: [0] mismatch
+    // count, [1] first index, [2..3] expected/actual bits, [4..5] expected/actual as double.
+    struct CompareScratch
+    {
+      unsigned long long* dev  = nullptr;
+      unsigned long long* host = nullptr;  // pinned, for async copies
+      int                 numCus = 0;
+    };
+    constexpr size_t kCompareScratchBytes = 6 * sizeof(unsigned long long);
+
+    ErrCode GetCompareScratch(CompareScratch*& scratch)
+    {
+      thread_local std::vector<CompareScratch> cache;
+      int device = 0;
+      CHECK_HIP(hipGetDevice(&device));
+      if (device >= static_cast<int>(cache.size())) cache.resize(device + 1);
+      CompareScratch& s = cache[device];
+      if (s.dev == nullptr)
+      {
+        CompareScratch fresh;
+        CHECK_HIP(hipDeviceGetAttribute(&fresh.numCus, hipDeviceAttributeMultiprocessorCount, device));
+        CHECK_HIP(hipMalloc(&fresh.dev, kCompareScratchBytes));
+        hipError_t const hostErr = hipHostMalloc(&fresh.host, kCompareScratchBytes);
+        if (hostErr != hipSuccess)
+        {
+          (void)hipFree(fresh.dev);
+          CHECK_HIP(hostErr);
+        }
+        s = fresh;
+      }
+      scratch = &s;
+      return TEST_SUCCESS;
+    }
+  }
 
   // Dispatch a device data-op over the concrete element type for a dtype.
   // ACTION is a statement using template type `T`.
@@ -79,35 +122,30 @@ namespace RcclUnitTesting
     mismatches = 0;
     if (numElements == 0) return TEST_SUCCESS;
 
-    // Scope-guarded device frees: every early return below (CHECK_HIP failures and the
-    // dispatch default) runs these destructors, so nothing leaks on the error path.
-    struct DevFree
-    {
-      void* p = nullptr;
-      ~DevFree()
-      {
-        if (p) { (void)hipFree(p); }
-      }
-    } gScratch, gVals, gBits;
+    CompareScratch* scratch = nullptr;
+    CHECK_CALL(GetCompareScratch(scratch));
+    unsigned long long* const dScratch = scratch->dev;
+    unsigned long long* const hScratch = scratch->host;
 
-    // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
-    unsigned long long* dScratch = nullptr;
-    double*             dVals    = nullptr;   // [expected, actual]
-    unsigned long long* dBits    = nullptr;   // [expected, actual] exact raw bits (integer dtypes)
-    CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
-    CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
-    CHECK_HIP(hipMalloc(&dBits,    2 * sizeof(unsigned long long))); gBits.p    = dBits;
-    unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
-    CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
+    // Null stream throughout: callers have already synchronized the collective streams.
+    hScratch[0] = 0ULL;   // mismatch count
+    hScratch[1] = ~0ULL;  // first divergent index ("none")
+    CHECK_HIP(hipMemcpyAsync(dScratch, hScratch, 2 * sizeof(unsigned long long), hipMemcpyHostToDevice, 0));
 
-    size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
+    bool const vectorized =
+      ((reinterpret_cast<uintptr_t>(actualGpu) | reinterpret_cast<uintptr_t>(expectedGpu)) % 16) == 0;
+    size_t const elemsPerThread = vectorized ? 16 / DataTypeToBytes(dataType) : 1;
+    size_t const threadsNeeded  = (numElements + elemsPerThread - 1) / elemsPerThread;
+    size_t const maxBlocks      = static_cast<size_t>(std::max(scratch->numCus, 1)) * kMismatchBlocksPerCu;
+    size_t const blocks = std::min(maxBlocks, (threadsNeeded + kMismatchBlockSize - 1) / kMismatchBlockSize);
     RCCL_UT_DTYPE_DISPATCH(dataType,
-      hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                         (const T*)actualGpu, (const T*)expectedGpu, numElements,
+      hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(kMismatchBlockSize), 0, 0,
+                         (const T*)actualGpu, (const T*)expectedGpu, numElements, vectorized,
                          dScratch, dScratch + 1));
     CHECK_HIP(hipGetLastError());
-    unsigned long long hOut[2] = { 0ULL, 0ULL };
-    CHECK_HIP(hipMemcpy(hOut, dScratch, sizeof(hOut), hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpyAsync(hScratch, dScratch, 2 * sizeof(unsigned long long), hipMemcpyDeviceToHost, 0));
+    CHECK_HIP(hipStreamSynchronize(0));
+    unsigned long long const hOut[2] = { hScratch[0], hScratch[1] };
     mismatches = (size_t)hOut[0];
 
     // Diagnostic: with the host buffering path retired this is the only value dump, so
@@ -116,14 +154,17 @@ namespace RcclUnitTesting
     if (verbose && hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
     {
       size_t const fi = (size_t)hOut[1];
+      unsigned long long* const dBits = dScratch + 2;                        // [expected, actual] exact raw bits
+      double*             const dVals = reinterpret_cast<double*>(dScratch + 4);  // [expected, actual]
       RCCL_UT_DTYPE_DISPATCH(dataType,
         hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
                            (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
       CHECK_HIP(hipGetLastError());
-      double             hVals[2] = { 0.0, 0.0 };    // [expected, actual]
-      unsigned long long hBits[2] = { 0ULL, 0ULL };  // exact raw bits [expected, actual]
-      CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
-      CHECK_HIP(hipMemcpy(hBits, dBits, sizeof(hBits), hipMemcpyDeviceToHost));
+      CHECK_HIP(hipMemcpyAsync(hScratch + 2, dScratch + 2, 4 * sizeof(unsigned long long), hipMemcpyDeviceToHost, 0));
+      CHECK_HIP(hipStreamSynchronize(0));
+      unsigned long long const hBits[2] = { hScratch[2], hScratch[3] };  // exact raw bits [expected, actual]
+      double hVals[2];                                                  // [expected, actual]
+      memcpy(hVals, hScratch + 4, sizeof(hVals));
       // Mirror the host IsEqual verbose format exactly, per dtype: integers print from the
       // exact bits (no double rounding), floats (including fp8) from the double view.
       switch (dataType)
