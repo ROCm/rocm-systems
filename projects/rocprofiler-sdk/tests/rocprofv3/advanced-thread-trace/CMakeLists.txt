@@ -472,6 +472,11 @@ if(${IS_TRIPLE_BUFFER_DISABLED})
     set(ATT_NO_INTERCEPT_DISABLE ON)
 endif()
 
+# rocprofv3 rejects --att-no-intercept on a host CPU without AVX-512.
+set(ATT_NO_INTERCEPT_SKIP_REGEX
+    "--att-no-intercept requires a host CPU with AVX-512 support|ATT no-intercept output unavailable"
+    )
+
 set(ATT_NO_INTERCEPT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-no-intercept-out")
 
 rocprofiler_add_integration_execute_test(
@@ -486,6 +491,7 @@ rocprofiler_add_integration_execute_test(
     DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     ENVIRONMENT "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    SKIP_REGULAR_EXPRESSION "${ATT_NO_INTERCEPT_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-att-no-intercept)
 
 rocprofiler_add_integration_validate_test(
@@ -499,7 +505,8 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${ATT_NO_INTERCEPT_DISABLE}
     FIXTURES_REQUIRED rocprofv3-test-att-no-intercept
     ARGS --att-no-intercept-out-dir ${ATT_NO_INTERCEPT_OUT_DIR}
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "AssertionError"
+    SKIP_REGULAR_EXPRESSION "${ATT_NO_INTERCEPT_SKIP_REGEX}")
 
 set(ATT_CODE_OBJECT_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-code-object-out")
 
