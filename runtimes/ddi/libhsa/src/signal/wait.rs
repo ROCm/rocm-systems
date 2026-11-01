@@ -11,6 +11,18 @@ const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
 /// Cached system clock frequency in hertz for timeout conversion.
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+thread_local! {
+    /// Notifies a wait test after this thread has observed an unsatisfied poll.
+    static FIRST_UNSATISFIED_POLL: std::cell::RefCell<Option<Sender<()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn notify_first_unsatisfied_poll(sender: Sender<()>) {
+    FIRST_UNSATISFIED_POLL.with(|slot| *slot.borrow_mut() = Some(sender));
+}
+
 /// Caches the frequency reported by native system clock discovery.
 pub(crate) fn set_system_frequency(frequency: u64) {
     SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
@@ -68,35 +80,126 @@ pub(crate) unsafe fn signal_wait(
     wait_state_hint: u32,
     order: Ordering,
 ) -> SignalValue {
-    // SAFETY: Callers must supply a live HSA user signal.
-    unsafe {
-        with_public_signal(signal, |signal| {
-            // The common satisfied path needs only one atomic load. Read the clock
-            // and system frequency only once the caller actually has to wait.
-            let observed = signal.value.load(order);
-            if condition_met(condition, observed, compare_value) {
-                return observed;
+    // Keep the generation alive for the complete wait. The blocking path
+    // observes stop_workers and releases its retained slot before this drops.
+    // Publish the lease so nested slot reads still enter after final closure.
+    let Some(call) = crate::runtime::enter_public_raw_handle() else {
+        return 0;
+    };
+    let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
+    let (generation, observed) = {
+        let handles = WAIT_SIGNAL_HANDLES
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(&generation) = handles.get(&(signal.handle as usize)) else {
+            drop(handles);
+            // Unit tests exercise raw signal entry points with stack-owned
+            // slots and no published runtime generation.
+            #[cfg(test)]
+            if lock().is_ok_and(|guard| guard.as_ref().is_none()) {
+                return unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }
+                    .unwrap_or(0);
             }
-            let start = Instant::now();
-            let frequency = system_frequency();
-            loop {
-                let observed = signal.value.load(order);
-                if !crate::runtime::public_raw_handle_access_allowed() {
-                    return observed;
-                }
-                if condition_met(condition, observed, compare_value) {
-                    return observed;
-                }
-                if timeout_hint != u64::MAX
-                    && timeout_elapsed(start.elapsed(), timeout_hint, frequency)
-                {
-                    return observed;
-                }
-                wait_pause(wait_state_hint, &start);
-            }
-        })
+            return 0;
+        };
+        // SAFETY: The registry read lock excludes destruction and storage
+        // release through the entire atomic load. The raw gate excludes
+        // generation teardown while the slot is read.
+        (
+            generation,
+            unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }.unwrap_or(0),
+        )
+    };
+    if condition_met(condition, observed, compare_value) {
+        return observed;
     }
-    .unwrap_or(0)
+    if timeout_hint == 0 {
+        return observed;
+    }
+    let mut guard = match lock() {
+        Ok(guard) => guard,
+        Err(_) => return observed,
+    };
+    let Some(runtime) = guard.as_mut() else {
+        return observed;
+    };
+    if !runtime.signal_state.owns_signal(signal) {
+        return observed;
+    }
+    // A destroyed slab slot may already have been recycled at the same raw
+    // address. Do not turn this wait into one for the new signal lifetime.
+    if WAIT_SIGNAL_HANDLES
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&(signal.handle as usize))
+        .copied()
+        != Some(generation)
+    {
+        return observed;
+    }
+    // SAFETY: The runtime lock now prevents destruction until the per-slot
+    // reference and in-flight token have been acquired for the blocking path.
+    let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
+        return observed;
+    };
+    drop(guard);
+    let Some(entry) = registration.entries.first() else {
+        return observed;
+    };
+    let Some(pointer) = entry.signal else {
+        return observed;
+    };
+    // SAFETY: The registration retains this slot through signal_wait_open.
+    signal_wait_open(
+        unsafe { pointer.as_ref() },
+        entry.retired.as_deref(),
+        &registration.stop,
+        SignalWaitConfig {
+            condition,
+            compare_value,
+            timeout_hint,
+            wait_state_hint,
+            order,
+        },
+    )
+}
+
+/// Inputs that stay fixed while one signal wait polls a retained slot.
+#[derive(Clone, Copy)]
+pub(crate) struct SignalWaitConfig {
+    /// Comparison applied to each observed value.
+    pub(crate) condition: u32,
+    /// Value compared with each observation.
+    pub(crate) compare_value: SignalValue,
+    /// Timeout in system timestamp ticks.
+    pub(crate) timeout_hint: u64,
+    /// Active or blocked pause policy.
+    pub(crate) wait_state_hint: u32,
+    /// Ordering of the signal value load.
+    pub(crate) order: Ordering,
+}
+
+/// Waits on a retained slot until completion, retirement, or shutdown.
+pub(crate) fn signal_wait_open(
+    signal: &AmdSignal,
+    retired: Option<&AtomicBool>,
+    stop: &AtomicBool,
+    config: SignalWaitConfig,
+) -> SignalValue {
+    let start = Instant::now();
+    let frequency = system_frequency();
+    loop {
+        let observed = signal.value.load(config.order);
+        if stop.load(Ordering::Acquire)
+            || retired.is_some_and(|retired| retired.load(Ordering::Acquire))
+            || condition_met(config.condition, observed, config.compare_value)
+            || (config.timeout_hint != u64::MAX
+                && timeout_elapsed(start.elapsed(), config.timeout_hint, frequency))
+        {
+            return observed;
+        }
+        wait_pause(config.wait_state_hint, &start);
+    }
 }
 
 /// Waits until any signal in a group satisfies its condition.
@@ -194,6 +297,12 @@ pub(crate) unsafe fn signal_wait_inputs(
 
 /// Waits for pause to complete.
 fn wait_pause(wait_state_hint: u32, start: &Instant) {
+    #[cfg(test)]
+    FIRST_UNSATISFIED_POLL.with(|slot| {
+        if let Some(sender) = slot.borrow_mut().take() {
+            let _ = sender.send(());
+        }
+    });
     // A brief active phase avoids scheduler latency for short GPU completions
     // even when the caller allows a blocked wait. Longer blocked waits yield.
     if wait_state_hint == WAIT_STATE_ACTIVE
