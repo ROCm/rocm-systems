@@ -225,7 +225,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  .rankScaledFuncMaxBytes = {
+  .rankScaledLL128MaxBytes = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- rankScaledMaxBytes

@@ -1172,14 +1172,13 @@ inline bool rcclDdaRankScaled(const rcclArchThresholds* table, int nRanks) {
   return table != nullptr && table->rankScaledMinRanks > 0 && nRanks >= table->rankScaledMinRanks;
 }
 
-// Table cap for one DDA tier: nRanks * the per-rank entry (clipped to
-// rankScaledFuncMaxBytes[func] if set, else rankScaledMaxBytes) on rank-scaled
-// comms when that entry is set, else the total.
+// Table cap for one DDA tier: nRanks * the per-rank entry (clipped to clips[func]
+// if given and set, else rankScaledMaxBytes) on rank-scaled comms when that entry is set, else the total.
 inline size_t ddaTierCapFromTable(const rcclArchThresholds* table, const size_t* totals, const size_t* perRank,
-                                  ncclFunc_t func, int nRanks) {
+                                  ncclFunc_t func, int nRanks, const size_t* clips = nullptr) {
   const size_t share = funcThresholdFromTable(perRank, func);
   if (share != 0 && rcclDdaRankScaled(table, nRanks)) {
-    const size_t funcClip = funcThresholdFromTable(table->rankScaledFuncMaxBytes, func);
+    const size_t funcClip = clips != nullptr ? funcThresholdFromTable(clips, func) : 0;
     return std::min((size_t)nRanks * share, funcClip != 0 ? funcClip : table->rankScaledMaxBytes);
   }
   return funcThresholdFromTable(totals, func);
@@ -1225,11 +1224,13 @@ inline size_t rcclDdaLL128ThresholdTab(const rcclArchThresholds* table, ncclFunc
   if (param == 0) return 0;
   if (param == kDdaThresholdUnset) {
     if (table == nullptr) return 0;
-    return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+    return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
+                               table->rankScaledLL128MaxBytes);
   }
   // param > 0: user forced on
   if (table == nullptr) return kDdaLL128BaseDefault;
-  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks);
+  return ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, func, nRanks,
+                               table->rankScaledLL128MaxBytes);
 }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLL128ThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);

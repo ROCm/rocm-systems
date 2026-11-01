@@ -1760,7 +1760,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
-  t.rankScaledFuncMaxBytes[ncclFuncReduceScatter] = 112 * kMiB;
+  t.rankScaledLL128MaxBytes[ncclFuncReduceScatter] = 112 * kMiB;
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
@@ -6880,7 +6880,7 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
 // ===========================================================================
 
 // Below rankScaledMinRanks the totals apply; from it, nRanks x the per-rank entry, clipped to
-// rankScaledFuncMaxBytes (else rankScaledMaxBytes). Tiers without a per-rank entry keep their totals.
+// rankScaledLL128MaxBytes for the LL128 tier (else rankScaledMaxBytes). Tiers without a per-rank entry keep their totals.
 TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaTierCaps_RankScaledFromMinRanks",
@@ -6911,7 +6911,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         EXPECT_EQ(112 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 64;
         EXPECT_EQ(112 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
-        EXPECT_EQ(112 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
+        EXPECT_EQ(128 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter)) << "VMM keeps rankScaledMaxBytes";
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "rankScaledMaxBytes";
         DeleteCommWithArch(comm);
       });
