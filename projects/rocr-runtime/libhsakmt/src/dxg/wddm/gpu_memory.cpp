@@ -54,13 +54,17 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
 }
 
 GpuMemory::~GpuMemory() {
+  ReleasePeers();
   // Release the Lock2 pin before tearing down the allocation handles, since
   // DestroyAllocation invalidates the handles Unlock2 needs.
   UnlockSystemMemory();
-  FreeGpuVirtualAddress(GpuAddress(), Size());
+  // A peer view maps the owner's VA. The owner frees that reservation.
+  if (owner_ == nullptr) {
+    FreeGpuVirtualAddress(GpuAddress(), Size());
+    if (desc_.handle_ape_addr > 0)
+      dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
+  }
   FreePhysicalMemory();
-  if (desc_.handle_ape_addr > 0)
-    dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
 }
 
 ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
@@ -870,6 +874,85 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
       alloc_handles_ptr_[i] = open_resource->pOpenAllocationInfo2[i].hAllocation;
   }
   return finalize_import(shared_info_ptr);
+}
+
+GpuMemory* GpuMemory::ViewOn(WDDMDevice* dev, bool create, bool* created) {
+  if (owner_ != nullptr)
+    return owner_->ViewOn(dev, create, created);
+  if (created)
+    *created = false;
+  if (dev == device_)
+    return this;
+
+  for (auto* peer : peers_) {
+    if (peer->GetDevice() == dev)
+      return peer;
+  }
+  if (!create)
+    return nullptr;
+
+  auto* peer = new GpuMemory(dev);
+  if (peer->MapFromPeer(this) != ErrorCode::Success) {
+    delete peer;
+    return nullptr;
+  }
+  peers_.push_back(peer);
+  if (created)
+    *created = true;
+  return peer;
+}
+
+void GpuMemory::DropPeer(GpuMemory* peer) {
+  for (auto it = peers_.begin(); it != peers_.end(); ++it) {
+    if (*it == peer) {
+      peers_.erase(it);
+      break;
+    }
+  }
+
+  if (peer->IsPhysicalCreated()) {
+    if (peer->UnmapGpuVirtualAddress(peer->GpuAddress(), peer->Size()) != ErrorCode::Success)
+      pr_err("peer unmap failed\n");
+    peer->Evict();
+  }
+  delete peer;
+}
+
+void GpuMemory::ReleasePeers() {
+  while (!peers_.empty())
+    DropPeer(peers_.back());
+}
+
+ErrorCode GpuMemory::MapFromPeer(GpuMemory* owner) {
+  if (owner->GetDevice() == device_ || (!owner->IsSystem() && !owner->IsUserMemory()))
+    return ErrorCode::UnSupported;
+
+  owner_ = owner;
+  desc_ = owner->desc_;
+  num_allocations_ = owner->NumChunks();
+  if (num_allocations_ > 1)
+    alloc_handles_ptr_ = new WinAllocationHandle[num_allocations_];
+  memset(alloc_handles_ptr_, 0, num_allocations_ * sizeof(WinAllocationHandle));
+
+  auto code = CreatePhysicalMemory();
+  if (code != ErrorCode::Success)
+    return code;
+
+  code = MapGpuVirtualAddress(GpuAddress(), Size());
+  if (code != ErrorCode::Success)
+    return code;
+
+  code = MakeResident();
+  if (code != ErrorCode::Success) {
+    UnmapGpuVirtualAddress(GpuAddress(), Size());
+    return code;
+  }
+
+  if (!device_->WaitOnPagingFenceFromCpu()) {
+    UnmapGpuVirtualAddress(GpuAddress(), Size());
+    return ErrorCode::Unknown;
+  }
+  return ErrorCode::Success;
 }
 
 ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info,
