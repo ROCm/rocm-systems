@@ -1944,19 +1944,45 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     return true;
 }
 
+// Resolve the symbol a symbol-copy record names and check that the copy stays
+// inside it. The record's offset and count are archive data: without this the
+// handlers add the offset to the live address and hand the sum to HIP, which
+// does not bound a copy against the symbol and can reach a host memcpy at an
+// address the symbol does not own. The comparison is written so offset + count
+// is never formed and cannot wrap. On success *out is the symbol's live base address.
+static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
+                                       uint64_t offset, uint64_t count,
+                                       const char* api, void** out) {
+    size_t size = 0;
+    void* symbol = ctx.translate_symbol(rec, &size);
+    if (!symbol) {
+        fprintf(stderr,
+                "[HRR] %s: symbol 0x%llx is not in this archive's symbol "
+                "registry.\n", api, (unsigned long long)rec);
+        return hipErrorInvalidSymbol;
+    }
+    if (offset > size || count > size - offset) {
+        fprintf(stderr,
+                "[HRR] %s: copy of %llu bytes at offset %llu does not fit "
+                "symbol 0x%llx (%zu bytes registered); refusing the call\n",
+                api, (unsigned long long)count, (unsigned long long)offset,
+                (unsigned long long)rec, size);
+        return hipErrorInvalidValue;
+    }
+    *out = symbol;
+    return hipSuccess;
+}
+
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
                                                   const uint8_t* payload) {
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeToSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = ctx.translate_symbol(a->symbol);
-    if (!symbol) {
-        fprintf(stderr,
-                "[HRR] hipGraphAddMemcpyNodeToSymbol: symbol 0x%llx is not in "
-                "this archive's symbol registry.\n",
-                (unsigned long long)a->symbol);
-        return hipErrorInvalidSymbol;
-    }
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeToSymbol", &symbol);
+        e != hipSuccess)
+        return e;
 
     const void* src = nullptr;
     if (a->blob_hash_lo || a->blob_hash_hi) {
@@ -2001,14 +2027,11 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeFromSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = ctx.translate_symbol(a->symbol);
-    if (!symbol) {
-        fprintf(stderr,
-                "[HRR] hipGraphAddMemcpyNodeFromSymbol: symbol 0x%llx is not in "
-                "this archive's symbol registry.\n",
-                (unsigned long long)a->symbol);
-        return hipErrorInvalidSymbol;
-    }
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeFromSymbol", &symbol);
+        e != hipSuccess)
+        return e;
 
     void* dst = nullptr;
     if (kind == hipMemcpyDeviceToHost || kind == hipMemcpyHostToHost) {
@@ -2079,15 +2102,6 @@ static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
     return src;
 }
 
-static void* symbol_or_complain(PlaybackContext& ctx, uint64_t rec,
-                                const char* api) {
-    void* symbol = ctx.translate_symbol(rec);
-    if (!symbol)
-        fprintf(stderr, "[HRR] %s: symbol 0x%llx is not in this archive's "
-                "symbol registry.\n", api, (unsigned long long)rec);
-    return symbol;
-}
-
 }  // namespace
 
 hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx,
@@ -2095,8 +2109,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
@@ -2115,8 +2132,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsFromSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!node) {
         fprintf(stderr, "[HRR] %s: node 0x%llx was never built at replay.\n",
@@ -2142,8 +2162,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsToSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
@@ -2164,8 +2187,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsFromSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!exec || !node) {
