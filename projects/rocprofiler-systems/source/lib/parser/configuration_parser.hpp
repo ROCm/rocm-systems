@@ -33,8 +33,9 @@ enum class parse_mode : std::uint8_t
  * Loads a schema and resolves defaults, a preset, a config file, the environment,
  * and the command line.
  *
- * Precedence, from lowest to highest, is default_value, preset, file, environment,
- * then command_line. After that, copy_to, assigns, maps_to, and choice sets run
+ * Precedence, from lowest to highest, is default_value, file, environment,
+ * preset, then command_line. A preset overrides the configuration file and the
+ * environment. After that, copy_to, assigns, maps_to, and choice sets run
  * for a value whose winning source is not the default. A target with a higher
  * source is left alone. fills then copies onto a target that is absent or still
  * the default. The config file path is the resolved "config_file" parameter

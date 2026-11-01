@@ -86,8 +86,8 @@ reject_provider_values(const schema&                  config_schema,
             continue;
         }
         parsed.errors.push_back(
-            fmt::format("invalid value '{}' for parameter '{}' from {}", itr->second,
-                        itr->first, source_label(source)));
+            fmt::format("{} from {}", invalid_value_message(itr->second, itr->first),
+                        source_label(source)));
         itr = parsed.values.erase(itr);
     }
 }
@@ -402,6 +402,10 @@ append_violations(std::vector<std::string>& errors, const schema& config_schema,
     value_map_t values;
     for(const auto& [param_id, item] : resolved)
     {
+        if(item.source == config_source::default_value)
+        {
+            continue;
+        }
         values.emplace(param_id, item.value);
     }
     for(const auto& item : validate_values(config_schema, values))
@@ -539,20 +543,21 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     add_provider_defaults(resolved, request.config_schema, *m_providers);
     apply_effects(resolved, request.config_schema);
     append_violations(m_errors, request.config_schema, resolved);
+    config_store staged{ *schema_ptr };
     try
     {
-        config_store staged{ *schema_ptr };
         apply_resolved(staged, resolved);
-        m_store->clear();
-        for(const auto& [param_id, value] : staged.values())
-        {
-            const auto source =
-                staged.source_of(param_id).value_or(config_source::default_value);
-            m_store->set(param_id, value, source);
-        }
     } catch(const std::exception& err)
     {
         m_errors.emplace_back(err.what());
+        return {};
+    }
+    m_store->clear();
+    for(const auto& [param_id, value] : staged.values())
+    {
+        const auto source =
+            staged.source_of(param_id).value_or(config_source::default_value);
+        m_store->set(param_id, value, source);
     }
     return m_store->values();
 }
@@ -588,15 +593,19 @@ configuration_parser::export_as_environment() const
 std::string
 configuration_parser::export_as_json() const
 {
-    auto document = json::object();
-    if(m_store != nullptr)
+    if(m_store == nullptr)
     {
-        for(const auto& [param_id, value] : m_store->values())
-        {
-            document[param_id] = value;
-        }
+        return json::object().dump(k_json_indent);
     }
-    return document.dump(k_json_indent);
+    const auto      schema_ptr = m_store->config_schema();
+    resolved_config resolved;
+    for(const auto& [param_id, value] : m_store->values())
+    {
+        const auto source =
+            m_store->source_of(param_id).value_or(config_source::default_value);
+        resolved.emplace(param_id, resolved_value{ .value = value, .source = source });
+    }
+    return catalog_document(*schema_ptr, resolved).dump(k_json_indent);
 }
 
 void

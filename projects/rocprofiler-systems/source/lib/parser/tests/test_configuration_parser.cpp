@@ -8,6 +8,8 @@
 #include "parser/value_provider.hpp"
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <stdexcept>
 #include <stdlib.h>  // POSIX ::getenv, ::setenv, ::unsetenv
 #include <string>
 #include <string_view>
@@ -83,6 +86,13 @@ add_checked(schema& catalog, schema_param param)
 }
 
 void
+add_behavior_categories(schema& catalog)
+{
+    ASSERT_TRUE(catalog.add_category(category{ .id = "configuration" }));
+    ASSERT_TRUE(catalog.add_category(category{ .id = "tracing" }));
+}
+
+void
 add_behavior_params(schema& catalog)
 {
     add_checked(catalog,
@@ -119,6 +129,7 @@ add_behavior_params(schema& catalog)
                     .id            = "output_path",
                     .name          = "Output path",
                     .description   = "Output path",
+                    .category      = "configuration",
                     .type          = param_type::path,
                     .default_value = "rocprof-sys-output",
                     .path          = path_kind::directory,
@@ -129,6 +140,7 @@ add_behavior_params(schema& catalog)
                              .id            = "trace",
                              .name          = "Trace",
                              .description   = "Trace",
+                             .category      = "tracing",
                              .type          = param_type::boolean,
                              .default_value = "false",
                              .env           = env_spec{ .name = "ROCPROFSYS_TRACE" },
@@ -195,6 +207,7 @@ make_behavior_schema()
 {
     schema catalog{};
     catalog.set_version("1.0");
+    add_behavior_categories(catalog);
     add_behavior_params(catalog);
     add_behavior_sampling(catalog);
     catalog.add_constraint(constraint{
@@ -462,14 +475,14 @@ TEST(parser_configuration, command_line_overrides_lower_sources)
     parser.set_environment(verbose_environment);
     parser.set_preset_lookup(balanced_settings);
     const auto file = scoped_temp_file{ R"({
-        "output_path": "from-file",
-        "trace": true
+        "configuration": { "output_path": "from-file" },
+        "tracing": { "trace": true }
     })" };
 
     const auto values = parser.parse({ "--config", file.path(), "--preset", "balanced",
                                        "--verbose", "3", "--", "./app" });
 
-    EXPECT_EQ(values.at("output_path"), "from-file");
+    EXPECT_EQ(values.at("output_path"), "from-preset");
     EXPECT_EQ(parser.get<bool>("trace").value_or(false), true);
     EXPECT_EQ(parser.get<bool>("profile").value_or(false), true);
     EXPECT_EQ(parser.get<std::int64_t>("verbose").value_or(-1), 3);
@@ -483,7 +496,8 @@ TEST(parser_configuration, cli_output_overrides_preset_and_file)
     parser.set_preset_lookup([](std::string_view) {
         return preset_parser::settings_t{ { "ROCPROFSYS_OUTPUT_PATH", "from-preset" } };
     });
-    const auto file   = scoped_temp_file{ R"({ "output_path": "from-file" })" };
+    const auto file =
+        scoped_temp_file{ R"({ "configuration": { "output_path": "from-file" } })" };
     const auto values = parser.parse(
         { "--config", file.path(), "--preset", "balanced", "--output", "from-cli" });
     EXPECT_EQ(values.at("output_path"), "from-cli");
@@ -530,6 +544,9 @@ TEST(parser_configuration, reports_constraints_and_unknown_presets)
     auto parser = make_behavior_parser();
     static_cast<void>(parser.parse({ "--sample-cputime", "--sample-realtime" }));
     EXPECT_TRUE(contains_text(parser.errors(), "mutually exclusive"));
+
+    static_cast<void>(parser.parse({ "--sample-cputime" }));
+    EXPECT_FALSE(contains_text(parser.errors(), "mutually exclusive"));
 
     static_cast<void>(parser.parse({ "--flat-profile" }));
     EXPECT_TRUE(contains_text(parser.errors(), "flat profiles require profiling"));
@@ -580,14 +597,106 @@ TEST(parser_configuration, exports_environment_and_json)
     EXPECT_EQ(env.find("ROCPROFSYS_TRACE"), env.end());
     EXPECT_EQ(env.find("ROCPROFSYS_DEBUG"), env.end());
     EXPECT_EQ(env.find("ROCPROFSYS_PROFILE"), env.end());
-    EXPECT_NE(text.find("\"output_path\""), std::string::npos);
-    EXPECT_NE(text.find("exported"), std::string::npos);
+    const auto document = nlohmann::json::parse(text);
+    EXPECT_EQ(document["configuration"]["output_path"], "exported");
+    EXPECT_EQ(document["logging"]["verbose"], 4);
+    EXPECT_FALSE(document.contains("tracing"));
 
     const auto previous = capture_environment(env);
     parser.apply_to_environment();
     EXPECT_STREQ(std::getenv("ROCPROFSYS_VERBOSE"), "4");
     EXPECT_STREQ(std::getenv("ROCPROFSYS_OUTPUT_PATH"), "exported");
     restore_environment(previous);
+}
+
+TEST(parser_configuration, preset_overrides_the_file_and_environment)
+{
+    auto parser = make_behavior_parser();
+    parser.set_environment([](std::string_view name) -> std::optional<std::string> {
+        if(name == "ROCPROFSYS_OUTPUT_PATH")
+        {
+            return std::string{ "from-env" };
+        }
+        if(name == "ROCPROFSYS_VERBOSE")
+        {
+            return std::string{ "2" };
+        }
+        return std::nullopt;
+    });
+    parser.set_preset_lookup(balanced_settings);
+    const auto file =
+        scoped_temp_file{ R"({ "configuration": { "output_path": "from-file" } })" };
+
+    const auto values = parser.parse({ "--config", file.path(), "--preset", "balanced" });
+    EXPECT_EQ(values.at("output_path"), "from-preset");
+    EXPECT_EQ(parser.get<std::int64_t>("verbose").value_or(-1), 2);
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
+}
+
+TEST(parser_configuration, flag_does_not_consume_the_command)
+{
+    auto       parser    = make_parser();
+    const auto separated = parser.parse({ "--trace", "--", "true" });
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
+    EXPECT_EQ(separated.at("trace"), "true");
+    EXPECT_EQ(parser.command(), (std::vector<std::string>{ "true" }));
+
+    const auto bare = parser.parse({ "--trace", "true" });
+    EXPECT_EQ(bare.at("trace"), "true");
+    EXPECT_TRUE(parser.command().empty());
+    EXPECT_TRUE(contains_text(parser.errors(), "unexpected argument"));
+}
+
+TEST(parser_configuration, a_directory_config_path_throws)
+{
+    auto       parser    = make_parser();
+    const auto directory = std::filesystem::temp_directory_path().string();
+    const auto stored    = parser.parse({});
+    EXPECT_EQ(stored.at("verbose"), "0");
+    try
+    {
+        const auto parsed = parser.parse({ "--config", directory });
+        static_cast<void>(parsed);
+        FAIL() << "a directory config path must throw";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string{ error.what() }.find(directory), std::string::npos);
+    }
+    EXPECT_EQ(parser.get<std::int64_t>("verbose").value_or(-1), 0);
+}
+
+TEST(parser_configuration, invalid_resolved_value_keeps_the_previous_store)
+{
+    schema catalog{};
+    add_checked(catalog, schema_param{
+                             .id            = "trace",
+                             .name          = "Trace",
+                             .description   = "Trace",
+                             .type          = param_type::boolean,
+                             .default_value = "false",
+                             .arg = arg_spec{ .name = "--trace", .form = arg_form::flag },
+                         });
+    add_checked(catalog,
+                schema_param{
+                    .id          = "mode",
+                    .name        = "Mode",
+                    .description = "Mode",
+                    .type        = param_type::string,
+                    .arg         = arg_spec{ .name = "--mode", .form = arg_form::value },
+                    .maps_to     = { value_mapping{
+                            .when = "bad", .target = "trace", .value = "not-a-bool" } },
+                });
+
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(std::move(catalog))) << parser.failure();
+    EXPECT_EQ(parser.parse({}).at("trace"), "false");
+
+    const auto rejected = parser.parse({ "--mode", "bad" });
+    EXPECT_TRUE(rejected.empty());
+    EXPECT_EQ(parser.get<bool>("trace").value_or(true), false);
+    EXPECT_FALSE(parser.get<std::string>("mode").has_value());
+    EXPECT_TRUE(contains_text(parser.errors(), "invalid value 'not-a-bool'"));
 }
 
 TEST(parser_configuration, provider_default_keeps_the_other_values)
