@@ -2962,6 +2962,20 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     if (status != hipSuccess) return status;
   }
 
+  // Track the most recent host node's completion marker so we can wait on it
+  // before a subsequent memcpy that needs a CPU-side staging copy.
+  amd::Command* pendingHostMarker = nullptr;
+
+  // Helper: release pendingHostMarker and return an error status.
+  // Prevents leaking the retained marker on any early-exit path.
+  auto returnWithCleanup = [&pendingHostMarker](hipError_t err) {
+    if (pendingHostMarker != nullptr) {
+      pendingHostMarker->release();
+      pendingHostMarker = nullptr;
+    }
+    return err;
+  };
+
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
     auto& node = segment.nodes[i];
@@ -2998,7 +3012,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
           stream->vdev()->addSystemScope();
         }
         status = dispatchCurrentBatch(sdma_follows);
-        if (status != hipSuccess) return status;
+        if (status != hipSuccess) return returnWithCleanup(status);
       }
     } else {
       // Node doesn't support capture - execute individually. Upstream flat batches
@@ -3008,12 +3022,44 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
         node->stream_id_ = stream->GetStreamId();
         node->hw_queue_id_ = stream->getQueueID();
       }
+
+      // If a host node's callback is still in flight and this node will do a
+      // CPU-side staging copy (memcpy from host to staging buffer), wait for
+      // the callback to complete first so the staging copy sees valid data.
+      if (pendingHostMarker != nullptr &&
+          node->GetType() == hipGraphNodeTypeMemcpy) {
+        auto* memcpyNode = dynamic_cast<GraphMemcpyNode*>(node);
+        if (memcpyNode != nullptr && memcpyNode->NeedsCpuStagingCopy()) {
+          pendingHostMarker->awaitCompletion();
+          pendingHostMarker->release();
+          pendingHostMarker = nullptr;
+        }
+      }
+
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
-      if (status != hipSuccess) return status;
+      if (status != hipSuccess) return returnWithCleanup(status);
       status = node->EnqueueCommands(stream);
-      if (status != hipSuccess) return status;
+      if (status != hipSuccess) return returnWithCleanup(status);
+
+      // After a host node, capture its completion marker for deferred waiting.
+      if (node->GetType() == hipGraphNodeTypeHost) {
+        auto* hostNode = static_cast<GraphHostNode*>(node);
+        if (pendingHostMarker != nullptr) {
+          pendingHostMarker->release();
+        }
+        pendingHostMarker = hostNode->GetHostCompletionMarker();
+        if (pendingHostMarker != nullptr) {
+          pendingHostMarker->retain();
+        }
+      }
     }
+  }
+
+  // Release any unconsumed host completion marker.
+  if (pendingHostMarker != nullptr) {
+    pendingHostMarker->release();
+    pendingHostMarker = nullptr;
   }
 
   // Dispatch any remaining batches (e.g. trailing completion barrier for segments
