@@ -1421,6 +1421,125 @@ HRR_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
 }
 
+// Byte offset and event_type of each record in events.bin, in file order, up to
+// the EOF trailer.
+struct RawEvent {
+  size_t   offset;
+  uint16_t type;
+};
+
+static std::vector<RawEvent> hrr_raw_events(const fs::path& events) {
+  uint16_t version = 0;
+  FILE* f = hrr::open_record_stream(events.string(), HRR_MAGIC, HRR_VERSION, &version);
+  REQUIRE(f != nullptr);
+  std::vector<RawEvent> out;
+  std::vector<uint8_t> raw;
+  long off = ftell(f);
+  while (hrr::read_raw_record(f, raw) == hrr::RecordStatus::Ok) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(raw.data());
+    if (hdr->event_type == HRR_EOF_MARKER) break;
+    out.push_back({static_cast<size_t>(off), hdr->event_type});
+    off = ftell(f);
+  }
+  fclose(f);
+  return out;
+}
+
+static void hrr_poke_u16(const fs::path& file, size_t offset, uint16_t value) {
+  std::fstream f(file, std::ios::in | std::ios::out | std::ios::binary);
+  f.seekp(static_cast<std::streamoff>(offset));
+  f.write(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ExtModuleLaunchKernel_Direct, which times a
+ *     hipExtModuleLaunchKernel with a start and a stop event and reads
+ *     hipEventElapsedTime. The runtime marks both events inside the launch, so
+ *     the archive must carry a hipEventRecord for the start event before the
+ *     launch record and one for the stop event after it, and the header must
+ *     say so (HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS).
+ *   - Replay reaches the end without the old-archive fallback warning.
+ *   - Negative control: replace the stop marker with an event replay ignores.
+ *     With the flag set the missing marker is a fault and the replay fails; with
+ *     the flag cleared, as in an archive from before the markers were stored,
+ *     replay warns once and finishes.
+ */
+HRR_TEST_CASE(Unit_HRR_ExtLaunchEventMarkers) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extlaunch_markers"};
+  hrr_capture_direct("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 1);
+  const fs::path events = archives.front() / "events.bin";
+  const std::string fallback = "no marker on a live pair";
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  REQUIRE((arc.flags & HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS) != 0);
+
+  // Start marker, launch, stop marker: in that order and nothing between.
+  size_t launch = arc.events.size();
+  for (size_t i = 0; i < arc.events.size(); ++i)
+    if (arc.events[i].header().event_type == HRR_API_HIPMODULELAUNCHKERNEL)
+      launch = i;
+  REQUIRE(launch > 0);
+  REQUIRE(launch + 1 < arc.events.size());
+  auto record_event = [&](size_t i) -> uint64_t {
+    const hrr::Event& e = arc.events[i];
+    REQUIRE(e.header().event_type == HRR_API_HIPEVENTRECORD);
+    REQUIRE(e.raw_payload.size() >= sizeof(hrr_args_hipEventRecord));
+    return reinterpret_cast<const hrr_args_hipEventRecord*>(e.raw_payload.data())->event;
+  };
+  const uint64_t start_handle = record_event(launch - 1);
+  const uint64_t stop_handle  = record_event(launch + 1);
+  CHECK(start_handle != 0);
+  CHECK(stop_handle != 0);
+  CHECK(start_handle != stop_handle);
+
+  SECTION("replay applies the recorded markers") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find("D2H checks") != std::string::npos);
+    CHECK(out.find(fallback) == std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+
+  const std::vector<RawEvent> raw = hrr_raw_events(events);
+  size_t at = raw.size();
+  for (size_t i = 0; i < raw.size(); ++i)
+    if (raw[i].type == HRR_API_HIPMODULELAUNCHKERNEL) at = i;
+  REQUIRE(at + 1 < raw.size());
+  REQUIRE(raw[at + 1].type == HRR_API_HIPEVENTRECORD);
+  // hipExtStreamCreateWithCUMask has a no-op replay handler that never reads its
+  // payload, so the swapped record is skipped and the stop event is never marked.
+  hrr_poke_u16(events, raw[at + 1].offset, HRR_API_HIPEXTSTREAMCREATEWITHCUMASK);
+
+  SECTION("a marker missing from a marked archive fails the replay") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find("D2H checks") == std::string::npos);
+    CHECK(out.find(fallback) == std::string::npos);
+  }
+
+  SECTION("an archive without the flag keeps the fallback") {
+    const uint16_t flags = static_cast<uint16_t>(
+        arc.flags & ~HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS);
+    hrr_poke_u16(events, offsetof(hrr_file_header, reserved), flags);
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find("D2H checks") != std::string::npos);
+    CHECK(out.find(fallback) != std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+}
+
 HRR_TEST_CASE(Unit_HRR_HostFreeRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostfree"};
   // Exercises hipHostFree + hipHostMalloc (pinned-host alloc-map lifecycle).

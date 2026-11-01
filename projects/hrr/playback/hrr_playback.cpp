@@ -1794,6 +1794,8 @@ int main(int argc, char** argv) {
 
   ctx.archive_dir = archive.path;
   ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
+  ctx.ext_launch_event_markers =
+      (archive.flags & HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS) != 0;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,

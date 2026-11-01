@@ -1338,6 +1338,22 @@ hipError_t capture_hipModuleLaunchCooperativeKernel(
   return r;
 }
 
+// hipExtModuleLaunchKernel records startEvent (marker before the kernel) and
+// stopEvent (bound to the kernel command) inside the runtime, not through
+// hipEventRecord. A later hipEventElapsedTime on that pair succeeds only
+// because of that side effect. The launch payload has no slot for the two
+// handles, so write the side effect as hipEventRecord events around the launch
+// record. Replay already knows how to play those, and hipEventElapsedTime then
+// sees markers instead of hipErrorInvalidHandle.
+static void record_ext_launch_event(hipEvent_t event, hipStream_t stream) {
+  if (!event) return;
+  hrr_args_hipEventRecord a{};
+  a.ret    = static_cast<int32_t>(hipSuccess);
+  a.event  = reinterpret_cast<uint64_t>(event);
+  a.stream = reinterpret_cast<uint64_t>(stream);
+  hrr_cap::writer::write_event_raw(HRR_API_HIPEVENTRECORD, &a.hdr, sizeof(a));
+}
+
 hipError_t capture_hipExtModuleLaunchKernel(
     hipFunction_t f,
     uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
@@ -1361,12 +1377,17 @@ hipError_t capture_hipExtModuleLaunchKernel(
     auto ceil_div = [](uint32_t a, uint32_t b) -> unsigned {
       return b ? static_cast<unsigned>((a + b - 1) / b) : static_cast<unsigned>(a);
     };
+    // Start marker first, then the launch, then the stop marker, matching the
+    // order hipEventElapsedTime observes. flags is a launch flag, not an event
+    // record flag; the runtime records these with hipEventRecordDefault.
+    record_ext_launch_event(startEvent, stream);
     record_launch(f,
                   ceil_div(globalWorkSizeX, localWorkSizeX),
                   ceil_div(globalWorkSizeY, localWorkSizeY),
                   ceil_div(globalWorkSizeZ, localWorkSizeZ),
                   localWorkSizeX,  localWorkSizeY,  localWorkSizeZ,
                   static_cast<unsigned>(sharedMemBytes), stream, kernelParams, extra);
+    record_ext_launch_event(stopEvent, stream);
   }
   return r;
 }
