@@ -37,6 +37,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
@@ -46,6 +47,9 @@
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/range_replay/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
+#include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/queue_hooks.hpp"
@@ -102,108 +106,6 @@ namespace hsa
 namespace
 {
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
-
-// A single blocking wait -- Queue::sync(), or the replay drain barrier -- gives up after one slice
-// and reports whether it drained. The replay drain helpers retry for at most max_slices slices and
-// report elapsed time in multiples of one slice, so every wait in that loop has to use the same
-// slice length; hardcoding it separately would make those elapsed figures fiction as soon as one
-// of them changed.
-constexpr int  seconds_per_slice = 5;
-constexpr int  max_slices        = 12;
-constexpr auto drain_slice       = std::chrono::seconds{seconds_per_slice};
-constexpr int  drain_budget_secs = seconds_per_slice * max_slices;
-
-// Per-agent replay serialization (reader/writer). A replay's snapshot->restore window must exclude
-// any concurrent GPU work on the agent that could mutate tracked device memory, but ordinary
-// dispatches do not conflict with one another. So this is a shared_mutex:
-//   * a replay window takes the UNIQUE (writer) lock for the whole drain->snap->passes->restore
-//     sequence, excluding all other replays and every non-replay dispatch on the agent;
-//   * a non-replay dispatch takes the SHARED (reader) lock across its submit, so many normal
-//     dispatches still run concurrently while a pending replay writer waits for in-flight submits
-//     to finish and blocks new ones from entering the window.
-// Different agents use different mutexes and run concurrently; combined with agent-scoped snapshots
-// this keeps multi-GPU replay isolated. The reader lock only bounds *submission*; the async GPU
-// tail is drained by the replay window before it snapshots.
-std::shared_mutex&
-agent_replay_mutex(rocprofiler_agent_id_t agent_id)
-{
-    // No get_fini_status() guard is needed here. Every caller reaches this only when
-    // has_active_replay_contexts() is true, and that returns false during finalization, so the
-    // static lock map below is never touched after teardown.
-    using lock_map_t    = std::unordered_map<rocprofiler_agent_id_t, std::shared_mutex>;
-    static auto*& locks = common::static_object<common::Synchronized<lock_map_t>>::construct();
-
-    return locks->wlock([](lock_map_t& _map, auto _id) -> std::shared_mutex& { return _map[_id]; },
-                        agent_id);
-}
-
-template <typename TryDrainFn>
-void
-replay_wait_or_fatal(TryDrainFn&& try_drain_once, std::string_view what)
-{
-    // One try_drain_once() call blocks for at most one slice, so the two together bound the wait
-    // at drain_budget_secs.
-    for(int i = 0; i < max_slices; ++i)
-    {
-        if(try_drain_once()) return;
-        ROCP_WARNING << fmt::format("kernel replay: still waiting for {} (~{}s elapsed)",
-                                    what,
-                                    (i + 1) * seconds_per_slice);
-    }
-    ROCP_FATAL << fmt::format(
-        "kernel replay: {} did not drain after ~{}s", what, drain_budget_secs);
-}
-
-// Drain a queue's in-flight async completion handler(s) during replay. Unlike Queue::sync()'s
-// teardown use (warn once and proceed), a replay pass must NOT proceed while a handler is still
-// running: PASS-EXIT, the tool's continue-decision, restore(), and the next submit would race the
-// handler that is still emitting records, releasing signals, and dropping correlation-id refs.
-// Each sync() call blocks up to one slice and reports whether the queue drained.
-void
-replay_drain_or_fatal(const Queue& queue)
-{
-    replay_wait_or_fatal([&]() { return queue.sync(); },
-                         "this queue's async completion handler(s)");
-}
-
-// Drain every queue on `agent` before snapshotting, WITHOUT holding the queue-map lock across the
-// wait. iterate_queues holds the queue-map read lock for the duration of its callback, so a
-// per-sibling blocking drain there would block stream creation/destruction for the whole drain
-// budget. Instead poll each queue's in-flight async count under a brief read lock and sleep
-// between polls, so the map lock is held only for the microsecond poll -- never across the wait.
-// Safe against concurrent queue destruction: a Queue is only dereferenced while the read lock is
-// held (destroy_queue erases under the write lock), and the live set is re-read every poll. The
-// per-agent writer lock held by the replay window blocks new dispatches on the agent, so in-flight
-// work only decreases and the poll converges; fatal on a genuinely stuck queue (beta feature),
-// matching replay_drain_or_fatal.
-void
-replay_drain_agent_or_fatal(hsa_agent_t agent)
-{
-    auto* queue_controller = get_queue_controller();
-    if(queue_controller == nullptr) return;
-
-    constexpr auto poll_interval = std::chrono::milliseconds{2};
-    constexpr auto max_wait      = std::chrono::seconds{drain_budget_secs};
-    const auto     deadline      = std::chrono::steady_clock::now() + max_wait;
-
-    for(;;)
-    {
-        int64_t in_flight = 0;
-        queue_controller->iterate_queues([&](const Queue* sibling) {
-            if(sibling != nullptr && sibling->get_agent().get_hsa_agent() == agent)
-                in_flight += sibling->active_async_packets();
-        });
-
-        if(in_flight == 0) return;
-
-        ROCP_FATAL_IF(std::chrono::steady_clock::now() >= deadline) << fmt::format(
-            "kernel replay: agent-wide drain stuck ({} async handler(s) still active after ~{}s)",
-            in_flight,
-            drain_budget_secs);
-
-        std::this_thread::sleep_for(poll_interval);
-    }
-}
 
 template <typename DomainT, typename... Args>
 inline bool
@@ -298,24 +200,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             }
         });
 
-        // PC sampling completion is no longer routed through the per-queue
-        // callback registry; invoke its hook explicitly.
-        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
-                                                     packet.kernel_packet,
-                                                     _session,
-                                                     packet,
-                                                     packet.instrumentation_packets,
-                                                     dispatch_time);
-
-        // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
-        // it explicitly here.
-        spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
-                                             packet.kernel_packet,
-                                             _session,
-                                             packet,
-                                             packet.instrumentation_packets,
-                                             dispatch_time);
-
         // Counter collection completion is migrated off the callback registry (see
         // WriteInterceptor); invoke it explicitly here.
         counters::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
@@ -333,6 +217,24 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                                       packet,
                                                       packet.instrumentation_packets,
                                                       dispatch_time);
+
+        // PC sampling completion is no longer routed through the per-queue
+        // callback registry; invoke its hook explicitly.
+        pc_sampling::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                                     packet.kernel_packet,
+                                                     _session,
+                                                     packet,
+                                                     packet.instrumentation_packets,
+                                                     dispatch_time);
+
+        // SPM completion is migrated off the callback registry (see WriteInterceptor); invoke
+        // it explicitly here.
+        spm::kernel_dispatch_phase_exit_hook(&queue_info_session.queue,
+                                             packet.kernel_packet,
+                                             _session,
+                                             packet,
+                                             packet.instrumentation_packets,
+                                             dispatch_time);
 
         CHECK_NOTNULL(hsa::get_queue_controller())
             ->serializer(&queue_info_session.queue)
@@ -466,6 +368,16 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
+    // A range replay pass writes its already-transformed packets to the same ring the application
+    // submits through, which lands back here on this thread. Forward them untouched: transforming
+    // them a second time would mint a second dispatch record and a second completion signal for
+    // each packet.
+    if(interceptor_passthrough())
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
     // SPM no longer registers a queue-controller callback, so it does not count toward
@@ -499,10 +411,15 @@ WriteInterceptor(const void* packets,
          !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
+    // Unlike a service with a per-agent predicate, neither replay service can leave queues on other
+    // agents on the fast path. A range binds to an agent only when its first dispatch arrives, and
+    // a replay window's agent-wide drain and reader lock only see work that took the instrumented
+    // path, so a dispatch forwarded untouched just before or during a window would escape both.
     const bool has_kernel_replay = kernel_replay::has_active_replay_contexts();
+    const bool has_range_replay  = range_replay::has_active_range_replay_contexts();
 
     if(pkt_count == 0 || (no_real_consumers && !graph_launch_active && !has_kernel_replay &&
-                          !hip::event::is_active()))
+                          !has_range_replay && !hip::event::is_active()))
     {
         writer(packets, pkt_count);
         return;
@@ -538,6 +455,10 @@ WriteInterceptor(const void* packets,
         return;
     }
 
+    // Must stay ahead of the graph-launch fast path below: see range_replay/queue_hooks.hpp.
+    if(has_range_replay)
+        range_replay::submission_hook(&queue, packets_arr, pkt_count, graph_launch_active, writer);
+
     if(has_kernel_replay)
     {
         if(graph_launch_active)
@@ -568,7 +489,8 @@ WriteInterceptor(const void* packets,
     // it out of the snapshot window and registers it with async_started() so the agent-wide drain
     // can see it. process_packet_batch increments gls->dispatch_count per dispatch packet, so the
     // graph summary is unaffected by which path runs.
-    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !hip::event::is_active())
+    if(graph_launch_active && no_real_consumers && !has_kernel_replay && !has_range_replay &&
+       !hip::event::is_active())
     {
         gls->dispatch_count += num_dispatch_packets;
         writer(packets, pkt_count);
@@ -894,21 +816,8 @@ WriteInterceptor(const void* packets,
                 }
             });
 
-            // SPM is migrated off the per-queue callback registry: call its hook explicitly
-            // (the other services still flow through signal_callback above).
-            spm::kernel_dispatch_phase_enter_hook(
-                &queue,
-                kernel_packet,
-                kernel_id,
-                dispatch_id,
-                &_packet_data.user_data,
-                _packet_data.tracing_data.external_correlation_ids,
-                corr_id,
-                _packet_data.instrumentation_packets,
-                _packet_data.is_serialized);
-
             // Counter collection is migrated off the per-queue callback registry: call its hook
-            // explicitly (the other services still flow through signal_callback above).
+            // explicitly.
             counters::kernel_dispatch_phase_enter_hook(
                 queue,
                 kernel_packet,
@@ -921,9 +830,21 @@ WriteInterceptor(const void* packets,
                 _packet_data.is_serialized);
 
             // Thread trace is migrated off the per-queue callback registry: call its hook
-            // explicitly (only counter collection still flows through signal_callback above).
+            // explicitly.
             thread_trace::kernel_dispatch_phase_enter_hook(
                 queue,
+                kernel_packet,
+                kernel_id,
+                dispatch_id,
+                &_packet_data.user_data,
+                _packet_data.tracing_data.external_correlation_ids,
+                corr_id,
+                _packet_data.instrumentation_packets,
+                _packet_data.is_serialized);
+
+            // SPM is migrated off the per-queue callback registry: call its hook explicitly.
+            spm::kernel_dispatch_phase_enter_hook(
+                &queue,
                 kernel_packet,
                 kernel_id,
                 dispatch_id,
@@ -1132,6 +1053,11 @@ WriteInterceptor(const void* packets,
             // (b) agent-scoped snapshots so a replay only saves/restores its own agent's device
             // memory (other GPUs untouched). Different agents hold different locks and run
             // concurrently.
+            // Wall time of each phase of this window, reported at INFO once the window closes, so
+            // lock and drain waits, the snapshot, the passes and the restores can be told apart.
+            using phase_clock       = std::chrono::steady_clock;
+            const auto window_start = phase_clock::now();
+
             const auto& core         = queue.core_api();
             hsa_agent_t replay_agent = queue.get_agent().get_hsa_agent();
             const auto  replay_guard = std::unique_lock<std::shared_mutex>{
@@ -1145,9 +1071,16 @@ WriteInterceptor(const void* packets,
             hsa_signal_t app_completion_signal = dispatch_pkt.kernel_dispatch.completion_signal;
 
             // Drain barrier: fence the CPU against all prior in-flight GPU work on this queue so
-            // device memory is stable before snapshotting.
+            // device memory is stable before snapshotting. The signal comes from the pool because
+            // creating an interrupt signal costs a KFD event allocation on every replayed dispatch.
             hsa_signal_t drain_signal = null_hsa_signal;
-            Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
+            auto* pooled_drain_signal = Queue::create_signal(0, &drain_signal, /*use_pool=*/true);
+            const auto release_drain_signal = [&]() {
+                if(pooled_drain_signal != nullptr)
+                    Queue::release_signal(pooled_drain_signal);
+                else if(drain_signal != null_hsa_signal)
+                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            };
             {
                 auto drain_pkts = packet_vector_t{};
                 CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
@@ -1175,12 +1108,14 @@ WriteInterceptor(const void* packets,
             // replay gate and serializing those is a separate follow-up (TODO: mkuriche,
             // amd-vkale).
             replay_drain_agent_or_fatal(replay_agent);
+            const auto drained_at = phase_clock::now();
 
             // Save this agent's tracked device allocations so every pass runs against identical
             // inputs. snap() returns ok=false if it could not capture the complete set (host memory
             // pressure, a failed copy, or module-scope variables it could not enumerate). It logs
             // which of those it hit.
-            const auto snapshot = kernel_replay::memory_snapshot::snap(replay_agent);
+            const auto snapshot   = kernel_replay::memory_snapshot::snap(replay_agent);
+            const auto snapped_at = phase_clock::now();
 
             // Snapshot incomplete: restoring a partial snapshot between passes would corrupt
             // application data, so decline replay. Close the CONFIG sequence, free our drain
@@ -1192,8 +1127,7 @@ WriteInterceptor(const void* packets,
                                            "this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
-                if(drain_signal != null_hsa_signal)
-                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
+                release_drain_signal();
                 process_packet_batch(packets_arr,
                                      1,
                                      forward_to_writer,
@@ -1213,12 +1147,18 @@ WriteInterceptor(const void* packets,
             auto local_ctx_tls_guard =
                 kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
+            auto     passes_time   = phase_clock::duration{};
+            auto     restores_time = phase_clock::duration{};
+            uint64_t passes_run    = 0;
+            uint64_t restores_run  = 0;
+
             // Per-pass loop: PASS enter -> submit -> drain the async handler -> PASS exit -> ask
             // the tool whether to continue -> restore device memory before the next pass.
             for(uint64_t pass = 0;; ++pass)
             {
                 const bool is_final =
                     !replay_plan.indefinite && (pass == replay_plan.total_passes - 1);
+                const auto pass_start = phase_clock::now();
 
                 auto pass_state = kernel_replay::pass_context_state_t{};
                 kernel_replay::execute_pass_phase_enter(
@@ -1240,6 +1180,8 @@ WriteInterceptor(const void* packets,
                 replay_drain_or_fatal(queue);
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
+                passes_time += phase_clock::now() - pass_start;
+                ++passes_run;
 
                 // Stop once the tool (or the fixed pass count) says we're done; the last executed
                 // pass leaves device memory as the app expects, so no restore follows the break.
@@ -1250,9 +1192,12 @@ WriteInterceptor(const void* packets,
                 // A failed host->device copy leaves the snapshot only partially applied; continuing
                 // would submit the next pass over corrupted memory and (because the final pass
                 // skips restore) would also leave that corruption visible to the application.
+                const auto restore_start = phase_clock::now();
                 ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(snapshot)) << fmt::format(
                     "kernel replay: restore failed between passes (partial host->device copy); "
                     "aborting rather than continuing with corrupted device memory");
+                restores_time += phase_clock::now() - restore_start;
+                ++restores_run;
             }
 
             kernel_replay::execute_config_phase_exit(
@@ -1272,21 +1217,42 @@ WriteInterceptor(const void* packets,
             }
 
             // Clean up our private signals (never the app's completion signal).
-            if(drain_signal != null_hsa_signal)
-                get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            release_drain_signal();
+
+            ROCP_INFO << [&]() {
+                using ms_t          = std::chrono::duration<double, std::milli>;
+                auto snapshot_bytes = size_t{0};
+                for(const auto& blk : snapshot.blocks)
+                    snapshot_bytes += blk.host_copy.size();
+                return fmt::format(
+                    "kernel replay: dispatch {} phases: lock+drain {:.3f} ms, snapshot {:.3f} ms "
+                    "({} bytes in {} regions), {} passes {:.3f} ms, {} restores {:.3f} ms, window "
+                    "{:.3f} ms",
+                    replay_dispatch_id,
+                    ms_t{drained_at - window_start}.count(),
+                    ms_t{snapped_at - drained_at}.count(),
+                    snapshot_bytes,
+                    snapshot.blocks.size(),
+                    passes_run,
+                    ms_t{passes_time}.count(),
+                    restores_run,
+                    ms_t{restores_time}.count(),
+                    ms_t{phase_clock::now() - window_start}.count());
+            }();
             return;
         }
     }
 
-    // Kernel-replay reader side: while a replay service is active, a non-replay dispatch on this
-    // agent must not submit into a replay's snapshot->restore window -- restore() would revert this
+    // Replay reader side: while a replay service is active, a non-replay dispatch on this agent
+    // must not submit into a replay's snapshot->restore window -- restore() would revert this
     // dispatch's device writes. Hold the per-agent SHARED lock across the submit below so a replay
     // writer waits for in-flight submits to finish and cannot open its window until we return,
-    // while ordinary dispatches still run concurrently with each other. Gated on has_kernel_replay
-    // so non-replay runs take no lock at all. (The async GPU tail is handled by the replay window's
-    // agent-wide drain, not by this lock.)
+    // while ordinary dispatches still run concurrently with each other. Gated on the replay
+    // services so non-replay runs take no lock at all, and skipped on a thread that is replaying a
+    // range: it already holds this same mutex as a writer. (The async GPU tail is handled by the
+    // replay window's agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
-    if(has_kernel_replay)
+    if((has_kernel_replay || has_range_replay) && !range_replay::this_thread_replaying())
         replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
 
     bool should_batch_packets = true;

@@ -308,12 +308,13 @@ void
 interposition_fini();
 
 /**
- * @brief Wait, bounded, for in-flight completions to retire
+ * @brief Wait, with no time limit, for in-flight completions to retire
  *
  * Leaves the monitor running, so it is safe on paths where the SDK keeps operating
  * (context stop, code-object unload). Waits on the in-flight counter rather than the monitor
  * state, since batches already handed to the record emitter outlive the monitor thread. The
- * wait is bounded in every case and warns on expiry rather than hanging.
+ * wait warns periodically instead of giving up, so a call from a tool callback running on the
+ * record emitter never returns. Returns at once during or after finalization and in a fork child.
  */
 void
 interposition_sync();

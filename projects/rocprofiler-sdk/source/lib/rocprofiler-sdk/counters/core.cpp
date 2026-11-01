@@ -216,10 +216,10 @@ stop_context(const context::context* ctx)
         // accepted provenance-based completion routing on the condition that the callback thread
         // and the counter_callback_info objects stay alive until in-flight dispatches drain.
         //
-        // The drain is BOUNDED -- Queue::sync() gives up after one slice -- so it can return
-        // without having drained, and teardown below must stay correct for a completion that
-        // arrives afterwards rather than assuming none can. It does: the context and its
-        // counter_callback_info objects stay registered, the exit hook routes by packet
+        // The per-queue part of the drain is BOUNDED -- Queue::sync() gives up after one slice --
+        // so it can return without having drained, and teardown below must stay correct for a
+        // completion that arrives afterwards rather than assuming none can. It does: the context
+        // and its counter_callback_info objects stay registered, the exit hook routes by packet
         // provenance rather than by activeness, and disable_serialization() leaves a transition
         // barrier for work that is still serialized. So a straggler is delivered late, not
         // dropped or mishandled.
