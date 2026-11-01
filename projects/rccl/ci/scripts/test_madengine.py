@@ -85,7 +85,7 @@ MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, has MAD#279 and #280
+MAD_REF = "36339bd825f9c3772e35a54adfeba9635d6765da"  # mad-rccl, has MAD#279, #280 and #284
 MAD_BRANCH = "mad-rccl"
 
 # Primus is not vendored in MAD; tools/fetch_primus.sh checks it out into
@@ -121,6 +121,33 @@ WORKLOAD_CONFIGS = {
             "32N": 1485,
             "44N": 1432,
         },
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
+        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
+        "docker_run_options": "--privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK "
+            "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
+    },
+    # The same model and image with the parallel layout swapped from FSDP2 to
+    # TP1 x PP4 x DP4, so pipeline point-to-point traffic is what RCCL carries.
+    # Its own key because its numbers are a different baseline. Megatron
+    # rejects FSDP2 together with PP > 1, hence the three overrides together
+    # (ROCm/MAD#284).
+    "llama-3.1-70b-pp4-training": {
+        "type": "training",
+        "model_repo": "primus_pyt_megatron_lm_train_llama-3.1-70b",
+        "base_image": "rocm/primus:v26.4",
+        "gpu_target": "gfx950",
+        "metric_key": "tokens_per_second_per_gpu",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+        "precisions": ["BF16", "FP8"],
+        "env_vars": {
+            "PRIMUS_EXTRA_ARGS": "--pipeline_model_parallel_size 4 "
+                "--use_torch_fsdp2 false --use_distributed_optimizer true",
+        },
+        # PP4 on 16 GPUs is DP4; another scale is another layout.
+        "required_nodes": 2,
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
         "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
@@ -268,6 +295,28 @@ CLUSTER_CONFIGS = {
         "results_base": "/apps/rccl-ci/madengine/perf",
     },
 }
+
+
+def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
+    """Fail if the MAD pin's Megatron script never reads a PRIMUS_* knob we set.
+
+    An unknown knob is simply ignored there, and the run measures the shipped
+    config under this workload's name -- the PP=4 key would score FSDP.
+    """
+    if workload_config.get("family", "megatron") != "megatron":
+        return
+    knobs = [k for k in workload_config.get("env_vars", {}) if k.startswith("PRIMUS_")]
+    if not knobs:
+        return
+    script = (work_dir / "scripts" / "primus_megatron-lm"
+              / "primus_megatron-lm_benchmark_report.sh")
+    text = script.read_text(errors="replace") if script.is_file() else ""
+    missing = [k for k in knobs if k not in text]
+    if missing:
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} does not read {', '.join(missing)} "
+            f"({script}) -- the run would ignore it"
+        )
 
 
 def fetch_primus(mad_dir: Path) -> Path:
@@ -2481,6 +2530,7 @@ def main() -> None:
     # Step 2: Install madengine
     family = workload_config.get("family", "megatron")
     install_madengine(work_dir, family=family)
+    check_mad_knobs(work_dir, workload_config)
 
     primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
