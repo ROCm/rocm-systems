@@ -15,12 +15,11 @@ Torch and Triton tracing are experimental. Every command needs
 
 ## 1. Check the requirements
 
-Torch tracing needs PyTorch installed against a matching ROCm. PyTorch 2.13
-and 2.14 use the prebuilt native collector, which records operators on every
-thread, including autograd workers. Other versions, or a missing or unusable
-collector, warn and use `TorchDispatchMode` with reduced coverage on the Python
-thread where it is active. Confirm the version and check the loader message
-before interpreting missing backward operators as an absence of GPU work.
+PyTorch version coverage, the native collector versus reduced
+`TorchDispatchMode` coverage, and the abort when two ROCm installs load in
+one process are in the Torch trace section of
+[profile mode](../../docs/how-to/profile/mode.rst). Check the loader message
+before treating a missing backward operator as missing GPU work.
 
 The workload must be a Python command or Python script; the tracer cannot
 annotate a compiled binary. The collector is a generic prebuilt

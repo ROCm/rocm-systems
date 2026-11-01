@@ -4,9 +4,10 @@
 
 """Run the skill evaluation datasets through Claude Code.
 
-There is no CI for skills, so this is the manual gate: run it before a release
-to check that each skill still routes on the prompts it should and stays quiet
-on the ones it should not.
+Structural checks run in the AMD skills repo, not here. This script is the
+manual gate for routing and behavior: run it before a release to check that
+each skill still routes on the prompts it should and stays quiet on the ones
+it should not.
 
 Usage:
     ./skills/run_evals.py                      # routing only, no tools
@@ -31,7 +32,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 SKILLS_ROOT = Path(__file__).resolve().parent
-SAMPLES_ROOT = SKILLS_ROOT.parent / "sample"
 EXIT_SKIPPED = 77
 
 # Only these keys are understood. A typo is an error rather than an expectation
@@ -45,10 +45,10 @@ KNOWN_KEYS = {
     "unexpected_behavior",
     "logs_contain",
     "files_exist",
-    "sample",
+    "workspace",
 }
 JUDGED_KEYS = ("expected_behavior", "unexpected_behavior")
-BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist", "sample")
+BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
 
 # Keep the agent off the user's own CLAUDE.md, skills, and settings.
 ISOLATED_SETTINGS = ["--setting-sources", "project,local"]
@@ -99,8 +99,8 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         if case["id"] in seen:
             sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
         seen.add(case["id"])
-        if "sample" in case and not (SAMPLES_ROOT / case["sample"]).exists():
-            sys.exit(f"{skill.name}: {case['id']} names a missing sample")
+        if "workspace" in case and not workspace_dir(skill, case["workspace"]).is_dir():
+            sys.exit(f"{skill.name}: {case['id']} names a missing workspace")
 
         if case["skill_should_trigger"]:
             positive += 1
@@ -121,8 +121,24 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
     return cases
 
 
-def build_workspace(root: Path) -> Path:
-    """Install every skill and copy the samples into a scratch workspace."""
+def workspace_dir(skill: Path, workspace: str) -> Path:
+    """Join ``workspace`` onto the skill directory the way skillscope does.
+
+    skillscope checks ``(skill_path / workspace).is_dir()`` and then
+    ``copytree``s that directory. Parent-directory references stay in the
+    relative path and are followed by both calls, so a case can name
+    ``../../sample/<application>`` without copying those sources into the skill.
+    """
+    return skill / workspace
+
+
+def build_workspace(root: Path, skill: Path, case: dict[str, Any]) -> Path:
+    """Install every skill and seed a scratch workspace with the case's files.
+
+    Like skillscope, the contents of the case's workspace directory, relative
+    to the skill, land at the workspace root. Parent-directory references in
+    ``workspace`` are kept and followed.
+    """
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
     subprocess.run(
@@ -131,15 +147,18 @@ def build_workspace(root: Path) -> Path:
         stdout=subprocess.DEVNULL,
         check=True,
     )
-    shutil.copytree(SAMPLES_ROOT, workspace / "sample")
+    if "workspace" in case:
+        shutil.copytree(
+            workspace_dir(skill, case["workspace"]),
+            workspace,
+            dirs_exist_ok=True,
+        )
     return workspace
 
 
 def case_prompt(case: dict[str, Any]) -> str:
-    """Return the prompt, pointing at the case's sample when it has one."""
-    if "sample" not in case:
-        return case["prompt"]
-    return f"{case['prompt']}\n\nThe application is ./sample/{case['sample']}."
+    """Return the prompt. A case that needs an application already names it."""
+    return case["prompt"]
 
 
 def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list[str]]:
@@ -310,7 +329,7 @@ def run_case(
     name: str, case: dict[str, Any], tmp: Path, behavioral: bool
 ) -> tuple[str, str, list[str]]:
     """Run and grade one case. Returns (skill, case id, failure messages)."""
-    workspace = build_workspace(tmp / f"{name}-{case['id']}")
+    workspace = build_workspace(tmp / f"{name}-{case['id']}", SKILLS_ROOT / name, case)
     try:
         transcript, loaded = run_agent(case_prompt(case), workspace, behavioral)
         failures = grade(case, name, transcript, loaded, workspace, behavioral)

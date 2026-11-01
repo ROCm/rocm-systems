@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-memory
-description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Windows, host memory profiling, or system-wide tracing.
+description: Analyzes the AMD GPU memory hierarchy with rocprof-compute, covering the Memory Chart, vL1D and L2 caches, LDS bank conflicts, Infinity Fabric traffic, and the experimental gfx950 memory bandwidth analysis. Use when the user asks about memory bandwidth, cache hit rates, coalescing, LDS conflicts, data locality, HBM traffic, or says a kernel is memory-bound. Not for CUDA tools, Nsight, Windows, host-memory leaks, GPU out-of-memory allocation failures, or system-wide tracing.
 ---
 
 # Analyze the AMD GPU memory hierarchy
@@ -84,7 +84,9 @@ What usually follows from what:
 ## 4. Memory bandwidth analysis (experimental, gfx950)
 
 A guided breakdown that walks the bandwidth tree and names the limiting level.
-It is experimental and currently shipped for gfx950 only. It needs only the
+Which GPUs it supports, and the experimental flag, are in
+[memory bandwidth analysis](../../docs/how-to/membw_analysis.rst). It is
+experimental and currently shipped for gfx950 only. It needs only the
 memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
@@ -95,9 +97,15 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>
 ```
 
 Its cutoffs and guidance text are data, not something to restate from memory.
-They live in `src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml` and
-`src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml`. Read those files
-when you need to explain a verdict, and report the guidance the tool produced
+In a source checkout, read:
+
+- [gfx950_membw_tree_spec.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_tree_spec.yaml)
+- [gfx950_membw_guidance.yaml](../../src/membw_analysis/tree_spec/gfx950_membw_guidance.yaml)
+
+A ROCm install copies the skills to `<rocm-path>/share/rocprofiler-compute/skills/`
+and does not copy these YAML files next to them. When this skill was installed
+rather than opened from the source tree, read those same two paths in the
+matching rocprofiler-compute checkout. Report the guidance the tool produced
 rather than substituting your own numbers.
 
 On any other architecture, use the Memory Chart path above.

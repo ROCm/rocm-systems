@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-speed-of-light
-description: Reads the rocprof-compute System Speed-of-Light panel to show how close an AMD GPU kernel runs to hardware peak for compute throughput, memory bandwidth, and utilization. Use when the user asks how close to peak a kernel is, what percent of peak it reaches, whether a measured percentage is good enough or normal, whether a utilization number should be higher, or asks for an overall efficiency summary. Not for CUDA tools, Windows, per-instruction analysis, or looking up a datasheet specification when there is no profile to read.
+description: Reads the rocprof-compute System Speed-of-Light panel to show how close an AMD GPU kernel runs to hardware peak for compute throughput, memory bandwidth, and utilization. Use when the user asks how close to peak a kernel is, what percent of peak it reaches, whether a measured percentage is good enough or normal, whether a utilization number should be higher, or asks for an overall efficiency summary. Not for CUDA tools, Windows, per-instruction analysis, or a datasheet or theoretical-peak question when there is no profile to read.
 ---
 
 # Read System Speed-of-Light
@@ -8,6 +8,8 @@ description: Reads the rocprof-compute System Speed-of-Light panel to show how c
 Speed-of-Light is the first panel to read after profiling. It puts every
 headline metric next to the hardware peak for the current GPU, so one table
 says whether a kernel is near any limit at all.
+
+This skill reads an existing workload directory. It does not collect one.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
