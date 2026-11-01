@@ -718,7 +718,11 @@ const FactoryMap &factories(BuildMode build_mode) {
       auto cc = parse_compute_unit_config(cfg, arch, target, resources, emit_error);
       if (cc.failed())
         return util::Result::failure();
-      return amdgpu::ComputeUnitCore::create(n, cc.value(), mem, nullptr, mode);
+      auto compute_unit =
+          amdgpu::ComputeUnitCore::create(n, cc.value(), mem, nullptr, mode, emit_error);
+      if (!compute_unit)
+        return util::Result::failure();
+      return std::unique_ptr<simdojo::Component>(std::move(compute_unit));
     };
     return f;
   }();
@@ -734,7 +738,8 @@ const FactoryMap &factories(BuildMode build_mode) {
       if (maybe_cu_config.failed())
         return util::Result::failure();
       const auto &cu_config = maybe_cu_config.value();
-      amdgpu::ComputeUnitCore::validate(cu_config);
+      if (amdgpu::ComputeUnitCore::validate(cu_config, emit_error).failed())
+        return util::Result::failure();
       // Preserve the parsed CU config and declarative children without execution state.
       return std::unique_ptr<simdojo::Component>(
           std::make_unique<ValidatedComputeUnit>(name, cu_config));
