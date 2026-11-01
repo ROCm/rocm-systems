@@ -132,7 +132,7 @@ TEST(parser_env, reads_set_variables_and_skips_unset_ones)
 TEST(parser_env, reports_an_invalid_variable)
 {
     const auto lookup = [](std::string_view) -> std::optional<std::string> {
-        return std::string{ "9" };
+        return std::string{ "nope" };
     };
     const auto parsed = env_parser{ lookup }.parse(make_schema());
     EXPECT_TRUE(parsed.values.empty());
@@ -217,6 +217,95 @@ TEST(parser_cli, last_repeated_option_wins)
 {
     const auto parsed = parse_cli({ "--freq", "1", "--freq=2" });
     EXPECT_EQ(parsed.values.at("freq"), "2");
+}
+
+schema
+make_event_schema()
+{
+    schema value{};
+    add_trace(value);
+    auto events    = make_param("events", param_type::enumeration_list);
+    events.env     = env_spec{ .name = "ROCPROFSYS_EVENTS" };
+    events.arg     = arg_spec{ .name = "--events", .min_count = 1, .max_count = 3 };
+    events.choices = { choice{ .value = "ins" },
+                       choice{ .value = "cyc", .aliases = { "cycles" } } };
+    auto format    = make_param("format", param_type::enumeration);
+    format.env     = env_spec{ .name = "ROCPROFSYS_FORMAT" };
+    format.arg     = arg_spec{ .name = "--format" };
+    format.choices = { choice{ .value = "pftrace", .aliases = { "proto" } } };
+    auto output    = make_param("output", param_type::path);
+    output.arg     = arg_spec{ .name      = "--output",
+                               .min_count = 1,
+                               .max_count = 2,
+                               .binds     = { "output", "prefix" } };
+    auto prefix    = make_param("prefix", param_type::string);
+    add_param(value, std::move(events));
+    add_param(value, std::move(format));
+    add_param(value, std::move(output));
+    add_param(value, std::move(prefix));
+    return value;
+}
+
+TEST(parser_cli, joins_tokens_until_the_next_option)
+{
+    const auto parsed =
+        cli_parser{ { "--events", "ins", "cycles", "--trace" }, unknown_option::report }
+            .parse(make_event_schema());
+
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("events"), "ins,cyc");
+    EXPECT_EQ(parsed.values.at("trace"), "true");
+}
+
+TEST(parser_cli, binds_each_token_to_its_parameter)
+{
+    const auto parsed =
+        cli_parser{ { "--output", "/tmp/out", "run1" }, unknown_option::report }.parse(
+            make_event_schema());
+
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("output"), "/tmp/out");
+    EXPECT_EQ(parsed.values.at("prefix"), "run1");
+}
+
+TEST(parser_cli, does_not_take_the_next_option_as_a_value)
+{
+    const auto parsed = parse_cli({ "--output", "--trace" });
+
+    ASSERT_EQ(parsed.errors.size(), 1U);
+    EXPECT_NE(parsed.errors.front().find("requires a value"), std::string::npos);
+    EXPECT_EQ(parsed.values.find("output"), parsed.values.end());
+    EXPECT_EQ(parsed.values.at("trace"), "true");
+}
+
+TEST(parser_cli, stores_a_choice_alias_as_the_choice_value)
+{
+    const auto parsed =
+        cli_parser{ { "--format", "proto" }, unknown_option::report }.parse(
+            make_event_schema());
+
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+}
+
+TEST(parser_env, stores_a_choice_alias_as_the_choice_value)
+{
+    const auto lookup = [](std::string_view name) -> std::optional<std::string> {
+        if(name == "ROCPROFSYS_FORMAT")
+        {
+            return std::string{ "proto" };
+        }
+        if(name == "ROCPROFSYS_EVENTS")
+        {
+            return std::string{ "cycles,ins" };
+        }
+        return std::nullopt;
+    };
+
+    const auto parsed = env_parser{ lookup }.parse(make_event_schema());
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+    EXPECT_EQ(parsed.values.at("events"), "cyc,ins");
 }
 
 TEST(parser_cli, arguments_from_skips_the_program_name)

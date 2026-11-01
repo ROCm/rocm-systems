@@ -172,6 +172,11 @@ list_separator(const schema_param& param) noexcept;
 [[nodiscard]] std::optional<std::vector<std::string>>
 split_list(std::string_view value, std::string_view separator);
 
+/// Choice alias rewritten as the choice value. A list is rewritten element by
+/// element. Text that is not an alias is unchanged.
+[[nodiscard]] std::string
+canonical_choice(const schema_param& param, std::string_view value);
+
 struct constraint
 {
     constraint_kind          kind  = constraint_kind::mutually_exclusive;
