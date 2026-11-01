@@ -1660,6 +1660,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::SPM::spm_device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        rocprofiler::hsa::dispatch_time_init(hsa_api_table, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
         rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::kernel_replay::memory_tracker_init(hsa_api_table->core_, lib_instance);
