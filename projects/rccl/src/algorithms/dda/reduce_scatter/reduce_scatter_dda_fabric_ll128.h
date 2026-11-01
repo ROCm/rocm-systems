@@ -101,10 +101,12 @@ __launch_bounds__(512)
     const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
-      uint64_t regs[kDdaLLPeerBatch][kDdaLL128WordsPerThread] = {};
+    // Runtime-rank instance stages 4 peers per batch: 8 would spill.
+    constexpr int kSendBatch = NRANKS_CT ? kDdaLLPeerBatch : 4;
+    for (int base = 1; base < nRanks; base += kSendBatch) {
+      uint64_t regs[kSendBatch][kDdaLL128WordsPerThread] = {};
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -113,7 +115,7 @@ __launch_bounds__(512)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+      for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
