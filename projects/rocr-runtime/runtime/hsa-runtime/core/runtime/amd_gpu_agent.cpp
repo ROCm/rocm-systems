@@ -230,7 +230,11 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                              node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
-  assert(isa != nullptr && "ISA registry inconsistency.");
+  if (isa == nullptr) {
+    assert(false && "ISA registry inconsistency.");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA,
+                              "ISA registry inconsistency: could not find ISA for GPU.");
+  }
 
   // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
   // strict variant by name so the reported ISA and code-object
@@ -499,7 +503,11 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
                                 core::MemoryRegion::AllocateExecutable |
                                     core::MemoryRegion::AllocateExecutableBlitKernelObject |
                                     core::MemoryRegion::AllocateNonPaged);
-  assert(code_buf != NULL && "Code buffer allocation failed");
+  if (code_buf == nullptr) {
+    assert(false && "Code buffer allocation failed");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                              "Failed to allocate code buffer for shader.");
+  }
 
   memset(code_buf, 0, code_buf_size);
 
