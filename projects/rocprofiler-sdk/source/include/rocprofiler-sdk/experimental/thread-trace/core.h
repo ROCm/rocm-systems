@@ -59,8 +59,7 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
                                                      ///< producer/consumer pipeline. 0 (default)
                                                      ///< and 1 = single buffer mode (synchronous,
                                                      ///< no async copy). 2 is not allowed. Values
-                                                     ///< >= 3 enable the async copy pipeline and
-                                                     ///< require a single shader engine.
+                                                     ///< >= 3 enable the async copy pipeline.
     ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
 
