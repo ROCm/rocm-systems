@@ -22,11 +22,51 @@ namespace
 constexpr std::string_view k_option_end{ "--" };
 constexpr std::size_t      k_min_option_length = 2;
 constexpr std::size_t      k_min_bundle_length = 3;
+constexpr std::size_t      k_single_value      = 1;
+
+struct token_limit
+{
+    std::size_t minimum = 0;
+    std::size_t maximum = 0;
+};
 
 std::string_view
 option_name(const schema_param& param)
 {
     return param.arg ? std::string_view{ param.arg->name } : std::string_view{ param.id };
+}
+
+token_limit
+limits_for(const schema_param& param)
+{
+    const bool is_flag  = param.arg && param.arg->form == arg_form::flag;
+    const auto fallback = is_flag ? std::size_t{ 0 } : k_single_value;
+    const auto minimum  = param.arg ? param.arg->min_count.value_or(fallback) : fallback;
+    const auto maximum  = param.arg ? param.arg->max_count.value_or(minimum) : minimum;
+    return { .minimum = minimum, .maximum = maximum };
+}
+
+[[nodiscard]] bool
+blocks_value(std::string_view token)
+{
+    return token.size() >= k_min_option_length && token.front() == '-';
+}
+
+std::string
+join_tokens(const std::vector<std::string>& tokens, std::size_t start, std::size_t count,
+            std::string_view separator)
+{
+    std::string joined;
+    const auto  end = start + count;
+    for(std::size_t index = start; index < end; ++index)
+    {
+        if(index != start)
+        {
+            joined.append(separator);
+        }
+        joined.append(tokens[index]);
+    }
+    return joined;
 }
 
 std::vector<std::string>
@@ -94,7 +134,7 @@ private:
 
     [[nodiscard]] bool consume_option(std::string_view token)
     {
-        if(token.size() < k_min_option_length || token.front() != '-')
+        if(!blocks_value(token))
         {
             return false;
         }
@@ -107,29 +147,92 @@ private:
         }
         if(equals_at != std::string_view::npos)
         {
-            store_value(*param, token.substr(equals_at + 1));
+            store_target(*param, param->id, token.substr(equals_at + 1));
             return true;
         }
-        if(param->arg && param->arg->form == arg_form::flag)
-        {
-            store_value(*param, "true");
-            return true;
-        }
-        return consume_separate_value(*param);
+        return consume_counted(*param);
     }
 
-    [[nodiscard]] bool consume_separate_value(const schema_param& param)
+    [[nodiscard]] bool consume_counted(const schema_param& param)
     {
-        const auto next = m_index + 1;
-        if(next >= m_args.size() || m_args[next] == k_option_end)
+        const auto limit  = limits_for(param);
+        const auto tokens = take_tokens(limit.maximum);
+        if(tokens.size() < limit.minimum)
         {
-            m_result.errors.push_back(
-                fmt::format("option '{}' requires a value", option_name(param)));
+            report_missing(param);
             return true;
         }
-        store_value(param, m_args[next]);
-        m_index = next;
+        if(tokens.empty())
+        {
+            store_target(param, param.id, "true");
+            return true;
+        }
+        const auto binds = param.arg.value_or(arg_spec{}).binds;
+        if(!binds.empty())
+        {
+            store_binds(param, binds, tokens);
+            return true;
+        }
+        store_target(param, param.id,
+                     join_tokens(tokens, 0, tokens.size(), list_separator(param)));
         return true;
+    }
+
+    [[nodiscard]] std::vector<std::string> take_tokens(std::size_t maximum)
+    {
+        std::vector<std::string> tokens;
+        while(tokens.size() < maximum)
+        {
+            const auto next = m_index + 1;
+            if(next >= m_args.size() || blocks_value(m_args[next]))
+            {
+                break;
+            }
+            tokens.push_back(m_args[next]);
+            m_index = next;
+        }
+        return tokens;
+    }
+
+    void report_missing(const schema_param& param)
+    {
+        m_result.errors.push_back(
+            fmt::format("option '{}' requires a value", option_name(param)));
+    }
+
+    void store_binds(const schema_param& option, const std::vector<std::string>& binds,
+                     const std::vector<std::string>& tokens)
+    {
+        std::size_t start = 0;
+        for(std::size_t slot = 0; slot < binds.size() && start < tokens.size(); ++slot)
+        {
+            const bool last  = slot + 1 == binds.size();
+            const auto count = last ? tokens.size() - start : k_single_value;
+            const auto value = join_tokens(tokens, start, count, list_separator(option));
+            store_target(option, binds[slot], value);
+            start += count;
+        }
+    }
+
+    void store_target(const schema_param& option, std::string_view target_id,
+                      std::string_view value)
+    {
+        const auto* target = m_schema.find_param(target_id);
+        if(target == nullptr)
+        {
+            m_result.errors.push_back(
+                fmt::format("unknown parameter '{}' for option '{}'", target_id,
+                            option_name(option)));
+            return;
+        }
+        const auto stored = canonical_choice(*target, value);
+        if(!is_valid_value(*target, stored))
+        {
+            m_result.errors.push_back(fmt::format("invalid value '{}' for option '{}'",
+                                                  value, option_name(option)));
+            return;
+        }
+        m_result.values.insert_or_assign(target->id, stored);
     }
 
     [[nodiscard]] bool store_bundle(std::string_view token)
@@ -152,20 +255,9 @@ private:
         }
         for(const auto* param : flags)
         {
-            store_value(*param, "true");
+            store_target(*param, param->id, "true");
         }
         return true;
-    }
-
-    void store_value(const schema_param& param, std::string_view value)
-    {
-        if(!is_valid_value(param, value))
-        {
-            m_result.errors.push_back(fmt::format("invalid value '{}' for option '{}'",
-                                                  value, option_name(param)));
-            return;
-        }
-        m_result.values.insert_or_assign(param.id, std::string{ value });
     }
 
     const schema&                   m_schema;
