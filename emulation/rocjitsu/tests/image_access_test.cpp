@@ -1845,6 +1845,29 @@ TEST_P(AllImageAccessTest, StubMimgInstructionsScaleDescriptorSelectors) {
   }
 }
 
+TEST_P(AllImageAccessTest, LinearOneDimensionalArraysUseIndependentLayerStride) {
+  Image image;
+  image.width = 30;
+  image.depth = 3;
+  image.type = amdgpu::kImage1dArray;
+  dimension_override = image.type - amdgpu::kImage1d;
+  bind_image(image);
+  wf->set_exec(1);
+  // Physical 1DA R32 captures put each layer on a 256-byte boundary.
+  for (uint32_t layer : {1u, 2u}) {
+    const uint32_t offset = layer * 256 + 5 * 4;
+    write_coordinates(0, {5, layer, 0});
+    cu->write_vgpr(vb + 8, 0, 0x12340000u + offset);
+    ASSERT_TRUE(decoded_issue(false, 2));
+    EXPECT_EQ(memory.read32(kBase + offset), 0x12340000u + offset);
+    memory.write32(kBase + offset, 0xabcd0000u + offset);
+    cu->l1_vector().invalidate_all();
+    l2.invalidate_all();
+    ASSERT_TRUE(decoded_issue(true, 2));
+    EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0xabcd0000u + offset);
+  }
+}
+
 TEST_P(AllImageAccessTest, MisalignedLinearPitchNeedsQualifiedRounding) {
   const amdgpu::ImageAddressConfig config = amdgpu::default_image_address_config(arch());
   const amdgpu::ImageLayout layout{.width = 30, .height = 5, .pitch = 35, .element_bytes = 4};
