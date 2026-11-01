@@ -90,6 +90,10 @@ class QueueWriteIndexConcurrentTest : public TestBase {
   // concurrently.
   void QueueLoadStoreWriteIndexAtomic(void);
 
+  // @Brief: Verifies that silent signal stores don't wake waiting threads,
+  // while regular stores do wake them.
+  void TestSilentStoreSemantics(void);
+
  private:
   void QueueAddWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
   void QueueCasWriteIndexAtomic(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
