@@ -265,6 +265,8 @@ cases:
   Unit_HRR_PitchedH2DRoundtrip: {}
   Unit_HRR_PitchedH2DShortBlob: {}
   Unit_HRR_PitchedH2D_Direct: {}
+  Unit_HRR_ProfilerSwap_Direct: {}
+  Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable: {}
   Unit_HRR_RecordAfterCaptureShutdown: {}
   Unit_HRR_RecordAfterCaptureShutdown_Direct: {}
   Unit_HRR_Regions_Direct: {}
