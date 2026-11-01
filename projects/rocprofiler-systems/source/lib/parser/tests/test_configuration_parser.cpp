@@ -21,6 +21,7 @@
 #include <stdlib.h>  // POSIX ::getenv, ::setenv, ::unsetenv
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace rocprofsys::parser;
@@ -287,6 +288,109 @@ verbose_environment(std::string_view name)
     return std::nullopt;
 }
 
+schema
+make_effect_schema()
+{
+    schema catalog{};
+    add_checked(catalog,
+                schema_param{
+                    .id          = "profile",
+                    .name        = "Profile",
+                    .description = "Profile",
+                    .type        = param_type::boolean,
+                    .arg = arg_spec{ .name = "--profile", .form = arg_form::flag },
+                });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "flat_profile",
+                    .name          = "Flat profile",
+                    .description   = "Flat profile",
+                    .type          = param_type::boolean,
+                    .default_value = "false",
+                    .arg = arg_spec{ .name = "--flat-profile", .form = arg_form::flag },
+                    .copy_to = { "profile" },
+                });
+    add_checked(catalog, schema_param{
+                             .id          = "log_level",
+                             .name        = "Log level",
+                             .description = "Log level",
+                             .type        = param_type::string,
+                         });
+    add_checked(catalog, schema_param{
+                             .id            = "debug",
+                             .name          = "Debug",
+                             .description   = "Debug",
+                             .type          = param_type::boolean,
+                             .default_value = "false",
+                             .arg = arg_spec{ .name = "--debug", .form = arg_form::flag },
+                             .assigns = { { "log_level", "debug" } },
+                         });
+    add_checked(catalog,
+                schema_param{
+                    .id          = "verbose",
+                    .name        = "Verbose",
+                    .description = "Verbose",
+                    .type        = param_type::integer,
+                    .arg     = arg_spec{ .name = "--verbose", .form = arg_form::value },
+                    .maps_to = { value_mapping{
+                        .when = "2", .target = "log_level", .value = "verbose" } },
+                });
+    add_checked(catalog, schema_param{
+                             .id          = "backend",
+                             .name        = "Backend",
+                             .description = "Backend",
+                             .type        = param_type::string,
+                         });
+    add_checked(
+        catalog,
+        schema_param{
+            .id          = "include",
+            .name        = "Include",
+            .description = "Include",
+            .type        = param_type::enumeration,
+            .choices =
+                {
+                    choice{ .value       = "perfetto",
+                            .name        = "Perfetto",
+                            .description = "Perfetto",
+                            .sets        = { { "backend", "trace" } } },
+                    choice{ .value       = "timemory",
+                            .name        = "Timemory",
+                            .description = "Timemory",
+                            .sets        = { { "backend", "profile" } } },
+                },
+            .arg = arg_spec{ .name = "--include", .form = arg_form::value },
+        });
+    add_checked(catalog,
+                schema_param{
+                    .id            = "delay",
+                    .name          = "Delay",
+                    .description   = "Delay",
+                    .type          = param_type::string,
+                    .default_value = "0",
+                    .arg = arg_spec{ .name = "--delay", .form = arg_form::value },
+                });
+    add_checked(catalog, schema_param{
+                             .id            = "wait",
+                             .name          = "Wait",
+                             .description   = "Wait",
+                             .type          = param_type::boolean,
+                             .default_value = "false",
+                             .arg = arg_spec{ .name = "--wait", .form = arg_form::flag },
+                             .fills = { "delay" },
+                         });
+    return catalog;
+}
+
+configuration_parser
+make_effect_parser()
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    EXPECT_TRUE(parser.initialize(make_effect_schema())) << parser.failure();
+    return parser;
+}
+
 preset_parser::settings_t
 balanced_settings(std::string_view name)
 {
@@ -425,6 +529,28 @@ TEST(parser_configuration, exports_environment_and_json)
     EXPECT_STREQ(std::getenv("ROCPROFSYS_VERBOSE"), "4");
     EXPECT_STREQ(std::getenv("ROCPROFSYS_OUTPUT_PATH"), "exported");
     restore_environment(previous);
+}
+
+TEST(parser_configuration, effects_run_after_precedence)
+{
+    auto       parser    = make_effect_parser();
+    const auto untouched = parser.parse({});
+    EXPECT_EQ(untouched.find("profile"), untouched.end());
+    EXPECT_EQ(untouched.find("log_level"), untouched.end());
+    EXPECT_EQ(untouched.at("delay"), "0");
+
+    const auto copied = parser.parse({ "--flat-profile" });
+    EXPECT_EQ(copied.at("profile"), "true");
+    EXPECT_EQ(parser.parse({ "--profile", "false", "--flat-profile" }).at("profile"),
+              "true");
+
+    EXPECT_EQ(parser.parse({ "--debug" }).at("log_level"), "debug");
+    EXPECT_EQ(parser.parse({ "--verbose", "2" }).at("log_level"), "verbose");
+    EXPECT_EQ(parser.parse({ "--include", "perfetto" }).at("backend"), "trace");
+
+    EXPECT_EQ(parser.parse({ "--wait" }).at("delay"), "true");
+    EXPECT_EQ(parser.parse({ "--wait", "--delay", "5" }).at("delay"), "5");
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
 }
 
 TEST(parser_configuration, reads_argc_and_reports_an_uninitialized_parser)

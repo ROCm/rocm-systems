@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -249,6 +250,136 @@ add_provider_defaults(resolved_config& resolved, const schema& config_schema,
     }
 }
 
+struct effect_request
+{
+    std::string_view target;
+    std::string      value;
+    config_source    source    = config_source::default_value;
+    bool             fill_only = false;
+};
+
+bool
+keeps_existing(const resolved_config& resolved, const effect_request& request)
+{
+    const auto found = resolved.find(request.target);
+    if(found == resolved.end())
+    {
+        return false;
+    }
+    if(request.fill_only)
+    {
+        return found->second.source != config_source::default_value;
+    }
+    return static_cast<std::uint8_t>(found->second.source) >
+           static_cast<std::uint8_t>(request.source);
+}
+
+void
+write_effect(resolved_config& resolved, effect_request request)
+{
+    if(keeps_existing(resolved, request))
+    {
+        return;
+    }
+    resolved.insert_or_assign(
+        std::string{ request.target },
+        resolved_value{ .value = std::move(request.value), .source = request.source });
+}
+
+void
+write_pairs(resolved_config& resolved, const value_map_t& pairs, config_source source)
+{
+    for(const auto& [target, value] : pairs)
+    {
+        write_effect(resolved, effect_request{
+                                   .target = target,
+                                   .value  = value,
+                                   .source = source,
+                               });
+    }
+}
+
+void
+apply_choice_sets(resolved_config& resolved, const schema_param& param,
+                  const resolved_value& origin)
+{
+    for(const auto& item : param.choices)
+    {
+        if(item.value == origin.value)
+        {
+            write_pairs(resolved, item.sets, origin.source);
+        }
+    }
+}
+
+void
+apply_origin_effects(resolved_config& resolved, const schema_param& param,
+                     const resolved_value& origin)
+{
+    for(const auto& target : param.copy_to)
+    {
+        write_effect(resolved, effect_request{
+                                   .target = target,
+                                   .value  = origin.value,
+                                   .source = origin.source,
+                               });
+    }
+    write_pairs(resolved, param.assigns, origin.source);
+    for(const auto& mapping : param.maps_to)
+    {
+        if(mapping.when == origin.value)
+        {
+            write_effect(resolved, effect_request{
+                                       .target = mapping.target,
+                                       .value  = mapping.value,
+                                       .source = origin.source,
+                                   });
+        }
+    }
+    apply_choice_sets(resolved, param, origin);
+}
+
+void
+apply_fills(resolved_config& resolved, const schema_param& param,
+            const resolved_value& origin)
+{
+    for(const auto& target : param.fills)
+    {
+        write_effect(resolved, effect_request{
+                                   .target    = target,
+                                   .value     = origin.value,
+                                   .source    = origin.source,
+                                   .fill_only = true,
+                               });
+    }
+}
+
+// Effects run from values that won precedence, not from defaults. A later
+// effect does not see values written by an earlier one. fills runs last.
+void
+apply_effects(resolved_config& resolved, const schema& config_schema)
+{
+    std::vector<std::pair<const schema_param*, resolved_value>> origins;
+    for(const auto& param : config_schema.params())
+    {
+        const auto found = resolved.find(param.id);
+        if(found == resolved.end() ||
+           found->second.source == config_source::default_value)
+        {
+            continue;
+        }
+        origins.emplace_back(&param, found->second);
+    }
+    for(const auto& [param, origin] : origins)
+    {
+        apply_origin_effects(resolved, *param, origin);
+    }
+    for(const auto& [param, origin] : origins)
+    {
+        apply_fills(resolved, *param, origin);
+    }
+}
+
 void
 append_violations(std::vector<std::string>& errors, const schema& config_schema,
                   const resolved_config& resolved)
@@ -349,6 +480,7 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
 
     auto resolved = resolve_collected(collected);
     add_provider_defaults(resolved, request.config_schema, *m_providers);
+    apply_effects(resolved, request.config_schema);
     append_violations(m_errors, request.config_schema, resolved);
     try
     {
