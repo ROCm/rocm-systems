@@ -40,6 +40,9 @@ bool hip_capture_enabled();
 // Return the output directory from the env var
 const char* hip_capture_output_dir();
 
+// HIP_HRR_CAPTURE_CONTENT: record contents as well; without it capture is metadata-only
+bool hip_capture_content_enabled();
+
 // Snapshot real fn ptrs (must be called while live table holds real ptrs)
 void hip_capture_build_table();
 

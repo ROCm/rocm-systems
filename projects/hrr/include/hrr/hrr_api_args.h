@@ -91,8 +91,12 @@
  * A v10 reader would decode those events as the wrong API.
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
- * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)12u)
+ * those events as the wrong API.
+ * v13: capture without HIP_HRR_CAPTURE_CONTENT records no contents. It sets
+ * HRR_FILE_FLAG_METADATA_ONLY and stores HRR_HASH_WITHHELD where a blob or
+ * code-object hash would be. A v12 reader would fail each withheld H2D copy
+ * with hipErrorNotFound, without saying that the capture left the contents out. */
+#define HRR_VERSION ((uint16_t)13u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -112,6 +116,24 @@ typedef struct {
  * the last copied byte, or holds the flat width*height*depth bytes from the
  * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+
+/* HRR_FILE_FLAG_METADATA_ONLY: capture ran without HIP_HRR_CAPTURE_CONTENT, so
+ * the archive holds no host buffer, by-value kernel argument or code object.
+ * Replay refuses each call that needs one (HRR_HASH_WITHHELD below); --info
+ * and the enable-recording inspector name the mode from this bit. */
+#define HRR_FILE_FLAG_METADATA_ONLY ((uint16_t)0x0002u)
+
+/* Stored in place of both halves of a blob or code-object hash when capture ran
+ * without HIP_HRR_CAPTURE_CONTENT: the call needed contents that the
+ * metadata-only mode does not record, so there is no file to load. A zero hash
+ * still means that the call had no contents (a zero-size copy, say). */
+#define HRR_HASH_WITHHELD ((uint64_t)0xFFFFFFFFFFFFFFFFull)
+
+/* Stored in the present flag of an inline pointee that is application data
+ * (a hipSetupArgument value) when capture ran without HIP_HRR_CAPTURE_CONTENT:
+ * the pointer was non-null but its bytes were not recorded. 1 still means the
+ * bytes field holds them, zeros included. */
+#define HRR_PRESENT_WITHHELD ((uint8_t)2u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
@@ -3575,7 +3597,7 @@ typedef struct {
     uint64_t size;
     uint64_t offset;
     uint8_t arg_bytes[256];  /* unsigned char[256] inline copy */
-    uint8_t arg_present;  /* 1 when arg was non-null */
+    uint8_t arg_present;  /* 1 when arg was non-null, HRR_PRESENT_WITHHELD when its bytes were not recorded */
     uint32_t arg_n;  /* elements copied from arg */
 } hrr_args_hipSetupArgument;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H

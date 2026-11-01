@@ -33,13 +33,17 @@ needs no GPU.
 ## Capture modes
 
 Capture is disabled by default on AMD platforms at present (see the [README](README.md));
-where it is built in, it is armed by `HIP_HRR_CAPTURE_OUTPUT` alone. Today there is one
-mode, and it records **contents**: everything in the tables below.
+where it is built in, `HIP_HRR_CAPTURE_OUTPUT` arms it. It runs in one of two modes, and
+the notice it prints on stderr names the one it runs in:
 
-[AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) adds a
-**metadata-only** mode as the default and moves contents behind a second variable. The
-"Mode" column states which mode records each item once that task has landed. Until then,
-every capture is a contents capture.
+- **metadata-only**, the default: the rows marked "both" below. No host buffer, no by-value
+  kernel argument and no code object is written, and none is hashed either. The
+  `events.bin` header carries `HRR_FILE_FLAG_METADATA_ONLY`, `hrr-playback --info` reports
+  the contents as `withheld`, and replay refuses the first call that needs a withheld item.
+- **contents**, with `HIP_HRR_CAPTURE_CONTENT=1` as well: every row below. This is what
+  replay needs.
+
+The "Mode" column states which mode records each item.
 
 ## What an archive contains
 
@@ -49,10 +53,13 @@ every capture is a contents capture.
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
 | Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | both | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
+| Scalar values passed to a HIP call: memset fill values, memset graph nodes included; the values `hipStreamWriteValue32/64`, `hipStreamWaitValue32/64` and `hipStreamBatchMemOp` write or wait for; attribute and limit values such as those given to `hipMemPoolSetAttribute`. Each is at most 8 bytes, given to the call rather than read from a buffer | `events.bin` | both | — kept, as sizes and flags are; replay needs them |
+| Strings passed to a HIP call, up to 255 characters each: the `hipLinkAddFile` path, the `hipLinkAddData` input name, the `hipGetProcAddress` symbol and the names of `__device__` variables | `events.bin` | both | — kept, replay needs them |
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Pinned host memory a kernel reads: at each launch whose arguments point into memory from `hipHostMalloc`, `hipMallocHost` or `hipHostRegister`, the whole allocation, byte for byte, as it was before the launch, whether or not the kernel reads all of it, again each time its contents changed. Allocations over `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64 MiB unless set) are skipped, and `HIP_HRR_HOST_SNAPSHOTS=0` turns this off | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| By-value kernel argument bytes, a struct whole with any device pointers inside it, and the values pushed with `hipSetupArgument`. Whole-argument pointers are addresses and are kept in both modes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880): size and zeros in metadata-only mode |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
@@ -85,7 +92,7 @@ given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name
 `hipGetProcAddress`); as the name of a device variable the program registers; as a character
 array in a structure passed to a HIP call (the device and architecture names given to
 `hipChooseDevice`); inside the padding or unused bytes of such a structure; inside a host
-buffer the workload copied or registered; inside a linker input buffer, even one the linker
+buffer the workload copied or registered, or pinned host memory a kernel launch pointed into; inside a linker input buffer, even one the linker
 rejected; or inside a code object. A path in such a buffer,
 for example a compiler cache path under the user's home directory, is recorded with it.
 Memory that never crossed a HIP call is not recorded, and neither is a failed call, apart
@@ -94,8 +101,8 @@ from the exceptions listed in [skills/enable-recording/SKILL.md](skills/enable-r
 ## What no mode can promise
 
 A metadata-only archive with identifiers blanked still names every kernel the workload
-ran, which describes the model and the serving stack, and still records every size and
-address. It holds no buffer contents and no code, so it cannot reproduce a fault that
+ran, which describes the model and the serving stack, and still records every size,
+address and scalar call argument. It holds no buffer contents and no code, so it cannot reproduce a fault that
 depends on values, and it cannot be replayed in full. A contents archive is as sensitive
 as the data the workload handled: where it may go has to be agreed before it is sent.
 

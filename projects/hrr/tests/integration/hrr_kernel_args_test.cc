@@ -99,6 +99,7 @@ inline uint64_t hrr_capture_direct_kargs(const fs::path& cap_path) {
   std::string out;
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_KernelArgs_Direct\"");
     out = proc.getOutput();
@@ -197,6 +198,8 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
     hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    // Metadata-only, so the notice names the pointer values the dumps still log.
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONTENT");
     if (debug_args)
       proc.setEnv("HIP_HRR_DEBUG_ARGS", debug_args);
     else
@@ -214,7 +217,7 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
     hrr_single_process_archive(cap.path);
     return Run{out.find("[HRR args] ") != std::string::npos,
                out.find("[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel "
-                        "argument bytes") != std::string::npos,
+                        "pointer argument values") != std::string::npos,
                out.find("[HRR capture] HIP_HRR_DEBUG_ARGS ignored") !=
                    std::string::npos};
   };

@@ -426,6 +426,7 @@ struct PlaybackContext {
     // running failure fraction exceeds HIP_HRR_REPLAY_DIVERGENCE_ABORT (after a
     // minimum sample count), sets `diverged` + `fatal_error` so the replay stops
     // cleanly before a downstream GPU fault instead of dying unrecoverably.
+    // Counts nothing once fatal_error is set.
     // `seq` is the recorded event sequence id (hrr_dispatch_seq) for diagnostics.
     void note_d2h_fail(uint64_t seq);
 
@@ -973,11 +974,22 @@ struct PlaybackContext {
     // ---- Blob/code-object loading ----
     // Load a blob from archive_dir/blobs/<2-char-prefix>/<hash>.blob
     // Returns nullptr if not found. Memory is owned by the context (cached).
+    // `what` names the blob if it is refused as withheld. A refusal is reported
+    // and sets fatal_error; with `api` given, an absent blob is reported as
+    // "<api>: blob <hash> not found in archive", or "<api>: no blob recorded" for
+    // a zero hash. Callers that pass `api` print nothing after a null.
     const void* load_blob(uint64_t hash_lo, uint64_t hash_hi,
-                          size_t* sz_out = nullptr) const;
-    // Load a code object from archive_dir/code_objects/<hash>.hsaco
+                          size_t* sz_out = nullptr,
+                          const char* what = "host buffer",
+                          const char* api = nullptr) const;
+    // Load a code object from archive_dir/code_objects/<hash>.hsaco, reporting
+    // a refused or absent one as load_blob does.
+    // Both loaders refuse HRR_HASH_WITHHELD (see refuse_withheld).
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
+    // True, after reporting the refusal and setting fatal_error, when the hash is
+    // HRR_HASH_WITHHELD: a metadata-only capture recorded no contents for it.
+    bool refuse_withheld(uint64_t hash_lo, uint64_t hash_hi, const char* what) const;
     // Read `path` into blob_cache_ under `key`, charged to the host budget.
     const void* cache_file(const std::string& key, const std::string& path,
                            size_t* sz_out, const char* what) const;

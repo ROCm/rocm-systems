@@ -196,6 +196,7 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
   {
     hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
     // Catch2 exits 4 when the selected case skipped. HRR_SKIP uses SKIP(), so
@@ -805,9 +806,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") 
       "Owner PID:    7\n"
       "Processes:    1\n"
       "\n"
-      "  PID          Parent PID   Complete   Events       Blobs      Path\n"
-      "  ---          ----------   --------   ------       -----      ----\n"
-      "  7            1            NO         1326         1279       /tmp/cap/pid-7\n";
+      "  PID          Parent PID   Complete   Contents   Events       Blobs      Path\n"
+      "  ---          ----------   --------   --------   ------       -----      ----\n"
+      "  7            1            NO         recorded   1326         1279       /tmp/cap/pid-7\n";
   std::map<std::string, long long> root_counts;
   hrr_parse_info_breakdown(root_report, root_counts);
   CHECK(root_counts.empty());
