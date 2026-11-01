@@ -1062,6 +1062,7 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_connect_fakes.cc
     fakes/net_ib_cast_init_fakes.cc
     fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc  # ncclParamIbCastResiliencyPortRecovery, for qp_sharing.cc's real ncclIbCastGetQpSharingConfig
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc   # buildIbvSymbols, never called
