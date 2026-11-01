@@ -16,7 +16,7 @@ namespace rocprofsys::parser
 {
 namespace
 {
-constexpr double k_verbose_minimum = 0.0;
+constexpr double k_verbose_minimum = -1.0;
 constexpr double k_verbose_maximum = 4.0;
 
 auto
@@ -48,13 +48,12 @@ default_params()
             .category    = "configuration",
             .type        = param_type::path,
             .path        = path_kind::file,
-            .env         = env_spec{ .name = env_vars::CONFIG_FILE },
             .arg         = arg_spec{ .name = "--config", .form = arg_form::value },
         },
         {
             .id            = "verbose",
             .name          = "Verbose",
-            .description   = "Verbosity level from 0 to 4",
+            .description   = "Verbosity level from -1 to 4",
             .category      = "logging",
             .type          = param_type::integer,
             .default_value = "0",

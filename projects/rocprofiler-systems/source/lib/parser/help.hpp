@@ -4,6 +4,7 @@
 #pragma once
 
 #include "parser/schema.hpp"
+#include "parser/value_provider.hpp"
 
 #include <cstdint>
 #include <string>
@@ -26,6 +27,7 @@ enum class help_style : std::uint8_t
  * includes every category. Compact style omits advanced and expert parameters.
  */
 [[nodiscard]] std::string
-format_help(const schema& config_schema, help_style style, std::string_view topic);
+format_help(const schema& config_schema, help_style style, std::string_view topic,
+            const value_provider_registry* providers = nullptr);
 
 }  // namespace rocprofsys::parser

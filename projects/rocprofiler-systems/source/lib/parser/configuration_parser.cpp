@@ -54,29 +54,41 @@ append_errors(std::vector<std::string>& dest, const std::vector<std::string>& ex
     dest.insert(dest.end(), extra.begin(), extra.end());
 }
 
+std::string_view
+source_label(config_source source)
+{
+    switch(source)
+    {
+        case config_source::default_value: return "default";
+        case config_source::preset: return "preset";
+        case config_source::file: return "file";
+        case config_source::environment: return "environment";
+        case config_source::command_line: return "command line";
+    }
+    return "value";
+}
+
 void
 reject_provider_values(const schema&                  config_schema,
-                       const value_provider_registry& providers, parse_result& parsed)
+                       const value_provider_registry& providers, config_source source,
+                       parse_result& parsed)
 {
     for(auto itr = parsed.values.begin(); itr != parsed.values.end();)
     {
-        const auto* param    = config_schema.find_param(itr->first);
-        const auto* provider = (param != nullptr && param->value_provider)
-                                   ? providers.find(*param->value_provider)
-                                   : nullptr;
-        const auto  rejected =
-            param != nullptr && param->value_provider &&
-            (provider == nullptr || !provider->accepts(*param, itr->second));
-        if(rejected)
-        {
-            parsed.errors.push_back(fmt::format("invalid value '{}' for parameter '{}'",
-                                                itr->second, itr->first));
-            itr = parsed.values.erase(itr);
-        }
-        else
+        const auto* param = config_schema.find_param(itr->first);
+        const auto  provider_name =
+            (param == nullptr) ? std::string{} : param->value_provider.value_or("");
+        const auto* provider =
+            provider_name.empty() ? nullptr : providers.find(provider_name);
+        if(provider == nullptr || provider->accepts(*param, itr->second))
         {
             ++itr;
+            continue;
         }
+        parsed.errors.push_back(
+            fmt::format("invalid value '{}' for parameter '{}' from {}", itr->second,
+                        itr->first, source_label(source)));
+        itr = parsed.values.erase(itr);
     }
 }
 
@@ -123,7 +135,7 @@ read_preset(const schema& config_schema, const std::optional<std::string>& name,
             const configuration_parser::preset_lookup_t& lookup,
             std::vector<std::string>&                    errors)
 {
-    if(!name)
+    if(!name || name->empty())
     {
         return {};
     }
@@ -170,11 +182,12 @@ read_primary(const parse_request& request)
     collected.command_line =
         cli_parser{ request.arguments, to_unknown(request.mode) }.parse(
             request.config_schema);
-    reject_provider_values(request.config_schema, request.providers, collected.defaults);
     reject_provider_values(request.config_schema, request.providers,
-                           collected.environment);
+                           config_source::default_value, collected.defaults);
     reject_provider_values(request.config_schema, request.providers,
-                           collected.command_line);
+                           config_source::environment, collected.environment);
+    reject_provider_values(request.config_schema, request.providers,
+                           config_source::command_line, collected.command_line);
     return collected;
 }
 
@@ -187,7 +200,8 @@ read_indirect(const parse_request& request, collected_input& collected)
           make_source(config_source::command_line, collected.command_line) },
         k_config_file_param);
     collected.file = read_config_file(request.config_schema, file_path);
-    reject_provider_values(request.config_schema, request.providers, collected.file);
+    reject_provider_values(request.config_schema, request.providers, config_source::file,
+                           collected.file);
 
     const auto preset_name = selected_value(
         { make_source(config_source::default_value, collected.defaults),
@@ -197,7 +211,8 @@ read_indirect(const parse_request& request, collected_input& collected)
         k_preset_param);
     collected.preset =
         read_preset(request.config_schema, preset_name, request.presets, request.errors);
-    reject_provider_values(request.config_schema, request.providers, collected.preset);
+    reject_provider_values(request.config_schema, request.providers,
+                           config_source::preset, collected.preset);
 }
 
 void
@@ -398,6 +413,25 @@ append_violations(std::vector<std::string>& errors, const schema& config_schema,
     }
 }
 
+std::string
+catalog_errors(const schema& catalog)
+{
+    std::string message;
+    for(const auto& item : validate_schema(catalog))
+    {
+        if(item.level != severity::error)
+        {
+            continue;
+        }
+        if(!message.empty())
+        {
+            message.append("; ");
+        }
+        message.append(item.message);
+    }
+    return message;
+}
+
 }  // namespace
 
 void
@@ -434,11 +468,18 @@ configuration_parser::initialize()
 bool
 configuration_parser::initialize(schema catalog)
 {
+    const auto errors = catalog_errors(catalog);
+    if(!errors.empty())
+    {
+        m_failure = errors;
+        return false;
+    }
     try
     {
         auto providers = std::make_unique<value_provider_registry>();
         providers->add_builtins();
-        m_store     = std::make_unique<config_store>(std::move(catalog));
+        auto store  = std::make_unique<config_store>(std::move(catalog));
+        m_store     = std::move(store);
         m_providers = std::move(providers);
         m_failure.clear();
         m_errors.clear();
@@ -450,6 +491,22 @@ configuration_parser::initialize(schema catalog)
         m_failure = err.what();
         return false;
     }
+}
+
+bool
+configuration_parser::add_provider(std::unique_ptr<value_provider_interface> provider)
+{
+    if(m_providers == nullptr)
+    {
+        m_failure = "parser is not initialized";
+        return false;
+    }
+    if(!m_providers->add(std::move(provider)))
+    {
+        m_failure = "provider was not registered";
+        return false;
+    }
+    return true;
 }
 
 value_map_t
@@ -484,8 +541,15 @@ configuration_parser::parse(const std::vector<std::string>& arguments)
     append_violations(m_errors, request.config_schema, resolved);
     try
     {
+        config_store staged{ *schema_ptr };
+        apply_resolved(staged, resolved);
         m_store->clear();
-        apply_resolved(*m_store, resolved);
+        for(const auto& [param_id, value] : staged.values())
+        {
+            const auto source =
+                staged.source_of(param_id).value_or(config_source::default_value);
+            m_store->set(param_id, value, source);
+        }
     } catch(const std::exception& err)
     {
         m_errors.emplace_back(err.what());
@@ -511,7 +575,9 @@ configuration_parser::export_as_environment() const
     for(const auto& [param_id, value] : m_store->values())
     {
         const auto* param = schema_ptr->find_param(param_id);
-        if(param != nullptr && param->env)
+        const auto  origin =
+            m_store->source_of(param_id).value_or(config_source::default_value);
+        if(param != nullptr && param->env && origin != config_source::default_value)
         {
             exported.emplace(param->env->name, value);
         }
@@ -553,7 +619,7 @@ configuration_parser::render_help(help_style style, std::string_view topic) cons
     {
         return "parser is not initialized\n";
     }
-    return format_help(*m_store->config_schema(), style, topic);
+    return format_help(*m_store->config_schema(), style, topic, m_providers.get());
 }
 
 std::shared_ptr<const schema>

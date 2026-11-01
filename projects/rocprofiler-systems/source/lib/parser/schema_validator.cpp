@@ -84,8 +84,18 @@ matches_pattern(const schema_param&, std::string_view)
 }
 
 bool
+provider_lists_choices(const schema_param& param)
+{
+    return !param.value_provider.value_or(std::string{}).empty();
+}
+
+bool
 is_valid_choice(const schema_param& param, std::string_view value)
 {
+    if(provider_lists_choices(param))
+    {
+        return !value.empty();
+    }
     const bool is_listed = std::ranges::any_of(
         param.choices, [value](const choice& item) { return item.value == value; });
     return is_listed || (param.allow_custom && !value.empty());

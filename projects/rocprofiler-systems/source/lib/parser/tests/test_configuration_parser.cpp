@@ -5,6 +5,7 @@
 #include "parser/help.hpp"
 #include "parser/preset_parser.hpp"
 #include "parser/schema.hpp"
+#include "parser/value_provider.hpp"
 
 #include <gtest/gtest.h>
 
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <stdlib.h>  // POSIX ::getenv, ::setenv, ::unsetenv
@@ -247,7 +249,50 @@ restore_environment(const std::map<std::string, std::optional<std::string>>& pre
     }
 }
 
-TEST(parser_configuration, embedded_schema_is_help_text)
+class letter_provider final : public value_provider_interface
+{
+public:
+    [[nodiscard]] std::string_view name() const override { return "letters"; }
+
+    [[nodiscard]] std::vector<std::string> choices(const schema_param&) const override
+    {
+        return { "alpha" };
+    }
+
+    [[nodiscard]] std::optional<std::string> default_value(
+        const schema_param&) const override
+    {
+        return std::string{ "alpha" };
+    }
+};
+
+schema
+make_letter_schema()
+{
+    schema catalog{};
+    static_cast<void>(catalog.add_category(category{ .id = "shown", .name = "Shown" }));
+    add_checked(catalog, schema_param{
+                             .id            = "trace",
+                             .name          = "Trace",
+                             .description   = "Trace",
+                             .type          = param_type::boolean,
+                             .default_value = "false",
+                             .env           = env_spec{ .name = "ROCPROFSYS_TRACE" },
+                         });
+    add_checked(catalog,
+                schema_param{
+                    .id          = "letter",
+                    .name        = "Letter",
+                    .description = "Letter",
+                    .category    = "shown",
+                    .type        = param_type::enumeration,
+                    .arg = arg_spec{ .name = "--letter", .form = arg_form::value },
+                    .value_provider = "letters",
+                });
+    return catalog;
+}
+
+TEST(parser_configuration, built_in_catalog_is_help_text)
 {
     auto       parser     = make_parser();
     const auto schema_ptr = parser.config_schema();
@@ -255,14 +300,18 @@ TEST(parser_configuration, embedded_schema_is_help_text)
     EXPECT_EQ(schema_ptr->version(), "1.0");
     EXPECT_EQ(schema_ptr->params().size(), k_help_param_count);
 
-    const auto* preset  = schema_ptr->find_param("preset");
-    const auto* verbose = schema_ptr->find_param("verbose");
-    const auto* trace   = schema_ptr->find_param("trace");
+    const auto* preset      = schema_ptr->find_param("preset");
+    const auto* config_file = schema_ptr->find_param("config_file");
+    const auto* verbose     = schema_ptr->find_param("verbose");
+    const auto* trace       = schema_ptr->find_param("trace");
     ASSERT_NE(preset, nullptr);
+    ASSERT_NE(config_file, nullptr);
     ASSERT_NE(verbose, nullptr);
     ASSERT_NE(trace, nullptr);
     EXPECT_FALSE(preset->env.has_value());
+    EXPECT_FALSE(config_file->env.has_value());
     EXPECT_EQ(verbose->env.value_or(env_spec{}).name, "ROCPROFSYS_VERBOSE");
+    EXPECT_DOUBLE_EQ(verbose->min.value_or(0.0), -1.0);
     EXPECT_EQ(trace->category, "tracing");
 
     const auto values = parser.parse({});
@@ -275,6 +324,10 @@ TEST(parser_configuration, embedded_schema_is_help_text)
     EXPECT_EQ(help_text.find("General"), std::string::npos);
     EXPECT_NE(help_text.find("Configuration"), std::string::npos);
     EXPECT_EQ(help_text.find("ROCPROFSYS_PRESET"), std::string::npos);
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
+
+    const auto quiet = parser.parse({ "--verbose", "-1" });
+    EXPECT_EQ(quiet.at("verbose"), "-1");
     EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
 }
 
@@ -488,6 +541,9 @@ TEST(parser_configuration, reports_constraints_and_unknown_presets)
         [](std::string_view) { return preset_parser::settings_t{}; });
     static_cast<void>(parser.parse({ "--preset", "missing" }));
     EXPECT_TRUE(contains_text(parser.errors(), "unknown preset"));
+
+    static_cast<void>(parser.parse({ "--preset=" }));
+    EXPECT_FALSE(contains_text(parser.errors(), "unknown preset"));
 }
 
 TEST(parser_configuration, help_filters_by_level_and_topic)
@@ -521,6 +577,9 @@ TEST(parser_configuration, exports_environment_and_json)
     EXPECT_EQ(values.at("verbose"), "4");
     EXPECT_EQ(env.at("ROCPROFSYS_VERBOSE"), "4");
     EXPECT_EQ(env.at("ROCPROFSYS_OUTPUT_PATH"), "exported");
+    EXPECT_EQ(env.find("ROCPROFSYS_TRACE"), env.end());
+    EXPECT_EQ(env.find("ROCPROFSYS_DEBUG"), env.end());
+    EXPECT_EQ(env.find("ROCPROFSYS_PROFILE"), env.end());
     EXPECT_NE(text.find("\"output_path\""), std::string::npos);
     EXPECT_NE(text.find("exported"), std::string::npos);
 
@@ -529,6 +588,85 @@ TEST(parser_configuration, exports_environment_and_json)
     EXPECT_STREQ(std::getenv("ROCPROFSYS_VERBOSE"), "4");
     EXPECT_STREQ(std::getenv("ROCPROFSYS_OUTPUT_PATH"), "exported");
     restore_environment(previous);
+}
+
+TEST(parser_configuration, provider_default_keeps_the_other_values)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(make_letter_schema())) << parser.failure();
+    ASSERT_TRUE(parser.add_provider(std::make_unique<letter_provider>()));
+
+    const auto values = parser.parse({});
+    EXPECT_EQ(values.at("trace"), "false");
+    EXPECT_EQ(values.at("letter"), "alpha");
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
+}
+
+TEST(parser_configuration, refused_provider_value_names_the_source)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(make_letter_schema())) << parser.failure();
+    ASSERT_TRUE(parser.add_provider(std::make_unique<letter_provider>()));
+
+    static_cast<void>(parser.parse({ "--letter", "nope" }));
+    EXPECT_TRUE(contains_text(parser.errors(), "command line"));
+    EXPECT_EQ(parser.get<std::string>("letter").value_or(""), "alpha");
+    EXPECT_EQ(parser.get<bool>("trace").value_or(true), false);
+}
+
+TEST(parser_configuration, unknown_provider_does_not_reject_every_value)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(make_letter_schema())) << parser.failure();
+    const auto values = parser.parse({ "--letter", "alpha" });
+    EXPECT_EQ(values.at("letter"), "alpha");
+    EXPECT_EQ(values.at("trace"), "false");
+    EXPECT_TRUE(parser.errors().empty()) << parser.errors().front();
+}
+
+TEST(parser_configuration, failed_initialize_keeps_the_previous_catalog)
+{
+    auto   parser = make_parser();
+    schema bad{};
+    add_checked(bad, schema_param{
+                         .id          = "orphan",
+                         .name        = "Orphan",
+                         .description = "Orphan",
+                         .category    = "missing",
+                         .type        = param_type::string,
+                     });
+    EXPECT_FALSE(parser.initialize(std::move(bad)));
+    EXPECT_FALSE(parser.failure().empty());
+    ASSERT_NE(parser.config_schema(), nullptr);
+    EXPECT_NE(parser.config_schema()->find_param("verbose"), nullptr);
+}
+
+TEST(parser_configuration, help_shows_provider_choices_and_a_missing_category)
+{
+    configuration_parser parser;
+    parser.set_environment([](std::string_view) { return std::optional<std::string>{}; });
+    ASSERT_TRUE(parser.initialize(make_letter_schema())) << parser.failure();
+    ASSERT_TRUE(parser.add_provider(std::make_unique<letter_provider>()));
+    const auto full = parser.render_help(help_style::full);
+    EXPECT_NE(full.find("--letter"), std::string::npos);
+    EXPECT_NE(full.find("alpha"), std::string::npos);
+
+    schema unregistered{};
+    add_checked(unregistered,
+                schema_param{
+                    .id          = "orphan",
+                    .name        = "Orphan",
+                    .description = "Orphan",
+                    .category    = "ghost",
+                    .type        = param_type::string,
+                    .arg         = arg_spec{ .name = "--orphan", .form = arg_form::flag },
+                });
+    const auto text = format_help(unregistered, help_style::compact, {});
+    EXPECT_NE(text.find("--orphan"), std::string::npos);
+    EXPECT_NE(text.find("ghost"), std::string::npos);
 }
 
 TEST(parser_configuration, effects_run_after_precedence)

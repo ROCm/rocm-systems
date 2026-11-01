@@ -16,7 +16,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace rocprofsys::parser
@@ -35,11 +34,15 @@ enum class parse_mode : std::uint8_t
  * and the command line.
  *
  * Precedence, from lowest to highest, is default_value, preset, file, environment,
- * then command_line. The config file path is the resolved "config_file" parameter
+ * then command_line. After that, copy_to, assigns, maps_to, and choice sets run
+ * for a value whose winning source is not the default. A target with a higher
+ * source is left alone. fills then copies onto a target that is absent or still
+ * the default. The config file path is the resolved "config_file" parameter
  * from the defaults, environment, and command line. The preset name is the resolved
  * "preset" parameter after the file is included. Preset settings are supplied by
  * set_preset_lookup(); this library does not open the preset registry itself.
- * An empty lookup result means the preset name is unknown.
+ * An empty preset name is unset. An empty lookup for a named preset means that
+ * name is unknown. The parser is single-threaded.
  */
 class configuration_parser
 {
@@ -62,6 +65,13 @@ public:
      * @return false, leaving any previously loaded schema in place, when setup fails.
      */
     [[nodiscard]] bool initialize(schema catalog);
+
+    /**
+     * Register a provider on top of the built-in catalogs.
+     * @return false, leaving the registry unchanged, when the parser is not
+     * initialized or the name is empty or already taken.
+     */
+    [[nodiscard]] bool add_provider(std::unique_ptr<value_provider_interface> provider);
 
     [[nodiscard]] const std::string& failure() const noexcept { return m_failure; }
 
