@@ -1,0 +1,54 @@
+# The dispatch slot load contract of projects/hrr/DESIGN.md, checked without a GPU or ROCm.
+
+name: "HIP dispatch slot loads"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/clr/hipamd/src/hip_table_interface.cpp'
+      - 'projects/clr/hipamd/src/hip_dispatch_load.hpp'
+      - 'projects/hrr/tests/unit/check_dispatch_readers.cmake'
+      - 'projects/hrr/tests/unit/hrr_dispatch_load_tsan_test.cc'
+      - '.github/workflows/hip-dispatch-slot-loads.yml'
+  pull_request:
+    paths:
+      - 'projects/clr/hipamd/src/hip_table_interface.cpp'
+      - 'projects/clr/hipamd/src/hip_dispatch_load.hpp'
+      - 'projects/hrr/tests/unit/check_dispatch_readers.cmake'
+      - 'projects/hrr/tests/unit/hrr_dispatch_load_tsan_test.cc'
+      - '.github/workflows/hip-dispatch-slot-loads.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  slot-loads:
+    name: "HIP dispatch slot loads"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/clr/hipamd/src
+            projects/hrr/tests/unit
+          persist-credentials: false
+
+      - name: Every entry point loads its slot through hip::LoadDispatchSlot
+        run: >-
+          cmake -DSOURCE=projects/clr/hipamd/src/hip_table_interface.cpp
+          -P projects/hrr/tests/unit/check_dispatch_readers.cmake
+
+      # setarch -R: GCC's TSan runtime aborts at startup under high-entropy ASLR.
+      - name: The load races HRR's slot store cleanly under ThreadSanitizer
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O1 -g -pthread -fsanitize=thread \
+            -I projects/clr/hipamd/src \
+            projects/hrr/tests/unit/hrr_dispatch_load_tsan_test.cc -o hrr-unit-tests-tsan
+          setarch "$(uname -m)" -R ./hrr-unit-tests-tsan
