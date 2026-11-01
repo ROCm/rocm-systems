@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -31,7 +32,12 @@
 
 #include "lib/common/logging.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+
+#include <algorithm>
 #include <cstdint>
+#include <vector>
 
 using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
 using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
@@ -39,6 +45,71 @@ using DeviceThreadTracer   = rocprofiler::thread_trace::DeviceThreadTracer;
 namespace
 {
 using parameter_pack = rocprofiler::thread_trace::thread_trace_parameter_pack;
+
+// SQTT traces WGP target_cu (a CU on GFX9) of shader array 0 on every selected
+// shader engine, and a WGP that is not available never runs waves. A negative
+// target_cu selects the first index available on every selected shader engine,
+// or else the one available on the most of them. Warns about selected shader
+// engines where the final target_cu is not available.
+void
+resolve_target_cu(const rocprofiler_agent_t& agent, parameter_pack& pack)
+{
+    const auto* bitmap = rocprofiler::agent::get_cu_bitmap(agent.id);
+    if(bitmap == nullptr)
+    {
+        if(pack.target_cu < 0)
+        {
+            ROCP_WARNING << fmt::format("CU bitmap of agent {} ({}) is not available; using "
+                                        "thread trace target_cu=1",
+                                        agent.node_id,
+                                        agent.name);
+            pack.target_cu = 1;
+        }
+        return;
+    }
+
+    // Selected shader engines described by the bitmap
+    auto           selected_se = std::vector<uint32_t>{};
+    const uint32_t num_se      = std::min(bitmap->num_xcc * bitmap->num_se, 64u);
+    for(uint32_t se = 0; se < num_se; ++se)
+        if((pack.shader_engine_mask & (uint64_t{1} << se)) != 0) selected_se.emplace_back(se);
+
+    const auto is_available = [bitmap](uint32_t se, int64_t cu) {
+        return bitmap->is_wgp_active(
+            se / bitmap->num_se, se % bitmap->num_se, 0, static_cast<uint32_t>(cu));
+    };
+    const auto count_available = [&](int64_t cu) {
+        return std::count_if(selected_se.begin(), selected_se.end(), [&](uint32_t se) {
+            return is_available(se, cu);
+        });
+    };
+
+    if(pack.target_cu < 0)
+    {
+        pack.target_cu = 0;
+        for(int64_t cu = 1; cu <= 0xF; ++cu)
+            if(count_available(cu) > count_available(pack.target_cu)) pack.target_cu = cu;
+        ROCP_INFO << fmt::format("Thread trace selected target_cu={} on agent {} ({})",
+                                 pack.target_cu,
+                                 agent.node_id,
+                                 agent.name);
+    }
+
+    auto unavailable_se = std::vector<uint32_t>{};
+    for(auto se : selected_se)
+        if(!is_available(se, pack.target_cu)) unavailable_se.emplace_back(se);
+
+    if(unavailable_se.empty()) return;
+
+    ROCP_WARNING << fmt::format(
+        "Thread trace target_cu={} on agent {} ({}) selects a WGP that is not available on "
+        "shader engine(s) [{}]; no wave data will be collected from them. Select an available "
+        "WGP with target_cu, or a negative target_cu to select one automatically.",
+        pack.target_cu,
+        agent.node_id,
+        agent.name,
+        fmt::join(unavailable_se, ", "));
+}
 
 rocprofiler_status_t
 build_pack_from_array(parameter_pack&                             pack,
@@ -59,7 +130,9 @@ build_pack_from_array(parameter_pack&                             pack,
 
         switch(param.type)
         {
-            case ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU:
+                pack.target_cu = static_cast<int64_t>(param.value);
+                break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK:
                 pack.shader_engine_mask = param.value;
                 break;
@@ -128,6 +201,8 @@ build_pack_from_array(parameter_pack&                             pack,
         }
     }
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    resolve_target_cu(*agent, pack);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
