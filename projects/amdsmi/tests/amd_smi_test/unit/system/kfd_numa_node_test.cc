@@ -138,4 +138,23 @@ TEST(SystemUnit, KfdNodeInitializeFindsCpuIoLink) {
   EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_PCIEXPRESS);
 }
 
+// amdsmi_get_pcie_info() relies on this type to tell an xGMI host link from PCIe.
+TEST(SystemUnit, KfdNodeInitializeFindsXgmiCpuIoLink) {
+  ScopedTempDir root;
+  ASSERT_FALSE(root.path().empty());
+  ScopedKfdRootOverride kfd_root_override(root.path().string());
+
+  WriteGpuId(root.path(), 1, 23456);
+  WriteNodeProperties(root.path(), 1);
+  WriteIoLink(root.path(), 1, 0, /*node_to=*/0, amd::smi::IOLINK_TYPE_XGMI, /*weight=*/15);
+  WriteGpuId(root.path(), 0, 0);  // CPU node
+
+  amd::smi::KFDNode node(1);
+  ASSERT_EQ(node.Initialize(), 0);
+
+  EXPECT_EQ(node.numa_node_number(), 0u);
+  EXPECT_EQ(node.numa_node_weight(), 15u);
+  EXPECT_EQ(node.numa_node_type(), amd::smi::IOLINK_TYPE_XGMI);
+}
+
 }  // namespace
