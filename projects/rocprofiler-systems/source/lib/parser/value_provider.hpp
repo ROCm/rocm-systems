@@ -20,8 +20,9 @@ namespace rocprofsys::parser
  * Supplies the allowed values for a parameter whose schema names a provider.
  *
  * choices() and default_value() describe the catalog. accepts() checks one
- * textual value, including a separator-joined list. The built-in catalogs are
- * the ROCm domain, runtime, and GPU metric names the runtime accepts. A
+ * textual value. A list is split on space, comma, semicolon, colon, tab, and
+ * newline, and each name is compared exactly. The built-in catalogs are the
+ * ROCm domain, runtime, and GPU metric names the runtime accepts. A
  * hardware-counter name is any non-empty text.
  */
 class value_provider_interface
@@ -44,9 +45,11 @@ public:
 
     /// @return true when @p value is allowed for @p param.
     /// Empty text is allowed for a string or an enumeration_list and refused
-    /// for an enumeration. Without allow_custom, each element must appear in
-    /// choices(). With allow_custom, a list only requires non-empty elements,
-    /// and one enumeration value may be any non-empty text.
+    /// for an enumeration. A list is split on space, comma, semicolon, colon,
+    /// tab, and newline. Consecutive delimiters do not create an empty element.
+    /// Names are compared exactly. Without allow_custom, each element must
+    /// appear in choices(). With allow_custom, a list only requires a real
+    /// element, and one enumeration value may be any non-empty text.
     [[nodiscard]] virtual bool accepts(const schema_param& param,
                                        std::string_view    value) const;
 

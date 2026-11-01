@@ -5,6 +5,7 @@
 #include "parser/schema.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -17,35 +18,70 @@ namespace rocprofsys::parser
 {
 namespace
 {
+// Same delimiter set tracing_config uses for ROCPROFSYS_ROCM_DOMAINS.
+constexpr std::string_view k_list_delimiters = " ,;:\t\n";
+
 bool
 is_listed(const std::vector<std::string>& choices, std::string_view value)
 {
     return std::ranges::find(choices, value) != choices.end();
 }
 
-bool
-every_element_present(std::string_view value, std::string_view separator)
+[[nodiscard]] bool
+contains_delimiter(std::string_view value)
 {
-    const auto parts = split_list(value, separator).value_or(std::vector<std::string>{});
-    return std::ranges::all_of(
-        parts, [](const std::string& element) { return !element.empty(); });
+    return value.find_first_of(k_list_delimiters) != std::string_view::npos;
+}
+
+std::vector<std::string>
+split_provider_list(std::string_view value)
+{
+    std::vector<std::string> parts;
+    std::size_t              begin = 0;
+    while(begin < value.size())
+    {
+        begin = value.find_first_not_of(k_list_delimiters, begin);
+        if(begin == std::string_view::npos)
+        {
+            break;
+        }
+        const auto end = value.find_first_of(k_list_delimiters, begin);
+        const auto count =
+            end == std::string_view::npos ? std::string_view::npos : end - begin;
+        const auto token = value.substr(begin, count);
+        if(!token.empty())
+        {
+            parts.emplace_back(token);
+        }
+        if(end == std::string_view::npos)
+        {
+            break;
+        }
+        begin = end;
+    }
+    return parts;
 }
 
 bool
-elements_are_listed(const std::vector<std::string>& choices, std::string_view value,
-                    std::string_view separator)
+every_element_present(std::string_view value)
 {
-    if(separator.empty())
+    if(value.empty())
     {
-        return is_listed(choices, value);
+        return true;
     }
-    const auto parts = split_list(value, separator).value_or(std::vector<std::string>{});
+    return !split_provider_list(value).empty();
+}
+
+bool
+elements_are_listed(const std::vector<std::string>& choices, std::string_view value)
+{
+    const auto parts = split_provider_list(value);
     if(parts.empty())
     {
         return is_listed(choices, value);
     }
     return std::ranges::all_of(parts, [&choices](const std::string& element) {
-        return !element.empty() && is_listed(choices, element);
+        return is_listed(choices, element);
     });
 }
 }  // namespace
@@ -53,15 +89,13 @@ elements_are_listed(const std::vector<std::string>& choices, std::string_view va
 bool
 value_provider_interface::accepts(const schema_param& param, std::string_view value) const
 {
-    const auto separator = list_separator(param);
-    const bool is_list   = param.type == param_type::enumeration_list ||
-                         (param.type == param_type::string &&
-                          value.find(separator) != std::string_view::npos);
+    const bool is_list = param.type == param_type::enumeration_list ||
+                         (param.type == param_type::string && contains_delimiter(value));
     if(param.allow_custom)
     {
         if(is_list)
         {
-            return every_element_present(value, separator);
+            return every_element_present(value);
         }
         return param.type == param_type::string || !value.empty();
     }
@@ -70,8 +104,7 @@ value_provider_interface::accepts(const schema_param& param, std::string_view va
         return param.type != param_type::enumeration;
     }
     const auto available = choices(param);
-    return is_list ? elements_are_listed(available, value, separator)
-                   : is_listed(available, value);
+    return is_list ? elements_are_listed(available, value) : is_listed(available, value);
 }
 
 bool

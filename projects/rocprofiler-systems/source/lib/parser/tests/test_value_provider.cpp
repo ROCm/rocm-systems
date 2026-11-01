@@ -99,7 +99,23 @@ TEST(parser_value_provider, builtins_accept_known_names_and_lists)
     ASSERT_NE(runtime, nullptr);
     EXPECT_TRUE(runtime->accepts(runtimes, "mpi;openmp"));
     EXPECT_TRUE(runtime->accepts(runtimes, ""));
-    EXPECT_FALSE(runtime->accepts(runtimes, "mpi;;openmp"));
+    EXPECT_TRUE(runtime->accepts(runtimes, "mpi;;openmp"));
+}
+
+TEST(parser_value_provider, lists_split_on_runtime_delimiters_and_match_exactly)
+{
+    value_provider_registry registry;
+    install_builtins(registry);
+    const auto* domains = registry.find("rocm_domains_sdk");
+    ASSERT_NE(domains, nullptr);
+    const auto param = domain_param();
+
+    EXPECT_TRUE(domains->accepts(param, "hip_runtime_api kernel_dispatch"));
+    EXPECT_TRUE(domains->accepts(param, "hip_runtime_api;kernel_dispatch"));
+    EXPECT_TRUE(domains->accepts(param, "hip_runtime_api:kernel_dispatch"));
+    EXPECT_TRUE(domains->accepts(param, "hip_runtime_api\tkernel_dispatch"));
+    EXPECT_FALSE(domains->accepts(param, "HIP_API"));
+    EXPECT_FALSE(domains->accepts(param, "hip_api, not_a_domain"));
 }
 
 TEST(parser_value_provider, gpu_metrics_use_the_runtime_names)
