@@ -166,6 +166,10 @@ GFX1151 = GfxTarget(name="gfx1151", major=11, minor=5, stepping=1, xnack=_U)
 GFX1152 = GfxTarget(name="gfx1152", major=11, minor=5, stepping=2, xnack=_U)
 GFX1153 = GfxTarget(name="gfx1153", major=11, minor=5, stepping=3, xnack=_U)
 
+# -- GFX11.7 (iGPU) --
+GFX1170 = GfxTarget(name="gfx1170", major=11, minor=7, stepping=0, xnack=_U)
+GFX1171 = GfxTarget(name="gfx1171", major=11, minor=7, stepping=1, xnack=_U)
+
 # -- GFX12.0 (RDNA 4) --
 GFX1200 = GfxTarget(name="gfx1200", major=12, minor=0, stepping=0, xnack=_U)
 GFX1201 = GfxTarget(name="gfx1201", major=12, minor=0, stepping=1, xnack=_U)
@@ -387,6 +391,20 @@ BUNDLE_GFX1153 = TargetBundle(
     llvm_generic=None,
     members=(GFX1153,),
 )
+BUNDLE_GFX1170 = TargetBundle(
+    key="gfx1170",
+    level=_TARGET,
+    display_name="gfx1170",
+    llvm_generic=None,
+    members=(GFX1170,),
+)
+BUNDLE_GFX1171 = TargetBundle(
+    key="gfx1171",
+    level=_TARGET,
+    display_name="gfx1171",
+    llvm_generic=None,
+    members=(GFX1171,),
+)
 BUNDLE_GFX1200 = TargetBundle(
     key="gfx1200",
     level=_TARGET,
@@ -481,6 +499,14 @@ BUNDLE_GFX115X = TargetBundle(
     members=(GFX1150, GFX1151, GFX1152, GFX1153),
 )
 
+BUNDLE_GFX117X = TargetBundle(
+    key="gfx117x",
+    level=_SF,
+    display_name="GFX11.7",
+    llvm_generic="gfx11-7-generic",
+    members=(GFX1170, GFX1171),
+)
+
 # gfx12-generic covers gfx1200, gfx1201 only (not gfx1250+).
 BUNDLE_GFX12_0 = TargetBundle(
     key="gfx12_0",
@@ -544,13 +570,25 @@ BUNDLE_GFX10 = TargetBundle(
     ),
 )
 
-# gfx11-generic covers all of GFX11 (both 11.0 and 11.5).
+# gfx11-generic covers GFX11.0 and GFX11.5 only; GFX11.7 carries its own
+# gfx11-7-generic, so the family generic does not span every member.
 BUNDLE_GFX11 = TargetBundle(
     key="gfx11",
     level=_F,
     display_name="RDNA3",
     llvm_generic="gfx11-generic",
-    members=(GFX1100, GFX1101, GFX1102, GFX1103, GFX1150, GFX1151, GFX1152, GFX1153),
+    members=(
+        GFX1100,
+        GFX1101,
+        GFX1102,
+        GFX1103,
+        GFX1150,
+        GFX1151,
+        GFX1152,
+        GFX1153,
+        GFX1170,
+        GFX1171,
+    ),
 )
 
 BUNDLE_GFX12 = TargetBundle(
@@ -596,6 +634,8 @@ ALL_TARGETS: tuple[GfxTarget, ...] = (
     GFX1151,
     GFX1152,
     GFX1153,
+    GFX1170,
+    GFX1171,
     GFX1200,
     GFX1201,
     GFX1250,
@@ -618,6 +658,7 @@ ALL_SUB_FAMILIES: tuple[TargetBundle, ...] = (
     BUNDLE_GFX10_3,
     BUNDLE_GFX110X,
     BUNDLE_GFX115X,
+    BUNDLE_GFX117X,
     BUNDLE_GFX12_0,
     BUNDLE_GFX12_5,
 )
@@ -626,7 +667,7 @@ ALL_SUB_FAMILIES: tuple[TargetBundle, ...] = (
 _FAMILY_TO_SUB_FAMILIES: dict[str, tuple[TargetBundle, ...]] = {
     "gfx9": (BUNDLE_GFX9_0, BUNDLE_GFX9_4, BUNDLE_GFX9_5),
     "gfx10": (BUNDLE_GFX10_1, BUNDLE_GFX10_3),
-    "gfx11": (BUNDLE_GFX110X, BUNDLE_GFX115X),
+    "gfx11": (BUNDLE_GFX110X, BUNDLE_GFX115X, BUNDLE_GFX117X),
     "gfx12": (BUNDLE_GFX12_0, BUNDLE_GFX12_5),
 }
 
@@ -635,6 +676,7 @@ _FAMILY_TO_SUB_FAMILIES: dict[str, tuple[TargetBundle, ...]] = {
 _BUNDLE_KEY_ALIASES: dict[str, str] = {
     "gfx11_0": "gfx110x",
     "gfx11_5": "gfx115x",
+    "gfx11_7": "gfx117x",
 }
 
 
