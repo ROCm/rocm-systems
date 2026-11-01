@@ -935,6 +935,9 @@ graph:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations; gfx1201 (amd_windows) fails: launch_and_read() == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged"
     tags: [exec]
+  Unit_hipGraphExecBatchMemOpNodeSetParams_LayoutChange:
+    <<: *level_default
+    tags: [exec, synchronization, memory]
   Unit_hipGraphAddBatchMemOpNode_NegativeTsts:
     <<: *level_default
     tags: [node]

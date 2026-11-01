@@ -2437,60 +2437,11 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
       const size_t newPacketCount = newPackets.size();
 
       if (newPacketCount != oldPacketCount) {
-        const size_t rangeIdx = it->second;
-        const int64_t packetDelta =
-            static_cast<int64_t>(newPacketCount) - static_cast<int64_t>(oldPacketCount);
-
-        ClPrint(
-            amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
-            "[hipGraph] Packet count change for node (type=%d): %zu -> %zu packets (delta=%ld)",
-            node->GetType(), oldPacketCount, newPacketCount, packetDelta);
-
-        if (packetDelta > 0) {
-          // Insert additional packet slots at the end of this node's range
-          const size_t insertPos = range.startIndex + oldPacketCount;
-          packetBatch.dispatchPackets.insert(packetBatch.dispatchPackets.begin() + insertPos,
-                                             static_cast<size_t>(packetDelta), nullptr);
-          packetBatch.dispatchKernelNames.insert(
-              packetBatch.dispatchKernelNames.begin() + insertPos,
-              static_cast<size_t>(packetDelta), nullptr);
-          if (packetBatch.dispatchMetadataPackets.size() >= insertPos) {
-            packetBatch.dispatchMetadataPackets.insert(
-                packetBatch.dispatchMetadataPackets.begin() + insertPos,
-                static_cast<size_t>(packetDelta), nullptr);
-          }
-        } else {
-          // Negative packetDelta, remove excess packet slots from the end of this node's range
-          const size_t removePos = range.startIndex + newPacketCount;
-          const size_t removeCount = oldPacketCount - newPacketCount;
-
-          // Validate bounds before erasing
-          if (removePos + removeCount > packetBatch.dispatchPackets.size()) {
-            ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                    "[hipGraph] Invalid packet removal bounds: pos=%zu, count=%zu, size=%zu",
-                    removePos, removeCount, packetBatch.dispatchPackets.size());
-            return hipErrorInvalidValue;
-          }
-
-          packetBatch.dispatchPackets.erase(
-              packetBatch.dispatchPackets.begin() + removePos,
-              packetBatch.dispatchPackets.begin() + removePos + removeCount);
-          packetBatch.dispatchKernelNames.erase(
-              packetBatch.dispatchKernelNames.begin() + removePos,
-              packetBatch.dispatchKernelNames.begin() + removePos + removeCount);
-          if (packetBatch.dispatchMetadataPackets.size() >= removePos + removeCount) {
-            packetBatch.dispatchMetadataPackets.erase(
-                packetBatch.dispatchMetadataPackets.begin() + removePos,
-                packetBatch.dispatchMetadataPackets.begin() + removePos + removeCount);
-          }
-        }
-
-        // Update this node's packet count and adjust startIndex for all subsequent nodes
-        range.packetCount = newPacketCount;
-        for (size_t i = rangeIdx + 1; i < packetBatch.nodeRanges.size(); ++i) {
-          packetBatch.nodeRanges[i].startIndex = static_cast<size_t>(
-              static_cast<int64_t>(packetBatch.nodeRanges[i].startIndex) + packetDelta);
-        }
+        // Completion patches belong to the segment's final packet, not to a
+        // packet index. A layout change can move that packet (e.g. inserting a
+        // publication barrier) or remove it. Recapture all batches and rebuild
+        // the sync plan before any stale packet/flat-buffer pointers are used.
+        return rebuildPackets();
       }
 
       // Metadata-prefetch packets are kept parallel to dispatchPackets; the vector is
