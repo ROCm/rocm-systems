@@ -331,6 +331,105 @@ TEST(DecoderSmokeTest, Gfx1201DppCndmaskUsesTrue16SuffixesWithoutOpSel) {
                                  "row_mask:0xf bank_mask:0xf");
 }
 
+TEST(DecoderSmokeTest, Gfx1201ClassifiesControlAndTranscendentalPredicates) {
+  struct TestCase {
+    uint32_t word;
+    const char *mnemonic;
+    bool writes_pc;
+    bool terminates;
+    bool transcendental;
+    bool suspends;
+  };
+  constexpr TestCase cases[] = {
+      {0xBE850087u, "s_mov_b32", false, false, false, false},
+      {0xBFA00001u, "s_branch", true, false, false, false},
+      {0xBE804800u, "s_setpc_b64", true, false, false, false},
+      {0xBFB00000u, "s_endpgm", true, true, false, false},
+      // Trap entry and return carry TRAP_CONTROL, not a control-flow flag.
+      {0xBF900000u, "s_trap", true, false, false, false},
+      {0xBE804A00u, "s_rfe_b64", true, false, false, false},
+      {0xBF830001u, "s_sleep", false, false, false, true},
+      {0x7E0C6700u, "v_sqrt_f32", false, false, true, false},
+      {0xD6800000u, "v_s_exp_f32", false, false, true, false},
+      {0x4A040101u, "v_add_nc_u32", false, false, false, false},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    const uint32_t words[] = {test_case.word, 0, 0, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
+    EXPECT_EQ(inst->writes_pc(), test_case.writes_pc);
+    EXPECT_EQ(inst->is_program_terminator(), test_case.terminates);
+    EXPECT_EQ(inst->is_transcendental(), test_case.transcendental);
+    EXPECT_EQ(inst->suspends_wave(), test_case.suspends);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx1201ClassifiesExecutionBlocks) {
+  using amdgpu::ExecutionBlock;
+  struct TestCase {
+    std::array<uint32_t, 4> words;
+    const char *mnemonic;
+    ExecutionBlock block;
+  };
+  const TestCase cases[] = {
+      {{0xBE850087u}, "s_mov_b32", ExecutionBlock::SALU},
+      {{0xBFC00000u}, "s_wait_loadcnt", ExecutionBlock::SALU},
+      {{0xBF94FFFFu}, "s_barrier_wait", ExecutionBlock::SALU},
+      {{0x4A040101u}, "v_add_nc_u32", ExecutionBlock::VALU},
+      {{0x7E0C6700u}, "v_sqrt_f32", ExecutionBlock::VALU},
+      {{0xCA500501u, 0x00000903u}, "v_dual_cndmask_b32", ExecutionBlock::VALU},
+      {{0xBFA00001u}, "s_branch", ExecutionBlock::BRANCH},
+      {{0xBE804800u}, "s_setpc_b64", ExecutionBlock::BRANCH},
+      {{0xBFB00000u}, "s_endpgm", ExecutionBlock::BRANCH},
+      {{0xF40001C0u, 0xF8000000u}, "s_load_b32", ExecutionBlock::SMEM},
+      // Scalar cache maintenance carries no memory-issue metadata.
+      {{0xF4042000u, 0u}, "s_dcache_inv", ExecutionBlock::SMEM},
+      {{0xEE050000u, 4u, 0u}, "global_load_b32", ExecutionBlock::VMEM},
+      {{0xD8D80000u, 0x01000000u}, "ds_load_b32", ExecutionBlock::LDS},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test_case.words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
+    EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
+  }
+}
+
+TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampAndTrapBlocks) {
+  using amdgpu::ExecutionBlock;
+  struct TestCase {
+    uint32_t word;
+    const char *mnemonic;
+    ExecutionBlock block;
+  };
+  constexpr TestCase cases[] = {
+      // SMEM-encoded and returned through the scalar memory path.
+      {0xC0900000u, "s_memtime", ExecutionBlock::SMEM},
+      {0xBF920000u, "s_trap", ExecutionBlock::BRANCH},
+      {0xBE801F00u, "s_rfe_b64", ExecutionBlock::BRANCH},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.mnemonic);
+    const uint32_t words[] = {test_case.word, 0, 0, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->mnemonic().starts_with(test_case.mnemonic));
+    EXPECT_EQ(inst->amdgpu_execution_block(), test_case.block);
+  }
+}
+
 TEST(DecoderSmokeTest, DppControlNamesFollowIsaDialect) {
   struct TestCase {
     rj_code_arch_t arch;

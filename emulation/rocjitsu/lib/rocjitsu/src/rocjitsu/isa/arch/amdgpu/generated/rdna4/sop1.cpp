@@ -1930,6 +1930,7 @@ SRfeB64Sop1::SRfeB64Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= TRAP_CONTROL;
 }
 
 namespace detail {
@@ -2072,6 +2073,7 @@ SSleepVarSop1::SSleepVarSop1(const MachineInst *inst)
     ssrc0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= SUSPENDS_WAVE;
 }
 
 namespace detail {
