@@ -1163,6 +1163,20 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
     return (it != clonedNodes_.end()) ? it->second : nullptr;
   }
 
+  //! A node of this instantiated graph, paired with the exec object that owns its
+  //! segment/packet state. For a top-level node that is this graphExec; for a node
+  //! inside a child graph it is the ChildGraphNode holding that node.
+  struct ResolvedExecNode {
+    GraphNode* node = nullptr;
+    GraphExecBase* owner = nullptr;
+    explicit operator bool() const { return node != nullptr; }
+  };
+
+  //! Translate a caller-visible node handle into this exec's corresponding node,
+  //! descending through child graphs. Returns an empty result if the node is not
+  //! part of the graph this exec was instantiated from.
+  ResolvedExecNode ResolveClonedNode(Node node);
+  
   std::vector<Node>& GetNodes() { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
@@ -1442,7 +1456,7 @@ class ChildGraphNode : public GraphNode, public GraphExecSegmented {
  protected:
   // Copy Constructor. This is protected to prevent accidental copies causing unexpected behaviors.
   ChildGraphNode(const ChildGraphNode& rhs) : GraphNode(rhs), GraphExecSegmented() {
-    rhs.Graph::clone(this);
+    rhs.Graph::clone(this, /*clonesNodes=*/true);
     graphCaptureStatus_ = rhs.graphCaptureStatus_;
   }
 
