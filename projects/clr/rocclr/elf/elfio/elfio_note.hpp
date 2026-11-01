@@ -24,6 +24,8 @@ THE SOFTWARE.
 #ifndef ELFIO_NOTE_HPP
 #define ELFIO_NOTE_HPP
 
+#include <cstring>
+
 namespace amd {
 namespace ELFIO {
 
@@ -54,34 +56,33 @@ template <class S> class note_section_accessor_template {
   //------------------------------------------------------------------------------
   bool get_note(Elf_Word index, Elf_Word& type, std::string& name, void*& desc,
                 Elf_Word& descSize) const {
-    if (index >= note_section->get_size()) {
+    if (index >= note_start_positions.size()) {
       return false;
     }
 
-    const char* pData = note_section->get_data() + note_start_positions[index];
-    int align = sizeof(Elf_Word);
-
-    const endianess_convertor& convertor = elf_file.get_convertor();
-    type = convertor(*(const Elf_Word*)(pData + 2 * align));
-    Elf_Word namesz = convertor(*(const Elf_Word*)(pData));
-    descSize = convertor(*(const Elf_Word*)(pData + sizeof(namesz)));
-    Elf_Xword max_name_size = note_section->get_size() - note_start_positions[index];
-    if (namesz < 1 || namesz > max_name_size || namesz + descSize > max_name_size) {
+    const char* data = note_section->get_data();
+    const Elf_Xword data_size = note_section->get_size();
+    note_record record;
+    // The section may have changed since its note offsets were collected.
+    if (!read_note(data, data_size, note_start_positions[index], record)) {
       return false;
     }
-    name.assign(pData + 3 * align, namesz - 1);
-    if (0 == descSize) {
-      desc = 0;
-    } else {
-      desc = const_cast<char*>(pData + 3 * align + ((namesz + align - 1) / align) * align);
-    }
 
+    name.assign(record.name, record.name_size);
+    type = record.type;
+    descSize = record.descriptor_size;
+    desc = const_cast<char*>(record.descriptor);
     return true;
   }
 
   //------------------------------------------------------------------------------
   void add_note(Elf_Word type, const std::string& name, const void* desc, Elf_Word descSize) {
     const endianess_convertor& convertor = elf_file.get_convertor();
+
+    // A record without descriptor data must not claim a descriptor.
+    if (desc == nullptr) {
+      descSize = 0;
+    }
 
     int align = sizeof(Elf_Word);
     Elf_Word nameLen = (Elf_Word)name.size() + 1;
@@ -104,34 +105,86 @@ template <class S> class note_section_accessor_template {
       }
     }
 
-    note_start_positions.push_back(note_section->get_size());
-    note_section->append_data(buffer);
+    // Records start on a 4-byte boundary, even when the existing data does not
+    // end on one.
+    constexpr Elf_Xword word_size = sizeof(Elf_Word);
+    const Elf_Xword current_size = note_section->get_size();
+    const Elf_Xword padding = (word_size - current_size % word_size) % word_size;
+    note_section->append_data(std::string(static_cast<size_t>(padding), '\0') + buffer);
+    if (current_size == scanned_size) {
+      // The existing data decoded completely, so the new record simply follows it.
+      note_start_positions.push_back(current_size);
+      scanned_size = current_size + buffer.size();
+    } else {
+      // The appended bytes may complete a record the scan stopped at, so rescan to
+      // keep indices consistent with a fresh accessor.
+      process_section();
+    }
   }
 
  private:
+  struct note_record {
+    Elf_Word type;
+    const char* name;
+    Elf_Word name_size;
+    const char* descriptor;
+    Elf_Word descriptor_size;
+    Elf_Xword total_size;
+  };
+
+  static Elf_Xword padded_size(Elf_Word size) {
+    constexpr Elf_Xword alignment = sizeof(Elf_Word);
+    return (static_cast<Elf_Xword>(size) + alignment - 1) / alignment * alignment;
+  }
+
+  // Decode one complete record. Scanning and lookup share these checks.
+  bool read_note(const char* data, Elf_Xword data_size, Elf_Xword position,
+                 note_record& record) const {
+    constexpr Elf_Xword header_size = 3 * sizeof(Elf_Word);
+    if (data == nullptr || position > data_size || header_size > data_size - position) {
+      return false;
+    }
+
+    Elf_Word header[3];
+    std::memcpy(header, data + position, sizeof(header));
+    const endianess_convertor& convertor = elf_file.get_convertor();
+    const Elf_Word namesz = convertor(header[0]);
+    const Elf_Word descsz = convertor(header[1]);
+    const Elf_Xword padded_name = padded_size(namesz);
+    const Elf_Xword padded_desc = padded_size(descsz);
+    const Elf_Xword remaining = data_size - position - header_size;
+    if (padded_name > remaining || padded_desc > remaining - padded_name) {
+      return false;
+    }
+
+    const char* name = data + position + header_size;
+    // Some producers omit the owner's terminator; keep the full name then.
+    const bool terminated = namesz != 0 && name[namesz - 1] == '\0';
+    record.type = convertor(header[2]);
+    record.name = name;
+    record.name_size = terminated ? namesz - 1 : namesz;
+    record.descriptor = descsz == 0 ? nullptr : name + padded_name;
+    record.descriptor_size = descsz;
+    record.total_size = header_size + padded_name + padded_desc;
+    return true;
+  }
+
   //------------------------------------------------------------------------------
   void process_section() {
-    const endianess_convertor& convertor = elf_file.get_convertor();
-    const char* data = note_section->get_data();
-    Elf_Xword size = note_section->get_size();
-    Elf_Xword current = 0;
-
     note_start_positions.clear();
-
-    // Is it empty?
-    if (0 == data || 0 == size) {
+    scanned_size = 0;
+    if (note_section == nullptr) {
       return;
     }
-
-    int align = sizeof(Elf_Word);
-    while (current + 3 * align <= size) {
+    const char* data = note_section->get_data();
+    const Elf_Xword data_size = note_section->get_size();
+    Elf_Xword current = 0;
+    note_record record;
+    while (read_note(data, data_size, current, record)) {
       note_start_positions.push_back(current);
-      Elf_Word namesz = convertor(*(const Elf_Word*)(data + current));
-      Elf_Word descsz = convertor(*(const Elf_Word*)(data + current + sizeof(namesz)));
-
-      current += 3 * sizeof(Elf_Word) + ((namesz + align - 1) / align) * align +
-                 ((descsz + align - 1) / align) * align;
+      current += record.total_size;
     }
+    scanned_size = current;
   }
 
   //------------------------------------------------------------------------------
@@ -139,6 +192,7 @@ template <class S> class note_section_accessor_template {
   const elfio& elf_file;
   S* note_section;
   std::vector<Elf_Xword> note_start_positions;
+  Elf_Xword scanned_size = 0;  // End of the records decoded by process_section()
 };
 
 using note_section_accessor = note_section_accessor_template<section>;
