@@ -26,6 +26,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/precedence.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/value_provider.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
@@ -38,6 +39,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/precedence.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/value_provider.hpp
 )
 
 get_filename_component(PARSER_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
@@ -56,6 +58,17 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-fmt>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
 )
+
+if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
+    target_compile_definitions(
+        rocprofiler-systems-parser
+        PRIVATE ROCPROFSYS_PARSER_HAS_SDK_BACKEND
+    )
+    target_link_libraries(
+        rocprofiler-systems-parser
+        PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+    )
+endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

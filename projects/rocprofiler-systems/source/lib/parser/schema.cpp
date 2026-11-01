@@ -48,6 +48,23 @@ constraint_refs_are_usable(const schema& catalog, const constraint& item)
         });
     return params_known && terms_fit && forced_fit;
 }
+
+bool
+accepts_provider(const schema_param& param)
+{
+    const auto provider = param.value_provider.value_or(std::string{});
+    if(!param.value_provider.has_value())
+    {
+        return true;
+    }
+    if(provider.empty())
+    {
+        return false;
+    }
+    const auto type = param.type;
+    return type == param_type::string || type == param_type::enumeration ||
+           type == param_type::enumeration_list;
+}
 }  // namespace
 
 std::string_view
@@ -172,7 +189,7 @@ schema::add_param(schema_param param)
     const bool env_taken = param.env && m_env_index.contains(param.env->name);
     const bool arg_taken = param.arg && m_arg_index.contains(param.arg->name);
     if(param.id.empty() || empty_env || empty_arg || m_param_index.contains(param.id) ||
-       env_taken || arg_taken)
+       env_taken || arg_taken || !accepts_provider(param))
     {
         return false;
     }
