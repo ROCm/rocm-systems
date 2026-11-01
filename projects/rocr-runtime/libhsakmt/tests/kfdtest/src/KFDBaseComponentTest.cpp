@@ -23,6 +23,8 @@
 
 #include <syslog.h>
 
+#include <atomic>
+
 #include "KFDBaseComponentTest.hpp"
 #include "KFDTestUtil.hpp"
 
