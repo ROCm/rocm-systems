@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+#
+# See LICENSE.txt for license information
+"""Build RCCL at rocm-systems commits and compare them with rccl_ab_perf.
+
+  rccl-ab build <commit>...                 build missing libraries into rccl-libs/
+  rccl-ab run <A> <B> [options] -- <args>   build A and B if needed, then run
+                                            rccl_ab_perf (optionally under mpirun)
+  rccl-ab list                              show prebuilt libraries
+
+Each library is installed to rccl-libs/<full-commit-hash>/ by running that
+commit's own projects/rccl/install.sh in a sparse git worktree, so every
+commit is built with the defaults it shipped with. Libraries that already
+exist are reused.
+"""
+
+import argparse
+import datetime
+import fcntl
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+TOOL_DIR = Path(__file__).resolve().parent
+RCCL_TESTS = TOOL_DIR.parent.parent
+DEFAULT_TOOL = RCCL_TESTS / "build" / "rccl_ab_perf"
+
+
+def libs_dir():
+    return Path(os.environ.get("RCCL_LIBS_DIR", RCCL_TESTS / "rccl-libs")).resolve()
+
+
+def git(repo, *args, check=True, capture=True):
+    res = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
+    if check and res.returncode != 0:
+        msg = (res.stderr or "").strip()
+        sys.exit(f"rccl-ab: git {' '.join(args)} failed: {msg}")
+    return res
+
+
+def repo_root(args):
+    if args.repo:
+        return Path(args.repo).resolve()
+    res = git(RCCL_TESTS, "rev-parse", "--show-toplevel")
+    return Path(res.stdout.strip())
+
+
+def resolve_commit(repo, rev):
+    res = git(
+        repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}", check=False
+    )
+    if res.returncode != 0:
+        print(f"rccl-ab: {rev} not found locally, fetching from origin ...", flush=True)
+        git(repo, "fetch", "--quiet", "origin", rev, check=False, capture=False)
+        res = git(
+            repo, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}", check=False
+        )
+        if res.returncode != 0:
+            sys.exit(
+                f"rccl-ab: cannot resolve '{rev}' to a commit in {repo} "
+                "(fetch it first, or pass a full hash)"
+            )
+    return res.stdout.strip()
+
+
+def built_lib(full):
+    lib = libs_dir() / full / "lib" / "librccl.so"
+    return lib if lib.exists() else None
+
+
+def detect_targets():
+    for cmd in (["rocm_agent_enumerator"], ["offload-arch"]):
+        for exe in (
+            shutil.which(cmd[0]),
+            os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "bin", cmd[0]),
+        ):
+            if not exe or not os.path.exists(exe):
+                continue
+            try:
+                out = subprocess.run(
+                    [exe], capture_output=True, text=True, timeout=60
+                ).stdout
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            archs = sorted(
+                {
+                    a.strip()
+                    for a in out.split()
+                    if a.startswith("gfx") and a != "gfx000"
+                }
+            )
+            if archs:
+                return archs
+    sys.exit("rccl-ab: could not detect the local GPU architecture; pass --targets")
+
+
+def run_logged(cmd, cwd, log_path, verbose):
+    """Run cmd, writing all output to log_path; print coarse progress unless verbose."""
+    progress_re = re.compile(r"^\[\s*(\d+)%\]|^\[(\d+)/(\d+)\]")
+    last_pct = -10
+    with open(log_path, "a") as log:
+        log.write(f"$ {shlex.join(cmd)}\n")
+        log.flush()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            bufsize=1,
+        )
+        for line in proc.stdout:
+            log.write(line)
+            if verbose:
+                sys.stdout.write(line)
+                continue
+            m = progress_re.match(line)
+            if m:
+                pct = (
+                    int(m.group(1))
+                    if m.group(1)
+                    else 100 * int(m.group(2)) // int(m.group(3))
+                )
+                if pct >= last_pct + 10:
+                    last_pct = pct - pct % 10
+                    print(f"    {pct:3d}%", flush=True)
+        return proc.wait()
+
+
+def remove_worktree(repo, path):
+    if path.exists():
+        git(repo, "worktree", "remove", "--force", str(path), check=False)
+        shutil.rmtree(path, ignore_errors=True)
+    git(repo, "worktree", "prune", check=False)
+
+
+def build_one(repo, rev, args):
+    full = resolve_commit(repo, rev)
+    root = libs_dir()
+    dest = root / full
+    if built_lib(full) and not args.force:
+        print(f"rccl-ab: {full[:12]} already built: {dest}")
+        return dest / "lib" / "librccl.so"
+
+    for sub in (".src", ".locks", ".logs"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    lock = open(root / ".locks" / f"{full}.lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        if built_lib(full) and not args.force:
+            print(f"rccl-ab: {full[:12]} already built: {dest}")
+            return dest / "lib" / "librccl.so"
+
+        subject = git(repo, "log", "-1", "--format=%s", full).stdout.strip()
+        targets = args.targets.split(",") if args.targets else detect_targets()
+        src = root / ".src" / full
+        partial = root / f"{full}.partial"
+        log_path = root / ".logs" / f"{full}.log"
+        log_path.write_text("")
+        print(
+            f'rccl-ab: building {full[:12]} "{subject}"\n'
+            f"         targets {';'.join(targets)}, log {log_path}",
+            flush=True,
+        )
+
+        remove_worktree(repo, src)
+        git(
+            repo,
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            "--no-checkout",
+            str(src),
+            full,
+        )
+        git(src, "sparse-checkout", "init", "--cone")
+        git(src, "sparse-checkout", "set", "projects/rccl", "shared")
+        git(src, "reset", "--quiet", "--hard", full)
+        rccl_src = src / "projects" / "rccl"
+        if not (rccl_src / "install.sh").exists():
+            sys.exit(f"rccl-ab: {full[:12]} has no projects/rccl/install.sh")
+
+        shutil.rmtree(partial, ignore_errors=True)
+        cmd = [
+            "./install.sh",
+            "--prefix",
+            str(partial),
+            "--amdgpu_targets",
+            ";".join(targets),
+            "-j",
+            str(args.jobs),
+        ] + shlex.split(args.install_args)
+        start = datetime.datetime.now()
+        rc = run_logged(cmd, rccl_src, log_path, args.verbose)
+        elapsed = datetime.datetime.now() - start
+        if rc != 0 or not (partial / "lib" / "librccl.so").exists():
+            with open(log_path, errors="replace") as f:
+                tail = f.readlines()[-40:]
+            sys.stdout.write("".join(tail))
+            sys.exit(
+                f"rccl-ab: build of {full[:12]} failed (exit {rc}); "
+                f"log {log_path}, sources kept in {src}"
+            )
+
+        info = {
+            "commit": full,
+            "subject": subject,
+            "built": start.isoformat(timespec="seconds"),
+            "build_seconds": int(elapsed.total_seconds()),
+            "targets": ";".join(targets),
+            "install_args": args.install_args,
+            "rocm_path": os.environ.get("ROCM_PATH", "/opt/rocm"),
+        }
+        (partial / "BUILD_INFO").write_text(
+            "".join(f"{k}={v}\n" for k, v in info.items())
+        )
+        shutil.rmtree(dest, ignore_errors=True)
+        partial.rename(dest)
+        if not args.keep_src:
+            remove_worktree(repo, src)
+        print(f"rccl-ab: built {full[:12]} in {elapsed}: {dest}", flush=True)
+        return dest / "lib" / "librccl.so"
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def lib_for(repo, spec, args):
+    """A filesystem path is used as-is; anything else is treated as a commit."""
+    if os.path.exists(spec):
+        return Path(spec).resolve()
+    if args.no_build:
+        full = resolve_commit(repo, spec)
+        lib = built_lib(full)
+        if not lib:
+            sys.exit(f"rccl-ab: {spec} is not built and --no-build was given")
+        return lib
+    return build_one(repo, spec, args)
+
+
+def ensure_tool(args):
+    tool = Path(args.tool) if args.tool else DEFAULT_TOOL
+    src = TOOL_DIR / "rccl_ab_perf.cc"
+    if args.tool:
+        if not tool.exists():
+            sys.exit(f"rccl-ab: {tool} does not exist")
+        return tool
+    if not tool.exists() or tool.stat().st_mtime < src.stat().st_mtime:
+        print("rccl-ab: building rccl_ab_perf ...", flush=True)
+        subprocess.run(
+            ["make", "-C", str(TOOL_DIR), f"BUILDDIR={tool.parent}"], check=True
+        )
+    return tool
+
+
+def cmd_build(args):
+    repo = repo_root(args)
+    for rev in args.commits:
+        build_one(repo, rev, args)
+
+
+def cmd_run(args):
+    repo = repo_root(args)
+    lib_a = lib_for(repo, args.commit_a, args)
+    lib_b = lib_for(repo, args.commit_b, args)
+    tool = ensure_tool(args)
+    cmd = (
+        shlex.split(args.launcher)
+        + [str(tool), "-A", str(lib_a), "-B", str(lib_b)]
+        + args.perf_args
+    )
+    print(f"rccl-ab: {shlex.join(cmd)}", flush=True)
+    os.execvp(cmd[0], cmd)
+
+
+def cmd_list(args):
+    root = libs_dir()
+    entries = (
+        sorted(
+            p
+            for p in root.glob("*")
+            if p.is_dir()
+            and not p.name.startswith(".")
+            and (p / "lib" / "librccl.so").exists()
+        )
+        if root.exists()
+        else []
+    )
+    if not entries:
+        print(f"no libraries in {root}")
+        return
+    for d in entries:
+        info = {}
+        if (d / "BUILD_INFO").exists():
+            for line in (d / "BUILD_INFO").read_text().splitlines():
+                k, _, v = line.partition("=")
+                info[k] = v
+        print(
+            f"{d.name[:12]:12s}  {info.get('built', '?'):19s}  "
+            f"{info.get('targets', '?'):10s}  {info.get('subject', '')}"
+        )
+
+
+def main():
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--repo", help="rocm-systems checkout (default: the repo containing rccl-tests)"
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add_build_opts(sp):
+        sp.add_argument(
+            "--targets", help="comma-separated GPU archs (default: local GPUs)"
+        )
+        sp.add_argument(
+            "-j", "--jobs", type=int, default=os.cpu_count(), help="parallel build jobs"
+        )
+        sp.add_argument(
+            "--install-args",
+            default="",
+            help='extra install.sh arguments, e.g. "--cmake-options -DFOO=ON"',
+        )
+        sp.add_argument(
+            "--force", action="store_true", help="rebuild even if already built"
+        )
+        sp.add_argument(
+            "--keep-src", action="store_true", help="keep the build worktree"
+        )
+        sp.add_argument(
+            "-v", "--verbose", action="store_true", help="echo the full build output"
+        )
+
+    b = sub.add_parser("build", help="build RCCL at one or more commits")
+    b.add_argument("commits", nargs="+")
+    add_build_opts(b)
+    b.set_defaults(func=cmd_build)
+
+    r = sub.add_parser(
+        "run",
+        help="build A and B if needed, then run rccl_ab_perf",
+        description="Anything after '--' is passed to rccl_ab_perf, e.g. "
+        "rccl-ab run abc123 def456 --launcher 'mpirun -np 8' -- "
+        "-b 1K -e 1G -f 2",
+    )
+    r.add_argument(
+        "commit_a", help="baseline commit (or path to librccl.so / install dir)"
+    )
+    r.add_argument(
+        "commit_b", help="commit to compare (or path to librccl.so / install dir)"
+    )
+    r.add_argument("--launcher", default="", help='command prefix, e.g. "mpirun -np 8"')
+    r.add_argument(
+        "--tool", help="rccl_ab_perf binary (default: rccl-tests/build/rccl_ab_perf)"
+    )
+    r.add_argument(
+        "--no-build", action="store_true", help="fail instead of building missing libs"
+    )
+    add_build_opts(r)
+    r.set_defaults(func=cmd_run)
+
+    l = sub.add_parser("list", help="list prebuilt libraries")
+    l.set_defaults(func=cmd_list)
+
+    argv = sys.argv[1:]
+    perf_args = []
+    if "--" in argv:
+        split = argv.index("--")
+        argv, perf_args = argv[:split], argv[split + 1 :]
+    args = p.parse_args(argv)
+    args.perf_args = perf_args
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
