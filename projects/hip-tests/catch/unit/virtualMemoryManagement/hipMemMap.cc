@@ -769,6 +769,7 @@ HIP_TEST_CASE(Unit_hipMemMap_Capture) {
 
   CTX_CREATE();
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkVMMSupported(device);
 
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
