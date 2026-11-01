@@ -3034,6 +3034,17 @@ void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, si
     }
     return;
   }
+  // gfx1250 DPX: cap the block at 192. A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS,
+  // already in nThreads, still wins. PAT is excluded: its maxThreads entry is
+  // unset on HIP, and the kernel's compute thread is NCCL_MAX_NTHREADS-1, so a
+  // short block leaves the workers spinning. SPX stays on the 256 path below.
+  // RCCL_THREADS_PER_BLOCK is handled above. Channel selection still uses maxThreads.
+  if (info->algorithm != NCCL_ALGO_PAT && comm->archName && IsArchMatch(comm->archName, "gfx1250") &&
+      comm->archThresholds != nullptr &&
+      comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX)) {
+    nThreads = std::min(nThreads, RCCL_GFX1250_DEFAULT_NTHREADS);
+    return;
+  }
   if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.
   if (info->algorithm == NCCL_ALGO_PAT) nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
   if (comm->nNodes == 1)
