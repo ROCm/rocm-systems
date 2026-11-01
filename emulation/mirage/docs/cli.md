@@ -672,20 +672,14 @@ mirage emulators [-l|--long]
 $ mirage emulators
 NAME          INSTALLED  SUPPORTED  DESCRIPTION
 rocjitsu*     yes        yes        ROCm just-in-time GPU emulator (cycle-accurate or functional)
-rocjitsu-dbt  yes        no         rocjitsu dynamic binary translation: run a GPU's code objects on a different physical GPU by translating them at load time (e.g. gfx1250 on gfx950)
 
 * = default emulator for new profiles
 ```
 
-That is a default build; `hotswap` appears too in a build that enables its
-feature (see [`building.md`](building.md)).
-
 **Installed** is about this machine's files, **supported** about its
 hardware, and they are independent. `rocjitsu` emulates in software and is
 supported anywhere — which is the whole point, and why no physical GPU is
-needed. `rocjitsu-dbt` translates onto a real GPU instead, so it is
-installed here but unsupported, and says why. `-l` gives the reason in
-each case:
+needed. `-l` gives the reason:
 
 ```sh
 $ mirage emulators -l
@@ -1220,8 +1214,8 @@ One place it does outrank everything: `mirage cleanup` consults *every*
 engine installed on the machine, but a set `MIRAGE_CONTAINER_PROVIDER`
 names one deliberately and is then the only one asked.
 
-Finding an emulator's runtime library has its own set: `ROCJITSU_LIB` and
-`ROCJITSU_HOOKS_LIB` name a library file outright, `LD_LIBRARY_PATH`,
+Finding an emulator's runtime library has its own set: `ROCJITSU_LIB`
+names a library file outright, `LD_LIBRARY_PATH`,
 `ROCM_HOME` and `ROCM_PATH` are searched, and the ROCm SDK install root
 reported by `rocm-sdk path --root` is consulted after them. Note that the
 ROCm variables do not outrank everything: a `<prefix>/lib` beside the
