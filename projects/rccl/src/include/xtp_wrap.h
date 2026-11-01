@@ -28,13 +28,20 @@ struct ncclComm;
 // uses: "PXN_DISABLE", "P2P_NET_CHUNKSIZE", "UNROLL_FACTOR",
 // "THREADS_PER_BLOCK".
 //
-// Binds the comm on first use and caches the binding for its lifetime, so the
-// caller does not have to order an explicit bind against init. Returns false
-// and leaves *out untouched whenever no profile supplies the knob.
+// Binds the comm on first use and re-binds when the topology descriptor
+// changes. Returns false and leaves *out untouched whenever no profile
+// supplies the knob.
 //
 // Note this does NOT consult the environment: env-wins is the caller's to
 // enforce, because only the caller knows which variable overrides which knob.
 bool rcclXtpClassAInt(struct ncclComm* comm, const char* key, int64_t* out);
+
+// Re-bind once nNodes, localRanks, and NVL domain counts are known. PXN is
+// decided in ncclTopoComputePaths, before those fields exist, so the first
+// bind is incomplete. Later knob lookups re-bind on their own; 1-node jobs
+// never consult P2P_NET_CHUNKSIZE, so they need this explicit refresh.
+// No-op when RCCL_XTP is unset. Safe on a comm that was never bound.
+void rcclXtpRefreshComm(struct ncclComm* comm);
 
 // Release the binding held for comm. Safe on a comm that was never bound.
 void rcclXtpCommFree(struct ncclComm* comm);

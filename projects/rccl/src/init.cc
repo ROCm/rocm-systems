@@ -2279,6 +2279,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->localRanks = comm->nodeRanks[comm->node].localRanks;
 
   NCCLCHECKGOTO(initNvlDomainInfo(comm), ret, fail);
+  // nNodes, localRanks, and NVL domain counts are known now. PXN already bound
+  // with those at 0; refresh so IntelliTune sees the complete comm, including
+  // on 1-node where P2P_NET_CHUNKSIZE is never consulted.
+  rcclXtpRefreshComm(comm);
 
   TRACE(NCCL_INIT, "hostHash[%d] %lx localRank %d localRanks %d localRank0 %d", rank, comm->peerInfo[rank].hostHash,
         comm->localRank, comm->localRanks, comm->localRankToRank[0]);
