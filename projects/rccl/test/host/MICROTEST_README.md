@@ -598,6 +598,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `net_ib/common.cc` and host helpers in `net_ib/common.h`
     (`NET_IB_COMMON_CC_PATH`, from `net_ib/common-test.cc`); suites
     `NetIbCommonMicrotest.*`.
+  - `net_ib/connect.cc` (`NET_IB_CONNECT_CC_PATH`, from
+    `net_ib/connect-test.cc`); suites `NetIbConnectMicrotest.*`.
+  - `net_ib/p2p.cc` and host helpers in `net_ib/p2p.h`
+    (`NET_IB_P2P_CC_PATH`, from `net_ib/p2p-test.cc`); suites
+    `NetIbP2pMicrotest.*`.
+  - `net_ib/p2p_resiliency.cc` (`NET_IB_P2P_RESILIENCY_CC_PATH`, from
+    `net_ib/p2p-resiliency-test.cc`); suites
+    `NetIbP2pResiliencyMicrotest.*`.
+  - `net_ib/p2p_resiliency_recovery.cc`
+    (`NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH`, from
+    `net_ib/p2p-resiliency-recovery-test.cc`); suites
+    `NetIbP2pResiliencyRecoveryMicrotest.*`.
   - `net_ib/init.cc` (`NET_IB_INIT_CC_PATH`, from `net_ib/init-test.cc`);
     suites `NetIbInitMicrotest.*`.
   - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
@@ -617,13 +629,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `rma_socket_setup.cc` (`RMA_SOCKET_SETUP_CC_PATH`, from
     `rma-socket-setup-test.cc`); suites `RmaSocketSetupMicrotest.*`.
 
-  The `net_ib` tests share three headers in `transport/net_ib/`:
+  The `net_ib` tests share five headers in `transport/net_ib/`:
   `NetIbGlobals.h` (`NetIbResetGlobals()`, which every fixture's TearDown
   calls because the device tables are process-wide), `NetIbSupportSeams.h`
   (the `gdr.cc` capability probes a unit is renamed onto, since `gdr-test.cc`
-  compiles the real `gdr.cc`) and `NetIbDmaBufProbe.h`. Device discovery runs
-  against `IbVerbsWorld.h`, the fake HCAs and verbs libraries that
-  `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
+  compiles the real `gdr.cc`), `NetIbDmaBufProbe.h`, `NetIbQpSeams.h`
+  (`connect.cc`'s QP state helpers and `clockNano`, renamed onto for the same
+  reason by the `p2p_resiliency*.cc` tests) and `NetIbResiliencyScene.h` (a
+  send/recv comm pair with failover contexts on two `IbVerbsScene` devices).
+  Device discovery runs against `IbVerbsWorld.h`, the fake HCAs and verbs
+  libraries that `FakeIbWorld` in `net-ib-cast-test-common.h` also builds on.
 
 - **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
   `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
@@ -811,7 +826,9 @@ symbol.
 | `src/misc/gdr_peermem.cc` | `fakes/gdr_peermem_fakes.cc` |
 | `src/misc/gdr_probe.cc` (targets that do not compile the real file) | `fakes/gdr_probe_fakes.cc` |
 | file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
+| HSA runtime diagnostics | `fakes/hsa_fakes.cc` |
 | `src/misc/ibvwrap.cc` (verbs wrappers) | `fakes/ibvwrap_fakes.cc` |
+| libibverbs provider ops behind the `ibvwrap.h` inline post/poll wrappers | `IbVerbsScene.h` (one fake device per test) |
 | `src/misc/ionicdvwrap.cc` | `fakes/ionicdvwrap_fakes.cc` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
@@ -845,6 +862,7 @@ symbol.
 | `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
+| `src/transport/net_ib/wqe_lat_mon.cc` | `fakes/transport_net_ib_wqe_lat_fakes.{h,cc}` |
 | `src/transport/net_ib_cast/capability.cc` | `fakes/net_ib_cast_capability_fakes.cc` |
 | `src/transport/net_ib_cast/common.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_common_fakes.cc` |
 | `src/transport/net_ib_cast/{connect,p2p,p2p_resiliency,p2p_resiliency_recovery,qp_sharing,scheduler}.cc` (targets that do not compile the real file) | `fakes/net_ib_cast_<file>_fakes.cc` |
