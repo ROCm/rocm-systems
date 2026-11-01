@@ -35,6 +35,11 @@ struct ncclRawTaskColl {
   struct ncclDevRedOpFull opDev;
   cudaStream_t stream;
   ncclCollConfig_t collConfig;
+  // RCCL: accumulator of ncclAllReduceWithBias, and the chunk/slice steps the API entry picked for this
+  // node layout and arch (they must match the Simple-protocol variant the kernel selects via rcclUseOneSlice).
+  void const* acc;
+  int chunkSteps;
+  int sliceSteps;
 };
 
 // AllGatherV inputs built by merging broadcast raw tasks during pre-tuning.
