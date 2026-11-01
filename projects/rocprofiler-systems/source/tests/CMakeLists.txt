@@ -26,6 +26,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
+    $<TARGET_OBJECTS:parser-tests>
     $<TARGET_OBJECTS:lib-components-tests>
     $<TARGET_OBJECTS:rocprofiler-sdk-components-unit-tests>
     $<TARGET_OBJECTS:buffered-domains-unit-tests>
@@ -75,6 +76,7 @@ target_link_libraries(
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
         rocprofiler-systems::rocprofiler-systems-binary
+        rocprofiler-systems::rocprofiler-systems-parser
         $<$<TARGET_EXISTS:rocprofiler-systems-bin-common>:rocprofiler-systems::rocprofiler-systems-bin-common>
         rocprofiler-systems::rocprofiler-systems-interface-library
 )
