@@ -120,6 +120,14 @@ macro_rules! impl_cstr_getters {
 
 impl fmt::Display for AmdsmiStatusT {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[cfg(feature = "dynamic-loading")]
+        match self {
+            Self::AmdsmiStatusFailLoadModule => return f.write_str("Failed to load libamd_smi.so"),
+            Self::AmdsmiStatusFailLoadSymbol => {
+                return f.write_str("Failed to load an AMD SMI symbol")
+            }
+            _ => {}
+        }
         let status_str = crate::amdsmi_status_code_to_string(*self)
             .unwrap_or("An unknown error occurred".to_string());
         write!(f, "{}", status_str)
