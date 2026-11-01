@@ -902,6 +902,9 @@ class VirtualGPU : public device::VirtualDevice {
   std::string AnalyzeAqlQueueBody() const;
   bool ForceIrq() const { return GetStateFlag(kForceIrq); }
 
+  //! WDDM advances the OS fence only on EOP interrupts and needs a host thread for GPU doorbells
+  bool IsWddmAqlQueue() const { return IS_WINDOWS || dev().IsDxgAql(); }
+
   //! SDMA engine affinity management
   uint32_t AssignedSdmaEngine() const {
     return assigned_sdma_engine_;

@@ -748,6 +748,12 @@ class Device : public NullDevice {
   //! Returns true if PM4 emulation is enabled
   bool IsPm4Emulation() const { return pm4_emulation_; }
 
+  //! Returns true on a WDDM (DXG) device, on Windows or WSL
+  bool IsDxg() const { return dxg_; }
+
+  //! Returns true on a WDDM (DXG) device submitting native AQL, on Windows or WSL
+  bool IsDxgAql() const { return dxg_aql_; }
+
   //! Waits until all VirtualGPU QueuedAsyncHandlers are zero (30s timeout).
   void WaitForHsaAsyncHandlersIdle() override;
 
@@ -887,6 +893,8 @@ class Device : public NullDevice {
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
+  bool dxg_ = false;            //!< WDDM (DXG) device
+  bool dxg_aql_ = false;        //!< WDDM (DXG) device with native AQL submission
   uint32_t numHwPipes_;  //!< Number of hardware pipes
 
   //! SDMA engine allocator for per-stream affinity
