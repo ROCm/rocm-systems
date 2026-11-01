@@ -202,7 +202,7 @@ class MemoryAsyncCopy : public TestBase {
   };
 
   static const std::vector<Granularity> Granularities;
-  static const int kMaxCopySize;
+  static const size_t kMaxCopySize;
 
   // @Brief: Helper function to initialize Granularities based on emulator mode
   static std::vector<Granularity> initGranularities();
@@ -218,6 +218,16 @@ class MemoryAsyncCopy : public TestBase {
 
   // @Brief: Run for Benchmark mode with verification
   virtual void RunBenchmarkWithVerification(Transaction *t);
+
+  // Bytes the run records and DisplayBenchmark prints. Both must use this
+  // so the table does not read past the recorded samples.
+  hsa_status_t BenchmarkAllocLimit(const Transaction* t, size_t* size) const;
+
+  // Host pool rejected one request, or the machine is out of memory.
+  static bool HostPoolShort(hsa_status_t err) {
+    return err == HSA_STATUS_ERROR_INVALID_ALLOCATION ||
+           err == HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   // @Brief: Dispaly Benchmark result
   void DisplayBenchmark(Transaction *t) const;
