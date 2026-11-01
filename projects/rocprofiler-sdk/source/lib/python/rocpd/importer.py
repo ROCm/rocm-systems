@@ -1,7 +1,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,12 +27,12 @@
 #
 #
 
-import sys
 import os
 import sqlite3
+import sys
 
 from .schema import RocpdSchema
-from . import libpyrocpd
+from . import bindings
 from .features import get_supported_features_from_version
 
 __all__ = ["RocpdImportData", "execute_statement"]
@@ -40,6 +40,7 @@ __all__ = ["RocpdImportData", "execute_statement"]
 
 def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     from . import package
+    from . import bindings
 
     _input = package.flatten_rocpd_yaml_input_file(
         _input, skip_auto_merge=skip_auto_merge, automerge_limit=automerge_limit
@@ -48,15 +49,19 @@ def internal_init(_input, _output, skip_auto_merge, automerge_limit):
     assert _check_for_valid_dbs(
         _input
     ), "RocpdImportData error, invalid SQLite3 database provided"
-    _connection = libpyrocpd.connect(_output)
+    _connection = bindings.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
     _schema_version = _fetch_version_info(_connection)
     _create_meta_views(_connection, _schema_version)
+    if not bindings.supported():
+        from . import functions
+
+        functions.create(_connection)
     return (_connection, _input, _table_info, _schema_version)
 
 
-class RocpdImportData(libpyrocpd.RocpdImportData):
+class RocpdImportData(bindings.RocpdImportData):
 
     def __init__(
         self, input, skip_auto_merge=False, automerge_limit=None, dbname=":memory:"
@@ -70,7 +75,6 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
         else:
-
             if isinstance(input, sqlite3.Connection):
                 raise ValueError(
                     "RocpdImportData does not accept existing sqlite3 connections"
@@ -225,4 +229,4 @@ def _fetch_version_info(connection):
     if len(_versions) != 1:
         raise ValueError(f"Expected exactly one schema version, found: {_versions}")
 
-    return libpyrocpd.schema_version(_versions[0])
+    return bindings.schema_version(_versions[0])
