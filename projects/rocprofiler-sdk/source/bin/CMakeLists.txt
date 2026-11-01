@@ -4,6 +4,10 @@
 
 rocprofiler_activate_clang_tidy()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(rocprofv3-att-gdb)
+endif()
+
 # Adding main rocprofv3
 configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3 @ONLY)
 
