@@ -171,6 +171,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed GPU BDFs and sysfs-based queries when `libdrm_amdgpu` cannot be loaded**.  
+  - Without `libdrm_amdgpu`, as in the manylinux wheel on a system without the distro libdrm, `amdsmi_get_gpu_device_bdf()` returned leftover memory as the BDF with `AMDSMI_STATUS_SUCCESS`, `amdsmi_get_processor_handle_from_bdf()` could not find the GPU, and PCIe, clock, power-management and ECC-block information was unavailable.
+  - The BDF and render node now come from sysfs regardless of libdrm. ASIC, VBIOS, driver, VRAM-usage and virtualization-mode queries still need libdrm and keep returning `AMDSMI_STATUS_NOT_SUPPORTED` without it.
+
+- **Fixed AMD SMI reporting no GPUs when another copy of the library was loaded first**.  
+  - When a different `libamd_smi.so` file was already loaded with `RTLD_GLOBAL`, as PyTorch wheels do, the library's calls to its own functions went to that copy, and `amdsmi_get_processor_handles()` returned no GPUs, so `torch.cuda.device_count()` returned 0.
+  - `libamd_smi.so` is now linked with `-Bsymbolic-functions`, as the pip wheel's library already was, so its internal calls stay within the library.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
