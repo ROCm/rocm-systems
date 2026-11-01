@@ -363,6 +363,36 @@ TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
   }
 }
 
+TEST(ScalarControlTest, OnlySTrapCarriesTheSoftwareTrapFlag) {
+  // The issue loop enters the trap handler on this flag instead of the mnemonic.
+  struct TrapArch {
+    rj_code_arch_t arch;
+    uint32_t trap, nop;
+  };
+  constexpr TrapArch kArches[] = {
+      {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kSTrapSopp, cdna1::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kSTrapSopp, cdna2::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kSTrapSopp, cdna3::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kSTrapSopp, cdna4::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSTrapSopp, cdna5::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kSTrapSopp, rdna1::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kSTrapSopp, rdna2::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kSTrapSopp, rdna3::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kSTrapSopp, rdna3_5::kSNopSopp},
+      {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSTrapSopp, rdna4::kSNopSopp},
+  };
+  for (const auto &arch : kArches) {
+    SCOPED_TRACE(testing::Message() << "arch=" << arch.arch);
+    auto decoder = Decoder::create(arch.arch);
+    for (const auto &[opcode, trap] : {std::pair{arch.trap, true}, std::pair{arch.nop, false}}) {
+      const uint32_t words[] = {0xbf800000u | (opcode << 16) | 7u};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(bool(inst->flags() & SOFTWARE_TRAP), trap) << inst->mnemonic();
+    }
+  }
+}
+
 TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                     ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -4460,7 +4490,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
     cu->write_vgpr(v3, lane, 0xBEEF0007u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
@@ -6367,7 +6397,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
     cu->write_vgpr(v8, lane, 0x55550014u);
   }
 
-  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);

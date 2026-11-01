@@ -2214,7 +2214,7 @@ ComputeUnitCore::issue_decoded_instruction(
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
   // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
   // interrupt message, restores STATUS, and returns through s_rfe_b64.
-  if (std::string_view(inst->mnemonic()) == "s_trap") {
+  if (inst->flags() & SOFTWARE_TRAP) {
     // s_trap bypasses execute_instruction(), but still occupies the adjacent
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
