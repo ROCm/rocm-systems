@@ -15,6 +15,7 @@
 
 #include "../common/DdaIpcTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "fakes/dda_ipc_nranks_fakes.h"
 
 #include DDA_ALLTOALL_IPC_CC_PATH
 
@@ -33,9 +34,10 @@ const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
 // One 512-thread block of 16 B loads covers 8 KiB per peer; below that the kernel stages the copy itself.
 constexpr size_t kSingleBlockFloats = 8192 / 4;
 
-template <bool kStagingCopyInKernel>
+// NRANKS 8 is the compile-time clique kernel; NRANKS 0 is the runtime-rank kernel every other count uses.
+template <bool kStagingCopyInKernel, int NRANKS = 8>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, 8, false, kStagingCopyInKernel>);
+  return KernelPtr(&dda::common::ddaAllToAllIpc<int8_t, NRANKS, false, kStagingCopyInKernel>);
 }
 
 class DdaAlltoallIpcMicrotest : public ::testing::Test {
@@ -51,6 +53,7 @@ class DdaAlltoallIpcMicrotest : public ::testing::Test {
   void TearDown() override {
     ResetDdaCollSeams();
     ResetHipFakes();
+    g_ddaIpcNranksRelaxed = false;
   }
 
   ncclComm& comm() { return mock_.comm; }
@@ -177,7 +180,7 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunchin
   EXPECT_TRUE(g_ddaLaunches.empty());
 }
 
-TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) {
+TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankRankCountAndBarrier) {
   for (size_t count : {size_t{8}, kSingleBlockFloats * 2}) {
     g_ddaLaunches.clear();
     comm().addonStopEvent = kStopEvent;
@@ -189,13 +192,14 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) 
     EXPECT_EQ(launch.stopEvent, kStopEvent) << "count " << count;
     EXPECT_EQ(launch.sharedMemBytes, 0u);
     EXPECT_EQ(launch.flags, 0u);
-    ASSERT_EQ(launch.args.size(), 6u);
+    ASSERT_EQ(launch.args.size(), 7u);
     EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<size_t>(2), count * 2);
     EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
     EXPECT_EQ(launch.Arg<int>(4), 4);
-    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+    EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
+    EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
     EXPECT_EQ(comm().addonStopEvent, nullptr);
   }
 }
@@ -220,6 +224,117 @@ TEST_F(DdaAlltoallIpcMicrotest, Blocks_SizedOnBytesNotElements) {
 TEST_F(DdaAlltoallIpcMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+}
+
+// RCCL_DDA_NRANKS_RELAX: 8 ranks keep the compile-time kernel, any other 2..8 count takes the runtime-rank one, in
+// both staging modes. Forcing either instantiation for every count, or dropping the rank-count argument, fails one
+// of these.
+TEST_F(DdaAlltoallIpcMicrotest, Eligible_RelaxAdmitsTwoToEightRanksOnly) {
+  g_ddaIpcNranksRelaxed = true;
+  for (int nRanks = 2; nRanks <= 8; ++nRanks) {
+    comm().nRanks = nRanks;
+    EXPECT_TRUE(Eligible(4)) << "nRanks " << nRanks;
+  }
+  for (int nRanks : {1, 9}) {
+    comm().nRanks = nRanks;
+    EXPECT_FALSE(Eligible(4)) << "nRanks " << nRanks;
+  }
+}
+
+TEST_F(DdaAlltoallIpcMicrotest, Launch_EightRanksKeepTheCompileTimeKernelWithOrWithoutRelax) {
+  ASSERT_EQ(comm().nRanks, 8);
+  for (bool relaxed : {false, true}) {
+    g_ddaLaunches.clear();
+    g_ddaIpcNranksRelaxed = relaxed;
+    ASSERT_EQ(Run(kSingleBlockFloats - 4), ncclSuccess) << "relaxed " << relaxed;
+    ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess) << "relaxed " << relaxed;
+    ASSERT_EQ(g_ddaLaunches.size(), 2u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<true, 8>())) << "relaxed " << relaxed;
+    EXPECT_EQ(g_ddaLaunches[1].kernel, (Kernel<false, 8>())) << "relaxed " << relaxed;
+    for (const DdaLaunch& launch : g_ddaLaunches) {
+      ASSERT_EQ(launch.args.size(), 7u);
+      EXPECT_EQ(launch.Arg<int>(5), 8);
+    }
+  }
+}
+
+TEST_F(DdaAlltoallIpcMicrotest, Launch_RelaxedFourRanksStageASingleBlockPayloadInTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().rank = 1;
+  ASSERT_EQ(Run(kSingleBlockFloats - 4), ncclSuccess);
+  EXPECT_TRUE(copies_.empty());
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, (Kernel<true, 0>()));
+  EXPECT_EQ(launch.grid.x, 1u);
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  ASSERT_EQ(launch.args.size(), 7u);
+  EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<size_t>(2), (kSingleBlockFloats - 4) * 4);
+  EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
+  EXPECT_EQ(launch.Arg<int>(4), 1);
+  EXPECT_EQ(launch.Arg<int>(5), 4);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
+}
+
+// The pre-kernel copy stages only the live ranks' chunks, then launches the runtime-rank kernel.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_RelaxedFourRanksStageALargerPayloadBeforeTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().rank = 1;
+  ASSERT_EQ(Run(kSingleBlockFloats), ncclSuccess);
+  ASSERT_EQ(copies_.size(), 1u);
+  EXPECT_EQ(copies_[0].dst, comm().ddaScratch);
+  EXPECT_EQ(copies_[0].src, kSendbuff);
+  EXPECT_EQ(copies_[0].bytes, 4 * kSingleBlockFloats * 4);
+  EXPECT_EQ(copies_[0].kind, hipMemcpyDeviceToDevice);
+  EXPECT_EQ(copies_[0].stream, kStream);
+  EXPECT_EQ(copies_[0].launchesBefore, 0u);
+  ASSERT_EQ(g_ddaLaunches.size(), 1u);
+  const DdaLaunch& launch = g_ddaLaunches[0];
+  EXPECT_EQ(launch.kernel, (Kernel<false, 0>()));
+  ASSERT_EQ(launch.args.size(), 7u);
+  EXPECT_EQ(launch.Arg<size_t>(2), kSingleBlockFloats * 4);
+  EXPECT_EQ(launch.Arg<int>(4), 1);
+  EXPECT_EQ(launch.Arg<int>(5), 4);
+  EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(6), barrier_->barrierHost));
+}
+
+TEST_F(DdaAlltoallIpcMicrotest, Launch_RelaxedEveryOtherCountUsesTheRuntimeRankKernel) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().rank = 0;
+  for (int nRanks = 2; nRanks <= 7; ++nRanks) {
+    g_ddaLaunches.clear();
+    comm().nRanks = nRanks;
+    ASSERT_EQ(Run(16), ncclSuccess) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].kernel, (Kernel<true, 0>())) << "nRanks " << nRanks;
+    ASSERT_EQ(g_ddaLaunches[0].args.size(), 7u);
+    EXPECT_EQ(g_ddaLaunches[0].Arg<int>(5), nRanks);
+  }
+}
+
+// The whole-send-buffer scratch check is sized on the live rank count, not the 8-rank clique.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_RelaxedScratchCheckScalesWithTheRankCount) {
+  g_ddaIpcNranksRelaxed = true;
+  comm().nRanks = 4;
+  comm().ddaScratchBytes = 4 * 64;
+  EXPECT_EQ(Run(16), ncclSuccess);
+  EXPECT_EQ(Run(20), ncclInvalidArgument);
+  EXPECT_EQ(g_ddaLaunches.size(), 1u);
+}
+
+// Refused by the rank gate before the stop event is taken or anything is staged, in either staging mode.
+TEST_F(DdaAlltoallIpcMicrotest, Launch_FourRanksWithoutRelaxAreRefusedWithoutLaunching) {
+  comm().nRanks = 4;
+  EXPECT_FALSE(Eligible(4));
+  EXPECT_EQ(Run(kSingleBlockFloats - 4), ncclInvalidUsage);
+  EXPECT_EQ(Run(kSingleBlockFloats), ncclInvalidUsage);
+  EXPECT_TRUE(g_ddaLaunches.empty());
+  EXPECT_TRUE(copies_.empty());
+  EXPECT_EQ(comm().addonStopEvent, kStopEvent);
 }
 
 }  // namespace

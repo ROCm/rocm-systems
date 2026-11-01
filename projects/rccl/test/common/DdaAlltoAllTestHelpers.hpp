@@ -30,14 +30,26 @@ inline size_t testDdaAlltoAllThreshold(const ncclComm* comm) {
   return rcclDdaEntryThreshold(comm, ncclFuncAlltoAll);
 }
 
+// minRanks defaults to rcclDdaEnabled()'s own default (the full 8-rank clique),
+// matching every pre-existing caller's behavior unchanged. Pass a lower value
+// to exercise the relaxed floor the AlltoAll DDA gates apply when
+// RCCL_DDA_NRANKS_RELAX=1 -- otherwise this mirror always tracked the
+// unconditional 8-rank floor regardless of what the call sites actually pass.
+// This only mirrors the helper-level gate; the live AlltoAll selector's floor
+// is pinned by WrapMicrotestIsolated.SelectAlltoAll_DdaNranksRelaxOpensFourRankFloor
+// (host/wrap-test.cc).
 inline bool testRcclDdaAlltoAllThresholdEnabled(
     const ncclComm* comm,
     size_t count,
-    ncclDataType_t datatype) {
+    ncclDataType_t datatype,
+    int minRanks = nccl_dda_detail::kDdaNranks) {
   return rcclDdaEnabled(
       comm,
       testAlltoAllTotalBytes(count, comm->nRanks, datatype),
-      testDdaAlltoAllThreshold(comm));
+      testDdaAlltoAllThreshold(comm),
+      /*query=*/false,
+      /*prefix=*/nullptr,
+      minRanks);
 }
 
 // Mirrors dda_alltoall_ipc.cu: in-kernel staging copy on single-block launches only.

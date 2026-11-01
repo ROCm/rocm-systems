@@ -10,13 +10,27 @@
 
 #include "nccl.h"
 
+#include "algorithms/dda/ipc/ipc_init.h"
+
 #include <cstdint>
 
 struct ncclComm;
 
-// IPC path (single node, fixed kDdaNranks ranks).
+// IPC path (single node, kDdaNranks ranks by default; any 2..kDdaNranks when relax is set).
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op);
+
+// Single source of "can the IPC tree (two-shot) kernel take this count/nRanks/
+// typeSize combination": count must divide evenly across nRanks, and the
+// resulting per-rank slice must itself be 16-byte aligned, since the tree
+// kernel does 16-byte (uint4) vectorized loads over that slice. Shared by
+// ncclAllReduceDdaIpcEligible() (the caller-facing gate) and the IPC launch
+// path (which is templated on a compile-time NRANKS and so re-derives this
+// independently of the gate rather than trusting it) -- kept as one function
+// so the two cannot drift apart. Declared here so unit tests can exercise it
+// without a GPU; hidden in Release by -fvisibility=hidden, as the rest of the
+// internal surface is.
+bool ncclAllReduceDdaIpcTreeEligible(size_t count, int nRanks, size_t typeSize);
 
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);

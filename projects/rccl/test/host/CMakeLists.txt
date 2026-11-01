@@ -523,6 +523,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
     algorithms/dda/dda-coll-seams.cc
+    fakes/dda_ipc_nranks_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
@@ -907,6 +908,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
   set(TEST_MICRO_DDA_IPC_SOURCE_FILES
     dda-allreduce-ipc-test.cc
+    fakes/dda_ipc_nranks_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
@@ -1049,6 +1051,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/fabric/fabric-gpu-barrier-test.cc
     algorithms/dda/fabric/fabric-init-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
+    algorithms/dda/ipc/ipc-mem-handler-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
@@ -1494,6 +1497,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/VersionInfoTests.cpp
     ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
     ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+    ${RCCL_TEST_DIR}/DdaNranksRelaxConsensusTests.cpp
     RomeTopoConsensusLogTests.cpp
     ${RCCL_TEST_DIR}/MiscTests.cpp
     ${RCCL_TEST_DIR}/VersionGateTests.cpp
@@ -1506,6 +1510,7 @@ function(rccl_standalone_setup)
     ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
     ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
     ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
+    ${RCCL_HIPIFY_DIR}/src/algorithms/dda/ipc/dda_nranks_relax_consensus.cc
   )
 
   target_include_directories(rccl-HostUnitTests PRIVATE
@@ -2453,6 +2458,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
     FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
+    IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # ---------------------------------------------------------------------------

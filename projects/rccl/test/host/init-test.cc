@@ -9835,6 +9835,7 @@ struct Tr_AllGatherInfo {
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
+  bool ddaNranksRelax;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -10504,6 +10505,103 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclInvalidArgument;
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
+// RCCL_DDA_NRANKS_RELAX per-rank agreement check, right after the Rome one above
+// in init.cc. Unlike Rome's, it is gated: only communicators the knob can
+// actually affect (nNodes == 1, and nRanks in [2, kDdaNranks)) run it at all,
+// since outside that range ncclDdaIpcNranksSupported()'s answer does not
+// depend on the env var and a per-rank mismatch there cannot cause ranks to
+// disagree on whether to enter the DDA IPC path.
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesThisRanksValue) {
+  // g_ncclDdaNranksRelaxEnabled defaults to false (ResetNcclStubs), so it alone
+  // would leave "the real read ran and returned false" indistinguishable from
+  // "init.cc:2011 was skipped and the recorder's own false default was never
+  // overwritten." Set it true so the marshalled value can only match if the
+  // real call happened.
+  g_ncclDdaNranksRelaxEnabled = true;
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_EQ(4, g_ncclDdaNranksRelaxConsensusNranks);
+  EXPECT_TRUE(g_ncclDdaNranksRelaxConsensusValue0);
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusHost0.empty());
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesRanksDefaultValue) {
+  // Positive twin of the above: the default-false reading also has to reach the
+  // check, not just the overridden-true one, or the two tests together still
+  // would not distinguish "reads the real value" from "always reports true."
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusValue0);
+}
+
+// The two above only see rank 0's answer from a rank-0 comm, so a lambda that
+// indexed allGather3Data by the self rank instead of its argument would still
+// pass them. Here every peer gathers a distinct relax value and hostname, self
+// is not rank 0, and the check must be handed each peer's own row in order.
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusCheck_SeesEachPeersRow) {
+  constexpr int kSelf = 1;
+  g_ncclDdaNranksRelaxEnabled = true;  // self's own row, left as the real read wrote it
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/kSelf);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c, {}, [](int r, Tr_AllGatherInfo& row) {
+    if (r == kSelf) return;
+    row.ddaNranksRelax = r == 3;  // ranks 0 and 2 disagree with self, rank 3 agrees
+    std::snprintf(row.hostname, sizeof(row.hostname), "dda-peer-%d", r);
+  });
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  ASSERT_EQ(1, g_ncclCheckDdaNranksRelaxConsensusCalls);
+  EXPECT_EQ(4, g_ncclDdaNranksRelaxConsensusNranks);
+  EXPECT_EQ((std::vector<bool>{false, true, false, true}), g_ncclDdaNranksRelaxConsensusValues);
+  ASSERT_EQ(4u, g_ncclDdaNranksRelaxConsensusHosts.size());
+  EXPECT_EQ("dda-peer-0", g_ncclDdaNranksRelaxConsensusHosts[0]);
+  EXPECT_EQ("dda-peer-2", g_ncclDdaNranksRelaxConsensusHosts[2]);
+  EXPECT_EQ("dda-peer-3", g_ncclDdaNranksRelaxConsensusHosts[3]);
+  // Self's slot carries the real getHostName() result, which the test cannot
+  // predict; it only has to be its own, not a copy of some peer's.
+  EXPECT_FALSE(g_ncclDdaNranksRelaxConsensusHosts[kSelf].empty());
+  EXPECT_NE(0u, g_ncclDdaNranksRelaxConsensusHosts[kSelf].rfind("dda-peer-", 0));
+}
+
+// nRanks == kDdaNranks (8): ncclDdaIpcNranksSupported() returns true regardless
+// of RCCL_DDA_NRANKS_RELAX, so a mismatched env var here cannot cause ranks to
+// disagree on the DDA IPC decision -- the gate this test pins exists so
+// comm init is not failed over a variable that could not have mattered.
+TEST_F(InitMicrotest, InitTransportsRank_FullClique_SkipsTheDdaConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/8, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  const auto gathers = Tr_InstallGathers(c);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclCheckDdaNranksRelaxConsensusCalls);
+}
+
+// Multi-node: DDA IPC never activates when nNodes != 1 (checked again wherever
+// it is consulted), so RCCL_DDA_NRANKS_RELAX agreement is likewise irrelevant
+// here regardless of nRanks.
+TEST_F(InitMicrotest, InitTransportsRank_MultiNode_SkipsTheDdaConsensusCheck) {
+  TransportsRankComm c(/*nRanks=*/3, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  std::vector<PeerSpec> specs(3);
+  specs[2].node = 1;  // two ranks on one host, one on another
+  const auto gathers = Tr_InstallGathers(c, specs);
+  EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(0, g_ncclCheckDdaNranksRelaxConsensusCalls);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusFails_PropagatesThatCode) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx900");
+  g_ncclCheckDdaNranksRelaxConsensusResult = ncclInvalidArgument;
   const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
