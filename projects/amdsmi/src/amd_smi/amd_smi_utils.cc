@@ -483,7 +483,7 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string fullpath =
-      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device/ras/features";
+      amd::smi::test_hooks::SysfsDrmRoot() + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 

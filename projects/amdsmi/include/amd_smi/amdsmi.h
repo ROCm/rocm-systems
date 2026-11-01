@@ -1661,6 +1661,9 @@ typedef enum {
 /**
  * @brief Event notification data returned from event notification API
  *
+ * @details The message lists the event's fields as "label: value" pairs. A field the kernel did
+ * not send, as older kernels do for some events, reads "N/A".
+ *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
