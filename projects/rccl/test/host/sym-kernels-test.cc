@@ -36,6 +36,13 @@
 
 #include "SymTdmTestHelpers.h"
 
+// sym_kernels.cc asks for the railed GIN backend; gin_host.cc is not linked into this binary.
+std::function<ncclGinType_t(ncclComm*)> g_railedGinType = [](ncclComm*) { return NCCL_GIN_TYPE_NONE; };
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  *ginType = g_railedGinType(comm);
+  return ncclSuccess;
+}
+
 namespace {
 
 bool KernelBitSet(uint32_t mask, ncclSymkKernelId id) { return (mask >> static_cast<int>(id)) & 1u; }
@@ -367,6 +374,27 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(0));
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_EQ(kmask, 0u);
+}
+
+// Init marks the GIN backend unsupported (Anvil SDMA): the same empty mask as SYM_GIN_KERNELS_ENABLE=0.
+TEST_F(SymKernelMaskTest, NeedGinTrue_GinBackendUnsupported_EverythingCleared) {
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 2;
+    return t;
+  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
+  comm_->symkState.ginBackendUnsupported = true;
+  uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+  EXPECT_EQ(kmask, 0u);
+}
+
+TEST_F(SymKernelMicrotest, GinBackendUnsupported_OnlyForAnvilSdma) {
+  for (ncclGinType_t type : {NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_GIN_TYPE_PROXY, NCCL_GIN_TYPE_NONE}) {
+    ScopedHook railed(g_railedGinType, [type](ncclComm*) { return type; });
+    EXPECT_EQ(ncclSymkGinBackendUnsupported(comm_.get()), type == NCCL_GIN_TYPE_ANVIL_SDMA) << "ginType " << type;
+    EXPECT_EQ(railed.calls, 1);
+  }
 }
 
 TEST_F(SymKernelMaskTest, HasLsaMultimemTrue_STMCKernelSurvives) {

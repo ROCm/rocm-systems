@@ -148,6 +148,19 @@ struct ScopedDir {
   ~ScopedDir() { fs::remove_all(path); }
 };
 
+inline std::vector<uint8_t> read_file(const fs::path& path) {
+  std::ifstream f(path, std::ios::binary);
+  REQUIRE(f.good());
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+}
+
+inline void write_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  f.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(f.good());
+}
+
 inline std::string read_text_file(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
   std::ostringstream ss;
@@ -434,6 +447,45 @@ inline const char* hrr_replay_class_name(HrrReplayClass c) {
     case HrrReplayClass::kUnreplayable: return "UNREPLAYABLE";
   }
   return "?";
+}
+
+// A kernel launch record as capture writes it (v10 layout): `num_args`
+// zero-length arguments (or, with `pointer_args`, one-byte kind-3 arguments with
+// one embedded-pointer offset each), then the pinned host snapshot record `rec` if there is
+// one, cut `cut` bytes short of a whole record. A cut record has no attribute
+// tail, so the event runs out inside the snapshot.
+inline std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
+                                                      const std::vector<uint8_t>& rec,
+                                                      size_t cut = 0,
+                                                      uint16_t num_args = 0,
+                                                      bool pointer_args = false) {
+  std::vector<uint8_t> p(sizeof(hrr_event_header), 0);
+  auto put = [&](const void* d, size_t n) {
+    p.insert(p.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
+  };
+  const uint64_t stream = 0, co_hash[2] = {0, 0};
+  const uint16_t name_len = 1;
+  const uint16_t counts[2] = {num_args, static_cast<uint16_t>(rec.empty() ? 0 : 1)};
+  const uint32_t dims[7] = {1, 1, 1, 1, 1, 1, 0}, attrs[2] = {0, 0};
+  put(&stream, 8); put(&name_len, 2); put("k", 1); put(co_hash, 16);
+  put(dims, sizeof(dims)); put(counts, sizeof(counts));
+  for (uint16_t i = 0; i < num_args; ++i) {
+    const uint8_t kind = pointer_args ? 3 : 0;
+    const uint16_t size = pointer_args ? 1 : 0;
+    put(&kind, 1); put(&size, 2);
+    if (pointer_args) {
+      const uint8_t data = 0;
+      const uint16_t n_ptrs = 1, offset = 0;
+      put(&data, 1); put(&n_ptrs, 2); put(&offset, 2);
+    }
+  }
+  put(rec.data(), rec.size() - cut);
+  if (!cut) put(attrs, sizeof(attrs));
+  auto* h = reinterpret_cast<hrr_event_header*>(p.data());
+  h->event_type     = static_cast<uint16_t>(HRR_API_HIPMODULELAUNCHKERNEL);
+  h->sequence_id    = seq;
+  h->payload_length = static_cast<uint32_t>(p.size());
+  return p;
 }
 
 // Run hrr-playback with stderr merged into the captured output.  The NOOP and

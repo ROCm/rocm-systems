@@ -214,16 +214,17 @@ metadata_init_tracks(std::int64_t _tid)
     }
     auto thread_id = static_cast<std::uint64_t>(t_info->index_data->system_value);
 
-    trace_cache::get_metadata_registry().add_thread_info({ .parent_process_id = getppid(),
-                                                           .process_id        = getpid(),
-                                                           .thread_id         = thread_id,
-                                                           .start   = t_info->get_start(),
-                                                           .end     = t_info->get_stop(),
-                                                           .extdata = "{}" });
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = t_info->get_start(),
+                                          .end               = t_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 
     apply_for_all_thread_names<Category>(_tid, [&](const std::string& _track_name) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = _track_name, .thread_id = thread_id, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(_track_name, thread_id);
     });
 }
 

@@ -40,6 +40,7 @@ using RcclUnitTesting::LogHas;
 class NetIbCastGinMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
+    InstallSucceedingSocketFakes();  // logging reads the peer address
     InitFakeContext(&ctx_, &device_);
     snprintf(device_.name, sizeof(device_.name), "ionic_0");
     pd_.context = &ctx_;
@@ -1116,27 +1117,26 @@ TEST_F(NetIbCastGinTestMicrotest, Test_ErrorCompletion_IsARemoteErrorNamingTheHc
   EXPECT_EQ(done, 0);
 }
 
-// The error report indexes devBases[] with the completion's place in the poll batch, so an error
-// in the second slot reads a device this one-device comm does not have.
-// Pins AICOMRCCL-3095; a fix flips this pin.
-TEST_F(NetIbCastGinTestMicrotest, Test_KnownBug_ErrorInTheSecondCompletionSlotCrashes) {
+// The error report now indexes devBases[] by the request's own device, not by the completion's
+// place in the poll batch, so an error in a later completion slot of a one-device comm is reported
+// cleanly as a remote error instead of crashing. Fixes AICOMRCCL-3095 (ported from net_ib under
+// AICOMRCCL-2750); this flips the former known-bug pin.
+TEST_F(NetIbCastGinTestMicrotest, Test_ErrorInTheSecondCompletionSlot_IsReportedWithoutCrashing) {
+  struct ibv_context hcaCtx {};
+  struct ibv_device hca {};
+  snprintf(hca.name, sizeof(hca.name), "ionic_7");
+  hcaCtx.device = &hca;
+  struct ibv_pd hcaPd {};
+  hcaPd.context = &hcaCtx;
+  send_->devs[0].base.pd = &hcaPd;
   void* a = nullptr;
   void* b = nullptr;
   ASSERT_EQ(IbCastRmaIbProxyIPut(proxyCtx_, 0, 0, &src_, 8, 0, &dst_, 1, 0, &a), ncclSuccess);
   ASSERT_EQ(IbCastRmaIbProxyIPut(proxyCtx_, 0, 0, &src_, 8, 0, &dst_, 1, 0, &b), ncclSuccess);
   Completions({{static_cast<struct ncclIbRequest*>(b), IBV_WC_SUCCESS},
                {static_cast<struct ncclIbRequest*>(b), IBV_WC_REM_ACCESS_ERR}});
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
-  EXPECT_EXIT(
-      {
-        int done = 0;
-        IbCastRmaIbProxyTest(&cComm_, a, &done);
-        exit(0);
-      },
-      // A plain build dies on the signal; under ASan the runtime reports the SEGV and exits non-zero.
-      [](int status) { return WIFSIGNALED(status) ? WTERMSIG(status) == SIGSEGV : WEXITSTATUS(status) != 0; }, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
+  int done = 0;
+  EXPECT_EQ(IbCastRmaIbProxyTest(&cComm_, a, &done), ncclRemoteError);
 }
 
 TEST_F(NetIbCastGinTestMicrotest, Test_ErrorCompletionOnInfiniband_LeavesTheGidsOut) {

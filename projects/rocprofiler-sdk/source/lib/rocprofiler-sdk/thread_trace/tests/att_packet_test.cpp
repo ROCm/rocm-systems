@@ -215,7 +215,7 @@ TEST(thread_trace, resource_mode_configure)
             ASSERT_EQ(status, expected);
             if(status != ROCPROFILER_STATUS_SUCCESS) continue;
 
-            auto check_resources = [&](auto& tracer) {
+            auto check_resources = [&, mode = mode](auto& tracer) {
                 tracer.resource_init();
                 ASSERT_EQ(tracer.get_agents().count(agent_id), 1);
                 const auto& agent_tracer = *tracer.get_agents().at(agent_id);

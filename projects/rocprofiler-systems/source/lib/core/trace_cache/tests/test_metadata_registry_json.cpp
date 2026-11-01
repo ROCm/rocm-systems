@@ -24,6 +24,7 @@ namespace
 {
 using rocprofsys::agent;
 using rocprofsys::trace_cache::metadata_registry;
+using rocprofsys::trace_cache::info::thread;
 
 // Above UINT32_MAX, so 32-bit truncation is caught.
 constexpr std::uint64_t k_start = 1'000'000'000'001'000;
@@ -92,12 +93,14 @@ TEST_F(metadata_registry_json_test_interface, thread_timestamps_survive_round_tr
 {
     metadata_registry saved;
     set_test_process(saved);
-    saved.add_thread_info({ .parent_process_id = k_ppid,
-                            .process_id        = k_pid,
-                            .thread_id         = k_thread_id,
-                            .start             = k_start,
-                            .end               = k_end,
-                            .extdata           = "{}" });
+    saved.ensure_thread(k_thread_id, [] {
+        return thread{ .parent_process_id = k_ppid,
+                       .process_id        = k_pid,
+                       .thread_id         = k_thread_id,
+                       .start             = k_start,
+                       .end               = k_end,
+                       .extdata           = "{}" };
+    });
 
     metadata_registry loaded;
     ASSERT_TRUE(round_trip(saved, loaded));
@@ -113,8 +116,7 @@ TEST_F(metadata_registry_json_test_interface, track_thread_id_survives_round_tri
 {
     metadata_registry saved;
     set_test_process(saved);
-    saved.add_track(
-        { .track_name = "test_track", .thread_id = k_thread_id, .extdata = "{}" });
+    saved.ensure_track("test_track", k_thread_id);
 
     metadata_registry loaded;
     ASSERT_TRUE(round_trip(saved, loaded));
@@ -128,8 +130,7 @@ TEST_F(metadata_registry_json_test_interface, track_without_thread_id_survives_r
 {
     metadata_registry saved;
     set_test_process(saved);
-    saved.add_track(
-        { .track_name = "test_track", .thread_id = std::nullopt, .extdata = "{}" });
+    saved.ensure_track("test_track", std::nullopt);
 
     metadata_registry loaded;
     ASSERT_TRUE(round_trip(saved, loaded));

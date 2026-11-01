@@ -110,6 +110,7 @@ struct ncclSymkDevComm {
 struct ncclSymkState {
   bool initialized;
   bool hasLsaMultimem;
+  bool ginBackendUnsupported;
   int maxGinInboxBlocks;
   struct ncclSymkDevComm kcomm;
 };

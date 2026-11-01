@@ -76,10 +76,10 @@ pub enum NodeKind {
     HostSystem,
     /// OS NUMA domain.
     HostNuma,
-    /// KFD node with no GPU ID.
-    KfdHost,
-    /// KFD node reporting a GPU ID.
-    KfdGpu,
+    /// Driver node with host CPUs and no GPU endpoint.
+    Host,
+    /// Driver node reporting a GPU endpoint, possibly alongside host CPUs.
+    Gpu,
     /// Node reported by another activation driver.
     Other,
 }
@@ -346,8 +346,12 @@ impl TopologySnapshot {
                 ) | (
                     SourceKind::LinuxKfd,
                     NativeNodeId::LinuxKfd(_),
-                    NodeKind::KfdHost | NodeKind::KfdGpu
-                ) | (SourceKind::Driver, NativeNodeId::Driver(_), NodeKind::Other)
+                    NodeKind::Host | NodeKind::Gpu
+                ) | (
+                    SourceKind::Driver,
+                    NativeNodeId::Driver(_),
+                    NodeKind::Host | NodeKind::Gpu | NodeKind::Other
+                )
             )
         });
         if !valid_type
@@ -483,7 +487,7 @@ impl TopologySnapshot {
         Ok(())
     }
 
-    /// Associates CPU facts with an already-validated KFD node.
+    /// Associates CPU facts with a validated activation-driver node.
     pub(crate) fn set_cpu_node(&mut self, node: NodeId, cpu: CpuNodeInfo) -> Result<(), Error> {
         let Some(record) = self.nodes.get_mut(node.0) else {
             return Err(Error::Operation {
@@ -491,7 +495,8 @@ impl TopologySnapshot {
                 detail: "CPU facts have no topology node",
             });
         };
-        if self.sources[record.source.0].kind != SourceKind::LinuxKfd
+        if self.sources[record.source.0].kind == SourceKind::HostOs
+            || !matches!(record.kind, NodeKind::Host | NodeKind::Gpu)
             || cpu.core_count == 0
             || record.cpu.is_some()
         {
@@ -553,7 +558,9 @@ impl TopologySnapshot {
             .filter_map(|attachment| self.nodes.get(attachment.node.0))
     }
 
-    fn native_nodes_for_endpoint(
+    /// Activation-driver nodes attached to this endpoint, excluding passive
+    /// host-locality observations from the host OS.
+    pub fn native_nodes_for_endpoint(
         &self,
         endpoint: &Endpoint,
     ) -> impl Iterator<Item = &TopologyNode> {
@@ -593,14 +600,14 @@ impl TopologySnapshot {
         })
     }
 
-    /// Reported directed route from an endpoint to a KFD host node.
+    /// Reported directed route from an endpoint to its driver's host node.
     #[must_use]
     pub fn route_to_host(&self, from: &Endpoint) -> Option<MemoryLinkInfo> {
         self.routes.iter().rev().find_map(|route| {
             let source = self.nodes.get(route.source.0)?;
             let target = self.nodes.get(route.target.0)?;
             (source.source == target.source
-                && target.kind == NodeKind::KfdHost
+                && target.kind == NodeKind::Host
                 && self
                     .native_nodes_for_endpoint(from)
                     .any(|node| node.id == source.id))
@@ -608,14 +615,14 @@ impl TopologySnapshot {
         })
     }
 
-    /// Reported directed route from a KFD host node to an endpoint.
+    /// Reported directed route from a driver's host node to an endpoint.
     #[must_use]
     pub fn route_from_host(&self, to: &Endpoint) -> Option<MemoryLinkInfo> {
         self.routes.iter().rev().find_map(|route| {
             let source = self.nodes.get(route.source.0)?;
             let target = self.nodes.get(route.target.0)?;
             (source.source == target.source
-                && source.kind == NodeKind::KfdHost
+                && source.kind == NodeKind::Host
                 && self
                     .native_nodes_for_endpoint(to)
                     .any(|node| node.id == target.id))
@@ -708,7 +715,7 @@ mod tests {
             )
             .unwrap();
         let gpu = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(7), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(7), NodeKind::Gpu)
             .unwrap();
         let host_numa = snapshot
             .nodes
@@ -787,13 +794,13 @@ mod tests {
             )
             .unwrap();
         let from = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(1), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(1), NodeKind::Gpu)
             .unwrap();
         let to = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(2), NodeKind::KfdGpu)
+            .add_node(source, NativeNodeId::LinuxKfd(2), NodeKind::Gpu)
             .unwrap();
         let host_node = snapshot
-            .add_node(source, NativeNodeId::LinuxKfd(0), NodeKind::KfdHost)
+            .add_node(source, NativeNodeId::LinuxKfd(0), NodeKind::Host)
             .unwrap();
         snapshot.add_endpoint(first.clone(), from).unwrap();
         snapshot.add_endpoint(second.clone(), to).unwrap();
@@ -809,6 +816,46 @@ mod tests {
                 .unwrap_err()
                 .kind(),
             ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn generic_driver_nodes_keep_host_routes_and_cpu_facts() {
+        let mut snapshot = TopologySnapshot::new(host()).unwrap();
+        let endpoint = endpoint(3);
+        let source = snapshot
+            .add_source(
+                SourceKind::Driver,
+                None,
+                true,
+                Some(endpoint.driver_instance),
+            )
+            .unwrap();
+        let host_node = snapshot
+            .add_node(source, NativeNodeId::Driver(1), NodeKind::Host)
+            .unwrap();
+        let gpu_node = snapshot
+            .add_node(source, NativeNodeId::Driver(2), NodeKind::Gpu)
+            .unwrap();
+        snapshot
+            .set_cpu_node(
+                host_node,
+                CpuNodeInfo {
+                    core_count: 8,
+                    core_id_base: None,
+                    maximum_clock_mhz: None,
+                },
+            )
+            .unwrap();
+        snapshot.add_endpoint(endpoint.clone(), gpu_node).unwrap();
+        snapshot.add_route(host_node, gpu_node, link()).unwrap();
+        assert_eq!(snapshot.route_from_host(&endpoint), Some(link()));
+        assert_eq!(
+            snapshot
+                .native_nodes_for_endpoint(&endpoint)
+                .map(|node| node.id)
+                .collect::<Vec<_>>(),
+            [gpu_node]
         );
     }
 }

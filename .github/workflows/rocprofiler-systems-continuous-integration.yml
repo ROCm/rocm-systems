@@ -195,7 +195,8 @@ jobs:
 
       - name: Install MPI
         run: |
-          apt install -y libopenmpi-dev
+          apt-get update
+          apt-get install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
       - name: Install Latest Nightly ROCm
