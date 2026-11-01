@@ -407,10 +407,13 @@ inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t
 
 inline void write_explicit_lane_mask(uint32_t physical_dst, Wavefront &wf, uint64_t mask) {
   amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() <= 32)
-    regs.write_sgpr(physical_dst, static_cast<uint32_t>(mask));
-  else
-    regs.write_sgpr64(physical_dst, mask);
+  if (wf.wf_size() <= 32) {
+    if (regs.write_sgpr(physical_dst, static_cast<uint32_t>(mask)).failed())
+      return;
+  } else {
+    if (regs.write_sgpr64(physical_dst, mask).failed())
+      return;
+  }
 }
 
 inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, unsigned bits) {
@@ -1312,7 +1315,8 @@ template <typename T, bool Scoped = false, typename Inst, typename BinOp>
           const auto a = src0.template load_native<T>(base);
           const auto b = src1.template load_native<T>(base);
           const auto r = bin_op(a, b);
-          dst.template store_native<T>(base, r, chunk);
+          if (dst.template store_native<T>(base, r, chunk).failed())
+            return;
         }
       }))
     return false;
@@ -1384,8 +1388,10 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
       continue;
     const auto x_result = evaluate(x, x_src0, x_src1, lane_base);
     const auto y_result = evaluate(y, y_src0, y_src1, lane_base);
-    x_dst.template store_native<uint32_t>(lane_base, x_result, lane_mask);
-    y_dst.template store_native<uint32_t>(lane_base, y_result, lane_mask);
+    if (x_dst.template store_native<uint32_t>(lane_base, x_result, lane_mask).failed())
+      return true;
+    if (y_dst.template store_native<uint32_t>(lane_base, y_result, lane_mask).failed())
+      return true;
   }
   return true;
 }
@@ -1483,7 +1489,8 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
       continue;
     const auto a = src0.template load_native<Tin>(base);
     const auto r = un_op(a);
-    dst.template store_native<Tout>(base, r, chunk);
+    if (dst.template store_native<Tout>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1549,7 +1556,8 @@ template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
     const uint64_t cin_bits = (vcc_in >> base) & chunk_full;
     const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
-    dst.template store_native<T>(base, r.value, chunk);
+    if (dst.template store_native<T>(base, r.value, chunk).failed())
+      return true;
     // Pack the per-lane carry mask into the low W bits, then merge into VCC for
     // active lanes only (clear active bits, set from carry; preserve the rest).
     const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
@@ -1598,7 +1606,8 @@ template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
       const auto b = src1.template load_native<T>(base);
       const auto d = util::native<T>{};
       const auto r = fma_op(a, b, d, k);
-      dst.template store_native<T>(base, r, chunk);
+      if (dst.template store_native<T>(base, r, chunk).failed())
+        return;
     }
   });
 }
@@ -1640,7 +1649,8 @@ template <typename T, bool Scoped = false, typename Inst, typename FmaOp>
       const auto b = src1.template load_native<T>(base);
       const auto d = acc.template load_native<T>(base);
       const auto r = fma_op(a, b, d, k);
-      acc.template store_native<T>(base, r, chunk);
+      if (acc.template store_native<T>(base, r, chunk).failed())
+        return;
     }
   });
 }
@@ -1680,7 +1690,8 @@ template <F16Vop2FmaShape Shape, typename Inst>
           acc.template load_native<T>(base), false, false, false, false, false, false,
           wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false, wf.fp16_ovfl(),
           floating_clamp_nan_to_zero(wf), fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-      acc.template store_native<T>(base, result, chunk);
+      if (acc.template store_native<T>(base, result, chunk).failed())
+        return true;
     }
   } else {
     RegisterAccess::OperandWriteView dst = regs.write_operand(inst.vdst, exec);
@@ -1700,7 +1711,8 @@ template <F16Vop2FmaShape Shape, typename Inst>
                                   wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0, false,
                                   wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
                                   fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-      dst.template store_native<T>(base, result, chunk);
+      if (dst.template store_native<T>(base, result, chunk).failed())
+        return true;
     }
   }
   return true;
@@ -1740,7 +1752,8 @@ template <typename T, typename Inst>
     const auto d = acc.template load_native<T>(base); // dst-accumulate
     const auto result =
         fma_f64_mode_simd(a, b, d, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
-    acc.template store_native<T>(base, result, chunk);
+    if (acc.template store_native<T>(base, result, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1778,7 +1791,8 @@ template <typename T = double, typename Inst, typename BinOp>
       continue;
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
-    dst.template store_native<T>(base, bin_op(a, b), chunk);
+    if (dst.template store_native<T>(base, bin_op(a, b), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1820,7 +1834,8 @@ template <typename T, typename Inst, typename UnOp>
     if (chunk == 0)
       continue;
     const auto a = src0.template load_native<T>(base);
-    dst.template store_native<T>(base, un_op(a), chunk);
+    if (dst.template store_native<T>(base, un_op(a), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1858,7 +1873,8 @@ template <typename Tout, typename Inst, typename CvtOp>
       continue;
     const auto s = src0.template load_native<double>(base);
     const util::narrow32<Tout> r = cvt_op(s);
-    dst.template store_narrow<Tout>(base, r, chunk);
+    if (dst.template store_narrow<Tout>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1893,7 +1909,8 @@ template <typename Tin, typename Inst, typename CvtOp>
     if (chunk == 0)
       continue;
     const auto in = src0.template load_narrow<Tin>(base);
-    dst.template store_native<double>(base, cvt_op(in), chunk);
+    if (dst.template store_native<double>(base, cvt_op(in), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -1989,7 +2006,8 @@ template <bool True16, typename Inst>
     const auto src = apply_vop3_src_mod_f32<0>(cvt_f32_f16_mode_simd(raw, wf), abs, neg);
     const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf),
                                                wf.fp_round_mode_f32());
-    dst.template store_native<T>(base, std::bit_cast<util::native<T>>(result), chunk);
+    if (dst.template store_native<T>(base, std::bit_cast<util::native<T>>(result), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2028,7 +2046,8 @@ template <typename Inst>
     const uint64_t sel_bits = (vcc >> base) & chunk_full;
     auto r = a;
     util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2071,7 +2090,8 @@ template <typename Inst>
     const uint64_t sel_bits = (sel64 >> base) & chunk_full;
     auto r = a;
     util::stdx::where(util::simd_mask_from_bits<util::native<T>>(sel_bits), r) = b;
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2363,7 +2383,8 @@ template <typename T, typename Inst, typename BinOp>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const auto r = bin_op(a, b);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2400,7 +2421,8 @@ template <typename T, typename Inst, typename BinOp>
     const auto a = select_vop3_true16_src(src0.template load_native<T>(base), opsel, 0);
     const auto b = select_vop3_true16_src(src1.template load_native<T>(base), opsel, 1);
     const auto r = bin_op(a, b);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2461,7 +2483,8 @@ try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op,
                            : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
             if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
               out = out_half;
-            dst.template store_native<T>(base, out, chunk);
+            if (dst.template store_native<T>(base, out, chunk).failed())
+              return;
           }
         }))
       return false;
@@ -2475,7 +2498,8 @@ try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op,
             const auto a = src0.template load_native<T>(base);
             const auto b = src1.template load_native<T>(base);
             const auto r = bin_op(a, b);
-            dst.template store_native<T>(base, r, chunk);
+            if (dst.template store_native<T>(base, r, chunk).failed())
+              return;
           }
         }))
       return false;
@@ -2562,7 +2586,8 @@ template <typename T, bool Scoped = false, typename Inst, typename BinOp>
       const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
       const auto r = apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp,
                                             floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
-      dst.template store_native<T>(base, r, chunk);
+      if (dst.template store_native<T>(base, r, chunk).failed())
+        return;
     }
   });
 }
@@ -2688,7 +2713,8 @@ template <typename Inst, typename BinOp>
     const auto b = apply_vop3_src_mod_f64<1>(src1.template load_native<T>(base), abs, neg);
     const auto r =
         apply_vop3_dst_mod_f64(bin_op(a, b), omod, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2723,7 +2749,8 @@ template <typename Inst, typename BinOp>
       continue;
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
-    dst.template store_native<T>(base, bin_op(a, b), chunk);
+    if (dst.template store_native<T>(base, bin_op(a, b), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2808,7 +2835,8 @@ template <typename Inst, typename UnOp>
       continue;
     const auto a = apply_vop3_src_mod_f64<0>(src0.template load_native<T>(base), abs, neg);
     const auto r = apply_vop3_dst_mod_f64(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2879,7 +2907,8 @@ try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool tra
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
       if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
         out = out_half;
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   } else {
     auto dst = regs.write_operand(inst.vdst, exec);
@@ -2892,7 +2921,8 @@ try_execute_unary_vop3_fp16_simd(Inst &inst, Wavefront &wf, UnOp un_op, bool tra
       const auto in = util::f16_to_f32_simd(raw);
       const auto a = apply_vop3_src_mod_f32<0>(in, abs, neg);
       const auto out = modified_half(un_op(a)) & util::broadcast<T>(0xffffu);
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   }
   detail::record_simd_fast_path(SimdFastPath::VOP3_UNARY_FP16);
@@ -2937,7 +2967,8 @@ template <typename T, typename Inst, typename TernOp>
     const auto b = src1.template load_native<T>(base);
     const auto c = src2.template load_native<T>(base);
     const auto r = tern_op(a, b, c);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -2976,7 +3007,8 @@ template <typename T, typename Inst, typename TernOp>
     const auto b = select_vop3_true16_src(src1.template load_native<T>(base), opsel, 1);
     const auto c = src2.template load_native<T>(base);
     const auto r = tern_op(a, b, c);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3022,7 +3054,8 @@ template <typename T, typename Inst, typename TernOp>
                               : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
     if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
       out = out_half;
-    dst.template store_native<T>(base, out, chunk);
+    if (dst.template store_native<T>(base, out, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3071,7 +3104,8 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
       const auto c = apply_vop3_src_mod_f32<2>(src2.template load_native<T>(base), abs, neg);
       const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp,
                                             floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
-      dst.template store_native<T>(base, r, chunk);
+      if (dst.template store_native<T>(base, r, chunk).failed())
+        return;
     }
   });
 }
@@ -3154,7 +3188,8 @@ template <bool True16, typename Inst, typename TernOp>
                                 : ((prev & util::broadcast<T>(0xffff0000u)) | out_half);
       if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
         out = out_half;
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   } else {
     auto dst = regs.write_operand(inst.vdst, exec);
@@ -3169,7 +3204,8 @@ template <bool True16, typename Inst, typename TernOp>
       const auto b = apply_vop3_src_mod_f32<1>(util::f16_to_f32_simd(b_raw), abs, neg);
       const auto c = apply_vop3_src_mod_f32<2>(util::f16_to_f32_simd(c_raw), abs, neg);
       const auto out = finish(tern_op(a, b, c)) & util::broadcast<T>(0xffffu);
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   }
   detail::record_simd_fast_path(SimdFastPath::VOP3_TERNARY_FP16);
@@ -3223,7 +3259,8 @@ template <bool True16, typename Inst>
                                 : ((prev & 0xffff0000u) | out_half);
       if (!(opsel & 0x8u) && cdna_vop3_low_dst_zeroes_high(wf))
         out = out_half;
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   } else {
     auto dst = regs.write_operand(inst.vdst, exec);
@@ -3238,7 +3275,8 @@ template <bool True16, typename Inst>
           wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), omod, inst.inst_.clamp,
           wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
           fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-      dst.template store_native<T>(base, out, chunk);
+      if (dst.template store_native<T>(base, out, chunk).failed())
+        return true;
     }
   }
   detail::record_simd_fast_path(SimdFastPath::VOP3_FMA_FP16);
@@ -3281,7 +3319,8 @@ template <typename Inst>
         fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
     result = finish_f64_mode_simd(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
                                   floating_clamp_nan_to_zero(wf));
-    dst.template store_native<double>(base, result, chunk);
+    if (dst.template store_native<double>(base, result, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3324,7 +3363,8 @@ template <typename Inst, typename FmaOp>
     const auto c = apply_vop3_src_mod_f64<2>(src2.template load_native<T>(base), abs, neg);
     const auto r =
         apply_vop3_dst_mod_f64(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3373,7 +3413,8 @@ template <bool Scoped = false, typename Inst, typename FmaOp>
       const auto c = acc.template load_native<T>(base); // accumulator, NO modifier
       const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp,
                                             floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
-      acc.template store_native<T>(base, r, chunk);
+      if (acc.template store_native<T>(base, r, chunk).failed())
+        return;
     }
   });
 }
@@ -3429,7 +3470,8 @@ template <bool True16, typename Inst>
       else if (!cdna_vop3_low_dst_zeroes_high(wf))
         out = (prev & 0xffff0000u) | out_half;
     }
-    acc.template store_native<T>(base, out, chunk);
+    if (acc.template store_native<T>(base, out, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3468,7 +3510,8 @@ template <typename Inst>
         fma_f64_mode_simd(a, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64());
     result = finish_f64_mode_simd(result, wf.fp_round_mode_f16_f64(), omod, inst.inst_.clamp,
                                   floating_clamp_nan_to_zero(wf));
-    acc.template store_native<double>(base, result, chunk);
+    if (acc.template store_native<double>(base, result, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3502,7 +3545,8 @@ template <typename Inst, typename Op>
     const auto a = src0.template load_native<T>(base);
     const auto e =
         util::stdx::static_simd_cast<util::native<T>>(exp_src.template load_narrow<uint32_t>(base));
-    dst.template store_native<T>(base, op(a, e), chunk);
+    if (dst.template store_native<T>(base, op(a, e), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3545,7 +3589,8 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<Tin>(base), abs, neg);
     const auto r =
         apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf), round_mode);
-    dst.template store_native<Tout>(base, r, chunk);
+    if (dst.template store_native<Tout>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3620,7 +3665,8 @@ template <typename Inst>
     // Scale the rounded quotient, then clamp (checked on gfx1201).
     const auto bits = std::bit_cast<util::native<uint32_t>>(r);
     r = std::bit_cast<util::native<T>>(output_modifier::apply<fp_format::F32>(bits, output_policy));
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3667,7 +3713,8 @@ template <typename Inst>
     // Scale the rounded quotient, then clamp (checked on gfx1201).
     const auto bits = std::bit_cast<util::native<uint64_t>>(r);
     r = std::bit_cast<util::native<T>>(output_modifier::apply<fp_format::F64>(bits, output_policy));
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3705,7 +3752,8 @@ template <typename Inst, typename ShiftOp>
     const auto s = shift_src.template load_narrow<uint32_t>(base);
     const auto v = value_src.template load_native<uint64_t>(base);
     const auto sh = util::stdx::static_simd_cast<util::native<uint64_t>>(s) & 63ull;
-    dst.template store_native<uint64_t>(base, shift_op(v, sh), chunk);
+    if (dst.template store_native<uint64_t>(base, shift_op(v, sh), chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3741,7 +3789,8 @@ template <typename Inst>
     const auto s = shift_src.template load_narrow<uint32_t>(base);
     const auto c = addend_src.template load_native<uint64_t>(base);
     const auto sh = util::stdx::static_simd_cast<util::native<uint64_t>>(s) & 63ull;
-    dst.template store_native<uint64_t>(base, simd_lshl_u64(v, sh) + c, chunk);
+    if (dst.template store_native<uint64_t>(base, simd_lshl_u64(v, sh) + c, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -3783,7 +3832,8 @@ template <typename Inst, typename MadOp, typename WriteResult>
     const auto b = src1.template load_narrow<uint32_t>(base);
     const auto c = src2.template load_native<uint64_t>(base);
     const auto r = mad_op(a, b, c);
-    dst.template store_native<uint64_t>(base, r.value, chunk);
+    if (dst.template store_native<uint64_t>(base, r.value, chunk).failed())
+      return true;
     const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
@@ -3836,7 +3886,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const auto a = src0.template load_native<T>(base);
     const auto b = src1.template load_native<T>(base);
     const auto r = carry_op(a, b, zero_cin);
-    dst.template store_native<T>(base, r.value, chunk);
+    if (dst.template store_native<T>(base, r.value, chunk).failed())
+      return true;
     const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
@@ -3888,7 +3939,8 @@ template <typename Inst, typename CarryOp, typename WriteResult>
     const uint64_t cin_bits = (cin_all >> base) & chunk_full;
     const auto cin = util::simd_u32_lanes_from_bits(cin_bits);
     const auto r = carry_op(a, b, cin);
-    dst.template store_native<T>(base, r.value, chunk);
+    if (dst.template store_native<T>(base, r.value, chunk).failed())
+      return true;
     const uint64_t carry_bits = util::simd_mask_to_bits(r.carry);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
@@ -4038,7 +4090,8 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
       const uint64_t chunk = (exec >> base) & chunk_full;
       if (chunk == 0)
         continue;
-      dst.template store_native<float>(base, compute_result(base), chunk);
+      if (dst.template store_native<float>(base, compute_result(base), chunk).failed())
+        return true;
     }
   } else {
     auto dst = regs.write_operand(inst.vdst, exec, DstMode == FmaMixDst::F16_LO ? 0x3 : 0xc);
@@ -4061,7 +4114,8 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
                                       false, wf.fp16_ovfl(), false);
       }
       const U packed = DstMode == FmaMixDst::F16_LO ? h : h << 16;
-      dst.template store_native<uint32_t>(base, packed, chunk);
+      if (dst.template store_native<uint32_t>(base, packed, chunk).failed())
+        return true;
     }
   }
   return true;
@@ -4274,7 +4328,8 @@ template <PackedFloatOp Op, bool Bf16, typename Inst>
     U hi = packed_float_half_simd<Op, Bf16>(
         half(a, 0, 16, inst.inst_.neg_hi), half(b, 1, 16, inst.inst_.neg_hi),
         half(c, 2, 16, inst.inst_.neg_hi), wf, inst.inst_.clamp);
-    dst.template store_narrow<uint32_t>(base, lo | (hi << 16), mask);
+    if (dst.template store_narrow<uint32_t>(base, lo | (hi << 16), mask).failed())
+      return true;
   }
   return true;
 }
@@ -4313,7 +4368,8 @@ template <typename Inst, typename Op>
     const auto b = select_packed_halves(src1.template load_native<T>(base),
                                         packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 1);
     const auto r = op(a, b);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -4356,7 +4412,8 @@ template <typename Inst, typename Op>
         select_packed_halves(src2.template load_native<T>(base), packed_opsel(inst.inst_),
                              packed_opsel_hi(inst.inst_) | (packed_opsel_hi_2(inst.inst_) << 2), 2);
     const auto r = op(a, b, c);
-    dst.template store_native<T>(base, r, chunk);
+    if (dst.template store_native<T>(base, r, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -4425,7 +4482,9 @@ template <typename Inst, typename Op>
     const util::native<float> r_hi =
         binary(flush_input(pkf32_neg((op_sel_hi & 1u) ? a.hi : a.lo, neg0_hi)),
                flush_input(pkf32_neg((op_sel_hi & 2u) ? b.hi : b.lo, neg1_hi)));
-    dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
+    if (dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk)
+            .failed())
+      return true;
   }
   return true;
 }
@@ -4504,7 +4563,9 @@ template <typename Inst, typename Op>
         op(flush_input(pkf32_neg((op_sel_hi & 1u) ? a.hi : a.lo, neg0_hi)),
            flush_input(pkf32_neg((op_sel_hi & 2u) ? b.hi : b.lo, neg1_hi)),
            flush_input(pkf32_neg(op_sel_hi_2 ? c.hi : c.lo, neg2_hi)));
-    dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk);
+    if (dst.template store_native_pair<float>(base, flush_output(r_lo), flush_output(r_hi), chunk)
+            .failed())
+      return true;
   }
   return true;
 }
@@ -4560,7 +4621,8 @@ template <typename Inst>
     const U64 out_lo = (inst.inst_.op_sel & 1u) ? ((s0 >> 32) & kLoMask) : (s0 & kLoMask);
     const U64 out_hi = (inst.inst_.op_sel & 2u) ? (s1 & kHiMask) : ((s1 & kLoMask) << 32);
     const U64 out = out_lo | out_hi;
-    dst.template store_native<uint64_t>(base, out, chunk);
+    if (dst.template store_native<uint64_t>(base, out, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -4639,7 +4701,9 @@ template <int ElemBits, bool Signed, typename Inst>
             I64(std::numeric_limits<int32_t>::min());
         util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
             I64(std::numeric_limits<int32_t>::max());
-        dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+        if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
+                .failed())
+          return true;
         continue;
       }
 #endif
@@ -4651,7 +4715,8 @@ template <int ElemBits, bool Signed, typename Inst>
         const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
         sum += std::bit_cast<U>(src0_elem * src1_elem);
       }
-      dst.template store_native<uint32_t>(base, sum, chunk);
+      if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
+        return true;
     } else {
 #if !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
       if (clamp) {
@@ -4664,7 +4729,9 @@ template <int ElemBits, bool Signed, typename Inst>
         }
         util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
             U64(std::numeric_limits<uint32_t>::max());
-        dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+        if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
+                .failed())
+          return true;
         continue;
       }
 #endif
@@ -4674,7 +4741,8 @@ template <int ElemBits, bool Signed, typename Inst>
         const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
         sum += src0_bits * src1_bits;
       }
-      dst.template store_native<uint32_t>(base, sum, chunk);
+      if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
+        return true;
     }
   }
   detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
@@ -4757,7 +4825,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
     const F src1_lo = half(raw1 & 0xFFFFu, neg_src1_lo);
     const F src1_hi = half(raw1 >> 16, neg_src1_hi);
     F result = src0_lo * src1_lo + src0_hi * src1_hi + acc;
-    dst.template store_native<float>(base, result, chunk);
+    if (dst.template store_native<float>(base, result, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -4831,7 +4900,9 @@ template <int ElemBits, typename Inst>
           I64(std::numeric_limits<int32_t>::min());
       util::stdx::where(sum > I64(std::numeric_limits<int32_t>::max()), sum) =
           I64(std::numeric_limits<int32_t>::max());
-      dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk);
+      if (dst.template store_native<uint32_t>(base, util::stdx::static_simd_cast<U>(sum), chunk)
+              .failed())
+        return true;
       continue;
     }
 #endif
@@ -4845,7 +4916,8 @@ template <int ElemBits, typename Inst>
                                       : util::stdx::static_simd_cast<I>(src1_bits);
       sum += std::bit_cast<U>(src0_elem * src1_elem);
     }
-    dst.template store_native<uint32_t>(base, sum, chunk);
+    if (dst.template store_native<uint32_t>(base, sum, chunk).failed())
+      return true;
   }
   detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
   return true;
@@ -4908,7 +4980,8 @@ template <int ElemBits, bool Vop3, typename Inst>
       const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
       sum += std::bit_cast<U>(a * b);
     }
-    acc.template store_native<uint32_t>(base, sum, chunk);
+    if (acc.template store_native<uint32_t>(base, sum, chunk).failed())
+      return true;
   }
   return true;
 }
@@ -4965,7 +5038,8 @@ template <bool Vop3, typename Inst>
     const F b0 = util::f16_to_f32_simd(raw1 & 0xFFFFu);
     const F b1 = util::f16_to_f32_simd(raw1 >> 16);
     const F r = acc_value + (a0 * b0 + a1 * b1);
-    acc.template store_native<uint32_t>(base, std::bit_cast<U>(r), chunk);
+    if (acc.template store_native<uint32_t>(base, std::bit_cast<U>(r), chunk).failed())
+      return true;
   }
   return true;
 }

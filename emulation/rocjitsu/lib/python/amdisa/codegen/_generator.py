@@ -8941,7 +8941,9 @@ class CodeGenerator:
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         if esz == 4:
-            L.append('  data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append(
+                '  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -9950,7 +9952,7 @@ class CodeGenerator:
                 '  if (exec) {',
                 '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
                 '    if (data.valid()) {',
-                '      data.copy_dwords_lane_major(d->store_data, exec);',
+                '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;',
                 '      set_data(std::move(d));',
                 '      return;',
                 '    }',
@@ -10039,7 +10041,9 @@ class CodeGenerator:
                 f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {stride // 4}, exec);'
             )
             L.append('    if (data.valid()) {')
-            L.append('      data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append(
+                '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('      set_data(std::move(d));')
             L.append('      return;')
             L.append('    }')
@@ -10152,7 +10156,11 @@ class CodeGenerator:
         L.append('    });')
         L.append('  } else {')
         L.append(
-            '    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+            '    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+        )
+        L.append('    if (maybe_addresses.failed()) return;')
+        L.append(
+            '    const std::span<const uint32_t> addresses = maybe_addresses.value();'
         )
         L.append(
             '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
@@ -10204,12 +10212,20 @@ class CodeGenerator:
         # Each source word keeps independent allocation validation, including
         # a pair straddling the end of the wave's register allocation.
         L.append(
-            '  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+            '  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+        )
+        L.append('  if (maybe_addresses.failed()) return;')
+        L.append(
+            '  const std::span<const uint32_t> addresses = maybe_addresses.value();'
         )
         for group in (0, 1):
             for i in range(dwords_per_access):
                 L.append(
-                    f'  auto data{group}_{i} = amdgpu::RegisterAccess(cu).read_vgpr_region(data{group}_base + {i}, 1, exec).lanes();'
+                    f'  auto maybe_data{group}_{i} = amdgpu::RegisterAccess(cu).read_vgpr_region(data{group}_base + {i}, 1, exec).lanes();'
+                )
+                L.append(f'  if (maybe_data{group}_{i}.failed()) return;')
+                L.append(
+                    f'  const auto data{group}_{i} = maybe_data{group}_{i}.value();'
                 )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -17491,7 +17507,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         uint64_t lane_mask = count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                         auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                             wf.vgpr_alloc().base + voff, 1, lane_mask);
-                        std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
+                        auto maybe_lanes = region.lanes();
+                        if (maybe_lanes.failed()) return;
+                        std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
                         return;
                       }
                       std::ranges::fill_n(
@@ -17570,7 +17588,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                    : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                     auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                         wf.vgpr_alloc().base + voff, 1, lane_mask);
-                    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
+                    auto maybe_lanes = region.lanes();
+                    if (maybe_lanes.failed()) return;
+                    std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
                     return;
                   }
                   std::ranges::fill_n(
