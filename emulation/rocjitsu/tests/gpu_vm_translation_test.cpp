@@ -178,6 +178,31 @@ AddressSpaceHandle register_step_process(LegacyGpuVmAdapter &adapter, KfdProcess
                                          .fault_reporter = reporter});
 }
 
+TEST(GpuVmTranslation, MutationSnapshotRetainsEpochAfterProcessDestruction) {
+  HostPage backing;
+  ASSERT_NE(backing.data(), nullptr);
+  VmMtypeSnapshot snapshot;
+  uint64_t updated_epoch = 0;
+  {
+    KfdProcess process(7);
+    auto epoch = process.page_table_mutation_epoch();
+    snapshot = {.mtype = Mtype::RW,
+                .begin = 0x4000,
+                .size = KfdProcess::kPageSize,
+                .mutation_epoch = epoch,
+                .captured_epoch = epoch->value.load(std::memory_order_acquire)};
+    EXPECT_TRUE(snapshot.unchanged(0x4000));
+    process.map_pages(0x4000, backing.data(), KfdProcess::kPageSize, Mtype::RW);
+    EXPECT_FALSE(snapshot.unchanged(0x4000));
+    updated_epoch = epoch->value.load(std::memory_order_acquire);
+    EXPECT_GT(updated_epoch, snapshot.captured_epoch);
+  }
+  ASSERT_TRUE(snapshot.mutation_epoch);
+  EXPECT_EQ(snapshot.mutation_epoch->ref_count().load(), 1u);
+  EXPECT_EQ(snapshot.mutation_epoch->value.load(std::memory_order_acquire), updated_epoch);
+  EXPECT_FALSE(snapshot.unchanged(0x4000));
+}
+
 TEST(GpuVmTranslation, DefaultStepsPreserveCustomTransportProgressAndFaultOrigin) {
   class Translator final : public AddressSpaceTranslator {
   public:

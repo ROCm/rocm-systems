@@ -9,6 +9,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/distributed_shared_mutex.h"
+#include "util/intrusive_shared_ptr.h"
 
 #include <array>
 #include <atomic>
@@ -367,12 +368,13 @@ struct VmMtypeSnapshot {
   bool may_batch_private_ram = false;
   uint64_t begin = 0;
   uint64_t size = 0;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
+      mutation_epoch{};
   uint64_t captured_epoch = 0;
 
   [[nodiscard]] bool unchanged(uint64_t address) const {
     return address >= begin && address - begin < size && mutation_epoch &&
-           captured_epoch == mutation_epoch->load(std::memory_order_acquire);
+           captured_epoch == mutation_epoch->value.load(std::memory_order_acquire);
   }
 };
 
@@ -622,9 +624,7 @@ public:
 /// a quantum, checking is_current() before reuse.
 /// Operations on a revoked snapshot report @ref VmAccessOutcome::Revoked,
 /// never the retryable Unavailable outcome.
-// Keep immutable metadata read by every CU off the cache line containing a
-// coallocated shared_ptr reference count, which wave admission and retirement update.
-class alignas(64) GpuVmAccess {
+class GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.
   /// @details Replacement, invalidation, and unregistration retire ordinary snapshots.
@@ -729,6 +729,9 @@ private:
   AddressSpaceInfo info_;
   std::shared_ptr<GpuVmAccessState> access_state_;
 };
+
+/// @brief Shared snapshot storage with metadata isolated from reference-count updates.
+using GpuVmAccessSnapshot = util::RefCountedCacheAligned<GpuVmAccess>;
 
 /// @brief Owns GPU address-space identities independently of their front end.
 ///

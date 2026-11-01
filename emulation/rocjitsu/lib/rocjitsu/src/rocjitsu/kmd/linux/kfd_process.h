@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/distributed_shared_mutex.h"
+#include "util/intrusive_shared_ptr.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -515,7 +516,8 @@ public:
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
   /// @brief Return the retained token invalidated before each page-policy mutation.
-  std::shared_ptr<const std::atomic<uint64_t>> page_table_mutation_epoch() const {
+  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
+  page_table_mutation_epoch() const {
     return page_table_mutation_epoch_;
   }
 
@@ -893,7 +895,7 @@ private:
   // Invalidate copied policies before mutation, including a partial update
   // that throws before publishing the ordinary translation generation.
   void invalidate_page_policies_locked() {
-    page_table_mutation_epoch_->fetch_add(1, std::memory_order_release);
+    page_table_mutation_epoch_->value.fetch_add(1, std::memory_order_release);
     page_table_cache_state_->invalidate_and_wait();
   }
 
@@ -908,15 +910,13 @@ private:
   ///          and page_table_mutex_; readers hold at least one of those locks,
   ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
-  // Cache hits read the epoch while misses copy and release its shared_ptr.
-  // Keep the epoch off the cache line containing make_shared's reference count.
-  struct alignas(64) PageTableMutationEpoch : std::atomic<uint64_t> {
-    PageTableMutationEpoch() : std::atomic<uint64_t>(1) {}
-  };
+  // Cache hits read the epoch while misses copy and release its owner.
+  // Keep the epoch off the cache line containing the reference count.
+  using PageTableMutationEpoch = util::RefCountedCacheAligned<std::atomic<uint64_t>>;
   /// @brief Retained atomic token for lockless copied-policy checks.
   /// @details Invalidate before mutation, including partially throwing updates.
-  std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
-      std::make_shared<PageTableMutationEpoch>();
+  util::IntrusiveSharedPtr<PageTableMutationEpoch> page_table_mutation_epoch_ =
+      util::IntrusiveSharedPtr<PageTableMutationEpoch>::make(1);
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
       std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };
