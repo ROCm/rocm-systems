@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/lds_lane_shapes.h"
 #include "rocjitsu/vm/amdgpu/lds_store_plans.h"
 #include "rocjitsu/vm/amdgpu/lds_writeback.h"
 
@@ -692,6 +693,104 @@ TEST(LdsTest, PlainStoresMatchVectorStore) {
   check_store_format<st::StoreFormat{.elem_size = 1, .num_elems = 1, .d16_hi = true}>(rng);
   check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1}>(rng);
   check_store_format<st::StoreFormat{.elem_size = 2, .num_elems = 1, .d16_hi = true}>(rng);
+}
+
+namespace lanes = rocjitsu::amdgpu::lds_shapes::lanes;
+
+/// lanes::scalar against lanes::avx2 for one width: every lane loop the
+/// proofs use must give the same answer on the same lanes.
+template <uint32_t Width>
+void check_lane_loops(const std::array<uint32_t, 64> &v, uint32_t offset) {
+#if RJ_HOST_HAS_AVX2
+  const auto check_span = [&]<uint32_t Span>() {
+    ASSERT_EQ((lanes::scalar::ramps<Width, Span>(v.data())),
+              (lanes::avx2::ramps<Width, Span>(v.data())))
+        << "ramps width " << Width << " span " << Span;
+    ASSERT_EQ(lanes::scalar::all_same<Span>(v.data()), lanes::avx2::all_same<Span>(v.data()))
+        << "all_same span " << Span;
+    ASSERT_EQ(lanes::scalar::max_lane<Span>(v.data(), offset),
+              lanes::avx2::max_lane<Span>(v.data(), offset))
+        << "max_lane span " << Span;
+    for (const uint32_t last : {v[0] + offset, v[Span - 1] + offset, 0x1'0000u, UINT32_MAX})
+      ASSERT_EQ(lanes::scalar::all_at_most<Span>(v.data(), offset, last),
+                lanes::avx2::all_at_most<Span>(v.data(), offset, last))
+          << "all_at_most span " << Span << " last " << last;
+  };
+  check_span.template operator()<16>();
+  check_span.template operator()<32>();
+  check_span.template operator()<48>();
+  check_span.template operator()<64>();
+  ASSERT_EQ(lanes::scalar::columns(v.data()), lanes::avx2::columns(v.data()));
+#else
+  (void)v, (void)offset;
+#endif
+}
+
+// The proofs are written once over lanes::host; this keeps the plain C++ lane
+// loops, which only hosts without AVX2 run, equal to the intrinsics.
+TEST(LdsTest, ScalarLaneLoopsMatchTheIntrinsics) {
+#if !RJ_HOST_HAS_AVX2
+  GTEST_SKIP() << "lanes::avx2 needs an AVX2 build";
+#endif
+  std::mt19937_64 rng(0x1a9e5);
+  for (int iteration = 0; iteration < 20000; ++iteration) {
+    const uint32_t widths[] = {1, 2, 4, 8, 16};
+    const uint32_t width = widths[rng() % 5];
+    std::array<uint32_t, 64> v{};
+    switch (rng() % 5) {
+    case 0: // 16-lane ramps, sometimes with one lane off
+      for (uint32_t group = 0; group < 64; group += 16) {
+        const auto base = static_cast<uint32_t>(rng());
+        for (uint32_t lane = 0; lane < 16; ++lane)
+          v[group + lane] = base + lane * width;
+      }
+      if (rng() % 2)
+        v[rng() % 64] ^= uint32_t{1} << (rng() % 32);
+      break;
+    case 1: // b64 column pairs, sometimes broken
+      for (uint32_t lane = 0; lane < 16; ++lane) {
+        v[lane] = static_cast<uint32_t>(rng());
+        v[lane + 16] = v[lane] + 8;
+      }
+      if (rng() % 2)
+        v[16 + rng() % 16] += 1;
+      break;
+    case 2: // broadcast, sometimes with one lane off
+      v.fill(static_cast<uint32_t>(rng()));
+      if (rng() % 2)
+        v[rng() % 64] += 1;
+      break;
+    case 3: // near 2^32, so adding the offset wraps
+      for (auto &lane : v)
+        lane = UINT32_MAX - static_cast<uint32_t>(rng() % 64);
+      break;
+    default:
+      for (auto &lane : v)
+        lane = static_cast<uint32_t>(rng());
+      break;
+    }
+    const uint32_t offsets[] = {0, 37, 0xFFFF'FFF0u};
+    const uint32_t offset = offsets[rng() % 3];
+    switch (width) {
+    case 1:
+      check_lane_loops<1>(v, offset);
+      break;
+    case 2:
+      check_lane_loops<2>(v, offset);
+      break;
+    case 4:
+      check_lane_loops<4>(v, offset);
+      break;
+    case 8:
+      check_lane_loops<8>(v, offset);
+      break;
+    default:
+      check_lane_loops<16>(v, offset);
+      break;
+    }
+    if (::testing::Test::HasFatalFailure())
+      return;
+  }
 }
 
 } // namespace

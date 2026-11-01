@@ -3,6 +3,22 @@
 
 /// @file lds_inline_access.h
 /// @brief DS instructions completing their LDS access inside execute_impl().
+///
+/// @details Reads top-down, one file per level:
+///
+///   lds_inline_access.h        the entry points generated handlers call
+///   lds_inline_access_steps.h  their numbered steps: gate, addresses, access
+///   lds_load_plans.h           loads: LDS -> staging, by address shape
+///   lds_writeback.h            loads: staging -> VGPRs, by format and EXEC
+///   lds_store_plans.h          stores: VGPR rows -> LDS, by EXEC and shape
+///   lds_lane_shapes.h          the address-shape proofs loads and stores share
+///
+/// Each hot loop has a plain C++ body that builds anywhere and, where it
+/// measured faster, an AVX2 body, which AVX2 builds use.
+///
+/// "The census" in these files is the DS accesses recorded across a corpus of
+/// emulated workloads (BLAS, RNG, FFT, convolutions, Triton kernels). The
+/// branch orders and the comments' "most" and "many" come from it.
 
 #pragma once
 
@@ -18,9 +34,13 @@ namespace amdgpu {
 class VectorMemState;
 class Wavefront;
 
-/// @brief A plain single-address DS load or store, as its generated handler
-/// describes it: register numbers and shape, not register contents.
-/// @details Field order matches the designated initializers the generator emits.
+/// @brief A plain DS load or store, single- or two-address, as its generated
+/// handler describes it: register numbers and shape, not register contents.
+/// @details The specialized subset of VectorMemState such an access needs. It
+/// has no per-lane address, payload or response buffers: the request path
+/// reads its operands from, and writes its results to, the registers
+/// themselves. Field order matches the designated initializers the generator
+/// emits.
 struct LdsAccessRequest {
   uint32_t addr_vgpr = 0;   ///< Physical address VGPR.
   uint32_t offset = 0;      ///< Byte offset, (offset1 << 8) | offset0.

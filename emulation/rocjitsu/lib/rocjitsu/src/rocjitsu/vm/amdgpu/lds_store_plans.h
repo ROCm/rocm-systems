@@ -17,12 +17,12 @@
 ///   Level 1  dispatch: by opcode, by EXEC, by address shape
 ///   Level 2  the rewrites
 ///
-/// Census stores by rewrite (2.72B instructions):
-///   blocks 75.1%   lane by lane 12.8%   lanes 7.6%   broadcast 4.4%
+/// Census stores by rewrite: blocks are most of them; lane by lane comes next,
+/// nearly all of it single-lane stores; then lanes in any order, then
+/// broadcasts.
 ///
-/// Standalone comparison against the run walk this replaces, on the census's
-/// store instances (~/rj-lds-patterns/microbench/lds_store, Ryzen 9 9950X), ns
-/// per DS store, census mix / runs16: 91.6 / 87.2 -> 11.7 / 6.1.
+/// Against the run walk this replaces (Lds::vector_store, fed a payload
+/// gathered lane by lane), a store costs several times less on the census mix.
 
 #ifndef ROCJITSU_VM_AMDGPU_LDS_STORE_PLANS_H_
 #define ROCJITSU_VM_AMDGPU_LDS_STORE_PLANS_H_
@@ -93,25 +93,25 @@ template <StoreFormat F, uint32_t Span> RJ_NOINLINE void by_shape(Lds &lds, cons
 /// @details By opcode: F is the opcode's payload format. By EXEC: the dense
 /// rewrites write every lane of their span, so they only run when EXEC covers
 /// it all; unlike loads, a store may not touch inactive lanes. Inlined into
-/// the store's handler; everything behind it is out of line, so the 12.8% of
-/// stores with at most 4 lanes pay no large frame (a single-lane store went
-/// 14.2 -> 4.4 cycles, lds_store_bench --drive 2730).
+/// the store's handler; everything behind it is out of line, so the many
+/// stores with at most 4 lanes pay no large frame: a single-lane store costs
+/// about a third of what it did with the writers inlined.
 template <StoreFormat F, uint32_t Wave>
 [[gnu::always_inline]] inline void store(Lds &lds, const StoreRequest &r) {
   using namespace detail;
-  if (std::popcount(r.exec) <= 4) // 12.8% of stores, nearly all EXEC = 1
+  if (std::popcount(r.exec) <= 4) // many stores, nearly all EXEC = 1
     return lane_by_lane<F>(lds, r);
   if constexpr (Wave == 64) {
     if (r.exec == prefix(64))
       return by_shape<F, 64>(lds, r);
-    if (r.exec == prefix(48)) // 5.6% of stores: ds_write_b32 on lanes 0-47
+    if (r.exec == prefix(48)) // a common ds_write_b32 shape: lanes 0-47
       return by_shape<F, 48>(lds, r);
   }
   if (r.exec == prefix(32))
     return by_shape<F, 32>(lds, r);
   if (r.exec == prefix(16))
     return by_shape<F, 16>(lds, r);
-  return lane_by_lane<F>(lds, r); // EXEC with holes: 0.2% of stores
+  return lane_by_lane<F>(lds, r); // EXEC with holes: rare
 }
 
 namespace detail {
@@ -130,9 +130,9 @@ template <StoreFormat F, uint32_t Span> void exact_span(Lds &lds, const StoreReq
 template <StoreFormat F, uint32_t Span> void by_shape(Lds &lds, const StoreRequest &r) {
   constexpr uint32_t Width = kWidth<F>;
   const uint64_t capacity = Access::capacity(lds);
-  // [[likely]] keeps the block store on the fall-through path. Without it:
-  // b32 wave64 blocks (48% of all stores) 16.5 -> 17.0 cycles, the 48-lane
-  // prefix 12.3 -> 13.3, broadcast 10.7 -> 13.1 (--drive 2610 / 2740 / 1172).
+  // [[likely]] keeps the block store on the fall-through path. Without it the
+  // b32 wave64 block store, the single most common store, gets slower, and so
+  // do the 48-lane prefix and broadcasts.
   if (auto plan = lds_shapes::prove_blocks<Width, Span>(r.addr, r.offset, capacity)) [[likely]]
     return write_blocks<F, Span>(lds, r, *plan);
   if (auto plan = lds_shapes::prove_broadcast<Width, Span>(r.addr, r.offset, capacity))
@@ -147,13 +147,14 @@ template <StoreFormat F, uint32_t Span> void by_shape(Lds &lds, const StoreReque
 // ---------------------------------------------------------------------------
 
 /// Lane-major payload of the first Span lanes.
-///   b32 (76% of stores): none. A VGPR row already holds lane 0, lane 1, ... in
+///   b32 (most stores): none. A VGPR row already holds lane 0, lane 1, ... in
 ///     order, so the row itself is the payload. Gathering it lane by lane is
-///     what made a per-lane writer slower than the run walk (116 vs 93 ns).
-///   b8 / b16 / d16_hi: a block store costs the same as b32's (16.3 vs 18.1
-///     cycles, --drive 1214 / 2610).
-///   b64 / b96 / b128: interleaved from the rows; clang leaves this scalar, and
-///     an AVX2 zip / transpose is worth at most ~2% of store time.
+///     what made a per-lane writer slower than the run walk it replaced.
+///   b8 / b16 / d16_hi: narrowed into staging; a block store still costs about
+///     what b32's does.
+///   b64 / b96 / b128: interleaved from the rows. clang leaves this scalar; an
+///     AVX2 zip / transpose, as the load writeback has, is worth only a sliver
+///     of store time, so stores have no AVX2 body.
 template <StoreFormat F, uint32_t Span>
 [[gnu::always_inline]] inline const uint8_t *payload(const StoreRequest &r, uint8_t *staging) {
   constexpr uint32_t Width = kWidth<F>;
@@ -253,9 +254,8 @@ template <StoreFormat F, uint32_t Span>
   const uint32_t offset = r.offset;
   const uint32_t *v = r.addr;
   // No lane wraps 2^32, so the offset folds into the base: three instructions
-  // a lane instead of four. b32 wave64 88.7 -> 66.2 cycles (--drive 2663).
-  // Wider lanes lost with it (b128 81 -> 135 cycles, --drive 1174), so b32
-  // and narrower only.
+  // a lane instead of four, a clear win on scattered b32 wave64. Wider lanes
+  // got much slower with it, so b32 and narrower only.
   if (Width <= 4 && !plan.wraps) {
     uint8_t *base = data + offset;
 #pragma GCC unroll 64

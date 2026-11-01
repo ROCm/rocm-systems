@@ -6,7 +6,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
-#include "rocjitsu/vm/amdgpu/lds_access_patterns.h"
+#include "rocjitsu/vm/amdgpu/lds_load_plans.h"
 #include "simdojo/components/memory_interface.h"
 
 #include <algorithm>
@@ -186,13 +186,16 @@ public:
   /// @details Active lanes get exactly vector_load()'s bytes; inactive lanes'
   /// bytes in @p dst are unspecified. Reads the address of every lane of the
   /// span (lanes 0-31, or 0-63 when a lane above 31 is active), which must be
-  /// initialized, and @p dst must hold the span. Kernels: lds_access_patterns.h.
+  /// initialized, and @p dst must hold the span. The same reader as
+  /// vector_load32(), on the low 32 bits of each address: they are all the
+  /// exact rule reads.
   void vector_load_span(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                         uint32_t num_elems, uint8_t *dst) const {
-    lds_patterns::load({data_.data(), data_.size()}, addrs, lane_mask, elem_size, num_elems, dst,
-                       [&](const uint64_t *exact, uint64_t lanes) {
-                         load_lanes(exact, lanes, elem_size, num_elems, dst);
-                       });
+    uint32_t lanes[64];
+    const uint32_t span = lane_mask >> 32 ? 64 : 32;
+    for (uint32_t lane = 0; lane < span; ++lane)
+      lanes[lane] = static_cast<uint32_t>(addrs[lane]);
+    vector_load32(lanes, 0, lane_mask, elem_size, num_elems, dst);
   }
 
   /// @brief vector_load_span() from 32-bit lane values plus a common offset:
@@ -202,12 +205,12 @@ public:
   /// must hold the span. @p lane_mask has no lanes at or past @p Wave. With a
   /// @p view (Wave / 16 entries), read the result through it instead of
   /// @p dst: lanes 16g..16g+15 are at view[g], which points into LDS itself
-  /// when those lanes read consecutive bytes (lds_patterns::load32()).
+  /// when those lanes read consecutive bytes. Reader: lds_load_plans.h.
   template <uint32_t Wave = 64>
   [[gnu::always_inline]] void
   vector_load32(const uint32_t *lanes, uint32_t offset, uint64_t lane_mask, uint32_t elem_size,
                 uint32_t num_elems, uint8_t *dst, const uint8_t **view = nullptr) const {
-    lds_patterns::load32<Wave>(
+    lds_load::load<Wave>(
         {data_.data(), data_.size()}, lanes, offset, lane_mask, elem_size, num_elems, dst,
         [&](const uint64_t *exact, uint64_t slow_lanes) {
           load_lanes(exact, slow_lanes, elem_size, num_elems, dst);

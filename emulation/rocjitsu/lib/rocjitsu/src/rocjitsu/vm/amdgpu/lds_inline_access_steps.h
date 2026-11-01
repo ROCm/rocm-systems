@@ -55,14 +55,14 @@ template <bool IsLoad, bool Dual = false>
   if (!cu.owns_vgpr_range(wf, req.addr_vgpr, 1))
     return false;
   if constexpr (IsLoad) {
-    // 1e. Same but for loads: they write their destination registers (a
-    //     two-address load, two consecutive ranges). Unowned, the VectorMemState
-    //     path still performs the LDS reads and skips the writeback, as the
-    //     routed path does.
+    // 1d. Loads also write their destination registers (a two-address load,
+    //     two consecutive ranges). Unowned, the VectorMemState path still
+    //     performs the LDS reads and skips the writeback, as the routed path
+    //     does.
     return cu.owns_vgpr_range(wf, req.dst_vgpr, dst_vgpr_count(stride) * (Dual ? 2 : 1));
   } else {
-    // 1d. Same but for stores: they also read their payload registers (a
-    //     two-address store, two independent ranges).
+    // 1d. Stores also read their payload registers (a two-address store, two
+    //     independent ranges).
     const uint32_t regs = std::max(1u, stride / 4u);
     return cu.owns_vgpr_range(wf, req.data_vgpr, regs) &&
            (!Dual || cu.owns_vgpr_range(wf, req.data2_vgpr, regs));
@@ -87,7 +87,7 @@ read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint
   //    writeback starts (a two-address load reads both accesses first), so a
   //    destination overlapping the address register is safe.
 
-  // 4. Reader by address pattern (lds_access_patterns.h, on the proofs in
+  // 4. Reader by address shape (lds_load_plans.h, on the proofs in
   //    lds_lane_shapes.h): contiguous 16-lane groups are read in place, b64
   //    rows where lane l + 16 follows lane l one 16-byte column per pair, up to
   //    four lanes fixed copies, other dense masks one bounds check and fixed
@@ -97,7 +97,7 @@ read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint
   //    which the writeback reads in place. The reader may write any lane of the
   //    span; the caller's typed writeback (lds_writeback.h) then stores the
   //    active lanes to the destination VGPR(s), applying sign_extend / d16;
-  //    ownership was checked in 1e.
+  //    ownership was checked in 1d.
   wf.lds().vector_load32<Wave>(address_lanes, offset, exec, req.elem_size, req.num_elems, staging,
                                load.group);
   for (uint32_t i = 0; i < dst_vgpr_count(stride); ++i)
@@ -109,8 +109,8 @@ read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint
 
 } // namespace lds_inline
 
-/// A whole plain load, or both accesses of a two-address one, gate to step 6,
-/// but their writebacks.
+/// A whole plain load, or both accesses of a two-address one, from the gate
+/// to step 6, all but the writebacks.
 template <bool Dual>
 [[gnu::always_inline]] inline bool LdsInlineAccess::read(const Instruction &inst,
                                                          const LdsAccessRequest &req, Wavefront &wf,
