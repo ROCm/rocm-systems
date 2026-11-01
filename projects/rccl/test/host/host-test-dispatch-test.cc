@@ -802,9 +802,9 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
 
 // ── binaryDirectory ─────────────────────────────────────────────────
 //
-// Which layout is in use is decided by looking, so these do touch the filesystem -- there is no
-// pure function underneath to test instead, and a wrong decision here runs nothing at all and
-// still exits 0 on the way there.
+// There is one layout, so where the binaries come from is a path join; what still needs proving
+// is that nothing outside micro/ is picked up, since a wrong directory here runs nothing at all
+// and can still exit 0 on the way there.
 
 namespace {
 
@@ -845,42 +845,26 @@ private:
 
 }  // namespace
 
-TEST(HostDispatchLayoutMicrotest, TheFrontedBinariesAreFoundInTheMicroSubdirectory)
+TEST(HostDispatchLayoutMicrotest, TheFrontedBinariesAreTakenFromTheMicroSubdirectory)
 {
-    // The build tree's layout: the front door at the top, everything it runs one level down, so
-    // a listing of the build output shows which binary to run.
-    const ScopedDir tree;
-    ASSERT_FALSE(tree.path().empty());
-    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
-    tree.addExecutable("micro/rccl-UnitTestsMicroInit");
-
-    EXPECT_EQ(binaryDirectory(tree.path(), self),
-              (std::filesystem::path(tree.path()) / "micro").string());
+    // One layout everywhere: the front door at the top, everything it runs one level down in
+    // micro/ -- in the build tree and in an install alike.
+    EXPECT_EQ(binaryDirectory("/opt/rocm/bin"),
+              (std::filesystem::path("/opt/rocm/bin") / "micro").string());
 }
 
-TEST(HostDispatchLayoutMicrotest, AFlatLayoutIsStillFound)
+TEST(HostDispatchLayoutMicrotest, ABinaryBesideTheFrontDoorIsNotFronted)
 {
-    // An install keeps them beside the front door, and the same binary runs from there.
+    // A stale copy left beside the front door by an earlier build is not in micro/, so it is not
+    // what runs -- the directory is where the binaries are put, never where they happen to be.
     const ScopedDir tree;
     ASSERT_FALSE(tree.path().empty());
     const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
     tree.addExecutable("rccl-UnitTestsMicroInit");
+    tree.addExecutable("micro/rccl-UnitTestsMicroCrypt");
 
-    EXPECT_EQ(binaryDirectory(tree.path(), self), tree.path());
-}
-
-TEST(HostDispatchLayoutMicrotest, AnEmptyMicroDirectoryDoesNotHideTheFlatLayout)
-{
-    // micro/ existing but holding nothing is not the build layout, so the binaries beside the
-    // front door are still the ones that run.
-    const ScopedDir tree;
-    ASSERT_FALSE(tree.path().empty());
-    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
-    tree.addExecutable("rccl-UnitTestsMicroInit");
-    std::error_code ec;
-    std::filesystem::create_directories(std::filesystem::path(tree.path()) / "micro", ec);
-
-    EXPECT_EQ(binaryDirectory(tree.path(), self), tree.path());
+    EXPECT_EQ(discoverBinaries(binaryDirectory(tree.path()), self),
+              std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
 }
 
 // ── child logs ──────────────────────────────────────────────────────

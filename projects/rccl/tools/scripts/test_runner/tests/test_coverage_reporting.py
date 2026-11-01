@@ -277,7 +277,7 @@ class CoverageReportingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             executor, build_dir = self._coverage_executor(root)
-            host_dir = build_dir / "test" / "host"
+            host_dir = build_dir / "test" / "host" / "micro"
             host_dir.mkdir(parents=True)
             for name in ("rccl-UnitTestsMicroInit", "rccl-UnitTestsMicroBrandNew"):
                 binary = host_dir / name
@@ -301,18 +301,18 @@ class CoverageReportingTest(unittest.TestCase):
             # Only binaries: a report or a log sitting beside them is not an object.
             self.assertNotIn(str(host_dir / "host_tests.xml"), show_cmd)
 
-    def test_host_test_binaries_are_found_in_the_micro_subdirectory(self):
-        # A build tree puts the fronted binaries in test/host/micro/, leaving the front door
-        # the only test binary at the top; an install keeps them flat. Both layouts are read
-        # here, because this runs against either and a binary missed is coverage lost without
-        # a word.
+    def test_host_test_binaries_are_read_only_from_the_micro_subdirectory(self):
+        # The fronted binaries are in test/host/micro/ in a build tree and in an install alike,
+        # so that is the only place looked at. A stale copy left beside the front door by an
+        # earlier build is not what ran, and crediting its counters would report coverage of
+        # code this run never executed.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             executor, build_dir = self._coverage_executor(root)
             host_dir = build_dir / "test" / "host"
             micro_dir = host_dir / "micro"
             micro_dir.mkdir(parents=True)
-            for binary in (host_dir / "rccl-UnitTestsHostAll",
+            for binary in (host_dir / "rccl-UnitTestsMicroStale",
                            micro_dir / "rccl-UnitTestsMicroInit"):
                 binary.write_bytes(b"object")
                 binary.chmod(0o755)
@@ -326,10 +326,10 @@ class CoverageReportingTest(unittest.TestCase):
             self.assertTrue(self._run_report(executor, _record))
 
             show_cmd = next(c for c in recorded if "show" in c)
-            for path in (str(host_dir / "rccl-UnitTestsHostAll"),
-                         str(micro_dir / "rccl-UnitTestsMicroInit")):
-                self.assertIn(path, show_cmd)
-                self.assertEqual(show_cmd[show_cmd.index(path) - 1], "--object")
+            path = str(micro_dir / "rccl-UnitTestsMicroInit")
+            self.assertIn(path, show_cmd)
+            self.assertEqual(show_cmd[show_cmd.index(path) - 1], "--object")
+            self.assertNotIn(str(host_dir / "rccl-UnitTestsMicroStale"), show_cmd)
 
     def test_host_only_fallback_skips_uninstrumented_device_elf(self):
         with tempfile.TemporaryDirectory() as temp_dir:
