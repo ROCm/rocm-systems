@@ -33,6 +33,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
