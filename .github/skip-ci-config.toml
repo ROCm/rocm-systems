@@ -106,6 +106,15 @@ common = [
 
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
+
+    # HRR's own CI and the HRR paths TheRock never reads. CLR compiles against
+    # projects/hrr/include, and TheRock #8965 adds hrr-playback (CMakeLists.txt,
+    # include/ and playback/, with HRR_BUILD_TESTS=OFF). Remove
+    # projects/hrr/tests/* once TheRock builds the HRR test suites.
+    ".github/workflows/hrr-*.yml",
+    "projects/hrr/tests/*",
+    "projects/hrr/tools/*",
+    "projects/hrr/skills/*",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)

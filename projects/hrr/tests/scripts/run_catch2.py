@@ -24,15 +24,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         help="seconds before the suite and its workloads are killed",
     )
-    parser.add_argument("--config", type=Path, help="suite YAML; decides which cases run")
-    parser.add_argument("--os", dest="os_name", choices=("auto", "linux", "windows"),
-                        help="OS the rules see; default auto when --config is set")
-    parser.add_argument("--arch", help="auto, none, or comma-separated gfx names")
-    parser.add_argument("--select", help="Catch2 selector; overrides the one in the config")
-    parser.add_argument("--ignore-config", action="store_true",
-                        help="run the cases the config would skip")
     parser.add_argument(
-        "--launcher", default="",
+        "--config", type=Path, help="suite YAML; decides which cases run"
+    )
+    parser.add_argument(
+        "--os",
+        dest="os_name",
+        choices=("auto", "linux", "windows"),
+        help="OS the rules see; default auto when --config is set",
+    )
+    parser.add_argument("--arch", help="auto, none, or comma-separated gfx names")
+    parser.add_argument(
+        "--select", help="Catch2 selector; overrides the one in the config"
+    )
+    parser.add_argument(
+        "--ignore-config",
+        action="store_true",
+        help="run the cases the config would skip",
+    )
+    parser.add_argument(
+        "--launcher",
+        default="",
         help="Prefix for the suite process. Case listing still uses the Catch2 binary.",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -41,7 +53,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.command = args.command[1:]
     if not args.command:
         parser.error("a Catch2 command is required after --")
-    if args.config is None and (args.os_name or args.arch or args.select or args.ignore_config):
+    if args.config is None and (
+        args.os_name or args.arch or args.select or args.ignore_config
+    ):
         parser.error("--os, --arch, --select and --ignore-config require --config")
     return args
 
@@ -98,7 +112,10 @@ def _ignore_config(args: argparse.Namespace) -> bool:
     if args.ignore_config:
         return True
     return os.environ.get("HRR_TEST_IGNORE_CONFIG", "").strip().lower() in (
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
 
@@ -117,16 +134,22 @@ def _archs_for(arch_arg: str, ignore: bool) -> list[str]:
         return []
     if arch_arg == "auto":
         import hrr_test_config
+
         archs = hrr_test_config.detect_archs()
         if not archs:
-            print("error: could not detect a GPU architecture; "
-                  "pass --arch none or --arch gfxNNNN", file=sys.stderr)
+            print(
+                "error: could not detect a GPU architecture; "
+                "pass --arch none or --arch gfxNNNN",
+                file=sys.stderr,
+            )
             raise SystemExit(1)
         return archs
     archs = _parse_arch(arch_arg)
     if not archs or not all(arch.startswith("gfx") for arch in archs):
-        print(f"error: --arch must be auto, none, or gfx names, not {arch_arg!r}",
-              file=sys.stderr)
+        print(
+            f"error: --arch must be auto, none, or gfx names, not {arch_arg!r}",
+            file=sys.stderr,
+        )
         raise SystemExit(1)
     return archs
 
@@ -150,13 +173,17 @@ def _add_skip(suite: ET.Element, name: str, message: str) -> None:
 
 def _write_junit(path: Path, skips: list[tuple[str, str]]) -> None:
     root = ET.Element("testsuites")
-    suite = ET.SubElement(root, "testsuite", {
-        "name": "hrr-config",
-        "tests": str(len(skips)),
-        "failures": "0",
-        "errors": "0",
-        "skipped": str(len(skips)),
-    })
+    suite = ET.SubElement(
+        root,
+        "testsuite",
+        {
+            "name": "hrr-config",
+            "tests": str(len(skips)),
+            "failures": "0",
+            "errors": "0",
+            "skipped": str(len(skips)),
+        },
+    )
     for name, message in skips:
         _add_skip(suite, name, message)
     tree = ET.ElementTree(root)
@@ -182,7 +209,9 @@ def _inject_skips(path: Path, skips: list[tuple[str, str]]) -> None:
     tree.write(path, encoding="unicode", xml_declaration=True)
 
 
-def _apply_config(args: argparse.Namespace) -> tuple[list[str], list[tuple[str, str]], str | None]:
+def _apply_config(
+    args: argparse.Namespace,
+) -> tuple[list[str], list[tuple[str, str]], str | None]:
     """Return the Catch2 command, the config skips, and the case-list file.
 
     An empty command means every selected case was skipped, so Catch2 is not
@@ -217,21 +246,37 @@ def _apply_config(args: argparse.Namespace) -> tuple[list[str], list[tuple[str, 
     # selector is Catch2's. Listing still uses command[0], which is the binary
     # in CI. Tests mock list_cases.
     names = [case["name"] for case in listed]
-    _run, skipped = hrr_test_config.resolve(config, names, os_name, archs, ignore=ignore)
+    _run, skipped = hrr_test_config.resolve(
+        config, names, os_name, archs, ignore=ignore, emulated=bool(args.launcher)
+    )
     records = [
-        (item["name"], hrr_test_config.skip_message(os_name, item["archs"], item["rule"]))
+        (
+            item["name"],
+            hrr_test_config.skip_message(os_name, item["archs"], item["rule"]),
+        )
         for item in skipped
     ]
     if not _run:
         return [], records, None
     prefix = _strip_filters(args.command)
     handle = tempfile.NamedTemporaryFile(
-        "w", prefix="hrr-cases-", suffix=".txt", delete=False, encoding="utf-8",
+        "w",
+        prefix="hrr-cases-",
+        suffix=".txt",
+        delete=False,
+        encoding="utf-8",
     )
     with handle:
         for name in _run:
             handle.write(name + "\n")
     return prefix + ["--input-file", handle.name], records, handle.name
+
+
+def launch_command(launcher: str, command: list[str]) -> list[str]:
+    """Prefix the suite process. Listing uses command[0], the Catch2 binary."""
+    if not launcher:
+        return command
+    return shlex.split(launcher) + command
 
 
 def _report(root: ET.Element) -> tuple[dict[str, int], str]:
@@ -290,16 +335,18 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
             return 0
     else:
         command = list(args.command)
-    if args.launcher:
-        command = shlex.split(args.launcher) + command
-    command = command + [
-        "--durations",
-        "yes",
-        "--reporter",
-        "console",
-        "--reporter",
-        f"junit::out={args.xml}",
-    ]
+    command = launch_command(
+        args.launcher,
+        command
+        + [
+            "--durations",
+            "yes",
+            "--reporter",
+            "console",
+            "--reporter",
+            f"junit::out={args.xml}",
+        ],
+    )
     # A session of its own, so a timeout also kills the workloads the suite
     # spawned: they hold the pipe open and would block the read forever.
     with subprocess.Popen(
