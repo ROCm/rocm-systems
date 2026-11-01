@@ -298,6 +298,7 @@ struct AmdExtTable {
   decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
   decltype(hsa_amd_signal_batch_create)* hsa_amd_signal_batch_create_fn;
   decltype(hsa_amd_signal_batch_destroy)* hsa_amd_signal_batch_destroy_fn;
+  decltype(hsa_amd_memory_fill_bytes)* hsa_amd_memory_fill_bytes_fn;
 };
 
 // Table to export HSA Core Runtime Apis
