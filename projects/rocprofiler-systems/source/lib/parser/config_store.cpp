@@ -6,8 +6,6 @@
 #include "parser/schema_validator.hpp"
 #include "parser/value_text.hpp"
 
-#include "common/string_utility.hpp"
-
 #include <fmt/format.h>
 
 #include <cstdint>
@@ -47,33 +45,6 @@ notify(std::string_view param_id, std::string_view value,
     }
 }
 
-std::vector<std::string>
-split_list(std::string_view text, std::string_view separator)
-{
-    std::vector<std::string> items;
-    if(text.empty())
-    {
-        return items;
-    }
-    if(separator.empty())
-    {
-        items.emplace_back(text);
-        return items;
-    }
-
-    while(true)
-    {
-        const auto position = text.find(separator);
-        const auto element  = utility::string::trim(text.substr(0, position));
-        items.emplace_back(element);
-        if(position == std::string_view::npos)
-        {
-            return items;
-        }
-        text.remove_prefix(position + separator.size());
-    }
-}
-
 template <typename ValueT>
 struct dependent_false : std::false_type
 {};
@@ -102,9 +73,11 @@ convert(param_type type, std::string_view text, std::string_view separator)
     }
     else if constexpr(std::is_same_v<ValueT, std::vector<std::string>>)
     {
-        return type == param_type::enumeration_list
-                   ? std::optional{ split_list(text, separator) }
-                   : std::nullopt;
+        if(type != param_type::enumeration_list)
+        {
+            return std::nullopt;
+        }
+        return split_list(text, separator);
     }
     else
     {
@@ -116,13 +89,6 @@ convert(param_type type, std::string_view text, std::string_view separator)
 config_store::config_store(schema config_schema)
 : m_schema{ std::make_shared<const schema>(std::move(config_schema)) }
 {}
-
-config_store&
-config_store::instance()
-{
-    static config_store s_store{ schema{} };
-    return s_store;
-}
 
 void
 config_store::reset(schema config_schema)
@@ -213,7 +179,7 @@ config_store::source_of(std::string_view param_id) const
     return entry == m_values.end() ? std::nullopt : std::optional{ entry->second.source };
 }
 
-template <typename ValueT>
+template <config_value ValueT>
 std::optional<ValueT>
 config_store::get_as(std::string_view param_id) const
 {
