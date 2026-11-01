@@ -245,6 +245,12 @@ arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
                 1) *
                4;
 
+    if(name.find("gfx125") == 0)
+        return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
+                                 AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
+                1) *
+               16;
+
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                              AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
             1) *
