@@ -700,6 +700,12 @@ in the following table.
         | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
         | communicator initialization.
 
+    * - | ``RCCL_P2P_MNNVL_CHUNKSIZE``
+        | Overrides the P2P chunk size for a clique fused across multiple
+          physical hosts by MNNVL/UALoE.
+      - | ``N`` (bytes): Use ``N`` as the P2P chunk size for an MNNVL-fused
+          multi-host clique (default: ``131072``, 128 kB).
+
     * - | ``RCCL_BCM_LINKS_PATH``
         | Fallback directory for Broadcom PEX inter-switch link topology.
           When the ``switch_discovery`` kernel module's sysfs path
