@@ -32,6 +32,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
@@ -1778,6 +1779,10 @@ protected:
   bool observes_memory_routing_ = false;
   bool observes_register_access_ = false;
   uint64_t memory_wait_diagnostic_count_ = 0;
+  // Written only when decoding or executing fails and cleared once reported,
+  // so the issue loop does not construct and destroy them per instruction.
+  util::StringDiagnostic decode_error_;
+  std::string execution_failure_detail_;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
   // Reports come only from the CU issuing thread; helpers must not report.
