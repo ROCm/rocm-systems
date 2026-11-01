@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <gtest/gtest.h>
 
@@ -855,17 +856,60 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
     returned.discard();
   }
   EXPECT_EQ(decoder.calls, 1u);
+  // The issuing caller discards on unwinding, as the CU's issue loop does.
   try {
     auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
     ASSERT_FALSE(decoded.failed());
     amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
                                                            words);
-    throw std::runtime_error("execution callback failed");
+    try {
+      throw std::runtime_error("execution callback failed");
+    } catch (...) {
+      returned.discard();
+      throw;
+    }
   } catch (const std::runtime_error &) {
   }
   auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
   ASSERT_FALSE(decoded.failed());
   EXPECT_EQ(decoder.calls, 3u);
+}
+
+class ThrowAfterExecutePlugin final : public rocjitsu::ExecutionPlugin {
+public:
+  ThrowAfterExecutePlugin() : ExecutionPlugin("throw-after-execute") {}
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const rocjitsu::Instruction &,
+                                       amdgpu::Wavefront &) override {
+    if (std::exchange(throw_next, false))
+      throw std::runtime_error("after-execute callback failed");
+  }
+  bool throw_next = true;
+};
+
+TEST(DecodedInstructionCacheCuTest, ExceptionAfterExecutionDoesNotRetainTheInstruction) {
+  CuFixture fixture("decoded_exception");
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  auto group = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  auto plugin = std::make_unique<ThrowAfterExecutePlugin>();
+  auto *thrower = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.cu()->set_plugin_group(group);
+  fixture.write_program(std::array<uint32_t, 2>{kSNop, kSEndpgm});
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+
+  EXPECT_THROW(fixture.cu()->step(), std::runtime_error);
+  EXPECT_FALSE(thrower->throw_next);
+  EXPECT_EQ(counter->calls, 1u);
+  // The unwound s_nop was discarded, so issuing it again decodes afresh; the
+  // completed one is then reused.
+  for (unsigned issue = 0; issue < 2; ++issue) {
+    wf->pc = kCodeBase;
+    fixture.cu()->step();
+  }
+  EXPECT_EQ(counter->calls, 2u);
 }
 
 // An external decoder may return an instruction whose raw encoding points into
