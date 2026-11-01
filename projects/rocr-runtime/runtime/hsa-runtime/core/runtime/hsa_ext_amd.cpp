@@ -1833,7 +1833,8 @@ hsa_status_t hsa_amd_register_deallocation_callback(void* ptr,
 
   if (status == HSA_STATUS_SUCCESS) {
     if (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
+        info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+        info.type == HSA_EXT_POINTER_TYPE_SVM) {
       // Route to vmem registry (vmem or reserved addresses)
       hsa_status_t vmem_status = g_vmem_registry.register_dealloc_callback(ptr, callback, user_data);
       if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {
@@ -1866,7 +1867,8 @@ hsa_status_t hsa_amd_deregister_deallocation_callback(void* ptr,
 
   if (status == HSA_STATUS_SUCCESS &&
       (info.type == HSA_EXT_POINTER_TYPE_HSA_VMEM ||
-       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR)) {
+       info.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+       info.type == HSA_EXT_POINTER_TYPE_SVM)) {
     // Route to vmem registry (vmem or reserved addresses)
     hsa_status_t vmem_status = g_vmem_registry.deregister_dealloc_callback(ptr, callback);
     if (vmem_status != HSA_STATUS_ERROR_INVALID_ALLOCATION) {

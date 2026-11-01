@@ -1090,6 +1090,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
+}
+
 /* This should be called memory_lock_ held */
 Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
@@ -1197,9 +1216,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // SVM is host-backed, so the agent VA is the host VA. The early return in
+    // PtrInfo skips the driver query that would have filled this in. A bare
+    // reservation has no backing, so its agent base stays null.
+    info->agentBaseAddress = addressHandle->svm_attrib ? info->hostBaseAddress : nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1270,10 +1297,9 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * Reservations registered with hsa_amd_svm_attributes_set are already reported as
+       * HSA_EXT_POINTER_TYPE_SVM. Unregistered NO_REGISTER reservations fall through so
+       * QueryPointerInfo can still describe the address when the driver knows it.
        */
       if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
         memcpy(info, &retInfo, retInfo.size);
@@ -3649,6 +3675,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
+  MarkReservedAddressSvm(base, len);
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4030,9 +4058,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4193,7 +4224,11 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
