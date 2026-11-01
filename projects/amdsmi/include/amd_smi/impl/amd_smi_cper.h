@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
-#include <vector>
 
 #include "amd_smi/amdsmi.h"
 
@@ -204,4 +203,3 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(const char* amdgpu_ring_cper
                                                     amdsmi_cper_hdr_t** cper_hdrs,
                                                     uint64_t* entry_count, uint64_t* cursor,
                                                     uint64_t product_serial);
-std::vector<int> cper_decode(const amdsmi_cper_hdr_t* cper, size_t buf_size);
