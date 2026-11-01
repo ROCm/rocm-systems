@@ -418,7 +418,10 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                        size_t nElts) {
   if (!comm->symmetricSupport) return false;
-  if (!comm->isAllDirectNvlink) return false;
+  // [RCCL] A UALink domain that covers the comm reaches every peer across trays. Only
+  // AllGather is offered there, through the TDM window.
+  const bool oneFabricDomain = comm->MNNVL && comm->nvlDomainSize == comm->nRanks && !comm->p2pCrossClique;
+  if (!comm->isAllDirectNvlink && !(coll == ncclFuncAllGather && oneFabricDomain)) return false;
   if (!ncclSymkImplemented(coll, red, ty)) return false;
 
   return (ncclSymkMask(comm, coll, red, ty, nElts) != 0);

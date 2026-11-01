@@ -1203,6 +1203,31 @@ TEST_F(SchedulerMicrotest,
   EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
+// Across trays only a task the selector admitted (ALLOW) is extracted.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayNeedsSelectorAllow) {
+  for (rcclSymkExtract extract : {RCCL_SYMK_EXTRACT_NONE, RCCL_SYMK_EXTRACT_ALLOW}) {
+    MakeSymmetricTaskList_Scene scene;
+    scene.comm->planner.nTasksColl = 5;
+    scene.comm->MNNVL = 1;
+    scene.comm->isAllDirectNvlink = false;
+    ncclTaskColl task{};
+    task.func = ncclFuncAllGather;
+    task.symkExtract = extract;
+    g_symRegType = ncclSymSendRegRecvReg;
+    struct ncclTaskColl* remainTasksHead = nullptr;
+    if (extract == RCCL_SYMK_EXTRACT_NONE) {
+      EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
+      EXPECT_EQ(remainTasksHead, &task);
+      EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
+    } else {
+      // Extracted, then stopped by the zero workArgsBytes guard like the cases below.
+      EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclInternalError);
+      EXPECT_EQ(remainTasksHead, nullptr);
+      EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
+    }
+  }
+}
+
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
   MakeSymmetricTaskList_Scene scene;  // g_symRegType defaults to ncclSymSendNonregRecvNonreg
   scene.comm->planner.nTasksColl = 5;

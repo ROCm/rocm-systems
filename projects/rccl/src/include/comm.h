@@ -1261,6 +1261,11 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   return stopEvent;
 }
 
+// True for a UALink (MNNVL) comm whose GPUs are not all directly linked.
+static inline bool rcclCommSpansTrays(const struct ncclComm* comm) {
+  return comm->MNNVL && !comm->isAllDirectNvlink;
+}
+
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);
 ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
 

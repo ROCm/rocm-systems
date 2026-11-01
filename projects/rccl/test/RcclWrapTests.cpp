@@ -3043,6 +3043,32 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
+// Only the gfx1250 SPX table opens the AllGather TDM window.
+TEST(RcclDdaTierThresholds, SymTdmWindowPerArch)
+{
+    constexpr size_t MiB = 1024 * 1024;
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(spx, nullptr);
+    EXPECT_EQ(spx->symTdmMinR2[ncclFuncAllGather], 64 * MiB);
+    EXPECT_EQ(spx->symTdmMaxR2[ncclFuncAllGather], 128 * MiB);
+    EXPECT_EQ(spx->symTdmMaxR2Graph[ncclFuncAllGather], 4096 * MiB);
+    EXPECT_EQ(spx->symTdmCrossTrayMaxR2[ncclFuncAllGather], 512 * MiB);
+    const rcclArchThresholds* tables[] = {spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX),
+                                          rcclGetArchThresholds("gfx950"), rcclGetArchThresholds("gfx942")};
+    for (const rcclArchThresholds* t : tables)
+    {
+        ASSERT_NE(t, nullptr);
+        for (int f = 0; f < RCCL_DDA_FUNC_COUNT; ++f)
+        {
+            if (t == spx && f == ncclFuncAllGather) continue;
+            EXPECT_EQ(t->symTdmMinR2[f], 0u) << f;
+            EXPECT_EQ(t->symTdmMaxR2[f], 0u) << f;
+            EXPECT_EQ(t->symTdmMaxR2Graph[f], 0u) << f;
+            EXPECT_EQ(t->symTdmCrossTrayMaxR2[f], 0u) << f;
+        }
+    }
+}
+
 // RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, tuned on DPX nodes apart from
 // the SPX one; the other archs return one table for every mode.
 TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
