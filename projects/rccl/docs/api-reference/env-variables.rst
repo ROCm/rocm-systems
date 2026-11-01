@@ -833,7 +833,7 @@ These variables only take effect when the IB-CAST net plugin is loaded
         | Minimum interval between scheduler weight updates. Value is in
           microseconds.
       - | Integer microseconds. Default: ``50``.
-        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
+        | Values outside the range 1 µs to 60 s are ignored.
 
     * - | ``RCCL_IB_QP_SCHED_WEIGHT``
         | Exponential moving average (EMA) weight applied to new RTT samples.
@@ -859,7 +859,7 @@ These variables only take effect when the IB-CAST net plugin is loaded
           Value is in microseconds. Only used when
           ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
       - | Integer microseconds. Default: ``1000000`` (1 second).
-        | Clamped to the range 1 µs to 60 s; out-of-range values are ignored.
+        | Values outside the range 1 µs to 60 s are ignored.
 
 Development and testing (advanced)
 ==================================
