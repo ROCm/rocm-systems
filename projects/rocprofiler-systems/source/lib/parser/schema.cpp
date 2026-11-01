@@ -85,6 +85,66 @@ split_list(std::string_view value, std::string_view separator)
     return parts;
 }
 
+namespace
+{
+[[nodiscard]] bool
+alias_matches(const choice& item, std::string_view token)
+{
+    return std::ranges::any_of(
+        item.aliases, [token](const std::string& alias) { return alias == token; });
+}
+
+std::string
+canonical_token(const schema_param& param, std::string_view token)
+{
+    for(const auto& item : param.choices)
+    {
+        if(item.value == token)
+        {
+            return item.value;
+        }
+    }
+    for(const auto& item : param.choices)
+    {
+        if(alias_matches(item, token))
+        {
+            return item.value;
+        }
+    }
+    return std::string{ token };
+}
+}  // namespace
+
+std::string
+canonical_choice(const schema_param& param, std::string_view value)
+{
+    if(param.type == param_type::enumeration)
+    {
+        return canonical_token(param, value);
+    }
+    if(param.type != param_type::enumeration_list)
+    {
+        return std::string{ value };
+    }
+
+    const auto parts = split_list(value, list_separator(param));
+    if(!parts)
+    {
+        return std::string{ value };
+    }
+
+    std::string joined;
+    for(std::size_t index = 0; index < parts->size(); ++index)
+    {
+        if(index != 0)
+        {
+            joined.append(list_separator(param));
+        }
+        joined.append(canonical_token(param, (*parts)[index]));
+    }
+    return joined;
+}
+
 void
 schema::set_version(std::string version)
 {
