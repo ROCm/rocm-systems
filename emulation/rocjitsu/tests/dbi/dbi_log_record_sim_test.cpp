@@ -215,14 +215,23 @@ protected:
 
   // A kernel that sets EXEC to @p mask and reaches its anchor, the s_nop at
   // kMaskedAnchor, under it.
-  std::vector<uint32_t> masked_kernel(uint64_t mask) const {
-    const uint16_t exec_lo = scalar_operand_exec_lo(t_.arch);
-    return {build_s_mov_b32(exec_lo, test::kScalarSrcLiteral, t_.arch),
-            static_cast<uint32_t>(mask),
-            build_s_mov_b32(exec_lo + 1, test::kScalarSrcLiteral, t_.arch),
-            static_cast<uint32_t>(mask >> 32),
-            build_s_nop(0, t_.arch),
-            build_s_endpgm(t_.arch)};
+  void masked_kernel(uint64_t mask, std::vector<uint32_t> &words) const {
+    util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_18 = scalar_operand_exec_lo(t_.arch);
+    ASSERT_TRUE(maybe_scalar_operand_exec_lo_18.succeeded());
+    const uint16_t exec_lo = maybe_scalar_operand_exec_lo_18.value();
+    util::FailureOr<uint32_t> maybe_s_endpgm_14 = build_s_endpgm(t_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_14.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_15 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_15.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b32_16 =
+        build_s_mov_b32(exec_lo + 1, test::kScalarSrcLiteral, t_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_16.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b32_17 =
+        build_s_mov_b32(exec_lo, test::kScalarSrcLiteral, t_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_17.succeeded());
+    words = {maybe_s_mov_b32_17.value(), static_cast<uint32_t>(mask),
+             maybe_s_mov_b32_16.value(), static_cast<uint32_t>(mask >> 32),
+             maybe_s_nop_15.value(),     maybe_s_endpgm_14.value()};
   }
   static constexpr uint64_t kMaskedAnchor = 16;
 
@@ -255,8 +264,14 @@ protected:
 
   void expect_one_record_under_the_launch_mask() {
     PatchedKernel kernel;
+    util::FailureOr<uint32_t> maybe_s_endpgm_11 = build_s_endpgm(t_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_11.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_12 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_12.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_13 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_13.succeeded());
     ASSERT_NO_FATAL_FAILURE(
-        patch({build_s_nop(0, t_.arch), build_s_nop(0, t_.arch), build_s_endpgm(t_.arch)},
+        patch({maybe_s_nop_13.value(), maybe_s_nop_12.value(), maybe_s_endpgm_11.value()},
               {/*anchor_offset=*/4}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
@@ -269,8 +284,9 @@ protected:
 
   void expect_partial_guest_mask_recorded() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(
-        patch(masked_kernel(partial_mask()), {kMaskedAnchor}, /*force_full_exec=*/true, kernel));
+    std::vector<uint32_t> words;
+    ASSERT_NO_FATAL_FAILURE(masked_kernel(partial_mask(), words));
+    ASSERT_NO_FATAL_FAILURE(patch(words, {kMaskedAnchor}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, 1u);
@@ -281,8 +297,9 @@ protected:
 
   void expect_zero_mask_recorded() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(
-        patch(masked_kernel(0), {kMaskedAnchor}, /*force_full_exec=*/true, kernel));
+    std::vector<uint32_t> words;
+    ASSERT_NO_FATAL_FAILURE(masked_kernel(0, words));
+    ASSERT_NO_FATAL_FAILURE(patch(words, {kMaskedAnchor}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, 1u);
@@ -298,8 +315,9 @@ protected:
   // escaped the mask would land in the image.
   void expect_record_lost_under_the_guests_zero_mask() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(
-        patch(masked_kernel(0), {kMaskedAnchor}, /*force_full_exec=*/false, kernel));
+    std::vector<uint32_t> words;
+    ASSERT_NO_FATAL_FAILURE(masked_kernel(0, words));
+    ASSERT_NO_FATAL_FAILURE(patch(words, {kMaskedAnchor}, /*force_full_exec=*/false, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, 0u);
@@ -317,13 +335,27 @@ protected:
     constexpr uint32_t kTrips = kSlotCount;
     // s20 counts down from kTrips; s_cbranch_scc1 returns to the anchor, the
     // s_nop at 4, while it is nonzero.
-    const std::vector<uint32_t> text{
-        build_s_mov_b32(kCounter, scalar_positive_inline_u32(kTrips), t_.arch),
-        build_s_nop(0, t_.arch),
-        build_s_add_u32(kCounter, kCounter, scalar_inline_neg_one(t_.arch), t_.arch),
-        build_s_cmp_lg_u32(kCounter, scalar_positive_inline_u32(0), t_.arch),
-        test::build_s_cbranch_scc(/*scc1=*/true, /*back to the anchor=*/-4, t_.arch),
-        build_s_endpgm(t_.arch)};
+    util::FailureOr<uint32_t> maybe_s_endpgm_5 = build_s_endpgm(t_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_5.succeeded());
+    util::FailureOr<uint32_t> maybe_s_cmp_lg_u32_6 =
+        build_s_cmp_lg_u32(kCounter, scalar_positive_inline_u32(0), t_.arch);
+    ASSERT_TRUE(maybe_s_cmp_lg_u32_6.succeeded());
+    util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_7 = scalar_inline_neg_one(t_.arch);
+    ASSERT_TRUE(maybe_scalar_inline_neg_one_7.succeeded());
+    util::FailureOr<uint32_t> maybe_s_add_u32_8 =
+        build_s_add_u32(kCounter, kCounter, maybe_scalar_inline_neg_one_7.value(), t_.arch);
+    ASSERT_TRUE(maybe_s_add_u32_8.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_9 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_9.succeeded());
+    util::FailureOr<uint32_t> maybe_s_mov_b32_10 =
+        build_s_mov_b32(kCounter, scalar_positive_inline_u32(kTrips), t_.arch);
+    ASSERT_TRUE(maybe_s_mov_b32_10.succeeded());
+    util::FailureOr<uint32_t> maybe_s_cbranch_scc_1 =
+        test::build_s_cbranch_scc(/*scc1=*/true, /*back to the anchor=*/-4, t_.arch);
+    ASSERT_TRUE(maybe_s_cbranch_scc_1.succeeded());
+    const std::vector<uint32_t> text{maybe_s_mov_b32_10.value(),    maybe_s_nop_9.value(),
+                                     maybe_s_add_u32_8.value(),     maybe_s_cmp_lg_u32_6.value(),
+                                     maybe_s_cbranch_scc_1.value(), maybe_s_endpgm_5.value()};
     PatchedKernel kernel;
     ASSERT_NO_FATAL_FAILURE(patch(text, {/*anchor_offset=*/4}, /*force_full_exec=*/true, kernel));
     Drained drained;
@@ -338,8 +370,16 @@ protected:
   // records land in execution order.
   void expect_each_site_records_its_own_offset() {
     PatchedKernel kernel;
-    ASSERT_NO_FATAL_FAILURE(patch({build_s_nop(0, t_.arch), build_s_nop(0, t_.arch),
-                                   build_s_nop(0, t_.arch), build_s_endpgm(t_.arch)},
+    util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(t_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_2.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_3.succeeded());
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, t_.arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    ASSERT_NO_FATAL_FAILURE(patch({maybe_s_nop_4.value(), maybe_s_nop_3.value(),
+                                   maybe_s_nop_2.value(), maybe_s_endpgm_1.value()},
                                   {/*first=*/4, /*second=*/8}, /*force_full_exec=*/true, kernel));
     Drained drained;
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));

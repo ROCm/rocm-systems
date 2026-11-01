@@ -11,6 +11,8 @@
 
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 namespace rocjitsu {
 
@@ -244,7 +246,13 @@ inline constexpr uint64_t kKernelEntryAlignment = 256;
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
 
-void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code_arch_t arch);
+/// @brief Append word-aligned target-ISA NOP padding.
+/// @returns Failure for an unsupported architecture when padding is required;
+/// leaves @p text unchanged on that failure.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
+                                rj_code_arch_t arch,
+                                const util::DiagnosticEmitter *error = nullptr);
 
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
                                            uint64_t alignment);
@@ -301,8 +309,11 @@ private:
 [[nodiscard]] uint64_t next_direct_branch_island_pool_offset(uint64_t current_body_size);
 
 /// @brief Append one skipped branch-island pool to @p kernel_text and record its slots.
-void append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text, KernelTextLayout &layout,
-                                      rj_code_arch_t arch);
+/// @returns Failure for an unsupported architecture, leaving bytes and slots unchanged.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+util::Result append_direct_branch_island_pool(std::vector<uint8_t> &kernel_text,
+                                              KernelTextLayout &layout, rj_code_arch_t arch,
+                                              const util::DiagnosticEmitter *error = nullptr);
 
 /// @brief Add @p delta to body-relative target offsets in @p layout.
 ///

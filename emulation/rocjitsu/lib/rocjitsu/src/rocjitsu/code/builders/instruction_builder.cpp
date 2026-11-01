@@ -84,7 +84,10 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
   if (!opcode)
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  if (word.failed())
+    return std::nullopt;
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_sub_u32` instruction.
@@ -94,7 +97,10 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
   if (!opcode)
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  if (word.failed())
+    return std::nullopt;
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_addc_u32` instruction.
@@ -104,7 +110,10 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
   if (!opcode)
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  if (word.failed())
+    return std::nullopt;
+  return word.value();
 }
 
 /// @brief Build an encoded scalar `s_subb_u32` instruction.
@@ -114,7 +123,10 @@ enum class ScalarSop2Op {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
   if (!opcode)
     return std::nullopt;
-  return build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  if (word.failed())
+    return std::nullopt;
+  return word.value();
 }
 
 } // namespace
@@ -159,8 +171,11 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
     auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
     if (!opcode)
       return false;
-    words.push_back(build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
-                                        use_literal32 ? kLiteralOperand : kLiteral64Operand));
+    util::FailureOr<uint32_t> word = build_sop2_encoding(
+        arch, *opcode, pc_sreg, pc_sreg, use_literal32 ? kLiteralOperand : kLiteral64Operand);
+    if (word.failed())
+      return false;
+    words.push_back(word.value());
     words.push_back(static_cast<uint32_t>(raw_delta));
     if (!use_literal32)
       words.push_back(static_cast<uint32_t>(raw_delta >> 32));

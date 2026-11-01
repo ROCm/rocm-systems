@@ -360,7 +360,9 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(maybe_s_endpgm.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm.value();
 
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
@@ -415,7 +417,9 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  static_assert(maybe_s_endpgm_2.succeeded());
+  constexpr uint32_t SOPP_S_ENDPGM = maybe_s_endpgm_2.value();
 
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));

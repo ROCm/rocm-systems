@@ -27,10 +27,11 @@ using Blocks = std::vector<std::unique_ptr<BasicBlock>>;
 using Issue = BasicBlock::SuccessorIssue;
 using Range = BasicBlock::CodeRange;
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
-constexpr uint32_t kNop = build_s_nop(0, kArch);
-constexpr uint32_t kEnd = build_s_endpgm(kArch);
+
+constexpr uint32_t kNop = build_s_nop(0, kArch).value();
+constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
 constexpr uint32_t kInvalid = 0xffffffffu;
-constexpr uint32_t branch(int16_t delta) { return build_s_branch(delta, kArch); }
+constexpr uint32_t branch(int16_t delta) { return build_s_branch(delta, kArch).value(); }
 constexpr uint32_t conditional(int16_t delta) {
   return pack_sopp(5, static_cast<uint16_t>(delta)); // s_cbranch_scc0.
 }
@@ -118,6 +119,9 @@ protected:
 
 std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, uint16_t hwreg,
                                                         uint32_t literal) {
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  static_assert(kEndpgmCdna5Result.succeeded());
+
   const auto set_banks = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = initial_banks});
   const auto setreg = cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = hwreg});
   return {
@@ -135,9 +139,9 @@ std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, u
       0xD7600000u,
       0x0201012Cu, // 0x2c: v_readlane_b32 s0, encoded v44, 0.
       0xD7600001u,
-      0x0201032Cu,                              // 0x34: v_readlane_b32 s1, encoded v44, 1.
-      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target/continuation.
+      0x0201032Cu,                // 0x34: v_readlane_b32 s1, encoded v44, 1.
+      0xBE9E4900u,                // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      kEndpgmCdna5Result.value(), // 0x40: target/continuation.
   };
 }
 
@@ -212,7 +216,9 @@ TEST_F(ReachableCfg, SelfLoopTerminatesDiscovery) {
 
 TEST_F(ReachableCfg, DirectCallIncludesCalleeAndContinuation) {
   // Callee returns with s_setpc_b64 s[4:5] (0xbe801d04).
-  const auto result = build_reachable({build_s_call_b64(4, 2, kArch), kEnd, kInvalid, 0xbe801d04u});
+  util::FailureOr<uint32_t> maybe_s_call_b64 = build_s_call_b64(4, 2, kArch);
+  ASSERT_TRUE(maybe_s_call_b64.succeeded());
+  const auto result = build_reachable({maybe_s_call_b64.value(), kEnd, kInvalid, 0xbe801d04u});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const auto &blocks = result.value();
   ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0, 4, 12}));
@@ -242,7 +248,9 @@ TEST_F(ReachableCfg, IndirectCallKeepsPossibleContinuation) {
 
 TEST_F(ReachableCfg, MissingBranchTargetsRemainVisible) {
   for (int16_t delta : {-2, 5}) {
-    const auto result = build_reachable({branch(delta)});
+    const auto branch_result = build_s_branch(delta, kArch);
+    ASSERT_TRUE(branch_result.succeeded());
+    const auto result = build_reachable({branch_result.value()});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     ASSERT_EQ(result.value().size(), 1u);
     EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingBranchTarget);
@@ -251,11 +259,15 @@ TEST_F(ReachableCfg, MissingBranchTargetsRemainVisible) {
 
 TEST_F(ReachableCfg, MissingCallTargetAndContinuationAreDistinguished) {
   {
-    const auto result = build_reachable({build_s_call_b64(4, 4, kArch), kEnd});
+    util::FailureOr<uint32_t> maybe_s_call_b64_2 = build_s_call_b64(4, 4, kArch);
+    ASSERT_TRUE(maybe_s_call_b64_2.succeeded());
+    const auto result = build_reachable({maybe_s_call_b64_2.value(), kEnd});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingCallTarget);
   }
-  const auto result = build_reachable({kEnd, build_s_call_b64(4, -2, kArch)}, {4});
+  util::FailureOr<uint32_t> maybe_s_call_b64_3 = build_s_call_b64(4, -2, kArch);
+  ASSERT_TRUE(maybe_s_call_b64_3.succeeded());
+  const auto result = build_reachable({kEnd, maybe_s_call_b64_3.value()}, {4});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().back()->successor_issue(), Issue::MissingCallContinuation);
 }
@@ -321,8 +333,10 @@ TEST_F(ReachableCfg, RejectsTargetsInsideInstructionsInEitherDiscoveryOrder) {
 }
 
 TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
-  const auto result = build_reachable({build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), 0, kInvalid}, {0},
-                                      {}, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_s_nop.succeeded());
+  const auto result =
+      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(result.value().size(), 1u);
   EXPECT_TRUE(result.value()[0]->has_implicit_terminator());
@@ -330,15 +344,19 @@ TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
 }
 
 TEST_F(ReachableCfg, Gfx1250ExplicitPaddingTargetFails) {
-  const auto result = build_reachable({build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5), 0}, {0}, {},
-                                      ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_s_branch.succeeded());
+  const auto result =
+      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
   EXPECT_TRUE(result.failed());
   EXPECT_NE(error_.message().find("padding"), std::string::npos);
 }
 
 TEST_F(ReachableCfg, RangeBoundaryIsNotAnImplicitPaddingTerminator) {
-  const auto result = build_reachable({build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5), 0}, {0}, {{0, 4}},
-                                      ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_s_nop_2.succeeded());
+  const auto result =
+      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value()[0]->has_implicit_terminator());
   EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingFallthrough);
@@ -346,8 +364,14 @@ TEST_F(ReachableCfg, RangeBoundaryIsNotAnImplicitPaddingTerminator) {
 
 TEST_F(ReachableCfg, ClippedCalleeDoesNotDiscardCallContinuation) {
   constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(arch);
+  ASSERT_TRUE(maybe_s_endpgm.succeeded());
+  util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, arch);
+  ASSERT_TRUE(maybe_s_nop_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_call_b64_4 = build_s_call_b64(4, 2, arch);
+  ASSERT_TRUE(maybe_s_call_b64_4.succeeded());
   const auto result = build_reachable(
-      {build_s_call_b64(4, 2, arch), build_s_endpgm(arch), kInvalid, build_s_nop(0, arch), 0}, {0},
+      {maybe_s_call_b64_4.value(), maybe_s_endpgm.value(), kInvalid, maybe_s_nop_3.value(), 0}, {0},
       {{0, 8}, {12, 4}}, arch);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 4, 12}));
@@ -369,11 +393,21 @@ TEST_F(ReachableCfg, RejectsAmbiguousSectionsAndReachedPartialWords) {
 
 TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const uint32_t nop = build_s_nop(0, arch);
-    const uint32_t end = build_s_endpgm(arch);
+    util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_4.succeeded());
+    const uint32_t nop = maybe_s_nop_4.value();
+    util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+    const uint32_t end = maybe_s_endpgm_2.value();
+    const auto branch_result = build_s_branch(-1, arch);
+    ASSERT_TRUE(branch_result.succeeded());
+    const auto call_result = build_s_call_b64(4, 1, arch);
+    ASSERT_TRUE(call_result.succeeded());
+    const auto return_result = build_s_setpc_b64(4, arch);
+    ASSERT_TRUE(return_result.succeeded());
     std::vector<std::vector<uint32_t>> programs{
-        {nop, build_s_branch(-1, arch)},
-        {build_s_call_b64(4, 1, arch), end, build_s_setpc_b64(4, arch)},
+        {nop, branch_result.value()},
+        {call_result.value(), end, return_result.value()},
         {nop, end},
     };
     if (arch == ROCJITSU_CODE_ARCH_CDNA5)
@@ -418,8 +452,12 @@ TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
   for (auto arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
         ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const auto result =
-        build_reachable({build_s_branch(1, arch), kInvalid, build_s_endpgm(arch)}, {0}, {}, arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(1, arch);
+    ASSERT_TRUE(maybe_s_branch_2.succeeded());
+    const auto result = build_reachable(
+        {maybe_s_branch_2.value(), kInvalid, maybe_s_endpgm_3.value()}, {0}, {}, arch);
     ASSERT_TRUE(result.succeeded()) << error_.message();
     ASSERT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 8}));
     EXPECT_EQ(successors(*result.value()[0]), (std::vector<uint64_t>{8}));
@@ -428,11 +466,20 @@ TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
 
 // A CDNA4 getpc/add/addc/setpc chain targeting byte 24, across an undecodable gap.
 static std::vector<uint32_t> indirect_branch_words() {
-  return {build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+  constexpr util::FailureOr<uint32_t> kGetpcS8Result = build_s_getpc_b64(8, kArch);
+  static_assert(kGetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddS8LiteralResult = build_s_add_u32(8, 8, 255, kArch);
+  static_assert(kAddS8LiteralResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddcS9ZeroResult = build_s_addc_u32(9, 9, 128, kArch);
+  static_assert(kAddcS9ZeroResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS8Result = build_s_setpc_b64(8, kArch);
+  static_assert(kSetpcS8Result.succeeded());
+
+  return {kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           20,
-          build_s_addc_u32(9, 9, 128, kArch),
-          build_s_setpc_b64(8, kArch),
+          kAddcS9ZeroResult.value(),
+          kSetpcS8Result.value(),
           kInvalid,
           kEnd};
 }
@@ -452,9 +499,13 @@ TEST_F(ReachableCfg, DiscoversIndirectTargetAcrossMalformedGap) {
 
 TEST_F(ReachableCfg, DiscoversReturningCallAndContinuation) {
   auto words = indirect_branch_words();
-  words[4] = build_s_swappc_b64(30, 8, kArch);
+  util::FailureOr<uint32_t> maybe_s_swappc_b64 = build_s_swappc_b64(30, 8, kArch);
+  ASSERT_TRUE(maybe_s_swappc_b64.succeeded());
+  words[4] = maybe_s_swappc_b64.value();
   words[5] = kEnd;
-  words[6] = build_s_setpc_b64(30, kArch);
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_7 = build_s_setpc_b64(30, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_7.succeeded());
+  words[6] = maybe_s_setpc_b64_7.value();
   const auto result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const BasicBlock &consumer = *result.value()[1];
@@ -480,12 +531,20 @@ TEST_F(ReachableCfg, RepeatsDiscoveryThroughNewlyDecodedCode) {
 TEST_F(ReachableCfg, LowerAddressCalleeKeepsCallerFacts) {
   // The helper at zero consumes s[8:9] built by the real entry at byte 8.
   // Marking the lowest decoded instruction as external would poison that fact.
-  const std::vector<uint32_t> words = {build_s_setpc_b64(8, kArch),
+  util::FailureOr<uint32_t> maybe_s_setpc_b64 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64.succeeded());
+  util::FailureOr<uint32_t> maybe_s_getpc_b64 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32.succeeded());
+  const std::vector<uint32_t> words = {maybe_s_setpc_b64.value(),
                                        kInvalid,
-                                       build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+                                       maybe_s_getpc_b64.value(),
+                                       maybe_s_add_u32.value(),
                                        24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
+                                       maybe_s_addc_u32.value(),
                                        branch(-7),
                                        kInvalid,
                                        kInvalid,
@@ -500,12 +559,20 @@ TEST_F(ReachableCfg, LowerAddressCalleeKeepsCallerFacts) {
 }
 
 TEST_F(ReachableCfg, DecodeSeedDoesNotBecomeExternalEntry) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_2 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_2 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_2 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32_2 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_2.succeeded());
+  const std::vector<uint32_t> words = {maybe_s_getpc_b64_2.value(),
+                                       maybe_s_add_u32_2.value(),
                                        24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
+                                       maybe_s_addc_u32_2.value(),
                                        branch(0),
-                                       build_s_setpc_b64(8, kArch),
+                                       maybe_s_setpc_b64_2.value(),
                                        kInvalid,
                                        kEnd};
   const auto result = build_reachable(words, {0}, {}, kArch, {20});
@@ -517,12 +584,20 @@ TEST_F(ReachableCfg, DecodeSeedDoesNotBecomeExternalEntry) {
 }
 
 TEST_F(ReachableCfg, IndependentDecodeSeedCompletesCrossBlockIndirectClosure) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_3 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_3 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_3 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32_3 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_3.succeeded());
+  const std::vector<uint32_t> words = {maybe_s_getpc_b64_3.value(),
+                                       maybe_s_add_u32_3.value(),
                                        24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
+                                       maybe_s_addc_u32_3.value(),
                                        branch(0),
-                                       build_s_setpc_b64(8, kArch),
+                                       maybe_s_setpc_b64_3.value(),
                                        kInvalid,
                                        kEnd};
   const auto result = build_reachable(words, {}, {}, kArch, {0});
@@ -539,14 +614,24 @@ TEST_F(ReachableCfg, IndependentDecodeSeedCompletesCrossBlockIndirectClosure) {
 }
 
 TEST_F(ReachableCfg, IndependentSeedClosurePrecedesAnOptionalLiteralSeed) {
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_4 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_4 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_4 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_5 = build_s_add_u32(0, 0, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32_4 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_4.succeeded());
+  const std::vector<uint32_t> words = {maybe_s_getpc_b64_4.value(),
+                                       maybe_s_add_u32_4.value(),
                                        24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
+                                       maybe_s_addc_u32_4.value(),
                                        branch(0),
-                                       build_s_setpc_b64(8, kArch),
+                                       maybe_s_setpc_b64_4.value(),
                                        kInvalid,
-                                       build_s_add_u32(0, 0, 255, kArch),
+                                       maybe_s_add_u32_5.value(),
                                        kEnd, // Literal also encodes an instruction.
                                        kEnd};
   const auto result = build_reachable(words, {}, {}, kArch, {32, 0, 20});
@@ -562,24 +647,32 @@ TEST_F(ReachableCfg, IndependentSeedPropagatesLaneStateWithoutAssumingAnEntryMod
   constexpr auto bank_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
   for (bool set_mode : {false, true}) {
     SCOPED_TRACE(set_mode);
+    util::FailureOr<uint32_t> maybe_s_nop_5 = build_s_nop(0, arch);
+    ASSERT_TRUE(maybe_s_nop_5.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
+    util::FailureOr<uint32_t> maybe_s_endpgm_5 = build_s_endpgm(arch);
+    ASSERT_TRUE(maybe_s_endpgm_5.succeeded());
+    util::FailureOr<uint32_t> maybe_s_branch_3 = build_s_branch(0, arch);
+    ASSERT_TRUE(maybe_s_branch_3.succeeded());
     const std::vector<uint32_t> words = {
-        set_mode ? bank_zero[0] : build_s_nop(0, arch), // 0: establish banking explicitly.
-        0xBE804700u,                                    // 4: getpc s[0:1], PC=8.
+        set_mode ? bank_zero[0] : maybe_s_nop_5.value(), // 0: establish banking explicitly.
+        0xBE804700u,                                     // 4: getpc s[0:1], PC=8.
         0xA980FE00u,
         56u,
         0u, // 8: add target delta -> 64.
         0xD761002Cu,
         0x02010000u, // 20: v44 lane 0 <- s0.
         0xD761002Cu,
-        0x02010201u,             // 28: v44 lane 1 <- s1.
-        build_s_branch(0, arch), // 36: branch to 40.
+        0x02010201u,              // 28: v44 lane 1 <- s1.
+        maybe_s_branch_3.value(), // 36: branch to 40.
         0xD7600000u,
         0x0201012Cu, // 40: s0 <- v44 lane 0.
         0xD7600001u,
-        0x0201032Cu,          // 48: s1 <- v44 lane 1.
-        0xBE9E4900u,          // 56: swappc s[30:31], s[0:1].
-        build_s_endpgm(arch), // 60: continuation.
-        build_s_endpgm(arch), // 64: indirect target.
+        0x0201032Cu,              // 48: s1 <- v44 lane 1.
+        0xBE9E4900u,              // 56: swappc s[30:31], s[0:1].
+        maybe_s_endpgm_4.value(), // 60: continuation.
+        maybe_s_endpgm_5.value(), // 64: indirect target.
     };
     // Mark the restore block as another seed to ensure it preserves the stash
     // from its real predecessor instead of adding an empty external lane state.
@@ -663,12 +756,20 @@ TEST_F(ReachableCfg, DiscoveryRoundLimitReturnsFailure) {
 TEST_F(ReachableCfg, PartialIndirectTargetsRetainIncompleteStatus) {
   // The taken arm reaches setpc with an unconstrained PC; the fallthrough arm
   // contributes one concrete target. Finding that target must not hide the unknown arm.
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_5 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_5 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_5.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_6 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_6.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32_5 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_5.succeeded());
   const std::vector<uint32_t> words = {conditional(4),
-                                       build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+                                       maybe_s_getpc_b64_5.value(),
+                                       maybe_s_add_u32_6.value(),
                                        24,
-                                       build_s_addc_u32(9, 9, 128, kArch),
-                                       build_s_setpc_b64(8, kArch),
+                                       maybe_s_addc_u32_5.value(),
+                                       maybe_s_setpc_b64_5.value(),
                                        kInvalid,
                                        kInvalid,
                                        kEnd};
@@ -685,17 +786,28 @@ TEST_F(ReachableCfg, PartialIndirectTargetsRetainIncompleteStatus) {
 
 // Two paths produce targets at bytes 40 and 44 for the consumer at byte 32.
 static std::vector<uint32_t> mixed_indirect_targets(bool call) {
+  constexpr util::FailureOr<uint32_t> kGetpcS8Result = build_s_getpc_b64(8, kArch);
+  static_assert(kGetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kAddS8LiteralResult = build_s_add_u32(8, 8, 255, kArch);
+  static_assert(kAddS8LiteralResult.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS8Result = build_s_setpc_b64(8, kArch);
+  static_assert(kSetpcS8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kSwappcS30S8Result = build_s_swappc_b64(30, 8, kArch);
+  static_assert(kSwappcS30S8Result.succeeded());
+  constexpr util::FailureOr<uint32_t> kSetpcS30Result = build_s_setpc_b64(30, kArch);
+  static_assert(kSetpcS30Result.succeeded());
+
   return {conditional(4),
-          build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+          kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           32,
           branch(3),
-          build_s_getpc_b64(8, kArch),
-          build_s_add_u32(8, 8, 255, kArch),
+          kGetpcS8Result.value(),
+          kAddS8LiteralResult.value(),
           20,
-          call ? build_s_swappc_b64(30, 8, kArch) : build_s_setpc_b64(8, kArch),
+          call ? kSwappcS30S8Result.value() : kSetpcS8Result.value(),
           kEnd,
-          build_s_setpc_b64(30, kArch),
+          kSetpcS30Result.value(),
           kEnd};
 }
 
@@ -720,11 +832,14 @@ TEST_F(ReachableCfg, ExcludedIndirectCallTargetKeepsContinuation) {
 }
 
 TEST_F(ReachableCfg, ExcludedIndirectTargetsKeepOuterCallContinuation) {
+  constexpr util::FailureOr<uint32_t> kCallS4Plus1Result = build_s_call_b64(4, 1, kArch);
+  static_assert(kCallS4Plus1Result.succeeded());
+
   // Exercise both a nested swappc and a tail setpc in the directly called helper.
   for (bool nested_call : {false, true}) {
     SCOPED_TRACE(nested_call);
     auto words = mixed_indirect_targets(nested_call);
-    words.insert(words.begin(), {build_s_call_b64(4, 1, kArch), kEnd});
+    words.insert(words.begin(), {kCallS4Plus1Result.value(), kEnd});
     const auto result = build_reachable(words, {0}, {{0, 48}, {52, 4}});
     ASSERT_TRUE(result.succeeded()) << error_.message();
     const auto &caller = *result.value().front();
@@ -735,8 +850,11 @@ TEST_F(ReachableCfg, ExcludedIndirectTargetsKeepOuterCallContinuation) {
 }
 
 TEST_F(ReachableCfg, OptionalSeedInsideIndirectlyReachedInstructionIsIgnored) {
+  constexpr util::FailureOr<uint32_t> kAddS0LiteralResult = build_s_add_u32(0, 0, 255, kArch);
+  static_assert(kAddS0LiteralResult.succeeded());
+
   auto words = indirect_branch_words();
-  words.back() = build_s_add_u32(0, 0, 255, kArch);
+  words.back() = kAddS0LiteralResult.value();
   words.push_back(kEnd); // Literal word also happens to encode a standalone endpgm.
   words.push_back(kEnd);
   const auto result = build_reachable(words, {0}, {}, kArch, {28});
@@ -746,8 +864,11 @@ TEST_F(ReachableCfg, OptionalSeedInsideIndirectlyReachedInstructionIsIgnored) {
 }
 
 TEST_F(ReachableCfg, OptionalSeedInsideAnotherSeedsIndirectClosureIsIgnored) {
+  constexpr util::FailureOr<uint32_t> kAddS0LiteralResult = build_s_add_u32(0, 0, 255, kArch);
+  static_assert(kAddS0LiteralResult.succeeded());
+
   auto words = indirect_branch_words();
-  words.back() = build_s_add_u32(0, 0, 255, kArch);
+  words.back() = kAddS0LiteralResult.value();
   words.push_back(kEnd);
   words.push_back(kEnd);
   const auto result = build_reachable(words, {}, {}, kArch, {0, 28});
@@ -798,12 +919,20 @@ TEST_F(ReachableCfg, SharedDecodePoliciesKeepDistinctCoverage) {
 
 TEST_F(ReachableCfg, FullSectionPolicyRetainsImplicitFirstEntry) {
   TestCodeObject object;
-  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch),
-                                       build_s_add_u32(8, 8, 255, kArch),
+  util::FailureOr<uint32_t> maybe_s_getpc_b64_6 = build_s_getpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_getpc_b64_6.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64_6 = build_s_setpc_b64(8, kArch);
+  ASSERT_TRUE(maybe_s_setpc_b64_6.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_7 = build_s_add_u32(8, 8, 255, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_7.succeeded());
+  util::FailureOr<uint32_t> maybe_s_addc_u32_6 = build_s_addc_u32(9, 9, 128, kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_6.succeeded());
+  const std::vector<uint32_t> words = {maybe_s_getpc_b64_6.value(),
+                                       maybe_s_add_u32_7.value(),
                                        28,
-                                       build_s_addc_u32(9, 9, 128, kArch),
+                                       maybe_s_addc_u32_6.value(),
                                        branch(0),
-                                       build_s_setpc_b64(8, kArch),
+                                       maybe_s_setpc_b64_6.value(),
                                        kEnd,
                                        kEnd,
                                        kEnd};

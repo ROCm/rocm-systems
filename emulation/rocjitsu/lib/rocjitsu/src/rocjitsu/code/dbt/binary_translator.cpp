@@ -154,7 +154,10 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
                                               uint64_t call_offset, rj_code_arch_t arch) {
   if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0)
     return false;
-  const uint32_t nop = build_s_nop(0, arch);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
+  if (maybe_nop.failed())
+    return false;
+  const uint32_t nop = maybe_nop.value();
   for (uint64_t offset = recovery_end; offset < call_offset; offset += sizeof(uint32_t)) {
     if (text_word_at(text, offset) != nop)
       return false;
@@ -390,9 +393,15 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
     return offsets;
   std::vector<uint32_t> slot_words(lookahead_words, 0);
 
-  const uint32_t marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
-  const uint32_t skip_pool =
+  util::FailureOr<uint32_t> maybe_marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
+  if (maybe_marker.failed())
+    return offsets;
+  const uint32_t marker = maybe_marker.value();
+  util::FailureOr<uint32_t> maybe_skip =
       build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
+  if (maybe_skip.failed())
+    return offsets;
+  const uint32_t skip_pool = maybe_skip.value();
   constexpr uint64_t kPoolBytes = (kGeneratedIslandPoolHeaderWords + kDirectBranchIslandPoolSlots) *
                                   static_cast<uint64_t>(sizeof(uint32_t));
   for (uint64_t offset = 0;
@@ -1483,8 +1492,16 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
-  if (translated_text.size() < original_text_size)
-    append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch);
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
+  if (translated_text.size() < original_text_size &&
+      append_nop_padding(translated_text, original_text_size - translated_text.size(), host_arch,
+                         &builder_error)
+          .failed()) {
+    return std::nullopt;
+  }
 
   std::unordered_set<uint64_t> applied_descriptors;
   for (const KdTranslation &translation : translations) {
@@ -2339,6 +2356,26 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "translation requires exactly one allocated executable section named .text");
     return leave_unchanged();
   }
+
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
+  util::FailureOr<uint32_t> guest_pool_marker =
+      build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_pool_marker.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_pool_skip = build_s_branch(
+      static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_, &builder_error);
+  if (guest_pool_skip.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_long_marker =
+      build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_long_marker.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &builder_error);
+  if (host_endpgm.failed())
+    return leave_unchanged();
 
   CodeObjectPatcher patcher(obj);
 
@@ -3433,20 +3470,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           const Instruction *marker = marker_it->second;
           const Instruction *skip = skip_it->second;
           const auto skip_delta = skip->branch_offset_bytes();
-          reachable_header =
-              marker->size() == static_cast<int>(sizeof(uint32_t)) &&
-              marker->raw_encoding() != nullptr &&
-              marker->raw_encoding()[0] ==
-                  build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_) &&
-              marker->next_instruction() == skip &&
-              skip->size() == static_cast<int>(sizeof(uint32_t)) &&
-              skip->raw_encoding() != nullptr &&
-              skip->raw_encoding()[0] ==
-                  build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_) &&
-              skip_delta &&
-              pool_offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) +
-                      static_cast<uint64_t>(*skip_delta) ==
-                  pool_offset + kGeneratedIslandPoolBytes;
+          reachable_header = marker->size() == static_cast<int>(sizeof(uint32_t)) &&
+                             marker->raw_encoding() != nullptr &&
+                             marker->raw_encoding()[0] == guest_pool_marker.value() &&
+                             marker->next_instruction() == skip &&
+                             skip->size() == static_cast<int>(sizeof(uint32_t)) &&
+                             skip->raw_encoding() != nullptr &&
+                             skip->raw_encoding()[0] == guest_pool_skip.value() && skip_delta &&
+                             pool_offset + kGeneratedIslandPoolHeaderWords * sizeof(uint32_t) +
+                                     static_cast<uint64_t>(*skip_delta) ==
+                                 pool_offset + kGeneratedIslandPoolBytes;
         }
 
         bool reachable_slot = false;
@@ -3694,10 +3727,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             marker->size() == static_cast<int>(sizeof(uint32_t)) &&
             marker->src_loc() + sizeof(uint32_t) == first.source_getpc_offset &&
             marker->raw_encoding() != nullptr &&
-            marker->raw_encoding()[0] ==
-                build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_) &&
-            call != nullptr && call->size() == static_cast<int>(sizeof(uint32_t)) &&
-            !has_interior_block_entry && !has_external_call_entry;
+            marker->raw_encoding()[0] == guest_long_marker.value() && call != nullptr &&
+            call->size() == static_cast<int>(sizeof(uint32_t)) && !has_interior_block_entry &&
+            !has_external_call_entry;
         if (canonical_marked_window) {
           consumer.preserve_marked_long_transfer = true;
           consumer.marked_window_begin = marker->src_loc();
@@ -3937,7 +3969,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .preserve_marked_long_transfer = true});
-          append_nop_padding(kernel_text, window_bytes, host_arch_);
+          if (append_nop_padding(kernel_text, window_bytes, host_arch_, &builder_error).failed()) {
+            return leave_unchanged();
+          }
           active_marked_long_transfer = {
               .source_end = consumer.marked_window_end,
               .source_begin = consumer.marked_window_begin,
@@ -4099,7 +4133,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .target_inst_offset = target_offset,
                .target_window_bytes = branch_window_bytes,
                .translated_words = target_words});
-          append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_);
+          if (append_nop_padding(kernel_text, branch_window_bytes - inst.size(), host_arch_,
+                                 &builder_error)
+                  .failed()) {
+            return leave_unchanged();
+          }
           queue_trace(pending_traces, inst, offset, branch_leg, copied_original, false, changed,
                       target_offset, std::move(target_words));
           continue;
@@ -4115,7 +4153,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                .return_sreg = source_fixup.source_return_sreg,
                .is_call = source_fixup.source_is_call,
                .keep_dynamic_when_long = recovered_it->second.builder_is_contiguous});
-          append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_);
+          if (append_nop_padding(kernel_text, sizeof(uint32_t), host_arch_, &builder_error)
+                  .failed()) {
+            return leave_unchanged();
+          }
           continue;
         }
 
@@ -4349,7 +4390,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // any other target-side expansion, the terminator belongs in relocated
         // function extents. Without an architectural terminator, ordinary text
         // materialization can turn this unreachable stub into a fallthrough.
-        const uint32_t endpgm = build_s_endpgm(host_arch_);
+        const uint32_t endpgm = host_endpgm.value();
         append_words(kernel_text, std::span<const uint32_t>(&endpgm, 1));
         // The boundary is inferred from what follows the block, not from anything the block itself
         // says, so a body that really did run on past here is cut short instead of translated.
@@ -4389,7 +4430,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       target_offset_by_source_offset.emplace(block->end_offset(), placement.target_end);
       if (!can_use_long_direct_branches && !preserve_generated_branch_island_pools &&
           block != scope.blocks.back() && kernel_text.size() >= next_branch_island_pool_offset) {
-        append_direct_branch_island_pool(kernel_text, layout, host_arch_);
+        if (append_direct_branch_island_pool(kernel_text, layout, host_arch_, &builder_error)
+                .failed()) {
+          return leave_unchanged();
+        }
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
       }
     }

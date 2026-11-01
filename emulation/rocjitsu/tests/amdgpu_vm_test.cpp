@@ -5184,7 +5184,9 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
                            KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
         return descriptor;
       }());
-      const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+      util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(f.cu()->arch());
+      ASSERT_TRUE(maybe_s_endpgm.succeeded());
+      const uint32_t code[] = {maybe_s_endpgm.value()};
       const uint64_t large = f.write_kernel(0x1000, code, sizeof(code));
       const uint64_t small = f.write_kernel(0x2000, code, sizeof(code));
       f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size), 1024);
@@ -5250,7 +5252,9 @@ TEST(CommandProcessorTest, Cdna5RuntimeScratchAcceptsTargetGranules) {
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 2));
   constexpr uint64_t kRing = 0xF0000000, kQueue = 0xF0010000, kDoorbell = 0xF0020000;
   constexpr uint64_t kBacking = 0x800000, kStride = 1536;
-  const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(f.cu()->arch());
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const uint32_t code[] = {maybe_s_endpgm_2.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   f.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size), 48);
   f.mem()->write64(kQueue + offsetof(amd_queue_t, scratch_backing_memory_location), kBacking);
@@ -5838,10 +5842,18 @@ TEST_P(WavefrontSlotTest, SparseSlotsExecuteAcrossRetirementWaitPauseAndReuse) {
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_4 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_5 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_5.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch()),
-      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch()),
-      build_s_endpgm(cu->arch()),
+      maybe_s_mov_b32_5.value(),
+      maybe_s_mov_b32_4.value(),
+      maybe_s_endpgm_3.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
 
@@ -5887,9 +5899,14 @@ TEST_P(WavefrontSlotTest, LowerBarrierWaiterResumesAfterSparseHigherSlotRetires)
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch()),
-      build_s_endpgm(cu->arch()),
+      maybe_s_mov_b32_2.value(),
+      maybe_s_endpgm_1.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
   auto *low = cu->dispatch_wf_at(0, 7, kCode, 104, 256, wave_size);
@@ -5953,11 +5970,21 @@ TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
   constexpr uint64_t kStartPc = 0x1000;
   constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
   constexpr uint32_t kTtmp0Selector = 108;
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64 =
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_setpc_b64.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32 =
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32.succeeded());
   const std::array<uint32_t, 4> code = {
-      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      maybe_s_setpc_b64.value(),
+      maybe_s_endpgm_3.value(),
+      maybe_s_mov_b32.value(),
+      maybe_s_endpgm_4.value(),
   };
   mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
 

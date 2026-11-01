@@ -76,6 +76,17 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
   EXPECT_EQ(std::ranges::count(body, kSWaitAluSaSdst), 4);
 
   // The wait must be the word after @p inst, or after its literal when it has one.
+  util::FailureOr<uint32_t> maybe_s_addc_u32_1 =
+      build_s_addc_u32(11, 11, scalar_positive_inline_u32(0), kArch);
+  ASSERT_TRUE(maybe_s_addc_u32_1.succeeded());
+  util::FailureOr<uint32_t> maybe_s_add_u32_2 = build_s_add_u32(12, 12, kScalarSrcLiteral, kArch);
+  ASSERT_TRUE(maybe_s_add_u32_2.succeeded());
+  util::FailureOr<uint32_t> maybe_s_lshl_b32_3 =
+      build_s_lshl_b32(12, 12, scalar_positive_inline_u32(6), kArch);
+  ASSERT_TRUE(maybe_s_lshl_b32_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_and_b32_1 =
+      build_s_and_b32(12, 10, scalar_positive_inline_u32(kSlotCount - 1), kArch);
+  ASSERT_TRUE(maybe_s_and_b32_1.succeeded());
   const auto expect_wait_after = [&](uint32_t inst, size_t literal_words, const char *what) {
     const auto it = std::ranges::find(body, inst);
     ASSERT_NE(it, body.end()) << what << " not found";
@@ -83,13 +94,10 @@ TEST(LogRecordProbe, Rdna4WaitsAfterEachSaluWriteLlvmFlags) {
     ASSERT_LT(at, body.size()) << what;
     EXPECT_EQ(body[at], kSWaitAluSaSdst) << "no wait after " << what;
   };
-  expect_wait_after(build_s_and_b32(12, 10, scalar_positive_inline_u32(kSlotCount - 1), kArch), 0,
-                    "s_and_b32 s12");
-  expect_wait_after(build_s_lshl_b32(12, 12, scalar_positive_inline_u32(6), kArch), 0,
-                    "s_lshl_b32 s12");
-  expect_wait_after(build_s_add_u32(12, 12, kScalarSrcLiteral, kArch), 1, "s_add_u32 s12");
-  expect_wait_after(build_s_addc_u32(11, 11, scalar_positive_inline_u32(0), kArch), 0,
-                    "s_addc_u32 s11");
+  ASSERT_NO_FATAL_FAILURE(expect_wait_after(maybe_s_and_b32_1.value(), 0, "s_and_b32 s12"));
+  ASSERT_NO_FATAL_FAILURE(expect_wait_after(maybe_s_lshl_b32_3.value(), 0, "s_lshl_b32 s12"));
+  ASSERT_NO_FATAL_FAILURE(expect_wait_after(maybe_s_add_u32_2.value(), 1, "s_add_u32 s12"));
+  ASSERT_NO_FATAL_FAILURE(expect_wait_after(maybe_s_addc_u32_1.value(), 0, "s_addc_u32 s11"));
 }
 
 TEST(LogRecordProbe, CdnaBodiesCarryNoRdna4Wait) {
