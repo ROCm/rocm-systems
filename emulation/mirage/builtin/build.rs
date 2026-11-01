@@ -18,18 +18,17 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-/// The names mirage addressed its first three agents by, before it read
-/// the whole directory.
+/// Short names for Instinct agents.
 ///
-/// They are not derivable — `gfx1250_mi455x` describes an MI455X and
-/// mirage has always called it `mi450x` — and they are load-bearing:
-/// `--profile` defaults to `mi350x`, the shipped topologies name
-/// `MI350X` and `MI300X`, and every agent and profile a user already has
-/// on disk was written under them. Everything else is addressed by its
-/// config's file stem, which is unique and needs no table.
-const ESTABLISHED_NAMES: [(&str, &str); 3] = [
+/// Rocjitsu config filenames are external interfaces, so some cannot be
+/// renamed to match their product: `gfx950_mi355x` describes MI350X and
+/// `gfx1250_mi455x` is Mirage's established `mi450x`. These names keep
+/// saved profiles and topologies working. Other agents use their config's
+/// file stem, which is unique and needs no table.
+const INSTINCT_NAMES: [(&str, &str); 4] = [
     ("gfx942_cdna3", "mi300x"),
     ("gfx950_mi355x", "mi350x"),
+    ("gfx950_mi355x_pci75a3", "mi355x"),
     ("gfx1250_mi455x", "mi450x"),
 ];
 
@@ -84,7 +83,7 @@ fn main() {
         // MI210's only config and is therefore taken as it is.
         candidates.sort_by_key(|c| (variant_rank(&c.stem), c.stem.len(), c.stem.clone()));
         let chosen = candidates.remove(0);
-        let name = ESTABLISHED_NAMES
+        let name = INSTINCT_NAMES
             .iter()
             .find_map(|(stem, name)| (*stem == chosen.stem).then_some((*name).to_string()))
             .unwrap_or_else(|| chosen.stem.clone());
@@ -99,17 +98,16 @@ fn main() {
         presets.insert(name, (chosen.stem, chosen.config));
     }
 
-    // A rocjitsu config that is renamed or retired takes a mirage name
-    // with it, and the three below are the ones nothing on a user's disk
-    // survives losing. Fail here, where the fix is to add the new stem to
-    // the table above, rather than shipping a mirage whose default
-    // `--profile mi350x` names nothing.
-    for (stem, name) in ESTABLISHED_NAMES {
+    // A rocjitsu config that is renamed or retired takes a mirage name with
+    // it. Fail here, where the fix is to point the table above at the new
+    // stem, rather than shipping a mirage whose default `--profile mi350x`
+    // names nothing.
+    for (stem, name) in INSTINCT_NAMES {
         assert!(
             presets.get(name).is_some_and(|(chosen, _)| chosen == stem),
             "no rocjitsu config maps to the mirage name {name:?}: it came from \
              configs/{stem}.json, which is no longer the config chosen for its \
-             device. Point ESTABLISHED_NAMES at the config that replaced it."
+             device. Point INSTINCT_NAMES at the config that replaced it."
         );
     }
 
@@ -159,15 +157,22 @@ fn json_files(dir: &Path) -> Vec<PathBuf> {
 
 /// What makes two configs the same machine.
 ///
-/// `gfx_target_version` is the GPU's ISA version and is exactly the
-/// grouping wanted: rocjitsu's `_kmd` and `_Ngpu` variants of a device
-/// carry the same one, and no two devices share it. A config that does
-/// not name it stands alone under its own stem rather than being pooled
-/// with every other config that also omits it.
+/// A GPU ISA can ship as several products, so an agent is identified by
+/// its ISA and PCI vendor/device IDs. Rocjitsu's `_kmd` and `_Ngpu`
+/// variants of one product share those values. A config that omits them
+/// stands alone under its own stem rather than being pooled with every
+/// other config that also omits them.
 fn device_key(stem: &str, config: &serde_json::Value) -> String {
-    match config["vm"]["gpu"]["device"]["gfx_target_version"].as_u64() {
-        Some(version) => format!("gfx_target_version:{version}"),
-        None => format!("stem:{stem}"),
+    let device = &config["vm"]["gpu"]["device"];
+    match (
+        device["gfx_target_version"].as_u64(),
+        device["vendor_id"].as_u64(),
+        device["device_id"].as_u64(),
+    ) {
+        (Some(version), Some(vendor), Some(id)) => {
+            format!("gfx_target_version:{version}:vendor_id:{vendor}:device_id:{id}")
+        }
+        _ => format!("stem:{stem}"),
     }
 }
 

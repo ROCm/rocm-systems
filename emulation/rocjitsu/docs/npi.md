@@ -36,6 +36,9 @@ What the grep can't point at are the "create a new thing" steps:
 
 - Construct a `configs/<gpu>.json` (plus the `_kmd` and any multi-GPU variant)
   for the new device.
+  Treat an existing config filename as a public interface: add a new config
+  rather than changing the device described by an existing filename. See
+  [Configuration](configuration.md#simulator-configs).
 - For a brand-new ISA family: sync `shared/machine-readable-isa` with
   `download.py`, adding any parser compatibility required by the complete
   snapshot. Regenerate the ISA/DBT sources per [codegen.md](codegen.md),
