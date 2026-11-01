@@ -6797,6 +6797,116 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_power_stabilization_info
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. When NPM (Node-level Power Management) coordination is active on a node, every field becomes node-wide rather than per-GPU; a read reflects the current effective node-wide value regardless of which GPU handle on that node is used.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`host_control_enabled` | Read-only: `True` if the host has control of Power Stabilization
+`enabled` | Power Stabilization enabled
+`power_floor` | Power Floor, % of power limit (0-100)
+`delay` | Insertion delay, milliseconds
+`insertion_priority` | HAWK insertion priority (`AmdSmiHawkInsertionPriority`)
+`ramp_enabled` | Ramp Management enabled
+`ramp_max_ramp_up_rate` | Max ramp-up rate, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Max ramp-down rate, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Minimum time at Power Floor, seconds
+`ramp_stop_delay` | Ramp stop delay, seconds
+
+Exceptions that can be thrown by `amdsmi_get_power_stabilization_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, or the device is multi-VF
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_power_stabilization_info(device)
+            print(f"Enabled: {info['enabled']}")
+            print(f"Power floor: {info['power_floor']}")
+            print(f"Insertion priority: {info['insertion_priority'].name}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_power_stabilization_param
+
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+- Writing requires root (or equivalent sysfs write permission).
+
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation beyond checking the value's type.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
+* `value` new value; type is derived from `param_id`, not from the Python value's type: `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` require a `float` (sets `AMDSMI_VALUE_TYPE_DOUBLE`), every other `param_id` accepts an `int` or `bool` (sets `AMDSMI_VALUE_TYPE_INT64`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_power_stabilization_param` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, the device is multi-VF, or the driver rejects the write due to an unmet dependency
+- `AMDSMI_STATUS_NO_PERM` - amd-smi lacks permission to write sysfs
+- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, `value`'s type does not match the documented type for `param_id`, or the driver rejects the value
+- `AMDSMI_STATUS_FILE_ERROR` - The sysfs write could not complete
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_power_stabilization_param(
+                device, amdsmi.AmdSmiPowerStabilizationParamId.POWER_FLOOR, 60
+            )
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_accelerator_partition_profile
 
 Description: Get partition information for target device

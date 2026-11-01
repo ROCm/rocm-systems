@@ -138,3 +138,140 @@ class TestGpuPower(unittest.TestCase):
                         amdsmi.amdsmi_set_gpu_power_profile(gpu, 0, mask)
                     self.common.print("")
         return
+
+    def test_get_power_stabilization_info(self):
+        """Read Power Stabilization info; asserts field shape on supported hardware.
+
+        A GPU with no power_stabilization sysfs node (eg. an APU) exercises the
+        AMDSMI_STATUS_NOT_SUPPORTED path.
+        """
+        self.common.print_func_name("")
+        fields = (
+            "host_control_enabled",
+            "enabled",
+            "power_floor",
+            "delay",
+            "insertion_priority",
+            "ramp_enabled",
+            "ramp_max_ramp_up_rate",
+            "ramp_max_ramp_down_rate",
+            "ramp_min_time_at_power_floor",
+            "ramp_stop_delay",
+        )
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+                msg = f"\t### amdsmi_get_power_stabilization_info(gpu={i}):"
+                info = None
+                with self.common.expect_status(msg, accept):
+                    info = amdsmi.amdsmi_get_power_stabilization_info(gpu)
+                if info is None:
+                    continue
+                self.common.print("", info)
+                for field in fields:
+                    self.assertIn(field, info)
+                self.assertIsInstance(
+                    info["insertion_priority"], amdsmi.AmdSmiHawkInsertionPriority
+                )
+        return
+
+    def test_set_power_stabilization_param(self):
+        """Set each Power Stabilization param and confirm the read-back changed, then restore.
+
+        A GPU with no power_stabilization sysfs node exercises the NOT_SUPPORTED
+        path; host_control_enabled has no param_id (read-only), so it is never set.
+        """
+        self.common.print_func_name("")
+        param_id = amdsmi.AmdSmiPowerStabilizationParamId
+        priority = amdsmi.AmdSmiHawkInsertionPriority
+        # (param_id, info field, test value). ENABLE is last so the other
+        # params -- some of which the driver may gate on Power Stabilization
+        # being enabled (e.g. ramp-down) -- are exercised while still at
+        # their baseline enabled state, not freshly disabled.
+        param_specs = (
+            (param_id.POWER_FLOOR, "power_floor", 60),
+            (param_id.DELAY, "delay", 20),
+            (param_id.INSERTION_PRIORITY, "insertion_priority", None),
+            (param_id.RAMP_ENABLE, "ramp_enabled", 0),
+            (param_id.RAMP_MAX_RAMP_UP_RATE, "ramp_max_ramp_up_rate", 30.0),
+            (param_id.RAMP_MAX_RAMP_DOWN_RATE, "ramp_max_ramp_down_rate", 30.0),
+            (param_id.RAMP_MIN_TIME_AT_POWER_FLOOR, "ramp_min_time_at_power_floor", 8),
+            (param_id.RAMP_STOP_DELAY, "ramp_stop_delay", 4),
+            (param_id.ENABLE, "enabled", 0),
+        )
+
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
+
+                msg = f"\t### amdsmi_get_power_stabilization_info(gpu={i}) baseline:"
+                original = None
+                with self.common.expect_status(
+                    msg, [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+                ):
+                    original = amdsmi.amdsmi_get_power_stabilization_info(gpu)
+                supported = original is not None
+                accept = (
+                    [amdsmi.AmdSmiStatus.SUCCESS]
+                    if supported
+                    else [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+                )
+
+                # Derive the insertion_priority target from the baseline so the
+                # set/read-back assertion isn't a tautology when the baseline
+                # already happens to be GUARANTEED.
+                insertion_priority_target = (
+                    (int(original["insertion_priority"]) + 1) % 3
+                    if supported
+                    else int(priority.GUARANTEED)
+                )
+                params = tuple(
+                    (pid, field, insertion_priority_target)
+                    if pid == param_id.INSERTION_PRIORITY
+                    else (pid, field, value)
+                    for pid, field, value in param_specs
+                )
+
+                try:
+                    for pid, field, value in params:
+                        set_msg = (
+                            f"\t### amdsmi_set_power_stabilization_param(gpu={i}, "
+                            f"param_id={pid.name}, value={value}):"
+                        )
+                        with self.common.expect_status(set_msg, accept):
+                            amdsmi.amdsmi_set_power_stabilization_param(gpu, pid, value)
+
+                        if not supported:
+                            continue
+
+                        read_msg = f"\t### amdsmi_get_power_stabilization_info(gpu={i}) after set:"
+                        info = None
+                        with self.common.expect_status(read_msg, amdsmi.AmdSmiStatus.SUCCESS):
+                            info = amdsmi.amdsmi_get_power_stabilization_info(gpu)
+                        if info is not None:
+                            self.assertEqual(
+                                int(info[field]),
+                                value,
+                                f"gpu({i}): set {field}={value} but read back {info[field]}",
+                            )
+                finally:
+                    if supported:
+                        for pid, field, _ in params:
+                            restore_msg = (
+                                f"\t### restore amdsmi_set_power_stabilization_param(gpu={i}, "
+                                f"param_id={pid.name}):"
+                            )
+                            # Restore with the baseline's own Python type: the
+                            # two ramp-rate params require a float
+                            # (AMDSMI_VALUE_TYPE_DOUBLE), so coercing every
+                            # field to int() makes the API reject them with
+                            # INVAL and leaves them un-restored.
+                            restore_value = original[field]
+                            if not isinstance(restore_value, float):
+                                restore_value = int(restore_value)
+                            with self.common.expect_status(
+                                restore_msg, amdsmi.AmdSmiStatus.SUCCESS
+                            ):
+                                amdsmi.amdsmi_set_power_stabilization_param(gpu, pid, restore_value)
+        return

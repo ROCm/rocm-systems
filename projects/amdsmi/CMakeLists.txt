@@ -349,6 +349,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
     "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
     "${ROCM_SRC_DIR}/rocm_smi_ampp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_power_stabilization.cc"
 )
 
 if(ENABLE_ESMI_LIB)
