@@ -16,7 +16,8 @@ namespace rocprofsys::parser
  *
  * @p settings is the map rocprofsys::preset_registry::get_settings() returns:
  * environment variable name to textual value. Variables that name a parameter
- * are stored under that parameter's id. Other variables are reported and skipped.
+ * are stored under that parameter's id. Choice aliases are stored as the choice
+ * value. Other variables are reported and skipped.
  */
 class preset_parser
 {

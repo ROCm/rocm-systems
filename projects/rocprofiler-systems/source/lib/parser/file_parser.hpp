@@ -18,7 +18,8 @@ namespace rocprofsys::parser
  * A key is a parameter id or that parameter's environment variable name.
  * Keys that start with "_" (for example "_comment") and JSON null are ignored.
  * Scalars keep their JSON spelling, and arrays are joined with the parameter's
- * list separator. Values the schema rejects are reported and not stored.
+ * list separator. Choice aliases are stored as the choice value. Values the
+ * schema rejects are reported and not stored.
  */
 class file_parser
 {

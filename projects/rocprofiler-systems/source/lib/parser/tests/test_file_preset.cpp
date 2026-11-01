@@ -139,6 +139,43 @@ TEST(parser_file, reads_a_file_and_reports_io_errors)
     EXPECT_NE(invalid.errors.front().find("failed to parse"), std::string::npos);
 }
 
+TEST(parser_file, stores_a_choice_alias_as_the_choice_value)
+{
+    schema value{};
+    auto   format      = make_param("format", param_type::enumeration);
+    format.env         = env_spec{ .name = "ROCPROFSYS_FORMAT" };
+    format.choices     = { choice{ .value = "pftrace", .aliases = { "proto" } } };
+    auto components    = make_param("components", param_type::enumeration_list);
+    components.env     = env_spec{ .name = "ROCPROFSYS_COMPONENTS", .separator = ";" };
+    components.choices = { choice{ .value = "wall_clock", .aliases = { "wall" } },
+                           choice{ .value = "cpu_clock" } };
+    add_param(value, std::move(format));
+    add_param(value, std::move(components));
+
+    const auto document = nlohmann::json::parse(R"({
+        "ROCPROFSYS_FORMAT": "proto",
+        "components": ["wall", "cpu_clock"]
+    })");
+    const auto parsed   = file_parser{}.parse(value, document);
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+    EXPECT_EQ(parsed.values.at("components"), "wall_clock;cpu_clock");
+}
+
+TEST(parser_preset, stores_a_choice_alias_as_the_choice_value)
+{
+    schema value{};
+    auto   format  = make_param("format", param_type::enumeration);
+    format.env     = env_spec{ .name = "ROCPROFSYS_FORMAT" };
+    format.choices = { choice{ .value = "pftrace", .aliases = { "proto" } } };
+    add_param(value, std::move(format));
+
+    const auto parsed =
+        preset_parser{}.parse(value, { { "ROCPROFSYS_FORMAT", "proto" } });
+    EXPECT_TRUE(parsed.errors.empty());
+    EXPECT_EQ(parsed.values.at("format"), "pftrace");
+}
+
 TEST(parser_preset, maps_environment_settings_to_parameters)
 {
     const preset_parser::settings_t settings{ { "ROCPROFSYS_TRACE", "on" },
