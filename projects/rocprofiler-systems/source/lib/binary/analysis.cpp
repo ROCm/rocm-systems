@@ -290,31 +290,60 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         return std::optional<tim::unwind::processed_entry>{};
     }
 
-    auto _v    = tim::unwind::processed_entry{};
-    _v.address = _entry.address();
-    _v.name    = _entry.template get_name<4096, true>(*_context_p, &_v.offset, &_v.error);
-
-    tim::unwind::processed_entry::construct(_v, &_cache_p->files);
-
-    if(_v.error != 0 && _v.lineinfo)
+    auto new_entry                                    = tim::unwind::processed_entry{};
+    new_entry.address                                 = _entry.address();
+    static constexpr std::size_t k_proc_name_buf_size = 4096;
+    // Workaround for a regression introduced in libunwind 1.6.x: a null-pointer
+    // dereference inside _ULx86_64_get_proc_name (via __sigaction at offset 0x38)
+    // fires for valid mapped addresses on certain kernels. Confirmed on libunwind
+    // 1.6.2 (Ubuntu 22.04); libunwind < 1.6 (e.g. 1.3.2 on Ubuntu 20.04) is
+    // unaffected. dladdr() is a crash-safe alternative: it returns the nearest
+    // exported symbol name and the byte offset from its start without invoking
+    // the unwinder. This fix is necessitated by a libunwind regression, not by
+    // a defect in rocprofiler-systems.
+    // TODO: remove this version guard once the upstream regression is fixed.
+#if defined(ROCPROFSYS_LIBUNWIND_BROKEN_GET_PROC_NAME)
     {
-        auto const _lineinfo = _v.lineinfo.get();
-        if(_lineinfo)
+        Dl_info dli{};
+        if(::dladdr(reinterpret_cast<const void*>(_addr), &dli) != 0 &&
+           dli.dli_sname != nullptr)
         {
-            _v.name  = _lineinfo.name;
-            _v.error = 0;
+            new_entry.name   = dli.dli_sname;
+            new_entry.offset = _addr - reinterpret_cast<uintptr_t>(dli.dli_saddr);
+            new_entry.error  = 0;
+        }
+        else
+        {
+            new_entry.error = 1;  // non-zero: address not resolvable via dladdr
         }
     }
-    else if(_v.info && _v.info.symbol)
+#else
+    new_entry.name = _entry.template get_name<k_proc_name_buf_size, true>(
+        *_context_p, &new_entry.offset, &new_entry.error);
+#endif
+
+    tim::unwind::processed_entry::construct(new_entry, &_cache_p->files);
+
+    if(new_entry.error != 0 && new_entry.lineinfo)
     {
-        _v.name  = _v.info.symbol.name;
-        _v.error = 0;
+        auto const _lineinfo = new_entry.lineinfo.get();
+        if(_lineinfo)
+        {
+            new_entry.name  = _lineinfo.name;
+            new_entry.error = 0;
+        }
+    }
+    else if(new_entry.info && new_entry.info.symbol)
+    {
+        new_entry.name  = new_entry.info.symbol.name;
+        new_entry.error = 0;
     }
 
-    _cache_p->entries.emplace(_entry, _v);
+    _cache_p->entries.emplace(_entry, new_entry);
 
-    return (_v.error == 0) ? std::optional<tim::unwind::processed_entry>{ _v }
-                           : std::optional<tim::unwind::processed_entry>{};
+    return (new_entry.error == 0)
+               ? std::optional<tim::unwind::processed_entry>{ new_entry }
+               : std::optional<tim::unwind::processed_entry>{};
 }
 
 template std::optional<tim::unwind::processed_entry>
