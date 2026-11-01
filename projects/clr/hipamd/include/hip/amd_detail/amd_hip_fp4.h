@@ -7,6 +7,16 @@
 #ifndef _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
 #define _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
 
+#include "amd_hip_fp8.h"  // __hip_fp8*_storage_t
+typedef __hip_fp8_storage_t __hip_fp4_storage_t;
+typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
+typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
+typedef enum __hip_fp4_interpretation_t {
+  __HIP_E2M1 = 0,
+} __hip_fp4_interpretation_t;
+
+#if defined(__cplusplus)
+
 #if defined(__HIPCC_RTC__)
 #define __FP4_HOST_DEVICE__ __device__
 #define __FP4_HOST_DEVICE_STATIC__ __FP4_HOST_DEVICE__ static
@@ -19,17 +29,9 @@
 #include "amd_hip_ocp_host.hpp"
 #endif  // __HIPCC_RTC__
 
-typedef __hip_fp8_storage_t __hip_fp4_storage_t;
-typedef __hip_fp8_storage_t __hip_fp4x2_storage_t;
-typedef __hip_fp8x2_storage_t __hip_fp4x4_storage_t;
-
 static_assert(sizeof(__hip_fp4_storage_t[4]) == sizeof(__hip_uint32_t), "");
 static_assert(sizeof(__hip_fp4x2_storage_t[4]) == sizeof(__hip_uint32_t), "");
 static_assert(sizeof(__hip_fp4x4_storage_t[2]) == sizeof(__hip_uint32_t), "");
-
-enum __hip_fp4_interpretation_t {
-  __HIP_E2M1 = 0,
-};
 
 // Note: Ignore rounding input on AMD GPUs for now. At the moment AMD GPUs do not support rounding
 // modes, all the inputs are rounded to nearest or use an input to do stochastic rounding.
@@ -591,4 +593,5 @@ struct __hip_fp4x4_e2m1 {
 #endif  // !defined(__HIP_NO_FP4_CONVERSION_OPERATORS__)
 };
 
+#endif  // defined(__cplusplus)
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_FP4_H_
