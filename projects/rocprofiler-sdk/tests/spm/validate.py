@@ -77,8 +77,10 @@ def test_spm_counter_consistency(input_data):
                 return itr["name"]
 
     dispatch_counter_map = defaultdict(dict)
+    dispatch_agent = {}
     for record in counter_data:
         dispatch_id = record["dispatch_id"]
+        dispatch_agent[dispatch_id] = record["agent_id"]["handle"]
         counter_name = get_name(record["counter_id"]["handle"])
         _accumulate_counter(
             dispatch_counter_map[dispatch_id], counter_name, record["value"]
@@ -86,8 +88,10 @@ def test_spm_counter_consistency(input_data):
 
     assert len(dispatch_counter_map) > 0, "No SPM dispatch data found"
 
-    counter_name = "TA_TA_BUSY"
     for dispatch_id, counter_map in dispatch_counter_map.items():
+        counter_name, _ = _ta_counter_names(
+            _agent_name(data, dispatch_agent[dispatch_id])
+        )
         assert (
             counter_name in counter_map
         ), f"Dispatch {dispatch_id} missing {counter_name}"
@@ -96,27 +100,47 @@ def test_spm_counter_consistency(input_data):
         ), f"Dispatch {dispatch_id} has zero {counter_name}"
 
 
+def _agent_name(data, agent_handle):
+    for agent in data["agents"]:
+        if agent["id"]["handle"] == agent_handle:
+            return agent["name"]
+    raise AssertionError(f"No agent with handle {agent_handle}")
+
+
+def _ta_counter_names(agent_name):
+    # gfx1250 (MI455) reports TA activity through the VCA block.
+    if str(agent_name).removesuffix("-strict") == "gfx1250":
+        return "TX_VCA_VCA_BUSY", "TX_VCA_TOTAL_WAVEFRONTS"
+    return "TA_TA_BUSY", "TA_TOTAL_WAVEFRONTS"
+
+
 def _get_counter_value(counters, name):
     for itr in counters:
         if itr["name"] == name:
             return itr["value"]
 
 
-def _validate_dispatch_counters(dispatch_id, counters):
-    assert float(_get_counter_value(counters, "TA_TA_BUSY")) > _get_counter_value(
-        counters, "TA_TOTAL_WAVEFRONTS"
-    )
+def _validate_dispatch_counters(dispatch_id, counters, agent_name):
+    busy_name, wavefront_name = _ta_counter_names(agent_name)
+    busy = _get_counter_value(counters, busy_name)
+    wavefronts = _get_counter_value(counters, wavefront_name)
+    assert busy is not None, f"Dispatch {dispatch_id} missing {busy_name}"
+    assert (
+        wavefronts is not None
+    ), f"Dispatch {dispatch_id} missing {wavefront_name}"
+    assert float(busy) > float(wavefronts)
 
-    assert (
-        100
-        * _get_counter_value(counters, "SQC_ICACHE_MISSES")
-        / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) <= 100
-    assert (
-        100
-        * _get_counter_value(counters, "SQC_ICACHE_HITS")
-        / _get_counter_value(counters, "SQC_ICACHE_REQ")
-    ) <= 100
+    # 100 * value / requests <= 100 is value <= requests. A dispatch can report
+    # no I-cache traffic once the cache is warm, so a zero request count is valid
+    # when hits and misses are also zero.
+    requests = _get_counter_value(counters, "SQC_ICACHE_REQ")
+    assert requests is not None, f"Dispatch {dispatch_id} missing SQC_ICACHE_REQ"
+    for name in ("SQC_ICACHE_HITS", "SQC_ICACHE_MISSES"):
+        value = _get_counter_value(counters, name)
+        assert value is not None, f"Dispatch {dispatch_id} missing {name}"
+        assert float(value) <= float(requests), (
+            f"Dispatch {dispatch_id} {name} {value} exceeds SQC_ICACHE_REQ {requests}"
+        )
 
 
 def _accumulate_counter(counter_map, name, value):
@@ -166,7 +190,11 @@ def _validate_buffered_counter_values(data):
         )
 
     for dispatch_id, counter_map in dispatch_counter_map.items():
-        _validate_dispatch_counters(dispatch_id, list(counter_map.values()))
+        _validate_dispatch_counters(
+            dispatch_id,
+            list(counter_map.values()),
+            _agent_name(data, headers[dispatch_id]["agent_id"]["handle"]),
+        )
 
 
 def _validate_callback_counter_values(data):
@@ -179,15 +207,21 @@ def _validate_callback_counter_values(data):
                 return itr["name"]
 
     dispatch_counter_map = defaultdict(dict)
+    dispatch_agent = {}
     for record in counter_data:
         dispatch_id = record["dispatch_id"]
+        dispatch_agent[dispatch_id] = record["agent_id"]["handle"]
         counter_name = get_name(record["counter_id"]["handle"])
         _accumulate_counter(
             dispatch_counter_map[dispatch_id], counter_name, record["value"]
         )
 
     for dispatch_id, counter_map in dispatch_counter_map.items():
-        _validate_dispatch_counters(dispatch_id, list(counter_map.values()))
+        _validate_dispatch_counters(
+            dispatch_id,
+            list(counter_map.values()),
+            _agent_name(data, dispatch_agent[dispatch_id]),
+        )
 
 
 if __name__ == "__main__":
