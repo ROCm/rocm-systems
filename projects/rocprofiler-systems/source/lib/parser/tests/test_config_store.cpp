@@ -117,6 +117,7 @@ TEST(parser_config_store, converts_numeric_and_list_values)
     EXPECT_EQ(store.get_as<std::vector<std::string>>("components"),
               (std::vector<std::string>{ "wall_clock", "cpu_clock" }));
     EXPECT_FALSE(store.get_as<bool>("sampling_freq").has_value());
+    EXPECT_FALSE(store.get_as<double>("sampling_freq").has_value());
     EXPECT_FALSE(store.get_as<std::int64_t>("scale").has_value());
     EXPECT_FALSE(store.get_as<double>("missing").has_value());
 }
@@ -208,17 +209,22 @@ TEST(parser_config_store, values_map_contains_stored_entries)
     EXPECT_EQ(stored.size(), 2U);
 }
 
-TEST(parser_config_store, instance_is_resettable)
+TEST(parser_config_store, callback_can_store_another_parameter)
 {
-    auto& store = config_store::instance();
-    store.reset(make_schema());
-    store.set("trace", "on", config_source::command_line);
+    auto store = make_store();
+    store.on_change("trace", [&store](std::string_view, std::string_view value) {
+        if(value == "true")
+        {
+            store.set("profile", "true", config_source::preset);
+        }
+    });
 
-    EXPECT_EQ(&config_store::instance(), &store);
-    EXPECT_EQ(store.get_as<bool>("trace"), true);
+    store.set("trace", "true", config_source::command_line);
+    EXPECT_EQ(store.get_as<bool>("profile"), true);
 
-    store.reset(schema{});
+    store.clear();
     EXPECT_FALSE(store.contains("trace"));
+    EXPECT_FALSE(store.contains("profile"));
 }
 
 void
