@@ -286,6 +286,12 @@ namespace RcclUnitTesting
       SkipOrHandToParent(kSkipFileEnv, reason);
     }
 
+    // A UT_MAX_GPUS cap below 2 is skipped here, in the gtest process, because a skip in the isolated
+    // child would score as a pass. Needs no HIP, so it is safe before the fork.
+#define SKIP_IF_UT_MAX_GPUS_BELOW_2()                                                     \
+    if (const char* maxGpus = getenv("UT_MAX_GPUS"); maxGpus != nullptr && atoi(maxGpus) < 2) \
+      GTEST_SKIP() << "UT_MAX_GPUS=" << maxGpus << ", these tests need at least 2 GPUs"
+
     // Why CE-registered AllReduce can never be selected on these comms, or "" when it can.
     std::string CeAllReduceUnselectableReason(const std::vector<ncclComm_t>& comms)
     {
@@ -437,9 +443,14 @@ namespace RcclUnitTesting
     {
       int numDevices = 0;
       HIPCALL(hipGetDeviceCount(&numDevices));
+      // No TestBed in the isolated child, so apply UT_MAX_GPUS here as testBed.ev.maxGpus does.
+      const char* maxGpus = getenv("UT_MAX_GPUS");
+      if (maxGpus)
+        numDevices = std::min(numDevices, atoi(maxGpus));
       if (numDevices < 2)
       {
-        SkipSweep("This test requires at least 2 GPUs.");
+        SkipSweep("This test requires at least 2 GPUs (usable: " + std::to_string(numDevices) +
+                  ", UT_MAX_GPUS=" + (maxGpus ? maxGpus : "unset") + ").");
         return;
       }
       const int nRanks = std::min(numDevices, 8);
@@ -661,6 +672,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, AllReduceMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllReduceMatchesDispatchLog", []() {
       RunSweep("AllReduce", ncclFuncAllReduce, kLoBytes, kHiBytes);
     });
@@ -668,6 +680,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, AllGatherMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllGatherMatchesDispatchLog", []() {
       RunSweep("AllGather", ncclFuncAllGather, kLoBytes, kHiBytes);
     });
@@ -679,6 +692,7 @@ namespace RcclUnitTesting
   // informational NOTE in RunSweep). Skips if cuMem/VMM is unavailable.
   TEST(CollImplInfo, AllReduceSymmetricMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllReduceSymmetricMatchesDispatchLog", []() {
       SweepMode mode;
       mode.registerSym = true;
@@ -690,6 +704,7 @@ namespace RcclUnitTesting
   // One thread drives every GPU, so CE AllReduce staging setup must not run at launch (ROCM-32044): this hangs there.
   TEST(CollImplInfo, AllReduceCeRegisteredMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     // The child judges eligibility, since HIP in this parent breaks later TestBed forks; the skip is scored here.
     const std::string skipFile = "/tmp/rccl_collimpl_ce_skip_" + std::to_string(getpid());
     remove(skipFile.c_str());
@@ -709,6 +724,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, AllGatherSymmetricMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllGatherSymmetricMatchesDispatchLog", []() {
       SweepMode mode;
       mode.registerSym = true;
@@ -722,6 +738,7 @@ namespace RcclUnitTesting
   // never claim SYM. Buffers stay plain; comm->symmetricSupport is forced false.
   TEST(CollImplInfo, AllReduceSymkNotReportedWhenCuMemDisabled)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllReduceSymkNotReportedWhenCuMemDisabled", []() {
       SweepMode mode;
       mode.cumemOff    = true;
@@ -733,6 +750,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, AllGatherSymkNotReportedWhenCuMemDisabled)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("AllGatherSymkNotReportedWhenCuMemDisabled", []() {
       SweepMode mode;
       mode.cumemOff    = true;
@@ -744,6 +762,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, ReduceScatterMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("ReduceScatterMatchesDispatchLog", []() {
       RunSweep("ReduceScatter", ncclFuncReduceScatter, kLoBytes, kHiBytes);
     });
@@ -751,6 +770,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, ReduceScatterSymmetricMatchesDispatchLog)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("ReduceScatterSymmetricMatchesDispatchLog", []() {
       SweepMode mode;
       mode.registerSym = true;
@@ -761,6 +781,7 @@ namespace RcclUnitTesting
 
   TEST(CollImplInfo, ReduceScatterSymkNotReportedWhenCuMemDisabled)
   {
+    SKIP_IF_UT_MAX_GPUS_BELOW_2();
     RUN_ISOLATED_TEST("ReduceScatterSymkNotReportedWhenCuMemDisabled", []() {
       SweepMode mode;
       mode.cumemOff    = true;
