@@ -32,10 +32,19 @@
 #include "lib/rocprofiler-sdk/platform/wsl/dxg_topology.hpp"
 
 #include <hsakmt/hsakmttypes.h>
+#if defined(__has_include)
+#    if __has_include(<hsakmt/rocdxg_version.h>)
+#        include <hsakmt/rocdxg_version.h>
+#    endif
+#endif
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
+
+#define ROCPROFILER_ROCDXG_STR2(v) #v
+#define ROCPROFILER_ROCDXG_STR(v)  ROCPROFILER_ROCDXG_STR2(v)
 
 namespace rocprofiler
 {
@@ -52,10 +61,19 @@ using PFN_hsaKmtReleaseSystemProperties = HSAKMT_STATUS (*)();
 using PFN_hsaKmtCloseKFD                = HSAKMT_STATUS (*)();
 using PFN_DxgAbiCheck                   = HSAKMT_STATUS (*)(HsaStructureSizes*);
 
-// The unversioned soname, matching ThunkLoader::whoami() in the HSA runtime.
-// Never a versioned name (librocdxg.so.1 / .so.7): hard-coding a soversion
-// would silently stop resolving the very object the HSA runtime has loaded.
-inline constexpr const char* kLibRocdxgSoname = "librocdxg.so";
+// The names the HSA runtime's ThunkLoader tries, in the order it tries them
+// (thunk_loader_linux.cpp): the versioned soname first, then the unversioned
+// development name. The major comes from the hsakmt rocdxg_version.h that the
+// thunk's own soname is derived from, never from a literal, so the two cannot
+// drift apart. Headers that predate rocdxg_version.h leave the versioned name
+// empty and only the unversioned name is tried.
+#if defined(ROCDXG_LIB_VERSION_MAJOR)
+inline constexpr const char* kLibRocdxgVersionedName =
+    "librocdxg.so." ROCPROFILER_ROCDXG_STR(ROCDXG_LIB_VERSION_MAJOR);
+#else
+inline constexpr const char* kLibRocdxgVersionedName = "";
+#endif
+inline constexpr const char* kLibRocdxgUnversionedName = "librocdxg.so";
 
 // Every entry point the topology read needs, all of them long-standing KMT
 // exports. Requiring all five before any of them is called is what keeps the
@@ -95,13 +113,21 @@ struct DxgThunk
 };
 
 // The dynamic-loader calls RocdxgHandle makes, as data. Defaults to dlopen and
-// friends; a test substitutes its own to observe the open/close balance.
+// friends; a test substitutes its own to observe the open order and the
+// open/close balance.
+//
+// hsa_runtime_dir answers the directory, with a trailing '/', of the
+// libhsa-runtime64 already mapped into this process, or an empty string if
+// none is. It is where the HSA runtime itself falls back to looking for the
+// thunk, so a versioned-only package layout that the global search cannot see
+// still resolves to the copy the HSA runtime will use.
 struct DxgLoaderOps
 {
     std::function<void*(const char*, int)>   open;
     std::function<void*(void*, const char*)> sym;
     std::function<int(void*)>                close;
     std::function<const char*()>             error;
+    std::function<std::string()>             hsa_runtime_dir;
 };
 
 const DxgLoaderOps&
@@ -120,9 +146,14 @@ resolve_dxg_thunk(void* handle, const DxgLoaderOps& ops);
 std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgThunk& thunk);
 
-// The same, preceded by loading and resolving librocdxg through `ops`. The
-// handle is closed on the way out of every path. read_dxg_gpu_topology() is
-// this with default_loader_ops().
+// The same, preceded by loading and resolving librocdxg through `ops`. A copy
+// already resident under either name is reused before anything is loaded; a
+// cold process then loads the first of the versioned name, the versioned name
+// beside libhsa-runtime64, the unversioned name and the unversioned name beside
+// libhsa-runtime64 - the HSA runtime's own order, so the copy loaded here is
+// the one it will later find by soname instead of a second one. The handle is
+// closed on the way out of every path. read_dxg_gpu_topology() is this with
+// default_loader_ops().
 std::vector<DxgNode>
 read_dxg_gpu_topology(const DxgLoaderOps& ops);
 }  // namespace wsl
