@@ -15,9 +15,10 @@ namespace rocprofsys::parser
 {
 /**
  * Reads the environment variable named by each parameter's env spec.
- * Unset variables are skipped. Choice aliases are stored as the choice value.
- * The lookup is injected so tests do not touch the process environment;
- * from_process() reads it with std::getenv.
+ * Unset variables are skipped. Values are trimmed. An empty enumeration list is
+ * skipped so it does not replace a later default. An empty boolean is false.
+ * Choice aliases are stored as the choice value. The lookup is injected so tests
+ * do not touch the process environment; from_process() reads it with std::getenv.
  */
 class env_parser
 {
