@@ -379,29 +379,56 @@ HIP_TEST_CASE(Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_DoesNotSynchronize
     return;
   }
 
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  if (!props.canMapHostMemory) {
+    HIP_SKIP_TEST("device cannot map host memory.");
+    return;
+  }
+
   int* flag = nullptr;
   HIP_CHECK(hipHostMalloc(&flag, sizeof(int), hipHostMallocMapped));
   *flag = 0;
 
   int* deviceFlag = nullptr;
-  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&deviceFlag), flag, 0));
+  const hipError_t mapStatus =
+      hipHostGetDevicePointer(reinterpret_cast<void**>(&deviceFlag), flag, 0);
+  if (mapStatus != hipSuccess) {
+    HIP_CHECK(hipHostFree(flag));
+    HIP_CHECK(mapStatus);
+  }
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipStreamCreate(&stream));
+  const hipError_t streamStatus = hipStreamCreate(&stream);
+  if (streamStatus != hipSuccess) {
+    HIP_CHECK(hipHostFree(flag));
+    HIP_CHECK(streamStatus);
+  }
+
   SpinUntilFlag<<<1, 1, 0, stream>>>(deviceFlag);
-  HIP_CHECK(hipGetLastError());
+  const hipError_t launchStatus = hipGetLastError();
 
-  HIP_CHECK(hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTargetCurrentDevice,
-                                        hipFlushGPUDirectRDMAWritesToOwner));
+  hipError_t flushStatus = hipSuccess;
+  hipError_t queryStatus = hipErrorNotReady;
+  if (launchStatus == hipSuccess) {
+    flushStatus = hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTargetCurrentDevice,
+                                                    hipFlushGPUDirectRDMAWritesToOwner);
+    // The kernel cannot have retired: nothing has released it yet.
+    queryStatus = hipStreamQuery(stream);
+  }
 
-  // The kernel cannot have retired: nothing has released it yet.
-  HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);
-
+  // Release the kernel and tear down before asserting: a failed REQUIRE aborts the test case,
+  // and the kernel would otherwise spin on the GPU forever.
   std::atomic_thread_fence(std::memory_order_release);
   *static_cast<volatile int*>(flag) = 1;
-  HIP_CHECK(hipStreamSynchronize(stream));
+  const hipError_t syncStatus = hipStreamSynchronize(stream);
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipHostFree(flag));
+
+  HIP_CHECK(launchStatus);
+  HIP_CHECK(flushStatus);
+  HIP_CHECK_ERROR(queryStatus, hipErrorNotReady);
+  HIP_CHECK(syncStatus);
 }
 
 /**
