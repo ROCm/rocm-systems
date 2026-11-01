@@ -11,7 +11,8 @@
  * Direct GPU micro-kernel workloads that reproduce the specific behaviours and
  * regressions exercised by the playback fixes in this area:
  *
- *   - dropped-first-hipMalloc capture (the first HIP call is a hipMalloc),
+ *   - dropped-first-call capture (the first HIP call is a hipMalloc, a
+ *     hipStreamCreateWithFlags or a hipSetDeviceFlags),
  *   - embedded device pointers inside a by-value struct kernel argument,
  *   - an uncaptured host write that deterministically diverges replay,
  *   - the "null optional output pointer + 0x20000" GPU-fault class, and
@@ -34,6 +35,7 @@
 #endif
 
 #include <cstdint>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // Workload parameters (kept local so this file is self-contained)
@@ -112,10 +114,11 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
 // A1. First-hipMalloc capture regression
 //
 // Makes the VERY FIRST HIP call in the process a hipMalloc (no hipSetDevice,
-// no warm-up allocation).  hip_capture_init() is deferred into hip::init(),
-// which the HIP_INIT macro runs *before* the body of this first hipMalloc — so
-// the allocation must be captured.  If the first-call capture ever regresses,
-// `da` will not be translated at replay and the D2H validation fails.
+// no warm-up allocation).  hip::init() runs inside this call, and the exported
+// hipMalloc has already read its dispatch slot by then, so a shim installed by
+// hip_capture_init() alone would miss it.  hip_capture_bootstrap() installs the
+// shims on the first read of the table instead.  If the first-call capture ever
+// regresses, `da` will not be translated at replay and the D2H validation fails.
 //
 // H2D(da=1) -> scale(out = da*2) -> D2H(out)  => out[i] == 2.0f
 // ===========================================================================
@@ -142,6 +145,44 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dout));
   delete[] ha;
   delete[] hout;
+}
+
+// ===========================================================================
+// A1b. First call creates the stream / sets the device flags
+//
+// The same regression for the other state the first call can create.  The
+// stream is non-blocking and every command after its creation runs on it.  A
+// dropped creation fails Unit_HRR_FirstStreamCreateRecorded twice: the archive
+// lacks the event, and the replay trace never creates the stream.
+// ===========================================================================
+static void hrr_repro_scale_on(hipStream_t stream) {
+  float *da = nullptr, *dout = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&da, kSZ));
+  HRR_HIP_CHECK(hipMalloc(&dout, kSZ));
+  std::vector<float> ha(kN, 1.0f), hout(kN, 0.0f);
+
+  HRR_HIP_CHECK(hipMemcpyAsync(da, ha.data(), kSZ, hipMemcpyHostToDevice, stream));
+  hipLaunchKernelGGL(hrr_repro_scale, dim3(kGrid), dim3(kBlock), 0, stream,
+                     da, dout, 2.0f, kN);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipMemcpyAsync(hout.data(), dout, kSZ, hipMemcpyDeviceToHost, stream));
+  HRR_HIP_CHECK(hipStreamSynchronize(stream));
+  for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 2.0f);
+
+  HRR_HIP_CHECK(hipFree(da));
+  HRR_HIP_CHECK(hipFree(dout));
+}
+
+TEST_CASE("Unit_HRR_FirstStreamCreate_Direct", "[.][hrr-direct]") {
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));  // first HIP call
+  hrr_repro_scale_on(stream);
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+}
+
+TEST_CASE("Unit_HRR_FirstSetDeviceFlags_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDeviceFlags(hipDeviceScheduleBlockingSync));  // first HIP call
+  hrr_repro_scale_on(nullptr);
 }
 
 // ===========================================================================

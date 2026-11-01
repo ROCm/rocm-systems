@@ -811,6 +811,13 @@ shims are **not** installed at
 `libamdhip64` static-init time: that pulled every HIP call through capture from DSO
 load before `hip::init()` completed and disturbed host stacks that load HIP early
 (e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
+They are installed instead by `hip_capture_bootstrap()` on the first read of the
+`HipDispatchTable` when `HIP_HRR_CAPTURE_OUTPUT` is set in the environment, before
+the call that runs `hip::init()` reads its slot, so that call is recorded once init
+has opened the writer. Until then the shims record nothing, and
+`hip_capture_init()` takes them out if the parsed flag leaves capture off. A shim
+still takes the writer's events mutex then, so the writer's fork handlers are
+registered before the shims are installed.
 Shutdown uninstalls the runtime shims from the slots that still hold them (the compiler
 table keeps its shims) and flushes `events.bin` + `manifest.json`; a slot that another
 component wrapped after install keeps its wrapper, and the writer drops any event, blob

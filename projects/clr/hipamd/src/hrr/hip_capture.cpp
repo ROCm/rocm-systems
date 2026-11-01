@@ -116,12 +116,15 @@ static bool hrr_secure_exec() {
 
 // CLR's flag parser stores an exported empty variable as a single space, so a
 // value that is only blanks counts as unset rather than as a directory named " ".
-static bool hrr_capture_requested() {
-  if (flagIsDefault(HIP_HRR_CAPTURE_OUTPUT)) return false;
-  for (const char* p = HIP_HRR_CAPTURE_OUTPUT; *p != '\0'; ++p) {
+static bool hrr_nonblank(const char* value) {
+  for (const char* p = value; *p != '\0'; ++p) {
     if (!std::isspace(static_cast<unsigned char>(*p))) return true;
   }
   return false;
+}
+
+static bool hrr_capture_requested() {
+  return !flagIsDefault(HIP_HRR_CAPTURE_OUTPUT) && hrr_nonblank(HIP_HRR_CAPTURE_OUTPUT);
 }
 
 bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
@@ -225,8 +228,8 @@ static void pinned_untrack(void* p) {
 
 // fork() takes g_pinned_mu before the writer's locks, the order a launch takes
 // them in, so a child never inherits it held by a snapshot on a thread it does
-// not have. Registered after writer::open() registers the writer's handlers:
-// prepare handlers run in reverse order of registration.
+// not have. Registered after the writer's handlers: prepare handlers run in
+// reverse order of registration.
 static void pinned_install_atfork() {
 #ifndef _WIN32
   static std::once_flag once;
@@ -2886,16 +2889,51 @@ static void record_registered_var(const void* host_var, const char* name,
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERVAR, &a.hdr, sizeof(a));
 }
 
-// Runtime dispatch-table capture is installed only from hip_capture_init()
-// (after hip::init() has built the live HipDispatchTable).  We intentionally
+// Runtime dispatch-table capture is installed by hip_capture_bootstrap(), on the
+// first read of the HipDispatchTable, or else by hip_capture_init().  We intentionally
 // do NOT hook at libamdhip64 static-init time when HIP_HRR_CAPTURE_OUTPUT is set:
 // early install ran before amd::Runtime::init() / Flag::init(), forced every
 // HIP API through capture shims from the moment the DSO loaded, and pulled host
 // stacks (e.g. Python import torch → multiprocessing spawn) into ordering where
 // the GPU runtime appeared "already initialized" before child processes start.
-// Events before writer::open() were dropped anyway (write_event_raw no-ops when
-// g_events_fd < 0), so deferring install loses no recorded events for that
-// window while restoring a normal pre-init load path.
+// The bootstrap installs before the call that runs hip::init() reads its slot,
+// so that call is recorded once init has opened the writer. Until then the
+// shims record nothing: write_event_raw drops events while g_events_fd < 0.
+std::atomic<bool> g_capture_bootstrapped{false};
+
+namespace {
+// Building and installing read the dispatch table, which comes back here.
+thread_local bool t_installing = false;
+
+void install_runtime_shims_once() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    // A shim reaches the writer's mutexes before open() too, for a call made
+    // before hip::init(), so fork() must hold them from the moment one is live.
+    hrr_cap::writer::install_fork_handlers();
+    pinned_install_atfork();
+    t_installing = true;
+    MAKE_SCOPE_GUARD(installing, [] { t_installing = false; });
+    hip_capture_build_table();
+    pinned_wrap_table();
+    hip_capture_install();
+  });
+}
+}  // namespace
+
+void hip_capture_bootstrap() {
+  if (t_installing) return;
+  static std::once_flag once;
+  std::call_once(once, [] {
+    // Flag::init() has not run yet, so read the variable itself. hip_capture_init()
+    // decides on the parsed flag and takes the shims out if capture stays off.
+    if (!g_capture_bootstrapped.load(std::memory_order_acquire) &&
+        hrr_nonblank(amd::Os::getEnvironment("HIP_HRR_CAPTURE_OUTPUT").c_str()) &&
+        !hrr_secure_exec())
+      install_runtime_shims_once();
+    g_capture_bootstrapped.store(true, std::memory_order_release);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Crash-time finalize through CLR exception handling.
@@ -2927,22 +2965,22 @@ void hrr_install_clr_exception_handler() {
 
 void hip_capture_init() {
   #if defined(HIP_HRR_CAPTURE_ENABLED)
+    // Decided here from now on: a bootstrap after this point installs nothing.
+    g_capture_bootstrapped.store(true, std::memory_order_release);
+
     if (!hip_capture_enabled()) {
       if (hrr_secure_exec() && hrr_capture_requested())
         fprintf(stderr,
                 "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
                 "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
                 "LSM transition).\n");
+      hip_capture_uninstall();
       return;
     }
 
-    // Snapshot the fully-initialized dispatch table and install runtime shims here
-    // only (see comment above — no static-init capture hook).
-    if (!g_installed) {
-      hip_capture_build_table();
-      pinned_wrap_table();
-      hip_capture_install();
-    }
+    // Snapshot the dispatch table and install runtime shims, unless the bootstrap
+    // already has (see comment above — no static-init capture hook).
+    install_runtime_shims_once();
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off. Without a writer the shims would only
@@ -2952,7 +2990,6 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
-    pinned_install_atfork();
 
     // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
     // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace

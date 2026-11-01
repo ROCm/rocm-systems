@@ -4059,6 +4059,60 @@ TEST_CASE("Unit_HRR_ForkWhileWriterHoldsLock_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// Unit_HRR_ForkBeforeInit_Direct
+//
+// Forks while a second thread calls hipGetErrorString() in a loop, and nothing
+// has run hip::init(). With capture requested that call goes through its shim,
+// which takes the events mutex only to find the writer closed. A child forked
+// while the caller held it would block for ever on its own first record, or in
+// the open() of its first initializing call. Each child makes one call and
+// exits; the parent waits for each under a deadline and stops at the first
+// that hangs. The window is narrow, so the case forks many times, which is
+// cheap while the runtime is not initialized.
+// Unit_HRR_ForkBeforeInit checks the exit code and that no archive was opened.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkBeforeInit_Direct", "[.][hrr-direct]") {
+  constexpr int kForks = 500;
+
+  // Nothing below may REQUIRE before the join.
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> calls{0};
+  std::thread caller([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      (void)hipGetErrorString(hipErrorInvalidValue);
+      calls.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  for (int ms = 0; ms < 10000 && calls.load() == 0; ++ms) hrr_sleep_1ms();
+
+  int forked = 0, hung = 0, failed = 0;
+  for (; forked < kForks; ++forked) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      (void)hipGetErrorString(hipSuccess);
+      _exit(0);
+    }
+    if (pid < 0) break;
+    const int status = hrr_wait_child(pid, 10);
+    if (status == -1) {
+      ++hung;
+      break;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) ++failed;
+  }
+
+  stop = true;
+  caller.join();
+
+  INFO("calls " << calls.load() << ", forked " << forked << ", hung " << hung << ", failed "
+                << failed);
+  REQUIRE(calls.load() > 0);
+  REQUIRE(hung == 0);
+  REQUIRE(forked == kForks);
+  REQUIRE(failed == 0);
+}
+
+// ---------------------------------------------------------------------------
 // Unit_HRR_CaptureCrashDuringFork_Direct
 //
 // Forks while the crash callback writes the emergency manifest. The main thread

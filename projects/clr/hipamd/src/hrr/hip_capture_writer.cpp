@@ -1118,6 +1118,12 @@ static bool publish_active_marker(int dir_fd, const std::string& out_dir) {
   return false;
 }
 
+void install_fork_handlers() {
+#ifndef _WIN32
+  install_atfork_handlers_once();
+#endif
+}
+
 bool open(const char* output_dir) {
   if (is_open()) return true;  // already open — guard against double-invocation
   if (g_out_of_space.load(std::memory_order_relaxed)) {  // e.g. a child after fork
