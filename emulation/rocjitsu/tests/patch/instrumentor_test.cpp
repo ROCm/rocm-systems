@@ -20,8 +20,13 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/register_set.h"
@@ -203,19 +208,93 @@ TEST(Validator, RejectsOffsetThatWouldOverflow) {
   EXPECT_FALSE(err.empty());
 }
 
-TEST(Validator, RejectsNonBeforeInstKind) {
+TEST(Validator, RejectsReservedBlockBoundaryKinds) {
   static constexpr uint32_t kRaw = 0xDEADBEEFu;
   TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &kRaw);
   auto text = dummy_text();
 
-  for (auto kind : {InstrumentationKind::AfterInst, InstrumentationKind::BlockEntry,
-                    InstrumentationKind::BlockExit}) {
+  for (auto kind : {InstrumentationKind::BlockEntry, InstrumentationKind::BlockExit}) {
     InstrumentationPoint pt;
     pt.kind = kind;
     std::string err;
     EXPECT_FALSE(validate_anchor(anchor, 0, text, pt, ROCJITSU_CODE_ARCH_CDNA4, &err).has_value())
-        << "kind != BeforeInst must be rejected";
-    EXPECT_FALSE(err.empty());
+        << "reserved block boundary must be rejected";
+    EXPECT_NE(err.find("kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit"),
+              std::string::npos);
+  }
+}
+
+TEST(Validator, AfterInstRequiresACallableProbe) {
+  constexpr uint32_t raw = 0xDEADBEEF;
+  TestInstruction anchor("v_add_f32_e32", 4, 0, std::nullopt, &raw);
+  const InstrumentationPoint point{
+      .kind = InstrumentationKind::AfterInst, .probe_symbol = {}, .probe_args = {}};
+  std::string error;
+  EXPECT_FALSE(validate_anchor(anchor, 0, dummy_text(), point, ROCJITSU_CODE_ARCH_CDNA4, &error));
+  EXPECT_NE(error.find("AfterInst requires a callable probe"), std::string::npos);
+}
+
+TEST(Validator, AfterInstRejectsBankSelectionAndMissingHwregOperands) {
+  constexpr uint32_t raw = 0xDEADBEEF;
+  const auto text = dummy_text();
+  for (const char *name : {"s_set_vgpr_msb", "s_setreg_b32", "s_setreg_imm32_b32"}) {
+    TestInstruction anchor(name, 4, 0, std::nullopt, &raw);
+    InstrumentationPoint point;
+    point.kind = InstrumentationKind::AfterInst;
+    point.probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1);
+    point.probe_symbol = "after";
+    std::string error;
+    EXPECT_FALSE(validate_anchor(anchor, 0, text, point, ROCJITSU_CODE_ARCH_CDNA5, &error));
+    EXPECT_NE(error.find("bank selection"), std::string::npos);
+  }
+}
+
+TEST(Validator, AfterInstQualifiesSetregByArchitectureHwregAndTargetCapability) {
+  constexpr uint16_t kOtherHwreg = 2;
+  constexpr uint16_t kModeBankBit = amdgpu::MODE_HWREG | (amdgpu::VGPR_MSB_MODE_SHIFT << 6);
+  constexpr uint16_t kModeOutsideBankBit = amdgpu::MODE_HWREG | (25 << 6);
+  const InstrumentationPoint point{.kind = InstrumentationKind::AfterInst,
+                                   .probe_obj = reinterpret_cast<const AmdGpuCodeObject *>(0x1),
+                                   .probe_symbol = "after",
+                                   .probe_args = {}};
+  for (const rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const uint16_t hwreg : {kOtherHwreg, kModeBankBit, kModeOutsideBankBit}) {
+      for (const bool immediate : {false, true}) {
+        std::array<uint32_t, 2> words{0, 1};
+        if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+          words[0] =
+              cdna4::build_sopk(immediate ? cdna4::kSSetregImm32B32Sopk : cdna4::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        else if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+          words[0] =
+              rdna4::build_sopk(immediate ? rdna4::kSSetregImm32B32Sopk : rdna4::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        else
+          words[0] =
+              cdna5::build_sopk(immediate ? cdna5::kSSetregImm32B32Sopk : cdna5::kSSetregB32Sopk,
+                                {.simm16 = hwreg})[0];
+        const std::unique_ptr<Instruction> anchor(decode_valid(*decoder, words.data()));
+        ASSERT_NE(anchor, nullptr);
+        const std::span<const uint8_t> text(reinterpret_cast<const uint8_t *>(words.data()),
+                                            words.size() * sizeof(uint32_t));
+        for (const bool fixup : {false, true}) {
+          SCOPED_TRACE(::testing::Message() << arch << " hwreg=" << hwreg
+                                            << " immediate=" << immediate << " fixup=" << fixup);
+          const bool changes_bank = arch == ROCJITSU_CODE_ARCH_CDNA5 && hwreg != kOtherHwreg &&
+                                    (fixup || hwreg == kModeBankBit);
+          std::string error;
+          EXPECT_EQ(validate_anchor(*anchor, 0, text, point, arch, &error, fixup).has_value(),
+                    !changes_bank)
+              << error;
+          if (changes_bank) {
+            EXPECT_NE(error.find("bank selection"), std::string::npos);
+          }
+        }
+      }
+    }
   }
 }
 
