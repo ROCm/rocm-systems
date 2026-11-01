@@ -1499,7 +1499,13 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
         uint64_t lanes = d.lanes;
         if (event.kind == WaitEventKind::FlatLoad)
           lanes &= counter == WaitCounterKind::Ds ? flat_shared_lanes : ~flat_shared_lanes;
-        scoreboard.add({sequence, wf.pc, lanes, d.reg, counter, d.bytes});
+        MemoryWaitScoreboard::Event result{sequence, wf.pc, lanes, d.reg, counter, d.bytes};
+        // FLAT's LDS-serviced lanes share native LDS's order class, so partial
+        // waits retire them together. Only qualified targets also write them
+        // to registers in order with native LDS results.
+        if (event.kind == WaitEventKind::FlatLoad && counter == WaitCounterKind::Ds)
+          result.ordered_overwrite = has_ordered_flat_lds_writeback(config_.arch);
+        scoreboard.add(result);
       }
   }
 }
