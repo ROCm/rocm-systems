@@ -1425,6 +1425,90 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
                    dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
 }
 
+TEST(ConfigLoaderTest, ImageAddressingUsesEachDeviceIdentity) {
+  // These devices share one ISA but KMD reports different tiling registers.
+  for (uint32_t version : {100300u, 100301u}) {
+    SCOPED_TRACE(version);
+    const std::string json = std::string(R"({
+      "num_threads": 1,
+      "vm": {"arch": "rdna2", "gpu": {"device": {
+        "gfx_target_version": )") +
+                             std::to_string(version) + R"(,
+        "family_id": 143, "num_sdma_engines": 0
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "cp", "type": "command_processor"},
+        {"name": "cu", "type": "compute_unit"}
+      ]}}
+    })";
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 1));
+    std::vector<simdojo::Component *> components;
+    loaded.build_result.root->collect_components(components);
+    size_t checked = 0;
+    for (auto *component : components) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+      if (!cu)
+        continue;
+      const auto identity = cu->image_address_config();
+      EXPECT_EQ(identity.arch, ROCJITSU_CODE_ARCH_RDNA2);
+      EXPECT_EQ(identity.gb_addr_config,
+                kmd::gb_addr_config_for_gfx_target_version(loaded.device.gfx_target_version));
+      EXPECT_EQ(identity.gb_addr_config, version == 100300 ? 0x444u : 0u);
+      ++checked;
+    }
+    EXPECT_EQ(checked, 1u);
+  }
+}
+
+TEST(ConfigLoaderTest, PartialDeviceIdentityRetainsWorkingImageDefaults) {
+  for (std::string_view architecture : {"cdna2", "rdna2", "rdna3"}) {
+    SCOPED_TRACE(architecture);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna2", "gpu": {"device": {"num_sdma_engines": 0}}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "cp", "type": "command_processor"},
+        {"name": "cu", "type": "compute_unit"}
+      ]}}
+    })";
+    json.replace(json.find("cdna2"), 5, architecture);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 1));
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_EQ(loaded.device.family_id, 0u);
+    std::vector<simdojo::Component *> components;
+    loaded.build_result.root->collect_components(components);
+    size_t checked = 0;
+    for (auto *component : components) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+      if (!cu)
+        continue;
+      const auto identity = cu->image_address_config();
+      EXPECT_EQ(identity.gb_addr_config, 0u)
+          << "GET_TILE_CONFIG reports zero for an omitted target";
+      const amdgpu::ImageLayout linear{.width = 64, .height = 32, .pitch = 64, .element_bytes = 4};
+      const auto linear_addressing = amdgpu::ImageAddressing::prepare(identity, linear);
+      ASSERT_TRUE(linear_addressing);
+      EXPECT_EQ(linear_addressing->byte_offset(5, 3, 0), 788u);
+      if (architecture != "cdna2") {
+        // KFD reports a zero tiling register for an omitted device version;
+        // the native evaluator must use the same zero-register equations.
+        const amdgpu::ImageLayout tiled{
+            .width = 256, .height = 128, .pitch = 256, .element_bytes = 4, .swizzle_mode = 27};
+        const auto tiled_addressing = amdgpu::ImageAddressing::prepare(identity, tiled);
+        ASSERT_TRUE(tiled_addressing);
+        EXPECT_EQ(tiled_addressing->byte_offset(200, 100, 0),
+                  architecture == "rdna2" ? 90496u : 121216u);
+      }
+      ++checked;
+    }
+    EXPECT_EQ(checked, 1u);
+  }
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
   config::LoadedConfig loaded;

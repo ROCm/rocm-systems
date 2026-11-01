@@ -183,6 +183,10 @@ constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_targe
 // from local W7900/R9700 hardware through AMDKFD_IOC_GET_TILE_CONFIG.
 constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
   switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return 0x44;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return 0x444;
   case ROCJITSU_CODE_ARCH_RDNA3:
     return 0x545;
   case ROCJITSU_CODE_ARCH_RDNA4:

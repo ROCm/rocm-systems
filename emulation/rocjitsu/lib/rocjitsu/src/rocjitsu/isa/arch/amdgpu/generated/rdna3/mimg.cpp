@@ -136,7 +136,7 @@ bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) c
 }
 
 bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
-  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -335,7 +335,7 @@ void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
-  return !(inst_.nsa && src_operands_[operand_index] == &vaddr);
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
