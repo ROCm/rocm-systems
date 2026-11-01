@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -65,6 +66,20 @@ get_buffer_offset()
         return rng(gen);
     }();
     return _v;
+}
+
+// Whether a context delivers kernel dispatch records into @p buffer_id.
+bool
+receives_kernel_dispatch_records(rocprofiler_buffer_id_t buffer_id)
+{
+    for(const auto* ctx : context::get_registered_contexts())
+    {
+        if(ctx->buffered_tracer &&
+           ctx->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+                   .handle == buffer_id.handle)
+            return true;
+    }
+    return false;
 }
 }  // namespace
 
@@ -330,6 +345,8 @@ rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 #endif
 
+    if(rocprofiler::buffer::receives_kernel_dispatch_records(buffer_id))
+        rocprofiler::hsa::queue_interposition::flush_sync();
     return rocprofiler::buffer::flush(buffer_id, true);
 }
 

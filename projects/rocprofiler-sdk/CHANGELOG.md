@@ -8,6 +8,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- Kernel dispatch tracing with inline queue interposition places the completion signals it adds in GPU memory, except for the last dispatch of each submitted batch, where `hsa_amd_signal_batch_create` supports it (large-BAR gfx94x, gfx95x and gfx125x). This lowers the per-kernel overhead of tracing back-to-back kernels, such as HIP graph replay. `ROCPROFILER_DEVICE_SIGNALS=false` restores host signals.
+- `rocprofiler_flush_buffer` on a buffer receiving kernel dispatch records waits, bounded, for the records of batches already submitted when device signals are in use.
+
 ### Resolved issues
 
 ### Known issues
