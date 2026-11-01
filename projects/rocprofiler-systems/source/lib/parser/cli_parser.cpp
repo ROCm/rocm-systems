@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,7 +44,11 @@ limits_for(const schema_param& param)
     const bool is_flag  = param.arg && param.arg->form == arg_form::flag;
     const auto fallback = is_flag ? std::size_t{ 0 } : k_single_value;
     const auto minimum  = param.arg ? param.arg->min_count.value_or(fallback) : fallback;
-    const auto maximum  = param.arg ? param.arg->max_count.value_or(minimum) : minimum;
+    if(param.type == param_type::enumeration_list && param.arg && !param.arg->max_count)
+    {
+        return { .minimum = minimum, .maximum = std::numeric_limits<std::size_t>::max() };
+    }
+    const auto maximum = param.arg ? param.arg->max_count.value_or(minimum) : minimum;
     return { .minimum = minimum, .maximum = maximum };
 }
 
@@ -74,9 +79,13 @@ blocks_value(const schema_param& param, std::string_view token)
 }
 
 [[nodiscard]] bool
-is_flag_word(std::string_view token)
+accepts_list_token(const schema_param& param, std::string_view token)
 {
-    return !starts_option(token) && parse_boolean(token).has_value();
+    if(param.type != param_type::enumeration_list)
+    {
+        return true;
+    }
+    return is_valid_value(param, canonical_choice(param, token));
 }
 
 std::string
@@ -136,7 +145,8 @@ private:
         }
         if(!starts_option(token))
         {
-            finish(m_result.command, m_index);
+            m_result.errors.push_back(fmt::format("unexpected argument '{}'", token));
+            ++m_index;
             return;
         }
         if(!consume_option(token))
@@ -220,14 +230,6 @@ private:
         {
             return false;
         }
-        const auto next = m_index + 1;
-        if(limits_for(param).maximum == 0 && next < m_args.size() &&
-           is_flag_word(m_args[next]))
-        {
-            m_index = next;
-            store_target(param, param.id, m_args[next]);
-            return true;
-        }
         store_target(param, param.id, "true");
         return true;
     }
@@ -239,7 +241,8 @@ private:
         while(tokens.size() < maximum)
         {
             const auto next = m_index + 1;
-            if(next >= m_args.size() || blocks_value(param, m_args[next]))
+            if(next >= m_args.size() || blocks_value(param, m_args[next]) ||
+               !accepts_list_token(param, m_args[next]))
             {
                 break;
             }
@@ -280,14 +283,7 @@ private:
                             option_name(option)));
             return;
         }
-        const auto stored = canonical_choice(*target, value);
-        if(!is_valid_value(*target, stored))
-        {
-            m_result.errors.push_back(fmt::format("invalid value '{}' for option '{}'",
-                                                  value, option_name(option)));
-            return;
-        }
-        m_result.values.insert_or_assign(target->id, stored);
+        m_result.store_if_valid(*target, value);
     }
 
     [[nodiscard]] bool store_bundle(std::string_view token)
