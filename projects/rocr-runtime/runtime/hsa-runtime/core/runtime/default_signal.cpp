@@ -143,7 +143,15 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
     }
 
     // Past the hot-spin window: nap between scans instead of burning the core.
-    os::uSleep(poll_nap_us);
+    // Never nap past the caller's deadline: clamp to the remaining timeout
+    // (rounded up, so the next scan lands at or just after it).
+    const timer::fast_clock::duration remaining = fast_timeout - (now - start_time);
+    unsigned int nap_us = poll_nap_us;
+    if (remaining < std::chrono::microseconds(nap_us)) {
+      nap_us = static_cast<unsigned int>(
+          std::chrono::ceil<std::chrono::microseconds>(remaining).count());
+    }
+    os::uSleep(nap_us);
     poll_nap_us = NextPollNapUs(poll_nap_us);
   }
 }

@@ -6,13 +6,17 @@
 //
 // Escalating backoff for userspace polling fallbacks.
 //
-// Some wait paths cannot sleep in the kernel (e.g. AsyncEventsLoop when the
-// thunk exposes no interrupt-backed signal events, as on the WSL/dxg thunk).
-// Those paths re-scan signal values in userspace and would otherwise burn a
-// full CPU core. To keep idle cost near zero without penalizing a wait that
-// completes quickly, the nap between scans starts at a small floor and doubles
-// up to a ceiling; callers reset to the floor whenever a wait makes progress so
-// the escalation only compounds within a single idle wait.
+// Some wait paths cannot sleep in the kernel and re-scan signal values in
+// userspace, which would otherwise burn a full CPU core:
+//   - Runtime::AsyncEventsLoop, when the thunk exposes no interrupt-backed
+//     signal events (e.g. the WSL/dxg thunk). It resets the nap to the floor
+//     whenever a wait makes progress.
+//   - BusyWaitSignal::WaitRelaxed (default_signal.cpp), for a signal that has
+//     no interrupt event at all, opt-in via HSA_ENABLE_YIELDING_POLL=1. It
+//     spins for HotPollUs() first and starts every call at the floor.
+// To keep idle cost near zero without penalizing a wait that completes
+// quickly, the nap between scans starts at a small floor and doubles up to a
+// ceiling, so the escalation only compounds within a single idle wait.
 
 #ifndef HSA_RUNTIME_CORE_UTIL_POLL_BACKOFF_H_
 #define HSA_RUNTIME_CORE_UTIL_POLL_BACKOFF_H_
@@ -25,14 +29,19 @@ namespace core {
 // Floor (microseconds) for the polling-fallback nap.
 inline constexpr unsigned int kPollNapFloorUs = 20;
 
-// Ceiling (microseconds) for the polling-fallback nap. Only used when the
-// runtime has no interrupt-backed signal events at all
+// Ceiling (microseconds) for the polling-fallback nap. AsyncEventsLoop only
+// naps when the runtime has no interrupt-backed signal events at all
 // (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk). Every signal is
 // polling-only there, so the only cost of a long nap is observation latency of
-// the napping wait itself. Where interrupts are available, callers must not
-// back off at all: a single EopEvent-less signal can force the shared
+// the napping wait itself. Where interrupts are available, AsyncEventsLoop must
+// not back off at all: a single EopEvent-less signal can force the shared
 // async-events thread into polling, and napping would delay the unrelated
 // interrupt-backed handlers batched onto that same thread.
+//
+// BusyWaitSignal::WaitRelaxed with HSA_ENABLE_YIELDING_POLL=1 naps up to this
+// ceiling regardless of g_use_interrupt_wait: it runs on the waiting thread
+// and only delays its own wait. It clamps each nap to the caller's remaining
+// timeout.
 inline constexpr unsigned int kPollNapCeilingUs = 2000;
 
 // Given the current nap duration, return the next one: double it, capped at
@@ -56,8 +65,11 @@ inline constexpr unsigned int kHotPollUs = 200;
 
 // HSA_WAIT_STATE_ACTIVE widens the window: the caller asked to trade CPU for
 // reduced latency. It does not remove the nap fallback -- clr's WaitForSignal()
-// re-arms the wait every 4s with the active hint, so "active" is not a licence
-// to spin a core unbounded.
+// re-arms the wait in a loop with the active hint, so "active" is not a
+// licence to spin a core unbounded. Note that clr's kTimeout4Secs is 4 * M
+// timestamp ticks, i.e. ~4 ms at rocr's 1 GHz timestamp clock, so each re-armed
+// wait ends inside this window and never reaches the nap; the intended 4 s
+// re-arm is ROCm/rocm-systems#13513.
 inline constexpr unsigned int kHotPollActiveUs = 10000;
 
 constexpr unsigned int HotPollUs(bool active_hint) {

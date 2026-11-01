@@ -87,6 +87,7 @@
 #include "suites/functional/signal_concurrent.h"
 #include "suites/functional/signal_allocation_validation.h"
 #include "suites/functional/signal_wait_multi.h"
+#include "suites/functional/signal_yielding_poll.h"
 #include "suites/functional/metadata_prefetch.h"
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
@@ -300,6 +301,41 @@ TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
   if (!RunCustomTestProlog(&swm)) return;
   swm.TestWaitAllReportsSatisfyingValues();
   RunCustomTestEpilog(&swm);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Long_Wait_Yields_Cpu) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestLongWaitYieldsCpu();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Nap_Honors_Timeout) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestNapHonorsTimeout();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Completion_During_Nap) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestCompletionDuringNap();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Yielding_Poll_Active_Hint_Widens_Hot_Window) {
+  SignalYieldingPollTest syp(true);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestActiveHintWidensHotWindow();
+  RunCustomTestEpilog(&syp);
+}
+
+TEST(rocrtstFunc, Signal_Busy_Wait_Default_Keeps_Spinning) {
+  SignalYieldingPollTest syp(false);
+  if (!RunCustomTestProlog(&syp)) return;
+  syp.TestDefaultKeepsSpinning();
+  RunCustomTestEpilog(&syp);
 }
 
 /* Temporary: Disable CU Masking until it is fixed */

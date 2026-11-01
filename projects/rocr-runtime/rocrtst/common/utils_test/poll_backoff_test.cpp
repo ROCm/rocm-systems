@@ -98,6 +98,12 @@ TEST(PollBackoffTest, HotPollSelectsOnActiveHint) {
 // os::uSleep(nap) with nap escalating via NextPollNapUs() -- over a wait far
 // longer than any real GPU op (the TheRock#7832 stalls ran ~60s) and confirm
 // the time spent spinning is a tiny fraction of the wait.
+//
+// This models one uninterrupted call. A caller that re-arms the wait restarts
+// the hot window on every call; clr's WaitForSignal() re-arms every ~4 ms
+// (kTimeout4Secs = 4 * M timestamp ticks), inside the active window, until
+// ROCm/rocm-systems#13513. The real loop is covered by the
+// Signal_Yielding_Poll_* functional tests (suites/functional/signal_yielding_poll.cc).
 TEST(PollBackoffTest, LongWaitIsMostlyAsleep) {
   constexpr unsigned long kWaitUs = 60UL * 1000 * 1000;  // 60 s
 
