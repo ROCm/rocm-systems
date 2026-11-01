@@ -3,6 +3,10 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -732,6 +736,129 @@ TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
       << "the copy stage cannot tell an unsupported revision apart, which is why callers "
          "stop on the setup status instead; it only has to refuse to succeed";
   EXPECT_EQ(metrics.apu_metrics, nullptr);
+}
+
+TEST(GpuUnit, MetricsQueryPreservesUnsupportedRevision) {
+  FakeMetricsDevice fake_device("query_unsupported_v2_5");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(5, sizeof(ApuMetrics)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), RSMI_STATUS_NOT_SUPPORTED);
+
+  amd::smi::AMDGpuDynamicMetricTblValues_t values;
+  EXPECT_EQ(device.run_internal_gpu_metrics_query(amd::smi::AMDGpuMetricsUnitType_t::kMetricTempGfx,
+                                                  values),
+            RSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(values.empty());
+}
+
+TEST(GpuUnit, MetricsQueryPreservesReadErrors) {
+  const int cases[] = {EACCES, EROFS, EPERM,  ENOENT, ENOTSUP, EBUSY, EINTR, EIO,
+                       ENXIO,  EBADF, EISDIR, EINVAL, ENOTDIR, ESRCH, ENOMEM};
+
+  for (const auto read_error : cases) {
+    SCOPED_TRACE(testing::Message() << "read errno " << read_error);
+    FakeMetricsDevice fake_device("query_read_error");
+    fake_device.WriteMetrics(BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size)));
+
+    // Fault only the child's read syscall, keeping setup and errno translation real.
+    EXPECT_EXIT(
+        {
+          const auto query = ([&]() {
+            amd::smi::Device device(fake_device.path(), nullptr);
+            struct sock_filter filter[] = {
+                BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+                BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_read, 0, 1),
+                BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | static_cast<uint32_t>(read_error)),
+                BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+            };
+            sock_fprog program{static_cast<unsigned short>(std::size(filter)), filter};
+            ASSERT_EQ(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0), 0);
+            ASSERT_EQ(prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &program), 0);
+
+            const auto setup_status = device.setup_gpu_metrics_reading();
+            ASSERT_NE(setup_status, RSMI_STATUS_SUCCESS);
+            amd::smi::AMDGpuDynamicMetricTblValues_t values;
+            EXPECT_EQ(device.run_internal_gpu_metrics_query(
+                          amd::smi::AMDGpuMetricsUnitType_t::kMetricTempGfx, values),
+                      setup_status);
+            EXPECT_TRUE(values.empty());
+          });
+          query();
+          _exit(testing::Test::HasFailure() ? 1 : 0);
+        },
+        testing::ExitedWithCode(0), "");
+  }
+}
+
+TEST(GpuUnit, MetricsQueryPreservesMalformedTableErrors) {
+  auto truncated = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
+  truncated.resize(kApuV21Size / 2);
+  const std::pair<std::vector<uint8_t>, rsmi_status_t> cases[] = {
+      {{}, RSMI_STATUS_NOT_SUPPORTED},
+      {{0, 1}, RSMI_STATUS_UNEXPECTED_SIZE},
+      {BuildApuMetricsBlob(1, 0), RSMI_STATUS_UNEXPECTED_SIZE},
+      {truncated, RSMI_STATUS_UNEXPECTED_SIZE},
+      {BuildMetricsBlob(4, 1, 9, 4), RSMI_STATUS_UNEXPECTED_DATA},
+  };
+
+  for (const auto& [blob, expected_status] : cases) {
+    SCOPED_TRACE(testing::Message() << "blob size " << blob.size());
+    FakeMetricsDevice fake_device("query_malformed");
+    fake_device.WriteMetrics(blob);
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), expected_status);
+
+    amd::smi::AMDGpuDynamicMetricTblValues_t values;
+    EXPECT_EQ(device.run_internal_gpu_metrics_query(
+                  amd::smi::AMDGpuMetricsUnitType_t::kMetricTempGfx, values),
+              expected_status);
+    EXPECT_TRUE(values.empty());
+  }
+}
+
+TEST(GpuUnit, MetricsQueryReadsPresentApuValues) {
+  FakeMetricsDevice fake_device("query_present");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size)));
+  amd::smi::Device device(fake_device.path(), nullptr);
+  amd::smi::AMDGpuDynamicMetricTblValues_t values;
+
+  ASSERT_EQ(device.run_internal_gpu_metrics_query(amd::smi::AMDGpuMetricsUnitType_t::kMetricTempGfx,
+                                                  values),
+            RSMI_STATUS_SUCCESS);
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_EQ(values[0].m_value, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+  EXPECT_EQ(values[0].m_original_type, amd::smi::AMDGpuMetricsDataType_t::kUInt16);
+
+  ASSERT_EQ(device.run_internal_gpu_metrics_query(
+                amd::smi::AMDGpuMetricsUnitType_t::kMetricTempCore, values),
+            RSMI_STATUS_SUCCESS);
+  ASSERT_EQ(values.size(), 8u);
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    EXPECT_EQ(
+        values[index].m_value,
+        FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_core) + index * sizeof(uint16_t)));
+    EXPECT_EQ(values[index].m_original_type, amd::smi::AMDGpuMetricsDataType_t::kUInt16);
+  }
+}
+
+TEST(GpuUnit, MetricsQueryKeepsAbsentApuFieldsNotApplicable) {
+  for (const auto revision : {uint8_t{1}, uint8_t{4}}) {
+    SCOPED_TRACE(testing::Message() << "APU revision 2." << static_cast<int>(revision));
+    FakeMetricsDevice fake_device("query_absent");
+    fake_device.WriteMetrics(BuildApuMetricsBlob(
+        revision, static_cast<uint16_t>(revision == 1 ? kApuV21Size : kApuV24Size)));
+    amd::smi::Device device(fake_device.path(), nullptr);
+    amd::smi::AMDGpuDynamicMetricTblValues_t values;
+
+    ASSERT_EQ(device.run_internal_gpu_metrics_query(
+                  amd::smi::AMDGpuMetricsUnitType_t::kMetricAvgCpuVoltage, values),
+              RSMI_STATUS_SUCCESS);
+    ASSERT_EQ(values.size(), 1u);
+    EXPECT_EQ(values[0].m_value,
+              revision == 1 ? UINT16_MAX
+                            : FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_cpu_voltage)));
+  }
 }
 
 // v3.0 is a different layout, not a v2.x prefix, and it reaches the caller

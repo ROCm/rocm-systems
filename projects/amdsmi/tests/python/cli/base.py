@@ -151,6 +151,16 @@ class TestCliBase(unittest.TestCase):
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
 
+    SWEEP_GPU_LOCAL_SET_ARGS = {
+        "--clk-level",
+        "--clk-limit",
+        "{perf_determinism}",
+        "--perf-determinism",
+        "--profile",
+        "--power-cap",
+        "--memory-partition",
+    }
+
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
     # natively through normal attribute inheritance -- no dynamic ``setattr``
@@ -298,11 +308,18 @@ class TestCliBase(unittest.TestCase):
                 for name, clk_type in clk_types.items():
                     try:
                         freq = amdsmi.amdsmi_get_clk_freq(processor, clk_type)
-                        info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
                     except amdsmi.AmdSmiLibraryException:
                         entry[name] = None
                         continue
-                    freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
+                    try:
+                        info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
+                        freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
+                    except amdsmi.AmdSmiLibraryException as error:
+                        if error.get_error_code() != amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+                            entry[name] = None
+                            continue
+                        # No gpu_metrics (e.g. an iGPU), yet the table is still settable.
+                        freq["has_deep_sleep"] = False
                     entry[name] = freq
                 per_gpu.append(entry)
         finally:
@@ -628,12 +645,17 @@ class TestCliBase(unittest.TestCase):
         # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
+            items = cmd.split()
+            if cmd_name == "set" and items[2] in self.SWEEP_GPU_LOCAL_SET_ARGS:
+                if "--gpu" not in items or not items[items.index("--gpu") + 1].isdigit():
+                    cmds[index] = ("", cond)
+                    continue
             tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
             if tolerated is not None:
                 cond = [*ok, tolerated]
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
-                # Find gpu index. No --gpu, "all" or a bdf all target every device.
+                # Find the numeric GPU index for dependent values.
                 explicit_gpu = False
                 try:
                     i = items.index("--gpu")
@@ -729,7 +751,8 @@ class TestCliBase(unittest.TestCase):
                         elif nameStr == "{max_power}":
                             cmd = cmd.replace("{max_power}", str(max_power), 1)
                 elif nameStr == "{perf_determinism}":
-                    clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
+                    static_clock = self.static_data["gpu_data"][gpu_index].get("clock", {})
+                    clock_sys = "N/A" if static_clock == "N/A" else static_clock.get("sys", "N/A")
                     if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
                         num = len(clock_sys["frequency_levels"])
                         level = f"Level {num - 1}"
@@ -741,9 +764,10 @@ class TestCliBase(unittest.TestCase):
                         cmd = ""
                 elif "clk_limit" in nameStr:
                     clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
-                    value = self._clk_limit_probe_value(
-                        self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
-                    )
+                    clock = self.metric_data["gpu_data"][gpu_index].get("clock", {})
+                    if clock == "N/A":
+                        clock = {}
+                    value = self._clk_limit_probe_value(clock, clk_type, bound)
                     if value is None:
                         cmd = ""
                     else:
@@ -843,7 +867,11 @@ class TestCliBase(unittest.TestCase):
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
                         # Whole word matches only: i.e. remove "--gpu", not "--gpureset"
-                        if "--gpu" in items:
+                        if "--gpu" in items and not (
+                            cmd_name == "set"
+                            and sub_arg in self.SWEEP_GPU_LOCAL_SET_ARGS
+                            and gpu_index.isdigit()
+                        ):
                             cmd = ""
 
                 # Remove all file and watch modifiers except for gpu 0
@@ -986,8 +1014,8 @@ class TestCliBase(unittest.TestCase):
                 defaulting to it while actually running on every device.
 
         Returns:
-            int: the highest settable level plus one, or 0 when the device does
-            not expose the clock -- in which case the caller drops the command.
+            int: the highest settable level plus one, or 0 when a target device
+            does not expose the clock -- in which case the caller drops the command.
         """
         if clk_type == "PCIE":
             pcie_levels = self.static_data["gpu_data"][gpu_index]["bus"]["pcie_levels"]
@@ -999,9 +1027,11 @@ class TestCliBase(unittest.TestCase):
         per_gpu = []
         for table in tables:
             freq = table.get(clk_type)
-            if freq and freq["num_supported"]:
-                # The deep-sleep row occupies a table slot but is not settable.
-                per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
+            # A device with no table (e.g. an iGPU's empty pp_dpm_fclk) fails any mask.
+            if not freq or not freq["num_supported"]:
+                return 0
+            # The deep-sleep row occupies a table slot but is not settable.
+            per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
         return min(per_gpu) if per_gpu else 0
 
     @staticmethod

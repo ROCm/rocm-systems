@@ -5544,7 +5544,9 @@ auto Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_count
   //            /sys/class/drm/renderDXXX/device/xcp/xcp_metrics
   status_code = setup_gpu_metrics_reading(type);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
        << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
