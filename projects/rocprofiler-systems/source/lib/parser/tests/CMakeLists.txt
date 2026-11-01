@@ -16,3 +16,11 @@ target_link_libraries(
     parser-tests
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-parser
 )
+
+if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
+    target_compile_definitions(parser-tests PRIVATE ROCPROFSYS_PARSER_HAS_SDK_BACKEND)
+    target_link_libraries(
+        parser-tests
+        PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+    )
+endif()

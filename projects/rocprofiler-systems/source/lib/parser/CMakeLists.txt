@@ -27,7 +27,6 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/precedence.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/value_provider.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/builtin_providers.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
@@ -59,6 +58,17 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-fmt>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
 )
+
+if(TARGET rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend)
+    target_compile_definitions(
+        rocprofiler-systems-parser
+        PRIVATE ROCPROFSYS_PARSER_HAS_SDK_BACKEND
+    )
+    target_link_libraries(
+        rocprofiler-systems-parser
+        PRIVATE rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
+    )
+endif()
 
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)

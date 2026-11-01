@@ -21,9 +21,10 @@ namespace rocprofsys::parser
  *
  * choices() and default_value() describe the catalog. accepts() checks one
  * textual value. A list is split on space, comma, semicolon, colon, tab, and
- * newline, and each name is compared exactly. The built-in catalogs are the
- * ROCm domain, runtime, and GPU metric names the runtime accepts. A
- * hardware-counter name is any non-empty text.
+ * newline, and each name is compared exactly. rocm_domains_sdk reads the
+ * domains reported by the rocprofiler-sdk backend. gpu_metrics,
+ * parallel_runtimes, and hw_counters accept any non-empty value until a
+ * backend supplies their lists.
  */
 class value_provider_interface
 {
@@ -71,8 +72,9 @@ public:
     /// @return false, leaving the registry unchanged, when the name is empty or taken.
     bool add(std::unique_ptr<value_provider_interface> provider);
 
-    /// Install rocm_domains_sdk, parallel_runtimes, gpu_metrics, and hw_counters.
-    /// A name that is already registered is left as it is.
+    /// Install rocm_domains_sdk when the SDK backend is linked, and the
+    /// gpu_metrics, parallel_runtimes, and hw_counters stubs. A name that is
+    /// already registered is left as it is.
     void add_builtins();
 
     [[nodiscard]] const value_provider_interface* find(std::string_view name) const;
