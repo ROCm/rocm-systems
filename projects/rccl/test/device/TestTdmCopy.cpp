@@ -8,7 +8,7 @@
 //
 // tdmCopy.h exposes four device entry points plus a wait and a host/device
 // capability query. This file exercises every one of them and the internal
-// [head][aligned 256B rows][tail] partitioning of detail::issue():
+// [vector head][TDM chunks] partitioning of detail::issue():
 //
 //   * IsTdmCopySupported()  - host and device capability query
 //   * tdmCopy()             - blocking, block-collective (all warps)
@@ -21,12 +21,10 @@
 // and also checks sentinel padding around the destination window so an out-of-
 // bounds write is caught.
 //
-// NOTE ON ALIGNMENT: detail::issue() peels its "head" against the SOURCE pointer
-// only (that is the direct-copy requirement of load_to_lds). The bulk TDM store
-// then targets dst+head, so the destination is only guaranteed correct when it
-// shares the source's sub-128B alignment. Tests therefore use matched src/dst
-// byte offsets, which is the supported contract, while still driving the head /
-// bulk / tail split across a wide range of sizes and offsets.
+// Source and destination offsets are independent: detail::issue() aligns each
+// chunk to the destination and absorbs the difference delta = (src - dst) % 256
+// in LDS, shifting the chunk in place when delta % 4 != 0. The destination sits
+// past a kGuard-byte pad, so matched offsets give delta 128.
 
 #include "DeviceTestBase.hpp"
 
@@ -213,7 +211,8 @@ TEST_F(TdmCopyTest, DeviceCapabilityMatchesHost) {
 struct BlockCase {
   size_t      n;          // bytes to copy
   size_t      lds;        // LDS staging bytes handed to the copy
-  int         off;        // matched src/dst byte offset (drives the head peel)
+  int         soff;       // src byte offset from an allocation boundary
+  int         doff;       // dst byte offset past the kGuard pad
   int         block;      // threads per block
   std::string name;
 };
@@ -225,11 +224,11 @@ protected:
   void run(const BlockCase& c) {
     if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
 
-    const size_t srcTotal = static_cast<size_t>(c.off) + c.n;
-    const size_t dstTotal = static_cast<size_t>(kGuard) + c.off + c.n + kGuard;
-    const size_t copyStart = static_cast<size_t>(kGuard) + c.off;
+    const size_t srcTotal = static_cast<size_t>(c.soff) + c.n;
+    const size_t dstTotal = static_cast<size_t>(kGuard) + c.doff + c.n + kGuard;
+    const size_t copyStart = static_cast<size_t>(kGuard) + c.doff;
 
-    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(c.n ^ (c.off * 131) ^ c.block));
+    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(c.n ^ (c.soff * 131) ^ (c.doff * 17) ^ c.block));
     DeviceBuffer<uint8_t> d_src(srcTotal ? srcTotal : 1);
     if (srcTotal) d_src.copyFrom(h_src);
 
@@ -238,39 +237,70 @@ protected:
     d_dst.copyFrom(h_dstInit);
 
     uint8_t* dstPtr = d_dst.ptr + copyStart;
-    const uint8_t* srcPtr = d_src.ptr + c.off;
+    const uint8_t* srcPtr = d_src.ptr + c.soff;
     kTdmBlockCopy<ASYNC><<<1, c.block, c.lds>>>(dstPtr, srcPtr, c.n, c.lds);
     syncAndCheck();
 
     auto h_out = d_dst.copyTo();
-    checkCopy(h_out, h_src, static_cast<size_t>(c.off), copyStart, c.n, c.name);
+    checkCopy(h_out, h_src, static_cast<size_t>(c.soff), copyStart, c.n, c.name);
   }
 };
 
 TEST_P(TdmBlockCopyTest, Blocking)  { run<false>(GetParam()); }
 TEST_P(TdmBlockCopyTest, Async)     { run<true>(GetParam());  }
 
-// A broad gamut hitting: pure aligned bulk; head+bulk+tail; tail-only (n<256B);
-// head-only (head clamped by n); tiny LDS (< 256B, vector fallback); LDS that
+// A broad gamut hitting: pure aligned bulk; head plus chunks; copies under 256B;
+// head-only (head clamped by n); tiny LDS (< MIN_SLOT, vector fallback); LDS that
 // only feeds a subset of warps; single-warp blocks; and awkward remainders.
 INSTANTIATE_TEST_SUITE_P(
   Gamut, TdmBlockCopyTest,
   ::testing::Values(
-    BlockCase{4096,        4096, 0,   64,  "aligned_bulk_2warp"},
-    BlockCase{8192,        8192, 0,   256, "aligned_bulk_8warp"},
-    BlockCase{256,         1024, 0,   32,  "exactly_one_row"},
-    BlockCase{255,         1024, 0,   32,  "tail_only_255"},
-    BlockCase{257,         1024, 0,   32,  "one_row_plus_tail"},
-    BlockCase{100,         1024, 0,   32,  "tail_only_100"},
-    BlockCase{4096,        4096, 5,   128, "head_bulk_tail_off5"},
-    BlockCase{6000,        2048, 64,  256, "head_bulk_tail_off64"},
-    BlockCase{50,          1024, 100, 32,  "head_only_clamped"},
-    BlockCase{4096,        128,  0,   64,  "tiny_lds_vector_fallback"},
-    BlockCase{16384,       512,  0,   256, "lds_limits_issuers"},
-    BlockCase{4096,        1024, 0,   32,  "single_warp_block"},
-    BlockCase{65536 + 37,  8192, 0,   256, "large_odd_remainder"},
-    BlockCase{1,           1024, 3,   32,  "one_byte_head"}
+    BlockCase{4096,        4096, 0,   0,   64,  "aligned_bulk_2warp"},
+    BlockCase{8192,        8192, 0,   0,   256, "aligned_bulk_8warp"},
+    BlockCase{256,         1024, 0,   0,   32,  "exactly_one_row"},
+    BlockCase{255,         1024, 0,   0,   32,  "tail_only_255"},
+    BlockCase{257,         1024, 0,   0,   32,  "one_row_plus_tail"},
+    BlockCase{100,         1024, 0,   0,   32,  "tail_only_100"},
+    BlockCase{4096,        4096, 5,   5,   128, "head_bulk_tail_off5"},
+    BlockCase{6000,        2048, 64,  64,  256, "head_bulk_tail_off64"},
+    BlockCase{50,          1024, 100, 100, 32,  "head_only_clamped"},
+    BlockCase{4096,        128,  0,   0,   64,  "tiny_lds_vector_fallback"},
+    BlockCase{16384,       2176, 0,   0,   256, "lds_limits_issuers"},
+    BlockCase{4096,        1024, 0,   0,   32,  "single_warp_block"},
+    BlockCase{65536 + 37,  8192, 0,   0,   256, "large_odd_remainder"},
+    BlockCase{1,           1024, 3,   3,   32,  "one_byte_head"},
+    // Two slots: shifting (delta 129) on a 4KB window, and not shifting on a window wide enough for two anyway.
+    BlockCase{65536 + 37,  4096,  5, 4, 32,  "two_slot_shift"},
+    BlockCase{(1 << 18) + 5, 32768, 0, 0, 32, "two_slot_wide"},
+    // Every delta % 4 across a whole block.
+    BlockCase{(1 << 20) + 13, 65536, 0, 0, 256, "team_delta128"},
+    BlockCase{(1 << 20) + 13, 65536, 1, 0, 256, "team_delta129"},
+    BlockCase{(1 << 20) + 13, 65536, 2, 0, 256, "team_delta130"},
+    BlockCase{(1 << 20) + 13, 65536, 3, 0, 256, "team_delta131"}
   ),
+  [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
+
+// Independent offsets across the slot layouts, on one warp so that the window is the whole budget: one slot (at
+// MIN_SLOT and just under 2 * MIN_SLOT), two slots when shifting (at 2 * MIN_SLOT and above), and two slots regardless
+// (16KB+). With doff 0 the destination sits kGuard bytes past an allocation boundary, so delta = (soff - kGuard) % 256;
+// soff 116 and 127 give delta 244 and 255, where the LDS offset o reaches ALIGN. The _short copies are one partial
+// chunk past the head, which is up to 384 bytes.
+std::vector<BlockCase> offsetSlotCases() {
+  const int soffs[] = {0, 1, 2, 3, 4, 5, 7, 116, 127, 128, 131, 255};
+  const size_t ldsSizes[] = {544, 1087, 1088, 4096, 16384, 65536};
+  std::vector<BlockCase> v;
+  for (size_t lds : ldsSizes) {
+    for (int soff : soffs) {
+      const std::string tag = "lds" + std::to_string(lds) + "_soff" + std::to_string(soff);
+      v.push_back({600, lds, soff, 0, 32, tag + "_short"});
+      v.push_back({3 * lds + 37, lds, soff, 0, 32, tag + "_long"});
+    }
+  }
+  return v;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  OffsetSlots, TdmBlockCopyTest, ::testing::ValuesIn(offsetSlotCases()),
   [](const ::testing::TestParamInfo<BlockCase>& i){ return i.param.name; });
 
 // ===========================================================================
