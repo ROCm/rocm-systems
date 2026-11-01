@@ -93,6 +93,99 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find NUMA library
+if(UNIX)
+  set(NUMA_FOUND FALSE)
+
+  # Try pkg-config first (for TheRock builds which may use rocm_sysdeps_numa)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(NUMA_PC numa)
+    if(NUMA_PC_FOUND)
+      # Resolve actual library file using LIBRARY_DIRS as hints
+      find_library(NUMA_LIBRARY_FILE
+        NAMES numa rocm_sysdeps_numa
+        HINTS ${NUMA_PC_LIBRARY_DIRS}
+        NO_DEFAULT_PATH
+      )
+
+      if(NUMA_LIBRARY_FILE)
+        # Create SHARED IMPORTED target with resolved path
+        add_library(numa SHARED IMPORTED GLOBAL)
+        set_target_properties(numa PROPERTIES
+          IMPORTED_LOCATION "${NUMA_LIBRARY_FILE}"
+          INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
+        )
+        set(NUMA_FOUND TRUE)
+        message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
+      else()
+        # pkg-config reported numa but no actual library file resolved under its
+        # LIBRARY_DIRS. Do NOT accept a link-flags-only INTERFACE target here: a
+        # bare "numa" item resolves back to this target and CMake silently drops
+        # it, leaving NUMA_FOUND=TRUE while nothing is linked -> unresolved
+        # numa_* symbols at link time. Leave NUMA_FOUND FALSE so the
+        # find_package / manual-search tiers below can resolve a real library
+        # file, or we degrade to the all-CPU path if none exists.
+        message(STATUS "NUMA via pkg-config: no library file resolved under "
+                       "'${NUMA_PC_LIBRARY_DIRS}'; trying find_package/manual search")
+      endif()
+    endif()
+  endif()
+
+  # Try CMake package config. ROCm ships this as numa::numa, while the
+  # link lines below use the target name numa.
+  if(NOT NUMA_FOUND)
+    set(_numa_hints)
+    if(DEFINED ROCM_PATH)
+      list(APPEND _numa_hints "${ROCM_PATH}/lib/rocm_sysdeps")
+    endif()
+    if(DEFINED ENV{ROCM_PATH})
+      list(APPEND _numa_hints "$ENV{ROCM_PATH}/lib/rocm_sysdeps")
+    endif()
+    find_package(NUMA QUIET HINTS ${_numa_hints})
+    if(TARGET numa::numa)
+      set(_numa_package_target numa::numa)
+    elseif(TARGET NUMA::NUMA)
+      set(_numa_package_target NUMA::NUMA)
+    else()
+      set(_numa_package_target "")
+    endif()
+
+    if(_numa_package_target)
+      if(NOT TARGET numa)
+        add_library(numa INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(numa INTERFACE ${_numa_package_target})
+      endif()
+      set(NUMA_FOUND TRUE)
+      message(STATUS "Found NUMA via CMake package: ${_numa_package_target}")
+    else()
+      set(NUMA_FOUND FALSE)
+    endif()
+    unset(_numa_package_target)
+    unset(_numa_hints)
+  endif()
+
+  # Manual detection as fallback
+  if(NOT NUMA_FOUND)
+    find_library(NUMA_LIBRARY NAMES numa rocm_sysdeps_numa)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+
+    if(NUMA_LIBRARY AND NUMA_INCLUDE_DIR)
+      add_library(numa SHARED IMPORTED GLOBAL)
+      set_target_properties(numa PROPERTIES
+        IMPORTED_LOCATION "${NUMA_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${NUMA_INCLUDE_DIR}")
+      set(NUMA_FOUND TRUE)
+      message(STATUS "Found NUMA via manual search: ${NUMA_LIBRARY}")
+    endif()
+  endif()
+
+  if(NOT NUMA_FOUND)
+    message(WARNING "NUMA library not found; helper threads will use all CPUs. "
+                    "Install libnuma-dev for NUMA-aware CPU affinity (perf optimization).")
+  endif()
+endif()
+
+
 ## Find AMD CUID library.
 set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
 find_library(AMDCUID_LIB
@@ -384,7 +477,14 @@ if(${IMAGE_SUPPORT})
 endif()
 
 if (UNIX)
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  if(NUMA_FOUND)
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt numa )
+    # Gate the numa_* code in os_linux.cpp on the same condition that links the
+    # library, so the compiled calls and the linked library never disagree.
+    target_compile_definitions ( ${CORE_RUNTIME_TARGET} PRIVATE HSA_HAS_NUMA=1 )
+  else()
+    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  endif()
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
@@ -449,7 +549,11 @@ if( NOT ${BUILD_SHARED_LIBS} )
   ## Add external link requirements.
   target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE hsakmt-staticdrm::hsakmt-staticdrm )
   if (UNIX)
-    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
+    if(NUMA_FOUND)
+      target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt numa )
+    else()
+      target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
+    endif()
   else()
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE Ws2_32 )
   endif()
