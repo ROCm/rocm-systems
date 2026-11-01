@@ -255,35 +255,13 @@ jobs:
         ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 
-    - name: Configure, Build, and Test (Total Code Coverage)
-      timeout-minutes: 45
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run:
-        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
-          --build-jobs 16
-          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --coverage all
-          --run-attempt ${{ github.run_attempt }}
-          --
-          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
-          -DPython3_EXECUTABLE=$(which python3)
-          ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
-
     - name: Configure, Build, and Test (Tests Code Coverage)
+      id: coverage-tests
       timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
-        find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
@@ -297,22 +275,32 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
+          --parallel 4
           -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
+    - name: Stash Tests Code Coverage Data
+      if: ${{ !cancelled() && steps.coverage-tests.outcome != 'skipped' }}
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      # always move the counters so they do not mix with the next step's
+      run: python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/tests
+
     - name: Configure, Build, and Test (Samples Code Coverage)
+      if: ${{ !cancelled() && steps.coverage-tests.outcome != 'skipped' }}
       timeout-minutes: 30
       working-directory: projects/rocprofiler-sdk
       shell: bash
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
-        find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-samples
           --build-jobs 16
           --site ${{ needs.ci_config.outputs.gfx94x_runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
+          --stages Start Update Configure Test Coverage Submit
           --run-attempt ${{ github.run_attempt }}
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
@@ -320,8 +308,49 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
+          --parallel 4
           -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Stash Samples Code Coverage Data
+      if: ${{ !cancelled() && steps.coverage-tests.outcome != 'skipped' }}
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      # always move the counters so they do not mix with the next step's
+      run: python3 ./source/scripts/gcda-tool.py move build ${RUNNER_TEMP}/gcda/samples
+
+    - name: Merge Code Coverage Data
+      id: merge-coverage
+      if: ${{ !cancelled() && steps.coverage-tests.outcome != 'skipped' }}
+      timeout-minutes: 10
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run:
+        python3 ./source/scripts/gcda-tool.py merge -o build
+          ${RUNNER_TEMP}/gcda/tests
+          ${RUNNER_TEMP}/gcda/samples
+
+    - name: Report Total Code Coverage
+      if: ${{ !cancelled() && steps.merge-coverage.outcome == 'success' }}
+      timeout-minutes: 20
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run:
+        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
+          --build-jobs 16
+          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage all
+          --stages Start Update Configure Coverage Submit
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -333,7 +362,7 @@ jobs:
 
     - id: generatereport
       name: Generate Code Coverage Comment
-      if: github.event_name == 'pull_request'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       shell: bash
@@ -343,6 +372,10 @@ jobs:
         ls -la
 
         for i in "all" "tests" "samples"; do
+            if [ ! -f .codecov/${i}.html ]; then
+                echo "::error::No ${i} coverage report; keeping the existing comment"
+                exit 1
+            fi
             wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
         done
         ls -la .codecov
@@ -379,7 +412,7 @@ jobs:
         echo 'EOF' >> $GITHUB_OUTPUT
 
     - name: Write Code Coverage Comment
-      if: github.event_name == 'pull_request'
+      if: ${{ !cancelled() && steps.generatereport.outcome == 'success' }}
       timeout-minutes: 10
       uses: actions/github-script@v6
       env:
@@ -427,7 +460,7 @@ jobs:
             }
 
     - name: Archive Code Coverage Data
-      if: ${{ github.event_name == 'workflow_dispatch' }}
+      if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
       uses: actions/upload-artifact@v7
       with:
         name: code-coverage-details
