@@ -3,8 +3,10 @@
 
 #include "src/cuid_cpu.h"
 
+#include <dirent.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -77,6 +79,22 @@ bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model, uint
 #endif
 }
 
+/**
+ * @brief Parse an integer, returning a fallback instead of throwing
+ *
+ * /proc/cpuinfo and sysfs keys are not portable across architectures: a key
+ * that holds an integer on one machine can hold free text on another, so
+ * parsing one unconditionally risks an uncaught std::invalid_argument, which
+ * aborts the process.
+ */
+int parse_int(const std::string& value, int fallback) {
+  try {
+    return std::stoi(value);
+  } catch (...) {
+    return fallback;
+  }
+}
+
 }  // namespace
 
 /**
@@ -101,6 +119,9 @@ namespace {
  *
  * This is the primary method for CPU discovery that works without sudo.
  * Returns information about all logical processors on the system.
+ *
+ * x86 only. The key names and value types below are x86 /proc/cpuinfo
+ * conventions; other architectures use different fields.
  */
 amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
   std::ifstream cpuinfo("/proc/cpuinfo");
@@ -165,6 +186,96 @@ amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
+/**
+ * @brief Whether a logical CPU is online, per sysfs
+ *
+ * For CPUs that can be taken offline, sysfs provides an "online" file that
+ * indicates whether it is online or offline.
+ */
+bool cpu_is_online(const std::string& cpu_dir) {
+  return CuidUtilities::read_sysfs_file(cpu_dir + "/online") != "0";
+}
+
+/**
+ * @brief Enumerate CPU topology from sysfs
+ *
+ * Reads the CPU list and socket topology from /sys/devices/system/cpu.
+ * x86-specific identity fields (vendor, family, model, stepping) are
+ * deliberately left zero. When physical_package_id is unavailable, the
+ * socket is derived by grouping CPUs that share a package_cpus_list.
+ */
+amdcuid_status_t enumerate_cpus_from_sysfs(std::vector<ProcCpuInfo>& cpus) {
+  static constexpr char kCpuRoot[] = "/sys/devices/system/cpu";
+
+  cpus.clear();
+
+  DIR* dir = opendir(kCpuRoot);
+  if (!dir) {
+    return AMDCUID_STATUS_CPUINFO_ERROR;
+  }
+
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  while (const auto* entry = readdir(dir)) {
+    const std::string name = entry->d_name;
+    // "cpu" followed by digits, so that cpuidle and cpufreq are skipped.
+    if (name.compare(0, 3, "cpu") != 0 || name.size() == 3) continue;
+    if (name.find_first_not_of("0123456789", 3) != std::string::npos) continue;
+
+    const std::string cpu_dir = std::string(kCpuRoot) + "/" + name;
+    if (!cpu_is_online(cpu_dir)) continue;
+
+    ProcCpuInfo cpu;
+    cpu.processor = parse_int(name.substr(3), -1);
+    if (cpu.processor < 0) continue;
+    cpu.core_id = parse_int(CuidUtilities::read_sysfs_file(cpu_dir + "/topology/core_id"), 0);
+    cpus.push_back(cpu);
+  }
+  closedir(dir);
+
+  if (cpus.empty()) {
+    return AMDCUID_STATUS_CPUINFO_ERROR;
+  }
+
+  // readdir order is arbitrary. Sort so that both the reported CPU order and
+  // the socket numbering derived below are stable from run to run.
+  std::sort(cpus.begin(), cpus.end(),
+            [](const ProcCpuInfo& a, const ProcCpuInfo& b) { return a.processor < b.processor; });
+
+  std::vector<std::string> package_order;
+  for (auto& cpu : cpus) {
+    const std::string topology =
+        std::string(kCpuRoot) + "/cpu" + std::to_string(cpu.processor) + "/topology/";
+
+    const int package =
+        parse_int(CuidUtilities::read_sysfs_file(topology + "physical_package_id"), -1);
+    if (package >= 0) {
+      cpu.physical_id = package;
+      continue;
+    }
+
+    // package_cpus_list is the current name; core_siblings_list is the legacy
+    // alias kept for older kernels.
+    std::string siblings = CuidUtilities::read_sysfs_file(topology + "package_cpus_list");
+    if (siblings.empty()) {
+      siblings = CuidUtilities::read_sysfs_file(topology + "core_siblings_list");
+    }
+    if (siblings.empty()) {
+      continue;  // Nothing to group on; physical_id stays 0, i.e. one socket.
+    }
+
+    size_t index = 0;
+    for (; index < package_order.size(); ++index) {
+      if (package_order[index] == siblings) break;
+    }
+    if (index == package_order.size()) {
+      package_order.push_back(siblings);
+    }
+    cpu.physical_id = static_cast<int>(index);
+  }
+
+  return AMDCUID_STATUS_SUCCESS;
+}
+
 }  // namespace
 
 /**
@@ -177,27 +288,36 @@ amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
 amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr>& cpus) {
   cpus.clear();
 
-  // Parse /proc/cpuinfo - works without root
+  // Get CPU information from CPUID (same for all cores)
+  uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
+  uint8_t stepping = 0;
+  const bool cpuid_available = get_cpuid_info(vendor_id, family, model, device_id, stepping);
+
+  // If CPUID is not available, gather CPU info from sysfs.
   std::vector<ProcCpuInfo> proc_cpus;
-  amdcuid_status_t status = parse_proc_cpuinfo(proc_cpus);
+  const amdcuid_status_t status =
+      cpuid_available ? parse_proc_cpuinfo(proc_cpus) : enumerate_cpus_from_sysfs(proc_cpus);
 
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
   }
 
-  // Get CPU information from CPUID (same for all cores)
-  uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
-  uint8_t stepping = 0;
-  bool cpuid_available = get_cpuid_info(vendor_id, family, model, device_id, stepping);
-
   // Group logical processors by physical package (socket). For each socket,
   // pick the representative entry with the lowest APIC ID — this is the
   // bootstrap processor convention used by firmware to represent the package.
+  // Without APIC IDs, order by logical CPU number instead so that the choice
+  // is still deterministic rather than whichever entry was seen first.
   std::map<int, const ProcCpuInfo*> socket_rep;
   for (const auto& proc_info : proc_cpus) {
     auto it = socket_rep.find(proc_info.physical_id);
-    if (it == socket_rep.end() || proc_info.apic_id < it->second->apic_id) {
+    if (it == socket_rep.end()) {
       socket_rep[proc_info.physical_id] = &proc_info;
+    } else {
+      const bool lower_id = cpuid_available ? (proc_info.apic_id < it->second->apic_id)
+                                            : (proc_info.processor < it->second->processor);
+      if (lower_id) {
+        it->second = &proc_info;
+      }
     }
   }
 
@@ -209,18 +329,15 @@ amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr>& cpus) {
 
     info.header.device_type = AMDCUID_DEVICE_TYPE_CPU;
 
+    // Without CPUID there is nothing to fill these in from: the sysfs path
+    // reports topology only, so the identity fields keep their zeroed values
+    // rather than being guessed at.
     if (cpuid_available) {
       info.header.fields.cpu.vendor_id = vendor_id;
       info.header.fields.cpu.family = family;
       info.header.fields.cpu.model = model;
       info.header.fields.cpu.device_id = device_id;
       info.header.fields.cpu.revision_id = stepping;
-    } else {
-      info.header.fields.cpu.vendor_id = rep->is_amd ? 0x1022 : 0x8086;
-      info.header.fields.cpu.family = static_cast<uint16_t>(rep->family);
-      info.header.fields.cpu.model = static_cast<uint16_t>(rep->model);
-      info.header.fields.cpu.device_id = static_cast<uint16_t>((rep->family << 8) | rep->model);
-      info.header.fields.cpu.revision_id = static_cast<uint8_t>(rep->stepping);
     }
 
     // UnitID names a sub-unit, and a package is published as a whole, so zero.
@@ -275,22 +392,41 @@ amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info,
   cpu_info->device_node.clear();
   cpu_info->header.device_type = AMDCUID_DEVICE_TYPE_CPU;
 
-  // Get CPU info from CPUID instruction
+  // Get CPU info from CPUID instruction. Where there is none, the identity
+  // fields stay zero and the CPU is still identified by its topology and
+  // fingerprint below.
   uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
   uint8_t stepping = 0;
-  if (get_cpuid_info(vendor_id, family, model, device_id, stepping)) {
+  const bool cpuid_available = get_cpuid_info(vendor_id, family, model, device_id, stepping);
+  int physical_id = parse_int(physical_package_str, -1);
+
+  if (cpuid_available) {
     cpu_info->header.fields.cpu.vendor_id = vendor_id;
     cpu_info->header.fields.cpu.family = family;
     cpu_info->header.fields.cpu.model = model;
     cpu_info->header.fields.cpu.device_id = device_id;
     cpu_info->header.fields.cpu.revision_id = stepping;
-  } else {
-    return AMDCUID_STATUS_CPUINFO_ERROR;
+  } else if (physical_id < 0) {
+    // The platform leaves physical_package_id unpopulated. Fall back to the
+    // same derivation discover() uses, over every CPU, so that both entry
+    // points agree on socket numbering.
+    std::vector<ProcCpuInfo> all_cpus;
+    if (enumerate_cpus_from_sysfs(all_cpus) == AMDCUID_STATUS_SUCCESS) {
+      const size_t cpu_num_pos = device_path.rfind("cpu");
+      const int processor = parse_int(device_path.substr(cpu_num_pos + 3), -1);
+      for (const auto& cpu : all_cpus) {
+        if (cpu.processor == processor) {
+          physical_id = cpu.physical_id;
+          break;
+        }
+      }
+    }
+    if (physical_id < 0) {
+      physical_id = 0;
+    }
   }
-
-  // Set topology fields from sysfs
-  cpu_info->header.fields.cpu.physical_id = static_cast<uint16_t>(std::stoi(physical_package_str));
-  cpu_info->header.fields.cpu.core = static_cast<uint16_t>(std::stoi(core_id_str));
+  cpu_info->header.fields.cpu.physical_id = static_cast<uint16_t>(physical_id);
+  cpu_info->header.fields.cpu.core = static_cast<uint16_t>(parse_int(core_id_str, 0));
 
   // Zero, as in discover(): the logical CPU number from the sysfs path would
   // make a socket's identifier depend on which of its threads the caller named.
