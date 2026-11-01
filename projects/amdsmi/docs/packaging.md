@@ -12,7 +12,7 @@ the loader contract that `py-interface/amdsmi_wrapper.py` implements.
 | System package (deb/rpm) | `/opt/rocm/lib/libamd_smi.so.<MAJOR>` (+ `ld.so.conf.d` entry) | Installed into the system interpreter's `site-packages`/`dist-packages` **and** `share/amd_smi` | SONAME via the dynamic linker |
 | TheRock native package (`amdrocm-amdsmi`) | `/opt/rocm/core-X.Y/lib/libamd_smi.so.<MAJOR>` | `/opt/rocm/core-X.Y/share/amd_smi/amdsmi` only; importable after adding `share/amd_smi` to `PYTHONPATH` | Resolved relative to the wrapper (`../../../lib`) |
 | TheRock tarball | `<root>/lib/libamd_smi.so.<MAJOR>` in the extracted tree | `<root>/share/amd_smi/amdsmi`; add `share/amd_smi` to `PYTHONPATH` for direct imports | Resolved relative to the wrapper (`../../../lib`) |
-| ROCm via pip (TheRock `rocm-sdk-core`) | `<root>/lib/libamd_smi.so.<MAJOR>` | `<root>/share/amd_smi/amdsmi`; add `share/amd_smi` to `PYTHONPATH` for direct imports | Resolved relative to the wrapper (`../../../lib`) |
+| ROCm via pip (TheRock `rocm-sdk-core`) | `<root>/lib/libamd_smi.so.<MAJOR>` | `<root>/share/amd_smi/amdsmi`; add `share/amd_smi` to `PYTHONPATH` for direct imports | Resolved relative to the wrapper (`../../../lib`); a copy elsewhere, such as in site-packages, uses `_rocm_sdk_core/lib` |
 | ROCm via pip in a venv | Same as above, inside the venv | Same as above, inside the venv | Same as above |
 | Community-built PyPI `amdsmi` releases through 7.0.2 | Not bundled; requires a matching ROCm `libamd_smi.so` | Interpreter `site-packages` | Legacy loader checks `ROCM_HOME` before `ROCM_PATH`, then the dynamic linker and `/opt/rocm/lib` |
 | Bundled-library wheel (`BUILD_PYTHON_WHEEL=ON`) | Bundled `libamd_smi_python.so` next to the wrapper | Interpreter `site-packages` | The bundled `.so`; system fallback is disabled |
@@ -41,9 +41,28 @@ The current `py-interface/amdsmi_wrapper.py` selects the library in this order
 2. A bundled `libamd_smi_python.so` next to the wrapper — the bundled-library wheel.
 3. The SONAME resolved relative to the wrapper (`parents[3]/lib`) — the TheRock
    `share/amd_smi` layout, where a venv has no `ld.so.conf.d` entry.
-4. The bare SONAME via the dynamic linker — the system deb/rpm.
+4. In the copy TheRock ships in `rocm-sdk-core` (it sets
+   `_AMDSMI_ROCM_SDK_CORE = True`): `lib/<SONAME>` in the `_rocm_sdk_core`
+   package, then stop. That copy never loads a system `libamd_smi.so`, which
+   could come from another ROCm release.
+5. The bare SONAME via the dynamic linker — the system deb/rpm.
+6. `lib/<SONAME>` in the `_rocm_sdk_core` package, for a wrapper without that
+   flag.
 
-Steps 3 and 4 are skipped when `_AMDSMI_ALLOW_SYSTEM_FALLBACK` is `False`. The
+Steps 4 and 6 locate `_rocm_sdk_core` through `sys.modules` or `sys.path`
+without importing it, so they also work when the module is copied out of
+`share/amd_smi`, for example into site-packages. Each file in steps 3, 4 and 6
+is first opened with `RTLD_NOLOAD`, so a copy already loaded in the process is
+reused; PyTorch's `_amdsmi_cdll_hook` would otherwise redirect the load to
+`$ROCM_PATH/lib`.
+
+Steps 3 to 6 check the library version against the module's `_version.py`. A
+library with a newer minor version, or another major version, is closed and
+skipped, because SONAME `27` structures have grown between minor releases and
+an older module allocates too little for them. An older library loads with a
+warning. `AMDSMI_LIB_OVERRIDE` and the bundled library skip this check.
+
+Steps 3 to 6 are skipped when `_AMDSMI_ALLOW_SYSTEM_FALLBACK` is `False`. The
 committed wrapper and the system package keep it `True`; the wheel build flips
 it to `False`, so the bundled-library wheel does not automatically load a
 system `libamd_smi.so` (which could be a different version and would risk

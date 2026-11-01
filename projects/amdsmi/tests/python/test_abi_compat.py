@@ -18,6 +18,7 @@
 # and ctypes.CDLL is monkey-patched to a FakeCDLL that simulates the
 # library surface.
 
+import _ctypes
 import ast
 import builtins
 import ctypes
@@ -31,6 +32,7 @@ import sysconfig
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +77,8 @@ class FakeCDLL:
     """
 
     def __init__(self, path, mode=0, available_symbols=None):
+        if mode & getattr(os, "RTLD_NOLOAD", 0):
+            raise OSError("%s: not loaded" % path)
         self._path = path
         self._mode = mode
         self._available = set(available_symbols or ())
@@ -397,6 +401,215 @@ class WheelLoaderContractTest(unittest.TestCase):
         # bare system SONAME instead of returning a broken/_MissingLibrary.
         self.assertIn(str(reloc), attempted)
         self.assertEqual(mod._loaded_lib_path, mod._AMDSMI_LIB_SONAME)
+
+    def _sdk_core_site(self, rocm_sdk_core=True):
+        import re as _re
+
+        soname = _re.search(r'_AMDSMI_LIB_SONAME = "([^"]+)"', WRAPPER_SRC.read_text()).group(1)
+        site = self._tmp / "site-packages"
+        pkg = site / "amdsmi"
+        pkg.mkdir(parents=True)
+        text = WRAPPER_SRC.read_text()
+        if rocm_sdk_core:
+            flag = "_AMDSMI_ROCM_SDK_CORE = False"
+            self.assertEqual(text.count(flag), 1)
+            text = text.replace(flag, "_AMDSMI_ROCM_SDK_CORE = True")
+        (pkg / "amdsmi_wrapper.py").write_text(text)
+        sdk_core = site / "_rocm_sdk_core"
+        (sdk_core / "lib").mkdir(parents=True)
+        (sdk_core / "__init__.py").write_text("")
+        sdk_lib = sdk_core / "lib" / soname
+        sdk_lib.write_bytes(b"")
+        return site, pkg, sdk_lib
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_rocm_sdk_core_library_found_from_site_packages(self):
+        # The module installed or copied into site-packages beside TheRock's
+        # rocm-sdk-core wheel must load _rocm_sdk_core/lib/<SONAME>, without
+        # importing _rocm_sdk_core, so a restrictive import guard cannot stop it.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        sys.path.insert(0, str(site))
+        try:
+            with _ProfileModeLikeGuard(), _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            sys.path.remove(str(site))
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+        self.assertNotIn("_rocm_sdk_core", sys.modules)
+
+    def _import_with(self, site, pkg, cdll):
+        sys.path.insert(0, str(site))
+        orig = ctypes.CDLL
+        ctypes.CDLL = cdll
+        try:
+            return _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            ctypes.CDLL = orig
+            sys.path.remove(str(site))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_rocm_sdk_core_copy_never_loads_system_library(self):
+        # rocm-sdk-core's copy must not pair with a system libamd_smi.so from
+        # another release when its own library cannot be loaded.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        attempted = []
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            if str(path) == str(sdk_lib):
+                raise OSError("simulated missing dependency")
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        mod = self._import_with(site, pkg, _cdll)
+        self.assertIn(str(sdk_lib), attempted)
+        self.assertNotIn(mod._AMDSMI_LIB_SONAME, attempted)
+        self.assertIsNone(mod._loaded_lib_path)
+        self.assertIn("simulated missing dependency", str(mod._libraries["libamd_smi.so"]._err))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_system_copy_ignores_rocm_sdk_core(self):
+        # Without TheRock's flag (the rpm/deb copy) the loader keeps today's
+        # order and never picks up a rocm-sdk-core library from sys.path.
+        site, pkg, sdk_lib = self._sdk_core_site(rocm_sdk_core=False)
+        attempted = []
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        mod = self._import_with(site, pkg, _cdll)
+        self.assertNotIn(str(sdk_lib), attempted)
+        self.assertEqual(mod._loaded_lib_path, mod._AMDSMI_LIB_SONAME)
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_copy_without_flag_falls_back_to_rocm_sdk_core(self):
+        # A module copied beside rocm-sdk-core without TheRock's flag tries the
+        # system library first, then rocm-sdk-core's.
+        site, pkg, sdk_lib = self._sdk_core_site(rocm_sdk_core=False)
+        attempted = []
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            if str(path) != str(sdk_lib):
+                raise OSError("%s: cannot open shared object file" % path)
+            return FakeCDLL(path, mode, STABLE_SYMBOLS)
+
+        mod = self._import_with(site, pkg, _cdll)
+        self.assertLess(attempted.index(mod._AMDSMI_LIB_SONAME), attempted.index(str(sdk_lib)))
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    @unittest.skipUnless(
+        WRAPPER_SRC.is_file() and hasattr(os, "RTLD_NOLOAD"), "needs the wrapper and RTLD_NOLOAD"
+    )
+    def test_loaded_candidate_is_reused_before_a_plain_load(self):
+        # Under PyTorch's import hook a plain load can be redirected to another
+        # libamd_smi; asking for the candidate with RTLD_NOLOAD first returns
+        # the copy PyTorch already loaded.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        attempted = []
+
+        def _cdll(path, mode=0):
+            attempted.append((str(path), bool(mode & os.RTLD_NOLOAD)))
+            if mode & os.RTLD_NOLOAD and str(path) == str(sdk_lib):
+                return FakeCDLL(path, 0, STABLE_SYMBOLS)
+            raise OSError("not loaded")
+
+        mod = self._import_with(site, pkg, _cdll)
+        self.assertEqual(attempted, [(str(sdk_lib), True)])
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_rocm_sdk_core_copy_names_the_missing_library(self):
+        site, pkg, sdk_lib = self._sdk_core_site()
+        sdk_lib.unlink()
+        sys.path.insert(0, str(site))
+        try:
+            with _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            sys.path.remove(str(site))
+        self.assertIsNone(mod._loaded_lib_path)
+        self.assertIn(str(sdk_lib), str(mod._libraries["libamd_smi.so"]._err))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_unusable_sys_path_entries_are_skipped(self):
+        # The import system skips non-str and unreadable sys.path entries, so
+        # the _rocm_sdk_core lookup must not fail on them either.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        locked = self._tmp / "locked"
+        (locked / "inner").mkdir(parents=True)
+        locked.chmod(0)
+        entries = [b"/nonexistent", str(locked / "inner"), str(site)]
+        sys.path[:0] = entries
+        try:
+            with _Patch(STABLE_SYMBOLS):
+                mod = _import_wrapper_from(str(pkg), self._modname)
+        finally:
+            del sys.path[: len(entries)]
+            locked.chmod(0o700)
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    def _versioned_cdll(self, versions, attempted):
+        class _Versioned(FakeCDLL):
+            @property
+            def _handle(self):
+                return self._path
+
+            def __getattr__(self, name):
+                if name != "amdsmi_get_lib_version":
+                    return FakeCDLL.__getattr__(self, name)
+                major, minor = versions[self._path]
+
+                def _get(buf):
+                    buf[0], buf[1] = major, minor
+                    return 0
+
+                return _get
+
+        def _cdll(path, mode=0):
+            attempted.append(str(path))
+            return _Versioned(str(path), mode, STABLE_SYMBOLS)
+
+        return _cdll
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_newer_library_is_rejected(self):
+        # SONAME 27 grew structs between minor releases, so a module must not
+        # bind a library newer than the build it came from.
+        site, pkg, sdk_lib = self._sdk_core_site()
+        (pkg / "_version.py").write_text('__version__ = "27.1.0+abc"\n')
+        attempted = []
+        cdll = self._versioned_cdll({str(sdk_lib): (27, 2)}, attempted)
+        with mock.patch.object(_ctypes, "dlclose", create=True) as dlclose:
+            mod = self._import_with(site, pkg, cdll)
+        self.assertIsNone(mod._loaded_lib_path)
+        self.assertIn("27.2", str(mod._libraries["libamd_smi.so"]._err))
+        dlclose.assert_called_once_with(str(sdk_lib))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_older_library_warns(self):
+        site, pkg, sdk_lib = self._sdk_core_site()
+        (pkg / "_version.py").write_text('__version__ = "27.2.0"\n')
+        attempted = []
+        with self.assertWarns(UserWarning):
+            mod = self._import_with(
+                site, pkg, self._versioned_cdll({str(sdk_lib): (27, 1)}, attempted)
+            )
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+
+    @unittest.skipUnless(WRAPPER_SRC.is_file(), "amdsmi_wrapper.py not found")
+    def test_newer_system_library_is_closed_before_the_fallback(self):
+        # Without TheRock's flag a newer library found by SONAME is refused and
+        # closed, and rocm-sdk-core's library is loaded instead.
+        site, pkg, sdk_lib = self._sdk_core_site(rocm_sdk_core=False)
+        (pkg / "_version.py").write_text('__version__ = "27.1.0"\n')
+        attempted = []
+        cdll = self._versioned_cdll({sdk_lib.name: (27, 2), str(sdk_lib): (27, 1)}, attempted)
+        with mock.patch.object(_ctypes, "dlclose", create=True) as dlclose:
+            mod = self._import_with(site, pkg, cdll)
+        self.assertEqual(mod._loaded_lib_path, str(sdk_lib))
+        dlclose.assert_called_once_with(sdk_lib.name)
 
 
 class DisableSystemFallbackToolTest(unittest.TestCase):
