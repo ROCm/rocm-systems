@@ -28,6 +28,7 @@ import re
 import argparse
 import textwrap
 import subprocess
+import stat
 
 # version info for rocprofiler-sdk / rocprofv3
 CONST_VERSION_INFO = {
@@ -59,6 +60,8 @@ PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
+EXTRA_COUNTERS_FILE_ENV = "ROCPROF_EXTRA_COUNTERS_FILE"
+EXTRA_COUNTERS_CONTENTS_ENV = "ROCPROF_EXTRA_COUNTERS_CONTENTS"
 REATTACH_INVARIANT_FILTER = (
     r".*_trace|^pc_sampling_.*$|^att_.*$|"
     r"^(pmc|pmc_groups|output_config|extra_counters)$|"
@@ -112,6 +115,91 @@ def warning(msg, *args):
     msg = patch_message(msg, *args)
     sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
+
+
+def resolve_extra_counters_file(path):
+    """Return a validated absolute path without loading the file contents."""
+    path = os.path.abspath(path)
+
+    try:
+        file_info = os.stat(path)
+    except OSError as error:
+        fatal_error(
+            "Failed to access extra counter definition file '{}': {}",
+            path,
+            error.strerror or str(error),
+        )
+
+    if not stat.S_ISREG(file_info.st_mode):
+        fatal_error(
+            "Extra counter definition file '{}' is not a regular file",
+            path,
+        )
+
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError as error:
+        fatal_error(
+            "Failed to open extra counter definition file '{}': {}",
+            path,
+            error.strerror or str(error),
+        )
+
+    if file_info.st_size == 0:
+        warning("Extra counter file '{}' was empty.", path)
+
+    return path
+
+
+def _file_contains_bytes(path, needle, chunk_size=1 << 20):
+    overlap = len(needle) - 1
+    tail = b""
+    try:
+        with open(path, "rb") as input_file:
+            while True:
+                chunk = input_file.read(chunk_size)
+                if not chunk:
+                    return False
+                if needle in tail + chunk:
+                    return True
+                tail = chunk[-overlap:]
+    except OSError as error:
+        fatal_error(
+            "Failed to inspect rocprofiler tool library '{}': {}",
+            path,
+            error.strerror or str(error),
+        )
+
+
+def tool_supports_extra_counters_file(tool_path):
+    """Return whether a tool binary recognizes the path-based extra-counter variable."""
+    return _file_contains_bytes(tool_path, EXTRA_COUNTERS_FILE_ENV.encode())
+
+
+def max_environment_entry_bytes():
+    """Linux's per-argument/per-environment-entry exec limit, including the NUL."""
+    try:
+        return int(os.sysconf("SC_PAGESIZE")) * 32
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 128 * 1024
+
+
+def environment_entry_bytes(name, value):
+    return len(os.fsencode(f"{name}={value}")) + 1
+
+
+def read_extra_counters_contents(path):
+    try:
+        with open(path, "r") as input_file:
+            return input_file.read()
+    except (OSError, UnicodeError) as error:
+        detail = getattr(error, "strerror", None) or str(error)
+        fatal_error(
+            "Failed to read extra counter definition file '{}': {}",
+            path,
+            detail,
+        )
 
 
 def warn_deprecated_output_formats(output_formats):
@@ -1409,7 +1497,8 @@ def parse_text(text_file):
 def parse_input(input_file):
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1426,7 +1515,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -1447,6 +1537,18 @@ def has_set_attr(obj, key):
         return True
     else:
         return False
+
+
+def prepare_extra_counters_reattach(current_args, previous_args):
+    """Return whether this attach should reuse the target's loaded counter snapshot."""
+    previous_path = getattr(previous_args, "extra_counters", None)
+    current_path = getattr(current_args, "extra_counters", None)
+    if previous_path is None:
+        return False
+    if current_path is None:
+        current_args.extra_counters = previous_path
+        return True
+    return current_path == previous_path
 
 
 def services_conflicting_with_kernel_replay(args, environ=None):
@@ -1625,6 +1727,7 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+    deferred_attach_args = None
 
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
@@ -2205,8 +2308,10 @@ def run(app_args, args, **kwargs):
             "--fallback-tool-library",
             ROCPROF_ATTACH_TOOL_LIBRARY,
         ]
+        # Defer execution until all profiling options have been added to app_env. In
+        # particular, the extra-counter file path is configured below this block.
         if app_args:
-            exit_code = subprocess.check_call(attach_args, env=app_env)
+            deferred_attach_args = attach_args
         else:
             app_args = attach_args
 
@@ -2233,11 +2338,42 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_AGENT_INDEX", args.agent_index)
 
     if args.extra_counters is not None:
-        with open(args.extra_counters, "r") as e_file:
-            e_file_contents = e_file.read()
-            if not e_file_contents.strip():
-                warning("Extra counter file '{}' was empty.", args.extra_counters)
-            update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
+        if getattr(args, "extra_counters_reuse", False):
+            app_env.pop(EXTRA_COUNTERS_FILE_ENV, None)
+            app_env.pop(EXTRA_COUNTERS_CONTENTS_ENV, None)
+        else:
+            extra_counters_file = resolve_extra_counters_file(args.extra_counters)
+            app_env.pop(EXTRA_COUNTERS_CONTENTS_ENV, None)
+
+            if args.pid or tool_supports_extra_counters_file(ROCPROF_TOOL_LIBRARY):
+                update_env(EXTRA_COUNTERS_FILE_ENV, extra_counters_file, overwrite=True)
+            else:
+                contents = read_extra_counters_contents(extra_counters_file)
+                entry_size = environment_entry_bytes(
+                    EXTRA_COUNTERS_CONTENTS_ENV, contents
+                )
+                entry_limit = max_environment_entry_bytes()
+                if entry_size > entry_limit:
+                    fatal_error(
+                        "Selected rocprofiler tool '{}' does not support {}. Extra counter "
+                        "file '{}' requires a {}-byte environment entry, exceeding the "
+                        "{}-byte exec limit. Use a newer ROCm tool or a smaller definition "
+                        "file.",
+                        ROCPROF_TOOL_LIBRARY,
+                        EXTRA_COUNTERS_FILE_ENV,
+                        extra_counters_file,
+                        entry_size,
+                        entry_limit,
+                    )
+                app_env.pop(EXTRA_COUNTERS_FILE_ENV, None)
+                warning(
+                    "Selected rocprofiler tool '{}' does not support {}; using legacy inline "
+                    "contents for '{}'.",
+                    ROCPROF_TOOL_LIBRARY,
+                    EXTRA_COUNTERS_FILE_ENV,
+                    extra_counters_file,
+                )
+                update_env(EXTRA_COUNTERS_CONTENTS_ENV, contents, overwrite=True)
 
     if args.pmc and args.pmc_groups:
         fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
@@ -2525,6 +2661,9 @@ def run(app_args, args, **kwargs):
 
     if args.log_level in ("info", "trace", "env", "config"):
         log_config(app_env)
+
+    if deferred_attach_args is not None:
+        subprocess.check_call(deferred_attach_args, env=app_env)
 
     if use_execv:
         if args.echo:
@@ -2819,6 +2958,8 @@ def main(argv=None):
                         print(f"Loading attach configuration from {fname}...")
                     prev_args = pickle.load(ifs)
 
+                reuse_extra_counters = prepare_extra_counters_reattach(args, prev_args)
+
                 # get_args will compare the arguments used to the previous attachments's arguments
                 # arguments matching the filter will throw an error if they are different
                 args = get_args(
@@ -2831,6 +2972,8 @@ def main(argv=None):
                     # Allow this value to be None if it is not set in current cmd line
                     ignore_prev_inp=r"attach_duration_msec",
                 )
+                if reuse_extra_counters:
+                    args.extra_counters_reuse = True
 
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:

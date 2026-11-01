@@ -26,6 +26,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #if defined(ROCPROFILER_REGISTER_TEST_SDK_FIXTURE)
 
@@ -35,10 +37,34 @@ rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     ROCPROFILER_REGISTER_TEST_PUBLIC_API;
 
 int
+rocprofiler_attach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
+rocprofiler_detach() ROCPROFILER_REGISTER_TEST_PUBLIC_API;
+
+int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
 {
     std::puts("runtime SONAME SDK fixture loaded");
+    if(std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") != nullptr)
+    {
+        const auto* contents = std::getenv("ROCPROF_EXTRA_COUNTERS_CONTENTS");
+        if(contents == nullptr || std::strlen(contents) <= 256 * 1024) return 1;
+    }
     return 0;
+}
+
+int
+rocprofiler_attach()
+{
+    const auto* contents = std::getenv("ROCPROF_EXTRA_COUNTERS_CONTENTS");
+    return (contents != nullptr && std::strlen(contents) > 256 * 1024) ? 0 : 1;
+}
+
+int
+rocprofiler_detach()
+{
+    return (std::getenv("ROCPROF_EXTRA_COUNTERS_CONTENTS") == nullptr) ? 0 : 1;
 }
 }
 
