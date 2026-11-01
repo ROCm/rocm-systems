@@ -3358,21 +3358,72 @@ TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250SpxStays256) {
       });
 }
 
-// The 192 default must not lower the cap: an explicit 256-thread request on
-// gfx1250 still launches 256.
+// PAT's maxThreads slot is never filled on HIP, so the caller passes 0. The
+// DPX cap must not turn that into a short block: the PAT compute thread is
+// NCCL_MAX_NTHREADS-1. Multi-node so the single-node arm is not what sets it.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx1250DpxPatStaysFullBlock",
+      []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->WarpSize = 32;
+        comm->nNodes = 2;
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_PAT;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllGather;
+        int nThreads = 0;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_DEFAULT_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// gfx950 and gfx942 return the same arch table for DPX and SPX. The gfx1250
+// arch check is what keeps that shared table from taking the 192 cap.
+TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx950SharedTableStays256) {
+  RUN_ISOLATED_TEST(
+      "Wrap_OptThreadBlockSize_Gfx950SharedTableStays256",
+      []() {
+        static rcclArchThresholds shared{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &shared;
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &shared;
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->WarpSize = 64;
+        comm->nNodes = 1;
+        comm->archThresholds = &shared;
+        ncclTaskColl info{};
+        info.algorithm = NCCL_ALGO_RING;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        info.func = ncclFuncAllReduce;
+        int nThreads = 256;
+        rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
+        EXPECT_EQ(RCCL_SINGLE_NODE_MAX_NTHREADS, nThreads);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_THREADS_PER_BLOCK wins over the DPX 192 cap. The comm is DPX so this
+// fails if the override is moved below that cap.
 TEST(WrapMicrotestIsolated, OptThreadBlockSize_Gfx1250UserOverrideKeeps256) {
   RUN_ISOLATED_TEST(
       "Wrap_OptThreadBlockSize_Gfx1250UserOverrideKeeps256",
       []() {
+        static rcclArchThresholds dpx{};
+        g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &dpx;
         g_loadParam = ForceParam("RCCL_THREADS_PER_BLOCK", int64_t(256));
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->WarpSize = 32;
+        comm->nNodes = 1;
+        comm->archThresholds = &dpx;
         ncclTaskColl info{};
         info.algorithm = NCCL_ALGO_RING;
         info.protocol = NCCL_PROTO_SIMPLE;
         info.func = ncclFuncBroadcast;
-        comm->nNodes = 1;
-        int nThreads = -1;
+        int nThreads = 192;
         rcclOptThreadBlockSize(comm, &info, /*nBytes=*/1 << 20, nThreads);
         EXPECT_EQ(256, nThreads);
         DeleteCommWithArch(comm);
