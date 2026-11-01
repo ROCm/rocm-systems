@@ -25,6 +25,7 @@
 import os
 import sys
 import re
+import signal
 import argparse
 import textwrap
 import subprocess
@@ -404,6 +405,111 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
 class booleanArgAction(argparse.Action):
     def __call__(self, parser, args, value, option_string=None):
         setattr(args, self.dest, strtobool(value))
+
+
+# Signals rocprofv3 installs a handler for. Naming another signal alongside one of
+# these warns and is dropped; naming only other signals is an error.
+ROCPROF_HANDLED_SIGNALS = ("SIGINT", "SIGQUIT", "SIGABRT", "SIGTERM")
+
+# Signals the logging failure handler claims independently, so suppressing rocprofv3's
+# handler alone does not return them to the application.
+LOGGING_CLAIMED_SIGNALS = ("SIGABRT", "SIGTERM")
+
+
+def resolve_signal_name(token):
+    """Returns the canonical name of the signal a token names, or None if it names none.
+
+    Accepts the number and the name in any case, with or without the SIG prefix and with
+    underscores, so 2, int, sig_int and SIGINT all resolve to SIGINT. Aliases resolve to
+    the name of the signal they share a number with, so SIGIOT gives SIGABRT. The tokens
+    0 and 1 are read as the boolean form before reaching here.
+    """
+    if token.isdigit():
+        try:
+            return signal.Signals(int(token)).name
+        except ValueError:
+            return None
+
+    name = token.upper().replace("_", "")
+    if not name.startswith("SIG"):
+        name = f"SIG{name}"
+    member = signal.Signals.__members__.get(name)
+    return member.name if member is not None else None
+
+
+class signalHandlerArgAction(argparse.Action):
+    """Parses --disable-signal-handlers as either a boolean or a list of signals.
+
+    The destination holds the boolean form -- rocprofv3 stops keeping its handler
+    in front of the application's -- and `<dest>_signals` holds the comma-separated
+    signals whose handler is not installed at all.
+    """
+
+    def __call__(self, parser, args, values, option_string=None):
+        # nargs="*" with no value -> values is an empty list -> bare bool
+        if not values:
+            setattr(args, self.dest, True)
+            setattr(args, f"{self.dest}_signals", "")
+            return
+
+        tokens = [str(v).strip() for v in values if str(v).strip()]
+
+        bad_commas = [t for t in tokens if "," in t]
+        if bad_commas:
+            parser.error(
+                "--disable-signal-handlers: signals must be space-separated, not "
+                "comma-separated; use e.g. '--disable-signal-handlers SIGINT SIGQUIT' "
+                "(got {bad!r})".format(bad=" ".join(bad_commas))
+            )
+
+        # A single bool-like token is the =true/=false spelling.
+        if len(tokens) == 1:
+            try:
+                bool_val = strtobool(tokens[0])
+                setattr(args, self.dest, bool_val)
+                setattr(args, f"{self.dest}_signals", "")
+                return
+            except ValueError:
+                pass
+
+        selected = []
+        for token in tokens:
+            name = resolve_signal_name(token)
+            if name is None:
+                parser.error(
+                    "--disable-signal-handlers: {bad!r} names no signal; expected a "
+                    "signal name or number such as SIGINT, int or 2 (0 and 1 are read "
+                    "as the boolean form). rocprofv3 handles {good}".format(
+                        bad=token, good=" ".join(ROCPROF_HANDLED_SIGNALS)
+                    )
+                )
+            if name not in ROCPROF_HANDLED_SIGNALS:
+                warning(
+                    f"--disable-signal-handlers: rocprofv3 installs no handler for "
+                    f"{name}, so disabling it has no effect"
+                )
+                continue
+            if name in LOGGING_CLAIMED_SIGNALS:
+                warning(
+                    f"--disable-signal-handlers: rocprofv3's handler for {name} will "
+                    f"not be installed, but the logging failure handler still claims it"
+                )
+            selected.append(name)
+
+        if not selected:
+            parser.error(
+                "--disable-signal-handlers: rocprofv3 installs a handler for none of "
+                "{named}, so nothing would be disabled and the run would get more "
+                "signal handling than the bare option gives. rocprofv3 handles "
+                "{good}".format(
+                    named=" ".join(tokens), good=" ".join(ROCPROF_HANDLED_SIGNALS)
+                )
+            )
+
+        # A list names the signals to leave alone. The handler stays in front of the
+        # application's for every signal not named, so the boolean is off.
+        setattr(args, self.dest, False)
+        setattr(args, f"{self.dest}_signals", ",".join(sorted(set(selected))))
 
 
 # Categories recognized by --ompt-trace
@@ -1127,14 +1233,24 @@ For attachment profiling of running processes:
         help=argparse.SUPPRESS,
     )
 
-    add_parser_bool_argument(
-        advanced_options,
+    advanced_options.add_argument(
         "--disable-signal-handlers",
-        help="""Enables the signal handlers in the rocprofv3 tool.
-        When --disable-signal-handlers is set to true,
-        and application has its signal handler on SIGSEGV or similar installed,
-        then its signal handler will be used, not the rocprofv3 signal handler.
-        Note: glog still installs signal handlers which provide backtraces""",
+        action=signalHandlerArgAction,
+        nargs="*",
+        type=str,
+        required=False,
+        default=None,
+        metavar="SIGNAL",
+        help="""Suppresses rocprofv3's signal handling. The two forms differ and neither
+        contains the other. With no value, rocprofv3 installs its handlers but stops
+        keeping them in front of the application's, so an application that installs its
+        own handler takes precedence. With a space-separated list of signals, rocprofv3
+        installs no handler for those signals and keeps its handler in front for the
+        rest, e.g. '--disable-signal-handlers SIGINT'. A named signal is left entirely to
+        the application, so if the application does not handle it the process dies
+        without writing profiling output. rocprofv3 handles SIGINT, SIGQUIT, SIGABRT and
+        SIGTERM; naming any other signal has no effect. The logging failure handler
+        claims SIGABRT and SIGTERM independently of this option.""",
     )
 
     add_parser_bool_argument(
@@ -2396,7 +2512,22 @@ def run(app_args, args, **kwargs):
             )
 
     if args.disable_signal_handlers is not None:
+        # An input file reaches here without passing through the argparse action, so a
+        # list arrives as a list.
+        if not isinstance(args.disable_signal_handlers, bool):
+            fatal_error(
+                "disable_signal_handlers takes an unquoted true or false in an input "
+                f"file (got {args.disable_signal_handlers!r}); a list of signals is "
+                "accepted on the command line only"
+            )
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
+        # Written whenever the option is present, so a value inherited from the caller's
+        # environment does not survive an invocation that named no signal.
+        update_env(
+            "ROCPROF_SIGNAL_HANDLERS_DISABLED",
+            getattr(args, "disable_signal_handlers_signals", ""),
+            overwrite=True,
+        )
 
     if args.process_sync is not None:
         update_env("ROCPROF_PROCESS_SYNC", args.process_sync)
