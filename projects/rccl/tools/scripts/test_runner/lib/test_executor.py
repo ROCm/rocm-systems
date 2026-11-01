@@ -256,7 +256,8 @@ def _leaf_case_status(case):
     """Map one executed gtest JSON leaf to PASSED / FAILED / SKIPPED / UNKNOWN.
 
     Returns None for leaves that were not run (DISABLED / SUPPRESSED). Those
-    must not inflate "test cases executed" or the unique-case counts.
+    are now emitted separately with status="DISABLED" by collect_gtest_case_details
+    so callers receive a complete picture of every case in the binary.
 
     A missing or empty ``result`` is not PASSED. Google Test writes COMPLETED
     or SKIPPED on a finished leaf. If the case was started (``status`` is RUN,
@@ -282,10 +283,35 @@ def _leaf_case_status(case):
     return str(result)
 
 
-def collect_gtest_case_details(obj):
-    """Leaf cases from a gtest JSON object (suite, case, full_name, status).
+def _gtest_case_duration_ms(case):
+    """Parse the per-case ``time`` field from the gtest JSON into milliseconds.
 
-    DISABLED / SUPPRESSED entries are omitted; they were not executed.
+    gtest writes the value as a string like "0.123s" or as a bare float.
+    Returns 0.0 when the field is absent or unparseable.
+    """
+    raw = case.get("time", "")
+    if not raw:
+        return 0.0
+    try:
+        return float(str(raw).rstrip("s")) * 1000.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def collect_gtest_case_details(obj):
+    """Leaf cases from a gtest JSON object.
+
+    Each entry contains:
+      suite        — test suite name
+      case         — test case name
+      full_name    — "Suite.Case"
+      status       — PASSED | FAILED | SKIPPED | DISABLED
+      duration_ms  — per-case wall time in milliseconds (0 if not reported)
+      message      — first failure assertion text for FAILED cases (else "")
+
+    Previously DISABLED / SUPPRESSED entries were silently omitted.  They are
+    now included with status="DISABLED" so the report can show a complete
+    count of every case present in the binary.
     """
     details = []
     if not isinstance(obj, dict):
@@ -299,13 +325,20 @@ def collect_gtest_case_details(obj):
                 continue
             status = _leaf_case_status(case)
             if status is None:
-                continue
+                # DISABLED / SUPPRESSED — include with explicit status rather
+                # than omitting, so the report can render a DISABLED table.
+                status = "DISABLED"
+
             name = case["name"]
+            fails = case.get("failures") or []
+            message = fails[0].get("failure", "") if isinstance(fails, list) and fails else ""
             details.append({
                 "suite": suite_name,
                 "case": name,
                 "full_name": f"{suite_name}.{name}" if suite_name else name,
                 "status": status,
+                "duration_ms": _gtest_case_duration_ms(case),
+                "message": message,
             })
     return details
 
@@ -419,6 +452,66 @@ def collect_gtest_case_details_from_file(json_path):
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None
     return collect_gtest_case_details(data)
+
+
+def extract_skip_reasons_from_log(log_path):
+    """Return a mapping of full_name → skip_reason parsed from a captured gtest log.
+
+    Google Test does not carry the GTEST_SKIP() / SKIP() message in its JSON
+    report.  It only appears in stdout, two lines before the
+    ``[  SKIPPED ] Suite.Case (N ms)`` banner:
+
+        [ RUN      ] Suite.Case
+        path/to/test.cpp:42: Skipped
+        [  SKIPPED ] Suite.Case (0 ms)
+
+    We scan for that pattern and return a dict so callers can enrich the
+    case_details entries produced from the gtest JSON with the reason text.
+    Returns an empty dict when the log is absent or unreadable.
+    """
+    reasons = {}
+    if not log_path or not os.path.isfile(log_path):
+        return reasons
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return reasons
+
+    for i, line in enumerate(lines):
+        # Match the terminal "[  SKIPPED ] Suite.Case (N ms)" line.
+        m = re.match(r'\[  SKIPPED \] ([\w./]+)\s+\(\d+', line)
+        if not m:
+            continue
+        full_name = m.group(1)
+        # The skip reason is the line immediately before this one (index i-1),
+        # provided it looks like "path:line: message" and is not a gtest banner.
+        if i > 0:
+            prev = lines[i - 1].rstrip()
+            if prev and not prev.startswith("["):
+                reasons[full_name] = prev.strip()
+    return reasons
+
+
+def enrich_skip_reasons(case_details, log_path):
+    """Attach skip reason strings to SKIPPED entries in case_details in-place.
+
+    Reads the captured log file via extract_skip_reasons_from_log() and sets
+    the ``reason`` field on any SKIPPED case_detail entry whose full_name
+    appears in the log's skip map.  Non-SKIPPED entries are untouched.
+    Returns the (mutated) case_details list.
+    """
+    if not case_details or not log_path:
+        return case_details
+    reasons = extract_skip_reasons_from_log(log_path)
+    if not reasons:
+        return case_details
+    for entry in case_details:
+        if entry.get("status") == "SKIPPED":
+            fn = entry.get("full_name", "")
+            if fn in reasons:
+                entry["reason"] = reasons[fn]
+    return case_details
 
 
 def collect_pytest_case_details_from_junit(junit_path):
@@ -1071,6 +1164,16 @@ class TestExecutor:
         self.build_config = config_processor.get_build_config()
         self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
+        # Must be set before setup_directories() which calls _prepare_incremental_emit()
+        self.emit_enabled = bool(
+            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
+        )
+        # Incremental emission paths: initialized here so _open_incremental_writer()
+        # (called from setup_directories → _prepare_incremental_emit) can set them.
+        # DO NOT reassign these after setup_directories() or the paths get wiped.
+        self._incremental_jsonl_path = None
+        self._incremental_run_json_path = None
+
         # Setup directories
         self.setup_directories()
 
@@ -1100,13 +1203,12 @@ class TestExecutor:
         self.test_run_identities = []
         self.test_executed = []
 
-        # Structured result emission (dashboard). Enabling either --emit-results or
-        # --db-push turns on per-test log capture so perf output can be parsed.
-        self.emit_enabled = bool(
-            getattr(args, "emit_results", False) or getattr(args, "db_push", False)
-        )
+        # Structured result emission (dashboard). emit_enabled is set earlier in
+        # __init__ (before setup_directories) so _prepare_incremental_emit() can use it.
         self.test_records = []       # rich per-test records for the emitter
         self._emit_log_counter = 0   # keeps captured-log filenames unique
+        # _incremental_jsonl_path and _incremental_run_json_path are initialized
+        # before setup_directories() above; do not reassign here.
 
         # Rerun tracking
         self.failed_test_info = []  # Store info needed to rerun failed tests
@@ -1183,6 +1285,110 @@ class TestExecutor:
                 print(f"  (Custom path via {'--build-dir' if self.args.build_dir else 'RCCL_LIB_PATH/RCCL_BUILD_DIR'})")
             print(f"Log directory:    {self.log_dir}")
             print(f"Report directory: {self.report_dir}")
+
+        # Open the incremental writer early so that _record_result() can start
+        # appending to tests.jsonl and refreshing run.json from the very first
+        # test. This way a killed or hung run leaves a valid result directory for
+        # all completed tests without any post-hoc log scraping.
+        if self.emit_enabled:
+            self._prepare_incremental_emit()
+
+    def _prepare_incremental_emit(self):
+        """Build the run manifest and open the incremental writer.
+
+        Called once at the end of setup_directories() when emit is enabled.
+        Stores the partial manifest as self._manifest_snapshot so that
+        _record_result() can immediately start writing per-test lines to
+        tests.jsonl and refreshing run.json after every completed test.
+
+        The manifest built here is intentionally minimal (no host metadata,
+        no summary) because those are expensive/slow to collect and are not
+        needed for the incremental snapshot.  emit_results() enriches it later.
+        """
+        import socket
+        import uuid
+        from lib import results_emitter as re_mod
+
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+
+        sys_cfg = {}
+        try:
+            sys_cfg = self.config_processor.config.get("system_configurations", {}) or {}
+        except AttributeError:
+            pass
+
+        run_tags = list(getattr(self.args, "tag", []) or [])
+        for _t in (getattr(self.args, "tags", "") or "").split(","):
+            _t = _t.strip()
+            if _t and _t not in run_tags:
+                run_tags.append(_t)
+
+        self._manifest_snapshot = {
+            "run_id": run_id,
+            "created_at": stamp.isoformat(),
+            "started_at": stamp.isoformat(),
+            "host": socket.gethostname(),
+            "node_names": re_mod.node_names_from_mpi_hosts(getattr(self, "mpi_hosts", None)) or [socket.gethostname()],
+            "gpu_arch": re_mod.gpu_arch(),
+            "config_name": sys_cfg.get("name"),
+            "config_file": os.path.basename(getattr(self.args, "config", "") or ""),
+            "label": getattr(self.args, "run_label", "") or None,
+            "tags": run_tags or None,
+        }
+
+        results_dir = (getattr(self.args, "results_dir", "") or
+                       os.path.join(self.workspace_dir, "results"))
+        self._open_incremental_writer(results_dir, run_id)
+
+    def _open_incremental_writer(self, results_dir, run_id):
+        """Prepare the paths for incremental per-test-result emission.
+
+        Called once by emit_results() before the first test record is written.
+        After this call, every _record_result() invocation appends a line to
+        tests.jsonl and rewrites run.json with the latest partial summary so
+        that a killed or hung run leaves a valid, readable result directory.
+        """
+        run_dir = os.path.join(results_dir, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        self._incremental_jsonl_path = os.path.join(run_dir, "tests.jsonl")
+        self._incremental_run_json_path = os.path.join(run_dir, "run.json")
+
+    def _append_test_record(self, record, manifest):
+        """Append one test result to the live tests.jsonl and refresh run.json.
+
+        Intended to be called from _record_result() immediately after a test
+        completes.  Both files are written atomically (tmp + rename) so a
+        mid-write kill cannot leave a truncated or corrupt JSON file.
+        """
+        if not self._incremental_jsonl_path:
+            return
+        import json as _json
+        from lib import results_emitter as re_mod
+
+        # Append the slim record (no perf_rows) to tests.jsonl.
+        slim = {k: v for k, v in record.items() if k != "perf_rows"}
+        with open(self._incremental_jsonl_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(slim, default=str) + "\n")
+
+        # Rewrite run.json with the current partial summary so consumers can
+        # read a meaningful snapshot even if the run is killed immediately after.
+        partial_summary = {
+            "total": len(self.test_results),
+            "passed": self.test_results.count(TestResult.RESULT_PASSED.value),
+            "failed": self.test_results.count(TestResult.RESULT_FAILED.value),
+            "timeout": self.test_results.count(TestResult.RESULT_TIMEOUT.value),
+            "skipped": self.test_results.count(TestResult.RESULT_SKIPPED.value),
+            "disabled": self.test_results.count(TestResult.RESULT_DISABLED.value),
+            "duration_s": sum(self.test_durations) if self.test_durations else 0,
+            "partial": True,   # cleared to False when emit_results() finalises
+        }
+        partial_manifest = dict(manifest)
+        partial_manifest["summary"] = partial_summary
+        tmp = self._incremental_run_json_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(partial_manifest, f, indent=2, default=str)
+        os.replace(tmp, self._incremental_run_json_path)
 
     def _coverage_profile_pattern(self):
         """Absolute per-host/process profile path for the current workspace."""
@@ -1806,13 +2012,18 @@ class TestExecutor:
             print(f"  Binary resolved via default build_dir/test: {resolved}")
         return resolved
 
-    def _terminate_process_group(self, proc):
+    def _terminate_process_group(self, proc, post_kill_grace_s=10):
         """Tear down the entire process group of ``proc`` (SIGTERM, then SIGKILL).
 
         Tests are launched with ``start_new_session=True`` so the shell, mpirun,
         orted and all spawned ranks share one process group (pgid == proc.pid).
         Signalling the group -- rather than just ``proc`` -- guarantees a timed-out
         or interrupted MPI job does not leave orphaned ranks holding the GPUs.
+
+        After sending SIGKILL, the method waits up to ``post_kill_grace_s`` seconds
+        for the process to actually exit.  If it does not (e.g. a GPU kernel is stuck
+        in a hardware fence and the process is unkillable), a warning is printed and
+        the runner continues so that remaining tests are not blocked.
         """
         try:
             pgid = os.getpgid(proc.pid)
@@ -1831,11 +2042,18 @@ class TestExecutor:
                 return
             except subprocess.TimeoutExpired:
                 continue
-        # Reap to avoid a zombie even if it ignored SIGKILL (should not happen).
+
+        # Post-SIGKILL grace period: wait for the process to actually disappear.
+        # A GPU kernel stuck in a hardware fence may render the process unkillable;
+        # in that case we log a warning and move on rather than blocking forever.
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=post_kill_grace_s)
         except subprocess.TimeoutExpired:
-            pass
+            print(
+                f"  WARNING: process (pid={proc.pid}) did not exit within "
+                f"{post_kill_grace_s}s after SIGKILL -- possible GPU kernel hang. "
+                "Continuing with remaining tests; orphan ranks may still hold the GPU."
+            )
 
     @staticmethod
     def _normalize_mpi_args(value):
@@ -2280,10 +2498,18 @@ class TestExecutor:
                 p for p in (base_args, suite_args, test_args, cli_extra_args, env_extra_args) if p
             )
 
+            # Inject mpirun's own --timeout so that orted daemons on remote nodes
+            # kill their children cleanly when a test hangs. This is more reliable
+            # than an OS-level process-group kill from the head node, which cannot
+            # reach orted processes on other hosts. Only injected when the config
+            # specifies a finite timeout; unlimited tests are left unrestricted.
+            mpirun_timeout_arg = f"--timeout {timeout} " if timeout and timeout > 0 else ""
+
             mpi_args = (
                 f"-np {num_ranks} "
                 f"{host_arg}"
                 f"{map_by_arg}"
+                f"{mpirun_timeout_arg}"
                 f"{mca_params}"
             )
 
@@ -2381,6 +2607,7 @@ class TestExecutor:
                 case_details = merge_timeout_details(
                     parsed, test_name, test_filter, timeout
                 )
+                enrich_skip_reasons(case_details, emit_log_path)
                 case_counts = _counts_from_details(case_details)
                 print_case_result(
                     TestResult.RESULT_TIMEOUT.value,
@@ -2487,6 +2714,9 @@ class TestExecutor:
             if case_counts is not None:
                 result["case_counts"] = case_counts
             if case_details is not None:
+                # Enrich SKIPPED entries with the reason text from the captured
+                # log (gtest JSON does not carry GTEST_SKIP() messages).
+                enrich_skip_reasons(case_details, emit_log_path)
                 result["case_details"] = case_details
             return _done(result)
         finally:
@@ -2871,6 +3101,11 @@ class TestExecutor:
             record["test_name"] = test_name
             record["duration"] = duration
             self.test_records.append(record)
+            # Write this result immediately so that a killed/hung run still
+            # leaves a valid tests.jsonl for all completed tests. _manifest_snapshot
+            # is set by emit_results() before the first test runs.
+            if hasattr(self, "_manifest_snapshot"):
+                self._append_test_record(record, self._manifest_snapshot)
 
     def record_disabled_suite(self, suite_config):
         """Record each config test as DISABLED without launching it.
@@ -3624,7 +3859,14 @@ class TestExecutor:
         print(f"{'='*80}")
 
         stamp = datetime.datetime.now(datetime.timezone.utc)
-        run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+        # Reuse the run_id minted in _prepare_incremental_emit() so that the
+        # run directory created during the run (and already populated with an
+        # incremental tests.jsonl) matches the directory emit_results() writes
+        # the final run.json into.
+        if hasattr(self, "_manifest_snapshot") and self._manifest_snapshot.get("run_id"):
+            run_id = self._manifest_snapshot["run_id"]
+        else:
+            run_id = f"{stamp.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
 
         sha, branch = re_mod.git_info(os.path.dirname(os.path.abspath(__file__)))
 
@@ -3668,6 +3910,7 @@ class TestExecutor:
             "num_nodes": num_nodes,
             "gpus_per_node": self.gpus_per_node or None,
             "config_name": sys_cfg.get("name"),
+            "config_file": os.path.basename(getattr(self.args, "config", "") or ""),
             "config_description": sys_cfg.get("description"),
             "label": getattr(self.args, "run_label", "") or None,
             "tags": run_tags or None,
@@ -3745,3 +3988,10 @@ class TestExecutor:
 
         if getattr(self.args, "db_push", False):
             emitter.push_postgres(timeout=getattr(self.args, "db_timeout", 10))
+
+        # Record the run directory so callers (e.g. --report) can locate it.
+        self._emit_run_dir = os.path.join(results_dir, run_id)
+
+    def get_emit_run_dir(self):
+        """Return the run directory written by emit_results(), or None if not yet emitted."""
+        return getattr(self, "_emit_run_dir", None)
