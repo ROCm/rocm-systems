@@ -78,7 +78,7 @@ parse_boolean(std::string_view value)
 {
     if(value.empty())
     {
-        return false;
+        return std::nullopt;
     }
 
     constexpr auto k_tokens = std::array{
@@ -90,6 +90,8 @@ parse_boolean(std::string_view value)
         std::pair{ std::string_view{ "off" }, false },
         std::pair{ std::string_view{ "y" }, true },
         std::pair{ std::string_view{ "n" }, false },
+        std::pair{ std::string_view{ "t" }, true },
+        std::pair{ std::string_view{ "f" }, false },
         std::pair{ std::string_view{ "1" }, true },
         std::pair{ std::string_view{ "0" }, false },
     };
@@ -102,7 +104,12 @@ parse_boolean(std::string_view value)
         }
     }
 
-    const auto parsed = parse_integer(value);
+    auto number = value;
+    if(!number.empty() && number.front() == '+')
+    {
+        number.remove_prefix(1);
+    }
+    const auto parsed = parse_integer(number);
     if(!parsed)
     {
         return std::nullopt;

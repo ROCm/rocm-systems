@@ -38,7 +38,9 @@ target_link_libraries(
     rocprofiler-systems-parser
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-fmt>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

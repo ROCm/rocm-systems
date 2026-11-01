@@ -114,8 +114,7 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
     const auto& param         = require_param(*config_schema, param_id);
     if(!is_valid_value(param, value))
     {
-        throw std::runtime_error(
-            fmt::format("invalid value '{}' for parameter '{}'", value, param_id));
+        throw std::runtime_error(invalid_value_message(value, param_id));
     }
 
     std::vector<change_callback_t> callbacks;

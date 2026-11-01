@@ -9,12 +9,10 @@
 #include <fmt/ranges.h>
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
 #include <optional>
-#include <regex>
 #include <set>
 #include <string>
 #include <string_view>
@@ -25,8 +23,7 @@ namespace rocprofsys::parser
 {
 namespace
 {
-constexpr std::size_t k_max_regex_subject = 4096;
-constexpr double      k_int64_upper       = 0x1p63;
+constexpr double k_int64_upper = 0x1p63;
 
 [[nodiscard]] std::optional<std::int64_t>
 exact_integer_bound(double bound)
@@ -81,25 +78,9 @@ is_valid_number(const schema_param& param, std::string_view value)
 }
 
 bool
-matches_pattern(const schema_param& param, std::string_view value)
+matches_pattern(const schema_param&, std::string_view)
 {
-    if(!param.pattern)
-    {
-        return true;
-    }
-    if(param.pattern->size() > k_max_regex_subject || value.size() > k_max_regex_subject)
-    {
-        return false;
-    }
-
-    try
-    {
-        const std::regex pattern{ *param.pattern };
-        return std::regex_match(value.begin(), value.end(), pattern);
-    } catch(const std::regex_error&)
-    {
-        return false;
-    }
+    return true;
 }
 
 bool
@@ -253,10 +234,8 @@ private:
             }
             else if(!is_valid_value(*param, value))
             {
-                report(
-                    severity::error,
-                    fmt::format("invalid value '{}' for parameter '{}'", value, param_id),
-                    { param_id });
+                report(severity::error, invalid_value_message(value, param_id),
+                       { param_id });
             }
         }
     }
@@ -483,31 +462,6 @@ check_bounds(const schema_param& param, std::vector<violation>& errors)
 }
 
 void
-check_pattern(const schema_param& param, std::vector<violation>& errors)
-{
-    if(!param.pattern || param.pattern->size() > k_max_regex_subject)
-    {
-        if(param.pattern)
-        {
-            report_catalog(errors,
-                           fmt::format("parameter '{}' has an invalid pattern", param.id),
-                           { param.id });
-        }
-        return;
-    }
-    try
-    {
-        const std::regex compiled{ *param.pattern };
-        static_cast<void>(compiled);
-    } catch(const std::regex_error&)
-    {
-        report_catalog(errors,
-                       fmt::format("parameter '{}' has an invalid pattern", param.id),
-                       { param.id });
-    }
-}
-
-void
 check_param_shape(const schema& config_schema, const schema_param& param,
                   std::vector<violation>& errors)
 {
@@ -532,7 +486,6 @@ check_param_shape(const schema& config_schema, const schema_param& param,
                        { param.id });
     }
     check_bounds(param, errors);
-    check_pattern(param, errors);
     check_argument_counts(param, errors);
     check_references(config_schema, param, errors);
 }
@@ -553,6 +506,12 @@ check_constraint_targets(const schema& config_schema, const constraint& item,
     }
 }
 }  // namespace
+
+std::string
+invalid_value_message(std::string_view value, std::string_view param_id)
+{
+    return fmt::format("invalid value '{}' for parameter '{}'", value, param_id);
+}
 
 bool
 is_valid_value(const schema_param& param, std::string_view value)

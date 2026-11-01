@@ -115,6 +115,45 @@ TEST(parser_schema, indexes_stay_valid_after_growth)
     EXPECT_EQ(value.find_param_by_arg("--first"), first);
 }
 
+TEST(parser_schema, rejects_empty_names)
+{
+    schema value{};
+    EXPECT_FALSE(value.add_category(category{ .id = "", .name = "Blank" }));
+    EXPECT_TRUE(value.categories().empty());
+
+    EXPECT_FALSE(value.add_param(make_param("")));
+    auto empty_env = make_param("trace");
+    empty_env.env  = env_spec{ .name = "" };
+    EXPECT_FALSE(value.add_param(std::move(empty_env)));
+    auto empty_arg = make_param("trace");
+    empty_arg.arg  = arg_spec{ .name = "" };
+    EXPECT_FALSE(value.add_param(std::move(empty_arg)));
+    EXPECT_TRUE(value.params().empty());
+}
+
+TEST(parser_schema, rejects_a_constraint_that_names_a_bad_value)
+{
+    schema value{};
+    auto   trace = make_param("trace");
+    trace.type   = param_type::boolean;
+    ASSERT_TRUE(value.add_param(std::move(trace)));
+
+    EXPECT_FALSE(value.add_constraint(constraint{ .params = { "missing" } }));
+    EXPECT_FALSE(value.add_constraint(constraint{
+        .when = condition{ .terms = { param_condition{ .param  = "trace",
+                                                       .equals = "ture" } } },
+    }));
+    EXPECT_FALSE(
+        value.add_constraint(constraint{ .forced_values = { { "trace", "ture" } } }));
+    EXPECT_TRUE(value.constraints().empty());
+
+    EXPECT_TRUE(value.add_constraint(constraint{
+        .when = condition{ .terms = { param_condition{ .param  = "trace",
+                                                       .equals = "true" } } },
+    }));
+    EXPECT_EQ(value.constraints().size(), 1U);
+}
+
 TEST(parser_schema, categories_reject_duplicates)
 {
     schema value{};
@@ -149,22 +188,23 @@ TEST(parser_schema, params_in_category)
 
 TEST(parser_schema, effect_fields_round_trip)
 {
-    auto param           = make_param("flat_profile", "", "--flat-profile");
-    param.copy_to        = { "profile" };
-    param.assigns        = { { "log_level", "debug" } };
-    param.fills          = { "trace_delay" };
-    param.maps_to        = { value_mapping{
-               .when = "0", .target = "log_level", .value = "info" } };
-    param.choices        = { choice{
-               .value       = "pftrace",
-               .name        = "Perfetto",
-               .description = "Trace",
-               .sets        = { { "trace", "true" } },
-               .aliases     = { "proto" },
+    auto param    = make_param("flat_profile");
+    param.copy_to = { "profile" };
+    param.assigns = { { "log_level", "debug" } };
+    param.fills   = { "trace_delay" };
+    param.maps_to = { value_mapping{
+        .when = "0", .target = "log_level", .value = "info" } };
+    param.choices = { choice{
+        .value       = "pftrace",
+        .name        = "Perfetto",
+        .description = "Trace",
+        .sets        = { { "trace", "true" } },
+        .aliases     = { "proto" },
     } };
-    param.arg->min_count = 1;
-    param.arg->max_count = 2;
-    param.arg->binds     = { "output_path", "output_prefix" };
+    param.arg     = arg_spec{ .name      = "--flat-profile",
+                              .min_count = 1,
+                              .max_count = 2,
+                              .binds     = { "output_path", "output_prefix" } };
 
     schema value{};
     ASSERT_TRUE(value.add_param(std::move(param)));
@@ -178,22 +218,20 @@ TEST(parser_schema, effect_fields_round_trip)
     ASSERT_EQ(stored->choices.size(), 1U);
     EXPECT_EQ(stored->choices.front().sets.at("trace"), "true");
     EXPECT_EQ(stored->choices.front().aliases, std::vector<std::string>({ "proto" }));
-    ASSERT_TRUE(stored->arg.has_value());
-    ASSERT_TRUE(stored->arg->min_count.has_value());
-    ASSERT_TRUE(stored->arg->max_count.has_value());
-    EXPECT_EQ(*stored->arg->min_count, 1U);
-    EXPECT_EQ(*stored->arg->max_count, 2U);
-    EXPECT_EQ(stored->arg->binds,
+    const auto argument = stored->arg.value_or(arg_spec{});
+    EXPECT_EQ(argument.min_count.value_or(0U), 1U);
+    EXPECT_EQ(argument.max_count.value_or(0U), 2U);
+    EXPECT_EQ(argument.binds,
               (std::vector<std::string>{ "output_path", "output_prefix" }));
 }
 
 TEST(parser_schema, split_list_trims_and_rejects_an_empty_separator)
 {
-    const auto parts = split_list(" alpha, beta ", ",");
-    ASSERT_TRUE(parts.has_value());
-    EXPECT_EQ(*parts, (std::vector<std::string>{ "alpha", "beta" }));
-    EXPECT_TRUE(split_list("", ",").has_value());
-    EXPECT_TRUE(split_list("", ",")->empty());
+    const auto parts =
+        split_list(" alpha, beta ", ",").value_or(std::vector<std::string>{});
+    EXPECT_EQ(parts, (std::vector<std::string>{ "alpha", "beta" }));
+    const auto empty_list = split_list("", ",").value_or(std::vector<std::string>{ "x" });
+    EXPECT_TRUE(empty_list.empty());
     EXPECT_FALSE(split_list("alpha", "").has_value());
 }
 
