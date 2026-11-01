@@ -22,6 +22,33 @@ THE SOFTWARE.
 
 #include "rocjpeg_decoder.h"
 
+namespace {
+// Makes device_id the calling thread's current HIP device for the lifetime of the object, then restores the
+// previous one, so the library's HIP work runs on the decoder's device without changing the caller's state.
+class ScopedHipDevice {
+public:
+    explicit ScopedHipDevice(int device_id) {
+        if (hipGetDevice(&previous_device_id_) == hipSuccess && previous_device_id_ != device_id) {
+            switched_ = hipSetDevice(device_id) == hipSuccess;
+            if (!switched_) {
+                ErrorLog(g_rocjpeg_logger, "Failed to set the current HIP device to " + ROCJPEG_TOSTR(device_id));
+            }
+        }
+    }
+    ~ScopedHipDevice() {
+        if (switched_ && hipSetDevice(previous_device_id_) != hipSuccess) {
+            ErrorLog(g_rocjpeg_logger, "Failed to restore the current HIP device to " + ROCJPEG_TOSTR(previous_device_id_));
+        }
+    }
+    ScopedHipDevice(const ScopedHipDevice &) = delete;
+    ScopedHipDevice &operator=(const ScopedHipDevice &) = delete;
+
+private:
+    int previous_device_id_ = -1;
+    bool switched_ = false;
+};
+}  // namespace
+
 RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
     num_devices_{0}, device_id_ {device_id}, hip_stream_ {0}, backend_{backend}, initialized_{false} {}
 
@@ -362,6 +389,9 @@ RocJpegStatus RocJpegDecoder::FinalizeDecodeBatched(const VASurfaceID *surface_i
     // hip_stream_). A dedicated lock keeps two concurrent finalizations from interleaving
     // without holding mutex_ across the GPU work, so async submits can still proceed.
     std::lock_guard<std::mutex> finalize_lock(finalize_mutex_);
+    // The HIP interop imports and the kernel parameter buffers below are created on the calling thread's current
+    // device, which need not be device_id_ (for example on an application thread that never called hipSetDevice).
+    ScopedHipDevice device_guard(device_id_);
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
     for (int i = 0; i < batch_size; i += current_vcn_jpeg_spec.num_jpeg_cores) {
         int sub_batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
