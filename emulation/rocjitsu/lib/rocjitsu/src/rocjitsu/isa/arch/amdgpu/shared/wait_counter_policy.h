@@ -159,7 +159,7 @@ struct LegacyWaitcnt {
 /// - LegacyNoVscnt: VMCNT, LGKMCNT, EXPCNT.
 /// - LegacyVscnt: those tags plus VSCNT and the GFX11 internal LOADCNT,
 ///   STORECNT, DSCNT, KMCNT subsets.
-/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, and CDNA5's
+/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, SAMPLECNT, and CDNA5's
 ///   ASYNCCNT/TENSORCNT. Aggregate VMCNT/VSCNT/LGKMCNT tags are not supported.
 /// Mapping a supported tag back with memory_wait_counter_type produces a wait
 /// that covers the original event, including subsets of aggregate counters.
@@ -179,6 +179,8 @@ struct LegacyWaitcnt {
     return smem_wait_counter(model);
   case WaitCounterType::EXPCNT:
     return WaitCounterKind::Exp;
+  case WaitCounterType::SAMPLECNT:
+    return WaitCounterKind::Sample;
   case WaitCounterType::ASYNCCNT:
     return WaitCounterKind::Async;
   case WaitCounterType::TENSORCNT:
@@ -188,8 +190,8 @@ struct LegacyWaitcnt {
 }
 
 /// Returns nullopt for domains without a corresponding memory-pipeline counter.
-/// Callers must leave unrelated counters unchanged for those domains; Sample
-/// and Bvh waits must not be aliased to ordinary LOADCNT events.
+/// Callers must leave unrelated counters unchanged for those domains. Sample
+/// has a separate GFX12 counter; Bvh must not alias ordinary LOADCNT events.
 [[nodiscard]] constexpr std::optional<WaitCounterType>
 memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   switch (counter) {
@@ -210,6 +212,10 @@ memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
   case WaitCounterKind::Async:
     if (model == WaitcntModel::SplitGfx12)
       return WaitCounterType::ASYNCCNT;
+    return std::nullopt;
+  case WaitCounterKind::Sample:
+    if (model == WaitcntModel::SplitGfx12)
+      return WaitCounterType::SAMPLECNT;
     return std::nullopt;
   case WaitCounterKind::Tensor:
     if (model == WaitcntModel::SplitGfx12)

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 
 namespace rocjitsu {
 namespace rdna4 {
@@ -27,6 +28,19 @@ class ImageSampleVsample : public Vsample {
 public:
   ImageSampleVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -37,6 +51,20 @@ class ImageSampleDVsample : public Vsample {
 public:
   ImageSampleDVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    modifiers.image_prefix_words = 2 * amdgpu::image_derivative_component_count(inst_.dim);
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -47,6 +75,19 @@ class ImageSampleLVsample : public Vsample {
 public:
   ImageSampleLVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -67,6 +108,19 @@ class ImageSampleLzVsample : public Vsample {
 public:
   ImageSampleLzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -257,6 +311,16 @@ class ImageGather4LzVsample : public Vsample {
 public:
   ImageGather4LzVsample(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;

@@ -143,11 +143,23 @@ struct RegisterModifiers {
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   /// Coordinate VGPR selectors, including NSA selectors.
-  std::array<uint32_t, 4> image_coordinates{};
+  std::array<uint32_t, 12> image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
+  /// VGPR words occupied by derivative inputs.
+  uint8_t image_prefix_words = 0;
+  /// SGPR selector of the image resource.
+  uint32_t image_resource_selector = ~0u;
+  /// Coordinates include an array layer.
+  // GFX9 descriptor-derived tuple flags. RDNA includes these operands in
+  // image_coordinate_count and image_prefix_words instead.
+  bool image_array = false;
+  /// Coordinates include a relative mip level.
+  bool image_mip = false;
+  /// Coordinates follow explicit derivatives.
+  bool image_derivatives = false;
   uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;

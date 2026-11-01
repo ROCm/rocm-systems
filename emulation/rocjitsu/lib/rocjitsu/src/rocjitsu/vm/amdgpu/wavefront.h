@@ -581,7 +581,15 @@ public:
 
   /// Wait for every modeled memory pipeline, including stores and async DMA.
   void set_wait_all() {
-    wait_target_ = {0, 0, 0, 0, 0, 0, 0, 0};
+    wait_target_ = {.vmcnt = 0,
+                    .lgkmcnt = 0,
+                    .expcnt = 0,
+                    .vscnt = 0,
+                    .dscnt = 0,
+                    .kmcnt = 0,
+                    .tensorcnt = 0,
+                    .asynccnt = 0,
+                    .samplecnt = 0};
     if (!wait_satisfied())
       set_state(WfState::WAITCNT);
   }
@@ -683,7 +691,11 @@ public:
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);
-    } else if (name == "wait_samplecnt" || name == "wait_bvhcnt") {
+    } else if (name == "wait_samplecnt") {
+      wait_target_.samplecnt = t;
+      if (!wait_satisfied())
+        set_state(WfState::WAITCNT);
+    } else if (name == "wait_bvhcnt") {
       wait_target_.vmcnt = t; // map to vmcnt
       if (!wait_satisfied())
         set_state(WfState::WAITCNT);

@@ -23,7 +23,10 @@ public:
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
     modifiers.image_a16 = inst_.a16;
-    modifiers.image_coordinate_count = 3;
+    modifiers.image_resource_selector = inst_.srsrc * 4;
+    modifiers.image_array = inst_.da;
+    modifiers.image_mip = false;
+    modifiers.image_derivatives = false;
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -36,6 +39,17 @@ class ImageLoadMipMimg : public Mimg {
 public:
   ImageLoadMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_resource_selector = inst_.srsrc * 4;
+    modifiers.image_array = inst_.da;
+    modifiers.image_mip = true;
+    modifiers.image_derivatives = false;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -85,7 +99,10 @@ public:
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
     modifiers.image_a16 = inst_.a16;
-    modifiers.image_coordinate_count = 3;
+    modifiers.image_resource_selector = inst_.srsrc * 4;
+    modifiers.image_array = inst_.da;
+    modifiers.image_mip = false;
+    modifiers.image_derivatives = false;
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -98,6 +115,17 @@ class ImageStoreMipMimg : public Mimg {
 public:
   ImageStoreMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_resource_selector = inst_.srsrc * 4;
+    modifiers.image_array = inst_.da;
+    modifiers.image_mip = true;
+    modifiers.image_derivatives = false;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -278,6 +306,17 @@ class ImageSampleMimg : public Mimg {
 public:
   ImageSampleMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_resource_selector = inst_.srsrc * 4;
+    modifiers.image_array = inst_.da;
+    modifiers.image_mip = false;
+    modifiers.image_derivatives = false;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

@@ -84,6 +84,12 @@ constexpr uint64_t whole_element_bytes_in_range(uint64_t address, uint64_t bytes
   return std::min(bytes, available / element_bytes * element_bytes);
 }
 
+/// @brief One texel address set in a filtered-image footprint.
+struct ImageSampleFootprint {
+  std::span<const uint64_t> addresses;
+  uint64_t lane_mask = 0;
+};
+
 /// @brief One memory instruction as the memory system will see it.
 ///
 /// @details Reported after routing rather than before, which is the whole
@@ -284,10 +290,19 @@ struct MemoryAccessObservation {
   /// lanes as the first, so an instruction with a non-empty set here moves
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
+  /// @brief Per-texel footprints of sampler instructions, regardless of filter mode.
+  /// @details IMAGE_SAMPLE*/IMAGE_GATHER4* replace addresses with these footprints,
+  /// including point samples. Each has wavefront_size addresses and a lane mask
+  /// contained in request_lane_mask. Border/zero-weight taps have cleared masks.
+  /// bytes_per_lane() is bytes per texel; all footprints share one instruction
+  /// issue and one completion-counter event.
+  std::span<const ImageSampleFootprint> image_sample_footprints;
 
   /// @brief Nominal bytes each participating lane requests through one address
   ///        set, before backing rejection. Double it when @ref
   ///        secondary_addresses is non-empty.
+  /// @details For image sampling this is bytes per texel footprint, not the
+  /// instruction total. Count each image_sample_footprints lane mask separately.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;
   }

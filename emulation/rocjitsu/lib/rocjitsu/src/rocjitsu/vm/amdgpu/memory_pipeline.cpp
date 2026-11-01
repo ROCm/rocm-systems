@@ -1314,6 +1314,47 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 
 VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wavefront &wf,
                                                           uint64_t request_lanes) {
+  if (!d.image_sample)
+    return initiate_texel_access(d, wf, request_lanes);
+  auto &sample = *d.image_sample;
+  if (request_lanes == 0) {
+    sample.next_tap = sample.taps.size();
+    return VmAccessOutcome::Complete;
+  }
+  if (wf.address_space() &&
+      (!d.translated.initialized ||
+       (sample.next_tap == 0 && d.translated.access && !d.translated.access->info().ready))) {
+    d.translated.access = wf.snapshot_vm_access();
+    if (!d.translated.access)
+      return VmAccessOutcome::Faulted;
+    d.translated.initialized = true;
+  }
+  if (d.translated.access && !d.translated.access->info().ready)
+    return VmAccessOutcome::Unavailable;
+  while (sample.next_tap < sample.taps.size()) {
+    auto &tap = sample.taps[sample.next_tap];
+    if (!tap.translated.initialized && d.translated.initialized) {
+      tap.translated.access = d.translated.access;
+      tap.translated.initialized = true;
+    }
+    // Each tap retains its own request cursor, while all share one VM snapshot.
+    // Restore the issue-time parent state before returning, including on retry.
+    std::swap(d.per_lane_addr, tap.addresses);
+    std::swap(d.response_data, tap.response);
+    std::swap(d.translated, tap.translated);
+    const auto outcome = initiate_texel_access(d, wf, tap.lane_mask & request_lanes);
+    std::swap(d.translated, tap.translated);
+    std::swap(d.response_data, tap.response);
+    std::swap(d.per_lane_addr, tap.addresses);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    ++sample.next_tap;
+  }
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wavefront &wf,
+                                                         uint64_t request_lanes) {
   const uint64_t swizzled_lanes = d.scratch_swizzle ? d.scratch_lane_mask & request_lanes : 0;
   if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;

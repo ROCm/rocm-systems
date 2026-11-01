@@ -24,7 +24,7 @@ public:
     modifiers.image_coordinates =
         amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
-    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim);
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
     if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
       modifiers.memory_result_last_bytes = 0x3;
   }
@@ -40,6 +40,18 @@ class ImageLoadMipMimg : public Mimg {
 public:
   ImageLoadMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -90,7 +102,7 @@ public:
     modifiers.image_coordinates =
         amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
     modifiers.image_a16 = inst_.a16;
-    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim);
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -103,6 +115,15 @@ class ImageStoreMipMimg : public Mimg {
 public:
   ImageStoreMipMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -322,6 +343,18 @@ class ImageSampleMimg : public Mimg {
 public:
   ImageSampleMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -332,6 +365,19 @@ class ImageSampleDMimg : public Mimg {
 public:
   ImageSampleDMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    modifiers.image_prefix_words = 2 * amdgpu::image_derivative_component_count(inst_.dim);
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -342,6 +388,18 @@ class ImageSampleLMimg : public Mimg {
 public:
   ImageSampleLMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -362,6 +420,18 @@ class ImageSampleLzMimg : public Mimg {
 public:
   ImageSampleLzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.memory_result_last_bytes = 0x3;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
@@ -552,6 +622,15 @@ class ImageGather4LzMimg : public Mimg {
 public:
   ImageGather4LzMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates =
+        amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding());
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand srsrc;

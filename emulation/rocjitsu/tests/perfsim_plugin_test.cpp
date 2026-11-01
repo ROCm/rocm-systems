@@ -1079,6 +1079,68 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
   }
 }
 
+TEST_F(PerfsimPluginTest, FilteredImageRecordsAllTexelsUnderOneInstruction) {
+  WaveFixture fixture;
+  const std::string config = plugin_config();
+  PerfsimPlugin plugin(config.c_str());
+  plugin.onInit();
+  const auto info = dispatch_info(19);
+  plugin.onAmdgpuDispatchPacketProcessed(info);
+  plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  auto &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  plugin.onAmdgpuWavefrontDispatched(wave);
+  const std::array<uint32_t, 1> words{0xDEAD0001};
+  SyntheticInstruction sample("image_sample_lz", words, MEMORY_OP);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2000, sample, wave);
+  std::array<std::array<uint64_t, 32>, 4> addresses{};
+  std::array<ImageSampleFootprint, 4> taps{};
+  for (uint32_t i = 0; i < 4; ++i) {
+    addresses[i][0] = 100 + 100 * i;
+    taps[i] = {addresses[i], i == 3 ? 0u : 1u}; // Last tap is border-only.
+  }
+  MemoryAccessObservation access;
+  access.mnemonic = "image_sample_lz";
+  access.pc = 0x2000;
+  access.compute_unit_id = static_cast<uint32_t>(wave.cu().id());
+  access.dispatch_id = info.dispatch_id;
+  access.queue_id = wave.queue_id();
+  access.workgroup_id = wave.wg_id();
+  access.wavefront_id = wave.wf_id();
+  access.process_id = wave.process_id();
+  access.route = MemoryRoute::GLOBAL;
+  access.decoded_space = DecodedMemorySpace::GLOBAL;
+  access.is_load = true;
+  access.wavefront_size = 32;
+  access.element_size_bytes = 4;
+  access.elements_per_lane = 1;
+  access.active_lane_mask = access.architectural_exec_lane_mask = 1;
+  access.valid_lane_mask = access.request_lane_mask = 1;
+  access.image_sample_footprints = taps;
+  plugin.onAmdgpuMemoryAccessRouted(access);
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  plugin.onAmdgpuBeforeExecuteInstruction(0x2004, end, wave);
+  plugin.onAmdgpuWavefrontHalted(wave);
+  plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  plugin.onShutdown();
+  const auto trace = lines(read_file(trace_.path()));
+  unsigned memory_records = 0, instruction_records = 0;
+  for (const auto &line : trace) {
+    if (line.starts_with("instruction 19 "))
+      ++instruction_records;
+    if (!line.starts_with("memory 19 "))
+      continue;
+    ASSERT_LT(memory_records, 3u);
+    // All three real texels belong to instruction 0 and active lane 0.
+    EXPECT_TRUE(line.starts_with("memory 19 0 0 0 0 0 1 32 4 5 0 1 0 " +
+                                 std::to_string(100 + memory_records * 100) + " "))
+        << line;
+    ++memory_records;
+  }
+  EXPECT_EQ(memory_records, 3u);
+  EXPECT_EQ(instruction_records, 2u); // Sample plus ENDPGM, independent of tap count.
+}
+
 TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   WaveFixture fixture;
   const std::string config = plugin_config();

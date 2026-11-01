@@ -462,6 +462,88 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
   }
 }
 
+namespace {
+std::array<uint32_t, 4> image_texel_values(const VectorMemState &state,
+                                           std::span<const uint8_t> bytes) {
+  auto values = unpack_format(state.decoded_buffer_format, state.buffer_selectors, bytes);
+  for (uint32_t component = 0; component < state.buffer_components; ++component) {
+    const uint32_t selector = (state.buffer_selectors >> (3 * component)) & 7;
+    if (state.image_srgb && selector >= 4 && selector <= 6) {
+      const float value = std::bit_cast<float>(values[component]);
+      float linear = value <= 0.04045f ? value / 12.92f : std::pow((value + 0.055f) / 1.055f, 2.4f);
+      // RDNA3/4 texture sRGB decoding rounds channels to BF16 precision.
+      if (state.buffer_format_encoding == BufferFormatEncoding::Gfx11)
+        linear = util::bf16_to_f32(util::f32_to_bf16_rne(linear));
+      values[component] = std::bit_cast<uint32_t>(linear);
+    }
+    if (state.image_sample && !state.image_sample->gather &&
+        state.decoded_buffer_format.number == Number::Float) {
+      const uint32_t magnitude = values[component] & 0x7fffffffu;
+      if (magnitude > 0x7f800000u)
+        values[component] = 0xffc00000u;
+      else if (magnitude < 0x00800000u)
+        values[component] &= 0x80000000u;
+    }
+  }
+  return values;
+}
+
+std::array<uint32_t, 4> image_sample_values(const VectorMemState &state, uint32_t lane) {
+  std::array<uint32_t, 4> selected{};
+  if (state.image_sample->gather) {
+    constexpr std::array<uint32_t, 4> order{2, 3, 1, 0};
+    for (uint32_t component = 0; component < 4; ++component) {
+      const auto &tap = state.image_sample->taps[order[component]];
+      if (tap.lane_mask & (uint64_t{1} << lane)) {
+        const auto bytes = std::span(tap.response).subspan(lane * state.elem_size, state.elem_size);
+        selected[component] = image_texel_values(state, bytes)[0];
+      }
+    }
+    return selected;
+  }
+  const bool preserve_single_tap = !(state.image_sample->mip_blend_mask & (uint64_t{1} << lane));
+  std::array<double, 4> sum{};
+  uint32_t contributors = 0;
+  for (const auto &tap : state.image_sample->taps) {
+    const float weight = tap.weights[lane];
+    if (weight == 0)
+      continue;
+    const auto bytes =
+        tap.lane_mask & (uint64_t{1} << lane)
+            ? std::span(tap.response).subspan(lane * state.elem_size, state.elem_size)
+            : std::span<const uint8_t>{};
+    auto values = image_texel_values(state, bytes);
+    // A transparent-black border is independent of absent resource channels.
+    if (!(tap.lane_mask & (uint64_t{1} << lane)))
+      values.fill(0);
+    selected = values;
+    ++contributors;
+    if (weight == 1 && contributors == 1 && preserve_single_tap)
+      continue;
+    for (uint32_t component = 0; component < state.buffer_components; ++component)
+      sum[component] += double(std::bit_cast<float>(values[component])) * weight;
+  }
+  if (contributors == 1 && preserve_single_tap) {
+    // prepare_image_sample deliberately collapses duplicate spatial texels into
+    // one weight-1 tap. Preserve its integer payload and signed zero, except
+    // when an active fractional-mip lane makes its GFX12 quad blend.
+    for (const auto &tap : state.image_sample->taps)
+      if (tap.weights[lane] == 1)
+        return selected;
+  }
+  for (uint32_t component = 0; component < state.buffer_components; ++component) {
+    uint32_t bits = std::bit_cast<uint32_t>(static_cast<float>(sum[component]));
+    const uint32_t magnitude = bits & 0x7fffffffu;
+    if (magnitude < 0x00800000u)
+      bits &= 0x80000000u;
+    else if (magnitude > 0x7f800000u)
+      bits = 0xffc00000u;
+    selected[component] = bits;
+  }
+  return selected;
+}
+} // namespace
+
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &d) {
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
@@ -473,10 +555,15 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(lane_write_mask & (1ULL << lane)))
       continue;
-    const auto bytes = d.lane_mask & (1ULL << lane)
-                           ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
-                           : std::span<const uint8_t>{};
-    const auto values = unpack_format(format, d.buffer_selectors, bytes);
+    std::array<uint32_t, 4> values;
+    if (d.image_sample) {
+      values = image_sample_values(d, lane);
+    } else {
+      const auto bytes = d.lane_mask & (1ULL << lane)
+                             ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
+                             : std::span<const uint8_t>{};
+      values = image_texel_values(d, bytes);
+    }
     for (uint32_t reg = 0; reg < registers; ++reg) {
       if (!d.buffer_d16) {
         if (d.lds_dst)
