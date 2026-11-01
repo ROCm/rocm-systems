@@ -82,7 +82,7 @@ class SmiNicPort {
 
   std::optional<std::string> mac_address() const;
   std::optional<uint32_t> port_num() const;
-  std::optional<uint8_t> ifindex() const;
+  std::optional<uint32_t> ifindex() const;
   std::optional<uint8_t> carrier() const;
   std::optional<uint16_t> mtu() const;
   std::optional<std::string> link_state() const;

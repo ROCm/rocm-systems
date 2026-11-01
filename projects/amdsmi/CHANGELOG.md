@@ -261,6 +261,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
 
+- **Fixed AMD AI NIC ports reporting the wrong network interface index when the index is above 255**.  
+  - The interface index in NIC port information is now 32 bits wide, so programs that read NIC port information must be rebuilt. An unknown index is now `UINT32_MAX` (was 255) and shows as `N/A` in the Python interface and `amd-smi`.
+
+- **Fixed AMD SMI crashing when an AMD AI NIC reports text where a number is expected**.  
+  - `amdsmi_init()` and `amd-smi` ended the process on a value such as `Unknown`. The value now reads as unknown, shown as `N/A` in `amd-smi`.
+
+- **Fixed AMD AI NIC values that can't be read showing as numbers**.  
+  - A port that is down showed carrier and link speed 0, and a NIC with no NUMA node showed node 255. Unknown AI NIC values are now the field's maximum value in the C API and `N/A` in `amd-smi` and the Python interface.
+
+- **Fixed `amd-smi static --json` printing nothing when AI NICs are selected with `-N`**.  
+  - It now prints the same `nic_data` JSON that `amd-smi static --json` prints without `-N`.
+
+- **Fixed AMD AI NIC firmware fields showing the driver name and version**.  
+  - `FW_0` and `FW_HEARTBEAT` in `amd-smi static` and the Python interface now show `N/A`. The NIC firmware version is available as `FW_VER` under `RDMA_DEVICES`.
+
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
