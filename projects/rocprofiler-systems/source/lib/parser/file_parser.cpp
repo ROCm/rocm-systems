@@ -12,7 +12,9 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <fstream>
+#include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,14 +47,15 @@ scalar_text(const nlohmann::json& value)
     return std::nullopt;
 }
 
-std::optional<std::string>
-value_text(const nlohmann::json& value, std::string_view separator)
+struct decoded_value
 {
-    if(!value.is_array())
-    {
-        return scalar_text(value);
-    }
+    bool                       array_rejected = false;
+    std::optional<std::string> text;
+};
 
+std::optional<std::string>
+joined_array(const nlohmann::json& value, std::string_view separator)
+{
     std::vector<std::string> items;
     items.reserve(value.size());
     for(const auto& item : value)
@@ -67,33 +70,80 @@ value_text(const nlohmann::json& value, std::string_view separator)
     return fmt::format("{}", fmt::join(items, separator));
 }
 
-void
-read_entry(const schema& config_schema, const std::string& key,
-           const nlohmann::json& value, parse_result& result)
+decoded_value
+decode_value(const schema_param& param, const nlohmann::json& value)
 {
-    const auto* param = find_key(config_schema, key);
-    if(param == nullptr)
+    if(!value.is_array())
     {
-        result.errors.push_back(fmt::format("unknown parameter '{}'", key));
-        return;
+        return { .text = scalar_text(value) };
+    }
+    if(param.type != param_type::enumeration_list)
+    {
+        return { .array_rejected = true };
+    }
+    return { .text = joined_array(value, list_separator(param)) };
+}
+
+class document_reader
+{
+public:
+    document_reader(const schema& config_schema, parse_result& result)
+    : m_schema(config_schema)
+    , m_result(result)
+    {}
+
+    void read(const std::string& key, const nlohmann::json& value)
+    {
+        const auto* param = find_key(m_schema, key);
+        if(param == nullptr)
+        {
+            m_result.errors.push_back(fmt::format("unknown parameter '{}'", key));
+            return;
+        }
+        if(m_seen.contains(param->id))
+        {
+            reject_duplicate(*param);
+            return;
+        }
+
+        const auto decoded = decode_value(*param, value);
+        if(decoded.array_rejected)
+        {
+            m_result.errors.push_back(
+                fmt::format("parameter '{}' does not accept an array", param->id));
+            return;
+        }
+        if(!decoded.text.has_value())
+        {
+            m_result.errors.push_back(
+                fmt::format("unsupported value for parameter '{}'", param->id));
+            return;
+        }
+
+        const auto text   = decoded.text.value_or(std::string{});
+        const auto stored = canonical_choice(*param, text);
+        if(!is_valid_value(*param, stored))
+        {
+            m_result.errors.push_back(
+                fmt::format("invalid value '{}' for parameter '{}'", text, param->id));
+            return;
+        }
+        m_seen.insert(param->id);
+        m_result.values.emplace(param->id, stored);
     }
 
-    const auto text = value_text(value, list_separator(*param));
-    if(!text)
+private:
+    void reject_duplicate(const schema_param& param)
     {
-        result.errors.push_back(
-            fmt::format("unsupported value for parameter '{}'", param->id));
-        return;
+        m_result.values.erase(param.id);
+        m_result.errors.push_back(
+            fmt::format("parameter '{}' is given by more than one key", param.id));
     }
-    const auto stored = canonical_choice(*param, *text);
-    if(!is_valid_value(*param, stored))
-    {
-        result.errors.push_back(
-            fmt::format("invalid value '{}' for parameter '{}'", *text, param->id));
-        return;
-    }
-    result.values.insert_or_assign(param->id, stored);
-}
+
+    const schema&                      m_schema;
+    parse_result&                      m_result;
+    std::set<std::string, std::less<>> m_seen;
+};
 }  // namespace
 
 parse_result
@@ -106,13 +156,14 @@ file_parser::parse(const schema& config_schema, const nlohmann::json& document) 
         return result;
     }
 
+    document_reader reader{ config_schema, result };
     for(const auto& [key, value] : document.items())
     {
         if((!key.empty() && key.front() == '_') || value.is_null())
         {
             continue;
         }
-        read_entry(config_schema, key, value, result);
+        reader.read(key, value);
     }
     return result;
 }
