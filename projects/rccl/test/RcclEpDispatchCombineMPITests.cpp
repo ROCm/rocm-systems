@@ -36,12 +36,16 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <future>
+#include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -165,11 +169,9 @@ protected:
         numExperts_ = numExperts;
         topk_       = numTopk;
 
-        std::vector<char> uid(static_cast<size_t>(ep_unique_id_size()), 0);
-        int idOk = (rank_ != 0 || ep_get_unique_id(uid.data()) == 0) ? 1 : 0;
-        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid.data(), static_cast<int>(uid.size()), MPI_BYTE, 0,
-                                             MPI_COMM_WORLD));
-        ASSERT_MPI_EQ(1, idOk);
+        std::vector<char> uid;
+        BroadcastUid(&uid);
+        if (HasFatalFailure() || IsSkipped()) return;
 
         handle_ = ep_create(rank_, nRanks_, uid.data(), kTokens, kHidden, device_);
         ASSERT_MPI_TRUE(handle_ != nullptr);
@@ -184,6 +186,36 @@ protected:
             owners.insert(topk[static_cast<size_t>(token) * topk_ + k] / expertsPerRank);
         }
         return static_cast<int>(owners.size());
+    }
+
+    // Rank 0 makes a unique id and every rank gets a copy.
+    void BroadcastUid(std::vector<char>* uid)
+    {
+        uid->assign(static_cast<size_t>(ep_unique_id_size()), 0);
+        int idOk = (rank_ != 0 || ep_get_unique_id(uid->data()) == 0) ? 1 : 0;
+        ASSERT_MPI_EQ(MPI_SUCCESS, MPI_Bcast(uid->data(), static_cast<int>(uid->size()), MPI_BYTE, 0,
+                                             MPI_COMM_WORLD));
+        ASSERT_MPI_EQ(1, idOk);
+    }
+
+    // Bounded ep_create: a missed num_ranks rejection would wait in init for ranks that never join.
+    void CreateBounded(const std::vector<char>& uid, int numRanks, int maxTokens, int hidden, void** out,
+                       bool* finished)
+    {
+        *out      = nullptr;
+        *finished = false;
+        auto result = std::make_shared<std::promise<void*>>();
+        std::future<void*> done = result->get_future();
+        std::thread worker([result, uid, rank = rank_, numRanks, maxTokens, hidden, dev = device_]() {
+            result->set_value(ep_create(rank, numRanks, uid.data(), maxTokens, hidden, dev));
+        });
+        if (done.wait_for(std::chrono::seconds(60)) == std::future_status::ready) {
+            worker.join();
+            *finished = true;
+            *out      = done.get();
+        } else {
+            worker.detach();
+        }
     }
 
     // Plan, dispatch, combine with an identity expert, and check every token came back
@@ -384,6 +416,55 @@ TEST_F(RcclEpDispatchCombineTest, ReconfigureBetweenShapes)
     // reads the same window.
     ASSERT_MPI_EQ(0, ep_configure(handle_, numExperts_, topk_));
     ASSERT_EP_STEP(RoundTrip());
+}
+
+// Each case breaks one ep_create argument. A missed rejection shows as a non-null handle or a timeout.
+TEST_F(RcclEpDispatchCombineTest, CreateRejectsOutOfRangeArguments)
+{
+    if (!EnvReady()) {
+        GTEST_SKIP() << "rccl_ep needs NCCL_CUMEM_ENABLE=1 and 8 ranks on a single node";
+    }
+
+    constexpr int kEpMaxRanks = 16;  // rccl_ep's kMaxRanks. This file stays off rccl_ep's device headers.
+    struct Case { const char* name; int numRanks; int maxTokens; int hidden; };
+    const Case rejected[] = {
+        {"num_ranks kMaxRanks + 1",    kEpMaxRanks + 1, kTokens, kHidden},
+        {"max_tokens_per_rank 0",      nRanks_, 0,       kHidden},
+        {"max_tokens_per_rank -1",     nRanks_, -1,      kHidden},
+        {"hidden 7 (not a multiple)",  nRanks_, kTokens, 7},
+        {"hidden 12 (remainder 4)",    nRanks_, kTokens, 12},
+        {"hidden 0",                   nRanks_, kTokens, 0},
+        {"hidden -8",                  nRanks_, kTokens, -8},
+    };
+    // A rejected create never reaches init, so all rejected cases share one id.
+    std::vector<char> uid;
+    ASSERT_EP_STEP(BroadcastUid(&uid));
+    for (const Case& c : rejected) {
+        SCOPED_TRACE(c.name);
+        void* h        = nullptr;
+        bool  finished = false;
+        ASSERT_EP_STEP(CreateBounded(uid, c.numRanks, c.maxTokens, c.hidden, &h, &finished));
+        ASSERT_MPI_TRUE(finished);
+        if (h != nullptr) ep_destroy(h);
+        ASSERT_MPI_TRUE(h == nullptr);
+    }
+
+    {
+        // Valid 1-rank communicator: each rank makes its own, as rank 0 of 1.
+        std::vector<char> localUid(static_cast<size_t>(ep_unique_id_size()), 0);
+        ASSERT_MPI_EQ(0, ep_get_unique_id(localUid.data()));
+        void* solo = ep_create(0, 1, localUid.data(), kTokens, kHidden, device_);
+        ASSERT_MPI_TRUE(solo != nullptr);
+        ep_destroy(solo);
+    }
+
+    void* h        = nullptr;
+    bool  finished = false;
+    ASSERT_EP_STEP(BroadcastUid(&uid));
+    ASSERT_EP_STEP(CreateBounded(uid, nRanks_, /*maxTokens=*/1, /*hidden=*/8, &h, &finished));
+    ASSERT_MPI_TRUE(finished);
+    handle_ = h;  // TearDown destroys it
+    ASSERT_MPI_TRUE(handle_ != nullptr);
 }
 
 TEST_F(RcclEpDispatchCombineTest, DispatchBf16AndFp8Bandwidth)
