@@ -58,9 +58,8 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
+        ROCP_FATAL << fmt::format("ROCPROF_OUTPUT_PATH ({}) already exists and is not a directory",
+                                  output_path.string());
     }
     else if(!fs::exists(output_path))
     {
@@ -77,9 +76,8 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
     }
     else if(fs::exists(_ofname_path) && !fs::is_directory(fs::status(_ofname_path)))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-            output_path.string());
+        ROCP_FATAL << fmt::format("ROCPROF_OUTPUT_PATH ({}) already exists and is not a directory",
+                                  output_path.string());
     }
 
     return _ofname;
