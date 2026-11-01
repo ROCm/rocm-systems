@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -324,6 +325,9 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    auto completion_status = rocprofiler::kfd::flush_signal_less_records(buffer_id);
+    if(completion_status != ROCPROFILER_STATUS_SUCCESS) return completion_status;
+
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     // Drain internal PC sampling buffers, if needed.
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);

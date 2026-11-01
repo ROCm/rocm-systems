@@ -591,7 +591,7 @@ public:
     // Runs emit_dispatch_records, which calls into tool code, so the monitor thread only does
     // bounded work between waits. One thread, because records are emitted in retirement order. Not
     // in get_task_groups(), so no tool can name it. Declared last: destroying it joins it.
-    std::unique_ptr<internal_threading::task_group_t> record_emitter = {};
+    std::shared_ptr<internal_threading::task_group_t> record_emitter = {};
 };
 
 completion_monitor&
@@ -2126,6 +2126,19 @@ interposition_sync()
     drain_completion_monitor();
 }
 
+bool
+interposition_fence_records(uint64_t timeout_ns)
+{
+    if(internal_threading::is_task_group_thread() || internal_threading::fork_stale() ||
+       registration::get_fini_status() != 0)
+        return false;
+    if(!s_intercept_installed.load(std::memory_order_acquire)) return true;
+
+    auto& monitor = get_completion_monitor();
+    auto emitter = monitor.thread.rlock([&monitor](const auto&) { return monitor.record_emitter; });
+    return !emitter || emitter->wait_async_for(timeout_ns);
+}
+
 // Create the wake signal and launch the monitor thread. A second call while it is already
 // running does nothing.
 void
@@ -2346,6 +2359,12 @@ void
 join_signal_less_tasks()
 {
     hsa::queue_interposition::interposition_sync();
+}
+
+bool
+fence_signal_less_tasks(uint64_t timeout_ns)
+{
+    return hsa::queue_interposition::interposition_fence_records(timeout_ns);
 }
 }  // namespace kfd
 }  // namespace rocprofiler

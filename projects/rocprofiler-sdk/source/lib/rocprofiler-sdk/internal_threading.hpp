@@ -62,6 +62,7 @@ public:
     void async(std::function<void()>&&);
     void wait(bool async_only = false);
     void join(bool async_only = false);
+    bool wait_async_for(uint64_t timeout_ns);
 
 private:
     std::mutex                             m_mutex           = {};
@@ -82,6 +83,9 @@ using task_group_t = TaskGroup;
 // generation is conclusive (see D4/D6).
 bool
 fork_stale();
+
+bool
+is_task_group_thread();
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);

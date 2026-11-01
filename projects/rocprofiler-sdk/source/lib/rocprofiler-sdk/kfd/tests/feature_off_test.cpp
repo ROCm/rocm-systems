@@ -28,6 +28,9 @@
 
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
+
+#include <rocprofiler-sdk/buffer.h>
 
 #include <gtest/gtest.h>
 
@@ -58,6 +61,12 @@ TEST(feature_off, static_objects_stay_unconstructed)
     // The public availability/support queries are non-constructing and report off.
     EXPECT_FALSE(kfd_dispatch_log_available());
     EXPECT_FALSE(kfd_dispatch_log_supported());
+    EXPECT_FALSE(kfd_profiler_state_constructed());
+    EXPECT_FALSE(kfd_reader_state_constructed());
+
+    EXPECT_EQ(flush_signal_less_records(rocprofiler_buffer_id_t{0}), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(rocprofiler_flush_buffer(rocprofiler_buffer_id_t{0}),
+              ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
     EXPECT_FALSE(kfd_profiler_state_constructed());
     EXPECT_FALSE(kfd_reader_state_constructed());
 }

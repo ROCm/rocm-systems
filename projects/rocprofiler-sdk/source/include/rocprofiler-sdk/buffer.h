@@ -99,6 +99,15 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 /**
  * @brief Flush buffer.
  *
+ * For signal-less kernel-dispatch tracing, this also waits for available dispatch-log records
+ * and their completion tasks before delivering the buffer. This call does not synchronize GPU
+ * execution; synchronize the required application work before flushing its completed records.
+ *
+ * A signal-less kernel-dispatch flush returns ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY if the
+ * completion pipeline cannot quiesce within its configured budget, or if called from an SDK
+ * task-group worker where waiting could deadlock. Retry from an application thread. A busy
+ * result does not stop or disable signal-less tracing.
+ *
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t
  */
