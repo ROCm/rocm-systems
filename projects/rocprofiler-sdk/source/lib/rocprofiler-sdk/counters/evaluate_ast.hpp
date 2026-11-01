@@ -207,7 +207,7 @@ std::optional<std::set<Metric>>
 get_required_hardware_counters(const std::unordered_map<std::string, EvaluateASTMap>& asts,
                                const std::string&                                     agent,
                                const Metric&                                          metric);
-int64_t
+uint64_t
 get_agent_property(std::string_view property, const rocprofiler_agent_t& agent);
 }  // namespace counters
 }  // namespace rocprofiler
