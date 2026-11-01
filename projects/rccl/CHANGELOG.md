@@ -5,6 +5,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.
+* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB, at most 32 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
@@ -13,6 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. Copy Engine connections use one shared non-blocking stream per proxy thread, cross-process staging buffers use legacy IPC instead of the slow cuMem/VMM import path, and the Copy Engine transport carries only send/recv-based operations, so collectives keep the kernel P2P transport.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 * Fixed the GIN Anvil SDMA backend (`NCCL_GIN_TYPE=7`, or `NCCL_GIN_TYPE` unset when Anvil is the selected backend) publishing signal addresses outside the mapped LSA window for GIN peers that are not in the rank's LSA team, for example an MI300X CPX communicator spanning two OAMs with `NCCL_LSA_TEAM_SIZE=4`, or any `NCCL_GIN_CONNECTION_RAIL` team with more than one rank. Such peers have no address in the window, so binding Anvil signals now fails with `ncclInvalidUsage` and a warning naming the peer, instead of warning and continuing. `ncclDevCommCreate` calls that request GIN in these configurations previously succeeded and now fail; set `NCCL_LSA_TEAM_SIZE` to cover the GIN team or select another GIN type. The symmetric GIN kernels, which address rail peers outside the LSA team, are no longer used with Anvil SDMA, so communicator initialization and collectives are unaffected.

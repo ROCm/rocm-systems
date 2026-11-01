@@ -1074,6 +1074,11 @@
           "test_filter": "P2pMaxNchannels*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"

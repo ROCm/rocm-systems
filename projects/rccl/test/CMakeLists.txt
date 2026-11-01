@@ -829,6 +829,7 @@ if(BUILD_TESTS)
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp

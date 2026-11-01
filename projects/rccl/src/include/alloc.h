@@ -963,7 +963,8 @@ finish:
 
 template <typename T>
 ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, int line, struct ncclMemManager* manager,
-                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault) {
+                                 ncclMemType_t memType = ncclMemPersist, unsigned int flags = hipDeviceMallocDefault,
+                                 bool forceLegacy = false) {
   ncclResult_t result = ncclSuccess;
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   *ptr = nullptr;
@@ -971,7 +972,7 @@ ncclResult_t ncclCudaCallocDebug(T** ptr, size_t nelem, const char* filefunc, in
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   if (nelem > 0) {
-    if (ncclCuMemEnable()) {
+    if (ncclCuMemEnable() && !forceLegacy) {
       // ncclCuMemAlloc already zeroes the buffer (ROCM-20370 residue scrub),
       // reusing the pooled side stream, so no extra memset/stream is needed.
       NCCLCHECKGOTO(ncclCuMemAlloc((void**)ptr, NULL, ncclCuMemHandleType, nelem * ncclSizeOfT<T>(), manager, memType),
@@ -1101,7 +1102,7 @@ finish:
 }
 
 template <typename T>
-ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1) {
+ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegments = 1, bool forceLegacy = false) {
   if (ptr == NULL) return ncclSuccess;
 
   // Check if process is shutting down. The atexit handler sets this flag
@@ -1147,7 +1148,7 @@ ncclResult_t ncclCudaFree(T* ptr, struct ncclMemManager* manager, int numSegment
   }
 
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  if (ncclCuMemEnable()) {
+  if (ncclCuMemEnable() && !forceLegacy) {
     NCCLCHECKGOTO(ncclCuMemFree((void*)ptr, manager, numSegments), result, finish);
   } else {
     if (numSegments > 1) {
