@@ -17,9 +17,10 @@ extern "C" {
 }
 #endif
 
-extern "C" {
+// Included bare: the header opens its own extern "C", and wrapping it again
+// would extend C linkage over the C++-only declarations at its tail.
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
-}
+
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
@@ -100,7 +101,7 @@ const std::map<smi_nic_status_t, amdsmi_status_t> ainic_status_map = {
     {SMI_NIC_STATUS_WRONG_PARAM, AMDSMI_STATUS_INVAL},
     {SMI_NIC_STATUS_NOT_FOUND, AMDSMI_STATUS_NOT_FOUND},
     {SMI_NIC_STATUS_NO_RESOURCE, AMDSMI_STATUS_OUT_OF_RESOURCES},
-    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_YET_IMPLEMENTED},
+    {SMI_NIC_STATUS_NOT_SUPPORTED, AMDSMI_STATUS_NOT_SUPPORTED},
     {SMI_NIC_STATUS_NOT_INIT, AMDSMI_STATUS_NOT_INIT},
     {SMI_NIC_STATUS_NO_DATA, AMDSMI_STATUS_NO_DATA},
     {SMI_NIC_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED}};
