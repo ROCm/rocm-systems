@@ -192,10 +192,118 @@ capture.hrr/
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
     regions/*.hrrr     external region annotations (optional; written by producers
                        outside the runtime, never by capture — see below)
+    hrr.manifest       SHA-256 of every file above, `sha256sum` format (only when signed)
+    hrr.sig            Ed25519 signature over hrr.manifest, 64 bytes (only when signed)
   pid-<pid>.prev-<n>/  an earlier process's archive with the same pid, moved
                        aside by writer::open(); not part of this capture
 ```
 All handle values (stream, event, module, graph, device pointer) are stored as raw `uint64_t` pointer casts. Sequence IDs are a global atomic counter providing causal ordering across threads.
+
+### Archive signing
+
+Replay executes what the archive says: code objects, kernel arguments, event
+order. A modified archive can drive it into arbitrary code, so an archive that
+crosses a trust boundary must be signed, and replay must check it.
+
+**What is signed.** When `flush()` finishes a process archive (not a crash), and
+`HIP_HRR_SIGNING_KEY` names a seed file, it writes two files into
+`pid-<pid>/`:
+
+- `hrr.manifest`: one line `<64 hex>  <path>` per file in the directory, sorted by
+  path, `/` separators, the SHA-256 of the file. It is `sha256sum -c` compatible.
+  The FNV-1a-128 in blob names only deduplicates; it is not collision resistant
+  and the manifest does not use it.
+- `hrr.sig`: the 64-byte Ed25519 (RFC 8032) signature over the exact bytes of
+  `hrr.manifest`.
+
+`hrr_sign::sign_archive(dir, seed)` does both and replaces an earlier pair (capture
+passes its checked directory descriptor, so the files signed are the ones in the
+archive it wrote, not whatever the path names by then), so a
+rewriter can sign again. `hrr-playback --repair --signing-key <seed>` does that
+(through the checked descriptor of the directory it rewrote);
+without `--signing-key`, `--repair` deletes the now-stale pair and says so.
+Signing refuses a manifest over 256 MiB, the size verification accepts, so an
+archive that is signed can always be verified. The
+format is additive: `events.bin` is unchanged, `HRR_VERSION` stays 10, and a
+reader that does not know the files ignores them.
+
+**Keys.** The private key is a 32-byte seed in a file (64 hex digits, mode 0600;
+a seed readable by others is refused). It stays on the capturing site and is never
+given to a replaying site. `hrr-playback --gen-signing-key <seed> <pub>` creates a
+pair once. The public key is 32 bytes (64 hex digits) in a file.
+
+**Which keys replay trusts.** Exactly the keys the user gives it. There is no
+built-in key, no key server, no certificate chain and no trust-on-first-use.
+`hrr-playback --trusted-key <pub>` (or `HIP_HRR_TRUSTED_KEY`, which `--repair` does not read) names one public key;
+the archive is replayed only if it is signed under that key. **How a recipient gets
+the capturing site's public key is the recipient's decision, made out of band**: the
+capturing site sends the 32-byte public key by a channel the recipient already
+trusts (a signed e-mail, an internal wiki page, the ticket), separately from the
+archive. A key that travels inside the archive proves nothing, which is why none
+does. To rotate or revoke, give replaying sites a new key file; an archive signed
+under an older key then stops replaying.
+
+**What replay does.** Verification runs in `load_archive` (through `hrr::set_archive_check`),
+before any file in the archive is opened, so no tampered byte is parsed. `--info` on an
+archive root without `--trusted-key` prints the process summary from the manifests and
+each `events.bin` trailer, unchecked; with `--trusted-key` it loads the root's single
+`pid-<pid>/` and verifies it (a root with several is refused, naming each).
+`--repair` refuses `--trusted-key`: it rewrites files and does not verify them, so
+`--repair --signing-key` instead refuses an archive that holds a signature which does not
+verify under the seed's public key (it would sign over an alteration); an archive with no
+signature, such as a crashed one, is repaired and signed as found (it says the content was
+not verified). The check runs before `events.bin` is parsed, and the parse is held to the
+digest the check saw, as in replay; signing is then held to the verified digests, with the
+digests of the `events.bin` and `manifest.json` that repair wrote for those two. To sign an altered or changed
+signed archive anyway, delete its `hrr.sig` and `hrr.manifest` first.
+Replay refuses, naming the file, when
+the signature does not verify, any file differs from its manifest line, a file is
+listed and missing, a file exists and is not listed, or an entry is a link or other
+non-regular file. An archive with no `hrr.sig` is refused when a key was given (the
+user asked for a signature). Without `--trusted-key` nothing is checked, and an
+unsigned archive replays as before, so an archive just captured on the same machine
+stays convenient. **An archive from another machine must be replayed with
+`--trusted-key`.**
+
+The check runs once, but the files are opened again afterwards: `events.bin` while it is
+parsed, each code object at its module's first launch (the bytes go to `hipModuleLoadData`),
+each blob at its use, and the region streams. `load_archive` keeps the digest of every file
+the check saw (`Archive::verified`) and each of those reads is compared to it: `events.bin`
+and the region streams are hashed as they are parsed, a code object or blob once it is read,
+and a file the check did not list is refused. A file swapped, or a hard link rewritten, after
+the check is therefore refused where it is read (the replay ends) rather than used.
+
+**What this does not cover.**
+
+- Only an archive finished by `flush()` is signed; a crash leaves it unsigned (the
+  crash callback may not hash files). `flush()` also signs an archive it wrote with
+  `complete:false` (out of disk space, a failed blob write): the signature vouches
+  for the bytes and their origin, not for completeness, and replay still treats the
+  archive as incomplete. Sign a crashed one with `--repair --signing-key`, which also
+  signs an already complete `pid-<pid>/` given by path (not one found by a root repair).
+  A crash during signing can leave a pair that no longer matches; replay refuses it.
+- The root `manifest.json` is an index outside `pid-<pid>/` and is not covered;
+  each process archive is checked on its own.
+- Files added after capture finishes, such as `regions/*.hrrr` written by a
+  producer after `flush()`, are not listed and make the archive refuse. Sign after
+  producers are done (`--repair --signing-key` on the `pid-<pid>/`); an archive that
+  `flush()` already signed needs its `hrr.sig` and `hrr.manifest` deleted first, since
+  `--repair` will not sign over a signature that no longer verifies.
+- A signature proves the archive is what the key holder produced, not that the
+  key holder is honest. The files are compared to their digests when read (above), but
+  `events.bin` is parsed before its digest is known, so a swapped one is parsed (within the
+  usual size and event limits) before the load fails; a code object or blob is refused
+  before it is used. Files the replay is given on the command line, such as
+  `--replace-kernel` objects, are the user's own and are not covered.
+- Hashing every file happens at process exit, so a very large capture delays exit.
+- Encryption is not implemented here. It belongs to the same epic, AIRUNTIME-2856
+  (archive signing and encryption), as a separate piece of work.
+
+Implementation: `projects/clr/hipamd/src/hrr/hrr_archive_sign.{h,cpp}`, SHA-256
+from `shared/sha256` (embedded as objects), Ed25519 from a vendored, unmodified
+Monocypher 4.0.2 (`third_party/monocypher`, BSD-2-Clause OR CC0-1.0, with its
+SHA-512 optional part). `libamdhip64` does not link libcrypto. `hrr-playback`
+compiles the same files.
 
 ### Playback Tool (`hrr-playback`)
 The reader (`hrr_reader`) loads all events sorted by sequence ID. One CPU thread is spawned per captured OS thread. Each thread replays its slice of events in order; a global atomic `next_seq` counter enforces the original interleave between threads — each thread spin-waits until its event's sequence ID is current before dispatching, then advances the counter.
@@ -451,6 +559,8 @@ Version history, so an archive written by an older runtime can be placed:
     blobs/<2hex>/      FNV-1a-128 content-addressed raw buffers (.blob ext)
     code_objects/      .hsaco ELFs keyed by hash
     regions/*.hrrr     external region annotations (optional)
+    hrr.manifest       SHA-256 of every file in pid-<pid>/, sha256sum format (optional)
+    hrr.sig            Ed25519 signature over hrr.manifest (optional)
 ```
 
 ### `events.bin` Layout

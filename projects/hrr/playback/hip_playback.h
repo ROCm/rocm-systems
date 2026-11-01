@@ -214,6 +214,11 @@ struct AllocEntry {
 
 struct PlaybackContext {
     std::string archive_dir;
+    // The digests of the files a --trusted-key check vouched for, or null when no
+    // check ran. Blobs and code objects are read well after that check, so each
+    // read is held to it; see hrr::read_archive_file. Not owned: the Archive it
+    // belongs to outlives the replay.
+    const hrr::VerifiedFiles* verified = nullptr;
 
     // ---- Handle translation maps (recorded raw ptr -> live handle) ----
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
@@ -978,8 +983,9 @@ struct PlaybackContext {
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
-    // Read `path` into blob_cache_ under `key`, charged to the host budget.
-    const void* cache_file(const std::string& key, const std::string& path,
+    // Read the archive file `rel` (below archive_dir) into blob_cache_ under `key`,
+    // charged to the host budget.
+    const void* cache_file(const std::string& key, const std::string& rel,
                            size_t* sz_out, const char* what) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);

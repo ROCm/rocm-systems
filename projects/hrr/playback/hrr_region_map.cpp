@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 namespace hrr {
 
@@ -19,18 +20,46 @@ namespace hrr {
 // Loading
 // ---------------------------------------------------------------------------
 
-size_t RegionMap::load(const std::string& archive_dir) {
+size_t RegionMap::load(const std::string& archive_dir, const VerifiedFiles* verified) {
     const std::vector<std::string> paths = find_region_streams(archive_dir);
+    auto refuse = [&](const std::string& why) {
+        fprintf(stderr, "[HRR] regions: refusing %s: %s\n", archive_dir.c_str(), why.c_str());
+        records_.clear();
+        streams_ = 0;
+        refused_ = true;
+        return size_t{0};
+    };
+    std::vector<std::string> rels;
+    for (const auto& path : paths)
+        rels.push_back("regions/" + std::filesystem::path(path).filename().generic_string());
+    if (verified) {
+        for (const std::string& rel : rels)
+            if (!verified->count(rel)) return refuse(rel + " is not in the signed manifest");
+        for (const auto& kv : *verified)
+            if (kv.first.rfind("regions/", 0) == 0 && kv.first.size() > 5 &&
+                kv.first.compare(kv.first.size() - 5, 5, ".hrrr") == 0 &&
+                std::find(rels.begin(), rels.end(), kv.first) == rels.end())
+                return refuse(kv.first + " is in the signed manifest but missing");
+    }
     if (paths.empty()) return 0;
 
-    for (const auto& path : paths) {
-        FILE* f = open_record_stream(path, HRR_REGION_MAGIC, HRR_REGION_VERSION, nullptr);
-        if (!f) continue;  // logged by open_record_stream; other streams still load
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const std::string& path = paths[i];
+        StreamHash hash;
+        StreamHash* const hp = verified ? &hash : nullptr;
+        FILE* f = open_record_stream(path, HRR_REGION_MAGIC, HRR_REGION_VERSION, nullptr,
+                                     nullptr, hp);
+        if (!f) {
+            // Logged by open_record_stream; other streams still load. A listed
+            // stream that no longer opens is a change, not a malformed file.
+            if (verified) return refuse(rels[i] + " cannot be read");
+            continue;
+        }
 
         size_t before = records_.size();
         std::vector<uint8_t> raw;
         while (true) {
-            const RecordStatus st = read_raw_record(f, raw);
+            const RecordStatus st = read_raw_record(f, raw, nullptr, hp);
             if (st == RecordStatus::EndOfStream) break;
             if (st == RecordStatus::Torn) {
                 // A producer that died mid-write leaves exactly one partial
@@ -50,6 +79,10 @@ size_t RegionMap::load(const std::string& archive_dir) {
             const auto* recs = reinterpret_cast<const hrr_region_rec*>(
                 raw.data() + sizeof(hrr_region_batch));
             records_.insert(records_.end(), recs, recs + n);
+        }
+        if (hp && hp->finish(f) != verified->at(rels[i])) {
+            fclose(f);
+            return refuse(rels[i] + " changed after the archive was verified");
         }
         fclose(f);
         ++streams_;
