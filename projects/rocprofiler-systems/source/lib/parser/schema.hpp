@@ -193,16 +193,22 @@ class schema
 public:
     void set_version(std::string version);
 
-    /// @return false, leaving the schema unchanged, if the id is already registered.
+    /// @return false, leaving the schema unchanged, if the id is empty or already
+    /// registered.
     [[nodiscard]] bool add_category(category value);
 
     /**
-     * @return false, leaving the schema unchanged, if the id, environment variable, or
-     *         CLI argument name is already registered.
+     * @return false, leaving the schema unchanged, if the id, environment name, or
+     *         argument name is empty or already registered.
      */
     [[nodiscard]] bool add_param(schema_param param);
 
-    void add_constraint(constraint value);
+    /**
+     * @return false, leaving the schema unchanged, when a referenced parameter is
+     *         missing or empty, or when an equals or forced value is not valid for
+     *         that parameter.
+     */
+    [[nodiscard]] bool add_constraint(constraint value);
 
     [[nodiscard]] const std::string& version() const noexcept { return m_version; }
     [[nodiscard]] const std::vector<category>& categories() const noexcept

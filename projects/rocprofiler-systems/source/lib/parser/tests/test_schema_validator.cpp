@@ -15,11 +15,13 @@ using namespace rocprofsys::parser;
 
 namespace
 {
-constexpr double k_integer_max       = 10.0;
-constexpr double k_number_min        = 0.5;
-constexpr double k_number_max        = 1.5;
-constexpr double k_frequency_minimum = 1.0;
-constexpr double k_frequency_maximum = 1000.0;
+constexpr double k_integer_max         = 10.0;
+constexpr double k_number_min          = 0.5;
+constexpr double k_number_max          = 1.5;
+constexpr double k_frequency_minimum   = 1.0;
+constexpr double k_frequency_maximum   = 1000.0;
+constexpr double k_non_integer_minimum = 2.5;
+constexpr double k_non_integer_maximum = 1.5;
 
 schema_param
 make_param(param_type type)
@@ -106,11 +108,11 @@ add_profiler_params(schema& value)
 void
 add_profiler_constraints(schema& value)
 {
-    value.add_constraint(constraint{
+    ASSERT_TRUE(value.add_constraint(constraint{
         .kind   = constraint_kind::mutually_exclusive,
         .params = { "label", "mode" },
-    });
-    value.add_constraint(constraint{
+    }));
+    ASSERT_TRUE(value.add_constraint(constraint{
         .kind    = constraint_kind::warn,
         .level   = severity::warning,
         .message = "nothing collected",
@@ -119,8 +121,8 @@ add_profiler_constraints(schema& value)
                 .mode  = condition_mode::all,
                 .terms = { param_condition{ .param = "trace", .equals = "false" },
                            param_condition{ .param = "profile", .equals = "false" } } },
-    });
-    value.add_constraint(constraint{
+    }));
+    ASSERT_TRUE(value.add_constraint(constraint{
         .kind    = constraint_kind::warn,
         .level   = severity::info,
         .message = "slow or labeled",
@@ -129,14 +131,14 @@ add_profiler_constraints(schema& value)
                 .mode  = condition_mode::any,
                 .terms = { param_condition{ .param = "mode", .equals = "slow" },
                            param_condition{ .param = "label", .equals = "debug" } } },
-    });
-    value.add_constraint(constraint{
+    }));
+    ASSERT_TRUE(value.add_constraint(constraint{
         .kind          = constraint_kind::forces,
         .message       = "flat profiles need profiling",
         .when          = condition{ .terms = { param_condition{ .param  = "flat_profile",
                                                                 .equals = "true" } } },
         .forced_values = { { "profile", "true" } },
-    });
+    }));
 }
 
 /// Parameters and constraints shared by the validate_values() tests.
@@ -172,12 +174,12 @@ has_violation(const std::vector<violation>& violations, severity level,
 TEST(parser_schema_validator, boolean_values)
 {
     const auto param = make_param(param_type::boolean);
-    for(const auto* value :
-        { "true", "FALSE", "Yes", "no", "on", "OFF", "y", "N", "1", "0", "2", "" })
+    for(const auto* value : { "true", "FALSE", "Yes", "no", "on", "OFF", "y", "N", "t",
+                              "F", "1", "0", "2", "+1", "-1" })
     {
         EXPECT_TRUE(is_valid_value(param, value)) << value;
     }
-    for(const auto* value : { "truthy", " true" })
+    for(const auto* value : { "truthy", " true", "", "   ", "maybe" })
     {
         EXPECT_FALSE(is_valid_value(param, value)) << value;
     }
@@ -238,20 +240,21 @@ TEST(parser_schema_validator, string_and_path_values)
 
     text.pattern = "^[a-z]+$";
     EXPECT_TRUE(is_valid_value(text, "lower"));
-    EXPECT_FALSE(is_valid_value(text, "Upper"));
-    EXPECT_FALSE(is_valid_value(text, "lower1"));
+    EXPECT_TRUE(is_valid_value(text, "Upper"));
+    EXPECT_TRUE(is_valid_value(text, "lower1"));
 
     auto path = make_param(param_type::path);
     EXPECT_TRUE(is_valid_value(path, "/tmp/output"));
     EXPECT_FALSE(is_valid_value(path, ""));
 }
 
-TEST(parser_schema_validator, regex_matches_whole_value)
+TEST(parser_schema_validator, pattern_is_not_applied)
 {
     auto param    = make_param(param_type::string);
     param.pattern = "[0-9]+";
     EXPECT_TRUE(is_valid_value(param, "123"));
-    EXPECT_FALSE(is_valid_value(param, "a123b"));
+    EXPECT_TRUE(is_valid_value(param, "a123b"));
+    EXPECT_TRUE(is_valid_value(param, std::string(4097, 'a')));
 }
 
 TEST(parser_schema_validator, enumeration_values)
@@ -447,12 +450,30 @@ TEST(parser_schema_validator, large_integers_do_not_compare_as_doubles)
     EXPECT_TRUE(has_violation(violations, severity::warning, "has no effect"));
 }
 
-TEST(parser_schema_validator, rejects_an_oversized_pattern_subject)
+TEST(parser_schema_validator, integer_text_does_not_equal_a_decimal)
 {
-    constexpr std::size_t k_oversized_subject = 4097;
-    auto                  param               = make_param(param_type::string);
-    param.pattern                             = "a+";
-    EXPECT_FALSE(is_valid_value(param, std::string(k_oversized_subject, 'a')));
+    schema value{};
+    add_checked(value,
+                schema_param{
+                    .id          = "count",
+                    .name        = "Count",
+                    .description = "Count",
+                    .type        = param_type::integer,
+                    .depends_on  = param_condition{ .param = "count", .equals = "1.0" },
+                });
+    add_checked(value,
+                schema_param{
+                    .id          = "scale",
+                    .name        = "Scale",
+                    .description = "Scale",
+                    .type        = param_type::number,
+                    .depends_on  = param_condition{ .param = "scale", .equals = "1.0" },
+                });
+
+    const auto violations =
+        validate_values(value, { { "count", "1" }, { "scale", "1" } });
+    EXPECT_TRUE(has_violation(violations, severity::warning, "count"));
+    EXPECT_FALSE(has_violation(violations, severity::warning, "scale"));
 }
 
 TEST(parser_schema_validator, catalog_check_accepts_the_profiler_fixture)
@@ -470,8 +491,8 @@ TEST(parser_schema_validator, catalog_check_reports_structural_errors)
                            .category      = "missing",
                            .type          = param_type::integer,
                            .default_value = "maybe",
-                           .min           = 2.5,
-                           .max           = 1.5,
+                           .min           = k_non_integer_minimum,
+                           .max           = k_non_integer_maximum,
                            .pattern       = "[",
                            .env = env_spec{ .name = "ROCPROFSYS_COUNT", .separator = "" },
                            .copy_to = { "absent" },
@@ -482,7 +503,7 @@ TEST(parser_schema_validator, catalog_check_reports_structural_errors)
     EXPECT_TRUE(has_violation(errors, severity::error, "invalid default"));
     EXPECT_TRUE(has_violation(errors, severity::error, "minimum greater"));
     EXPECT_TRUE(has_violation(errors, severity::error, "non-integer minimum"));
-    EXPECT_TRUE(has_violation(errors, severity::error, "invalid pattern"));
+    EXPECT_FALSE(has_violation(errors, severity::error, "invalid pattern"));
     EXPECT_TRUE(has_violation(errors, severity::error, "empty list separator"));
     EXPECT_TRUE(has_violation(errors, severity::error, "unknown parameter 'absent'"));
 }

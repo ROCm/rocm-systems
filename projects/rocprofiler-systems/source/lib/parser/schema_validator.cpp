@@ -3,127 +3,27 @@
 
 #include "parser/schema_validator.hpp"
 #include "parser/schema.hpp"
-
-#include "common/string_utility.hpp"
+#include "parser/value_text.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
-#include <array>
-#include <charconv>
-#include <cmath>
 #include <cstdint>
 #include <iterator>
 #include <limits>
 #include <optional>
-#include <regex>
 #include <set>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
-
-#if !defined(__cpp_lib_to_chars) || __cpp_lib_to_chars < 201611L
-#    include <cctype>
-#    include <cstddef>
-#    include <stdexcept>
-#endif
 
 namespace rocprofsys::parser
 {
 namespace
 {
-constexpr std::size_t k_max_regex_subject = 4096;
-constexpr double      k_int64_upper       = 0x1p63;
-
-std::optional<std::int64_t>
-parse_integer(std::string_view value)
-{
-    std::int64_t result{};
-    const auto*  last    = value.data() + value.size();
-    const auto [ptr, ec] = std::from_chars(value.data(), last, result);
-    if(ec != std::errc{} || ptr != last)
-    {
-        return std::nullopt;
-    }
-    return result;
-}
-
-std::optional<double>
-parse_number(std::string_view value)
-{
-    double result{};
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    const auto* last     = value.data() + value.size();
-    const auto [ptr, ec] = std::from_chars(value.data(), last, result);
-    if(ec != std::errc{} || ptr != last)
-    {
-        return std::nullopt;
-    }
-#else
-    // std::stod skips leading whitespace, which std::from_chars rejects.
-    if(value.empty() || std::isspace(static_cast<unsigned char>(value.front())) != 0)
-    {
-        return std::nullopt;
-    }
-    try
-    {
-        std::size_t consumed = 0;
-        result               = std::stod(std::string{ value }, &consumed);
-        if(consumed != value.size())
-        {
-            return std::nullopt;
-        }
-    } catch(const std::logic_error&)
-    {
-        return std::nullopt;
-    }
-#endif
-    if(!std::isfinite(result))
-    {
-        return std::nullopt;
-    }
-    return result;
-}
-
-std::optional<bool>
-parse_boolean(std::string_view value)
-{
-    if(value.empty())
-    {
-        return false;
-    }
-
-    constexpr auto k_tokens = std::array{
-        std::pair{ std::string_view{ "true" }, true },
-        std::pair{ std::string_view{ "false" }, false },
-        std::pair{ std::string_view{ "yes" }, true },
-        std::pair{ std::string_view{ "no" }, false },
-        std::pair{ std::string_view{ "on" }, true },
-        std::pair{ std::string_view{ "off" }, false },
-        std::pair{ std::string_view{ "y" }, true },
-        std::pair{ std::string_view{ "n" }, false },
-        std::pair{ std::string_view{ "1" }, true },
-        std::pair{ std::string_view{ "0" }, false },
-    };
-
-    for(const auto& [token, result] : k_tokens)
-    {
-        if(utility::string::equals_ignore_case(value, token))
-        {
-            return result;
-        }
-    }
-
-    const auto parsed = parse_integer(value);
-    if(!parsed)
-    {
-        return std::nullopt;
-    }
-    return *parsed != 0;
-}
+constexpr double k_int64_upper = 0x1p63;
 
 [[nodiscard]] std::optional<std::int64_t>
 exact_integer_bound(double bound)
@@ -178,25 +78,9 @@ is_valid_number(const schema_param& param, std::string_view value)
 }
 
 bool
-matches_pattern(const schema_param& param, std::string_view value)
+matches_pattern(const schema_param&, std::string_view)
 {
-    if(!param.pattern)
-    {
-        return true;
-    }
-    if(param.pattern->size() > k_max_regex_subject || value.size() > k_max_regex_subject)
-    {
-        return false;
-    }
-
-    try
-    {
-        const std::regex pattern{ *param.pattern };
-        return std::regex_match(value.begin(), value.end(), pattern);
-    } catch(const std::regex_error&)
-    {
-        return false;
-    }
+    return true;
 }
 
 bool
@@ -350,10 +234,8 @@ private:
             }
             else if(!is_valid_value(*param, value))
             {
-                report(
-                    severity::error,
-                    fmt::format("invalid value '{}' for parameter '{}'", value, param_id),
-                    { param_id });
+                report(severity::error, invalid_value_message(value, param_id),
+                       { param_id });
             }
         }
     }
@@ -580,31 +462,6 @@ check_bounds(const schema_param& param, std::vector<violation>& errors)
 }
 
 void
-check_pattern(const schema_param& param, std::vector<violation>& errors)
-{
-    if(!param.pattern || param.pattern->size() > k_max_regex_subject)
-    {
-        if(param.pattern)
-        {
-            report_catalog(errors,
-                           fmt::format("parameter '{}' has an invalid pattern", param.id),
-                           { param.id });
-        }
-        return;
-    }
-    try
-    {
-        const std::regex compiled{ *param.pattern };
-        static_cast<void>(compiled);
-    } catch(const std::regex_error&)
-    {
-        report_catalog(errors,
-                       fmt::format("parameter '{}' has an invalid pattern", param.id),
-                       { param.id });
-    }
-}
-
-void
 check_param_shape(const schema& config_schema, const schema_param& param,
                   std::vector<violation>& errors)
 {
@@ -629,7 +486,6 @@ check_param_shape(const schema& config_schema, const schema_param& param,
                        { param.id });
     }
     check_bounds(param, errors);
-    check_pattern(param, errors);
     check_argument_counts(param, errors);
     check_references(config_schema, param, errors);
 }
@@ -650,6 +506,12 @@ check_constraint_targets(const schema& config_schema, const constraint& item,
     }
 }
 }  // namespace
+
+std::string
+invalid_value_message(std::string_view value, std::string_view param_id)
+{
+    return fmt::format("invalid value '{}' for parameter '{}'", value, param_id);
+}
 
 bool
 is_valid_value(const schema_param& param, std::string_view value)

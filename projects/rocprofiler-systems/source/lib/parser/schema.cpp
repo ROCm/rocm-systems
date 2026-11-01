@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "parser/schema.hpp"
+#include "parser/schema_validator.hpp"
 
 #include "common/string_utility.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -14,6 +16,40 @@
 
 namespace rocprofsys::parser
 {
+namespace
+{
+bool
+known_param(const schema& catalog, std::string_view param_id)
+{
+    return !param_id.empty() && catalog.find_param(param_id) != nullptr;
+}
+
+bool
+accepted_text(const schema& catalog, std::string_view param_id, std::string_view text)
+{
+    const auto* param = catalog.find_param(param_id);
+    return param != nullptr && is_valid_value(*param, text);
+}
+
+bool
+constraint_refs_are_usable(const schema& catalog, const constraint& item)
+{
+    const auto params_known =
+        std::ranges::all_of(item.params, [&catalog](const std::string& param_id) {
+            return known_param(catalog, param_id);
+        });
+    const auto terms_fit =
+        std::ranges::all_of(item.when.terms, [&catalog](const param_condition& term) {
+            return accepted_text(catalog, term.param, term.equals);
+        });
+    const auto forced_fit =
+        std::ranges::all_of(item.forced_values, [&catalog](const auto& entry) {
+            return accepted_text(catalog, entry.first, entry.second);
+        });
+    return params_known && terms_fit && forced_fit;
+}
+}  // namespace
+
 std::string_view
 list_separator(const schema_param& param) noexcept
 {
@@ -58,7 +94,7 @@ schema::set_version(std::string version)
 bool
 schema::add_category(category value)
 {
-    if(m_category_index.contains(value.id))
+    if(value.id.empty() || m_category_index.contains(value.id))
     {
         return false;
     }
@@ -71,9 +107,12 @@ schema::add_category(category value)
 bool
 schema::add_param(schema_param param)
 {
+    const bool empty_env = param.env && param.env->name.empty();
+    const bool empty_arg = param.arg && param.arg->name.empty();
     const bool env_taken = param.env && m_env_index.contains(param.env->name);
     const bool arg_taken = param.arg && m_arg_index.contains(param.arg->name);
-    if(m_param_index.contains(param.id) || env_taken || arg_taken)
+    if(param.id.empty() || empty_env || empty_arg || m_param_index.contains(param.id) ||
+       env_taken || arg_taken)
     {
         return false;
     }
@@ -92,10 +131,15 @@ schema::add_param(schema_param param)
     return true;
 }
 
-void
+bool
 schema::add_constraint(constraint value)
 {
+    if(!constraint_refs_are_usable(*this, value))
+    {
+        return false;
+    }
     m_constraints.push_back(std::move(value));
+    return true;
 }
 
 const category*
