@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <profiler-hub/storage.hpp>
-#include <profiler-hub/writer_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
+#include <profiler-hub/cpp/writer_types.hpp>
 
 #include <memory>
 
