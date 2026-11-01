@@ -36,7 +36,7 @@ rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocm
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),
-``rocprof-sys-casual`` has a nearly identical design to ``rocprof-sys-sample``
+``rocprof-sys-causal`` has a nearly identical design to ``rocprof-sys-sample``
 
 When the command-line options produce more than one causal profiling configuration variant,
 the following actions take place for each variant:
@@ -65,6 +65,17 @@ rocprof-sys-instrument: `source/bin/rocprof-sys-instrument <https://github.com/R
   * For a binary rewrite: it produces a new instrumented binary and exits
   * For runtime instrumentation: it instructs the application to resume and
     then waits for it to exit
+
+rocsys: `source/bin/rocsys-exe <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/source/bin/rocsys-exe>`_
+---------------------------------------------------------------------------------------------------------------------------------------
+
+``rocsys`` is an experimental command-line dispatcher introduced in this release. ``main`` is in
+``source/bin/rocsys-exe/rocsys.cpp``. ``source/bin/common/cli_dispatcher.cpp``
+classifies each invocation.
+
+* ``profile``, including the implicit default when the first argument is a flag or ``--``, runs in-process through the same run-mode path as ``rocprof-sys-run``.
+* The other verbs exec the matching ``rocprof-sys-*`` binary next to the real ``rocsys`` executable. A symlink such as ``/usr/bin/rocsys`` still finds those siblings. ``rewrite`` inserts ``-o`` so ``rocprof-sys-instrument`` performs a binary rewrite.
+* ``sample`` is not a verb. Call-stack sampling without instrumentation remains ``rocprof-sys-sample``.
 
 Libraries
 ========================================
