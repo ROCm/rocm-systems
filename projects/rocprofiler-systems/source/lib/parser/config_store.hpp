@@ -13,10 +13,17 @@
 #include <shared_mutex>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::parser
 {
+template <typename ValueT>
+concept config_value =
+    std::is_same_v<ValueT, bool> || std::is_same_v<ValueT, std::int64_t> ||
+    std::is_same_v<ValueT, double> || std::is_same_v<ValueT, std::string> ||
+    std::is_same_v<ValueT, std::vector<std::string>>;
+
 /**
  * Where a stored value came from.
  *
@@ -36,11 +43,17 @@ enum class config_source : std::uint8_t
 /**
  * Values for the parameters of one schema.
  *
- * Construct a store with its schema. instance() is the process-wide store used in
- * place of tim::settings; call reset() before using it. set() accepts only parameter
- * ids and textual values the schema allows, and records which source supplied the
- * value. get_as<T>() converts a stored value when T matches the parameter type:
- * bool, int64_t, double, string, or vector<string> for an enumeration_list.
+ * Construct a store with its schema. set() accepts only parameter ids and textual
+ * values the schema allows, and records which source supplied the value.
+ * get_as<T>() converts a stored value when T is that parameter's type: bool,
+ * int64_t, double, string, or vector<string> for an enumeration_list. An integer
+ * value is not returned as a double.
+ *
+ * set() checks the value, then locks to store it. Do not call reset() at the same
+ * time as set(), get(), or on_change(). Callbacks run in registration order after
+ * the value is stored and the lock is released. A callback may call set(). A
+ * callback that throws leaves the new value stored and skips later callbacks for
+ * that change. clear() drops stored values and does not run callbacks.
  */
 class config_store
 {
@@ -48,9 +61,6 @@ public:
     using change_callback_t = std::function<void(std::string_view, std::string_view)>;
 
     explicit config_store(schema config_schema);
-
-    /// Process-wide store. Starts empty; call reset() with the tool schema.
-    [[nodiscard]] static config_store& instance();
 
     /// Replace the schema and drop stored values and callbacks.
     void reset(schema config_schema);
@@ -67,7 +77,7 @@ public:
     [[nodiscard]] bool                         contains(std::string_view param_id) const;
     [[nodiscard]] std::optional<config_source> source_of(std::string_view param_id) const;
 
-    template <typename ValueT>
+    template <config_value ValueT>
     [[nodiscard]] std::optional<ValueT> get_as(std::string_view param_id) const;
 
     /// Stored parameter ids in that category, in schema order.
