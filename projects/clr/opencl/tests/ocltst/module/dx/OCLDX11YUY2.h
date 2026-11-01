@@ -23,18 +23,13 @@ class OCLDX11YUY2 : public OCLDX11Common {
   static const unsigned int HEIGHT = 720;
 
   void testInterop();
-  void AllocateOpenCLImage();
-  bool CheckCLImage(cl_mem clImage);
   bool CheckCLImageY(cl_mem clImage);
   bool CheckCLImageUV(cl_mem clImage);
-  void CopyOpenCLImage(cl_mem clImageSrc);
-  void CompileKernel();
   bool formatSupported();
   void testFormat();
 
   size_t blockSizeX; /**< Work-group size in x-direction */
   size_t blockSizeY; /**< Work-group size in y-direction */
-  cl_mem clImage2DOut;
   DXGI_FORMAT dxFormat;
 };
 

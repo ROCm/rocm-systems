@@ -419,6 +419,7 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image,
   image.srd[9] = image.desc.format.channel_order;
   image.srd[10] = static_cast<uint32_t>(image.desc.width);
 
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -616,6 +617,7 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image) const {
   image.srd[9] = image.desc.format.channel_order;
   image.srd[10] = static_cast<uint32_t>(image.desc.width);
 
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -776,7 +778,16 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
       * operations.
       */
       bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
-      if (enable3DSwizzleMode)
+      /*
+       * The slice-alignment problem above only exists for TILED 3D swizzle
+       * modes, which is the only place a block depth exists to align to. A
+       * LINEAR surface has none, so the flag is meaningless there and only
+       * risks skewing the computed layout. (gfx11/gfx10 go further and fail
+       * outright, because they ask addrlib to pick a linear-only swizzle
+       * while this flag is set; gfx12 assigns ADDR3_LINEAR directly below and
+       * so avoids that particular failure, but the flag is still wrong.)
+       */
+      if (enable3DSwizzleMode || tileMode == Image::TileMode::LINEAR)
       {
         in.flags.view3dAs2dArray = 0;
       }

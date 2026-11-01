@@ -49,9 +49,13 @@ class ExternalBuffer final : public Buffer, public ExternalMemory {
   }
 
  public:
+  //! \p flags are the CL_MEM_* flags the caller passed to clCreateBufferWithProperties. They
+  //! have to reach the Buffer base: CL_MEM_FLAGS is answered from it, and the host
+  //! read/write/map paths enforce CL_MEM_HOST_NO_ACCESS and friends through getMemFlags().
   ExternalBuffer(Context& amdContext, size_t size_in_bytes, amd::Os::FileDesc handle,
-                 ExternalMemory::HandleType handle_type, const void* name = nullptr)
-      : Buffer(amdContext, 0, size_in_bytes), ExternalMemory(handle, name, handle_type) {
+                 ExternalMemory::HandleType handle_type, Memory::Flags flags = 0,
+                 const void* name = nullptr)
+      : Buffer(amdContext, flags, size_in_bytes), ExternalMemory(handle, name, handle_type) {
     setInteropObj(this);
   }
 

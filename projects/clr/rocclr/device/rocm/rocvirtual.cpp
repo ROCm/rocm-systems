@@ -6084,8 +6084,7 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
   std::scoped_lock lock(execution());
 
   // Unwrap the CLR-visible handle; null guard for holder/queue.
-  const auto* holder =
-      static_cast<const hsa_amd_external_semaphore_t*>(cmd.sem_ptr());
+  const auto* holder = static_cast<const ExternalSemaphore*>(cmd.sem_ptr());
   if (holder == nullptr || gpu_queue_ == nullptr) {
     cmd.setStatus(CL_INVALID_OPERATION);
     return;
@@ -6100,13 +6099,13 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
     dispatchBarrierPacket(kBarrierPacketHeader);
 
     hsa_status_t s =
-        hsa_amd_queue_signal_external_semaphore(gpu_queue_, *holder, cmd.fence());
+        hsa_amd_queue_signal_external_semaphore(gpu_queue_, holder->handle, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to signal external semaphore");
     }
   } else {
     hsa_status_t s =
-        hsa_amd_queue_wait_external_semaphore(gpu_queue_, *holder, cmd.fence());
+        hsa_amd_queue_wait_external_semaphore(gpu_queue_, holder->handle, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to wait on external semaphore");
     } else {

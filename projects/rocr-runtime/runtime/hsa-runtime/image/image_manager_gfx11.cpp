@@ -726,7 +726,17 @@ uint32_t ImageManagerGfx11::GetAddrlibSurfaceInfoNv(
 	       * operations.
 	       */
 	      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
-	      if (enable3DSwizzleMode)
+	      /*
+	       * The slice-alignment problem above only exists for TILED 3D
+	       * swizzle modes, which is the only place a block depth exists to
+	       * align to. A LINEAR surface has none, and asking addrlib for a
+	       * linear-only swizzle (every block forbidden, below) while also
+	       * requesting view3dAs2dArray makes Addr2GetPreferredSurfaceSetting
+	       * fail outright - which surfaced as a 3D Vulkan image import
+	       * failing with CL_MEM_OBJECT_ALLOCATION_FAILURE while the same
+	       * format imported fine as 1D or 2D.
+	       */
+	      if (enable3DSwizzleMode || tileMode == Image::TileMode::LINEAR)
 		      in.flags.view3dAs2dArray = 0;
 	      else
 		      in.flags.view3dAs2dArray = 1;

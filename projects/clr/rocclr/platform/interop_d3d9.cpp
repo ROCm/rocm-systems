@@ -192,25 +192,35 @@ void setObjDesc(amd::D3D9ObjDesc_t& objDesc, D3DSURFACE_DESC& resDesc, cl_uint p
   }
 }
 
+bool D3D9Object::isAdapterTypeSupported(cl_dx9_media_adapter_type_khr adapter_type) {
+  // CL_ADAPTER_DXVA_KHR test need a DXVA-HD capable device where IDXVAHD_Device::CreateVideoSurface
+  // hands back an ordinary IDirect3DSurface9 in D3DPOOL_DEFAULT.
+  return (adapter_type == CL_ADAPTER_D3D9EX_KHR) || (adapter_type == CL_ADAPTER_DXVA_KHR);
+}
+
 int D3D9Object::initD3D9Object(const Context& amdContext,
                                cl_dx9_media_adapter_type_khr adapter_type,
                                cl_dx9_surface_info_khr* cl_surf_info, cl_uint plane,
                                D3D9Object& obj) {
   ScopedLock sl(resLock_);
 
-  IDirect3DDevice9Ex* pDev9Ex = nullptr;
   cl_int errcode = CL_SUCCESS;
+
+  // Backstop only: clGetDeviceIDsFromDX9MediaAdapterKHR reports CL_DEVICE_NOT_FOUND for the
+  // unsupported adapter types, so an application that follows the spec never arrives here with
+  // one.
+  if (!isAdapterTypeSupported(adapter_type)) {
+    return CL_INVALID_DX9_MEDIA_ADAPTER_KHR;
+  }
 
   // Check if this ressource has already been used for interop
   IDirect3DSurface9* pD3D9res = cl_surf_info->resource;
   HANDLE shared_handle = cl_surf_info->shared_handle;
 
-  if ((adapter_type == CL_ADAPTER_D3D9_KHR) || (adapter_type == CL_ADAPTER_DXVA_KHR)) {
-    return CL_INVALID_DX9_MEDIA_ADAPTER_KHR;  // Not supported yet
-  }
-
   for (const auto& it : resources_) {
     if (it.first.surfInfo.resource == cl_surf_info->resource && it.first.surfPlane == plane) {
+      LogPrintfError("D3D9 interop: surface %p plane %u is already bound to a cl_mem",
+                     cl_surf_info->resource, plane);
       return CL_INVALID_D3D9_RESOURCE_KHR;
     }
   }
@@ -220,15 +230,21 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
 
   D3DSURFACE_DESC resDesc;
   if (D3D_OK != pD3D9res->GetDesc(&resDesc)) {
+    LogError("D3D9 interop: IDirect3DSurface9::GetDesc failed");
     return CL_INVALID_D3D9_RESOURCE_KHR;
   }
 
-  hr = pD3D9res->GetContainer(IID_IDirect3DDevice9Ex, (void**)&pDev9Ex);
-  if (hr == D3D_OK) {
-    pDev9Ex->CreateQuery(desc, &(obj.pQuery_));
-  } else {
-    return CL_INVALID_D3D9_RESOURCE_KHR;  // d3d9ex should be supported
+  // GetDevice() rather than GetContainer(): a surface that is a level of a texture
+  // reports the texture as its container, whereas the owning device is always
+  // reachable. The base IDirect3DDevice9 is enough here - CreateQuery and
+  // CreateOffscreenPlainSurface both live on it - so plain D3D9 and DXVA adapters
+  // work alongside D3D9Ex.
+  IDirect3DDevice9* pDev9 = nullptr;
+  if (D3D_OK != pD3D9res->GetDevice(&pDev9) || nullptr == pDev9) {
+    LogError("D3D9 interop: IDirect3DSurface9::GetDevice failed");
+    return CL_INVALID_D3D9_RESOURCE_KHR;
   }
+  pDev9->CreateQuery(desc, &(obj.pQuery_));
 
   obj.handleShared_ = shared_handle;
   obj.surfPlane_ = plane;
@@ -239,9 +255,26 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
   setObjDesc(obj.objDescOrig_, resDesc, plane);
   obj.objDesc_ = obj.objDescOrig_;
 
+  // A plain offscreen surface cannot be described by CLQueryResource whatever its origin, so a
+  // shared handle the application supplies for one is not enough on its own. For non-planar
+  // formats, stage into a texture in that case too - unless what we were handed is already a
+  // texture level, which the driver does describe and which therefore needs no copy.
+  bool stageIntoTexture = false;
+  if (shared_handle != nullptr && resDesc.Format != D3DFMT_NV_12 &&
+      resDesc.Format != D3DFMT_P010 && resDesc.Format != D3DFMT_YV_12) {
+    IDirect3DTexture9* container = nullptr;
+    if (FAILED(pD3D9res->GetContainer(IID_IDirect3DTexture9,
+                                      reinterpret_cast<void**>(&container))) ||
+        container == nullptr) {
+      stageIntoTexture = true;
+    } else {
+      container->Release();
+    }
+  }
+
   // shared handle cases if the shared_handle is nullptr
   // first check if the format is NV12 or YV12, which we need special handling
-  if (nullptr == shared_handle) {
+  if (nullptr == shared_handle || stageIntoTexture) {
     bool found = false;
     for (const auto& it : resources_) {
       if (it.first.surfInfo.resource == cl_surf_info->resource && it.first.surfPlane != plane) {
@@ -255,10 +288,47 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
     }
     if (!found) {
       obj.handleShared_ = 0;
-      hr = pDev9Ex->CreateOffscreenPlainSurface(resDesc.Width, resDesc.Height, resDesc.Format,
+      // Stage into a texture, mirroring the D3D11 backend's CreateTexture2D
+      // (interop_d3d11.cpp:252). The UMD's CLQueryResource only describes textures and YUV
+      // surfaces - a plain offscreen surface is refused as "neither texture nor YUV" - so
+      // staging into a texture level is what makes an SRD available for the non-YUV formats.
+      // Planar YUV keeps the offscreen-plain path, where the query already works, and any
+      // format that cannot back a render target falls back to it too.
+      const bool planarYuv = (resDesc.Format == D3DFMT_NV_12) ||
+                             (resDesc.Format == D3DFMT_P010) || (resDesc.Format == D3DFMT_YV_12);
+      hr = D3DERR_INVALIDCALL;
+      if (!planarYuv) {
+        // D3DUSAGE_RENDERTARGET first, because StretchRect needs a render-target destination.
+        // Formats that cannot be render targets (A8L8 on this driver) still make usable
+        // textures, so try plain usage before falling back to an unqueryable surface.
+        for (DWORD usage : {static_cast<DWORD>(D3DUSAGE_RENDERTARGET), static_cast<DWORD>(0)}) {
+          IDirect3DTexture9* stagingTex = nullptr;
+          obj.handleShared_ = 0;
+          hr = pDev9->CreateTexture(resDesc.Width, resDesc.Height, 1, usage, resDesc.Format,
+                                    D3DPOOL_DEFAULT, &stagingTex, &obj.handleShared_);
+          if (SUCCEEDED(hr) && stagingTex != nullptr) {
+            hr = stagingTex->GetSurfaceLevel(0, &obj.pD3D9Res_);
+            // A child surface keeps its container alive, so this reference can go now.
+            stagingTex->Release();
+          }
+          if (SUCCEEDED(hr)) {
+            break;
+          }
+          obj.handleShared_ = 0;
+          obj.pD3D9Res_ = nullptr;
+        }
+      }
+
+      if (FAILED(hr)) {
+        hr = pDev9->CreateOffscreenPlainSurface(resDesc.Width, resDesc.Height, resDesc.Format,
                                                 resDesc.Pool, &obj.pD3D9Res_, &obj.handleShared_);
+      }
 
       if (D3D_OK != hr) {
+        LogPrintfError(
+            "D3D9 interop: staging CreateOffscreenPlainSurface(%ux%u fmt=0x%x pool=%u) failed: "
+            "0x%xh",
+            resDesc.Width, resDesc.Height, resDesc.Format, resDesc.Pool, hr);
         errcode = CL_INVALID_D3D9_RESOURCE_KHR;
       }
     }
@@ -273,8 +343,8 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
     obj.pD3D9Res_->AddRef();
   }
 
-  // Release the Ex interface
-  if (pDev9Ex) pDev9Ex->Release();
+  // Release the device interface obtained from the surface
+  if (pDev9) pDev9->Release();
 
   // Check for CL format compatibilty
   if (obj.objDesc_.resType_ == D3DRTYPE_SURFACE) {
@@ -492,31 +562,44 @@ bool D3D9Object::copyOrigToShared() {
   // Don't copy if there is no orig
   if (nullptr == getD3D9ResOrig()) return true;
 
-  IDirect3DDevice9Ex* d3dDev;
+  IDirect3DDevice9* d3dDev = nullptr;
   HRESULT hr;
   ScopedLock sl(getResLock());
 
   IDirect3DSurface9* srcSurf = getD3D9ResOrig();
   IDirect3DSurface9* dstSurf = getD3D9Resource();
 
-  hr = getD3D9Resource()->GetContainer(IID_IDirect3DDevice9Ex, (void**)&d3dDev);
+  hr = getD3D9Resource()->GetDevice(&d3dDev);
   if (hr != D3D_OK || !d3dDev) {
     LogError("\nCannot get D3D9 device from D3D9 surface\n");
     return false;
   }
 
   hr = d3dDev->StretchRect(srcSurf, nullptr, dstSurf, nullptr, D3DTEXF_NONE);
+  d3dDev->Release();
   if (hr != D3D_OK) {
     LogError("\ncopy original surface to shared surface failed\n");
     return false;
   }
-  // Flush D3D queues and make sure D3D stuff is finished
+  // Flush D3D queues and make sure D3D stuff is finished.
+  //
+  // GetData returns S_FALSE while the query is still pending and leaves the output buffer
+  // untouched, so only its return value can end this wait. The previous condition also tested an
+  // uninitialised `data`: whenever that stack slot happened to hold a non-zero value the && went
+  // false on the first iteration and the wait returned with the StretchRect still in flight,
+  // handing OpenCL a surface whose copy had not landed. That is an intermittent
+  // wrong-data failure, not a hang.
   pQuery_->Issue(D3DISSUE_END);
-  BOOL data;
-  while ((D3D_OK != pQuery_->GetData(&data, sizeof(BOOL), D3DGETDATA_FLUSH)) && (data != TRUE)) {
+  BOOL data = FALSE;
+  HRESULT queryHr;
+  while (S_FALSE == (queryHr = pQuery_->GetData(&data, sizeof(BOOL), D3DGETDATA_FLUSH))) {
+  }
+  if (FAILED(queryHr)) {
+    // A lost device ends the wait here rather than spinning on an error forever.
+    LogPrintfError("D3D9 interop: IDirect3DQuery9::GetData failed: 0x%xh", queryHr);
+    return false;
   }
 
-  if (d3dDev) d3dDev->Release();
   return true;
 }
 
@@ -524,23 +607,23 @@ bool D3D9Object::copySharedToOrig() {
   // Don't copy if there is no orig
   if (nullptr == getD3D9ResOrig()) return true;
 
-  IDirect3DDevice9Ex* d3dDev;
+  IDirect3DDevice9* d3dDev = nullptr;
   HRESULT hr;
   ScopedLock sl(getResLock());
 
-  hr = getD3D9Resource()->GetContainer(IID_IDirect3DDevice9Ex, (void**)&d3dDev);
+  hr = getD3D9Resource()->GetDevice(&d3dDev);
   if (hr != D3D_OK || !d3dDev) {
     LogError("\nCannot get D3D9 device from D3D9 surface\n");
     return false;
   }
 
   hr = d3dDev->StretchRect(getD3D9Resource(), nullptr, getD3D9ResOrig(), nullptr, D3DTEXF_NONE);
+  d3dDev->Release();
   if (hr != D3D_OK) {
     LogError("\ncopy shared surface to original surface failed\n");
     return false;
   }
 
-  if (d3dDev) d3dDev->Release();
   return true;
 }
 

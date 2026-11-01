@@ -26,6 +26,10 @@
 
 #include "vdi_common.hpp"
 
+// For the CL_EXTERNAL_MEMORY_HANDLE_* / CL_SEMAPHORE_HANDLE_* tokens used to fill the
+// interop capability lists; the CL/cl_d3d10.h group below only pulls in CL/cl.h.
+#include "CL/cl_ext.h"
+
 #ifdef _WIN32
 #include <d3d9.h>
 #include <d3d10_1.h>
@@ -438,7 +442,7 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.image3DMaxHeight_ = std::min(2 * Ki, maxTextureSize);
     info_.image3DMaxDepth_ = std::min(2 * Ki, maxTextureSize);
 
-    info_.imagePitchAlignment_ = 256;        // PAL uses LINEAR_ALIGNED
+    info_.imagePitchAlignment_ = (palProp.gfxTriple >= Pal::IpLevel(12, 0)) ? 128 : 256;
     info_.imageBaseAddressAlignment_ = 256;  // XXX: 256 byte base address alignment for now
 
     info_.bufferFromImageSupport_ = true;
@@ -652,6 +656,27 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
 #else
   info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
 #endif
+
+  // cl_khr_external_memory / cl_khr_external_semaphore capability lists.
+  if (settings().checkExtension(ClKhrExternalMemory)) {
+    info_.externalMemoryImportHandleTypes_ = {CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KHR,
+                                              CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KMT_KHR};
+    info_.externalMemoryImportAssumeLinearImagesHandleTypes_ =
+        info_.externalMemoryImportHandleTypes_;
+  }
+  if (settings().checkExtension(ClKhrExternalSemaphore)) {
+    // Both flavours, unlike the ROCr path. importExtSemaphore() below hands the handle
+    // to Pal::IDevice::OpenExternalSharedQueueSemaphore() with flags.sharedViaNtHandle
+    // set only for the NT types, so a KMT handle opens as a non-NT shared semaphore
+    // instead of being rejected the way hsaKmtImportExternalSemaphore() rejects it.
+    info_.semaphoreImportHandleTypes_ = {CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KHR,
+                                         CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KMT_KHR};
+
+    if (palProp.maxSemaphoreCount >= 1) {
+      info_.semaphoreExportHandleTypes_ = {CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KHR,
+                                           CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KMT_KHR};
+    }
+  }
 }
 
 Device::XferBuffers::~XferBuffers() {
@@ -1750,11 +1775,17 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
       params.owner_ = &owner;
       params.resource_ = buffer;
       params.memory_ = buffer;
-      // Create memory object
-      result = gpuImage->create(amd::IS_HIP && owner.parent()->isInterop()
-                                    ? Resource::ImageExternalBuffer
-                                    : Resource::ImageBuffer,
-                                &params);
+      // ImageExternalBuffer rebuilds the SRD assuming the parent is an external-memory import,
+      // so it must be keyed on exactly that and not on isInterop(). In OpenCL a child memory
+      // object inherits interopObj_ from its parent, so isInterop() is also true for an image
+      // over a GL or D3D10/11 shared buffer - those are linear and have to keep using
+      // Resource::ImageBuffer.
+      amd::InteropObject* parentInterop = owner.parent()->getInteropObj();
+      const bool externalMemoryParent =
+          (parentInterop != nullptr) && (parentInterop->asExternalMemory() != nullptr);
+      // Create memory object.
+      result = gpuImage->create(
+          externalMemoryParent ? Resource::ImageExternalBuffer : Resource::ImageBuffer, &params);
     } else if (directAccess && (owner.getMemFlags() & CL_MEM_ALLOC_HOST_PTR)) {
       Resource::PinnedParams params;
       params.owner_ = &owner;
@@ -2950,7 +2981,7 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
                                 amd::ExternalSemaphoreHandleType sem_handle_type) {
   Pal::ExternalQueueSemaphoreOpenInfo palOpenInfo = {};
   palOpenInfo.externalSemaphore = handle;
-  palOpenInfo.flags.crossProcess = false;
+  palOpenInfo.flags.crossProcess = true;  // should work in inter/intro-process scenarios
   palOpenInfo.flags.isReference = true;
   palOpenInfo.flags.timeline = palOpenInfo.flags.timeline =
       (sem_handle_type == amd::ExternalSemaphoreHandleType::TimelineSemaphoreWin32 ||
@@ -2971,6 +3002,70 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
     amd::Os::alignedFree(mem);
     return false;
   }
+  return true;
+}
+
+// ================================================================================================
+bool Device::createExtSemaphore(void** extSemaphore,
+                                amd::ExternalSemaphoreHandleType sem_handle_type, bool timeline) {
+  Pal::QueueSemaphoreCreateInfo palCreateInfo = {};
+  // shareable + sharedViaNtHandle is what makes ExportExternalHandle() able to create an NT
+  // handle later. maxCount == 1 is how PAL spells "binary semaphore" (palQueueSemaphore.h).
+  palCreateInfo.flags.shareable = 1;
+  palCreateInfo.flags.sharedViaNtHandle =
+      (sem_handle_type == amd::ExternalSemaphoreHandleType::OpaqueWin32 ||
+       sem_handle_type == amd::ExternalSemaphoreHandleType::D3D12Fence);
+  palCreateInfo.flags.timeline = timeline ? 1 : 0;
+  palCreateInfo.maxCount = timeline ? 0 : 1;
+  palCreateInfo.initialCount = 0;
+
+  Pal::Result result;
+  // NOTE: GetQueueSemaphoreSize, not GetExternalSharedQueueSemaphoreSize - the latter sizes an
+  // opened (imported) semaphore and under-allocates the placement buffer for a created one.
+  size_t semaphoreSize = iDev()->GetQueueSemaphoreSize(palCreateInfo, &result);
+  if (result != Pal::Result::Success) {
+    return false;
+  }
+  void* mem = amd::Os::alignedMalloc(semaphoreSize, 16);
+  if (mem == nullptr) {
+    return false;
+  }
+  result = iDev()->CreateQueueSemaphore(palCreateInfo, mem,
+                                        reinterpret_cast<Pal::IQueueSemaphore**>(extSemaphore));
+  if (result != Pal::Result::Success) {
+    amd::Os::alignedFree(mem);
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
+bool Device::exportExtSemaphore(amd::Os::FileDesc* handle, void* extSemaphore,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (handle == nullptr || extSemaphore == nullptr) {
+    return false;
+  }
+  Pal::IQueueSemaphore* sem = reinterpret_cast<Pal::IQueueSemaphore*>(extSemaphore);
+
+  Pal::QueueSemaphoreExportInfo palExportInfo = {};
+  // isReference: hand out a handle referencing the same kernel object rather than a copy, so
+  // signals issued through this cl_semaphore are observed by whoever imports the handle.
+  palExportInfo.flags.isReference = 1;
+
+  // Access rights apply to NT handles only. Without them the handle is created but unusable and
+  // the importer (Vulkan) rejects it. Mirrors Buffer::ExportHandle() in palmemory.cpp.
+  if (sem_handle_type == amd::ExternalSemaphoreHandleType::OpaqueWin32 ||
+      sem_handle_type == amd::ExternalSemaphoreHandleType::D3D12Fence) {
+    palExportInfo.accessFlags = GENERIC_READ | GENERIC_WRITE;
+  }
+
+  Pal::OsExternalHandle osHandle = sem->ExportExternalHandle(palExportInfo);
+  if (osHandle == 0) {
+    return false;
+  }
+  // Ownership transfers to the caller; the runtime never closes it. See exportExtSemaphore()'s
+  // declaration in device.hpp for why.
+  *handle = reinterpret_cast<amd::Os::FileDesc>(osHandle);
   return true;
 }
 

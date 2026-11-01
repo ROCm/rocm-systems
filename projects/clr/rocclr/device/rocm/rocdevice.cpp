@@ -30,8 +30,10 @@
 #include "platform/sampler.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -1093,6 +1095,41 @@ bool Device::populateOCLDeviceConstants() {
                          unique_id)) {
     std::memcpy(info_.cuid_, unique_id, sizeof(info_.cuid_));
   }
+
+  if (settings().checkExtension(ClKhrExternalMemory)) {
+#if defined(_WIN32)
+    info_.externalMemoryImportHandleTypes_ = {CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KHR,
+                                              CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KMT_KHR};
+#else
+    info_.externalMemoryImportHandleTypes_ = {CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_FD_KHR};
+#endif
+    // Imported images of these types are assumed linear. That is a promise to the importer,
+    // and it is the only layout this backend reconstructs reliably: the WDDM metadata path
+    // (image_manager_gfx11.cpp) rebuilds an SRD only when the surface's swizzle mode is 0.
+    // An empty list here makes the CTS skip every image test rather than run them.
+    info_.externalMemoryImportAssumeLinearImagesHandleTypes_ =
+        info_.externalMemoryImportHandleTypes_;
+  }
+  if (settings().checkExtension(ClKhrExternalSemaphore)) {
+#if defined(_WIN32)
+    // NT handles only. MapHandleType() also accepts OpaqueWin32Kmt, but the Windows
+    // thunk behind hsaKmtImportExternalSemaphore rejects KMT semaphore handles, so
+    // advertising that type would hand clients an import that always fails. The
+    // memory list above keeps its KMT entry: interopMapBuffer does support KMT there
+    // (HSA_INTEROP_MAP_FLAG_KMT_HANDLE).
+    info_.semaphoreImportHandleTypes_ = {CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KHR,
+                                         CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KMT_KHR};
+    // Both flavours, and the CTS needs both: with NT alone it clears the NT
+    // subtest and then fails "missing support for handle type 8279" (= 0x2057,
+    // KMT). Import stays NT-only above; that asymmetry is real, because the
+    // thunk behind hsaKmtImportExternalSemaphore rejects KMT handles on open.
+    info_.semaphoreExportHandleTypes_ = {CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KHR,
+                                         CL_SEMAPHORE_HANDLE_OPAQUE_WIN32_KMT_KHR};
+#else
+    info_.semaphoreImportHandleTypes_ = {CL_SEMAPHORE_HANDLE_OPAQUE_FD_KHR};
+#endif
+  }
+
   hsa_luid_t localUID = {0};
   if (HSA_STATUS_SUCCESS ==
       Hsa::agent_get_info(bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
@@ -1643,7 +1680,7 @@ bool Device::populateOCLDeviceConstants() {
   // extension.  They must be set unconditionally so that hipMallocPitch /
   // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
   // off.  The PAL backend already sets them unconditionally.
-  info_.imagePitchAlignment_ = 256;
+  info_.imagePitchAlignment_ = (isa().versionMajor() >= 12) ? 128 : 256;
   info_.imageBaseAddressAlignment_ = 256;
   info_.bufferFromImageSupport_ = false;
 
@@ -2049,6 +2086,34 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
       success = false;
     }
   }
+
+  // Handle D3D9 adapter binding. The three cl_dx9_media_adapter_type_khr values occupy
+  // separate context slots and carry unrelated object types, so each is bound on its own.
+  constexpr struct {
+    amd::Context::Flags flag;
+    amd::Context::DeviceFlagIdx idx;
+    D3D9Interop::AdapterKind kind;
+  } kD3D9Slots[] = {
+      {amd::Context::Flags::D3D9DeviceKhr, amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx,
+       D3D9Interop::AdapterKind::D3D9},
+      {amd::Context::Flags::D3D9DeviceEXKhr, amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx,
+       D3D9Interop::AdapterKind::D3D9Ex},
+      {amd::Context::Flags::D3D9DeviceVAKhr, amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx,
+       D3D9Interop::AdapterKind::DXVA},
+  };
+
+  for (const auto& slot : kD3D9Slots) {
+    if (!(flags & slot.flag)) {
+      continue;
+    }
+    if (!D3D9Interop::associateD3D9Device(this, gfxDevice[slot.idx], slot.kind, gfxContext,
+                                          validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D9Interop::associateD3D9Device()");
+      }
+      success = false;
+    }
+  }
 #endif  // _WIN32
 
   // Handle GL device binding (existing code)
@@ -2079,6 +2144,13 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
+  }
+
+  // Handle D3D9 cleanup. The cache is keyed by the surfaces' owning devices rather than
+  // by context slot, so one drain covers all three adapter types.
+  if (flags & (amd::Context::Flags::D3D9DeviceKhr | amd::Context::Flags::D3D9DeviceEXKhr |
+               amd::Context::Flags::D3D9DeviceVAKhr)) {
+    D3D9Interop::dissociateD3D9Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
@@ -4826,23 +4898,110 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
   // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
   // preserves the syncobj identity that submitExternalSemaphoreCmd
   // will consume once the queue signal/wait submission path lands.
-  auto* holder = new hsa_amd_external_semaphore_t{};
+  auto* holder = new ExternalSemaphore{};
 
-  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, &holder->handle);
   if (s != HSA_STATUS_SUCCESS) {
     delete holder;
     return false;
   }
 
+  // Imported: the OS handle belongs to whoever gave it to us, so osHandle
+  // stays invalid and DestroyExtSemaphore will not close it.
   *extSemaphore = holder;
+  return true;
+}
+
+// ================================================================================================
+bool Device::createExtSemaphore(void** extSemaphore,
+                                amd::ExternalSemaphoreHandleType sem_handle_type, bool timeline) {
+  if (extSemaphore == nullptr) return false;
+
+  // NT and KMT are both exportable, by different KMD mechanisms. The CTS
+  // requires BOTH: advertising NT alone gets as far as the NT subtest and then
+  // fails with "missing support for handle type 8279" (0x2057 = KMT).
+  const bool nt = (sem_handle_type == amd::ExternalSemaphoreHandleType::OpaqueWin32);
+  if (!nt && sem_handle_type != amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt) {
+    return false;
+  }
+
+#if !IS_WINDOWS
+  return false;
+#else
+  // The KMD object type turns on this: a timeline semaphore is a monitored
+  // fence, a binary one a legacy sync object. Vulkan rejects the wrong flavour
+  // at import ("Failed to import semaphore in Vulkan"), so it has to be
+  // decided here, at creation, not at signal time.
+  hsa_amd_external_semaphore_create_descriptor_t desc = {};
+  desc.type = nt ? HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32
+                 : HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
+  desc.initial_value = 0;
+  desc.timeline = timeline ? 1 : 0;
+
+  auto* holder = new ExternalSemaphore{};
+  void* osHandle = nullptr;
+  hsa_status_t s = hsa_amd_external_semaphore_handle_create(bkendDevice_, &desc, &holder->handle,
+                                                            &osHandle);
+  if (s != HSA_STATUS_SUCCESS) {
+    delete holder;
+    return false;
+  }
+
+  holder->osHandle = reinterpret_cast<amd::Os::FileDesc>(osHandle);
+  holder->ntHandle = nt;
+  *extSemaphore = holder;
+#endif
+  return true;
+}
+
+// ================================================================================================
+bool Device::exportExtSemaphore(amd::Os::FileDesc* handle, void* extSemaphore,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (handle == nullptr || extSemaphore == nullptr) return false;
+  // Must accept the same pair createExtSemaphore() does; the holder already
+  // records which flavour was actually created.
+  if (sem_handle_type != amd::ExternalSemaphoreHandleType::OpaqueWin32 &&
+      sem_handle_type != amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt) {
+    return false;
+  }
+
+  auto* holder = static_cast<ExternalSemaphore*>(extSemaphore);
+  if (holder->osHandle == amd::Os::FDescInit()) {
+    // An imported semaphore has nothing of ours to hand out.
+    return false;
+  }
+
+  if (!holder->ntHandle) {
+    // A global KMT handle is not an NT handle: DuplicateHandle would fail on
+    // it, and it needs no per-caller copy because it is already global.
+    *handle = holder->osHandle;
+    return true;
+  }
+
+  // NT: hand out a DUPLICATE, not our own handle. Ownership transfers to the
+  // caller (see exportExtSemaphore()'s declaration in device.hpp), and
+  // clGetSemaphoreHandleForTypeKHR may be called more than once.
+  amd::Os::FileDesc dup = amd::Os::DupFileHandle(holder->osHandle);
+  if (dup == amd::Os::FDescInit()) {
+    return false;
+  }
+
+  *handle = dup;
   return true;
 }
 
 // ================================================================================================
 void Device::DestroyExtSemaphore(void* extSemaphore) {
   if (extSemaphore == nullptr) return;
-  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
-  hsa_amd_external_semaphore_handle_close(*holder);
+  auto* holder = static_cast<ExternalSemaphore*>(extSemaphore);
+  hsa_amd_external_semaphore_handle_close(holder->handle);
+  // Only a created semaphore with a real NT handle owns something closeable.
+  // Duplicates handed out by exportExtSemaphore() belong to their receiver, so
+  // closing ours does not invalidate theirs. A global KMT handle is not an NT
+  // handle and must never reach CloseHandle.
+  if (holder->ntHandle && holder->osHandle != amd::Os::FDescInit()) {
+    amd::Os::CloseFileHandle(holder->osHandle);
+  }
   delete holder;
 }
 

@@ -1434,6 +1434,15 @@ hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_create(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_create_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem,
+    void **out_os_handle) {
+  return amdExtTable->hsa_amd_external_semaphore_handle_create_fn(agent, desc, out_sem, out_os_handle);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
     hsa_amd_external_semaphore_t sem) {
   return amdExtTable->hsa_amd_external_semaphore_handle_close_fn(sem);

@@ -937,17 +937,27 @@ bool Resource::CreateInterop(CreateParams* params) {
             case 0:
               break;
             case 1:
-              // Y - plane size to the offset
-              // YV12 format. U is 4 times smaller plane than Y
-              viewOffset = 2 * imgCreateInfo.rowPitch * desc().height_;
-              imgCreateInfo.rowPitch >>= 1;
+            case 2: {
+              const Pal::gpusize lumaPitch = imgCreateInfo.rowPitch;
+              const Pal::gpusize lumaSize = 2 * lumaPitch * desc().height_;
+              const Pal::gpusize memSize = (iMem() != nullptr) ? iMem()->Desc().size : 0;
+              Pal::gpusize chromaPlaneSize = lumaPitch * desc().height_;
+              if ((desc().height_ != 0) && (memSize > lumaSize) && (((memSize - lumaSize) % 2) == 0)) {
+                const Pal::gpusize candidate = (memSize - lumaSize) / 2;
+                const Pal::gpusize candidatePitch = candidate / desc().height_;
+                if ((candidatePitch != 0) && (candidatePitch <= lumaPitch) &&
+                    ((candidate % desc().height_) == 0)) {
+                  chromaPlaneSize = candidate;
+                }
+              }
+
+              // Y plane, plus the V plane as well when this is plane 2.
+              viewOffset = lumaSize + ((layer == 2) ? chromaPlaneSize : 0);
+              if (desc().height_ != 0) {
+                imgCreateInfo.rowPitch = chromaPlaneSize / desc().height_;
+              }
               break;
-            case 2:
-              // Y + U plane sizes to the offest.
-              // U plane is 4 times smaller than Y and U == V
-              viewOffset = 5 * imgCreateInfo.rowPitch * desc().height_ / 2;
-              imgCreateInfo.rowPitch >>= 1;
-              break;
+            }
             default:
               LogError("Unknown Interop View Type");
               return false;
