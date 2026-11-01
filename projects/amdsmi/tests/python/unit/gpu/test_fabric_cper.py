@@ -17,6 +17,8 @@ import types
 import unittest
 from unittest.mock import patch
 
+from common.common import log_api_call
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 _PY_INTERFACE = os.path.join(_REPO_ROOT, "py-interface")
@@ -109,8 +111,13 @@ class TestFabricCperInterface(unittest.TestCase):
 
     def test_invalid_handle_type(self):
         """Test exception on invalid processor_handle type"""
-        with self.assertRaises(amdsmi_exception.AmdSmiParameterException):
+        with self.assertRaises(amdsmi_exception.AmdSmiParameterException) as raised:
             amdsmi_interface.amdsmi_get_fabric_cper_entries("not_a_handle", 0xFFFF)
+        log_api_call(
+            '\t### amdsmi_get_fabric_cper_entries("not_a_handle", 0xFFFF):',
+            raised.exception,
+            raises=amdsmi_exception.AmdSmiParameterException,
+        )
 
     @_patch_fabric_symbol()
     def test_not_supported_error(self, mock_fabric_cper):
@@ -121,6 +128,11 @@ class TestFabricCperInterface(unittest.TestCase):
             amdsmi_interface.amdsmi_get_fabric_cper_entries(
                 self.processor_handle, severity_mask=0xFFFF
             )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF):",
+            context.exception,
+            accept=amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+        )
 
         self.assertEqual(
             context.exception.get_error_code(), amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
@@ -140,6 +152,9 @@ class TestFabricCperInterface(unittest.TestCase):
 
         entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
+        )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF):"
         )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
@@ -188,6 +203,9 @@ class TestFabricCperInterface(unittest.TestCase):
         entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
         )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF):"
+        )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
         self.assertEqual(len(entries), 1)
@@ -217,6 +235,9 @@ class TestFabricCperInterface(unittest.TestCase):
         entries, new_cursor, cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF, cursor=0
         )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF, cursor=0):"
+        )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA)
         self.assertEqual(new_cursor, 100)
@@ -239,6 +260,9 @@ class TestFabricCperInterface(unittest.TestCase):
         custom_buffer_size = 2 * 1048576
         _entries, _new_cursor, _cper_data, status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size
+        )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF, buffer_size=custom_buffer_size):"
         )
 
         self.assertEqual(status, amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
@@ -272,6 +296,9 @@ class TestFabricCperInterface(unittest.TestCase):
 
         entries, _new_cursor, _cper_data, _status = amdsmi_interface.amdsmi_get_fabric_cper_entries(
             self.processor_handle, severity_mask=0xFFFF
+        )
+        log_api_call(
+            "\t### amdsmi_get_fabric_cper_entries(self.processor_handle, severity_mask=0xFFFF):"
         )
 
         self.assertEqual(len(entries), 1)

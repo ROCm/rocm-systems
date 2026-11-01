@@ -36,12 +36,11 @@ class TestSystemTopology(unittest.TestCase):
             self.skipTest("No GPUs available for a self-pair topology query")
 
         gpu = self.common.processors[0]
-        try:
+        msg = "\t### amdsmi_get_link_topology(gpu=0, gpu=0):"
+        topology = None
+        # A self pair needs no inter-device query, so it succeeds wherever the API exists.
+        with self.common.expect_status(msg, common.PASS):
             topology = amdsmi.amdsmi_get_link_topology(gpu, gpu)
-        except amdsmi.AmdSmiLibraryException as error:
-            if error.get_error_code() == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
-                self.skipTest("Unified link topology is not supported")
-            raise
 
         self.assertEqual(
             topology,
@@ -62,12 +61,13 @@ class TestSystemTopology(unittest.TestCase):
             self.skipTest("At least two GPUs are required for a peer topology query")
 
         src, dst = self.common.processors[:2]
-        try:
+        msg = "\t### amdsmi_get_link_topology(gpu=0, gpu=1):"
+        topology = None
+        accept = [common.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        with self.common.expect_status(msg, accept):
             topology = amdsmi.amdsmi_get_link_topology(src, dst)
-        except amdsmi.AmdSmiLibraryException as error:
-            if error.get_error_code() == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
-                self.skipTest("Unified link topology is not supported for this pair")
-            raise
+        if topology is None:
+            return  # topology not exposed for this pair: the status above is the outcome
 
         self.assertEqual(
             set(topology), {"weight", "link_status", "link_type", "num_hops", "fb_sharing"}
@@ -266,7 +266,7 @@ class TestSystemTopology(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            msg = f"\t### amdsmi.amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_good_counter_types}):"
+            msg = f"\t### amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_good_counter_types}):"
             try:
                 util_count = amdsmi.amdsmi_get_utilization_count(gpu, util_good_counter_types)
                 self.common.print(msg, util_count)
@@ -275,19 +275,11 @@ class TestSystemTopology(unittest.TestCase):
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
 
-            # With invalid entry
-            msg = f"\t### amdsmi.amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_bad_counter_types}):"
-            try:
-                util_count = amdsmi.amdsmi_get_utilization_count(gpu, util_bad_counter_types)
-                self.common.print(msg, util_count)
-                self.fail(
-                    f"{msg} Expected an exception for invalid counter type list "
-                    f"(mixed AmdSmiTemperatureMetric in util_bad_counter_types), "
-                    f"but call succeeded with util_count {util_count}"
-                )
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.ANY_FAIL):
-                    self.raise_exception = e
+            # With invalid entry: the wrapper rejects a non-counter type before any C call
+            msg = f"\t### amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_bad_counter_types}):"
+            with self.assertRaises(amdsmi.AmdSmiParameterException) as raised:
+                amdsmi.amdsmi_get_utilization_count(gpu, util_bad_counter_types)
+            common.log_api_call(msg, raised.exception, raises=amdsmi.AmdSmiParameterException)
 
         if self.raise_exception:
             raise self.raise_exception
