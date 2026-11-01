@@ -5,6 +5,7 @@
 #include "parser/parse_result.hpp"
 #include "parser/schema.hpp"
 #include "parser/schema_validator.hpp"
+#include "parser/value_text.hpp"
 
 #include <fmt/format.h>
 
@@ -47,9 +48,35 @@ limits_for(const schema_param& param)
 }
 
 [[nodiscard]] bool
-blocks_value(std::string_view token)
+starts_option(std::string_view token)
 {
     return token.size() >= k_min_option_length && token.front() == '-';
+}
+
+[[nodiscard]] bool
+is_signed_number(const schema_param& param, std::string_view token)
+{
+    if(param.type == param_type::integer)
+    {
+        return parse_integer(token).has_value();
+    }
+    if(param.type == param_type::number)
+    {
+        return parse_number(token).has_value();
+    }
+    return false;
+}
+
+[[nodiscard]] bool
+blocks_value(const schema_param& param, std::string_view token)
+{
+    return starts_option(token) && !is_signed_number(param, token);
+}
+
+[[nodiscard]] bool
+is_flag_word(std::string_view token)
+{
+    return !starts_option(token) && parse_boolean(token).has_value();
 }
 
 std::string
@@ -107,6 +134,11 @@ private:
             finish(m_result.command, m_index + 1);
             return;
         }
+        if(!starts_option(token))
+        {
+            finish(m_result.command, m_index);
+            return;
+        }
         if(!consume_option(token))
         {
             reject_unknown(token);
@@ -134,7 +166,7 @@ private:
 
     [[nodiscard]] bool consume_option(std::string_view token)
     {
-        if(!blocks_value(token))
+        if(!starts_option(token))
         {
             return false;
         }
@@ -156,7 +188,7 @@ private:
     [[nodiscard]] bool consume_counted(const schema_param& param)
     {
         const auto limit  = limits_for(param);
-        const auto tokens = take_tokens(limit.maximum);
+        const auto tokens = take_tokens(param, limit.maximum);
         if(tokens.size() < limit.minimum)
         {
             report_missing(param);
@@ -164,7 +196,10 @@ private:
         }
         if(tokens.empty())
         {
-            store_target(param, param.id, "true");
+            if(!store_bare_flag(param) && limit.minimum > 0)
+            {
+                report_missing(param);
+            }
             return true;
         }
         const auto binds = param.arg.value_or(arg_spec{}).binds;
@@ -178,13 +213,33 @@ private:
         return true;
     }
 
-    [[nodiscard]] std::vector<std::string> take_tokens(std::size_t maximum)
+    [[nodiscard]] bool store_bare_flag(const schema_param& param)
+    {
+        const auto form = param.arg.value_or(arg_spec{}).form;
+        if(form != arg_form::flag)
+        {
+            return false;
+        }
+        const auto next = m_index + 1;
+        if(limits_for(param).maximum == 0 && next < m_args.size() &&
+           is_flag_word(m_args[next]))
+        {
+            m_index = next;
+            store_target(param, param.id, m_args[next]);
+            return true;
+        }
+        store_target(param, param.id, "true");
+        return true;
+    }
+
+    [[nodiscard]] std::vector<std::string> take_tokens(const schema_param& param,
+                                                       std::size_t         maximum)
     {
         std::vector<std::string> tokens;
         while(tokens.size() < maximum)
         {
             const auto next = m_index + 1;
-            if(next >= m_args.size() || blocks_value(m_args[next]))
+            if(next >= m_args.size() || blocks_value(param, m_args[next]))
             {
                 break;
             }

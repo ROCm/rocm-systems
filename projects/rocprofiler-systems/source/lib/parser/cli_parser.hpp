@@ -30,10 +30,12 @@ enum class unknown_option : std::uint8_t
  * value, or none for a flag. A following token that starts with '-' is the next
  * option, not a value. Tokens are joined with the list separator, unless binds
  * names the parameter that receives each token. Choice aliases are stored as the
- * choice value. A flag with no value stores "true", and "--flag=false" stores the
- * explicit value. A single-letter flag bundle such as "-qv" is accepted when every
- * letter is a flag argument. "--" ends option parsing; the tokens after it are the
- * command and are not parsed.
+ * choice value. A flag with no value stores "true". It also accepts a following
+ * boolean token ("--flag false") or "--flag=false". A following option is left
+ * alone. An integer or number may be negative ("--num -5"). A single-letter flag
+ * bundle such as "-qv" is accepted when every letter is a flag argument. "--" ends
+ * option parsing. A token that does not start with '-' does too: that token and
+ * everything after it are the command and are not parsed.
  */
 class cli_parser
 {
