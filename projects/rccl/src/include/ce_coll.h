@@ -97,6 +97,8 @@ enum ncclCeMethodId {
   ncclCeMethodId_Count
 };
 
+struct ncclCeSdmaState;
+
 struct ncclCeColl {
   bool initialized;
   uint8_t* baseUCSymReadyPtr;
@@ -114,6 +116,9 @@ struct ncclCeColl {
   uint64_t intraBatchSyncMsgThreshold;
   int64_t agMulticastThreshold;  // user override (>=0); -1 -> use cost model
   struct ncclDevrWindow* ceSyncWin;
+  // SDMA-gated sync: gate offset in ceSyncWin; state is null unless RCCL_CE_SDMA_SYNC=1.
+  size_t sdmaGateOffset;
+  struct ncclCeSdmaState* sdma;
   int nCopyStreams;
   cudaStream_t copyStreams[RCCL_CE_NUM_COPY_STREAMS];
   cudaEvent_t copyEvents[RCCL_CE_NUM_COPY_STREAMS];

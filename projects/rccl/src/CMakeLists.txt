@@ -22,6 +22,8 @@ set(SRC_FILES
   allocator.cc
   bootstrap.cc
   ce_coll.cc
+  ce_sdma_queue.cc
+  ce_sdma_sync.cc
   cft_dev_runtime.cc
   channel.cc
   collectives.cc
@@ -179,6 +181,8 @@ set(SRC_FILES
   include/bitops.h
   include/bootstrap.h
   include/ce_coll.h
+  include/ce_sdma_queue.h
+  include/ce_sdma_sync.h
   include/ce_fault_inject.h
   include/channel.h
   include/checks.h
@@ -1654,22 +1658,20 @@ endif()
 # a fmt-header-only target leaks into rccl's link interface and breaks
 # install(EXPORT) for static builds.
 target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
-if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
-  # Resolve to a full path: nothing on the link line supplies ${ROCM_PATH}/lib, so a bare
-  # -lhsakmt would have no search path to resolve against.
-  find_library(HSAKMT_LIBRARY NAMES hsakmt
-    HINTS "${ROCM_PATH}"
-    PATH_SUFFIXES lib lib64)
-  if(NOT HSAKMT_LIBRARY)
-    message(FATAL_ERROR "Could not find libhsakmt")
-  endif()
+# The CE SDMA queues are created through the KFD thunk. Resolve to a full path: nothing on the link
+# line supplies ${ROCM_PATH}/lib, so a bare -lhsakmt would have no search path to resolve against.
+find_library(HSAKMT_LIBRARY NAMES hsakmt
+  HINTS "${ROCM_PATH}"
+  PATH_SUFFIXES lib lib64)
+if(NOT HSAKMT_LIBRARY)
+  message(FATAL_ERROR "Could not find libhsakmt")
 endif()
+target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
   # of the final librccl.so link.
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
-  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   # Full target IDs, not bare names
   set(_rocshmem_offload_arch_flags "")
   foreach(_gpu_raw ${GPU_TARGETS})
@@ -1723,8 +1725,6 @@ elseif(ENABLE_ROCSHMEM_GIN)
   add_dependencies(rccl gin_rocshmem_host_objects)
   target_link_libraries(rccl PRIVATE ${_gin_rocshmem_archive})
   target_link_options(rccl PRIVATE "LINKER:--exclude-libs,${_gin_rocshmem_archive_name}")
-  # anvil.cpp calls hsaKmt* directly. hsa-runtime64 is already linked above.
-  target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
   target_link_options(rccl PRIVATE "LINKER:--allow-shlib-undefined")
 endif()
 
