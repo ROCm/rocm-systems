@@ -93,6 +93,18 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+## Find NUMA library, resolved the same way as libhsakmt so both link the same libnuma.
+## Static-build consumers get numa::numa through hsakmt's find_dependency(NUMA).
+if (UNIX)
+  find_package(NUMA QUIET)
+  if(NUMA_FOUND)
+    set(NUMA_LINK_ITEMS ${NUMA_LIBRARIES})
+  else()
+    find_library(NUMA_LIBRARY NAMES numa REQUIRED)
+    set(NUMA_LINK_ITEMS numa)
+  endif()
+endif()
+
 ## Find AMD CUID library.
 set(AMDCUID_ROOT "/opt/amdcuid" CACHE PATH "Path to AMDCUID installation")
 find_library(AMDCUID_LIB
@@ -384,7 +396,7 @@ if(${IMAGE_SUPPORT})
 endif()
 
 if (UNIX)
-  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt ${NUMA_LINK_ITEMS} )
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
