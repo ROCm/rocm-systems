@@ -9,6 +9,10 @@ on:
         description: 'Reuse artifacts from a previous run ID (skips build)'
         type: string
         default: ''
+      candidate_sha:
+        description: 'Exact 40-character source SHA for artifact_run_id (required when reusing artifacts)'
+        type: string
+        default: ''
       test_scope:
         description: 'smoke (22 curated tests, ~3min) or all'
         type: string
@@ -35,6 +39,7 @@ on:
         default: '2'
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -52,6 +57,7 @@ jobs:
       run_linux_ci: ${{ steps.plan.outputs.run_linux_ci }}
       test_scope: ${{ steps.plan.outputs.test_scope }}
       amdgpu_families: ${{ steps.plan.outputs.amdgpu_families }}
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
 
     steps:
       - name: "Checking out repository"
@@ -59,6 +65,26 @@ jobs:
         with:
           # We need the parent commit to do a diff
           fetch-depth: 2
+
+      - name: Resolve immutable RCCL candidate
+        id: candidate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
+          GITHUB_SHA_VALUE: ${{ github.sha }}
+          CANDIDATE_SHA_OVERRIDE: ${{ inputs.candidate_sha }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+        run: |
+          candidate_sha="$(
+            python3 projects/rccl/ci/scripts/candidate_provenance.py resolve \
+              --event-name "$EVENT_NAME" \
+              --github-ref "$GITHUB_REF_VALUE" \
+              --github-sha "$GITHUB_SHA_VALUE" \
+              --candidate-sha "$CANDIDATE_SHA_OVERRIDE" \
+              --artifact-run-id "$ARTIFACT_RUN_ID"
+          )"
+          echo "sha=${candidate_sha}" >> "$GITHUB_OUTPUT"
+          echo "Candidate source SHA: ${candidate_sha}"
 
       - name: Plan RCCL CI
         id: plan
@@ -78,6 +104,7 @@ jobs:
     needs: setup
     if: ${{ needs.setup.outputs.run_linux_ci == 'true' }}
     permissions:
+      actions: read
       contents: read
       id-token: write
     strategy:
@@ -93,6 +120,7 @@ jobs:
       event_name: ${{ github.event_name }}
       package_version: ADHOCBUILD
       artifact_run_id: ${{ inputs.artifact_run_id }}
+      candidate_sha: ${{ needs.setup.outputs.candidate_sha }}
       test_scope: ${{ needs.setup.outputs.test_scope }}
       test_suites: ${{ inputs.test_suites || 'auto' }}
       notify_email: ${{ inputs.notify_email || 'collectives-ci@amd.com' }}
