@@ -420,6 +420,9 @@ namespace hip {
       return async_error_.exchange(hipSuccess, std::memory_order_acq_rel);
     }
 
+    const hipAccessPolicyWindow& GetAccessPolicyWindow() const { return accessPolicyWindow_; }
+    void SetAccessPolicyWindow(const hipAccessPolicyWindow& window) { accessPolicyWindow_ = window; }
+
     static void Destroy(hip::Stream* stream, bool forceDestroy = false);
     virtual bool terminate();
 
@@ -542,6 +545,8 @@ namespace hip {
 
     // Per-stream async error from fire-and-forget commands; cleared on read.
     std::atomic<hipError_t> async_error_{hipSuccess};
+
+    hipAccessPolicyWindow accessPolicyWindow_{};
 
     // ----- Stream capture state -----
     //!< Current capture status. Atomic because every capture API reads it without taking lock_.

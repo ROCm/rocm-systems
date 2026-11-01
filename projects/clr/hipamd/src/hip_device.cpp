@@ -816,7 +816,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   deviceProps.maxTexture3DAlt[1] = 0;
   deviceProps.maxTexture3DAlt[2] = 0;
   // access policy
-  deviceProps.accessPolicyMaxWindowSize = 0;
+  deviceProps.accessPolicyMaxWindowSize = info.l2CacheSize_;
   // cluster launch
   // A cluster of size 1 is a regular single-block launch (legal on all GPUs); clusterLaunch
   // advertises multi-block cluster support, which only devices reporting a max size > 1 have.
