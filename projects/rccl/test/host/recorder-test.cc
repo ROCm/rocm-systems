@@ -30,6 +30,7 @@
 #include <new>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -300,6 +301,18 @@ TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
   path_ = Output("/trace", "");
   EXPECT_TRUE(r.outputFile.is_open());
   EXPECT_EQ(ReadFile(path_), "");
+}
+
+// RCCL_LOG_LEVEL parses like other params: a numeric prefix is kept, and a non-numeric, empty or out-of-range
+// value falls back to 1 instead of throwing.
+TEST_F(RecorderMicrotest, LogLevel_ParsesLikeOtherParams) {
+  const std::string file = Dir() + "/trace.json";
+  const std::pair<const char*, int> cases[] = {
+      {"2", 2}, {"2abc", 2}, {"abc", 1}, {"", 1}, {"99999999999", 1}, {"-99999999999", 1}};
+  for (const auto& [value, expected] : cases) {
+    SCOPED_TRACE(value);
+    EXPECT_EQ(Restart(file.c_str(), value).logLevel, expected);
+  }
 }
 
 // The extension starts at the first '.' in the whole path, so a dotted directory breaks it. Pins AICOMRCCL-2955; a fix

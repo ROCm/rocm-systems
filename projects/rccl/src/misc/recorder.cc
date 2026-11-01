@@ -3,6 +3,9 @@
 #include "bootstrap.h"
 #include "group.h"
 #include "utils.h"
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <iomanip>
@@ -80,7 +83,18 @@ Recorder::Recorder() {
     return;
   }
 
-  logLevel = getenv("RCCL_LOG_LEVEL") ? std::stoi(getenv("RCCL_LOG_LEVEL")) : 1;
+  logLevel = 1;
+  const char* levelStr = getenv("RCCL_LOG_LEVEL");
+  if (levelStr && strlen(levelStr) > 0) {
+    errno = 0;
+    char* end = nullptr;
+    long long level = strtoll(levelStr, &end, 0);
+    if (errno || end == levelStr || level < INT_MIN || level > INT_MAX) {
+      ATTN("Invalid value %s for RCCL_LOG_LEVEL, using default 1.", levelStr);
+    } else {
+      logLevel = static_cast<int>(level);
+    }
+  }
   char hostname[256];
   gethostname(hostname, 256);
   pid = getpid();
