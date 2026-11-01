@@ -154,21 +154,6 @@ __launch_bounds__(512)
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff);
 
-#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
-  // Before the epoch read, prefetch each rank's shard of this warp's first slice in sendbuff, one touch per 64B.
-  {
-    const size_t off = gwarp * (size_t)kDdaLL128DataBytesPerSlice + (size_t)lane * 64;
-    if (off < shardBytes) {
-      const int8_t* base = srcBytes + off;
-      for (int r = 0; r < nRanks; ++r) {
-        // 0x11: device scope, TH 1 = non-speculative (may walk page tables).
-        __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)(base + (size_t)r * shardBytes),
-                                         0x11);
-      }
-    }
-  }
-#endif
-
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
   // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
