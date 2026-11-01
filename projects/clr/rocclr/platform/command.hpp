@@ -306,6 +306,8 @@ union CopyMetadata {
 class GraphKernelArgManager {
  public:
   virtual address AllocKernArg(size_t size, size_t alignment, int devId) = 0;
+  //! A slot the node's packets no longer use.
+  virtual void RetireKernArg(address addr, size_t size, int devId) {}
 };
 
 struct GraphKernargSlot {
@@ -466,8 +468,16 @@ class Command : public Event {
 
     address addr = graphCapture_->kernArgMgr->AllocKernArg(size, alignment, devId);
     GraphKernargSlot slot{addr, static_cast<size_t>(size), devId};
+    const bool failed = (addr == nullptr && size != 0);
     if (slotIndex < kernargSlots->size()) {
-      (*kernargSlots)[slotIndex] = slot;
+      // On failure keep the cached slot; otherwise hand the replaced one back.
+      GraphKernargSlot& replaced = (*kernargSlots)[slotIndex];
+      if (!failed) {
+        if (replaced.addr != nullptr) {
+          graphCapture_->kernArgMgr->RetireKernArg(replaced.addr, replaced.size, replaced.devId);
+        }
+        replaced = slot;
+      }
     } else {
       kernargSlots->push_back(slot);
     }
