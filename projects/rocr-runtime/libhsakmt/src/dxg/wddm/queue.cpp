@@ -168,6 +168,18 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+hsa_status_t ComputeQueue::SetCooperative(void) {
+  if (cooperative_) return HSA_STATUS_SUCCESS;
+  if (!use_hws) return HSA_STATUS_ERROR;
+
+  // The idle AQL->PM4 thread reads sync_addr under this lock, and recreating the HW queue
+  // replaces it.
+  std::lock_guard<std::mutex> lock(thread_cond_lock_);
+  if (!device->DestroyHwQueue(this)) return HSA_STATUS_ERROR;
+  cooperative_ = true;
+  return HwsInit();
+}
+
 // ================================================================================================
 hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
   if ((aql_doorbell_offset_ == 0) ||
