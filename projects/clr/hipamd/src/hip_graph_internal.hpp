@@ -1334,6 +1334,10 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<uint32_t> filteredValidPacketFullHeaders;
     std::vector<uint8_t> filteredFlatMetadataData;
     bool filteredCacheValid = false;
+    // Slot of each dispatchPackets entry in the filtered buffers, or kNotFiltered when its
+    // node is disabled. Built by rebuildFilteredLists.
+    static constexpr size_t kNotFiltered = ~size_t{0};
+    std::vector<size_t> filteredIndex;
 
     // Node tracking
     struct NodeRange {
@@ -1362,6 +1366,9 @@ class GraphExecSegmented : public GraphExecBase {
     // it has no remaining dependency, or its first kernel carries the one dependency in its
     // ext-dispatch dep_signal. Later packets keep the barrier bit.
     bool firstPacketUnordered = false;
+    // Indices of the patch_list entries whose packet is in dispatchPackets or is
+    // fallbackDepBarrier. The patch functions below only touch these entries.
+    std::vector<size_t> ownedPatches;
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
@@ -1384,6 +1391,16 @@ class GraphExecSegmented : public GraphExecBase {
                                          amd::AlignedVector64<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders,
                                          std::vector<uint8_t>& flatMetadata);
+    // Write one packet and its metadata into existing flat-buffer slots, in the same layout
+    // appendPacketToFlatBuffer produces.
+    static void writePacketToFlatSlot(const uint8_t* pkt_raw, const uint8_t* metadata_raw,
+                                      uint8_t* dst, uint32_t* fullHeader, uint8_t* metadataDst);
+    // Rewrite flat-buffer slot |idx| in place from dispatchPackets[idx]. Requires the flat
+    // buffers to already hold one slot per dispatchPackets entry.
+    void rewriteFlatSlot(size_t idx);
+    // Rewrite the filtered-buffer slot holding dispatchPackets[idx] in place. Requires a valid
+    // filtered cache; does nothing when the packet's node is disabled.
+    void rewriteFilteredSlot(size_t idx);
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
@@ -1404,6 +1421,8 @@ class GraphExecSegmented : public GraphExecBase {
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
+  //! Packet batch holding each captured node. Rebuilt by CaptureAndFormPacketsForGraph.
+  std::unordered_map<GraphNode*, PacketBatch*> nodeToPacketBatch_;
   bool batchAQLPacketUpdates_ = false;
   bool reuseKernargSlots_ = false;
   std::vector<PacketBatch*> updatedPacketBatches_;
