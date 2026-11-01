@@ -8,6 +8,9 @@
 #
 # Each run is timed and summarized; exits non-zero if any failed. gin.sbatch keeps
 # test failures non-gating (separate red check). Jira AICOMRCCL-1478: Enable GIN test gating.
+# The config's gating_tests are reported separately: "=== GATING FAILURES" if any
+# failed or was skipped, else "==> gating tests passed". gin.sbatch turns that
+# into the marker rccl-ci.yml's gin-sdma-gate reads.
 #
 # Environment overrides:
 #   NP             MPI ranks per run         (default: 8)
@@ -93,6 +96,7 @@ echo "==> test matrix          = ${CONFIG}"
 
 MCA=""
 DEBUG_ENV=""
+GATING_TESTS=""
 TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=() TEST_NPS=()
 CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
   echo "ERROR: failed to parse test matrix ${CONFIG}" >&2; exit 1; }
@@ -100,6 +104,7 @@ while IFS=$'\x1f' read -r kind f1 f2 f3 f4 f5 f6; do
   case "${kind}" in
     mca)        MCA="${f1}" ;;
     debug_env)  DEBUG_ENV="${f1}" ;;
+    gating)     GATING_TESTS="${f1}" ;;
     test)       TEST_NAMES+=("${f1}"); TEST_KINDS+=("${f2}"); TEST_BINS+=("${f3}"); TEST_ENVS+=("${f4}"); TEST_ARGS+=("${f5}"); TEST_NPS+=("${f6}") ;;
   esac
 done <<< "${CONFIG_TSV}"
@@ -117,8 +122,24 @@ if [[ -n "${RCCL_CI_DEBUG:-}" && -n "${DEBUG_ENV}" ]]; then
   echo "==> RCCL_CI_DEBUG=1: NCCL debug logs -> ${RCCL_CI_DEBUG_DIR}/nccl-debug.<host>.<pid>.log"
 fi
 echo "==> ${#TEST_NAMES[@]} tests to run: ${TEST_NAMES[*]}"
+read -r -a GATING_NAMES <<< "${GATING_TESTS}"
+echo "==> ${#GATING_NAMES[@]} gating tests: ${GATING_TESTS}"
 
 FAILED_RUNS=()
+GATING_FAILED=()
+
+is_gating_test() {
+  [[ " ${GATING_TESTS} " == *" $1 "* ]]
+}
+
+report_gating() {
+  if [[ ${#GATING_FAILED[@]} -ne 0 ]]; then
+    echo "=== GATING FAILURES (${#GATING_FAILED[@]} of ${#GATING_NAMES[@]}) ==="
+    printf '  %s\n' "${GATING_FAILED[@]}"
+  else
+    echo "==> gating tests passed (${#GATING_NAMES[@]}): ${GATING_TESTS}"
+  fi
+}
 
 ensure_pytest() {
   # shellcheck source=/dev/null
@@ -282,15 +303,23 @@ run_test() {
 }
 
 for i in "${!TEST_NAMES[@]}"; do
+  n_failed=${#FAILED_RUNS[@]}
   run_test "${TEST_NAMES[$i]}" "${TEST_KINDS[$i]}" "${TEST_BINS[$i]}" "${TEST_ENVS[$i]}" "${TEST_ARGS[$i]}" \
            "${TEST_NPS[$i]}"
+  if [[ ${#FAILED_RUNS[@]} -gt ${n_failed} ]] && is_gating_test "${TEST_NAMES[$i]}"; then
+    GATING_FAILED+=("${FAILED_RUNS[@]:n_failed}")
+  fi
 done
 
+# Keep the gating block after FAILED / SKIPPED RUNS: gin.sbatch copies from that
+# header to EOF into tests-failed, so the job Summary shows both lists.
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
   echo "=== FAILED / SKIPPED RUNS (${#FAILED_RUNS[@]} of ${#TEST_NAMES[@]}) ==="
   printf '  %s\n' "${FAILED_RUNS[@]}"
+  report_gating
   # Exit non-zero on failure; gin.sbatch turns this into a non-gating red check.
   exit 1
 fi
 
+report_gating
 echo "All GIN test runs succeeded."
