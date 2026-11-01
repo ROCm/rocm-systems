@@ -3,7 +3,13 @@
 
 include_guard(GLOBAL)
 
-if(ROCPROFSYS_BUILD_FMT)
+# An earlier find_package() (e.g. profiler-hub's config) may already have defined
+# fmt::fmt; building the bundled copy would then fail on the duplicate ALIAS target.
+if(ROCPROFSYS_BUILD_FMT AND TARGET fmt::fmt)
+    message(STATUS "fmt::fmt already defined; skipping bundled fmt build")
+endif()
+
+if(ROCPROFSYS_BUILD_FMT AND NOT TARGET fmt::fmt)
     message(STATUS "Building fmt from source!")
 
     include(FetchContent)
