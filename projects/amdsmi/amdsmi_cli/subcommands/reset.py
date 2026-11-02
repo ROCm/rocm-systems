@@ -29,7 +29,11 @@ class ResetCommands:
         top_mhz = max((hz for hz in levels if hz > 0), default=0) // 1_000_000
         if not top_mhz or not isinstance(current_max, int) or current_max >= top_mhz:
             return False
-        amdsmi_interface.amdsmi_set_gpu_clk_limit(gpu, "fclk", "max", top_mhz)
+        try:
+            amdsmi_interface.amdsmi_set_gpu_clk_limit(gpu, "fclk", "max", top_mhz)
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to restore FCLK cap to %s MHz | %s", top_mhz, e.get_error_info())
+            raise
         return True
 
     def reset(

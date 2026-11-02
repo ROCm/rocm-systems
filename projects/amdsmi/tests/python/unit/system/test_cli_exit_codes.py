@@ -2256,6 +2256,32 @@ class TestSetGpuFanGpuOdExitCodes(unittest.TestCase):
 class TestResetGpuGAllFailureGuards(unittest.TestCase):
     """A per-device GPU `reset` failure must be recorded and must NOT crash."""
 
+    def test_fclk_setter_logs_target_and_preserves_library_error(self) -> None:
+        reset = _load_reset()
+        for code in (
+            amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
+            amdsmi_wrapper.AMDSMI_STATUS_IO,
+            amdsmi_wrapper.AMDSMI_STATUS_NO_PERM,
+        ):
+            with self.subTest(code=code):
+                error = _DriverlessLibErr(code)
+
+                def fail_write(*_args: object) -> None:
+                    raise error
+
+                with _patch_amdsmi_interface(
+                    reset,
+                    amdsmi_get_clk_freq=lambda *_: {"frequency": [1300000000, 1800000000]},
+                    amdsmi_get_clock_info=lambda *_: {"max_clk": 1550},
+                    amdsmi_set_gpu_clk_limit=fail_write,
+                ):
+                    with self.assertLogs(level="DEBUG") as logs:
+                        with self.assertRaises(_DriverlessLibErr) as caught:
+                            reset.ResetCommands._restore_fclk_cap("gpu0")
+                self.assertIs(caught.exception, error)
+                self.assertIn("Failed to restore FCLK cap to 1800 MHz", logs.output[0])
+                self.assertIn(error.get_error_info(), logs.output[0])
+
     def test_missing_fclk_table_keeps_existing_reset_output(self):
         reset = _load_reset()
         cmd = _make_reset_cmd(reset)

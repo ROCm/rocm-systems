@@ -57,6 +57,12 @@ class TestCliSetSweep(unittest.TestCase):
         self.assertEqual(len(exclusions), 1)
         self.assertIn("cannot cancel", exclusions[0])
 
+    def test_excluded_memory_partition_has_no_sweep_metadata(self) -> None:
+        command = "amd-smi set --memory-partition NPS2 --gpu 0"
+        for name in ("PROMPT_ANSWERS", "SWEEP_TOLERATED_CODES"):
+            with self.subTest(table=name):
+                self.assertIsNone(self.sweep._lookup(getattr(self.sweep, name), command))
+
     def test_clock_values_come_from_the_selected_gpu(self) -> None:
         self.sweep.clk_freq = [
             {"FCLK": {"num_supported": 3, "has_deep_sleep": False}},

@@ -133,7 +133,7 @@ class TestCliBase(unittest.TestCase):
     }
 
     # TODO(amdsmi_team): User input is not a problem, we just need to test above ^
-    PROMPT_ANSWERS = {"set": {"--fan": "y\n", "--memory-partition": "y\n"}}
+    PROMPT_ANSWERS = {"set": {"--fan": "y\n"}}
 
     # Commands whose sweep also accepts NOT_SUPPORTED. A write may legitimately
     # refuse a feature the ASIC lacks, but a read answering NOT_SUPPORTED is a
@@ -142,12 +142,10 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option
-        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
-        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
+        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL}
     }
 
     # Order for the amd-smi reset commands, putting --clocks last since
