@@ -29,8 +29,7 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank.
 constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
@@ -49,7 +48,8 @@ __launch_bounds__(1024)
                                           uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
-                                          size_t bankSize) { // scratch bank size (from host)
+                                          size_t bankSize, // scratch bank size (from host)
+                                          DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -114,7 +114,10 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                          params)) {
+      break; // not return: every thread must reach the __syncthreads below
+    }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))

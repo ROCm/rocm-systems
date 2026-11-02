@@ -81,7 +81,14 @@ import types
 import unittest
 from unittest import mock
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    amdsmi_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else None
@@ -213,6 +220,14 @@ class TestCliSetNodeBalancingMode(unittest.TestCase):
             )
         modules = dict.fromkeys(_CLI_MODULES)
         modules.update(_build_fake_amdsmi())
+        # set_value.py does `from amdsmi_helpers import AMDSMIHelpers`; stub that
+        # module directly so the real amdsmi_helpers -> amdsmi_init import chain
+        # never loads. This dispatch block only reaches AMDSMIHelpers via
+        # self.helpers (stubbed below by _StubHelpers), never the bare imported
+        # class.
+        modules["amdsmi_helpers"] = fake_module(
+            "amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {})
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = load_cli_module(

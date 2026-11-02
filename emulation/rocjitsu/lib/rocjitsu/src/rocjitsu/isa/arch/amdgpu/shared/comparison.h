@@ -30,42 +30,18 @@
 /// F16 occupies the low half of a 32-bit lane as in the VOPC SIMD path. Lane
 /// values above the format width are ignored. CLASS tests read the raw
 /// encoding and do not use these stages.
+/// Input flushing uses input_denormal.h; gfx1201 captures confirm the compare
+/// behavior across every MODE.FP_DENORM setting.
+
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 
 #include <cstdint>
 #include <functional>
 #include <type_traits>
 
 namespace rocjitsu::amdgpu::comparison {
-
-/// @brief Binary interchange format carried in an unsigned lane type.
-template <typename LaneType, unsigned ExponentBits, unsigned MantissaBits> struct Format {
-  using Lane = LaneType;
-  static constexpr unsigned kExponentBits = ExponentBits;
-  static constexpr unsigned kMantissaBits = MantissaBits;
-  static constexpr unsigned kWidth = 1 + ExponentBits + MantissaBits;
-  static constexpr Lane kSign = Lane{1} << (kWidth - 1);
-  static constexpr Lane kMagnitude = kSign - 1;
-  static constexpr Lane kBits = kSign | kMagnitude;
-  static constexpr Lane kExponentMax = (Lane{1} << ExponentBits) - 1;
-  static constexpr Lane kInfinity = kExponentMax << MantissaBits;
-
-  static_assert(std::is_unsigned_v<Lane> && kWidth <= 8 * sizeof(Lane));
-};
-
-using F16 = Format<uint32_t, 5, 10>;
-using F32 = Format<uint32_t, 8, 23>;
-using F64 = Format<uint64_t, 11, 52>;
-
-/// @brief Per-instruction compare policy, fixed before any lane is evaluated.
-struct Policy {
-  bool flush_inputs = false;
-
-  /// @details Every ISA manual applies the MODE denormal controls to all
-  /// floating-point operations, with no exception for compares; gfx1201
-  /// captures across every MODE.FP_DENORM setting confirm it.
-  /// @param denorm_mode MODE.FP_DENORM field of the source format; bit 0 allows input denormals.
-  static constexpr Policy make(uint32_t denorm_mode) { return {(denorm_mode & 1u) == 0}; }
-};
 
 /// @brief A relation: an operation on order keys, optionally negated.
 template <typename Op, bool Negated = false> struct Relation {
@@ -74,20 +50,6 @@ template <typename Op, bool Negated = false> struct Relation {
 };
 
 namespace detail {
-
-/// @brief Whether V is the format's lane type or a SIMD vector of it.
-template <typename Fmt, typename V>
-inline constexpr bool is_lane_v = std::is_same_v<V, typename Fmt::Lane> || requires {
-  requires std::is_same_v<typename V::value_type, typename Fmt::Lane>;
-};
-
-/// @brief All ones where the exponent field is nonzero, zero elsewhere.
-/// @details The field plus its maximum carries into the next bit exactly when
-/// the field is nonzero, which avoids a mask type.
-template <typename Fmt, typename V> constexpr V normal_or_special(V bits) {
-  const V field = (bits & Fmt::kInfinity) >> Fmt::kMantissaBits;
-  return typename Fmt::Lane{0} - ((field + Fmt::kExponentMax) >> Fmt::kExponentBits);
-}
 
 /// @brief All ones where the magnitude is nonzero, zero for either signed zero.
 template <typename Fmt, typename V> constexpr V nonzero(V bits) {
@@ -124,49 +86,37 @@ using Neq = Relation<std::equal_to<>, true>;
 using Nlt = Relation<std::less<>, true>;
 using T = Relation<detail::Never, true>;
 
-/// @brief Stage 1: apply VOP3 or DPP source modifiers to one source.
-template <typename Fmt, typename V> constexpr V modify(V bits, bool absolute, bool negate) {
-  static_assert(detail::is_lane_v<Fmt, V>);
-  if (absolute)
-    bits = bits & Fmt::kMagnitude;
-  if (negate)
-    bits = bits ^ Fmt::kSign;
-  return bits;
-}
-
-/// @brief Stage 2: flush a subnormal source to a zero of the same sign.
-/// @details NaN, infinity, zero and normal encodings pass through unchanged.
-template <typename Fmt, typename V> constexpr V flush_input(V bits, const Policy &policy) {
-  static_assert(detail::is_lane_v<Fmt, V>);
-  if (!policy.flush_inputs)
-    return bits;
-  return bits & (detail::normal_or_special<Fmt>(bits) | Fmt::kSign);
-}
-
 /// @brief Whether a source encoding is NaN.
 template <typename Fmt, typename V> constexpr auto is_nan(V bits) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   return (bits & Fmt::kMagnitude) > Fmt::kInfinity;
 }
 
-/// @brief Stage 3: map a non-NaN encoding to a key that orders like its value.
-/// @details Both zeros map to the same key. A positive encoding sets the sign
-/// bit; a negative one inverts every bit of the format, reversing magnitude order.
-template <typename Fmt, typename V> constexpr V order_key(V bits) {
-  static_assert(detail::is_lane_v<Fmt, V>);
+/// @brief Map a non-NaN encoding to a key that orders like its value, with -0 below +0.
+/// @details A positive encoding sets the sign bit; a negative one inverts every
+/// bit of the format, reversing magnitude order.
+template <typename Fmt, typename V> constexpr V total_order_key(V bits) {
+  static_assert(fp_format::is_lane_v<Fmt, V>);
   bits = bits & Fmt::kBits;
-  bits = bits & detail::nonzero<Fmt>(bits);
   const V negative = typename Fmt::Lane{0} - (bits >> (Fmt::kWidth - 1));
   return bits ^ ((negative & Fmt::kBits) | Fmt::kSign);
+}
+
+/// @brief Stage 3: map a non-NaN encoding to a key that orders like its value.
+/// @details Both zeros map to the same key.
+template <typename Fmt, typename V> constexpr V order_key(V bits) {
+  static_assert(fp_format::is_lane_v<Fmt, V>);
+  bits = bits & Fmt::kBits;
+  return total_order_key<Fmt>(bits & detail::nonzero<Fmt>(bits));
 }
 
 /// @brief Evaluate a relation on two sources that already carry their modifiers.
 /// @returns bool for scalar lanes, or the key comparison's mask for SIMD lanes.
 template <typename Fmt, typename Rel, typename V>
-constexpr auto evaluate(V a, V b, const Policy &policy) {
-  static_assert(detail::is_lane_v<Fmt, V>);
-  a = flush_input<Fmt>(a & Fmt::kBits, policy);
-  b = flush_input<Fmt>(b & Fmt::kBits, policy);
+constexpr auto evaluate(V a, V b, const input_denormal::Policy &policy) {
+  static_assert(fp_format::is_lane_v<Fmt, V>);
+  a = input_denormal::prepare<Fmt>(a, policy);
+  b = input_denormal::prepare<Fmt>(b, policy);
   const auto ordered = !(is_nan<Fmt>(a) || is_nan<Fmt>(b));
   const auto holds = ordered && typename Rel::Operation{}(order_key<Fmt>(a), order_key<Fmt>(b));
   if constexpr (Rel::kNegated)
@@ -179,9 +129,10 @@ constexpr auto evaluate(V a, V b, const Policy &policy) {
 /// @param abs VOP3 ABS field; bit 0 applies to src0 and bit 1 to src1.
 /// @param neg VOP3 NEG field, with the same bit assignment.
 template <typename Fmt, typename Rel, typename V>
-constexpr auto evaluate(V a, V b, uint32_t abs, uint32_t neg, const Policy &policy) {
-  return evaluate<Fmt, Rel>(modify<Fmt>(a, abs & 1u, neg & 1u),
-                            modify<Fmt>(b, (abs & 2u) != 0, (neg & 2u) != 0), policy);
+constexpr auto evaluate(V a, V b, uint32_t abs, uint32_t neg,
+                        const input_denormal::Policy &policy) {
+  return evaluate<Fmt, Rel>(source_modifier::apply<Fmt>(a, 0, abs, neg),
+                            source_modifier::apply<Fmt>(b, 1, abs, neg), policy);
 }
 
 } // namespace rocjitsu::amdgpu::comparison

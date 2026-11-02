@@ -847,9 +847,12 @@ typedef struct abce_plan_frame_t {
 //   multi            — true when the copy is spread across more than one SDMA
 //                      engine (num_frames > 1), so the frames run in parallel
 //                      and need cross-engine start/fan-in coordination.
+//   fan_in_count     — signal updates the frames make to the coordination
+//                      word (one per fused chunk on all-fused frames).
 //   coordination_signal / coordination_initial_value — the word submit arms
-//                      before publishing, carrying the low-32 fan-in count and,
-//                      when required, the bit-62 start gate. Normally
+//                      before publishing (when multi, or when a single frame
+//                      signals more than once), carrying the low-32 fan-in count
+//                      and, when required, the bit-62 start gate. Normally
 //                      abce_signal_ref_t::coordination_scratch; the output
 //                      signal's own value only when the body signals are
 //                      themselves the completion transitions.
@@ -1448,9 +1451,18 @@ static inline abce_status_t abce_copy_orchestrator_validate_request(
 
     switch (copy->kind) {
       case ABCE_OP_KIND_LINEAR:
-      case ABCE_OP_KIND_SWAP:
         if (!copy->src || !copy->dst) return ABCE_STATUS_INVALID_ARGUMENT;
         break;
+      case ABCE_OP_KIND_SWAP: {
+        if (!copy->src || !copy->dst) return ABCE_STATUS_INVALID_ARGUMENT;
+        if (!abce_builder_swap_supported(orchestrator->builder)) return ABCE_STATUS_UNIMPLEMENTED;
+        // The packet builders only assert on this, which is compiled out of release and
+        // device builds.
+        const uintptr_t misalignment_mask = abce_builder_swap_alignment(orchestrator->builder) - 1;
+        if ((((uintptr_t)copy->src | (uintptr_t)copy->dst) & misalignment_mask) != 0)
+          return ABCE_STATUS_INVALID_ARGUMENT;
+        break;
+      }
       case ABCE_OP_KIND_INDIRECT:
         if (!orchestrator->is_gfx125plus) return ABCE_STATUS_UNIMPLEMENTED;
         if (!copy->src || !copy->dst || copy->size > (((uint64_t)1) << 30))
@@ -1851,6 +1863,9 @@ static inline abce_frame_job_t abce_make_frame_job(const abce_engine_op_t* ops, 
   job.metadata = metadata;
   job.engine = frame->engine;
   job.frame_num_ops = frame->num_ops;
+  job.frame_all_fused = true;
+  for (uint32_t op_idx = 0; op_idx < num_ops; ++op_idx)
+    if (ops[op_idx].engine == frame->engine && !ops[op_idx].fused) job.frame_all_fused = false;
   job.coordinator = frame->coordinator;
   job.multi = plan->multi;
   job.start_gate_required = plan->start_gate_required;
@@ -1960,8 +1975,12 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
   out_plan->epilogue_required = !all_bodies_fused || out_plan->start_gate_required ||
                                 abce_timestamp_surface_enabled(&metadata->timestamps) ||
                                 effective_gcr || metadata->out.event_mailbox != NULL;
-  out_plan->fan_in_count =
-      out_plan->multi ? out_plan->num_frames - (out_plan->start_gate_required ? 1u : 0u) : 0;
+  out_plan->fan_in_count = 0;
+  for (uint32_t frame_idx = 0; frame_idx < out_plan->num_frames; ++frame_idx) {
+    const abce_frame_job_t job = abce_make_frame_job(local_ops, num_ops, metadata, out_plan,
+                                                     &out_plan->frames[frame_idx]);
+    out_plan->fan_in_count += abce_frame_composer_signal_count(&orchestrator->composer, &job);
+  }
 
   // Where the gate and fan-in counter live. When the coordinator drains fan-in
   // and then writes completion itself, they belong in ABCE's own scratch word:
@@ -1981,12 +2000,16 @@ static inline abce_status_t abce_copy_orchestrator_map_copy(
     // coordination word would be silently polled at the wrong address.
     ABCE_ASSERT(((uintptr_t)metadata->out.coordination_scratch % 8) == 0 &&
                 "coordination_scratch must be 8-byte aligned");
+    if (out_plan->fan_in_count > UINT32_MAX) {
+      free(local_ops);
+      return ABCE_STATUS_TOO_MANY_OPERATIONS;
+    }
     out_plan->coordination_signal = metadata->out.coordination_scratch;
     out_plan->coordination_initial_value =
         (out_plan->start_gate_required ? ABCE_FAN_OUT_START_GATE : 0) | out_plan->fan_in_count;
   } else {
     out_plan->coordination_signal = metadata->out.value;
-    if (out_plan->multi) {
+    if (out_plan->multi || out_plan->fan_in_count > 1) {
       if (metadata->out.completion_value > UINT32_MAX ||
           out_plan->fan_in_count > UINT32_MAX - metadata->out.completion_value) {
         free(local_ops);
@@ -2108,7 +2131,7 @@ static inline abce_status_t abce_copy_orchestrator_submit(abce_copy_orchestrator
   // Arm the coordination word only after every reservation succeeds. No frame is
   // visible to hardware yet, so a deterministic/acquire failure cannot strand a
   // gate or a fan-in count that nothing will ever clear.
-  if (plan->multi) {
+  if (plan->multi || plan->fan_in_count > 1) {
     __atomic_store_n((uint64_t*)plan->coordination_signal, plan->coordination_initial_value,
                      __ATOMIC_RELEASE);
   }

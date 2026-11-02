@@ -1,0 +1,30 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Remove all files tracked by cmake --install via install_manifest.txt
+if(NOT EXISTS "@CMAKE_BINARY_DIR@/install_manifest.txt")
+    message(
+        FATAL_ERROR
+        "Cannot find install manifest: @CMAKE_BINARY_DIR@/install_manifest.txt\n"
+        "Run 'cmake --install' before attempting to uninstall."
+    )
+endif()
+
+file(READ "@CMAKE_BINARY_DIR@/install_manifest.txt" files)
+string(REGEX REPLACE "\n" ";" files "${files}")
+
+foreach(file ${files})
+    message(STATUS "Uninstalling: $ENV{DESTDIR}${file}")
+    if(IS_SYMLINK "$ENV{DESTDIR}${file}" OR EXISTS "$ENV{DESTDIR}${file}")
+        execute_process(
+            COMMAND "@CMAKE_COMMAND@" -E remove "$ENV{DESTDIR}${file}"
+            OUTPUT_VARIABLE rm_out
+            RESULT_VARIABLE rm_result
+        )
+        if(NOT rm_result EQUAL 0)
+            message(FATAL_ERROR "Failed to remove: $ENV{DESTDIR}${file}")
+        endif()
+    else()
+        message(STATUS "File not found, skipping: $ENV{DESTDIR}${file}")
+    endif()
+endforeach()

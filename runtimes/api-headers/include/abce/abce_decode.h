@@ -57,8 +57,9 @@ static inline abce_decoded_packet_t abce_decode_sdma_packet(const uint32_t* word
   const bool gfx125plus = isa.major == 12 && isa.minor >= 5;
   abce_decoded_packet_t packet = abce_decoded_packet_make("UNKNOWN", 1, op, sub_op);
 
-  if (header == 0) {
-    packet.name = "NOP";
+  if (op == SDMA_OP_NOP && sub_op == 0) {
+    packet = abce_decoded_packet_make(
+        "NOP", ((header >> SDMA_NOP_COUNT_SHIFT) & SDMA_NOP_COUNT_MASK) + 1u, op, sub_op);
   } else if (op == SDMA_OP_COPY) {
     const bool wait = (header & (1u << 30)) != 0;
     const bool signal = (header & (1u << 31)) != 0;
@@ -99,6 +100,10 @@ static inline abce_decoded_packet_t abce_decode_sdma_packet(const uint32_t* word
                                           sub_op);
       }
     }
+  } else if (op == SDMA_OP_WRITE && sub_op == SDMA_SUBOP_WRITE_LINEAR) {
+    packet = abce_decoded_packet_make("WRITE_LINEAR",
+                                      remaining_dwords > 3 ? 4u + (words[3] & 0xfffffu) + 1u : 4u,
+                                      op, sub_op);
   } else if (op == SDMA_OP_FENCE) {
     packet = abce_decoded_packet_make(sub_op == SDMA_SUBOP_FENCE_64B ? "FENCE_64" : "FENCE",
                                       sub_op == SDMA_SUBOP_FENCE_64B ? 5u : 4u, op, sub_op);

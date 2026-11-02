@@ -80,6 +80,16 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
     return -1;
   }
 
+  // Queues live in the process-global singleton, so a failed create has to give back the ones it
+  // took or they keep charging the budget. It must give back no more than that either: each
+  // communicator gets its own ginState and the loop below deliberately reuses queues a previous
+  // create left behind, whose device handles are already published to the GPU.
+  std::vector<int> connectedDevs;
+  auto abandon = [&connectedDevs]() {
+    for (int dev : connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
+    return -1;
+  };
+
   try {
     for (int local_pe = 0; local_pe < nRanks; ++local_pe) {
       const int remoteDev = devs[static_cast<size_t>(local_pe)];
@@ -87,12 +97,13 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
       if (myDev != remoteDev) sdma_anvil::EnablePeerAccess(myDev, remoteDev);
       if (!sdma_anvil::anvil.connect(myDev, remoteDev, numChannels)) {
         WARN("GIN anvil-sdma: connect(%d -> %d) failed", myDev, remoteDev);
-        return -1;
+        return abandon();
       }
+      connectedDevs.push_back(remoteDev);
     }
   } catch (const std::exception& e) {
     WARN("GIN anvil-sdma: SDMA connect failed: %s", e.what());
-    return -1;
+    return abandon();
   }
 
   const int total = nRanks * numChannels;
@@ -110,29 +121,29 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
   if (validHandles == 0) {
     WARN("GIN anvil-sdma: no SDMA queue handles for device %d", myDev);
-    return -1;
+    return abandon();
   }
 
   sdma_anvil::SdmaQueueDeviceHandle** dev_row = nullptr;
   if (checkHip(hipMalloc(&dev_row, static_cast<size_t>(total) * sizeof(void*)), "hipMalloc handles") != 0)
-    return -1;
+    return abandon();
   if (checkHip(hipMemcpy(dev_row, host_handles.data(), static_cast<size_t>(total) * sizeof(void*),
                          hipMemcpyHostToDevice),
                "hipMemcpy handles") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
-    return -1;
+    return abandon();
   }
 
   uint64_t* dirty = nullptr;
   if (checkHip(hipExtMallocWithFlags((void**)&dirty, sizeof(uint64_t), hipDeviceMallocFinegrained),
                "hipExtMallocWithFlags sdmaDirty") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
-    return -1;
+    return abandon();
   }
   if (checkHip(hipMemset(dirty, 0, sizeof(uint64_t)), "hipMemset sdmaDirty") != 0) {
     checkHip(hipFree(dev_row), "hipFree handles (cleanup)");
     checkHip(hipFree(dirty), "hipFree dirty (cleanup)");
-    return -1;
+    return abandon();
   }
 
   auto* impl = new gin_anvil_sdma_opaque{};

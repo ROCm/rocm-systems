@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -162,7 +163,7 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
         {
             errprintf(-127,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _name.c_str());
         }
 
@@ -186,10 +187,10 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
         auto       _imported     = std::vector<strpair_t>{};
         auto       _exported     = std::vector<strpair_t>{};
         auto const _get_env_pair = [](const std::string& _full) {
-            auto const _pos = _full.find('=');
-            if(_pos < _full.length())
+            if(auto const parsed = rocprofsys::utility::string::split_key_value(_full))
             {
-                return std::make_pair(_full.substr(0, _pos), _full.substr(_pos + 1));
+                return std::make_pair(std::string{ parsed->key },
+                                      std::string{ parsed->value });
             }
             return strpair_t{};
         };
@@ -214,13 +215,12 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_cmdc < 1) errprintf(-127, "No command provided");
-
+        // Empty _cmdc is rejected in main before this helper is called.
         if(is_text_file(_cmdv[0]))
         {
             errprintf(-1,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _cmdv[0]);
         }
 

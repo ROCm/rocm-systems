@@ -103,7 +103,11 @@ public:
     /// @param hash         128-bit hash for ELF, base64-decoded from archive member name
     /// @param (out) pBlob  The returned ELF blob; must remain valid until CreatePipeline/CreateShaderLibrary returns.
     /// @returns            Success or error code
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
     virtual Result Get(const Hash128& hash, Util::Span<const void>* pBlob) = 0;
+#else
+    virtual Result Get(const Hash128& hash, Util::ConstByteSpan* pBlob) = 0;
+#endif
 };
 
 /// Specifies properties for creation of a compute @ref IShaderLibrary object.  Input structure to
@@ -117,7 +121,6 @@ struct ShaderLibraryCreateInfo
                                          ///  obtained via IDevice::LoadCodeObject().
                                          ///  The code-object ELF contains pre-compiled shaders, register values, and
                                          ///  additional metadata.
-    Util::Span<ICodeObject*> shaders;    ///< an array of Shader Object Elves
 #endif
     const void*          pCodeObject;    ///< Pointer to code-object ELF binary implementing the Pipeline ABI interface.
                                          ///  The code-object ELF contains pre-compiled shaders, register values, and
@@ -224,8 +227,17 @@ public:
     /// @returns Success if the library binaries were fetched successfully.
     ///          +ErrorUnavailable if a library binary was not fetched successfully.
     virtual Result GetCodeObjects(
+        uint32*                          pCount,
+        Util::Span<Util::ConstByteSpan>* pCodeObjects) const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
+    Result GetCodeObjects(
         uint32*                             pCount,
-        Util::Span<Util::Span<const void>>* pCodeObjects) const = 0;
+        Util::Span<Util::Span<const void>>* pCodeObjects) const
+    {
+        static_assert(sizeof(Util::Span<const void>) == sizeof(Util::ConstByteSpan));
+        return GetCodeObjects(pCount, reinterpret_cast<Util::Span<Util::ConstByteSpan>*>(pCodeObjects));
+    }
+#endif
 
     /// Obtains the ICodeObjects used to create this shader library.
     ///

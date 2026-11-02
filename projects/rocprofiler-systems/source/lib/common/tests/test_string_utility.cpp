@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <limits>
+#include <string>
 
 using namespace rocprofsys::utility::string;
 
@@ -188,4 +190,139 @@ TEST(hex_padded, custom_width_is_honored)
 TEST(hex_padded, custom_width_narrower_than_value_is_not_truncated)
 {
     EXPECT_EQ(hex_padded(std::uintptr_t{ 0x1234 }, 2), "0x1234");
+}
+
+TEST(is_numeric, digits_only)
+{
+    EXPECT_TRUE(is_numeric("0"));
+    EXPECT_TRUE(is_numeric("0123456789"));
+}
+
+TEST(is_numeric, rejects_empty_and_non_digits)
+{
+    EXPECT_FALSE(is_numeric(""));
+    EXPECT_FALSE(is_numeric("12a"));
+    EXPECT_FALSE(is_numeric("-1"));
+    EXPECT_FALSE(is_numeric("1.5"));
+    EXPECT_FALSE(is_numeric(" 1"));
+}
+
+TEST(decimal_width, counts_digits)
+{
+    EXPECT_EQ(decimal_width(0), 1U);
+    EXPECT_EQ(decimal_width(9), 1U);
+    EXPECT_EQ(decimal_width(10), 2U);
+    EXPECT_EQ(decimal_width(99), 2U);
+    EXPECT_EQ(decimal_width(100), 3U);
+    EXPECT_EQ(decimal_width(1234567), 7U);
+}
+
+TEST(split_key_value, splits_at_first_equals)
+{
+    auto const parsed = split_key_value("KEY=a=b");
+    if(parsed.has_value())
+    {
+        EXPECT_EQ(parsed->key, "KEY");
+        EXPECT_EQ(parsed->value, "a=b");
+    }
+    else
+    {
+        ASSERT_TRUE(parsed.has_value());
+    }
+}
+
+TEST(split_key_value, empty_value_and_empty_key)
+{
+    auto const empty_value = split_key_value("KEY=");
+    if(empty_value.has_value())
+    {
+        EXPECT_EQ(empty_value->key, "KEY");
+        EXPECT_TRUE(empty_value->value.empty());
+    }
+    else
+    {
+        ASSERT_TRUE(empty_value.has_value());
+    }
+
+    auto const empty_key = split_key_value("=v");
+    if(empty_key.has_value())
+    {
+        EXPECT_TRUE(empty_key->key.empty());
+        EXPECT_EQ(empty_key->value, "v");
+    }
+    else
+    {
+        ASSERT_TRUE(empty_key.has_value());
+    }
+}
+
+TEST(split_key_value, no_equals_yields_nullopt)
+{
+    EXPECT_FALSE(split_key_value("KEY").has_value());
+    EXPECT_FALSE(split_key_value("").has_value());
+}
+
+TEST(has_env_key, matches_whole_key_only)
+{
+    EXPECT_TRUE(has_env_key("PATH=/usr/bin", "PATH"));
+    EXPECT_TRUE(has_env_key("PATH=", "PATH"));
+    EXPECT_FALSE(has_env_key("PATHX=/usr/bin", "PATH"));
+    EXPECT_FALSE(has_env_key("PAT=1", "PATH"));
+    EXPECT_FALSE(has_env_key("PATH", "PATH"));
+    EXPECT_FALSE(has_env_key("", "PATH"));
+}
+
+TEST(safe_stoi, parses_whole_string)
+{
+    EXPECT_EQ(safe_stoi("42"), 42);
+    EXPECT_EQ(safe_stoi("-7"), -7);
+    constexpr auto k_int_max = std::numeric_limits<int>::max();
+    constexpr auto k_int_min = std::numeric_limits<int>::min();
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max)), k_int_max);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min)), k_int_min);
+}
+
+TEST(safe_stoi, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stoi("").has_value());
+    EXPECT_FALSE(safe_stoi("12a").has_value());
+    EXPECT_FALSE(safe_stoi("12.5").has_value());
+    EXPECT_FALSE(safe_stoi(" 1").has_value());
+    EXPECT_FALSE(safe_stoi("99999999999").has_value());
+    constexpr auto k_int_max = static_cast<long long>(std::numeric_limits<int>::max());
+    constexpr auto k_int_min = static_cast<long long>(std::numeric_limits<int>::min());
+    EXPECT_FALSE(safe_stoi(std::to_string(k_int_max + 1)).has_value());
+    EXPECT_FALSE(safe_stoi(std::to_string(k_int_min - 1)).has_value());
+}
+
+TEST(safe_stol, parses_whole_string)
+{
+    EXPECT_EQ(safe_stol("42"), 42L);
+    EXPECT_EQ(safe_stol("-7"), -7L);
+    constexpr auto k_long_max = std::numeric_limits<long>::max();
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max)), k_long_max);
+}
+
+TEST(safe_stol, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stol("").has_value());
+    EXPECT_FALSE(safe_stol("12a").has_value());
+    EXPECT_FALSE(safe_stol("12.5").has_value());
+    EXPECT_FALSE(safe_stol(" 1").has_value());
+    constexpr auto k_long_max_plus_one =
+        static_cast<unsigned long>(std::numeric_limits<long>::max()) + 1UL;
+    EXPECT_FALSE(safe_stol(std::to_string(k_long_max_plus_one)).has_value());
+}
+
+TEST(safe_stod, parses_whole_string)
+{
+    EXPECT_DOUBLE_EQ(safe_stod("1.5").value_or(0.0), 1.5);
+    EXPECT_DOUBLE_EQ(safe_stod("-2").value_or(0.0), -2.0);
+}
+
+TEST(safe_stod, rejects_invalid_input)
+{
+    EXPECT_FALSE(safe_stod("").has_value());
+    EXPECT_FALSE(safe_stod("1.5x").has_value());
+    EXPECT_FALSE(safe_stod("abc").has_value());
 }

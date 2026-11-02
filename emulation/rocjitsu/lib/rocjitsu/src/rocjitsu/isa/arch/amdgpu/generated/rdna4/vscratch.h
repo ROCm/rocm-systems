@@ -262,6 +262,9 @@ class ScratchLoadBlockVscratch : public Vscratch {
 public:
   ScratchLoadBlockVscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vdst;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -273,6 +276,9 @@ class ScratchStoreBlockVscratch : public Vscratch {
 public:
   ScratchStoreBlockVscratch(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vsrc;
+  }
   Operand vaddr;
   Operand vsrc;
   Operand saddr;

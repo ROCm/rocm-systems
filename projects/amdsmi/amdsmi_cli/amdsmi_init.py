@@ -24,17 +24,11 @@ from amdsmi_cli_exceptions import AmdSmiExitCode
 #   3. the system site-packages -- last resort.
 # A pip install is meant for Python scripting, not for changing CLI behavior,
 # so it must not override the shipped modules; the fallbacks are safety nets.
-_share_candidates = []
-_rocm = os.environ.get("ROCM_PATH") or os.environ.get("ROCM_HOME")
-if _rocm:
-    _share_candidates.append(os.path.join(_rocm, "share", "amd_smi"))
-# CLI runs from ROCM_PATH/libexec/amdsmi_cli/, so ../../share/amd_smi is the
-# installed copy relative to this file.
-_share_candidates.append(str(Path(__file__).resolve().parent.parent.parent / "share" / "amd_smi"))
-for _cand in _share_candidates:
-    if os.path.isdir(os.path.join(_cand, "amdsmi")):
-        sys.path.insert(0, _cand)
-        break
+# CLI runs from <root>/libexec/amdsmi_cli/, so ../../share/amd_smi is the
+# installed copy. Not $ROCM_PATH: it can name a different ROCm install.
+_share_dir = Path(__file__).resolve().parent.parent.parent / "share" / "amd_smi"
+if (_share_dir / "amdsmi").is_dir():
+    sys.path.insert(0, str(_share_dir))
 
 try:
     from amdsmi import amdsmi_exception, amdsmi_interface

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 #ifndef ROCJITSU_CODE_AMDGPU_ELF_H_
@@ -6,8 +6,14 @@
 
 #include "rocjitsu/code/rj_code.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <optional>
 #include <span>
+#include <type_traits>
+#include <vector>
 
 namespace rocjitsu {
 
@@ -30,6 +36,7 @@ inline constexpr int EI_MAGIC_SIZE = sizeof(EI_MAGIC);
 inline constexpr uint8_t ELFCLASSNONE = 0;
 inline constexpr uint8_t ELFCLASS32 = 1;
 inline constexpr uint8_t ELFCLASS64 = 2;
+inline constexpr uint8_t ELFDATA2LSB = 1;
 
 inline constexpr uint8_t ELFOSABI_NONE = 0;
 inline constexpr uint8_t ELFOSABI_AMDGPU_HSA = 64;
@@ -248,6 +255,7 @@ inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
 
 // Program header types.
 inline constexpr uint32_t PT_LOAD = 1;
+inline constexpr uint32_t PF_X = 1;
 inline constexpr uint32_t PT_DYNAMIC = 2;
 inline constexpr uint32_t PT_NOTE = 4;
 
@@ -354,6 +362,46 @@ struct Elf64_Rela {
   uint64_t r_info;
   int64_t r_addend;
 };
+
+/// @brief Resolve a signed ELF displacement without wrapping the address.
+[[nodiscard]] inline std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
+  if (offset >= 0) {
+    const uint64_t positive = static_cast<uint64_t>(offset);
+    if (positive > std::numeric_limits<uint64_t>::max() - base)
+      return std::nullopt;
+    return base + positive;
+  }
+  // Form the magnitude without negating INT64_MIN.
+  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
+  if (magnitude > base)
+    return std::nullopt;
+  return base - magnitude;
+}
+
+/// @brief Copy a possibly strided ELF record table from an unaligned image.
+/// @details The declared stride may include trailing bytes, but it must hold a
+/// complete record. The entire table is bounds checked before any record is
+/// copied, including overflow in the count-times-stride calculation.
+template <typename Record>
+[[nodiscard]] std::optional<std::vector<Record>>
+read_elf_table(std::span<const uint8_t> image, uint64_t offset, uint64_t count, uint64_t stride) {
+  static_assert(std::is_trivially_copyable_v<Record>);
+  if (count == 0)
+    return std::vector<Record>{};
+  if (stride < sizeof(Record) || stride > std::numeric_limits<uint64_t>::max() / count) {
+    return std::nullopt;
+  }
+  const uint64_t table_size = count * stride;
+  if (offset > image.size() || table_size > image.size() - offset)
+    return std::nullopt;
+
+  std::vector<Record> records(static_cast<std::size_t>(count));
+  for (std::size_t record_index = 0; record_index < records.size(); ++record_index) {
+    const uint64_t record_offset = offset + record_index * stride;
+    std::memcpy(&records[record_index], image.data() + record_offset, sizeof(Record));
+  }
+  return records;
+}
 
 /// @brief Whether ROCr's dynamic loader forms this relocation from a symbol value.
 inline constexpr bool rocr_dynamic_relocation_uses_symbol_value(uint32_t relocation_type) {

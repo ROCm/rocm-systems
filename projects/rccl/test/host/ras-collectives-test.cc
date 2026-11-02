@@ -63,7 +63,7 @@
 
 uint64_t CollectivesTestClockNano();
 
-const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const int) {
+const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, size_t, const int) {
   buf[0] = '\0';
   return buf;
 }

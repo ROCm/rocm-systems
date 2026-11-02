@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <time.h>
 
 /* Needed for struct sockaddr */
 #ifdef _WIN32
@@ -84,7 +85,7 @@ extern "C" {
  * @brief hipFile minor version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_MINOR 6
+#define HIPFILE_VERSION_MINOR 7
 /*!
  * @brief hipFile patch version number
  * @ingroup core
@@ -474,10 +475,12 @@ HIPFILE_API
 void hipFileHandleDeregister(hipFileHandle_t fh);
 
 /*!
- * @brief Registers a GPU memory region to be used with GPU IO
+ * @brief Registers a memory region to be used with IO
  * @ingroup file
  *
  * The memory region should be allocated by the user before being passed to the API call
+ *
+ * Memory regions can refer to GPU device memory or host memory
  *
  * @note If the library has not already been initialized, the first call to
  *       `hipFileBufRegister()` will initialize the library and increment
@@ -493,7 +496,7 @@ HIPFILE_API
 hipFileError_t hipFileBufRegister(const void *buffer_base, size_t length, int flags);
 
 /*!
- * @brief Deregisters a GPU memory region from being used with GPU IO
+ * @brief Deregisters a memory region from being used with IO
  * @ingroup file
  *
  * @param [in] buffer_base \buffer_base_param

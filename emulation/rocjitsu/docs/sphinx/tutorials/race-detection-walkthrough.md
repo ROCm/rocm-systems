@@ -17,10 +17,7 @@ emulator runs the kernel entirely on the CPU.
 
 ```{note}
 This tutorial uses the built-in race detector, an execution plugin that
-runs inside the rocJITsu emulator (`RJ_RACE=1`). To detect the same
-class of LDS races on a physical GPU without the emulator, use the
-ConSan DBI sanitizer instead---see
-[Detect an LDS data race with ConSan](consan-detect-lds-race.md).
+runs inside the rocJITsu emulator (`RJ_RACE=1`).
 ```
 
 ## Write the kernel
@@ -152,5 +149,3 @@ Reports are written to `/tmp/output/race.log`.
     [Execution plugin system](../conceptual/execution-plugins.md).
 -   Analyze final GPU code objects for missing wait instructions with
     [waitcheck hazard analyzer reference](../reference/waitcheck.md).
--   Detect LDS data races on physical hardware using the ConSan DBI
-    sanitizer described in [ConSan GPU LDS sanitizer reference](../reference/consan.md).

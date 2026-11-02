@@ -16,7 +16,6 @@ GPU_FAMILIES = [
     "gfx120x",
     "gfx1151",
 ]
-TRIGGER_TYPES = ["presubmit", "postsubmit", "nightly"]
 
 
 def warn(message: str) -> None:
@@ -35,7 +34,7 @@ def load_ci_configs(
         from ci_config_api import load_config
 
         config = load_config(version=2, config_path=config_path)
-        all_families = config.get_gpu_families(TRIGGER_TYPES)
+        all_families = config.get_gpu_runner_labels()
         gpu_configs = {
             family: all_families.get(family, {}).get("linux", {})
             for family in GPU_FAMILIES

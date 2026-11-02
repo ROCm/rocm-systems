@@ -71,12 +71,44 @@ For example:
 ``rocJpegGetErrorName()`` returns error codes in text format from rocJPEG APIs.
 
 
+Querying decoder capabilities
+===============================
+
+``rocJpegGetDecoderCaps()`` fills a ``RocJpegDecodeCaps`` structure with the decode capabilities of the decoder bound to a ``RocJpegHandle``, such as the number of JPEG cores, the minimum and maximum image dimensions, and the supported chroma subsamplings and output formats. Chroma subsamplings and output formats are reported as bitmasks, where each bit represents the corresponding ``RocJpegChromaSubsampling`` or ``RocJpegOutputFormat`` enum value. For each supported chroma subsampling, ``native_surface_format`` reports the ``RocJpegSurfaceFormat`` layout written for ``ROCJPEG_OUTPUT_NATIVE``, such as ``ROCJPEG_SURFACE_FORMAT_NV12`` for 4:2:0. A chroma subsampling is reported as supported only if the VA-API driver supports its native surface format. The supported JPEG coding processes are reported in ``coding_process_mask``, where each bit represents a ``RocJpegCodingProcess`` enum value; the VCN JPEG decoder supports only baseline JPEG.
+
+.. code:: cpp
+
+    RocJpegStatus rocJpegGetDecoderCaps(
+      RocJpegHandle handle,
+      RocJpegDecodeCaps *decode_caps);
+
+For example:
+
+.. code:: cpp
+
+  RocJpegDecodeCaps decode_caps = {};
+  status = rocJpegGetDecoderCaps(handle, &decode_caps);
+  if (status != ROCJPEG_STATUS_SUCCESS) {
+    std::cerr << "Failed to query the decoder capabilities with error code: " << rocJpegGetErrorName(status) << std::endl;
+    rocJpegDestroy(handle);
+    return EXIT_FAILURE;
+  }
+  bool rgb_supported_for_420 = (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_420)) &&
+                               (decode_caps.output_format_mask & (1u << ROCJPEG_OUTPUT_RGB));
+
+For a complete example, see the ``jpegDecodeCaps`` sample.
+
+
 Parsing a stream
 =================
 
 ``rocJpegStreamParse()`` is used to parse a JPEG stream.
 
 The stream data buffer is passed through the ``data`` input parameter. The length of the buffer is passed through the ``length`` input parameter. The parsed stream is returned through the ``jpeg_stream_handle`` provided. ``jpeg_stream_handle`` must have already been created with ``rocJpegStreamCreate()``.
+
+Keep ``data`` valid and unchanged, and don't parse or destroy ``jpeg_stream_handle`` again until every decode call that uses the handle has returned. 
+
+``rocJpegDecode()`` and ``rocJpegDecodeBatched()`` use the handle until they return. ``rocJpegDecodeAsync()`` and ``rocJpegDecodeBatchedAsync()`` use the handle only until they return, not until the matching sync call. To parse the next images while a decode is running, use a different set of stream handles.
 
 .. code:: cpp
 
@@ -131,6 +163,8 @@ The ``decode_params`` input parameter is used to specify the decoding parameters
       RocJpegStreamHandle jpeg_stream_handle,
       const RocJpegDecodeParams *decode_params,
       RocJpegImage *destination);
+
+ ``rocJpegDecode()``, ``rocJpegDecodeBatched()``, ``rocJpegDecodeAsync()``, and ``rocJpegDecodeBatchedAsync()``, must not be called from more than one thread at the same time on the same ``RocJpegHandle``. To decode from several threads, create one handle per thread. ``rocJpegDecodeSync()`` and ``rocJpegDecodeBatchedSync()`` can be called from another thread while an asynchronous submit runs on the same handle.
 
 For more information on decoding streams, see `Decoding a JPEG stream with rocJPEG <./rocjpeg-decoding-a-jpeg-stream.html>`_.
 

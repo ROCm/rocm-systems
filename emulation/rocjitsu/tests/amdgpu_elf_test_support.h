@@ -6,16 +6,11 @@
 /// @file amdgpu_elf_test_support.h
 /// @brief Shared AMDGPU ELF fixtures for CPU-only code-object tests.
 
-#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"
-
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +22,7 @@ RJ_DIAGNOSTIC_POP
 
 namespace rocjitsu::test_support {
 
-using TestKernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
+using TestKernelDescriptor = rocjitsu::amdhsa::kernel_descriptor_t;
 inline constexpr size_t kKernelDescriptorSize = sizeof(TestKernelDescriptor);
 
 enum class TestRuntimeTextRelocation : uint8_t {

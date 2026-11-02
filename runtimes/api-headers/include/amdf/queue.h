@@ -32,7 +32,8 @@ enum amdf_queue_command_type_e {
 /// Encoding features within a command format and version.
 ///
 /// Bit meanings belong to the command type and are documented by its extension.
-/// These describe native packet layouts, not additional publication services.
+/// These describe native packet layouts and required register settings, not
+/// additional publication services.
 /// A zero value reports the baseline encoding; it never means unqueried state.
 typedef uint64_t amdf_queue_format_features_t;
 
@@ -337,6 +338,8 @@ typedef struct amdf_kernel_queue_info_t {
   /// Native wake destinations accepted by kernel_queue_request_notification.
   /// Zero means notification is unavailable; all bits are resolved at creation.
   amdf_native_event_types_t notification_types;
+  /// Optional operations resolved for this live queue without lazy setup.
+  amdf_kernel_queue_capabilities_t capabilities;
 } amdf_kernel_queue_info_t;
 
 /// Current retirement and terminal state of one kernel-mediated queue.

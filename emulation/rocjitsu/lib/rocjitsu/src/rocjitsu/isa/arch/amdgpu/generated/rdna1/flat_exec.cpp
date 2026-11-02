@@ -35,6 +35,13 @@ void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -49,6 +56,13 @@ void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -62,6 +76,13 @@ void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -76,6 +97,13 @@ void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -89,6 +117,13 @@ void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -300,6 +335,13 @@ void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -314,6 +356,13 @@ void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -329,6 +378,13 @@ void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -344,6 +400,13 @@ void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -358,6 +421,13 @@ void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -372,6 +442,13 @@ void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    const int32_t offset = static_cast<int32_t>(inst_.offset << 20) >> 20;
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0xfffcu) + offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 

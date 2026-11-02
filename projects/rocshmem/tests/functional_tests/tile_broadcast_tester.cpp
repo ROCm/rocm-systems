@@ -91,8 +91,8 @@ __global__ void TileBroadcastThreadTest(rocshmem_team_t team,
     end_time[wg_id] = wall_clock64();
   }
 
-  // Verify results on non-root PEs
-  if (my_world_pe != pe_root && threadIdx.x == 0) {
+  // Verify results on all PEs — root must also have src copied into dst.
+  if (threadIdx.x == 0) {
     int matrix_size = tile_extent_0 * tile_extent_1;
     for (int idx = 0; idx < matrix_size; idx++) {
       float expected = pe_root * 100.0f + idx;
@@ -158,8 +158,9 @@ __global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
     end_time[flat_wf_id] = wall_clock64();
   }
 
-  // Verify on non-root PEs — one thread per wave checks its own slice
-  if (my_world_pe != pe_root && t_id % wf_size == 0) {
+  // Verify on all PEs — one thread per wave checks its own slice.
+  // Root PE must also have src copied into dst.
+  if (t_id % wf_size == 0) {
     for (int idx = 0; idx < matrix_size; idx++) {
       float expected = pe_root * 100.0f + idx;
       float actual = my_dest[idx];
@@ -196,6 +197,11 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
   rocshmem_team_t my_team = teams[wg_id % num_teams];
   rocshmem_wg_team_create_ctx(my_team, ctx_type, &ctx_array[0]);
 
+  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0. The TDM LDS
+  // region sits right after the one ctx slot in the dynamic shared buffer.
+  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[1]);
+  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+
   int matrix_size = tile_extent_0 * tile_extent_1;
   int offset = matrix_size * wg_id;
 
@@ -217,8 +223,8 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
     end_time[wg_id] = wall_clock64();
   }
 
-  // Verify results on non-root PEs
-  if (my_world_pe != pe_root && threadIdx.x == 0) {
+  // Verify results on all PEs — root PE must also have src copied into dst.
+  if (threadIdx.x == 0) {
     for (int i = 0; i < tile_extent_0; i++) {
       for (int j = 0; j < tile_extent_1; j++) {
         int idx = i * tile_extent_1 + j;
@@ -392,7 +398,7 @@ void TileBroadcastTester::launchKernel(dim3 gridSize, dim3 blockSize,
     }
 
     case TileBroadcastWGTestType: {
-      size_t wg_shared = sizeof(rocshmem_ctx_t);
+      size_t wg_shared = sizeof(rocshmem_ctx_t) + rocshmem_query_tdm_lds_bytes();
       hipLaunchKernelGGL(TileBroadcastTest, dim3(args.num_wgs), blockSize,
                          wg_shared, stream,
                          teams, args.num_wgs, source, dest,

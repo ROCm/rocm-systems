@@ -82,6 +82,7 @@
 #include <rocprofiler-sdk/ompt/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
+#include <rocprofiler-sdk/cxx/enum_string.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/cxx/pc_sampling.hpp>
@@ -2221,6 +2222,12 @@ get_spm_config(rocprofiler_agent_id_t agent_id)
                         ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
                         tool::get_config().spm_sample_interval);
                     break;
+                case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
+                    param = common::init_public_api_struct(
+                        rocprofiler_spm_parameters_t{},
+                        ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES,
+                        tool::get_config().spm_sample_interval);
+                    break;
                 case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
                 case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:
                 default: break;
@@ -2825,6 +2832,9 @@ write_attach_session(const fs::path& path, uint64_t session)
     set_attach_session_file_permissions(path);
     return true;
 }
+
+void
+apply_core_capability_gates(tool::config& cfg);
 }  // namespace
 
 // Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
@@ -2877,6 +2887,10 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     // reset config for attach (i.e. re-parse environment variables)
     tool::get_config() = tool::config{};
 
+    // re-parsing restores options that tool_init turned off, so turn them off again before the
+    // comparison
+    apply_core_capability_gates(tool::get_config());
+
     // ensure the config has not changed which services were requested.
     // NOTE: this is a temporary restriction
     ROCP_FATAL_IF(!tool::is_attach_invariant(tool::get_config(), original_config))
@@ -2920,6 +2934,194 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
     return 0;
 }
 
+namespace
+{
+// version of the rocprofiler-sdk library this tool is running with, as passed to
+// rocprofiler_configure. This differs from ROCPROFILER_VERSION when the tool is attached to a
+// process using a different rocprofiler-sdk installation.
+uint32_t core_version = ROCPROFILER_VERSION;
+
+std::string
+format_version(uint32_t version)
+{
+    return fmt::format("{}.{}.{}", version / 10000, (version % 10000) / 100, version % 100);
+}
+
+// Thread trace is only enabled when the rocprofiler-sdk library is at least this version: older
+// versions have a different thread trace ABI (parameters, shader data layout, callbacks) and there
+// is no query for it. The asserts below fail when that ABI changes. When they do, bump VERSION and
+// raise this minimum in the same commit so the check keeps matching the ABI, then update them.
+constexpr uint32_t thread_trace_min_core_version = ROCPROFILER_SDK_COMPUTE_VERSION(1, 5, 0);
+
+#define ROCPROFV3_THREAD_TRACE_ABI_CHANGED                                                         \
+    "thread-trace ABI changed: bump VERSION and raise thread_trace_min_core_version in the same "  \
+    "commit, then update this assert"
+
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_LAST == 11, ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_LAST == 6,
+              ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(sizeof(rocprofiler_thread_trace_parameter_t) == 24,
+              ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(sizeof(rocprofiler_thread_trace_shader_data_t) == 96,
+              ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(
+    std::is_same<rocprofiler_thread_trace_shader_data_callback_t,
+                 void (*)(rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t)>::value,
+    ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(
+    std::is_same<rocprofiler_thread_trace_dispatch_callback_t,
+                 rocprofiler_thread_trace_control_flags_t (*)(rocprofiler_agent_id_t,
+                                                              rocprofiler_queue_id_t,
+                                                              rocprofiler_async_correlation_id_t,
+                                                              rocprofiler_kernel_id_t,
+                                                              rocprofiler_dispatch_id_t,
+                                                              void*,
+                                                              rocprofiler_user_data_t*)>::value,
+    ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(std::is_same<decltype(&rocprofiler_configure_device_thread_trace_service),
+                           rocprofiler_status_t (*)(rocprofiler_context_id_t,
+                                                    rocprofiler_agent_id_t,
+                                                    rocprofiler_thread_trace_parameter_t*,
+                                                    size_t,
+                                                    rocprofiler_thread_trace_shader_data_callback_t,
+                                                    rocprofiler_user_data_t)>::value,
+              ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+static_assert(std::is_same<decltype(&rocprofiler_configure_dispatch_thread_trace_service),
+                           rocprofiler_status_t (*)(rocprofiler_context_id_t,
+                                                    rocprofiler_agent_id_t,
+                                                    rocprofiler_thread_trace_parameter_t*,
+                                                    size_t,
+                                                    rocprofiler_thread_trace_dispatch_callback_t,
+                                                    rocprofiler_thread_trace_shader_data_callback_t,
+                                                    void*)>::value,
+              ROCPROFV3_THREAD_TRACE_ABI_CHANGED);
+
+#undef ROCPROFV3_THREAD_TRACE_ABI_CHANGED
+
+// When attached to a process using an older rocprofiler-sdk, the library may not know every kind
+// this tool requests: configuring an unknown kind fails or, in older versions, throws. Ask the
+// library whether it knows the kind instead of comparing versions (the kind enums only grow at the
+// end, so a known value is the same kind). Each unsupported kind is reported once.
+template <typename KindT, typename QueryT>
+bool
+core_supports_kind(KindT kind, QueryT query, bool user_requested)
+{
+    static auto reported = common::Synchronized<std::unordered_set<KindT>>{};
+
+    const char* name     = nullptr;
+    uint64_t    name_len = 0;
+    if(query(kind, &name, &name_len) == ROCPROFILER_STATUS_SUCCESS && name != nullptr) return true;
+
+    if(reported.wlock([kind](auto& data) { return data.emplace(kind).second; }))
+    {
+        auto msg =
+            fmt::format("{} is not supported by the rocprofiler-sdk v{} library used by this "
+                        "process. Continuing without it.",
+                        rocprofiler::sdk::get_enum_label(kind),
+                        format_version(core_version));
+        if(user_requested)
+            ROCP_WARNING << msg;
+        else
+            ROCP_INFO << msg;
+    }
+    return false;
+}
+
+bool
+core_supports_kind(rocprofiler_buffer_tracing_kind_t kind)
+{
+    return core_supports_kind(kind, rocprofiler_query_buffer_tracing_kind_name, true);
+}
+
+bool
+core_supports_kind(rocprofiler_callback_tracing_kind_t kind)
+{
+    return core_supports_kind(kind, rocprofiler_query_callback_tracing_kind_name, true);
+}
+
+// external correlation ID requests are made internally, not because of a user option
+bool
+core_supports_kind(rocprofiler_external_correlation_id_request_kind_t kind)
+{
+    return core_supports_kind(
+        kind, rocprofiler_query_external_correlation_id_request_kind_name, false);
+}
+
+// A kind or operation the rocprofiler-sdk library does not know is reported and skipped instead of
+// aborting the process. Any other status is returned unchanged.
+template <typename KindT>
+rocprofiler_status_t
+skip_if_unsupported(rocprofiler_status_t status, KindT kind)
+{
+    if(status == ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND ||
+       status == ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND)
+    {
+        ROCP_WARNING << rocprofiler::sdk::get_enum_label(kind)
+                     << " could not be configured with the rocprofiler-sdk v"
+                     << format_version(core_version)
+                     << " library used by this process: " << rocprofiler_get_status_string(status)
+                     << ". Continuing without it.";
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+    return status;
+}
+
+// Turn off options this process cannot support. Runs in tool_init and again in tool_attach on the
+// re-parsed config, so both see the same config. Each warning is reported once.
+void
+apply_core_capability_gates(tool::config& cfg)
+{
+    static auto att_version_reported      = std::atomic_flag{};
+    static auto att_no_intercept_reported = std::atomic_flag{};
+    static auto replay_counters_reported  = std::atomic_flag{};
+
+    if(cfg.advanced_thread_trace && core_version < thread_trace_min_core_version)
+    {
+        if(!att_version_reported.test_and_set())
+        {
+            ROCP_WARNING << "thread trace is disabled: it requires rocprofiler-sdk v"
+                         << format_version(thread_trace_min_core_version)
+                         << " or newer but this process uses rocprofiler-sdk v"
+                         << format_version(core_version)
+                         << ". Use the rocprofv3 from that rocprofiler-sdk installation to collect "
+                            "thread trace.";
+        }
+        cfg.advanced_thread_trace = false;
+    }
+
+    if(cfg.advanced_thread_trace && cfg.att_no_intercept && !tool::att_no_intercept::is_supported())
+    {
+        if(!att_no_intercept_reported.test_and_set())
+        {
+            ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not "
+                            "include ATT quick-scan support. Falling back to --att.";
+        }
+        cfg.att_no_intercept = false;
+    }
+
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(cfg.kernel_replay && !cfg.counter_collection)
+    {
+        if(!replay_counters_reported.test_and_set())
+        {
+            ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                          "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+        }
+        cfg.kernel_replay = false;
+    }
+
+    // the counter callbacks select a replay pass whenever kernel_replay is set, so it must be off
+    // before counter collection starts when the library cannot replay
+    if(cfg.kernel_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
+        cfg.kernel_replay = false;
+}
+}  // namespace
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
@@ -2930,13 +3132,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
-    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
-       !tool::att_no_intercept::is_supported())
-    {
-        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
-                        "ATT quick-scan support. Falling back to --att.";
-        tool::get_config().att_no_intercept = false;
-    }
+    apply_core_capability_gates(tool::get_config());
 
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
@@ -2977,43 +3173,51 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     auto callbacks = get_tracing_callbacks();
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(code_obj_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                                                       nullptr,
-                                                       0,
-                                                       callbacks.code_object_tracing,
-                                                       nullptr),
-        "code object tracing configure failed");
-
-    start_context(code_obj_ctx, "code object");
-
-    if(tool::get_config().marker_api_trace)
+    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT))
     {
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             get_client_ctx(),
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-                             nullptr,
-                             0,
-                             callbacks.callback_tracing,
-                             nullptr),
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 code_obj_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.code_object_tracing,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT),
+                         "code object tracing configure failed");
+
+        start_context(code_obj_ctx, "code object");
+    }
+
+    if(tool::get_config().marker_api_trace &&
+       core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API))
+    {
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 get_client_ctx(),
+                                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.callback_tracing,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API),
                          "callback tracing service failed to configure");
     }
 
     // Register pause/resume control callbacks when using selected_regions or marker tracing
-    if(tool::get_config().marker_api_trace || tool::get_config().selected_regions ||
-       tool::get_config().selected_regions_ref_count)
+    if((tool::get_config().marker_api_trace || tool::get_config().selected_regions ||
+        tool::get_config().selected_regions_ref_count) &&
+       core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API))
     {
         auto pause_resume_ctx = null_context_id;
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             pause_resume_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-                             nullptr,
-                             0,
-                             callbacks.cntrl_tracing,
-                             &pause_resume_contexts),
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 pause_resume_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.cntrl_tracing,
+                                                 &pause_resume_contexts),
+                                             ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API),
                          "callback tracing service failed to configure");
 
         start_context(pause_resume_ctx, "marker pause/resume");
@@ -3205,6 +3409,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             if(tool::get_config().benchmark_mode == tool::config::benchmark::sdk_callback_overhead)
                 continue;
 
+            if(!core_supports_kind(itr.kind)) continue;
+
             if(itr.buffer_id == null_buffer_id)
             {
                 ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
@@ -3245,7 +3451,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              << " Continuing with the other requested trace services.";
                 continue;
             }
-            ROCPROFILER_CALL(status, "buffer tracing service configure");
+            ROCPROFILER_CALL(skip_if_unsupported(status, itr.kind),
+                             "buffer tracing service configure");
         }
     }
 
@@ -3311,8 +3518,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             if(tool::get_config().benchmark_mode != tool::config::benchmark::sdk_callback_overhead)
                 continue;
 
-            ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                                 get_client_ctx(), itr.kind, nullptr, 0, itr.callback, nullptr),
+            if(!core_supports_kind(itr.kind)) continue;
+
+            ROCPROFILER_CALL(skip_if_unsupported(
+                                 rocprofiler_configure_callback_tracing_service(
+                                     get_client_ctx(), itr.kind, nullptr, 0, itr.callback, nullptr),
+                                 itr.kind),
                              "callback tracing service failed to configure");
         }
     }
@@ -3512,113 +3723,120 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
     }
 
-    auto rename_ctx            = rocprofiler_context_id_t{0};
-    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
-        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
-        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
-    };
+    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API))
+    {
+        auto rename_ctx            = rocprofiler_context_id_t{0};
+        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+        };
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+        ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                         rename_ctx,
-                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-                         marker_core_api_kinds.data(),
-                         marker_core_api_kinds.size(),
-                         callbacks.kernel_rename,
-                         nullptr),
-                     "callback tracing service failed to configure");
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 rename_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                                                 marker_core_api_kinds.data(),
+                                                 marker_core_api_kinds.size(),
+                                                 callbacks.kernel_rename,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API),
+                         "callback tracing service failed to configure");
 
-    start_context(rename_ctx, "kernel rename");
+        start_context(rename_ctx, "kernel rename");
+    }
 
     // Track stream ID information via callback service
-    auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
+    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_STREAM))
+    {
+        auto hip_stream_display_ctx = rocprofiler_context_id_t{0};
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
-                     "failed to create hip stream context");
+        ROCPROFILER_CALL(rocprofiler_create_context(&hip_stream_display_ctx),
+                         "failed to create hip stream context");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(hip_stream_display_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
-                                                       nullptr,
-                                                       0,
-                                                       callbacks.hip_stream,
-                                                       nullptr),
-        "hip stream tracing configure failed");
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 hip_stream_display_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.hip_stream,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_HIP_STREAM),
+                         "hip stream tracing configure failed");
 
-    start_context(hip_stream_display_ctx, "hip stream");
+        start_context(hip_stream_display_ctx, "hip stream");
+    }
 
     // Enable HIP graph attribution whenever any consumer can carry graph-attributed records:
     // kernel-dispatch / memory-copy / hip-graph tracing. The per-thread stack push/pop is
     // cheap and the alternative leaves graph_exec_id/graph_node_id empty on KERNEL_DISPATCH
     // and MEMORY_COPY records even though the data is available.
-    if(tool::get_config().hip_graph_trace || tool::get_config().kernel_trace ||
-       tool::get_config().memory_copy_trace)
+    if((tool::get_config().hip_graph_trace || tool::get_config().kernel_trace ||
+        tool::get_config().memory_copy_trace) &&
+       core_supports_kind(ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH))
     {
         auto hip_graph_display_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&hip_graph_display_ctx),
                          "failed to create hip graph context");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(hip_graph_display_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
-                                                           nullptr,
-                                                           0,
-                                                           callbacks.hip_graph,
-                                                           nullptr),
-            "hip graph tracing configure failed");
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 hip_graph_display_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.hip_graph,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH),
+                         "hip graph tracing configure failed");
 
         start_context(hip_graph_display_ctx, "hip graph");
     }
 
     // Track if HIP runtime has been initialized via runtime_intialization service
-    auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
+    if(core_supports_kind(ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION))
+    {
+        auto runtime_initialization_ctx = rocprofiler_context_id_t{0};
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
-                     "failed to create runtime initialization context");
+        ROCPROFILER_CALL(rocprofiler_create_context(&runtime_initialization_ctx),
+                         "failed to create runtime initialization context");
 
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                         runtime_initialization_ctx,
-                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
-                         nullptr,
-                         0,
-                         runtime_initialization_callback,
-                         nullptr),
-                     "runtime initialization tracing configure failed");
+        ROCPROFILER_CALL(
+            skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                    runtime_initialization_ctx,
+                                    ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                                    nullptr,
+                                    0,
+                                    runtime_initialization_callback,
+                                    nullptr),
+                                ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION),
+            "runtime initialization tracing configure failed");
 
-    start_context(runtime_initialization_ctx, "runtime initialization");
+        start_context(runtime_initialization_ctx, "runtime initialization");
+    }
 
     // Kernel replay: collect every --pmc counter group within a single application run by replaying
     // each dispatch once per group (device memory is snapshot/restored between passes). The tool
     // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
     // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
     //
-    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
-    // runs inside the profiled application's process during rocprofiler configuration, so exiting
-    // here would tear the application down mid-initialization and run static destructors and atexit
-    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
-    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
-    // skipping replay still produces a usable run, which beats killing the application.
-    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
-    {
-        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
-                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
-    }
-    else if(tool::get_config().kernel_replay)
+    // apply_core_capability_gates turned replay off when counter collection is off or the
+    // rocprofiler-sdk library cannot replay
+    if(tool::get_config().kernel_replay)
     {
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&kernel_replay_ctx),
                          "failed to create kernel replay context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             kernel_replay_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
-                             nullptr,
-                             0,
-                             callbacks.kernel_replay,
-                             nullptr),
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 kernel_replay_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.kernel_replay,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY),
                          "kernel replay tracing configure failed");
 
         start_context(kernel_replay_ctx, "kernel replay");
@@ -3627,12 +3845,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)
     {
         auto external_corr_id_request_kinds =
-            std::array<rocprofiler_external_correlation_id_request_kind_t, 5>{
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
-                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT};
+            std::vector<rocprofiler_external_correlation_id_request_kind_t>{};
+
+        // the library rejects the whole request if any kind is unknown to it
+        for(auto kind : {ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+                         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+                         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
+                         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,
+                         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_EVENT})
+        {
+            if(core_supports_kind(kind)) external_corr_id_request_kinds.emplace_back(kind);
+        }
 
         ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
                              get_client_ctx(),
@@ -4905,6 +5128,12 @@ rocprofiler_configure(uint32_t                 version,
 
     ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
+
+    core_version = version;
+    ROCP_WARNING_IF(core_version != ROCPROFILER_VERSION)
+        << id->name << " was built with rocprofiler-sdk v" << format_version(ROCPROFILER_VERSION)
+        << " but this process uses rocprofiler-sdk v" << format_version(core_version)
+        << ". Options that rocprofiler-sdk version does not support are skipped with warnings.";
 
     // create configure data using experimental struct with attach/detach support
     static auto cfg = rocprofiler_tool_configure_result_t{

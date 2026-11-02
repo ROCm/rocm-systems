@@ -19,7 +19,9 @@
  */
 
 #include <hip_test_common.hh>
+#include <hip_test_process.hh>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -197,7 +199,7 @@ unsigned long long WallClockTicksPerUs() {
   int wall_clock_khz = 0;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
-  return static_cast<unsigned long long>(wall_clock_khz) / 1000;
+  return std::max(1ULL, static_cast<unsigned long long>(wall_clock_khz) / 1000);
 }
 
 constexpr int kButterflyStages = 6;
@@ -251,6 +253,60 @@ __global__ void ChainStep(unsigned* sequence, int self, int chain_len, unsigned*
       __hip_atomic_load(sequence, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
   if (position % chain_len != static_cast<unsigned>(self)) atomicAdd(violations, 1u);
   __hip_atomic_store(sequence, position + 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+}
+
+// Launches a single-stream chain of chain_len ChainStep nodes and checks that every node ran
+// exactly once per launch, in chain order.
+void RunLongChain(int chain_len) {
+  constexpr unsigned kLaunches = 3;
+  INFO("chain length " << chain_len);
+
+  unsigned* sequence = nullptr;
+  unsigned* violations = nullptr;
+  HIP_CHECK(hipMalloc(&sequence, sizeof(unsigned)));
+  HIP_CHECK(hipMalloc(&violations, sizeof(unsigned)));
+  HIP_CHECK(hipMemset(sequence, 0, sizeof(unsigned)));
+  HIP_CHECK(hipMemset(violations, 0, sizeof(unsigned)));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t prev_node = nullptr;
+  for (int position = 0; position < chain_len; ++position) {
+    int self = position;
+    int len = chain_len;
+    void* args[] = {&sequence, &self, &len, &violations};
+    hipKernelNodeParams params{};
+    params.func = reinterpret_cast<void*>(ChainStep);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+    hipGraphNode_t node;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, prev_node ? &prev_node : nullptr,
+                                    prev_node ? 1 : 0, &params));
+    prev_node = node;
+  }
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  for (unsigned launch = 0; launch < kLaunches; ++launch) {
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  unsigned host_sequence = 0;
+  unsigned host_violations = 0;
+  HIP_CHECK(hipMemcpy(&host_sequence, sequence, sizeof(unsigned), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&host_violations, violations, sizeof(unsigned), hipMemcpyDeviceToHost));
+  REQUIRE(host_violations == 0);
+  REQUIRE(host_sequence == kLaunches * chain_len);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(sequence));
+  HIP_CHECK(hipFree(violations));
 }
 
 }  // namespace
@@ -481,6 +537,8 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_DisabledJoinHead) {
  *  - Single-stream chains whose lengths straddle the boundaries of the chunks a large packet
  *    batch is submitted in. Every kernel checks it runs exactly in chain order, and no packet
  *    may be lost or repeated across launches.
+ *  - The same chains on a 256-slot AQL queue, where the longer chains do not fit in the ring
+ *    and the batch must be submitted as the GPU drains it.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphSegmentOrdering.cc
@@ -490,54 +548,98 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_DisabledJoinHead) {
  */
 HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_LongChainBatches) {
   if (!UsesSegmentedGraphPath()) HIP_SKIP_TEST("Requires the segmented graph executor");
-  constexpr unsigned kLaunches = 3;
-  const int chain_len = GENERATE(1, 8, 9, 24, 25, 56, 57, 504, 505, 1000);
-  INFO("chain length " << chain_len);
+  // Section names are passed on the child process command line, so they contain no spaces.
+  SECTION("Chains") {
+    for (int chain_len : {1, 8, 9, 24, 25, 56, 57, 504, 505, 1000}) {
+      RunLongChain(chain_len);
+    }
+  }
+  SECTION("ChainsOnSmallQueue") {
+    // ROC_AQL_QUEUE_SIZE is read once at runtime startup, so it needs a fresh process.
+    hip::SpawnProc child(getSelfExePath());
+    child.setEnv("ROC_AQL_QUEUE_SIZE", "256");
+    REQUIRE(child.run("Unit_hipGraphSegmentOrdering_LongChainBatches -c Chains") == 0);
+  }
+}
 
-  unsigned* sequence = nullptr;
+/**
+ * Test Description
+ * ------------------------
+ *  - Graph with a join-and-fork EMPTY node (E0) whose successors land on a different stream.
+ *    The EMPTY-only segment must emit a completion signal so the downstream barrier does not
+ *    block forever. Reproduces the hang reported in ROCM-32125. Also covers a leaf EMPTY node
+ *    (E1) that forks to the two output kernels.
+ *
+ *    Shape (K* are kernel nodes, E* are hipGraphAddEmptyNode nodes):
+ *      K0 -> K1 -> E0 <- K0   (redundant K0->E0 makes E0 a join)
+ *      E0 -> G0 -> G1 -> E1
+ *      E1 -> P, F
+ *
+ *    Run with DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2 to force multi-stream assignment even on
+ *    shallow graphs where the default scheduler would collapse to one stream.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphSegmentOrdering.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion) {
+  if (!UsesSegmentedGraphPath()) HIP_SKIP_TEST("Requires the segmented graph executor");
+
+  hipGraph_t g;
+  HIP_CHECK(hipGraphCreate(&g, 0));
   unsigned* violations = nullptr;
-  HIP_CHECK(hipMalloc(&sequence, sizeof(unsigned)));
   HIP_CHECK(hipMalloc(&violations, sizeof(unsigned)));
-  HIP_CHECK(hipMemset(sequence, 0, sizeof(unsigned)));
   HIP_CHECK(hipMemset(violations, 0, sizeof(unsigned)));
 
-  hipGraph_t graph;
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-  hipGraphNode_t prev_node = nullptr;
-  for (int position = 0; position < chain_len; ++position) {
-    int self = position;
-    int len = chain_len;
-    void* args[] = {&sequence, &self, &len, &violations};
-    hipKernelNodeParams params{};
-    params.func = reinterpret_cast<void*>(ChainStep);
-    params.gridDim = dim3(1);
-    params.blockDim = dim3(1);
-    params.kernelParams = args;
-    hipGraphNode_t node;
-    HIP_CHECK(hipGraphAddKernelNode(&node, graph, prev_node ? &prev_node : nullptr,
-                                    prev_node ? 1 : 0, &params));
-    prev_node = node;
-  }
+  // Use ChainStep as a lightweight sequence checker for this topology test.
+  // Each kernel writes its own sequence slot; we just need all 100 launches to complete.
+  unsigned* sequence = nullptr;
+  HIP_CHECK(hipMalloc(&sequence, sizeof(unsigned)));
+  HIP_CHECK(hipMemset(sequence, 0, sizeof(unsigned)));
+
+  // Build the graph: K0->K1->E0<-K0, E0->G0->G1->E1->P, E1->F
+  hipGraphNode_t nK0, nK1, nG0, nG1, nP, nF, nE0, nE1;
+  constexpr int kChainLen = 1;
+  int self0 = 0, len = kChainLen;
+  void* args0[] = {&sequence, &self0, &len, &violations};
+  hipKernelNodeParams kp{};
+  kp.func = reinterpret_cast<void*>(ChainStep);
+  kp.gridDim = dim3(1); kp.blockDim = dim3(1);
+  kp.kernelParams = args0;
+
+  HIP_CHECK(hipGraphAddKernelNode(&nK0, g, nullptr, 0, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nK1, g, &nK0, 1, &kp));
+  hipGraphNode_t e0_deps[] = {nK0, nK1};
+  HIP_CHECK(hipGraphAddEmptyNode(&nE0, g, e0_deps, 2));
+  HIP_CHECK(hipGraphAddKernelNode(&nG0, g, &nE0, 1, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nG1, g, &nG0, 1, &kp));
+  HIP_CHECK(hipGraphAddEmptyNode(&nE1, g, &nG1, 1));
+  HIP_CHECK(hipGraphAddKernelNode(&nP, g, &nE1, 1, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nF, g, &nE1, 1, &kp));
+
   hipGraphExec_t exec;
-  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
 
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  for (unsigned launch = 0; launch < kLaunches; ++launch) {
+
+  constexpr unsigned kLaunches = 100;
+  for (unsigned i = 0; i < kLaunches; ++i) {
+    HIP_CHECK(hipMemsetAsync(sequence, 0, sizeof(unsigned), stream));
     HIP_CHECK(hipGraphLaunch(exec, stream));
   }
+  // If E0 or E1's completion signal is never emitted this synchronize hangs forever.
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  unsigned host_sequence = 0;
   unsigned host_violations = 0;
-  HIP_CHECK(hipMemcpy(&host_sequence, sequence, sizeof(unsigned), hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(&host_violations, violations, sizeof(unsigned), hipMemcpyDeviceToHost));
   REQUIRE(host_violations == 0);
-  REQUIRE(host_sequence == kLaunches * chain_len);
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphExecDestroy(exec));
-  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(g));
   HIP_CHECK(hipFree(sequence));
   HIP_CHECK(hipFree(violations));
 }

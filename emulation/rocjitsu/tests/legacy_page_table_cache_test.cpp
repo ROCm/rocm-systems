@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <pthread.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -190,6 +191,18 @@ TEST(LegacyPageTableCacheStateTest, ConcurrentAdmissionsObserveOnlyPublishedCopi
                 _exit(0);
               }()),
               ::testing::ExitedWithCode(0), "");
+}
+
+// glibc carves every thread's static TLS out of its stack, so rocJITsu's TLS
+// decides whether the preloaded application can start a small-stack thread.
+TEST(LegacyAddressSpaceTest, StaticTlsLeavesRoomForASmallThreadStack) {
+  pthread_attr_t attr;
+  ASSERT_EQ(pthread_attr_init(&attr), 0);
+  ASSERT_EQ(pthread_attr_setstacksize(&attr, 64 * 1024), 0);
+  pthread_t thread{};
+  ASSERT_EQ(pthread_create(&thread, &attr, [](void *) -> void * { return nullptr; }, nullptr), 0);
+  EXPECT_EQ(pthread_join(thread, nullptr), 0);
+  EXPECT_EQ(pthread_attr_destroy(&attr), 0);
 }
 
 } // namespace

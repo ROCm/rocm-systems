@@ -38,13 +38,8 @@ cmake --build . --config Release
 ```
 
 > [!NOTE]
-> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
-> locates FFmpeg by probing PATH — and keep them there when running:
-> ```bat
-> set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;<path-to-ffmpeg>\bin;%PATH%
-> ```
-> If FFmpeg is installed somewhere CMake cannot discover, pass
-> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

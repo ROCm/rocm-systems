@@ -12,7 +12,7 @@ instead.
 
 ``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``HIPFILE_INSTALL_TOOLS=OFF``.
 
-``ais-check`` must be run as root to produce accurate information. 
+``ais-check`` must be run as root to produce accurate information.
 
 .. code:: shell
 
@@ -23,38 +23,48 @@ Optional flags:
 | ``-v`` or ``--verbose``: Lists discovered HIP runtime libraries and whether each exports AIS symbols.
 | ``-q`` or ``--quiet``: Suppresses output and returns only an exit code.
 
-``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block. 
+``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block.
 
 When run with the verbose option, a list of discovered HIP runtime libraries is also included in the output.
 
 The mounted volumes table indicates whether a hipFile can use fastpath with each mount point. Each row in the table describes one block-backed mount. Pseudo file systems are omitted. Only mount points with "yes" in the``HIPFILE`` column are eligible for fastpath.
 
-For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligible for fastpath, while ``/mnt/raid`` is not:
+For example, this table shows that ``/``, ``/home``, ``/data``, and ``/mnt/raid10`` are eligible for fastpath, while ``/mnt/raid5`` and ``/mnt/secure`` are not:
 
 .. code-block:: shell-session
 
    Mounted volumes:
-   MOUNTPOINT  FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
-   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
-   /home       xfs             nvme1n1  nvme     yes       yes
-   /data       ext4 (ordered)  dm-0     lvm      yes       yes
-   /mnt/raid   xfs             md0      md       yes       no
+   MOUNTPOINT   FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
+   /            ext4 (ordered)  nvme0n1  nvme     yes       yes
+   /home        xfs             nvme1n1  nvme     yes       yes
+   /data        ext4 (ordered)  dm-0     lvm      yes       yes
+   /mnt/raid10  xfs             md0      md       yes       yes
+   /mnt/raid5   xfs             md1      md       yes       no
+   /mnt/secure  xfs             dm-1     crypt    yes       no
 
 | ``MOUNTPOINT``: Location where the file system is mounted.
 | ``FSTYPE``: The file system type. hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``.
 | ``DEVICE``: The underlying block device.
-| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through an LVM logical volume whose physical volumes are all local NVMe.
+| ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through LVM logical volumes and non-parity MD RAID arrays whose member devices are all local NVMe.
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
-| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw or LVM on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
+| ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw, or LVM or a non-parity MD RAID array on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
 
-.. note::
 
-   For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
-   the volume as capable only when every layer is an LVM target and all of the
-   underlying physical volumes are local NVMe. RAID logical volumes are
-   reported as capable on this basis, because LVM builds each RAID member as an
-   LVM sub-volume. ``md`` backing is MD software RAID, a different block layer,
-   and is always reported as not capable.
+For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
+reports the volume as capable only when every layer is an LVM target or an
+MD RAID array, every RAID layer runs a pass-through personality (``linear``,
+``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
+are local NVMe. The LVM target and RAID array can be stacked on each other in either order. The
+parity personalities (``raid4``, ``raid5``, ``raid6``) are always reported as not
+capable because they stage the transfer in the MD stripe cache rather than
+passing it to a member device. This applies to an LVM RAID logical volume
+just as it does to an MD array, since LVM implements a RAID LV with the
+``dm-raid`` target, which runs the same personality code.
+
+The RAID level of an LVM volume is not exposed in sysfs. ``ais-check``
+reads it from the device-mapper table. When it cannot run ``dmsetup`` with
+enough privilege, a RAID LV is reported as ``unverified``. Linear and
+striped volumes are classified from sysfs alone and are unaffected.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or
@@ -68,11 +78,18 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available.
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit exposed by the KFD topology. On older builds, or when the driver version can't be determined, ``ais-check`` looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
 
+``Kernel P2PDMA support : False`` most often means the distribution's kernel was
+built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS default
+5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For that case, including how
+to boot a kernel that has the option, see :ref:`hipfile-ubuntu-2204-fastpath`. To
+check the running kernel on another distribution, see
+:ref:`hipfile-check-p2pdma`. For the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::
 

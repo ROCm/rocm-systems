@@ -291,7 +291,9 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_clock_info(uint32_t node_id, uint32_t clk
     }
   }
 
-  // Fallback: static max only for GFX and MEM
+  // Fallback: current clock is unavailable (PMLog query failed or sensor
+  // unsupported); only static max is known for GFX and MEM.
+  info->clk = std::numeric_limits<uint32_t>::max();
   if (clk_type == 0) {
     info->max_clk = wdev->MaxEngineClockMhz();
     return HSAKMT_STATUS_SUCCESS;
@@ -333,8 +335,13 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_pcie_info(uint32_t node_id, rocdxg_smi_pc
   if (Wkmi::QueryPMLogData(wdev->GetAdapter(), wdev->DeviceHandle(), &pmlog) == STATUS_SUCCESS) {
     uint32_t lanes = pmlog_sensor(pmlog, Wkmi::kPmlogBusLanes);
     uint32_t speed = pmlog_sensor(pmlog, Wkmi::kPmlogBusSpeed);
-    if (lanes != Wkmi::kSensorUnavailable) info->pcie_width = static_cast<uint16_t>(lanes);
-    if (speed != Wkmi::kSensorUnavailable) info->pcie_speed = speed;
+    info->pcie_width = (lanes != Wkmi::kSensorUnavailable) ? static_cast<uint16_t>(lanes)
+                                                           : std::numeric_limits<uint16_t>::max();
+    info->pcie_speed =
+        (speed != Wkmi::kSensorUnavailable) ? speed : std::numeric_limits<uint32_t>::max();
+  } else {
+    info->pcie_width = std::numeric_limits<uint16_t>::max();
+    info->pcie_speed = std::numeric_limits<uint32_t>::max();
   }
   return HSAKMT_STATUS_SUCCESS;
 }

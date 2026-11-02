@@ -11,6 +11,8 @@ set(TEST_SRC
     library_get_module.cc
     library_invariants.cc
     hipKernelGetAttribute.cc
+    hipKernelSetAttributeForDevice.cc
+    hipKernelSetCacheConfig.cc
     lib_attribute.cc
 )
 

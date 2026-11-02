@@ -67,11 +67,11 @@ hsa_signal_value_t BusyWaitSignal::LoadAcquire() {
 }
 
 void BusyWaitSignal::StoreRelaxed(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::StoreRelease(hsa_signal_value_t value) {
-  atomic::Store(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kStore, value, std::memory_order_release);
 }
 
 hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
@@ -121,131 +121,119 @@ hsa_signal_value_t BusyWaitSignal::WaitAcquire(hsa_signal_condition_t condition,
 }
 
 void BusyWaitSignal::AndRelaxed(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::AndAcquire(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::AndRelease(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::AndAcqRel(hsa_signal_value_t value) {
-  atomic::And(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAnd, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::OrRelaxed(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::OrAcquire(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::OrRelease(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::OrAcqRel(hsa_signal_value_t value) {
-  atomic::Or(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kOr, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::XorRelaxed(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::XorAcquire(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::XorRelease(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::XorAcqRel(hsa_signal_value_t value) {
-  atomic::Xor(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kXor, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::AddRelaxed(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::AddAcquire(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::AddRelease(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::AddAcqRel(hsa_signal_value_t value) {
-  atomic::Add(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kAdd, value, std::memory_order_acq_rel);
 }
 
 void BusyWaitSignal::SubRelaxed(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_relaxed);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_relaxed);
 }
 
 void BusyWaitSignal::SubAcquire(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acquire);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acquire);
 }
 
 void BusyWaitSignal::SubRelease(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_release);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_release);
 }
 
 void BusyWaitSignal::SubAcqRel(hsa_signal_value_t value) {
-  atomic::Sub(&signal_.value, int64_t(value), std::memory_order_acq_rel);
+  UpdateValue(ValueOp::kSub, value, std::memory_order_acq_rel);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelaxed(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_relaxed));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_relaxed);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcquire(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acquire));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_acquire);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchRelease(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_release));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_release);
 }
 
 hsa_signal_value_t BusyWaitSignal::ExchAcqRel(hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Exchange(&signal_.value, int64_t(value),
-                                             std::memory_order_acq_rel));
+  return UpdateValue(ValueOp::kExchange, value, std::memory_order_acq_rel);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelaxed(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_relaxed));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_relaxed, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcquire(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acquire));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_acquire, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasRelease(hsa_signal_value_t expected,
                                               hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_release));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_release, expected);
 }
 
 hsa_signal_value_t BusyWaitSignal::CasAcqRel(hsa_signal_value_t expected,
                                              hsa_signal_value_t value) {
-  return hsa_signal_value_t(atomic::Cas(&signal_.value, int64_t(value),
-                                        int64_t(expected),
-                                        std::memory_order_acq_rel));
+  return UpdateValue(ValueOp::kCas, value, std::memory_order_acq_rel, expected);
 }
 
 }  // namespace core

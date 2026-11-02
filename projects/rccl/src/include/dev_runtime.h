@@ -47,9 +47,27 @@ struct ncclDevrWindow {
   // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
   void** ipcPeerPtrs;
   void** ipcPeerPtrsAllocBase;
+  // A peer mapping is either a legacy IPC handle or a cuMem import, and the two unmap differently.
+  uint8_t* ipcPeerIsCuMem;
   int ipcPeerCount;
 #endif
 };
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// All-gathered by windowRegisterNonSym. One record per LSA rank. Host tests
+// publish through this type, so a field added here cannot be reinterpreted by
+// a second copy in another translation unit.
+struct ncclDevrNonSymExchangeEntry {
+  cudaIpcMemHandle_t handle;
+  uint64_t cuMemHandle;
+  size_t allocSize;
+  int isCuMem;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  size_t userOffset; // userPtr - allocBase
+  size_t userSize;
+};
+#endif
 
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
@@ -141,6 +159,13 @@ void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+// RCCL: smallest registered size across this window's LSA team. Falls back to the
+// local size for host-only test windows that do not carry runtime memory state.
+size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win);
+// RCCL: bytes from userPtr that fit in this window and in every LSA peer allocation.
+// lsaMinSize starts at the allocation base, so a window at memOffset only owns
+// the tail of that minimum.
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win);
 
 // Get the corresponding pointer in another lsa rank's symmetric memory window
 ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,

@@ -75,6 +75,13 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_SDMA_GPU_POLL``
+        | Windows only, and only meaningful on a native SDMA user queue, which the device capability decides. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
+        | Defaults to host-thread emulation. Set to 1 once the driver supports GPU-side polling.
+      - ``0``
+      - | 0: Emulate the polls on a host thread.
+        | 1: Let the SDMA engine execute the polls.
+
     * - | ``HSA_ENABLE_MWAITX``
         | When mwaitx is enabled, on AMD CPUs, runtime will hint to the CPU to go into lower power-states when doing busy loops by using the mwaitx instruction.
       - ``1``
@@ -100,10 +107,10 @@
         | Any other value: Automatically load the HotSwap tool when a supported agent is present.
 
     * - | ``HSA_DISABLE_GFX12_STRICT``
-        | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.
-      - ``1``
-      - | 0: Report the strict ISA variant on A0 agents.
-        | 1, unset, empty, or any other value: Keep the base target on A0 agents.
+        | Controls reporting of the "strict" ISA variant on A0 silicon. Enabled by default, so the agent reports the strict variant and accepts native strict code objects. Set to 1 as an emergency kill switch to fall back to the base target.
+      - ``0``
+      - | 1: Keep the base target on A0 agents.
+        | 0, unset, or any other value: Report the strict ISA variant on A0 agents.
 
     * - | ``HSA_HOTSWAP_VERBOSE``
         | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.

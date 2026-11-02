@@ -888,8 +888,9 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
-  // not care about the callee body.
-  return is_program_path_terminator(inst) || is_indirect_branch(inst);
+  // not care about the callee body. Forks and joins also keep their fallthrough.
+  return is_program_path_terminator(inst) ||
+         (is_indirect_branch(inst) && !indirect_branch_falls_through(inst));
 }
 
 [[nodiscard]] std::optional<size_t>
@@ -1751,7 +1752,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered, bool incomplete = false) {
+                            std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index,
+                            bool incomplete = false) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
@@ -1761,14 +1763,15 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
   for (const PcValue &value : values) {
     if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
       fixup->source_incomplete = incomplete;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
 }
 
 void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBlock> &blocks,
                 std::vector<PendingConsumer> &pending_consumers,
-                std::vector<IndirectCallFixup> &recovered, PcAddressBuilderMap &pc_builders) {
+                std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index,
+                PcAddressBuilderMap &pc_builders) {
   // Phase 2: run local transfer semantics for one straight-line block.
   //
   // This scan has no incoming lattice facts by design. A pair either becomes
@@ -1848,7 +1851,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // block. Emit now so BasicBlock can split at the consumer and target.
       if (PcValue *value = state.builder(*consumer_pair)) {
         emit_fixups_for_values(ctx, index, *consumer_pair, std::span<const PcValue>(value, 1),
-                               recovered);
+                               recovered, recovered_index);
         // A setpc/swappc source operand is a read, not a write. Preserve the
         // source pair unless the instruction also defines it. Real kernels can
         // build one callee address once and issue multiple swappc calls through
@@ -2133,7 +2136,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
 classify_pending_consumers(const AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                            const std::vector<LatticeFacts> &entry_facts,
                            const std::vector<PendingConsumer> &pending_consumers,
-                           std::vector<IndirectCallFixup> &recovered) {
+                           std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index) {
   // Phase 4: resolve consumers that were pristine in their own block. A complete
   // entry fact provides concrete getpc-built targets. Missing, empty, or killed
   // facts are unresolved. Incomplete facts are still allowed when the concrete
@@ -2160,7 +2163,7 @@ classify_pending_consumers(const AnalysisContext &ctx, const std::vector<Analysi
     }
 
     emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, value->values, recovered,
-                           value->incomplete);
+                           recovered_index, value->incomplete);
   }
   return unresolved;
 }
@@ -3436,7 +3439,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
 void recover_signed_delta_templates(const AnalysisContext &ctx,
                                     const std::vector<AnalysisBlock> &blocks,
-                                    std::vector<IndirectCallFixup> &recovered) {
+                                    std::vector<IndirectCallFixup> &recovered,
+                                    FixupIndex &recovered_index) {
   // Some compiler output uses one signed literal template for a PC-relative
   // setpc:
   //
@@ -3531,11 +3535,11 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     // the duplicate to agree.
     if (auto fixup = fixup_for_value(ctx, sub_consumer->setpc_index, *pair_lo, value)) {
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
     if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value)) {
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
 }
@@ -3599,19 +3603,28 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // by being promoted to external roots.
     recover_vector_lane_stashed_pcs(ctx, blocks, recovered, iteration_recovered,
                                     sorted_extra_leaders, entry_policy, analysis_roots);
+    // Lane-stash recovery leaves unique records but can roll back its output on
+    // budget exhaustion. Seed the per-round index only after it finishes; all
+    // subsequent producers must use append_unique_indexed to keep the vector
+    // and index in sync and avoid quadratic collection.
+    FixupIndex iteration_recovered_index;
+    iteration_recovered_index.reserve(iteration_recovered.size());
+    for (size_t i = 0; i < iteration_recovered.size(); ++i)
+      iteration_recovered_index.try_emplace(fixup_identity(iteration_recovered[i]), i);
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
     round_builders.clear();
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
-      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered, round_builders);
-    recover_signed_delta_templates(ctx, blocks, iteration_recovered);
+      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered,
+                 iteration_recovered_index, round_builders);
+    recover_signed_delta_templates(ctx, blocks, iteration_recovered, iteration_recovered_index);
 
     if (!pending_consumers.empty()) {
       const auto entry_facts = run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders,
                                                   entry_policy, analysis_roots);
       (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                       iteration_recovered);
+                                       iteration_recovered, iteration_recovered_index);
     }
 
     bool changed = false;

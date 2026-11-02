@@ -810,6 +810,16 @@ DecodeResult decodeSXorB32Sop2(const MachineInst *opcode, const DecodeErrorEmitt
 DecodeResult decodeSXorB64Sop2(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeSXorSaveexecB64Sop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error);
+DecodeResult decodeScratchLoadLdsDwordFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeScratchLoadLdsSbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeScratchLoadLdsSshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
+DecodeResult decodeScratchLoadLdsUbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error);
+DecodeResult decodeScratchLoadLdsUshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error);
 DecodeResult decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error);
 DecodeResult decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode,
@@ -1579,6 +1589,10 @@ DecodeResult decodeVExpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVExpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpLegacyF32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVExpLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVFfbhI32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVFfbhI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVFfbhU32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
@@ -1641,6 +1655,10 @@ DecodeResult decodeVLogF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 DecodeResult decodeVLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVLogF32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogLegacyF32Vop1(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
+DecodeResult decodeVLogLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVLshlAddU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
 DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
@@ -2076,6 +2094,16 @@ private:
   static DecodeResult subDecodeDs(const MachineInst *opcode, const DecodeErrorEmitter &emit_error);
   static DecodeResult subDecodeFlat(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeFlatSegment38(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeFlatSegment39(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeFlatSegment40(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeFlatSegment41(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
+  static DecodeResult decodeFlatSegment42(const MachineInst *opcode,
+                                          const DecodeErrorEmitter &emit_error);
   static DecodeResult subDecodeMubuf(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error);
   static DecodeResult subDecodeMtbuf(const MachineInst *opcode,
@@ -2230,6 +2258,51 @@ DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Flat::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
   return sub_decode_flat[op.op](opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeFlatSegment38(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+    return detail::decodeGlobalLoadLdsUbyteFlat(opcode, emit_error);
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+    return detail::decodeScratchLoadLdsUbyteFlat(opcode, emit_error);
+  return decodeInvalid(opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeFlatSegment39(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+    return detail::decodeGlobalLoadLdsSbyteFlat(opcode, emit_error);
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+    return detail::decodeScratchLoadLdsSbyteFlat(opcode, emit_error);
+  return decodeInvalid(opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeFlatSegment40(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+    return detail::decodeGlobalLoadLdsUshortFlat(opcode, emit_error);
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+    return detail::decodeScratchLoadLdsUshortFlat(opcode, emit_error);
+  return decodeInvalid(opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeFlatSegment41(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+    return detail::decodeGlobalLoadLdsSshortFlat(opcode, emit_error);
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+    return detail::decodeScratchLoadLdsSshortFlat(opcode, emit_error);
+  return decodeInvalid(opcode, emit_error);
+}
+
+DecodeResult DecoderImpl::decodeFlatSegment42(const MachineInst *opcode,
+                                              const DecodeErrorEmitter &emit_error) {
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 2)
+    return detail::decodeGlobalLoadLdsDwordFlat(opcode, emit_error);
+  if (reinterpret_cast<const Flat::OpEncoding *>(opcode)->seg == 1)
+    return detail::decodeScratchLoadLdsDwordFlat(opcode, emit_error);
+  return decodeInvalid(opcode, emit_error);
 }
 
 DecodeResult DecoderImpl::subDecodeMubuf(const MachineInst *opcode,
@@ -2715,8 +2788,8 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_vop1 = {
     &detail::decodeVFractF16Vop1,
     &detail::decodeVSinF16Vop1,
     &detail::decodeVCosF16Vop1,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVExpLegacyF32Vop1,
+    &detail::decodeVLogLegacyF32Vop1,
     &detail::decodeVCvtNormI16F16Vop1,
     &detail::decodeVCvtNormU16F16Vop1,
     &detail::decodeVSatPkU8I16Vop1,
@@ -3871,8 +3944,8 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &detail::decodeVFractF16Vop3,
     &detail::decodeVSinF16Vop3,
     &detail::decodeVCosF16Vop3,
-    &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVExpLegacyF32Vop3,
+    &detail::decodeVLogLegacyF32Vop3,
     &detail::decodeVCvtNormI16F16Vop3,
     &detail::decodeVCvtNormU16F16Vop3,
     &detail::decodeVSatPkU8I16Vop3,
@@ -4937,11 +5010,11 @@ const std::array<DecoderImpl::DecodeFunc, 128> DecoderImpl::sub_decode_flat = {
     &detail::decodeFlatLoadSbyteD16HiFlat,
     &detail::decodeFlatLoadShortD16Flat,
     &detail::decodeFlatLoadShortD16HiFlat,
-    &detail::decodeGlobalLoadLdsUbyteFlat,
-    &detail::decodeGlobalLoadLdsSbyteFlat,
-    &detail::decodeGlobalLoadLdsUshortFlat,
-    &detail::decodeGlobalLoadLdsSshortFlat,
-    &detail::decodeGlobalLoadLdsDwordFlat,
+    &DecoderImpl::decodeFlatSegment38,
+    &DecoderImpl::decodeFlatSegment39,
+    &DecoderImpl::decodeFlatSegment40,
+    &DecoderImpl::decodeFlatSegment41,
+    &DecoderImpl::decodeFlatSegment42,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,

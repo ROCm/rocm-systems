@@ -1,0 +1,152 @@
+---
+name: choosing-a-profiling-preset
+description: Recommends which rocprofiler-systems runtime profiling preset (balanced, trace-gpu, trace-hpc, sys-trace, workload-trace, etc.) to pass to `rocprof-sys-run --preset=<name>` or `rocprof-sys-sample --preset=<name>` based on the user's workload and profiling goal, and returns the ready-to-run command. Use when the user asks "which preset should I use", describes a workload (GPU kernel, MPI, OpenMP, AI/ML training, production overview) and wants profiling guidance, or invokes `rocprof-sys-run`/`rocprof-sys-sample` without picking a preset. Do NOT use for CMake build presets (`cmake --preset debug|release|ci`) used to configure/compile rocprofiler-systems itself — that is a build-configuration concern, not a profiling-run concern.
+---
+
+# Choosing a Profiling Preset
+
+Recommends one of rocprofiler-systems' built-in runtime profiling presets for a
+described workload, and returns the exact command to run it.
+
+## Prerequisites
+
+None to make a first recommendation from the table below. To confirm what a preset
+sets (see "Confirm with `--explain`"), and to run the command, `rocprof-sys-run` or
+`rocprof-sys-sample` must be installed or built.
+
+## Terminology
+
+"Trace" and "tracing" mean two different things here. Keep them apart in every answer.
+
+| Term | Meaning | Setting |
+| --- | --- | --- |
+| Perfetto trace output | Writes a timeline file in Perfetto format | `ROCPROFSYS_TRACE` |
+| rocPD output | Writes a rocPD database | `ROCPROFSYS_USE_ROCPD` |
+| Profile output | Writes timemory profile files (flat or call-stack based) | `ROCPROFSYS_PROFILE` |
+| Call-stack sampling | Samples the CPU call stack at a fixed frequency | `ROCPROFSYS_USE_SAMPLING` |
+| API tracing | Intercepts and records the calls of one API | see below |
+
+API tracing is chosen per API: ROCm (`ROCPROFSYS_ROCM_DOMAINS`), MPI
+(`ROCPROFSYS_USE_MPIP`), RCCL (`ROCPROFSYS_USE_RCCLP`), OpenMP (`ROCPROFSYS_USE_OMPT`)
+and Kokkos (`ROCPROFSYS_USE_KOKKOSP`). ROCm API tracing is on in every built-in preset,
+by default for the HIP runtime API, ROCTx markers, kernel dispatches, memory copies and
+scratch memory. A preset may narrow or widen that set, and `--rocm=<domains>` overrides it.
+
+API tracing is separate from output selection. A preset's `tracing.enabled: false` (or
+`ROCPROFSYS_TRACE=false`) turns Perfetto trace output off, not API tracing. The collected
+data goes to whichever outputs are on: Perfetto, rocPD or profile files. Never say a
+preset "has tracing off" without saying which of these you mean.
+
+## Preset reference
+
+A routing aid only: it says which preset fits which need, not exactly what each one sets.
+The installed binary is the source of truth for that (see "Confirm with `--explain`").
+
+| Preset | Category | Use case |
+| --- | --- | --- |
+| `balanced` | general | Recommended default, moderate overhead |
+| `profile-only` | general | Lowest overhead flat profile (production) |
+| `detailed` | general | Maximum depth, high overhead |
+| `trace-gpu` | gpu | GPU activity timeline (kernel dispatch, memory copies) |
+| `trace-hw-counters` | gpu | GPU hardware counters (occupancy, VALU utilization) |
+| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads |
+| `trace-hpc` | hpc | Compute-intensive MPI/OpenMP/Kokkos/RCCL apps, with CPU counters (PAPI) |
+| `trace-openmp` | hpc | OpenMP GPU target-offload apps |
+| `profile-mpi` | hpc | MPI communication latency, flat profile, no Perfetto trace |
+| `sys-trace` | tracing | Debugging runtime-layer interactions, widest ROCm API tracing (HIP, HSA, ROCTx, RCCL) |
+| `runtime-trace` | tracing | Same as `sys-trace` without HSA/compiler APIs |
+
+## How to choose
+
+Resolve these in order; the first question that narrows to a single preset wins. Do not
+require the user to name a runtime such as MPI before a step applies.
+
+1. **API tracing or debugging.** Questions about HIP, HSA or runtime-layer behavior (e.g.
+   "why is my HIP call behaving oddly", "what's HSA doing under the hood") →
+   `sys-trace` (full ROCm API tracing), or `runtime-trace` when HSA and compiler API
+   noise should be left out.
+
+2. **One named measurement.**
+   - GPU hardware counters such as occupancy or VALU utilization → `trace-hw-counters`.
+   - MPI communication latency is the *only* concern, no Perfetto trace file needed →
+     `profile-mpi`.
+   - OpenMP GPU target-offload kernels → `trace-openmp`.
+
+3. **Long-running GPU work.** AI/ML training, or a long-running GPU-accelerated HPC job
+   that needs MPI and RCCL API tracing and a large Perfetto trace buffer →
+   `workload-trace`. A training job qualifies even if it never mentions MPI, and it wins
+   over step 4 when the prompt also names MPI or OpenMP.
+
+4. **HPC runtimes.** A compute-intensive MPI, OpenMP, Kokkos or RCCL application →
+   `trace-hpc`. It writes a Perfetto trace, traces those runtimes' APIs and sets CPU
+   hardware-counter events (PAPI). If the user wants neither the trace file nor the
+   counters, `profile-mpi` or `balanced` write no Perfetto trace.
+
+5. **GPU activity.** Kernel dispatch or device activity (a GPU activity timeline), with
+   none of the goals above stated → `trace-gpu`.
+
+6. **General-purpose profiling.** Pick by overhead tolerance and depth:
+   - Lowest overhead, quick flat profile (e.g. production) → `profile-only`; it turns
+     off Perfetto trace output, rocPD output and call-stack sampling, but ROCm API calls
+     and kernels still appear in the flat profile.
+   - Maximum depth, willing to accept high overhead → `detailed`.
+   - Anything else, or a good default for general profiling (profile output, rocPD
+     output, call-stack sampling and GPU metrics, no Perfetto trace) → `balanced`.
+
+## Confirm with `--explain`
+
+The presets are compiled into the installed binary, so `--explain` matches the user's
+build exactly and the table above can lag behind it. Once you have a candidate:
+
+1. Run `rocprof-sys-run --explain=<name>` (or `rocprof-sys-sample --explain=<name>`) as a
+   single command, with no `command -v` check or `&&` chain in front of it. Use its
+   `ROCPROFSYS_*` list as the facts about the preset. Quote the settings that matter to
+   the user's goal, and if they contradict the table or your first choice, follow
+   `--explain`.
+2. If the command is not found or cannot run, use the table and say that the settings
+   are unconfirmed.
+
+## Output
+
+Return the exact invocation. Default to `rocprof-sys-run`:
+
+```bash
+rocprof-sys-run --preset=<name> -- ./myapp
+```
+
+Both tools take the same `--preset`, and a preset that sets `sampling.enabled` overrides
+either one: `balanced` samples at 50 Hz on both, and `profile-only` leaves call-stack
+sampling off on both. The tools differ only when the preset says nothing about sampling
+(for example `trace-gpu`): `rocprof-sys-sample` turns call-stack sampling on and
+`rocprof-sys-run` leaves it off. So use `rocprof-sys-sample` when the user wants call-stack
+sampling and the preset does not already enable it:
+
+```bash
+rocprof-sys-sample --preset=<name> -- ./myapp
+```
+
+State in one line what the recommended preset turns on and what it leaves off, using the
+terms above, so the user knows what they gain and give up. For example, `profile-only`
+writes a flat profile with no Perfetto trace file, no rocPD database and no call-stack
+sampling, while ROCm API calls and kernels still appear in the profile.
+
+Mention, if relevant:
+
+- Domain flags (`--gpu`, `--rocm`, `--cpu`, `--parallel`) can layer on top of
+  any preset to add/override specific metrics, e.g.
+  `rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp`. Use this when the
+  user's need doesn't fit a preset neatly: start from `balanced` and extend it.
+- `--explain=<name>` and `--list-presets` let the user verify the choice themselves.
+- `--export-config=<file>.json` freezes the resolved preset+overrides into a
+  reusable JSON config — this is the supported way to customize a preset, not
+  hand-editing the shipped JSON files.
+- The file format for custom presets is the JSON schema installed at
+  `<install-prefix>/share/rocprofiler-systems/presets/schema.json`.
+
+## Common Mistakes
+
+| Mistake | Fix |
+| --- | --- |
+| Confusing this with the CMake `--preset debug\|release\|ci` used to *build* rocprofiler-systems | Build presets configure compilation; profiling presets configure a profiling *run*. This skill only covers the latter. |
+| Looking for the built-in preset JSON files to edit | The built-in presets are compiled into the binary and are not installed as files. Use `--explain=<name>` to inspect one and `--export-config` to produce an editable copy. |
+| Picking `detailed` by default for "just get me some data" | Default to `balanced` unless the user explicitly wants maximum depth and can tolerate higher overhead. |

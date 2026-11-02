@@ -691,7 +691,7 @@ def test_run_returns_the_workloads_own_status_after_verifying(world):
 
 
 def test_run_refuses_to_merge_into_an_existing_capture(world):
-    """Capture resumes into what is there, and two attempts then read as one
+    """Capture adds to what is there, and two attempts then read as one
     multi-process archive."""
     out = world.root / "capture"
     (out / "pid-1").mkdir(parents=True)

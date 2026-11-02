@@ -29,15 +29,9 @@ bool is_open();
 void set_capture_metadata_json(const std::string& metadata_json);
 
 // Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
-// and write manifest.json with "complete": true. Call on normal shutdown: once the
-// trailer is written, events, blobs and code objects are dropped until close() and
-// the next open(). Use checkpoint() to flush while capture runs.
+// and write manifest.json with "complete": true. Call on normal shutdown: events,
+// blobs and code objects that arrive after it are dropped.
 void flush(const char* output_dir);
-
-// Force any buffered events to disk and fsync. Bounds how much capture data a
-// crash can lose. Cheap relative to capture; called periodically by the writer
-// itself and may be called by the host. Thread-safe.
-void checkpoint();
 
 // Best-effort finalize for use from CLR's crash callback.
 // Flushes the in-memory event buffer with raw write()+fsync only when no writer
@@ -97,7 +91,7 @@ void note_unreplayable(const char* api, const char* reason);
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
 // writer is not open, flush() has written the trailer, or capture has stopped
 // for lack of space.
-// Thread-safe. Skips write if blob already exists on disk.
+// Thread-safe. Skips the write when the same bytes are already in this archive.
 Hash128 write_blob(const void* data, size_t len);
 
 // Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.

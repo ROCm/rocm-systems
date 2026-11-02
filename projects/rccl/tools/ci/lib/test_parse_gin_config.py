@@ -32,13 +32,14 @@ class ParseGinConfigTest(unittest.TestCase):
         rows = format_rows(config)
         test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
         parts = test_row.split(_FIELD_SEP)
-        self.assertEqual(len(parts), 6)
+        self.assertEqual(len(parts), 7)
         self.assertEqual(parts[0], "test")
         self.assertEqual(parts[1], "fixtures-case")
         self.assertEqual(parts[2], "fixtures")
         self.assertEqual(parts[3], "rccl-UnitTestsFixtures")
         self.assertEqual(parts[4], "")
         self.assertEqual(parts[5], "--gtest_filter=GinRocshmemGdaTemplateTest.*")
+        self.assertEqual(parts[6], "")
 
     def test_pytest_kind_preserves_args(self) -> None:
         config = parse_config(
@@ -61,12 +62,40 @@ class ParseGinConfigTest(unittest.TestCase):
         rows = format_rows(config)
         test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
         parts = test_row.split(_FIELD_SEP)
+        self.assertEqual(len(parts), 7)
         self.assertEqual(parts[2], "pytest")
         self.assertEqual(parts[3], "test_Broadcast.py")
         self.assertEqual(
             parts[4], "-x NCCL_CUMEM_ENABLE=1 -x HSA_NO_SCRATCH_RECLAIM=1"
         )
         self.assertEqual(parts[5], "-k GinSdma -v")
+        self.assertEqual(parts[6], "")
+
+    def test_np_override_is_seventh_field(self) -> None:
+        config = parse_config(
+            _write_json(
+                {
+                    "mca": "",
+                    "debug_env": [],
+                    "tests": [
+                        {
+                            "name": "mpi-barrier",
+                            "kind": "mpi-fixtures",
+                            "bin": "rccl-UnitTestsMPI",
+                            "np": 2,
+                            "env": ["NCCL_GIN_TYPE=7"],
+                            "args": "--gtest_filter=GinMPIDeviceTests.BarrierFence_*",
+                        }
+                    ],
+                }
+            )
+        )
+        rows = format_rows(config)
+        test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
+        parts = test_row.split(_FIELD_SEP)
+        self.assertEqual(len(parts), 7)
+        self.assertEqual(parts[2], "mpi-fixtures")
+        self.assertEqual(parts[6], "2")
 
 
 def _write_json(data: dict) -> Path:

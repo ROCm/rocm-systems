@@ -2351,10 +2351,9 @@ SCvtHiF32F16Sop1::SCvtHiF32F16Sop1(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->ssrc0 == 255)
-    ssrc0 =
-        Operand(16, OperandType::OPR_SIMM32,
-                static_cast<int>((
-                    reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+    ssrc0 = Operand(
+        16, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32));
 }
 
 namespace detail {
