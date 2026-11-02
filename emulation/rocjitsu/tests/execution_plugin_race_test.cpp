@@ -460,9 +460,13 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
 /// in race_detector_tests.cpp; these tests cover the hook's translation.
 class TensorDmaRaceTest : public ::testing::Test {
 protected:
+  static constexpr uint64_t kTensorPc = 0x2010;
+  static constexpr uint64_t kNextPc = 0x201c;
+
   PluginFixture fixture;
   StringSink *sink = nullptr;
   std::array<Wavefront *, 2> waves{};
+  std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna5",
@@ -579,11 +583,6 @@ protected:
     fixture.plugin_group_->onAmdgpuTensorDmaMemoryAccess(access, *waves[0]);
     return sink->str().substr(previous);
   }
-
-  static constexpr uint64_t kTensorPc = 0x2010;
-  static constexpr uint64_t kNextPc = 0x201c;
-
-  std::unique_ptr<Decoder> decoder;
 };
 
 TEST_F(TensorDmaRaceTest, LoadIsAnLdsWriteRetiredByTensorcntAndBarrier) {
