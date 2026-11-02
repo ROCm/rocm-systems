@@ -402,10 +402,6 @@ public:
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
   /// wave's PC has advanced past it.
   uint64_t pc = 0;
-  /// Exclusive absolute CU LDS byte address at which the wave's allocation
-  /// ends, clamped to the CU's LDS backing size. The allocation can end before
-  /// the CU's LDS does; transfer bytes at or past this address are dropped.
-  uint64_t lds_allocation_end = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -496,7 +492,8 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
 }
 
 /// @brief Exclusive absolute CU byte address at which the wave's LDS
-/// allocation ends, clamped to the CU's LDS backing size.
+/// allocation ends, clamped to the CU's LDS backing size. The allocation can
+/// end before the CU's LDS does; transfer bytes at or past it are dropped.
 inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
   return std::min<uint64_t>(wf.lds().size_bytes(),
                             uint64_t{wf.lds_base()} + uint64_t{wf.lds_size()});
@@ -507,11 +504,11 @@ inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
 /// unchecked 64-bit arithmetic. An out-of-range LDS address does not abort the transfer (CDNA5 ISA
 /// 10.11.6, "Xnack, Memviol and Out-of-Bounds Behavior"); append_copy drops the out-of-range
 /// bytes. Requiring the atomic-barrier cell to lie within the allocation is simulator validation,
-/// not a rule of that section.
+/// not a rule of that section. allocation_end is tensor_dma_lds_allocation_end(wf).
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
-                                                    const Wavefront &wf, bool store_from_lds) {
-  const uint64_t allocation_end = tensor_dma_lds_allocation_end(wf);
+                                                    const Wavefront &wf, bool store_from_lds,
+                                                    uint64_t allocation_end) {
   // Barrier completion writes eight bytes even when the transfer has no elements.
   if (desc.atomic_barrier) {
     const auto barrier_address =
@@ -563,9 +560,10 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
 
 /// @brief Append one transfer element after the descriptor-wide address proof.
 /// @pre The descriptor and wave passed validate_supported_descriptor and
-/// validate_materialization_address_ranges.
-inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_element,
-                        uint64_t lds_element, bool in_bounds) {
+/// validate_materialization_address_ranges. LDS bytes at or past
+/// lds_allocation_end, tensor_dma_lds_allocation_end(wf), are dropped.
+inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_allocation_end,
+                        uint64_t global_element, uint64_t lds_element, bool in_bounds) {
   const TensorDmaDescriptor &desc = state.desc;
   const uint64_t global_address =
       in_bounds ? desc.global_base + global_element * desc.elem_size : 0;
@@ -582,8 +580,8 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
   // other out-of-range LDS loads.
   const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
   const uint64_t lds_bytes =
-      lds_address < state.lds_allocation_end
-          ? std::min<uint64_t>(desc.elem_size, state.lds_allocation_end - lds_address)
+      lds_address < lds_allocation_end
+          ? std::min<uint64_t>(desc.elem_size, lds_allocation_end - lds_address)
           : 0;
   TensorDmaTransferElement element{
       .global_address = global_address,
@@ -701,12 +699,15 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
                     *element_count, kMaxMaterializedElements));
     return util::Result::failure();
   }
-  if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds)) [[unlikely]]
+  // The allocation bound is used only while materializing elements; resume,
+  // completion and observation work from the elements it produced.
+  const uint64_t lds_allocation_end = tensor_dma_lds_allocation_end(wf);
+  if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds,
+                                               lds_allocation_end)) [[unlikely]]
     return util::Result::failure();
-  state.lds_allocation_end = tensor_dma_lds_allocation_end(wf);
   state.elements.reserve(static_cast<size_t>(*element_count));
   auto append_element = [&](uint64_t global_element, uint64_t lds_element, bool in_bounds) {
-    append_copy(state, wf, global_element, lds_element, in_bounds);
+    append_copy(state, wf, lds_allocation_end, global_element, lds_element, in_bounds);
   };
   for_each_tensor_element(desc, layout, append_element);
 
