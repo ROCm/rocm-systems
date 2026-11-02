@@ -175,6 +175,16 @@ static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) 
   return comm->nNodes <= 1;
 }
 
+// GIN connection type once ncclGinSetDefaultBackend has run. That can drop every active backend
+// (Anvil SDMA alone on a multi-host communicator), and FULL or RAIL with none left would make
+// query and connect report a backend that is gone.
+static ncclGinConnectionType_t ginConnectionType(const struct ncclComm* comm, bool globalCrossNicSupport) {
+  if (!comm->sharedRes->ginState.supported) return NCCL_GIN_CONNECTION_NONE;
+  if (globalCrossNicSupport) return NCCL_GIN_CONNECTION_FULL;
+  if (comm->contiguousRanksPerHost != INT_MAX) return NCCL_GIN_CONNECTION_RAIL;
+  return NCCL_GIN_CONNECTION_NONE;
+}
+
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
   int maxPolicy = 0;
@@ -2935,11 +2945,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
-    if (globalCrossNicSupport) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
-    } else if (comm->contiguousRanksPerHost != INT_MAX) {
-      comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
-    }
+    comm->globalGinSupport = ginConnectionType(comm, globalCrossNicSupport);
   }
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
@@ -3689,8 +3695,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
 
   envNetName = ncclGetEnv("NCCL_NET");
   if (envNetName) {
-    if (strcasecmp(envNetName, "ROCM-IB") == 0) tmpNetName = "IB-CAST";
-    else tmpNetName = envNetName;
+    tmpNetName = rcclCanonicalNetName(envNetName);
   }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR) {

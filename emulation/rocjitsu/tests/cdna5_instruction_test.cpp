@@ -3,6 +3,7 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 
 #include <atomic>
 #include <mutex>
@@ -2161,6 +2162,48 @@ TEST(Gfx1250SimulationTest, VopdFmacUsesDestinationAccumulator) {
   for (uint32_t lane = 0; lane < wf->wf_size; ++lane) {
     EXPECT_EQ(wf->vgpr(10, lane), 0x40E00000u) << "lane " << lane;
     EXPECT_EQ(wf->vgpr(9, lane), 0x40000000u) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
+  constexpr VopdOp kInvalidVopd3Op = static_cast<VopdOp>(63);
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "invalid_x=" << invalid_x);
+    const auto words = make_vopd3_pair({.op = invalid_x ? kInvalidVopd3Op : VopdOp::AddF64,
+                                        .src0 = vopd_src0_vgpr(2),
+                                        .src1 = 4,
+                                        .src2 = 0,
+                                        .dst = 8},
+                                       {.op = invalid_x ? VopdOp::AddF64 : kInvalidVopd3Op,
+                                        .src0 = vopd_src0_vgpr(6),
+                                        .src1 = 10,
+                                        .src2 = 0,
+                                        .dst = 12});
+    // Invalid encodings cannot reach this fallback through the decoder.
+    cdna5::Vopd inst(reinterpret_cast<const cdna5::MachineInst *>(words.data()));
+    wf->set_exec(0xAAAA'AAAA);
+    wf->set_vcc(0x12345678);
+    wf->write_scc(1);
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        sim.cu()->write_vgpr(base + reg, lane, 100u * reg + lane);
+    ASSERT_NE(inst.execute, nullptr);
+    wf->clear_instruction_execution_error();
+    ASSERT_NO_THROW(inst.execute(inst, wf));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(wf->exec(), 0xAAAA'AAAAu);
+    EXPECT_EQ(wf->vcc(), 0x12345678u);
+    EXPECT_EQ(wf->read_scc(), 1u);
+    EXPECT_FALSE(wf->is_halted());
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        EXPECT_EQ(sim.cu()->read_vgpr(base + reg, lane), 100u * reg + lane);
   }
 }
 
