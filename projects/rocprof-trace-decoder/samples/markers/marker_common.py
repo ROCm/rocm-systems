@@ -24,7 +24,8 @@ def add_marker_args(parser, *, output_dir: bool = False) -> None:
     )
 
 
-def load_marker_traces(args):
+def load_marker_traces(args, extra_record_types=()):
+    # extra_record_types lets a sample also collect e.g. RecordType.REALTIME.
     expanded = []
     for value in args.files:
         path = Path(value).expanduser()
@@ -53,7 +54,7 @@ def load_marker_traces(args):
         )
     traces = []
     with Decoder() as decoder:
-        decoder.set_record_filter([RecordType.INFO, RecordType.MARKER])
+        decoder.set_record_filter([RecordType.INFO, RecordType.MARKER, *extra_record_types])
         for code_object in inputs.code_objects:
             path = Path(code_object.path)
             decoder.load_code_object_file(
