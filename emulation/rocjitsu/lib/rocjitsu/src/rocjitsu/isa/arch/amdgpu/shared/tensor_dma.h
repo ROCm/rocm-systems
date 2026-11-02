@@ -382,7 +382,8 @@ public:
   uint32_t lds_address = 0;
   std::array<uint8_t, 8> bytes{};
   std::size_t completed_bytes = 0;
-  /// Trailing bytes outside the wave's LDS. Loads drop them; stores read zero.
+  /// Trailing bytes outside the wave's LDS allocation. Loads drop them; stores
+  /// read zero.
   uint8_t lds_dropped_bytes = 0;
   bool in_bounds = false;
 };
@@ -401,7 +402,10 @@ public:
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
   /// wave's PC has advanced past it.
   uint64_t pc = 0;
-  uint64_t lds_end = 0;
+  /// Exclusive absolute CU LDS byte address at which the wave's allocation
+  /// ends, clamped to the CU's LDS backing size. The allocation can end before
+  /// the CU's LDS does; transfer bytes at or past this address are dropped.
+  uint64_t lds_allocation_end = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
@@ -491,8 +495,9 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
           .amount_bytes = uint64_t{desc.pad_amount} * sizeof(uint32_t)};
 }
 
-/// @brief End of the LDS a wave owns, clamped to the CU's LDS.
-inline uint64_t tensor_dma_lds_end(const Wavefront &wf) {
+/// @brief Exclusive absolute CU byte address at which the wave's LDS
+/// allocation ends, clamped to the CU's LDS backing size.
+inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
   return std::min<uint64_t>(wf.lds().size_bytes(),
                             uint64_t{wf.lds_base()} + uint64_t{wf.lds_size()});
 }
@@ -505,7 +510,7 @@ inline uint64_t tensor_dma_lds_end(const Wavefront &wf) {
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
                                                     const Wavefront &wf, bool store_from_lds) {
-  const uint64_t allocation_end = tensor_dma_lds_end(wf);
+  const uint64_t allocation_end = tensor_dma_lds_allocation_end(wf);
   // Barrier completion writes eight bytes even when the transfer has no elements.
   if (desc.atomic_barrier) {
     const auto barrier_address =
@@ -569,12 +574,13 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
     lds_byte += (lds_byte / padding.interval_bytes) * padding.amount_bytes;
   }
 
-  // Bytes past the wave's LDS are dropped rather than aborting the operation
+  // Bytes past the wave's LDS allocation are dropped rather than aborting the operation
   // (CDNA5 ISA 4.10.7). Like other LDS loads, a store reads them as zero.
   const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
-  const uint64_t lds_bytes = lds_address < state.lds_end
-                                 ? std::min<uint64_t>(desc.elem_size, state.lds_end - lds_address)
-                                 : 0;
+  const uint64_t lds_bytes =
+      lds_address < state.lds_allocation_end
+          ? std::min<uint64_t>(desc.elem_size, state.lds_allocation_end - lds_address)
+          : 0;
   TensorDmaTransferElement element{
       .global_address = global_address,
       .lds_address = lds_bytes ? static_cast<uint32_t>(lds_address) : kInvalidLdsAddress,
@@ -693,7 +699,7 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   }
   if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds)) [[unlikely]]
     return util::Result::failure();
-  state.lds_end = tensor_dma_lds_end(wf);
+  state.lds_allocation_end = tensor_dma_lds_allocation_end(wf);
   state.elements.reserve(static_cast<size_t>(*element_count));
   auto append_element = [&](uint64_t global_element, uint64_t lds_element, bool in_bounds) {
     append_copy(state, wf, global_element, lds_element, in_bounds);
@@ -736,7 +742,8 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
 
 /// @brief Merge the LDS bytes a transfer touches into runs, in element order.
 /// @details Loads write every element; out-of-tensor elements are zero-filled.
-/// Stores read only in-bounds elements. Bytes outside the wave's LDS are omitted.
+/// Stores read only in-bounds elements. Bytes outside the wave's LDS allocation
+/// are omitted.
 inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
   std::vector<TensorDmaLdsRange> ranges;
   ranges.reserve(state.elements.size());
