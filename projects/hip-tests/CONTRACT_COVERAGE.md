@@ -13,20 +13,20 @@ contract tier intentionally pins only small, portable semantic guarantees.
 ## Snapshot
 
 <!-- contract-coverage-snapshot
-contract_tests: 631
-contract_domains: 118
-declared_apis: 505
-covered_apis: 492
+contract_tests: 639
+contract_domains: 119
+declared_apis: 509
+covered_apis: 496
 uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
-- Contract tests: 631
-- Contract domains: 118
-- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505
-- Declared HIP runtime APIs directly exercised by contract tests: 492
+- Snapshot date: 2026-11-02
+- Snapshot commit: `61053fb485b`
+- Contract tests: 639
+- Contract domains: 119
+- Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 509
+- Declared HIP runtime APIs directly exercised by contract tests: 496
 - Intentionally uncovered, allowlisted APIs: 13
 - Approximate declared API-name coverage: 97.4%
 - Additional public macro exercised: `hipLaunchKernelGGL`
@@ -55,7 +55,7 @@ plan or the full covered-API listing here.
 
 ## Current allowlisted gaps
 
-The checker currently reports these 11 uncovered declared APIs, all intentionally
+The checker currently reports these 13 uncovered declared APIs, all intentionally
 allowlisted:
 
 ### External-semaphore graph nodes
@@ -137,6 +137,7 @@ binaries instead of exposing portable state to assert.
 | `graph_exec_lifecycle` | 5 |
 | `graph_generic_node` | 3 |
 | `graph_host` | 3 |
+| `graph_id` | 8 |
 | `graph_instantiate_params` | 2 |
 | `graph_kernel` | 3 |
 | `graph_mem_nodes` | 7 |

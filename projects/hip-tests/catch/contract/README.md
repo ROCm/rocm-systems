@@ -73,6 +73,7 @@ The first domains are:
 - `graph_node_params`: graph memcpy, memset, event, and lifecycle node parameter contracts
 - `graph_node_setters`: pre-instantiation graph node parameter setter and attribute-copy contracts
 - `graph_symbol_copy_nodes`: graph memcpy-to/from-symbol node add, set-params, and exec-set-params contracts
+- `graph_id`: IDs for graphs, executable graphs, and graph nodes
 - `host_memory`: host allocation, registration, device-pointer, and flag contracts
 - `host_alloc_aliases`: alternate host allocation/free entry point and extended allocation contracts
 - `pitched_memory`: pitched allocation and host/device 2D copy contracts

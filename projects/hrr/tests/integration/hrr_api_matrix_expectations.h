@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 559 HIP APIs.
+ * Generated from 563 HIP APIs.
  */
 
 #pragma once
@@ -348,6 +348,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphExecExternalSemaphoresSignalNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphExecExternalSemaphoresWaitNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphExecGetFlags", "T4", 1, false, true, false, false},
+    {"hipGraphExecGetId", "T4", 1, false, true, false, false},
     {"hipGraphExecMemcpyNodeSetParamsFromSymbol", "T4", 0, false, true, true, false},
     {"hipGraphExecMemcpyNodeSetParamsToSymbol", "T4", 0, false, true, true, false},
     {"hipGraphExternalSemaphoresSignalNodeGetParams", "T4", 0, false, true, false, false},
@@ -355,6 +356,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphExternalSemaphoresWaitNodeGetParams", "T4", 0, false, true, false, false},
     {"hipGraphExternalSemaphoresWaitNodeSetParams", "T4", 0, true, true, false, false},
     {"hipGraphGetEdges", "T4", 1, false, true, false, false},
+    {"hipGraphGetId", "T4", 1, false, true, false, false},
     {"hipGraphGetNodes", "T4", 1, false, true, false, false},
     {"hipGraphGetRootNodes", "T4", 1, false, true, false, false},
     {"hipGraphHostNodeGetParams", "T4", 1, false, true, false, false},
@@ -375,6 +377,8 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipGraphNodeGetDependencies", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetDependentNodes", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetEnabled", "T4", 1, false, true, false, false},
+    {"hipGraphNodeGetLocalId", "T4", 1, false, true, false, false},
+    {"hipGraphNodeGetToolsId", "T4", 1, false, true, false, false},
     {"hipGraphNodeGetType", "T4", 1, false, true, false, false},
     {"hipGraphNodeSetEnabled", "T4", 0, false, true, false, false},
     {"hipGraphReleaseUserObject", "T4", 1, false, true, false, false},
