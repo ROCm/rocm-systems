@@ -788,8 +788,8 @@ not its type, so the type is not compared.
 At init, all already-registered fat binaries are recovered retroactively via
 `ForEachFatBinaryBlob`. At playback, each captured blob is loaded with
 `hipModuleLoadData`; the resulting `hipModule_t` is stored in `module_map` keyed by
-hash and scanned for kernel name lookups. Without content mode the blob hash is
-`HRR_HASH_WITHHELD` and playback refuses the registration.
+hash and scanned for kernel name lookups. Without content mode, replay refuses the
+first call that needs contents the capture withheld.
 
 ## Multi-Threaded Capture
 
