@@ -234,6 +234,8 @@ def _detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
     unsupported_gpu_arch: set[str] = set()
 
     for idx, line_text in enumerate(rocminfo_lines):
+        # The regex stops at the first non-alphanumeric character (e.g. `-`)
+        # on purpose: variants like gfx1250-strict map to their base arch gfx1250.
         gpu_arch = search_pattern(
             r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", line_text
         )
