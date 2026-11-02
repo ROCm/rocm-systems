@@ -11,11 +11,18 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <cstdint>
 #include <optional>
-#include <stdexcept>
-#include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
+
+inline bool scalar_pair_crosses_register_region(const Wavefront &wf, int ev) {
+  if (ev == static_cast<int>(kScalarSgprSelectorLast) || ev == static_cast<int>(kVccSelectorLast) ||
+      ev == static_cast<int>(kTtmpSelectorLast) || ev == static_cast<int>(kExecSelectorLast))
+    return true;
+  const bool legacy = arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch());
+  return legacy ? ev == 101 || ev == static_cast<int>(kFlatScratchSelectorLast)
+                : ev == static_cast<int>(kFlatScratchBaseSelectorLast);
+}
 
 // resolve_src_scalar_statically() (the wavefront-free inline-constant subset) is
 // defined in scalar_static_resolve.h, included above, so model-side code can use
@@ -101,7 +108,8 @@ inline uint32_t resolve_src_scalar_value(const Wavefront &wf, int ev, int m0_ev)
     return wf.exec() == 0 ? 1u : 0u; // EXECZ
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
-  throw std::logic_error("Unsupported encoding value for scalar read: " + std::to_string(ev));
+  wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
+  return 0u;
 }
 
 inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
@@ -113,38 +121,34 @@ inline uint32_t resolve_src_scalar(const Wavefront &wf, int ev, int m0_ev) {
                                   }>(wf, ev, m0_ev);
 }
 
-// 16-bit reads of the inline float constants use the half-precision bit
-// patterns rather than the single-precision ones; every other encoding value
-// resolves identically to the 32-bit path.
-inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev) {
-  switch (ev) {
-  case 240:
-    return 0x3800u; // 0.5h
-  case 241:
-    return 0xB800u; // -0.5h
-  case 242:
-    return 0x3C00u; // 1.0h
-  case 243:
-    return 0xBC00u; // -1.0h
-  case 244:
-    return 0x4000u; // 2.0h
-  case 245:
-    return 0xC000u; // -2.0h
-  case 246:
-    return 0x4400u; // 4.0h
-  case 247:
-    return 0xC400u; // -4.0h
-  case 248:
-    return 0x3118u; // f16 1/(2*pi)
-  default:
-    return resolve_src_scalar(wf, ev, m0_ev);
+inline std::optional<uint32_t>
+resolve_lane_inline_float_statically(int ev, Operand::LaneInlineFloatFormat format) {
+  switch (format) {
+  case Operand::LaneInlineFloatFormat::F16:
+    return resolve_inline_float16_statically(ev);
+  case Operand::LaneInlineFloatFormat::BF16:
+    return resolve_inline_bfloat16_statically(ev);
+  case Operand::LaneInlineFloatFormat::F32:
+    if (is_inline_float_src(ev))
+      return static_cast<uint32_t>(*resolve_src_scalar_statically(ev));
+    return std::nullopt;
   }
+  return std::nullopt;
 }
 
-// Must stay in sync with resolve_src_scalar above -- returns true for exactly
-// the encoding values that resolve_src_scalar handles without throwing. Used by
-// Isa::simd_capable_value() to keep the SIMD fast path off operands whose
-// scalar broadcast would throw at runtime.
+// Only floating inline selectors depend on the lane's numeric format.
+// Registers, integer inlines and literals retain their raw carriers.
+inline uint32_t resolve_src_scalar16(const Wavefront &wf, int ev, int m0_ev,
+                                     Operand::LaneInlineFloatFormat format) {
+  if (auto value = resolve_lane_inline_float_statically(ev, format))
+    return *value;
+  return resolve_src_scalar(wf, ev, m0_ev);
+}
+
+// Must stay in sync with resolve_src_scalar above. This returns true for exactly
+// the encoding values that resolve without reporting UnsupportedOperandValue.
+// Isa::simd_capable_value() uses it to keep the SIMD fast path off operands whose
+// scalar broadcast would report a guest execution failure.
 inline bool can_resolve_src_scalar(int ev, int m0_ev) {
   bool ok =
       (ev >= 0 && ev <= static_cast<int>(kVccSelectorLast)) ||
@@ -160,6 +164,10 @@ inline bool can_resolve_src_scalar(int ev, int m0_ev) {
 }
 
 inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
+  if (scalar_pair_crosses_register_region(wf, ev)) {
+    wf.report_undefined_behavior("64-bit scalar source crosses a register region");
+    return 0u;
+  }
   if (is_src_scalar_register_pair(ev)) {
     if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
         ev == static_cast<int>(kFlatScratchSelectorFirst))
@@ -176,7 +184,8 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
       return wf.exec_raw();
     if (ev == static_cast<int>(kFlatScratchBaseSelectorFirst))
       return wf.scratch_base(); // SRC_FLAT_SCRATCH_BASE
-    throw std::logic_error("Scalar register-pair selector is not resolved: " + std::to_string(ev));
+    wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
+    return 0u;
   }
   if (m0_ev == static_cast<int>(kModernM0Selector) && ev == static_cast<int>(kModernNullSelector))
     return 0u; // NULL
@@ -216,7 +225,8 @@ inline uint64_t resolve_src_scalar64(const Wavefront &wf, int ev, int m0_ev) {
     return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT
   if (ev == 253)
     return wf.read_scc() ? 1u : 0u; // SCC
-  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));
+  wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
+  return 0u;
 }
 
 inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
@@ -263,10 +273,14 @@ inline void resolve_dst_write(Wavefront &wf, int ev, uint32_t val, int m0_ev) {
     wf.set_exec_raw((wf.exec_raw() & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));
     return;
   }
-  throw std::logic_error("Unsupported encoding value for scalar write: " + std::to_string(ev));
+  wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
 }
 
 inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
+  if (scalar_pair_crosses_register_region(wf, ev)) {
+    wf.report_undefined_behavior("64-bit scalar destination crosses a register region");
+    return;
+  }
   if (arch_uses_legacy_flat_scratch_sgprs(wf.cu().arch()) &&
       ev == static_cast<int>(kFlatScratchSelectorFirst)) {
     wf.set_scratch_base(val);
@@ -291,7 +305,7 @@ inline void resolve_dst_write64(Wavefront &wf, int ev, uint64_t val) {
     wf.set_exec_raw(val);
     return;
   }
-  throw std::logic_error("Unsupported encoding value for scalar64 write: " + std::to_string(ev));
+  wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
 }
 
 } // namespace amdgpu

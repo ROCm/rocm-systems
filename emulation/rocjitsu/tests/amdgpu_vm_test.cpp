@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "throwing_instruction_test_util.h"
 
@@ -110,6 +111,19 @@ public:
   }
 };
 
+class CommandProcessorCacheTestAccess {
+public:
+  static void flush_gpu_caches(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    cp.flush_gpu_caches();
+  }
+
+  static void flush_completion_caches(CommandProcessor &cp) {
+    std::lock_guard lock(cp.hw_queue_mutex_);
+    cp.completion_->flush_caches();
+  }
+};
+
 } // namespace rocjitsu::amdgpu
 
 namespace {
@@ -169,6 +183,7 @@ struct VmFixture {
                   uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104,
                   uint32_t vgprs_per_wf = 256, uint32_t num_shader_engines = 1,
                   uint64_t max_ticks = 10000, bool create_engine = true) {
+    util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string shader_engines;
     std::string links;
@@ -221,9 +236,13 @@ struct VmFixture {
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    if (create_engine)
-      engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    if (create_engine) {
+
+      ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+          << admission_diagnostic.message();
+    }
   }
 
   amdgpu::Xcd *xcd(uint32_t idx = 0) { return soc_ptr->xcd(idx); }
@@ -282,6 +301,34 @@ struct VmFixture {
                       addr + sizeof(kernel_descriptor_t));
     return addr;
   }
+};
+
+// Track each wave incarnation separately: a rollback may reuse the same slot.
+class CancellationLifecyclePlugin : public ExecutionPlugin {
+public:
+  CancellationLifecyclePlugin() : ExecutionPlugin("cancellation_lifecycle") {}
+  uint32_t launches = 0;
+  uint32_t cancellations = 0;
+  uint32_t halts = 0;
+  uint32_t completed_workgroups = 0;
+  uint32_t completed_dispatches = 0;
+  std::vector<amdgpu::InstructionExecutionError> cancellation_errors;
+  std::function<void(amdgpu::Wavefront &)> on_launch;
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
+    ++launches;
+    if (on_launch)
+      on_launch(wave);
+  }
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wave) override {
+    EXPECT_FALSE(wave.is_halted());
+    EXPECT_GT(wave.num_sgprs(), 0u);
+    cancellation_errors.push_back(wave.instruction_execution_error());
+    ++cancellations;
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halts; }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
+  void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
 };
 
 TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
@@ -402,6 +449,25 @@ TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) 
   auto compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2);
   ASSERT_NE(compute_unit, nullptr);
   EXPECT_EQ(compute_unit->arch(), ROCJITSU_CODE_ARCH_CDNA5);
+}
+
+TEST(ComputeUnitConfigTest, VectorCacheInheritsBackingTransactionPolicy) {
+  for (auto policy :
+       {amdgpu::MemoryTransactionPolicy{}, amdgpu::MemoryTransactionPolicy::unqualified_64()}) {
+    amdgpu::GpuMemory memory("memory", policy);
+    amdgpu::L2Cache l2("l2");
+    const amdgpu::ComputeUnitCore::Config config{
+        .arch = ROCJITSU_CODE_ARCH_CDNA5,
+        .target = ROCJITSU_CODE_TARGET_GFX1250,
+        .num_wf_slots = 8,
+        .sgprs_per_wf = 104,
+        .vgprs_per_wf = 256,
+        .lds_size_kb = 64,
+    };
+    auto cu = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2);
+    ASSERT_NE(cu, nullptr);
+    EXPECT_EQ(cu->l1_vector().transaction_policy().bytes(), policy.bytes());
+  }
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
@@ -897,12 +963,12 @@ TEST(GpuMemoryTest, FindHostRangeStopsAtNonContiguousVmidHostPages) {
 TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
   constexpr uint32_t kPerCuLdsBytes = 64 * 1024;
   constexpr uint32_t kWgpLdsBytes = 2 * kPerCuLdsBytes;
-  const uint32_t code[] = {SOPP_S_ENDPGM};
 
   for (const char *arch : {"rdna1", "rdna2", "rdna3", "rdna3_5", "rdna4"}) {
     SCOPED_TRACE(arch);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
+    const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
     auto *snap = f.capture_halts();
     uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, kWgpLdsBytes,
                                  /*wgp_mode=*/true);
@@ -958,6 +1024,49 @@ TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
   EXPECT_EQ(second->lds->read32(0), 0x12345678u);
   EXPECT_EQ(second->lds->read32(64 * 1024), 0x87654321u);
   EXPECT_TRUE(f.se()->spi().release_wgp_workgroup(entry.dispatch_id, /*global_wg_id=*/0));
+}
+
+TEST(RdnaDispatchTest, DispatchFailureReclaimsUnlaunchedWgpReservations) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
+  test::AqlQueue queue(f.mem(), f.cp());
+  auto &spi = f.se()->spi();
+
+  amdgpu::DispatchEntry failed{};
+  failed.kind = amdgpu::DispatchPacketKind::Kernel;
+  failed.queue_id = 1;
+  failed.dispatch_id = 19;
+  failed.total_wgs = 2;
+  failed.wgp_mode = true;
+  failed.wfs_per_workgroup = 2;
+  failed.group_segment_fixed_size = 32 * 1024;
+  f.cp()->accept_fanout_shard(failed);
+  f.cp()->drain_fanout_inbox_for_test();
+  ASSERT_TRUE(f.cp()->has_dispatch_for_test(1, 0, failed.dispatch_id));
+
+  // Reserve all paired-CU LDS without launching any waves. Interleave another
+  // dispatch's reservation, which cancellation must leave intact.
+  ASSERT_TRUE(spi.allocate_workgroup(failed, 0));
+  amdgpu::DispatchEntry other = failed;
+  other.queue_id = 2;
+  other.dispatch_id = 20;
+  other.group_segment_fixed_size = 64 * 1024;
+  ASSERT_TRUE(spi.allocate_workgroup(other, 0));
+  ASSERT_TRUE(spi.allocate_workgroup(failed, 1));
+  EXPECT_TRUE(f.cu(0)->is_idle());
+  EXPECT_TRUE(f.cu(1)->is_idle());
+
+  f.cp()->notify_dispatch_failure(1, 0, failed.dispatch_id);
+  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, failed.dispatch_id));
+
+  amdgpu::DispatchEntry next = failed;
+  next.dispatch_id = 21;
+  next.group_segment_fixed_size = 128 * 1024;
+  EXPECT_FALSE(spi.allocate_workgroup(next, 0));
+  ASSERT_TRUE(spi.release_wgp_workgroup(other.dispatch_id, 0));
+  ASSERT_TRUE(spi.allocate_workgroup(next, 0));
+  EXPECT_TRUE(spi.release_wgp_workgroup(next.dispatch_id, 0));
 }
 
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
@@ -2481,6 +2590,273 @@ TEST(GpuMemoryThreadingTest, SplitMappedAtomicLocksEveryBackingStripe) {
                                  std::span(first_backing).first(sizeof(uint32_t))));
   EXPECT_TRUE(std::ranges::equal(std::span(replacement).subspan(sizeof(uint32_t)),
                                  std::span(second_backing, sizeof(uint32_t))));
+}
+
+TEST(GpuMemoryTest, SealedSmallCopyRejectsNullBackingWithoutChangingReadDestination) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  KfdProcess process(kPid);
+  process.page_table_.emplace(
+      kAddress >> KfdProcess::kPageShift,
+      amdgpu::LegacyPageTableEntry(nullptr, amdgpu::Mtype::RW, amdgpu::kMaxMemoryTransactionBytes,
+                                   0, KfdProcess::HostExtentOwner::DriverSealedRam));
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  std::array<uint32_t, 4> bytes{1, 2, 3, 4};
+  auto &space = memory.legacy_address_space(kPid);
+  for (bool into_memory : {false, true})
+    EXPECT_FALSE(space.try_copy_contiguous(kAddress + sizeof(uint32_t), bytes.data(), sizeof(bytes),
+                                           kPid, into_memory));
+  EXPECT_EQ(bytes, (std::array<uint32_t, 4>{1, 2, 3, 4}));
+}
+
+TEST(GpuMemoryThreadingTest, OrdinaryLineTransfersShareAtomicExclusionAcrossMappedAliases) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  constexpr uint64_t kAlias = 0x50000000;
+  for (auto owner :
+       {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+    for (size_t host_offset : {0u, 4u, 64u}) {
+      rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+      KfdProcess process(kPid);
+      // Keep the contiguous-copy paths within one host page at every host offset.
+      alignas(KfdProcess::kPageSize)
+          std::array<uint8_t, KfdProcess::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
+              backing{};
+      auto *host = backing.data() + host_offset;
+      process.map_pages(kAddress, host, amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::RW,
+                        owner);
+      process.map_pages(kAlias, host, amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::RW, owner);
+      memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                              process.page_table_generation());
+      memory.set_process_client_pid(kPid, getpid());
+      auto &space = memory.legacy_address_space(kPid);
+      // Hold the last word's atomic stripe. An ordinary transaction must wait for
+      // it even through another GPU alias or when the host range crosses a line.
+      for (unsigned path = 0; path < 8; ++path) {
+        SCOPED_TRACE(host_offset);
+        SCOPED_TRACE(path);
+        std::array<uint8_t, amdgpu::kMaxMemoryTransactionBytes> value{};
+        std::promise<void> started;
+        auto ready = started.get_future();
+        std::unique_lock lock(*amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host + 124));
+        auto access = std::async(std::launch::async, [&] {
+          started.set_value();
+          switch (path) {
+          case 0:
+            return space.read_step(kAlias, value, kPid).outcome == amdgpu::CopyOutcome::Complete;
+          case 1:
+            return space.write_step(kAlias, value, kPid).outcome == amdgpu::CopyOutcome::Complete;
+          case 2:
+            return space.try_copy_contiguous(kAlias, value.data(), value.size(), kPid, false);
+          case 3:
+            return space.try_copy_contiguous(kAlias, value.data(), value.size(), kPid, true);
+          case 4:
+            return memory.read_block(kAlias, value, kPid) == amdgpu::AccessOutcome::Complete;
+          case 5:
+            return memory.write_block(kAlias, value, kPid) == amdgpu::AccessOutcome::Complete;
+          case 6:
+            return memory.read_block(reinterpret_cast<uint64_t>(host), value, kPid) ==
+                   amdgpu::AccessOutcome::Complete;
+          default:
+            return memory.write_block(reinterpret_cast<uint64_t>(host), value, kPid) ==
+                   amdgpu::AccessOutcome::Complete;
+          }
+        });
+        ready.wait();
+        const auto blocked = access.wait_for(std::chrono::milliseconds(10));
+        lock.unlock();
+        EXPECT_EQ(blocked, std::future_status::timeout);
+        EXPECT_TRUE(access.get());
+      }
+    }
+  }
+}
+
+TEST(GpuMemoryThreadingTest, NarrowTransactionPolicyPublishesSeparateHalvesOfOneCacheLine) {
+  using Policy = amdgpu::MemoryTransactionPolicy;
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  for (auto policy : {Policy{}, Policy::unqualified_64()}) {
+    for (auto owner :
+         {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+      SCOPED_TRACE(policy.bytes());
+      rocjitsu::test::LegacyGpuMemoryFixture memory("memory", policy);
+      KfdProcess process(kPid);
+      // The GPU-aligned 128-byte record starts 64 bytes into a host page,
+      // crossing two lock stripes while fitting try_copy_contiguous's
+      // single-page limit. Holding the second stripe exposes whether the
+      // first 64 bytes publish alone.
+      alignas(KfdProcess::kPageSize) std::array<uint8_t, 256> backing{};
+      auto *host = backing.data() + 64;
+      ASSERT_LE(reinterpret_cast<uintptr_t>(host) % KfdProcess::kPageSize + 128,
+                KfdProcess::kPageSize);
+      auto *first_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host);
+      auto *second_mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(host + 64);
+      ASSERT_NE(first_mutex, second_mutex);
+      process.map_pages(kAddress, host, 128, amdgpu::Mtype::UC, owner);
+      memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                              process.page_table_generation());
+      std::array<uint8_t, 128> value;
+      value.fill(0x5a);
+      std::promise<void> started;
+      auto ready = started.get_future();
+      std::unique_lock second_lock(*second_mutex);
+      auto access = std::async(std::launch::async, [&] {
+        started.set_value();
+        return memory.legacy_address_space(kPid).try_copy_contiguous(kAddress, value.data(),
+                                                                     value.size(), kPid, true);
+      });
+      ready.wait();
+      bool first_half_visible = false;
+      const auto deadline = std::chrono::steady_clock::now() +
+                            std::chrono::milliseconds(policy.bytes() == 64 ? 2000 : 10);
+      do {
+        std::unique_lock first_lock(*first_mutex, std::try_to_lock);
+        if (first_lock.owns_lock())
+          first_half_visible =
+              std::ranges::all_of(std::span(host, 64), [](uint8_t byte) { return byte == 0x5a; });
+        if (first_half_visible)
+          break;
+        std::this_thread::yield();
+      } while (std::chrono::steady_clock::now() < deadline);
+      const auto blocked = access.wait_for(std::chrono::milliseconds(0));
+      second_lock.unlock();
+      // Join before assertions so a failure cannot leave the writer blocked.
+      const bool completed = access.get();
+      EXPECT_TRUE(completed);
+      EXPECT_EQ(blocked, std::future_status::timeout);
+      EXPECT_EQ(first_half_visible, policy.bytes() == 64);
+      EXPECT_TRUE(std::ranges::equal(std::span(host, 128), value));
+    }
+  }
+}
+
+TEST(GpuMemoryThreadingTest, IndependentL2sReadWholeMappedLinePublications) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kWriteAddress = 0x40000000;
+  constexpr uint64_t kReadAddress = 0x50000000;
+  constexpr uint32_t kRounds = 20000;
+  for (auto owner :
+       {KfdProcess::HostExtentOwner::Application, KfdProcess::HostExtentOwner::DriverSealedRam}) {
+    for (size_t host_offset : {0u, 4u}) {
+      alignas(amdgpu::kMaxMemoryTransactionBytes)
+          std::array<uint8_t, KfdProcess::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
+              backing{};
+      rocjitsu::test::LegacyGpuMemoryFixture writer_memory("writer");
+      rocjitsu::test::LegacyGpuMemoryFixture reader_memory("reader");
+      KfdProcess writer_process(kPid);
+      KfdProcess reader_process(kPid);
+      writer_process.map_pages(kWriteAddress, backing.data() + host_offset,
+                               amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::UC, owner);
+      reader_process.map_pages(kReadAddress, backing.data() + host_offset,
+                               amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::UC, owner);
+      writer_memory.register_process(kPid, &writer_process.page_table_,
+                                     &writer_process.page_table_mutex_,
+                                     writer_process.page_table_generation());
+      reader_memory.register_process(kPid, &reader_process.page_table_,
+                                     &reader_process.page_table_mutex_,
+                                     reader_process.page_table_generation());
+      amdgpu::L2Cache writer("writer_l2");
+      amdgpu::L2Cache reader("reader_l2");
+      writer.set_backing_memory(&writer_memory);
+      reader.set_backing_memory(&reader_memory);
+      writer.set_gpu_vm(&writer_memory.gpu_vm());
+      reader.set_gpu_vm(&reader_memory.gpu_vm());
+      std::barrier start(2);
+      std::atomic<bool> failed{false};
+      std::thread producer([&] {
+        std::array<uint32_t, 32> value;
+        start.arrive_and_wait();
+        for (uint32_t epoch = 1; epoch <= kRounds; ++epoch) {
+          value.fill(epoch);
+          if (writer.write(kWriteAddress, reinterpret_cast<const uint8_t *>(value.data()),
+                           amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::UC,
+                           kPid) != amdgpu::VmAccessOutcome::Complete)
+            failed.store(true, std::memory_order_relaxed);
+        }
+      });
+      start.arrive_and_wait();
+      std::array<uint32_t, 32> observed;
+      for (uint32_t i = 0; i < kRounds; ++i) {
+        if (reader.read(kReadAddress, reinterpret_cast<uint8_t *>(observed.data()),
+                        amdgpu::kMaxMemoryTransactionBytes, amdgpu::Mtype::UC,
+                        kPid) != amdgpu::VmAccessOutcome::Complete ||
+            !std::ranges::all_of(observed,
+                                 [&](uint32_t value) { return value == observed.back(); }))
+          failed.store(true, std::memory_order_relaxed);
+      }
+      producer.join();
+      EXPECT_FALSE(failed.load()) << "host offset " << host_offset;
+    }
+  }
+}
+
+TEST(GpuMemoryThreadingTest, GuardedLineCopyReleasesStripesAfterHostFault) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  const size_t page_size = KfdProcess::kPageSize;
+  auto *page = static_cast<uint8_t *>(
+      mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(page, MAP_FAILED);
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  KfdProcess process(kPid);
+  process.map_pages(kAddress, page, page_size);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  ASSERT_EQ(mprotect(page, page_size, PROT_READ), 0);
+  std::array<uint8_t, amdgpu::kMaxMemoryTransactionBytes> value{};
+  EXPECT_FALSE(memory.legacy_address_space(kPid).try_copy_contiguous(kAddress, value.data(),
+                                                                     value.size(), kPid, true));
+  bool unlocked = false;
+  std::thread probe([&] {
+    auto *mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(page);
+    unlocked = mutex->try_lock();
+    if (unlocked)
+      mutex->unlock();
+  });
+  probe.join();
+  EXPECT_TRUE(unlocked);
+  ASSERT_EQ(mprotect(page, page_size, PROT_READ | PROT_WRITE), 0);
+  if (unlocked) {
+    EXPECT_TRUE(memory.legacy_address_space(kPid).try_copy_contiguous(kAddress, value.data(),
+                                                                      value.size(), kPid, true));
+  }
+  EXPECT_EQ(munmap(page, page_size), 0);
+}
+
+TEST(GpuMemoryThreadingTest, BulkCopyReleasesCurrentStripeAfterLaterPageFault) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  auto *pages = static_cast<uint8_t *>(
+      mmap(nullptr, 2 * kPageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(pages, MAP_FAILED);
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  KfdProcess process(kPid);
+  process.map_pages(kAddress, pages, 2 * kPageSize);
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  ASSERT_EQ(mprotect(pages + kPageSize, kPageSize, PROT_READ), 0);
+  std::array<uint8_t, 2 * kPageSize> value;
+  value.fill(0xa5);
+  EXPECT_NE(memory.write_block(kAddress, value, kPid), amdgpu::AccessOutcome::Complete);
+  EXPECT_EQ(pages[0], 0xa5);
+  EXPECT_EQ(pages[kPageSize - 1], 0xa5);
+  bool unlocked = true;
+  std::thread probe([&] {
+    for (size_t offset = 0; offset <= kPageSize; offset += amdgpu::kMaxMemoryTransactionBytes) {
+      auto *mutex = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(pages + offset);
+      if (mutex->try_lock())
+        mutex->unlock();
+      else
+        unlocked = false;
+    }
+  });
+  probe.join();
+  EXPECT_TRUE(unlocked);
+  EXPECT_EQ(munmap(pages, 2 * kPageSize), 0);
 }
 
 TEST(GpuMemoryTest, IdentityMappedEntryStillEnforcesItsExtent) {
@@ -4542,14 +4918,13 @@ TEST_P(IsaTest, RegisterAccess) {
 }
 
 TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
-  const uint32_t code[] = {SOPP_S_ENDPGM};
-
   for (const std::string &arch :
        {std::string("rdna3"), std::string("rdna3_5"), std::string("rdna4")}) {
     for (uint32_t component_count = 0; component_count <= 2; ++component_count) {
       SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
       VmFixture f;
       ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
+      const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
       auto *snap = f.capture_halts();
       uint64_t ko =
           f.write_kernel(0x1000, code, sizeof(code), 104, 32, 2, 0, false, component_count);
@@ -4732,7 +5107,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2));
-  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const uint64_t first_kernel = fixture.write_kernel(0x1000, code, sizeof(code));
   fixture.mem()->write32(first_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
                          kFirstPrivateBytes);
@@ -4790,6 +5165,13 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     EXPECT_EQ(fixture.mem()->read64(kMailbox), kEventId);
     read_pointers_at_request.push_back(fixture.mem()->read64(read_pointer));
     ++scratch_requests;
+    if (scratch_requests > 1) {
+      const uint64_t previous = scratch_requests - 2;
+      EXPECT_EQ(fixture.mem()->read32(kRing + previous * amdgpu::kAqlPacketBytes) & 0xffu,
+                HSA_PACKET_TYPE_INVALID)
+          << "scratch resize must wait until the previous dispatch releases its packet";
+      EXPECT_EQ(fixture.mem()->read64(read_pointer), previous + 1);
+    }
 
     // Model ROCr's dynamic queue handler: install scratch before clearing the
     // retry signal so the next CP pass may safely consume the same packet.
@@ -4864,6 +5246,129 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
   EXPECT_TRUE(std::ranges::all_of(snapshots->snapshots(), [](const auto &wave) {
     return wave.wf_id == 0;
   })) << "the CP used a physical wave slot beyond COMPUTE_TMPRING_SIZE.WAVES";
+}
+
+TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegments) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint64_t kRing = 0xF0000000;
+  constexpr uint64_t kQueue = 0xF0010000;
+  constexpr uint64_t kDoorbell = 0xF0020000;
+  constexpr uint64_t kMainScratch = 0x00800000;
+  constexpr uint64_t kAltScratch = 0x01000000;
+  constexpr uint32_t kProcessId = 7, kQueueId = 19, kXcc = 2;
+  for (const auto &arch : {"cdna1", "cdna2", "cdna3", "cdna4", "cdna5", "rdna1", "rdna2", "rdna3",
+                           "rdna3_5", "rdna4"}) {
+    for (bool alternate : {false, true}) {
+      SCOPED_TRACE(arch);
+      SCOPED_TRACE(alternate);
+      VmFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 2));
+      f.cp()->set_scratch_xcc_layout_for_test(kXcc, 4);
+      f.cp()->set_scratch_wave_divisor(1);
+      const auto target = f.cu()->arch();
+      const auto properties = isa_properties(target);
+      const uint32_t width = kernel_wavefront_size(target, [&] {
+        kernel_descriptor_t descriptor{};
+        RJ_AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                           KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+        return descriptor;
+      }());
+      const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+      const uint64_t large = f.write_kernel(0x1000, code, sizeof(code));
+      const uint64_t small = f.write_kernel(0x2000, code, sizeof(code));
+      f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size), 1024);
+      f.mem()->write32(small + offsetof(kernel_descriptor_t, private_segment_fixed_size), 16);
+      const uint64_t stride = alternate ? 128 * 1024 : 64 * 1024;
+      const uint32_t tmpring =
+          2u | (static_cast<uint32_t>(stride / properties.compute_tmpring_wavesize_granule) << 12);
+      f.mem()->write64(kQueue + offsetof(amd_queue_t, read_dispatch_id), 1);
+      f.mem()->write64(kQueue + offsetof(amd_queue_t, write_dispatch_id), 3);
+      f.mem()->write64(kDoorbell, 3);
+      f.mem()->write64(kQueue + offsetof(amd_queue_t, scratch_backing_memory_location),
+                       kMainScratch);
+      f.mem()->write32(kQueue + offsetof(amd_queue_t, compute_tmpring_size), tmpring);
+      if (alternate) {
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, caps),
+                         AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM | AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM);
+        f.mem()->write64(kQueue + offsetof(amd_queue_v2_t, scratch_max_use_index), 0);
+        f.mem()->write64(kQueue + offsetof(amd_queue_v2_t, alt_scratch_max_use_index), 3);
+        f.mem()->write64(kQueue + offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location),
+                         kAltScratch);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_compute_tmpring_size), tmpring);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_wave64_lane_byte_size),
+                         stride / 64);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_x),
+                         2 * width);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_y), 1);
+        f.mem()->write32(kQueue + offsetof(amd_queue_v2_t, alt_scratch_dispatch_limit_z), 1);
+      }
+      for (uint32_t index = 1; index <= 2; ++index) {
+        auto packet = make_dispatch_packet(index == 1 ? large : small, 0, 2 * width, 2 * width);
+        f.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                            kRing + index * amdgpu::kAqlPacketBytes);
+      }
+      amdgpu::ComputeQueueConfig queue{};
+      queue.process_id = kProcessId;
+      queue.queue_id = kQueueId;
+      queue.ring_base_va = kRing;
+      queue.ring_size = 4 * amdgpu::kAqlPacketBytes;
+      queue.read_ptr_va = kQueue + offsetof(amd_queue_t, read_dispatch_id);
+      queue.write_ptr_va = kQueue + offsetof(amd_queue_t, write_dispatch_id);
+      queue.doorbell_va = kDoorbell;
+      queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+      queue.uses_kfd_queue_abi = true;
+      queue.queue_desc_va = kQueue;
+      ASSERT_NE(f.cp()->register_queue(std::move(queue)), 0u);
+      auto *snapshots = f.capture_halts();
+      f.engine->schedule_event_now(f.cp()->doorbell_event());
+      f.engine->run();
+      ASSERT_EQ(snapshots->snapshots().size(), 4u);
+      for (const auto &wave : snapshots->snapshots()) {
+        const uint64_t slot = kXcc * 2 + wave.scratch_scoreboard_id;
+        EXPECT_EQ(wave.scratch_base, (alternate ? kAltScratch : kMainScratch) + slot * stride);
+      }
+      EXPECT_EQ(f.mem()->read64(kQueue + offsetof(amd_queue_t, read_dispatch_id)), 3u);
+      EXPECT_FALSE(f.cp()->queue_faulted_for_test(kQueueId, kProcessId));
+    }
+  }
+}
+
+TEST(CommandProcessorTest, Cdna5RuntimeScratchAcceptsTargetGranules) {
+  using namespace rocjitsu::amdhsa;
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 2));
+  constexpr uint64_t kRing = 0xF0000000, kQueue = 0xF0010000, kDoorbell = 0xF0020000;
+  constexpr uint64_t kBacking = 0x800000, kStride = 1536;
+  const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+  const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  f.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size), 48);
+  f.mem()->write64(kQueue + offsetof(amd_queue_t, scratch_backing_memory_location), kBacking);
+  f.mem()->write32(kQueue + offsetof(amd_queue_t, compute_tmpring_size), 2u | (6u << 12));
+  f.mem()->write64(kQueue + offsetof(amd_queue_t, read_dispatch_id), 0);
+  f.mem()->write64(kQueue + offsetof(amd_queue_t, write_dispatch_id), 1);
+  f.mem()->write64(kDoorbell, 1);
+  auto packet = make_dispatch_packet(kernel, 0, 64, 64);
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), kRing);
+  amdgpu::ComputeQueueConfig queue{};
+  queue.process_id = 7;
+  queue.queue_id = 19;
+  queue.ring_base_va = kRing;
+  queue.ring_size = amdgpu::kAqlPacketBytes;
+  queue.read_ptr_va = kQueue + offsetof(amd_queue_t, read_dispatch_id);
+  queue.write_ptr_va = kQueue + offsetof(amd_queue_t, write_dispatch_id);
+  queue.doorbell_va = kDoorbell;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
+  queue.uses_kfd_queue_abi = true;
+  queue.queue_desc_va = kQueue;
+  ASSERT_NE(f.cp()->register_queue(std::move(queue)), 0u);
+  auto *snapshots = f.capture_halts();
+  f.engine->schedule_event_now(f.cp()->doorbell_event());
+  f.engine->run();
+  ASSERT_EQ(snapshots->snapshots().size(), 2u);
+  for (const auto &wave : snapshots->snapshots())
+    EXPECT_EQ(wave.scratch_base, kBacking + wave.scratch_scoreboard_id * kStride);
+  EXPECT_EQ(f.mem()->read64(kQueue + offsetof(amd_queue_t, read_dispatch_id)), 1u);
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(19, 7));
 }
 
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
@@ -4954,6 +5459,21 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
   ASSERT_EQ(scratch_requests, 1u);
   EXPECT_EQ(fixture.mem()->read64(read_pointer), 0u)
       << "the scratch-needing packet must remain available to ROCr";
+  EXPECT_EQ(fixture.cp()->reconfigure_queue_registration(
+                registration, {.ring_base_address = kRing + 0x1000,
+                               .ring_size_bytes = amdgpu::kAqlPacketBytes,
+                               .scheduling_percentage = 100}),
+            amdgpu::QueueReconfigureStatus::Busy);
+  // Restore the original geometry so each change is checked independently,
+  // even if a regression incorrectly accepts the preceding update.
+  ASSERT_TRUE(
+      fixture.cp()->update_queue_registration(registration, kRing, amdgpu::kAqlPacketBytes, 100));
+  EXPECT_EQ(fixture.cp()->reconfigure_queue_registration(
+                registration, {.ring_base_address = kRing,
+                               .ring_size_bytes = 2 * amdgpu::kAqlPacketBytes,
+                               .scheduling_percentage = 100}),
+            amdgpu::QueueReconfigureStatus::Busy);
+  EXPECT_EQ(fixture.mem()->read64(read_pointer), 0u);
   ASSERT_TRUE(fixture.cp()->update_queue_registration(registration, kRing, amdgpu::kAqlPacketBytes,
                                                       /*queue_percentage=*/0));
   EXPECT_EQ(fixture.cp()->prepare_unregister_queue_registration(registration),
@@ -4992,7 +5512,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                                              /*num_shader_engines=*/2));
   fixture.cp()->set_scratch_wave_divisor(2);
   fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
-  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
   fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
                          kPrivateBytes);
@@ -5283,13 +5803,15 @@ TEST(CommandProcessorTest, FreshStallPullsPendingRecheckEarlier) {
 }
 
 TEST(CommandProcessorTest, PendingRetryDoesNotSurviveEngineShutdown) {
+  util::StringDiagnostic admission_diagnostic;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1, 2));
   auto *cp = f.cp();
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
   f.engine->shutdown();
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   const uint64_t passes_before = cp->doorbell_handle_count_for_test();
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
@@ -5928,7 +6450,7 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
     SCOPED_TRACE(format);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-    const uint32_t code[] = {SOPP_S_ENDPGM};
+    const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
     const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
     constexpr uint64_t kPriorCompletionSignal = 0x7000;
     constexpr uint64_t kBarrierCompletionSignal = 0x7100;
@@ -5959,10 +6481,46 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
   }
 }
 
+TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch) {
+  // Without a blocking barrier, the CP fetches the unsupported packet and faults
+  // the queue before the resident wave runs. That fetch fault cancels no work, so
+  // the kernel must still retire and publish its completion.
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1));
+  auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  f.soc_ptr->set_plugin_group(group);
+  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
+  constexpr uint64_t kCompletionSignal = 0x7000;
+  init_completion_signal(f.mem(), kCompletionSignal);
+
+  hsa_kernel_dispatch_packet_t unsupported{};
+  unsupported.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
+
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(make_dispatch_packet(kernel, kCompletionSignal));
+  ASSERT_TRUE(f.engine->step());
+  ASSERT_TRUE(f.cu()->has_active_wfs());
+  ASSERT_EQ(observed->halts, 0u);
+  queue.submit(unsupported);
+  f.engine->run();
+
+  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_EQ(observed->halts, 1u);
+  EXPECT_EQ(observed->cancellations, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 1u);
+  EXPECT_EQ(observed->completed_dispatches, 1u);
+  EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 0)
+      << "a queue fault that cancelled no work suppressed the dispatch's completion";
+}
+
 TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-  const uint32_t code[] = {SOPP_S_ENDPGM};
+  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   constexpr uint64_t kPriorCompletionSignal = 0x7000;
   constexpr uint64_t kPm4CompletionSignal = 0x7100;
@@ -6328,6 +6886,79 @@ TEST_P(IsaTest, EmptyCuMaskAllowsNonKernelPackets) {
   }
 }
 
+TEST(AqlDispatchTest, LiveDispatchRetainsItsPacketUntilCompletionAtWrappedIndices) {
+  for (const bool replace_ring : {false, true}) {
+    SCOPED_TRACE(replace_ring);
+    for (const uint64_t index : {uint64_t{0}, uint64_t{63}, (uint64_t{1} << 32) + 63}) {
+      SCOPED_TRACE(index);
+      VmFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1));
+      std::vector<uint32_t> code(256, SOPP_S_NOP);
+      code.push_back(SOPP_S_ENDPGM);
+      const uint64_t kernel = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+      test::AqlQueue queue(f.mem(), f.cp());
+      const uint64_t address =
+          test::AqlQueue::DEFAULT_RING_ADDR +
+          (index % (test::AqlQueue::DEFAULT_RING_SIZE / amdgpu::kAqlPacketBytes)) *
+              amdgpu::kAqlPacketBytes;
+      const auto packet = make_dispatch_packet(kernel, 0);
+      f.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet), address);
+      f.mem()->write64(test::AqlQueue::DEFAULT_READ_PTR_ADDR, index);
+      f.mem()->write64(test::AqlQueue::DEFAULT_WRITE_PTR_ADDR, index + 1);
+      f.mem()->write64(test::AqlQueue::DEFAULT_DOORBELL_ADDR, index + 1);
+      f.engine->schedule_event_now(f.cp()->doorbell_event());
+      for (unsigned step = 0; step < 100 && f.cp()->dispatched_workgroups() == 0; ++step)
+        ASSERT_TRUE(f.engine->step());
+      ASSERT_EQ(f.cp()->dispatched_workgroups(), 1u);
+      EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), index);
+      bool resident = false;
+      for (uint32_t slot = 0; slot < f.cu()->num_wf_slots(); ++slot) {
+        auto *wave = f.cu()->wf(slot);
+        if (!wave || wave->is_halted())
+          continue;
+        resident = true;
+        EXPECT_EQ(wave->queue_packet_id(),
+                  index % (test::AqlQueue::DEFAULT_RING_SIZE / amdgpu::kAqlPacketBytes));
+      }
+      EXPECT_TRUE(resident);
+      EXPECT_EQ(f.mem()->read32(address) & 0xFFu, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+      constexpr uint64_t replacement = 0xF0100000;
+      constexpr uint32_t replacement_size = 2048;
+      const uint64_t replacement_slot =
+          replacement +
+          (index % (replacement_size / amdgpu::kAqlPacketBytes)) * amdgpu::kAqlPacketBytes;
+      if (replace_ring) {
+        f.mem()->load_image(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet),
+                            replacement_slot);
+        // A resident dispatch still owns its admitted ring backing. Scheduling
+        // updates remain valid, but neither a base nor a size change may detach it.
+        EXPECT_FALSE(f.cp()->update_queue(1, 0, replacement, replacement_size, 100));
+        EXPECT_FALSE(
+            f.cp()->update_queue(1, 0, test::AqlQueue::DEFAULT_RING_ADDR, replacement_size, 100));
+        EXPECT_TRUE(f.cp()->update_queue(1, 0, test::AqlQueue::DEFAULT_RING_ADDR,
+                                         test::AqlQueue::DEFAULT_RING_SIZE, 0));
+        ASSERT_TRUE(f.cp()->update_queue(1, 0, test::AqlQueue::DEFAULT_RING_ADDR,
+                                         test::AqlQueue::DEFAULT_RING_SIZE, 100));
+      }
+      f.engine->run();
+      if (replace_ring) {
+        EXPECT_EQ(f.mem()->read32(replacement_slot) & 0xFFu, HSA_PACKET_TYPE_KERNEL_DISPATCH);
+      }
+      EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), index + 1);
+      EXPECT_EQ(f.mem()->read32(address) & 0xFFu, HSA_PACKET_TYPE_INVALID);
+      if (replace_ring) {
+        ASSERT_TRUE(f.cp()->update_queue(1, 0, replacement, replacement_size, 0));
+        // Once retirement permits replacement, the old VA can be reused. A
+        // subsequent CP pass must never revisit and invalidate its new occupant.
+        constexpr uint32_t sentinel = 0xCAFEBABE;
+        f.mem()->write32(address, sentinel);
+        f.engine->run();
+        EXPECT_EQ(f.mem()->read32(address), sentinel);
+      }
+    }
+  }
+}
+
 TEST(AqlDispatchTest, HeaderClearBarrierUnblocksPriorPollingKernelBeforeLaterDispatch) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
@@ -6406,7 +7037,8 @@ TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
 
   EXPECT_NO_THROW((void)f.engine->step());
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
-  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u)
+      << "a faulted dispatch retains its packet until queue teardown";
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
   EXPECT_FALSE(f.cu()->has_active_wfs());
   EXPECT_TRUE(f.cp()
@@ -6428,7 +7060,8 @@ TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster
 
   EXPECT_NO_THROW((void)f.engine->step());
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
-  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 1u);
+  EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u)
+      << "a faulted dispatch retains its packet until queue teardown";
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
   EXPECT_FALSE(f.cu()->has_active_wfs());
 }
@@ -6546,7 +7179,8 @@ TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
   ASSERT_NO_FATAL_FAILURE(f.initialize("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
   auto *snap = f.capture_halts();
 
-  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint32_t code[] = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
+                           build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
 
   amdgpu::AmdExtKernelDispatchPacket ext{};
@@ -7011,6 +7645,37 @@ TEST_P(IsaTest, StepExecutesAndHalts) {
   EXPECT_EQ(f.cu()->num_wfs(), 0u);
 }
 
+TEST_P(IsaTest, KernelLaunchStartsWithEmptyBranchStack) {
+  // The CP builds each wave's MODE from COMPUTE_PGM_RSRC1, which has no CSP
+  // field, so a kernel cannot inherit a previous kernel's branch stack depth.
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(arch()));
+  auto *snap = f.capture_halts();
+
+  const std::vector<uint32_t> set_csp = {
+      0xBA001741u,
+      6u, // s_setreg_imm32_b32 hwreg(HW_REG_MODE, 29, 3), 6
+      SOPP_S_ENDPGM,
+  };
+  const std::vector<uint32_t> read_csp = {
+      0xBE8500C1u, // s_mov_b32 s5, -1
+      0xB8851741u, // s_getreg_b32 s5, hwreg(HW_REG_MODE, 29, 3)
+      SOPP_S_ENDPGM,
+  };
+  uint64_t ko_set = f.write_kernel(0x0, set_csp.data(), set_csp.size() * sizeof(uint32_t));
+  uint64_t ko_read = f.write_kernel(0x2000, read_csp.data(), read_csp.size() * sizeof(uint32_t));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.dispatch(ko_set, 64);
+  step_until_halted(*f.engine, {f.cu()});
+  queue.dispatch(ko_read, 64);
+  step_until_halted(*f.engine, {f.cu()});
+
+  ASSERT_EQ(snap->snapshots().size(), 2u);
+  EXPECT_EQ(snap->snapshots()[0].mode_raw & amdgpu::Wavefront::CSP_MASK,
+            6u << amdgpu::Wavefront::CSP_SHIFT);
+  EXPECT_EQ(snap->snapshots()[1].sgpr(5), 0u);
+}
+
 TEST_P(IsaTest, RoundRobinScheduling) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch()));
@@ -7180,6 +7845,7 @@ TEST(AqlDispatchTest, CompletedPoolBatchRefillsIdleComputeUnits) {
 }
 
 TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
+  util::StringDiagnostic admission_diagnostic;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(
       f.initialize("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
@@ -7191,13 +7857,15 @@ TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
   ASSERT_NE(f.cu(1)->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/104,
                                  /*num_vgprs=*/256),
             nullptr);
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   f.engine->schedule_event_now(f.cp()->doorbell_event());
   f.engine->run();
   EXPECT_TRUE(f.cu(1)->is_idle());
 }
 
 TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave) {
+  util::StringDiagnostic admission_diagnostic;
   const char *json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna4"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
@@ -7229,8 +7897,10 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave
   auto *memory = loaded.memory();
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   soc_ptr->set_dispatch_threads(2);
 
   const uint32_t waiter_code[] = {
@@ -9021,11 +9691,11 @@ TEST(AqlDispatchTest, WorkerExceptionPropagatesThroughEngineStep) {
 }
 
 TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
-  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
   f.cp()->set_dispatch_threads(2);
-  uint64_t kernel = f.write_kernel(0x1000, &kSCbranchIFork, sizeof(kSCbranchIFork));
+  uint64_t kernel = f.write_kernel(0x1000, &test::kUnimplementedInstruction,
+                                   sizeof(test::kUnimplementedInstruction));
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
 
@@ -9034,11 +9704,531 @@ TEST(AqlDispatchTest, UnimplementedInstructionReportsFailureThroughEngineStep) {
   const auto &exit = f.engine->last_exit();
   EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
   EXPECT_EQ(exit.code, 1);
-  EXPECT_NE(exit.message.find("s_cbranch_i_fork"), std::string::npos);
+  EXPECT_NE(exit.message.find(test::kUnimplementedInstructionMnemonic), std::string::npos);
   EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
   EXPECT_NE(exit.message.find("unimplemented instruction"), std::string::npos);
   EXPECT_TRUE(f.cu(0)->is_idle());
   EXPECT_TRUE(f.cu(1)->is_idle());
+}
+
+TEST(AqlDispatchTest, InstructionFailuresDoNotCompleteDispatchOrBarrier) {
+  struct InstructionCase {
+    uint32_t word;
+    std::string_view detail;
+    std::string_view diagnostic;
+  };
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  constexpr uint64_t kBarrierSignal = 0x3040;
+  for (const auto instruction :
+       {InstructionCase{test::kUnimplementedInstruction, test::kUnimplementedInstructionMnemonic,
+                        "unimplemented instruction"},
+        InstructionCase{test::kUndecodableInstruction, test::kUndecodableInstructionText,
+                        "could not decode"}}) {
+    SCOPED_TRACE(instruction.diagnostic);
+    for (uint32_t threads : {1u, 2u}) {
+      // The larger grid leaves queued workgroups behind the resident waves.
+      for (uint32_t grid_size : {64u, 4096u}) {
+        SCOPED_TRACE(std::format("threads={} grid_size={}", threads, grid_size));
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/2));
+        f.cp()->set_dispatch_threads(threads);
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto probe = std::make_unique<CancellationLifecyclePlugin>();
+        auto *observations = probe.get();
+        ASSERT_TRUE(group->add(std::move(probe)));
+        f.soc_ptr->set_plugin_group(group);
+        const uint64_t kernel = f.write_kernel(0x1000, &instruction.word, sizeof(instruction.word));
+        test::AqlQueue queue(f.mem(), f.cp());
+        init_completion_signal(f.mem(), kCompletionSignal);
+        queue.submit(make_dispatch_packet(kernel, kCompletionSignal, grid_size));
+        init_completion_signal(f.mem(), kBarrierSignal);
+        hsa_kernel_dispatch_packet_t barrier{};
+        barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+        barrier.completion_signal.handle = kBarrierSignal;
+        queue.submit(barrier);
+
+        ASSERT_TRUE(f.engine->step());
+        ASSERT_NE(f.cu(0)->wf(0), nullptr);
+        const uint32_t dispatch_id = f.cu(0)->wf(0)->dispatch_id();
+        ASSERT_TRUE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+        EXPECT_FALSE(f.engine->step());
+        const auto &exit = f.engine->last_exit();
+        EXPECT_EQ(exit.reason, simdojo::ExitReason::EXIT_REQUEST);
+        EXPECT_EQ(exit.code, 1);
+        EXPECT_NE(exit.message.find(instruction.detail), std::string::npos);
+        EXPECT_NE(exit.message.find("pc=0x1040"), std::string::npos);
+        EXPECT_NE(exit.message.find("pid=0 qid=1 dispatch=" + std::to_string(dispatch_id)),
+                  std::string::npos);
+        EXPECT_NE(exit.message.find(instruction.diagnostic), std::string::npos);
+        EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+        EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+        EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 1);
+        EXPECT_EQ(completion_signal_value(f.mem(), kBarrierSignal), 1);
+        EXPECT_GT(observations->launches, 0u);
+        EXPECT_EQ(observations->cancellations, observations->launches);
+        EXPECT_TRUE(std::ranges::any_of(observations->cancellation_errors, [](auto error) {
+          return error != amdgpu::InstructionExecutionError::None;
+        }));
+        EXPECT_EQ(observations->halts, 0u);
+        EXPECT_EQ(observations->completed_workgroups, 0u);
+        EXPECT_EQ(observations->completed_dispatches, 0u);
+        for (uint32_t cu = 0; cu < 2; ++cu) {
+          EXPECT_TRUE(f.cu(cu)->is_idle());
+          EXPECT_TRUE(f.cu(cu)->can_accept_workgroup(10, 64 * 1024));
+        }
+      }
+    }
+  }
+}
+
+TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch) {
+  constexpr uint64_t kCompletionSignal = 0x3000;
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", /*num_cus=*/1));
+  uint32_t handled = 0;
+  f.cu(0)->set_illegal_inst_handler([&](amdgpu::Wavefront &wf) {
+    ++handled;
+    EXPECT_EQ(wf.pc, 0x1040u);
+    wf.set_debug_halted(true);
+    return true;
+  });
+  const uint64_t kernel =
+      f.write_kernel(0x1000, &test::kUndecodableInstruction, sizeof(test::kUndecodableInstruction));
+  test::AqlQueue queue(f.mem(), f.cp());
+  init_completion_signal(f.mem(), kCompletionSignal);
+  queue.submit(make_dispatch_packet(kernel, kCompletionSignal));
+
+  ASSERT_TRUE(f.engine->step());
+  auto *wave = f.cu(0)->wf(0);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t dispatch_id = wave->dispatch_id();
+  (void)f.engine->step();
+  EXPECT_EQ(handled, 1u);
+  EXPECT_TRUE(wave->debug_paused());
+  EXPECT_FALSE(wave->is_halted());
+  EXPECT_FALSE(wave->instruction_execution_failed());
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_TRUE(f.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+  EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 1);
+}
+
+TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 2));
+  auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  f.soc_ptr->set_plugin_group(group);
+  uint32_t handled = 0;
+  uint32_t queue_aborts = 0;
+  for (uint32_t cu = 0; cu < 2; ++cu) {
+    f.cu(cu)->set_execution_failure_handler([&](amdgpu::Wavefront &) {
+      ++queue_aborts;
+      return true;
+    });
+    f.cu(cu)->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
+      ++handled;
+      // Queue-owner publication pauses waves without an architectural debug halt.
+      wave.set_debug_suspended(true);
+      return true;
+    });
+  }
+  const uint64_t kernel =
+      f.write_kernel(0x1000, &test::kUndecodableInstruction, sizeof(test::kUndecodableInstruction));
+  test::AqlQueue queue(f.mem(), f.cp());
+  init_completion_signal(f.mem(), 0x3000);
+  init_completion_signal(f.mem(), 0x4000);
+  queue.submit(make_dispatch_packet(kernel, 0x3000, 128, 64));
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+  barrier.completion_signal.handle = 0x4000;
+  hsa_kernel_dispatch_packet_t raw{};
+  std::memcpy(&raw, &barrier, sizeof(raw));
+  queue.submit(raw);
+  f.engine->run();
+  EXPECT_EQ(handled, 1u);
+  EXPECT_EQ(queue_aborts, 0u);
+  EXPECT_EQ(f.engine->last_exit().code, 1);
+  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, 1));
+  EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 1);
+  EXPECT_EQ(completion_signal_value(f.mem(), 0x4000), 1);
+  EXPECT_EQ(observed->launches, 2u);
+  EXPECT_EQ(observed->cancellations, 2u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 0u);
+  EXPECT_EQ(observed->completed_dispatches, 0u);
+  EXPECT_EQ(std::ranges::count(observed->cancellation_errors,
+                               amdgpu::InstructionExecutionError::DecodeFailure),
+            1);
+}
+
+TEST(AqlDispatchTest, FatalFailureUsesNonRetainingExceptionDelivery) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4"));
+  bool delivered = false;
+  amdgpu::Wavefront *failed_wave = nullptr;
+  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &wave) {
+    failed_wave = &wave;
+    return wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), 1, false, false,
+                                            amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+                                            /*retain_wave=*/false);
+  });
+  fixture.cu()->set_queue_exception_handler(
+      [&](uint32_t, uint32_t, uint64_t, bool, amdgpu::QueueExceptionDeliveryPolicy policy) {
+        delivered = true;
+        EXPECT_EQ(policy, amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel);
+        EXPECT_TRUE(failed_wave->is_halted());
+        return true;
+      });
+  const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUnimplementedInstruction,
+                                               sizeof(test::kUnimplementedInstruction));
+  init_completion_signal(fixture.mem(), 0x3000);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+  fixture.engine->run();
+  ASSERT_TRUE(delivered);
+  EXPECT_EQ(failed_wave->trap_runtime_exception_status(), 0u);
+  EXPECT_EQ(fixture.engine->last_exit().code, 1);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), 0x3000), 1);
+}
+
+TEST(AqlDispatchTest, DelayedDispatchFaultDoesNotCancelRecreatedQueue) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 1, 1));
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  fixture.cu()->set_functional_quantum(1);
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, 32, 32);
+  ASSERT_TRUE(fixture.engine->step());
+  const uint32_t old_dispatch = fixture.cu()->wf(0)->dispatch_id();
+  fixture.cp()->unregister_queue(1, 0);
+  ASSERT_TRUE(fixture.cu()->is_idle());
+
+  init_completion_signal(fixture.mem(), 0x3000);
+  test::AqlQueue replacement(fixture.mem(), fixture.cp());
+  replacement.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+  ASSERT_TRUE(fixture.engine->step());
+  const uint32_t new_dispatch = fixture.cu()->wf(0)->dispatch_id();
+  ASSERT_NE(old_dispatch, new_dispatch);
+  fixture.cp()->notify_dispatch_vm_fault(1, 0, old_dispatch, amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, new_dispatch));
+  for (uint32_t iteration = 0;
+       iteration < 100 && completion_signal_value(fixture.mem(), 0x3000) != 0; ++iteration)
+    (void)fixture.engine->step();
+  EXPECT_EQ(completion_signal_value(fixture.mem(), 0x3000), 0);
+}
+
+TEST(AqlDispatchTest, LaterVmFaultCancelsEarlierAdmittedDispatchAndPreservesBarrier) {
+  for (uint32_t threads : {1u, 2u}) {
+    SCOPED_TRACE(threads);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2, 1));
+    fixture.cp()->set_dispatch_threads(threads);
+    auto plugin = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = plugin.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(plugin)));
+    fixture.soc_ptr->set_plugin_group(group);
+    for (uint32_t index = 0; index < 2; ++index)
+      fixture.cu(index)->set_functional_quantum(1);
+    std::array<uint32_t, 41> code;
+    code.fill(SOPP_S_NOP);
+    code.back() = SOPP_S_ENDPGM;
+    const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), sizeof(code));
+    for (uint64_t signal : {0x3000, 0x4000, 0x5000, 0x6000})
+      init_completion_signal(fixture.mem(), signal);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(make_dispatch_packet(kernel, 0x3000, 32, 32));
+    queue.submit(make_dispatch_packet(kernel, 0x4000, 32, 32));
+    queue.submit(make_dispatch_packet(kernel, 0, 32, 32));
+    hsa_kernel_dispatch_packet_t barrier{};
+    barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+    barrier.completion_signal.handle = 0x5000;
+    queue.submit(barrier);
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_EQ(observed->launches, 2u);
+    ASSERT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    ASSERT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, 2));
+    fixture.cp()->notify_dispatch_vm_fault(1, 0, 2, amdgpu::VmAccessOutcome::Faulted);
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 1));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 2));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, 3));
+    fixture.cp()->notify_dispatch_vm_fault(1, 0, 2, amdgpu::VmAccessOutcome::Faulted);
+    EXPECT_EQ(observed->cancellations, observed->launches);
+    EXPECT_EQ(observed->halts, 0u);
+    EXPECT_EQ(observed->completed_dispatches, 0u);
+    for (uint32_t index = 0; index < 2; ++index) {
+      EXPECT_TRUE(fixture.cu(index)->is_idle());
+      EXPECT_TRUE(fixture.cu(index)->can_accept_workgroup(1, 64 * 1024));
+    }
+    for (uint64_t signal : {0x3000, 0x4000, 0x5000})
+      EXPECT_EQ(completion_signal_value(fixture.mem(), signal), 1);
+
+    // A recoverable VM fault must not strand another queue or its CU resources.
+    test::AqlQueue independent(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000,
+                               0xf1010008, 0xf1010010, false, 2);
+    independent.submit(make_dispatch_packet(kernel, 0x6000, 32, 32));
+    for (uint32_t iteration = 0;
+         iteration < 1000 && completion_signal_value(fixture.mem(), 0x6000) != 0; ++iteration)
+      (void)fixture.engine->step();
+    EXPECT_EQ(fixture.engine->last_exit().code, 0);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), 0x6000), 0);
+    EXPECT_EQ(observed->launches, 3u);
+    EXPECT_EQ(observed->halts, 1u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), 0x5000), 1);
+  }
+}
+
+class AqlQueueFailureConcurrencyTest : public testing::TestWithParam<bool> {};
+
+// Fail one queue while another queue's worker is paused mid-quantum. Cache
+// maintenance for the failed queue must wait for that worker to join.
+TEST_P(AqlQueueFailureConcurrencyTest, DefersCacheFlushUntilWorkersJoin) {
+  using namespace std::chrono_literals;
+  const bool vm_fault = GetParam();
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2));
+  fixture.cp()->set_dispatch_threads(2);
+  for (uint32_t index = 0; index < 2; ++index)
+    fixture.cu(index)->set_functional_quantum(64);
+  auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  fixture.soc_ptr->set_plugin_group(group);
+
+  std::array<uint32_t, 34> failing_code;
+  failing_code.fill(SOPP_S_NOP);
+  failing_code[32] = vm_fault ? SOPP_S_NOP : test::kUnimplementedInstruction;
+  failing_code.back() = SOPP_S_ENDPGM;
+  const uint64_t failing_kernel =
+      fixture.write_kernel(0x1000, failing_code.data(), sizeof(failing_code));
+  std::array<uint32_t, 4001> busy_code;
+  busy_code.fill(SOPP_S_NOP);
+  busy_code.back() = SOPP_S_ENDPGM;
+  const uint64_t busy_kernel = fixture.write_kernel(0x10000, busy_code.data(), sizeof(busy_code));
+  constexpr uint64_t kFailureSignal = 0x3000;
+  constexpr uint64_t kBarrierSignal = 0x4000;
+  constexpr uint64_t kBusySignal = 0x5000;
+  for (uint64_t signal : {kFailureSignal, kBarrierSignal, kBusySignal})
+    init_completion_signal(fixture.mem(), signal);
+
+  test::AqlQueue failing_queue(fixture.mem(), fixture.cp());
+  test::AqlQueue busy_queue(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000, 0xf1010008,
+                            0xf1010010, false, 2);
+  fixture.cp()->set_queue_cu_selection(1, 0, std::vector{fixture.cu(0)});
+  fixture.cp()->set_queue_cu_selection(2, 0, std::vector{fixture.cu(1)});
+  failing_queue.submit(make_dispatch_packet(failing_kernel, kFailureSignal, 32, 32));
+  hsa_kernel_dispatch_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+  barrier.completion_signal.handle = kBarrierSignal;
+  failing_queue.submit(barrier);
+  busy_queue.submit(make_dispatch_packet(busy_kernel, kBusySignal, 128, 32));
+  ASSERT_TRUE(fixture.engine->step());
+  ASSERT_EQ(observed->launches, 5u);
+  const uint32_t failed_dispatch = fixture.cu(0)->wf(0)->dispatch_id();
+
+  std::promise<void> busy_entered;
+  std::future<void> busy_ready = busy_entered.get_future();
+  uint64_t busy_cache_epoch = 0;
+  fixture.cu(1)->set_notification_flush_hook_for_testing([&] {
+    // Pause outside the wave lock so queue cancellation can visit this CU.
+    // The pool still owns this quantum until the callback returns.
+    busy_cache_epoch = fixture.cu(1)->instruction_cache().epoch();
+    busy_entered.set_value();
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (!fixture.cp()->queue_faulted_for_test(1, 0) &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    ASSERT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_EQ(fixture.cu(1)->instruction_cache().epoch(), busy_cache_epoch)
+        << "Queue failure invalidated a cache before its worker joined";
+  });
+  fixture.cu(0)->set_notification_flush_hook_for_testing([&] {
+    ASSERT_EQ(busy_ready.wait_for(5s), std::future_status::ready);
+    if (vm_fault)
+      fixture.cp()->notify_dispatch_vm_fault(1, 0, failed_dispatch,
+                                             amdgpu::VmAccessOutcome::Faulted);
+  });
+
+  fixture.engine->run();
+  EXPECT_EQ(fixture.engine->last_exit().code, vm_fault ? 0 : 1);
+  EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(2, 0));
+  EXPECT_EQ(observed->cancellations, 1u);
+  EXPECT_EQ(observed->halts, vm_fault ? 4u : 0u);
+  EXPECT_EQ(observed->completed_dispatches, vm_fault ? 1u : 0u);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), kBarrierSignal), 1);
+  EXPECT_EQ(completion_signal_value(fixture.mem(), kBusySignal), vm_fault ? 0 : 1);
+  EXPECT_GT(fixture.cu(1)->instruction_cache().epoch(), busy_cache_epoch);
+}
+
+TEST(CommandProcessorTest, CacheMaintenanceSerializesWithRuntimeWaveStateFlush) {
+  struct CpMaintenance {
+    const char *name;
+    void (*flush)(amdgpu::CommandProcessor &);
+  };
+  for (const auto [name, flush] :
+       {CpMaintenance{"CP queue maintenance",
+                      amdgpu::CommandProcessorCacheTestAccess::flush_gpu_caches},
+        CpMaintenance{"CP completion flush",
+                      amdgpu::CommandProcessorCacheTestAccess::flush_completion_caches}}) {
+    SCOPED_TRACE(name);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+    (void)fixture.engine->step();
+    auto *cu = fixture.cu();
+    const uint64_t initial_epoch = cu->instruction_cache().epoch();
+    constexpr uint32_t kFlushCount = 1000;
+    std::barrier start(2);
+    std::thread cp_thread([&] {
+      start.arrive_and_wait();
+      for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
+        flush(*fixture.cp());
+    });
+    std::thread runtime_thread([&] {
+      start.arrive_and_wait();
+      for (uint32_t iteration = 0; iteration < kFlushCount; ++iteration)
+        cu->flush_l1();
+    });
+    cp_thread.join();
+    runtime_thread.join();
+    EXPECT_EQ(cu->instruction_cache().epoch(), initial_epoch + 2 * kFlushCount);
+  }
+}
+
+TEST(CommandProcessorTest, CacheMaintenanceLeavesPendingFailureWithItsProducer) {
+  using namespace std::chrono_literals;
+  struct CacheMaintenance {
+    const char *name;
+    void (*run)(VmFixture &);
+  };
+  for (const auto [name, run] : {
+           CacheMaintenance{"CP queue maintenance",
+                            [](VmFixture &fixture) {
+                              amdgpu::CommandProcessorCacheTestAccess::flush_gpu_caches(
+                                  *fixture.cp());
+                            }},
+           CacheMaintenance{"CP completion flush",
+                            [](VmFixture &fixture) {
+                              amdgpu::CommandProcessorCacheTestAccess::flush_completion_caches(
+                                  *fixture.cp());
+                            }},
+           CacheMaintenance{"CU flush_l1", [](VmFixture &fixture) { fixture.cu()->flush_l1(); }},
+           CacheMaintenance{"CU flush_all", [](VmFixture &fixture) { fixture.cu()->flush_all(); }},
+       }) {
+    SCOPED_TRACE(name);
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+    const uint64_t kernel = fixture.write_kernel(0x1000, &test::kUndecodableInstruction,
+                                                 sizeof(test::kUndecodableInstruction));
+    constexpr uint64_t kSignal = 0x3000;
+    init_completion_signal(fixture.mem(), kSignal);
+    test::AqlQueue queue(fixture.mem(), fixture.cp());
+    queue.submit(make_dispatch_packet(kernel, kSignal, 32, 32));
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_TRUE(fixture.cu()->has_active_wfs());
+    const uint32_t dispatch_id = fixture.cu()->wf(0)->dispatch_id();
+
+    std::promise<void> pending, release;
+    auto pending_ready = pending.get_future();
+    auto resume = release.get_future();
+    fixture.cu()->set_notification_flush_hook_for_testing([&] {
+      // Leave the real decode-failure notification queued after releasing the
+      // CU lock, exactly where maintenance can otherwise steal its delivery.
+      pending.set_value();
+      resume.wait();
+    });
+    std::thread producer([&] { (void)fixture.cu()->step(); });
+    const bool ready = pending_ready.wait_for(5s) == std::future_status::ready;
+    EXPECT_TRUE(ready);
+    if (ready) {
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0));
+      run(fixture);
+      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, 0))
+          << "Cache maintenance delivered a pending dispatch failure";
+      EXPECT_TRUE(fixture.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+    }
+    release.set_value();
+    producer.join();
+    EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_FALSE(fixture.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kSignal), 1);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(FailureKinds, AqlQueueFailureConcurrencyTest, testing::Bool(),
+                         [](const testing::TestParamInfo<bool> &info) {
+                           return info.param ? "VmFault" : "InstructionFailure";
+                         });
+
+TEST(AqlDispatchTest, WorkerExceptionLeavesQueueFailureForTeardown) {
+  for (bool close_queue : {false, true}) {
+    SCOPED_TRACE(close_queue ? "close" : "shutdown");
+    VmFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", 2));
+    fixture.cp()->set_dispatch_threads(2);
+    for (uint32_t index = 0; index < 2; ++index)
+      fixture.cu(index)->set_functional_quantum(1);
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
+    fixture.soc_ptr->set_plugin_group(group);
+
+    const uint32_t failing_code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+    constexpr uint32_t kSMovB32 = 0xBE800000u;
+    const uint32_t throwing_code[] = {kSMovB32, SOPP_S_ENDPGM};
+    const uint64_t failing_kernel =
+        fixture.write_kernel(0x1000, failing_code, sizeof(failing_code));
+    const uint64_t throwing_kernel =
+        fixture.write_kernel(0x2000, throwing_code, sizeof(throwing_code));
+    constexpr uint64_t kFailureSignal = 0x3000;
+    init_completion_signal(fixture.mem(), kFailureSignal);
+    test::AqlQueue failing_queue(fixture.mem(), fixture.cp());
+    test::AqlQueue throwing_queue(fixture.mem(), fixture.cp(), 0xf1000000, 4096, 0xf1010000,
+                                  0xf1010008, 0xf1010010, false, 2);
+    fixture.cp()->set_queue_cu_selection(1, 0, std::vector{fixture.cu(0)});
+    fixture.cp()->set_queue_cu_selection(2, 0, std::vector{fixture.cu(1)});
+    failing_queue.submit(make_dispatch_packet(failing_kernel, kFailureSignal, 32, 32));
+    throwing_queue.dispatch(throwing_kernel, 32, 32);
+    ASSERT_TRUE(fixture.engine->step());
+    ASSERT_EQ(observed->launches, 2u);
+    const uint32_t failed_dispatch = fixture.cu(0)->wf(0)->dispatch_id();
+    const uint64_t cache_epoch = fixture.cu(0)->instruction_cache().epoch();
+    fixture.cu(0)->set_notification_flush_hook_for_testing([&] {
+      fixture.cp()->notify_dispatch_vm_fault(1, 0, failed_dispatch,
+                                             amdgpu::VmAccessOutcome::Faulted);
+    });
+
+    // Both CUs finish their batch before the pool rethrows the independent
+    // queue's host exception. The normal post-batch failure drain is skipped.
+    EXPECT_THROW((void)fixture.engine->step(), std::runtime_error);
+    ASSERT_TRUE(fixture.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(observed->halts, 0u);
+    EXPECT_EQ(observed->completed_dispatches, 0u);
+    EXPECT_EQ(fixture.cu(0)->instruction_cache().epoch(), cache_epoch);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
+    if (close_queue)
+      fixture.cp()->unregister_queue(1, 0);
+    else
+      fixture.cp()->shutdown();
+    const uint64_t flushed_epoch = fixture.cu(0)->instruction_cache().epoch();
+    EXPECT_GT(flushed_epoch, cache_epoch);
+    fixture.cp()->shutdown();
+    EXPECT_EQ(fixture.cu(0)->instruction_cache().epoch(), flushed_epoch);
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(completion_signal_value(fixture.mem(), kFailureSignal), 1);
+  }
 }
 
 class ThrowingIssuePlugin final : public ExecutionPlugin {
@@ -9073,8 +10263,10 @@ TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
     f.soc_ptr->set_plugin_group(group);
-    // Halt after rejection, so the hook runs outside execute_instruction().
-    const uint32_t code = hook == ThrowingIssuePlugin::Halt ? 0xB8000000u : 0xBE800000u;
+    // An indirect branch to zero halts outside execute_instruction().
+    const uint32_t code = hook == ThrowingIssuePlugin::Halt
+                              ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
+                              : 0xBE800000u;
     f.write_kernel(0x1000, &code, sizeof(code));
     ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
 
@@ -9520,6 +10712,280 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
   }
 }
 
+TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint32_t kSSubvectorLoopBegin = 0xBD800000u;
+
+  constexpr uint32_t kFirstQueue = 71;
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    for (uint32_t failed_workgroups : {1u, 2u, 3u}) {
+      for (uint32_t wgp_lds_bytes : {64u * 1024, 128u * 1024}) {
+        SCOPED_TRACE(std::format("threads={} workgroups={} wgp_lds_bytes={}", dispatch_threads,
+                                 failed_workgroups, wgp_lds_bytes));
+        VmFixture f;
+        ASSERT_NO_FATAL_FAILURE(
+            f.initialize("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
+        f.cp()->set_dispatch_threads(dispatch_threads);
+        auto *snapshots = f.capture_halts();
+        auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+        auto *observed = lifecycle.get();
+        ASSERT_TRUE(f.plugin_group_->add(std::move(lifecycle)));
+        std::array<bool, 2> completed{};
+        std::array<bool, 2> succeeded{};
+        for (uint32_t index = 0; index < 2; ++index) {
+          amdgpu::ComputeQueueConfig queue;
+          queue.queue_id = kFirstQueue + index;
+          ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
+
+          const uint64_t code = 0x8000 + index * 0x1000;
+          const uint64_t ib = 0x4000 + index * 0x1000;
+          f.mem()->write32(code, index == 0 ? kSSubvectorLoopBegin : SOPP_S_ENDPGM);
+          std::vector<uint32_t> words;
+          const auto packet = [&](amdgpu::Pm4Opcode opcode,
+                                  std::initializer_list<uint32_t> payload) {
+            words.push_back(0xC0000000u | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+            words.insert(words.end(), payload.begin(), payload.end());
+          };
+          uint32_t rsrc1 = 0, rsrc2 = 0;
+          RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+          RJ_AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, wgp_lds_bytes / 512);
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
+          packet(amdgpu::Pm4Opcode::DispatchDirect,
+                 {index == 0 ? failed_workgroups : 1u, 1, 1, 1u | (1u << 15)}); // Wave32.
+          for (uint32_t i = 0; i < words.size(); ++i)
+            f.mem()->write32(ib + i * 4, words[i]);
+
+          amdgpu::Pm4Submission submission;
+          submission.buffers.push_back({ib, uint32_t(words.size())});
+          // Keep the second queue pending until the first reports failure. The
+          // first grid may also have workgroups that never found LDS capacity.
+          submission.ready = [&, index] { return index == 0 || completed[0]; };
+          f.engine->register_as_primary();
+          submission.complete = [&, index](bool success) {
+            EXPECT_FALSE(completed[index]);
+            completed[index] = true;
+            succeeded[index] = success;
+            EXPECT_TRUE(f.cu(0)->is_idle());
+            EXPECT_TRUE(f.cu(1)->is_idle());
+            f.engine->primary_release();
+          };
+          ASSERT_TRUE(f.cp()->submit_pm4(kFirstQueue + index, 0, std::move(submission)));
+        }
+
+        f.engine->run();
+        EXPECT_EQ(completed, (std::array{true, true}));
+        EXPECT_EQ(succeeded, (std::array{false, true}));
+        EXPECT_TRUE(f.cp()->queue_faulted_for_test(kFirstQueue, 0));
+        EXPECT_FALSE(f.cp()->queue_faulted_for_test(kFirstQueue + 1, 0));
+        EXPECT_EQ(observed->halts, 2u);
+        EXPECT_EQ(observed->completed_workgroups, 1u);
+        EXPECT_EQ(observed->completed_dispatches, 1u);
+        EXPECT_GT(observed->cancellations, 0u);
+        EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
+        if (wgp_lds_bytes == 64 * 1024 && failed_workgroups == 2) {
+          EXPECT_EQ(observed->launches, 6u);
+          EXPECT_EQ(observed->cancellations, 4u);
+        }
+        ASSERT_EQ(snapshots->snapshots().size(), 2u);
+        for (const auto &wave : snapshots->snapshots())
+          EXPECT_GE(wave.lds_size_bytes, wgp_lds_bytes);
+      }
+    }
+  }
+}
+
+TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
+  for (std::string_view arch : {"cdna4", "rdna1", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    const bool wgp = arch == "rdna1";
+    const bool clustered = arch == "cdna5";
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 2, 10, 64, 128));
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    f.soc_ptr->set_plugin_group(group);
+    const uint32_t code[] = {SOPP_S_NOP, clustered ? 0xBFB00000u : SOPP_S_ENDPGM};
+    const uint32_t lds_bytes = wgp ? 128 * 1024 : 64 * 1024;
+    const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code), 128, 256, 2, lds_bytes, wgp);
+    const auto submit = [&](test::AqlQueue &queue, uint64_t signal) {
+      init_completion_signal(f.mem(), signal);
+      if (clustered) {
+        amdgpu::AmdExtKernelDispatchPacket packet{};
+        packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+        packet.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+        packet.setup = 1;
+        packet.workgroup_size_x = 32;
+        packet.workgroup_size_y = packet.workgroup_size_z = 1;
+        packet.cluster_count_x = packet.cluster_count_y = packet.cluster_count_z = 1;
+        packet.cluster_size_x = 2;
+        packet.cluster_size_y = packet.cluster_size_z = 1;
+        packet.group_segment_size = lds_bytes;
+        packet.kernel_object = kernel;
+        packet.completion_signal.handle = signal;
+        queue.submit(packet);
+      } else {
+        queue.submit(make_dispatch_packet(kernel, signal, 128, 64));
+      }
+    };
+    test::AqlQueue first(f.mem(), f.cp());
+    submit(first, 0x3000);
+    ASSERT_TRUE(f.engine->step());
+    ASSERT_EQ(observed->launches, 2u);
+    EXPECT_EQ(observed->halts, 0u);
+    f.cp()->unregister_queue(1, 0);
+    EXPECT_EQ(observed->cancellations, 2u);
+    EXPECT_EQ(observed->halts, 0u);
+    EXPECT_EQ(observed->completed_workgroups, 0u);
+    EXPECT_EQ(observed->completed_dispatches, 0u);
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 1);
+    EXPECT_TRUE(f.cu(0)->is_idle());
+    EXPECT_TRUE(f.cu(1)->is_idle());
+    EXPECT_TRUE(f.cp()->cluster_lds_targets(1, 0, 3).empty());
+
+    // Reuse the same queue storage and the entire LDS capacity after close.
+    test::AqlQueue second(f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                          test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                          test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                          test::AqlQueue::DEFAULT_DOORBELL_ADDR, false, 2);
+    submit(second, 0x4000);
+    for (uint32_t step = 0; step < 1000 && f.engine->step(); ++step) {
+    }
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x4000), 0);
+    EXPECT_FALSE(f.cp()->queue_faulted_for_test(2, 0));
+    EXPECT_EQ(observed->cancellations, 2u);
+    EXPECT_EQ(observed->halts, wgp ? 4u : 2u);
+    EXPECT_EQ(observed->completed_workgroups, 2u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
+  }
+}
+
+TEST(ClusterDispatchTest, RollbackCancellationWaitsForRuntimeWaveStateSnapshot) {
+  using namespace std::chrono_literals;
+  class SnapshotCancellationPlugin final : public CancellationLifecyclePlugin {
+  public:
+    std::promise<void> cancellation_entered;
+    void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wave) override {
+      CancellationLifecyclePlugin::onAmdgpuWavefrontCancelled(wave);
+      cancellation_entered.set_value();
+    }
+  };
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+  auto plugin = std::make_unique<SnapshotCancellationPlugin>();
+  auto *observed = plugin.get();
+  auto cancelled = observed->cancellation_entered.get_future();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.soc_ptr->set_plugin_group(group);
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
+  test::AqlQueue queue(fixture.mem(), fixture.cp());
+  queue.dispatch(kernel, 32, 32);
+  ASSERT_TRUE(fixture.engine->step());
+  auto *wave = fixture.cu()->wf(0);
+  ASSERT_NE(wave, nullptr);
+  const uint32_t dispatch_id = wave->dispatch_id();
+  const uint32_t workgroup_id = wave->wg_id();
+  std::promise<void> rollback_started;
+  auto started = rollback_started.get_future();
+  std::thread rollback;
+  fixture.cu()->with_wave_state_locked([&] {
+    rollback = std::thread([&] {
+      rollback_started.set_value();
+      fixture.cu()->abort_workgroup(dispatch_id, workgroup_id);
+    });
+    started.wait();
+    // Cancellation observers read live wave state, so they must wait for a
+    // runtime snapshot to release the same mutex before the wave is retired.
+    EXPECT_EQ(cancelled.wait_for(50ms), std::future_status::timeout);
+  });
+  rollback.join();
+  EXPECT_EQ(cancelled.wait_for(0s), std::future_status::ready);
+  EXPECT_EQ(observed->cancellations, 1u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 0u);
+  EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) {
+  using namespace rocjitsu::amdhsa;
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads);
+    VmFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 2, 1, 64, 128));
+    f.cp()->set_dispatch_threads(dispatch_threads);
+    constexpr uint32_t process_id = 77;
+    auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem());
+    auto address_space = f.soc_ptr->gpu_vm().register_translated(
+        process_id, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+    ASSERT_TRUE(address_space);
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    uint32_t invalidations = 0;
+    observed->on_launch = [&](amdgpu::Wavefront &wave) {
+      EXPECT_EQ(wave.debug_read_sgpr(0), 0x12345678u);
+      if (invalidations == 0) {
+        ASSERT_TRUE(f.soc_ptr->gpu_vm().invalidate(address_space));
+        ++invalidations;
+      }
+    };
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    f.soc_ptr->set_plugin_group(group);
+    const uint32_t end = 0xBFB00000u;
+    const uint64_t kernel = f.write_kernel(0x1000, &end, sizeof(end), 128, 256, 1);
+    uint16_t preload = 0;
+    RJ_AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+    f.mem()->load_image(reinterpret_cast<const uint8_t *>(&preload), sizeof(preload),
+                        kernel + offsetof(kernel_descriptor_t, kernarg_preload));
+    f.mem()->write32(0x2000, 0x12345678u);
+    init_completion_signal(f.mem(), 0x3000);
+    test::AqlQueue queue(
+        f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+        test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+        test::AqlQueue::DEFAULT_DOORBELL_ADDR, false, 1, address_space, process_id);
+    amdgpu::AmdExtKernelDispatchPacket packet{};
+    packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    packet.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    packet.setup = 1;
+    packet.workgroup_size_x = 32;
+    packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.cluster_count_x = packet.cluster_count_y = packet.cluster_count_z = 1;
+    packet.cluster_size_x = 2;
+    packet.cluster_size_y = packet.cluster_size_z = 1;
+    packet.group_segment_size = 64 * 1024;
+    packet.kernel_object = kernel;
+    packet.kernarg_address = reinterpret_cast<void *>(0x2000);
+    packet.completion_signal.handle = 0x3000;
+    queue.submit(packet);
+    ASSERT_TRUE(f.engine->step());
+    EXPECT_EQ(observed->cancellations, 1u);
+    // Retrying cleanup of the already-rolled-back workgroup cannot notify twice.
+    for (uint32_t repeat = 0; repeat < 2; ++repeat)
+      for (uint32_t cu = 0; cu < 2; ++cu)
+        f.cu(cu)->abort_workgroup(1, 0);
+    EXPECT_EQ(observed->cancellations, 1u);
+    for (uint32_t step = 0; step < 1000 && f.engine->step(); ++step) {
+    }
+    EXPECT_EQ(invalidations, 1u);
+    EXPECT_EQ(observed->launches, 3u);
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(observed->halts, 2u);
+    EXPECT_EQ(observed->completed_workgroups, 2u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 0);
+    EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, process_id));
+    EXPECT_TRUE(f.cu(0)->is_idle());
+    EXPECT_TRUE(f.cu(1)->is_idle());
+    EXPECT_TRUE(f.cp()->cluster_lds_targets(1, 0, 3).empty());
+  }
+}
+
 TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   KfdProcess process(7);
   VmFixture f;
@@ -9875,9 +11341,24 @@ TEST(AmdgpuVmTest, LaterHostProducerCompletesParkedAqlConsumer) {
 }
 
 TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
+  class CancellationCounts final : public ExecutionPlugin {
+  public:
+    CancellationCounts() : ExecutionPlugin("gws_cancellation_counts") {}
+    std::atomic<uint32_t> launched = 0;
+    std::atomic<uint32_t> cancelled = 0;
+    std::atomic<uint32_t> halted = 0;
+    std::atomic<uint32_t> completed_workgroups = 0;
+    std::atomic<uint32_t> completed_dispatches = 0;
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override { ++launched; }
+    void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &) override { ++cancelled; }
+    void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halted; }
+    void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
+    void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
+  };
   for (uint32_t partitions : {1u, 2u, 8u})
     for (bool uninitialized : {false, true})
       for (uint32_t threads : {1u, 2u}) {
+        util::StringDiagnostic admission_diagnostic;
         SCOPED_TRACE(partitions);
         SCOPED_TRACE(uninitialized);
         SCOPED_TRACE(threads);
@@ -9886,14 +11367,22 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
             test::load_valid_config(std::string(CONFIG_DIR) + "/gfx942_cdna3.json", loaded));
         auto *soc = loaded.soc();
         auto *mem = loaded.memory();
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto counts = std::make_unique<CancellationCounts>();
+        auto *observed = counts.get();
+        ASSERT_TRUE(group->add(std::move(counts)));
+        soc->set_plugin_group(group);
         soc->set_dispatch_threads(threads);
         loaded.engine_config.num_threads = partitions;
         loaded.engine_config.max_ticks = 10000;
         auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
         engine->topology().set_root(loaded.take_root());
-        loaded.wire_links(engine->topology());
+        ASSERT_TRUE(
+            loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+            << admission_diagnostic.message();
         ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, partitions));
-        engine->create();
+        ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+            << admission_diagnostic.message();
         for (uint32_t x = 0; x < soc->num_xcds(); ++x)
           for (auto *cu : soc->xcd(x)->command_processor()->compute_units()) {
             cu->set_functional_quantum(1);
@@ -9930,6 +11419,11 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
         EXPECT_EQ(active, 0);
         EXPECT_FALSE(soc->gws_device()->any_parked());
         EXPECT_EQ(faulted, soc->num_xcds());
+        EXPECT_GT(observed->launched.load(), 0u);
+        EXPECT_EQ(observed->cancelled.load(), observed->launched.load());
+        EXPECT_EQ(observed->halted.load(), 0u);
+        EXPECT_EQ(observed->completed_workgroups.load(), 0u);
+        EXPECT_EQ(observed->completed_dispatches.load(), 0u);
       }
 }
 

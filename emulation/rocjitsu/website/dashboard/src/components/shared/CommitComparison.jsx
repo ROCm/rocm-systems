@@ -1,4 +1,5 @@
 import { Box, Typography } from '@mui/material';
+import { monoFont } from '../../theme/tokens';
 import { shortSha } from '../../utils/formatters';
 
 export default function CommitComparison({ candidate, baseline, align = 'left', sx }) {
@@ -25,9 +26,9 @@ export default function CommitComparison({ candidate, baseline, align = 'left', 
       title={`Candidate commit ${candidateSha} vs baseline commit ${baselineSha}`}
       sx={{ color: 'text.secondary', display: 'block', textAlign: align, lineHeight: 1.35, whiteSpace: 'nowrap', ...sx }}
     >
-      <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 'inherit', fontWeight: 700 }}>{candidateSha}</Box>
+      <Box component="code" sx={{ fontFamily: monoFont, fontSize: 'inherit', fontWeight: 700 }}>{candidateSha}</Box>
       <Box component="span" sx={{ mx: 0.45, color: 'text.disabled' }}>{' vs '}</Box>
-      <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 'inherit', fontWeight: 700 }}>{baselineSha}</Box>
+      <Box component="code" sx={{ fontFamily: monoFont, fontSize: 'inherit', fontWeight: 700 }}>{baselineSha}</Box>
     </Typography>
   );
 }

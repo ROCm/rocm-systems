@@ -37,12 +37,25 @@ using namespace rocshmem;
  *
  * One-way non-blocking put using anvil directly on the SDMA queue.
  * Pipelines multiple sdma_anvil::put calls and quiets only at batch boundaries.
+ * With poll set, each quiet spins on the non-blocking isFlushed() instead.
  *****************************************************************************/
+static __device__ void SdmaPutNbiQuiet(sdma_anvil::SdmaQueueDeviceHandle &handle,
+                                       bool poll) {
+  if (!poll) {
+    sdma_anvil::quiet(handle);
+    return;
+  }
+  uint64_t target = sdma_anvil::quietTarget(handle);
+  while (!sdma_anvil::isFlushed(handle, target)) {
+  }
+}
+
 __global__ void SdmaPutNbiTest(int loop, int skip,
                                long long int *start_time,
                                long long int *end_time,
                                char *source, char *dest, size_t size,
-                               int batch, ShmemContextType ctx_type) {
+                               int batch, ShmemContextType ctx_type,
+                               bool poll) {
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -74,7 +87,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       int slot = (start_slot + i) % batch;
 
       if (slot == 0) {
-        sdma_anvil::quiet(*handle);
+        SdmaPutNbiQuiet(*handle, poll);
         if (i == skip) {
           start_time[wg_id] = wall_clock64();
         }
@@ -86,7 +99,7 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
       sdma_anvil::put(*handle, remote_dest, source, size);
     }
 
-    sdma_anvil::quiet(*handle);
+    SdmaPutNbiQuiet(*handle, poll);
     end_time[wg_id] = wall_clock64();
   }
 
@@ -117,7 +130,8 @@ void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
   hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
-                     s_buf, r_buf, size, batch_size, _shmem_context);
+                     s_buf, r_buf, size, batch_size, _shmem_context,
+                     _type == SdmaPutNbiPollTestType);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;

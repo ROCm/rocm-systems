@@ -206,6 +206,39 @@ struct ReadModifyWriteCase {
 
 TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
   constexpr auto cases = std::to_array<ReadModifyWriteCase>({
+      {cdna3::kSAtomicSwapSmem, 1, 0x11111111, 0x22222222, 0x22222222},
+      {cdna3::kSAtomicAddSmem, 1, 5, 7, 12},
+      {cdna3::kSAtomicAddSmem, 1, 0xffffffff, 1, 0},
+      {cdna3::kSAtomicSubSmem, 1, 5, 7, 0xfffffffe},
+      // Signed and unsigned min/max share operands so the two orders disagree.
+      {cdna3::kSAtomicSminSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicUminSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicSmaxSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicUmaxSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicAndSmem, 1, 0xff00ff00, 0x0ff00ff0, 0x0f000f00},
+      {cdna3::kSAtomicOrSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xfff0fff0},
+      {cdna3::kSAtomicXorSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xf0f0f0f0},
+      // S_ATOMIC_INC wraps to zero once memory is >= DATA (unsigned).
+      {cdna3::kSAtomicIncSmem, 1, 6, 7, 7},
+      {cdna3::kSAtomicIncSmem, 1, 7, 7, 0},
+      {cdna3::kSAtomicIncSmem, 1, 0x8000'0000, 7, 0},
+      // X2 forms carry across dwords and take the sign from bit 63.
+      {cdna3::kSAtomicSwapX2Smem, 2, 0x1111'1111'2222'2222, 0x3333'3333'4444'4444,
+       0x3333'3333'4444'4444},
+      {cdna3::kSAtomicAddX2Smem, 2, 0xffff'ffff, 1, 0x1'0000'0000},
+      {cdna3::kSAtomicSubX2Smem, 2, 0x1'0000'0000, 1, 0xffff'ffff},
+      {cdna3::kSAtomicSminX2Smem, 2, 0x8000'0000, 1, 1},
+      {cdna3::kSAtomicSminX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicUminX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicSmaxX2Smem, 2, 0x8000'0000, 1, 0x8000'0000},
+      {cdna3::kSAtomicSmaxX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicUmaxX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicAndX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0x0f000f00'000f000f},
+      {cdna3::kSAtomicOrX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xfff0fff0'f0fff0ff},
+      {cdna3::kSAtomicXorX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xf0f0f0f0'f0f0f0f0},
+      {cdna3::kSAtomicIncX2Smem, 2, 7, 0x1'0000'0005, 8},
+      {cdna3::kSAtomicIncX2Smem, 2, 0x1'0000'0005, 0x1'0000'0005, 0},
+      {cdna3::kSAtomicIncX2Smem, 2, 0x8000'0000'0000'0000, 7, 0},
       // MI300 ISA, S_ATOMIC_DEC: zero and values above DATA wrap to DATA.
       {cdna3::kSAtomicDecSmem, 1, 0, 0, 0},
       {cdna3::kSAtomicDecSmem, 1, 1, 0, 0},
@@ -247,6 +280,60 @@ TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
       EXPECT_EQ(wf->read_scc(), 1u);
       EXPECT_EQ(wf->exec(), 0u);
       EXPECT_TRUE(wf->wait_counters().empty());
+    }
+  }
+}
+
+struct CompareSwapCase {
+  uint16_t opcode;
+  uint32_t dwords;
+  uint64_t old;
+  uint64_t source;
+  uint64_t compare;
+  uint64_t expected;
+};
+
+TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
+  constexpr auto cases = std::to_array<CompareSwapCase>({
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 5, 9},
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 6, 5},
+      // X2 compares all 64 bits, and its compare value starts at SDATA[2].
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0005, 0x2'0000'0009},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x3'0000'0005, 0x1'0000'0005},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0006, 0x1'0000'0005},
+  });
+  for (const auto &[opcode, dwords, old, source, compare, expected] : cases) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " old=" << old
+                                      << " compare=" << compare << " glc=" << +glc);
+      const uint64_t guard_address = kAddress + dwords * 4;
+      const unsigned compare_sgpr = 4 + dwords;
+      const unsigned guard_sgpr = 4 + 2 * dwords;
+      write_memory(kAddress, dwords, old);
+      memory.write32(guard_address, 0xdeadbeef);
+      write_sgprs(4, dwords, source);
+      write_sgprs(compare_sgpr, dwords, compare);
+      write_sgpr(guard_sgpr, 0x12345678);
+      if (backing) {
+        backing->update_attempts = 0;
+        backing->mutations = 0;
+      }
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
+      EXPECT_EQ(read_memory(kAddress, dwords), expected);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? old : source);
+      EXPECT_EQ(read_sgprs(compare_sgpr, dwords), compare);
+      EXPECT_EQ(memory.read32(guard_address), 0xdeadbeef);
+      EXPECT_EQ(read_sgpr(guard_sgpr), 0x12345678);
+      EXPECT_TRUE(wf->wait_counters().empty());
+      if (backing) {
+        // A translated mismatch skips the compare/exchange, as for vector
+        // atomics. L2 always writes the line back.
+        const unsigned writes = old == compare || memory_mode() == MemoryMode::CachedVm ? 1u : 0u;
+        EXPECT_EQ(backing->update_attempts, writes);
+        EXPECT_EQ(backing->mutations, writes);
+      }
     }
   }
 }
@@ -476,6 +563,36 @@ TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue
   }
 }
 
+TEST_P(ScalarAtomicTest, CompareSwapMismatchAfterLostExchangeDoesNotWrite) {
+  if (memory_mode() != MemoryMode::TranslatedVm)
+    GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  constexpr std::array<std::pair<uint16_t, uint32_t>, 2> kCompareSwapForms{
+      {{cdna3::kSAtomicCmpswapSmem, 1}, {cdna3::kSAtomicCmpswapX2Smem, 2}}};
+  for (const auto &[opcode, dwords] : kCompareSwapForms) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << opcode);
+    write_memory(kAddress, dwords, 4);
+    write_sgprs(4, dwords, 9);
+    write_sgprs(4 + dwords, dwords, 4);
+    backing->mutations = 0;
+    backing->exchange_outcome = VmAccessOutcome::Unavailable;
+    auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1}, opcode);
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
+    pipeline->tick();
+    EXPECT_EQ(backing->mutations, 0u);
+
+    // Another writer changes memory after our matching load. The resumed
+    // exchange observes a mismatch and must return it without writing.
+    write_memory(kAddress, dwords, 7);
+    backing->exchange_outcome = VmAccessOutcome::Complete;
+    pipeline->tick();
+    EXPECT_TRUE(wf->wait_counters().empty());
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_memory(kAddress, dwords), 7u);
+    EXPECT_EQ(read_sgprs(4, dwords), 7u);
+  }
+}
+
 TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
   if (memory_mode() != MemoryMode::TranslatedVm)
     GTEST_SKIP() << "Compare/exchange faults require a translated backing";
@@ -509,7 +626,7 @@ TEST_P(ScalarAtomicTest, DecodedDependenciesFollowReturnBit) {
       const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       const RegisterRef sdata{RegClass::SGPR, 4, static_cast<uint8_t>(dwords)};
       EXPECT_TRUE(def_use.uses.contains(sdata));
       EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));

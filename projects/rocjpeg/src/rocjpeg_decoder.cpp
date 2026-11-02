@@ -250,17 +250,19 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
         return ROCJPEG_STATUS_EXECUTION_FAILED;
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
-    const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
-    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+    // SubmitDecode writes the crop rectangle into the parameters it is given, so decode a copy
+    // rather than the stream handle's own parameters, as DecodeAsync and DecodeBatched do.
+    JpegStreamParameters jpeg_stream_params = *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
 
     VASurfaceID current_surface_id;
-    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
+    CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(&jpeg_stream_params, current_surface_id, decode_params));
 
     // A single image is just a batch of one.
-    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, jpeg_stream_params, decode_params, destination, 1);
+    RocJpegStatus rocjpeg_status = FinalizeDecodeBatched(&current_surface_id, &jpeg_stream_params, decode_params, destination, 1);
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_id);
     }
@@ -483,7 +485,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
 
     std::vector<VASurfaceID> current_surface_ids;
     std::vector<JpegStreamParameters> jpeg_streams_params;
-    current_surface_ids.resize(batch_size);
+    // Slots stay VA_INVALID_SURFACE until SubmitDecodeBatched assigns a surface to them.
+    current_surface_ids.resize(batch_size, VA_INVALID_SURFACE);
     jpeg_streams_params.resize(batch_size);
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
 
@@ -499,9 +502,12 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
 
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], current_surface_ids.data() + i);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
-            // VA surfaces that are already in-flight on the hardware.
-            for (int j = 0; j < i; j++) {
+            // Sync and release the surfaces of all previous sub-batches and those the failing sub-batch
+            // already acquired, which may be in flight on the hardware, so their pool entries are not leaked.
+            for (int j = 0; j < batch_end; j++) {
+                if (current_surface_ids[j] == VA_INVALID_SURFACE) {
+                    continue;
+                }
                 jpeg_vaapi_decoder_.SyncSurface(current_surface_ids[j]);
                 jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_ids[j]);
             }
@@ -556,7 +562,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     }
 
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
-    std::vector<VASurfaceID> surface_ids(batch_size);
+    // Slots stay VA_INVALID_SURFACE until SubmitDecodeBatched assigns a surface to them.
+    std::vector<VASurfaceID> surface_ids(batch_size, VA_INVALID_SURFACE);
 
     // SubmitDecodeBatched does not touch pending_decodes_ — hold no lock during GPU submission
     // so DecodeBatchedSync can concurrently drain its own states on the sync thread.
@@ -566,9 +573,12 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
 
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], surface_ids.data() + i);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
-            // VA surfaces that are already in-flight on the hardware.
-            for (int j = 0; j < i; j++) {
+            // Sync and release the surfaces of all previous sub-batches and those the failing sub-batch
+            // already acquired, which may be in flight on the hardware, so their pool entries are not leaked.
+            for (int j = 0; j < batch_end; j++) {
+                if (surface_ids[j] == VA_INVALID_SURFACE) {
+                    continue;
+                }
                 jpeg_vaapi_decoder_.SyncSurface(surface_ids[j]);
                 jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[j]);
             }
@@ -640,6 +650,9 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  * This function retrieves the number of components, chroma subsampling, widths, and heights
  * of the image from the given JPEG stream.
  *
+ * Only the parsed parameters of the stream handle are read, never decoder state, so no lock is taken and
+ * the query does not wait behind a decode on the same handle.
+ *
  * @param jpeg_stream_handle The handle to the JPEG stream.
  * @param num_components Pointer to store the number of components in the image.
  * @param subsampling Pointer to store the chroma subsampling of the image.
@@ -650,7 +663,6 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedSync(RocJpegImage *destinations, int 
  */
 RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handle, uint8_t *num_components, RocJpegChromaSubsampling *subsampling, uint32_t *widths, uint32_t *heights){
     FunctionEntryLogWithArgs(g_rocjpeg_logger, RocJpegFmtPtr(jpeg_stream_handle) + ", " + RocJpegFmtPtr(num_components) + ", " + RocJpegFmtPtr(subsampling) + ", " + RocJpegFmtPtr(widths) + ", " + RocJpegFmtPtr(heights));
-    std::lock_guard<std::mutex> lock(mutex_);
     if (jpeg_stream_handle == nullptr || num_components == nullptr || subsampling == nullptr || widths == nullptr || heights == nullptr) {
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);

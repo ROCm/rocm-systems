@@ -75,114 +75,13 @@ int ncclTeamRankToWorld(ncclComm_t, ncclTeam_t team, int rank) { return rank * t
 
 void ncclSetThreadName(std::thread&, const char*, ...) {}
 
+#include "fakes/gin_vtable_fake.h"
+
 namespace {
-
-struct FakeGinHost {
-  int closeCollCalls = 0;
-  int regMrSymCalls = 0;
-  int deregMrSymCalls = 0;
-  int listenCalls = 0;
-  int connectCalls = 0;
-  int closeListenCalls = 0;
-  int createContextCalls = 0;
-  std::vector<void*> closedColls;
-  std::vector<void*> deregColls;
-  // backend->closed as seen from inside each closeColl call.
-  std::vector<bool> closedFlagAtClose;
-  struct ncclGinBackendState* watchedBackend = nullptr;
-  void* closeCollFailOn = nullptr;
-  int connectFailOnCall = 0;  // 1-based; 0 never fails
-  uintptr_t nextCollComm = 0x5000;
-
-  static FakeGinHost*& currentPtr() {
-    static FakeGinHost* p = nullptr;
-    return p;
-  }
-  static FakeGinHost& current() { return *currentPtr(); }
-  static void setCurrent(FakeGinHost* p) { currentPtr() = p; }
-
-  static ncclResult_t CloseColl(void* collComm) {
-    FakeGinHost& self = current();
-    ++self.closeCollCalls;
-    self.closedColls.push_back(collComm);
-    if (self.watchedBackend) self.closedFlagAtClose.push_back(self.watchedBackend->closed);
-    return collComm == self.closeCollFailOn ? ncclSystemError : ncclSuccess;
-  }
-
-  static ncclResult_t RegMrSym(void* /*collComm*/, void* /*data*/, size_t /*size*/, int /*type*/,
-                               uint64_t /*mrFlags*/, void** mhandle, void** ginHandle) {
-    FakeGinHost& self = current();
-    ++self.regMrSymCalls;
-    if (mhandle) *mhandle = &self;
-    if (ginHandle) *ginHandle = &self;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t DeregMrSym(void* collComm, void* /*mhandle*/) {
-    FakeGinHost& self = current();
-    ++self.deregMrSymCalls;
-    self.deregColls.push_back(collComm);
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Devices(int* ndev) {
-    *ndev = 1;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t GetProperties(int /*dev*/, ncclNetProperties_t* props) {
-    std::memset(props, 0, sizeof(*props));
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Listen(void* /*ctx*/, int /*dev*/, void* /*handle*/, void** listenComm) {
-    FakeGinHost& self = current();
-    ++self.listenCalls;
-    *listenComm = &self;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t Connect(void* /*ctx*/, void* /*handles*/[], int /*nranks*/, int /*rank*/,
-                              void* /*listenComm*/, void** collComm) {
-    FakeGinHost& self = current();
-    if (++self.connectCalls == self.connectFailOnCall) return ncclSystemError;
-    *collComm = reinterpret_cast<void*>(self.nextCollComm++);
-    return ncclSuccess;
-  }
-
-  static ncclResult_t CloseListen(void* /*listenComm*/) {
-    ++current().closeListenCalls;
-    return ncclSuccess;
-  }
-
-  static ncclResult_t CreateContext(void* /*collComm*/, ncclGinConfig_t* /*config*/, void** /*ginCtx*/,
-                                    ncclNetDeviceHandle_t** /*devHandle*/) {
-    ++current().createContextCalls;
-    return ncclInternalError;
-  }
-
-  static ncclResult_t DestroyContext(void* /*ginCtx*/) { return ncclSuccess; }
-
-  ncclGin_t vtable() {
-    ncclGin_t gin{};
-    gin.name = "GinHostFinalizeStub";
-    gin.devices = &Devices;
-    gin.getProperties = &GetProperties;
-    gin.listen = &Listen;
-    gin.connect = &Connect;
-    gin.createContext = &CreateContext;
-    gin.regMrSym = &RegMrSym;
-    gin.deregMrSym = &DeregMrSym;
-    gin.destroyContext = &DestroyContext;
-    gin.closeColl = &CloseColl;
-    gin.closeListen = &CloseListen;
-    return gin;
-  }
-};
 
 class GinHostFinalizeTest : public ::testing::Test {
  protected:
-  FakeGinHost fake_;
+  FakeGinVtable fake_;
   ncclGin_t gin_{};
   std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();
   ncclComm comm_{};
@@ -194,7 +93,7 @@ class GinHostFinalizeTest : public ::testing::Test {
   uint32_t winGens_[NCCL_GIN_MAX_ACTIVE_BACKENDS] = {};
 
   void SetUp() override {
-    FakeGinHost::setCurrent(&fake_);
+    FakeGinVtable::setCurrent(&fake_);
     gin_ = fake_.vtable();
     g_localGinDevCount = 2;
     // Both are already value-initialized (make_unique, and `ncclComm comm_{}`);
@@ -221,10 +120,13 @@ class GinHostFinalizeTest : public ::testing::Test {
     backend->ginComms[1] = ginComm1_;
     backend->closed = false;
     backend->connectGeneration = 1;
-    fake_.watchedBackend = backend;
+    // ConnectOnce calls devices() and rejects ndev <= 0. The plugin-init
+    // cases leave ndev at 0, so this fixture sets it.
+    fake_.ndev = 1;
+    fake_.closedFlag = &backend->closed;
   }
 
-  void TearDown() override { FakeGinHost::setCurrent(nullptr); }
+  void TearDown() override { FakeGinVtable::setCurrent(nullptr); }
 
   struct ncclGinState* ginState() { return &sharedRes_->ginState; }
   struct ncclGinBackendState* backend() { return &ginState()->backends[0]; }

@@ -33,6 +33,7 @@ using bf16 = __nv_bfloat16;
 using bf162 = __nv_bfloat162;
 #endif
 
+#include "algorithms/dda/device/dda_kernel_params.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -296,11 +297,12 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 
 // Scratch is double buffered under a single epoch counter, so a bank is half of
-// it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
-// bank rather than a fixed constant puts bank 1 at the same byte offset, which
-// is what stops one tier landing on flag words another is still polling.
+// it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
+// tier that derives its slot stride from the bank rather than a fixed constant
+// puts bank 1 at the same byte offset, which is what stops one tier landing on
+// flag words another is still polling.
 constexpr size_t ddaBankSize(size_t bytes) {
-  return (bytes / 2) / 16 * 16;
+  return (bytes / 2) / 128 * 128;
 }
 
 // Per-rank slot carved out of a bank, counted in whatever unit the protocol
@@ -316,6 +318,10 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   const size_t slotUnits = bankSize / div;
   return (slotUnits / align) * align;
 }
+
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
@@ -381,6 +387,20 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
   o2 = __builtin_nontemporal_load((u32_gptr)src + 2);
   o3 = __builtin_nontemporal_load((u32_gptr)src + 3);
 #endif
+}
+
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
+// Returns false if the wait was aborted so the kernel can exit.
+__device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
+                                                   DdaKernelParams params, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   uint32_t& f1) {
+  const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
+  int spins = 0;
+  do {
+    ddaLLLoadLineB128(line, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) return true;
+  } while (!params.abortSpinTick(spins));
+  return false;
 }
 
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
