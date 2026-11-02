@@ -169,6 +169,7 @@ set(SRC_FILES
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
   algorithms/gin/sdma/all_reduce_gin_sdma.h
+  algorithms/gin/sdma/gin_scatter_reduce.h
   include/alloc.h
   include/allocator.h
   include/alltoallv_meta.h
@@ -593,6 +594,7 @@ set(SRC_FILES
   transport/net_ib/wqe_lat_mon.cc
   transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
+  transport/net_ib_cast/net_ib_qp_sharing_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
@@ -887,10 +889,6 @@ add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
 
 # Generate device/host tables and all the collective functions that are going to be in librccl.so
 #==================================================================================================
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-if (NOT Python3_FOUND)
-  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
-endif()
 
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")

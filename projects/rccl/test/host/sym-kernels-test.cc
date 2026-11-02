@@ -494,6 +494,60 @@ TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
   EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST));
 }
 
+// ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
+
+// A package is a run of consecutive ranks on one physical device, and every package must be the same size.
+TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice) {
+  struct {
+    const char* layout;
+    std::vector<int> devices;  // physical device of each rank
+    int scaleIn;
+  } const cases[] = {
+      {"two devices, two ranks each", {0, 0, 1, 1}, 2},
+      {"interleaved", {0, 1, 0, 1}, 0},
+      {"uneven", {0, 0, 1, 1, 1, 1}, 0},
+      {"single device", {0, 0, 0, 0}, 0},
+  };
+  for (const auto& c : cases) {
+    std::vector<ncclPeerInfo> peers(c.devices.size());
+    for (size_t r = 0; r < peers.size(); ++r) {
+      peers[r].hostHash = 1;
+      // Partitions of one device differ only in the low 4 bits of the bus ID.
+      peers[r].busId = (int64_t(c.devices[r] + 1) << 8) | int64_t(r % 16);
+    }
+    comm_->nRanks = int(peers.size());
+    comm_->peerInfo = peers.data();
+    EXPECT_EQ(computeHierScaleInSize(comm_.get()), c.scaleIn) << c.layout;
+  }
+  comm_->peerInfo = nullptr;
+}
+
+TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
+  struct {
+    const char* name;
+    bool gfx1250;
+    bool hasMloPart;
+    int scaleIn;  // ranks per package, of the fixture's 4-rank LSA team
+    bool offered;
+  } const cases[] = {
+      {"two packages", true, true, 2, true},  {"not partition mode", true, false, 2, false},
+      {"not gfx1250", false, true, 2, false}, {"no packages", true, true, 0, false},
+      {"one package", true, true, 4, false},  {"packages do not divide the team", true, true, 3, false},
+  };
+  for (const auto& c : cases) {
+    if (c.gfx1250) {
+      SetTdmCapableArch(comm_.get());
+    } else {
+      SetSymkArch(comm_.get(), "gfx950", 95, /*warpSize=*/64);
+    }
+    comm_->hasMloPart = c.hasMloPart;
+    comm_->symkState.kcomm.hierScaleInSize = c.scaleIn;
+    uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaST), c.offered) << c.name;
+    EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
+  }
+}
+
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {
   uint32_t kmask = ncclSymkMask(comm_.get(), ncclFuncBroadcast, ncclDevSum, kTy, /*nElts=*/1024);
   EXPECT_EQ(kmask, 0u);
