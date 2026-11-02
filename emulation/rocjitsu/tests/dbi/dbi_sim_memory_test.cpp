@@ -175,7 +175,9 @@ void make_copy_kernel(rj_code_arch_t arch, bool with_store, std::vector<uint32_t
           build_s_mov_b32(3, kInlineZero, arch), zero.value()};
   const std::vector<uint32_t> load = build_global_load_dword(1, 0, 2, 0, arch);
   code.insert(code.end(), load.begin(), load.end());
-  code.push_back(build_wait_loads_complete(arch));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete = build_wait_loads_complete(arch);
+  ASSERT_TRUE(maybe_wait_loads_complete.succeeded());
+  code.push_back(maybe_wait_loads_complete.value());
   const std::vector<uint32_t> store = build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
   if (with_store)
     code.insert(code.end(), store.begin(), store.end());

@@ -6,20 +6,16 @@
 
 #pragma once
 
+#include "common/bits.h"
 #include "common/packed16.h"
 
-#include <algorithm>
-#include <array>
-#include <bit>
 #include <cstddef>
 #include <stdint.h>
 #include <type_traits>
 
 // Adapted from rocjitsu ad2bb973ec4 shared/gfx12_dot.h (native FP8/BF8
 // extension dd63b040587). Empirical gfx1201 model, not a universal guarantee.
-// Current callers exercise FP16/BF16 DOT4 with FP32 output; packed-output and
-// FP8/BF8 instantiations are retained from the model but not exercised here.
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 namespace gfx12_dot_detail {
 
@@ -40,7 +36,8 @@ public:
 
   // Return the leading binary exponent, or the model's empty-exponent sentinel for zero.
   int leading_exponent() const {
-    return significand ? exponent + int(std::bit_width(significand)) - 1 : kEmptyExponent;
+    return significand ? exponent + int(rocjitsu::arith::bit_width(significand)) - 1
+                       : kEmptyExponent;
   }
 };
 
@@ -88,7 +85,9 @@ public:
   }
 
   // Return the binary exponent used to align this factor on the accumulation grid.
-  int alignment_exponent() const { return int(std::max(exponent_field(), 1u)) - bias; }
+  int alignment_exponent() const {
+    return int(rocjitsu::arith::maximum(exponent_field(), 1u)) - bias;
+  }
 
   // Form a signed product term from two decoded factors, retaining its grid exponent.
   template <InputFormat OtherFormat> Term product(Factor<OtherFormat> other) const {
@@ -118,7 +117,7 @@ inline uint32_t pack(int64_t units, int grid) {
   }
   const uint32_t sign = uint32_t(units < 0) << 31;
   const uint64_t magnitude = units < 0 ? uint64_t(-units) : uint64_t(units);
-  const int top = int(std::bit_width(magnitude)) - 1;
+  const int top = int(rocjitsu::arith::bit_width(magnitude)) - 1;
   int exponent = top + grid;
 
   // Round directly on the subnormal grid to avoid double rounding.
@@ -151,8 +150,8 @@ inline int64_t align(Term term, int grid, bool accumulator = false) {
 }
 
 // Return the empirical gfx12 dot result for the selected factor formats and output precision.
-template <InputFormat LeftFormat, InputFormat RightFormat, bool Packed, std::size_t N, typename Raw>
-inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &b, uint32_t acc,
+template <InputFormat LeftFormat, InputFormat RightFormat, bool Packed, int N, typename Raw>
+inline uint32_t dot_bits(const Raw (&a)[N], const Raw (&b)[N], uint32_t acc,
                          bool fp16_ovfl = false) {
   constexpr bool is_f8 = Factor<LeftFormat>::is_f8;
   constexpr bool is_bf16 = LeftFormat == InputFormat::Bf16;
@@ -168,8 +167,8 @@ inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &
   };
 
   // Retain product exponents outside FP32 range until the common accumulation grid is chosen.
-  std::array<Term, N> products;
-  std::array<int, N> product_grids;
+  Term products[N];
+  int product_grids[N];
   int product_grid = kEmptyExponent;
   bool positive_inf = false;
   bool negative_inf = false;
@@ -192,7 +191,7 @@ inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &
     product_grids[i] = products[i].significand
                            ? left.alignment_exponent() + right.alignment_exponent() - 24
                            : kEmptyExponent;
-    product_grid = std::max(product_grid, product_grids[i]);
+    product_grid = rocjitsu::arith::maximum(product_grid, product_grids[i]);
   }
   // Factor NaNs, then invalid products, precede an accumulator NaN.
   if (invalid || (positive_inf && negative_inf)) {
@@ -211,19 +210,19 @@ inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &
 
   const unsigned acc_exp = (acc >> 23) & 255;
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : acc & 0x7fffff,
-               int(std::max(acc_exp, 1u)) - 127 - 23, bool(acc >> 31)};
+               int(rocjitsu::arith::maximum(acc_exp, 1u)) - 127 - 23, bool(acc >> 31)};
 
-  // Packed F16 floors C's alignment exponent at -14. A negative subnormal C
-  // contributes an arithmetic-floor unit if the grid is at or below -14,
-  // even when no magnitude bits survive. Coarser grids drop that tiny C.
-  const int grid =
-      std::max(product_grid, std::max(Packed && !is_bf16 ? -14 : -126, c.leading_exponent()) - 26);
-  int64_t total = align(c, grid, !(Packed && !is_bf16 && grid <= -14));
+  // A negative C contributes a floor unit at or below its alignment floor,
+  // even when all magnitude bits are discarded (gfx1201, rocjitsu #13691).
+  const int c_floor = Packed && !is_bf16 ? -14 : -126;
+  const int grid = rocjitsu::arith::maximum(
+      product_grid, rocjitsu::arith::maximum(c_floor, c.leading_exponent()) - 26);
+  int64_t total = align(c, grid, grid > c_floor);
   constexpr int group_size = is_f8 ? 4 : 2;
   for (int i = 0; i < int(N); i += group_size) {
     int group_grid = kEmptyExponent;
     for (int j = i; j < i + group_size; ++j) {
-      group_grid = std::max(group_grid, product_grids[j]);
+      group_grid = rocjitsu::arith::maximum(group_grid, product_grids[j]);
     }
     int64_t group = 0;
     for (int j = i; j < i + group_size; ++j) {
@@ -248,8 +247,8 @@ inline uint32_t dot_bits(const std::array<Raw, N> &a, const std::array<Raw, N> &
 
 // Retain the DOT2/DOT4 interface used by FP16/BF16 arithmetic and reporting.
 template <bool Bf16, int N, bool Packed = false>
-inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
-                               uint32_t acc, bool fp16_ovfl = false) {
+inline uint32_t gfx12_dot_bits(const uint16_t (&a)[N], const uint16_t (&b)[N], uint32_t acc,
+                               bool fp16_ovfl = false) {
   using gfx12_dot_detail::InputFormat;
   constexpr auto format = Bf16 ? InputFormat::Bf16 : InputFormat::F16;
   return gfx12_dot_detail::dot_bits<format, format, Packed>(a, b, acc, fp16_ovfl);
@@ -259,12 +258,11 @@ inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::arra
 // followed by FP32 RNE. Factor NaNs and BF8 invalid products yield 0xffc00a3d;
 // otherwise an accumulator NaN retains its payload and is quieted.
 template <bool ABf8, bool BBf8>
-inline uint32_t gfx12_dot8_f32(const std::array<uint8_t, 8> &a, const std::array<uint8_t, 8> &b,
-                               uint32_t acc) {
+inline uint32_t gfx12_dot8_f32(const uint8_t (&a)[8], const uint8_t (&b)[8], uint32_t acc) {
   using gfx12_dot_detail::InputFormat;
   constexpr auto left = ABf8 ? InputFormat::Bf8 : InputFormat::Fp8;
   constexpr auto right = BBf8 ? InputFormat::Bf8 : InputFormat::Fp8;
   return gfx12_dot_detail::dot_bits<left, right, false>(a, b, acc);
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

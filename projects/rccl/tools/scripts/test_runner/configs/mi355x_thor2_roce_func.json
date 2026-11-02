@@ -1380,9 +1380,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -2687,6 +2687,75 @@
           }
         }
       ]
+    },
+    "pat_forced_mpi_tests": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "description": "Forced PAT at 4 ranks on 2 nodes: RCCL_TEST_PAT_HOST_PER_RANK=1 gives each rank its own host id, so RCCL counts one node per rank, refuses SHM and P2P between ranks on one node, and every PAT pair crosses the network. Each row runs in its own process because the profiler plugin and host id settle on the first communicator. The PAT rows set HSA_DISABLE_CACHE=1 to work around AICOMRCCL-2275, silent data corruption on gfx950: without it they left sentinel values in their output in some stock repeats (AllGather 1 of 10, ReduceScatter 4 of 20) and none failed with it. Added 2026-10-24; drop those env_variables entries once AICOMRCCL-2275 is fixed below RCCL. The avg row runs with the stock cache configuration.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_PAT_ENABLE": "1",
+        "NCCL_ALGO": "PAT",
+        "NCCL_PROTO": "Simple",
+        "RCCL_HIERARCHICAL_ALLGATHER": "0",
+        "RCCL_DIRECT_ALLGATHER_DISABLE": "1",
+        "RCCL_DIRECT_REDUCE_SCATTER_DISABLE": "1",
+        "RCCL_DDA_ENABLE": "0",
+        "RCCL_TEST_PAT_HOST_PER_RANK": "1"
+      },
+      "tests": [
+        {
+          "name": "PatForcedMPITests_ReduceScatterTakesPat",
+          "description": "Forced PAT ReduceScatter (sum, prod, max, min; four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.ReduceScatterTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        },
+        {
+          "name": "PatForcedMPITests_AllGatherTakesPat",
+          "description": "Forced PAT AllGather (four types; five counts; in and out of place) is correct and the profiler reports algo PAT, proto SIMPLE on every call. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.AllGatherTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        },
+        {
+          "name": "PatForcedMPITests_ReduceScatterAvgRunsWithoutPat",
+          "description": "ReduceScatter avg is correct and does not take PAT, which has no scaling step",
+          "test_filter": "PatForcedMPITest.ReduceScatterAvgRunsWithoutPat",
+          "timeout": 300
+        },
+        {
+          "name": "PatForcedMPITests_ReduceScatterAllGatherInterleaveTakesPat",
+          "description": "ReduceScatter, AllGather and ReduceScatter on one communicator take PAT and are correct, so shared connections carry state from one collective into the next. Sets HSA_DISABLE_CACHE=1, see the pat_forced_mpi_tests description.",
+          "test_filter": "PatForcedMPITest.ReduceScatterAllGatherInterleaveTakesPat",
+          "timeout": 300,
+          "env_variables": {
+            "HSA_DISABLE_CACHE": "1"
+          }
+        }
+      ]
+    },
+    "pat_forced_mpi_tests_3rank": {
+      "extends": "pat_forced_mpi_tests",
+      "num_ranks": 3,
+      "description": "Forced PAT at 3 ranks on 2 nodes (two plus one), the smallest PAT node count and not a power of two."
+    },
+    "pat_forced_mpi_tests_separate_qps": {
+      "extends": "pat_forced_mpi_tests",
+      "env_variables": {
+        "RCCL_PAT_SHARED_QPS": "0"
+      },
+      "description": "Forced PAT at 4 ranks with RCCL_PAT_SHARED_QPS=0, so ReduceScatter and AllGather each build their own connection set; the flag is cached for the process lifetime, so it is set here before launch."
     },
     "gin_traffic_class": {
       "extends": "default",
@@ -4215,6 +4284,24 @@
       "name": "Comm MPI Tests - 8-Rank (persistent communicator)",
       "description": "All 15 persistent-communicator rows from CommMPITests.cpp on 8 GPUs/ranks, single node: Broadcast + fused 24-way AllReduce burst + ReduceScatter/AllGather + ring P2P + Reduce to rank 0, 64 steps on one communicator",
       "config": "comm_mpi_tests_8rank",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 4-Rank",
+      "description": "ReduceScatter and AllGather under forced PAT on 4 ranks over 2 nodes, one host id per rank, algo checked through the recorder profiler plugin",
+      "config": "pat_forced_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 3-Rank",
+      "description": "The same rows on 3 ranks over 2 nodes",
+      "config": "pat_forced_mpi_tests_3rank",
+      "enabled": true
+    },
+    {
+      "name": "PAT Forced MPI Tests - 4-Rank (separate connection sets)",
+      "description": "The same rows with RCCL_PAT_SHARED_QPS=0",
+      "config": "pat_forced_mpi_tests_separate_qps",
       "enabled": true
     },
     {

@@ -74,7 +74,7 @@ pub(crate) fn enqueue_copy_job(
         None
     };
     let worker_handles = pending.handles.clone();
-    let quarantine = pending.memory.async_copy_quarantine.clone();
+    let health = pending.memory.health.clone();
     let stop = runtime.stop_workers.clone();
     let dependency_len = dependency_slice.len();
     let worker = match thread::Builder::new()
@@ -107,7 +107,7 @@ pub(crate) fn enqueue_copy_job(
                     Err(failure) => (false, failure.operands_may_be_live, None),
                 };
                 if may_be_live {
-                    quarantine.store(true, Ordering::Release);
+                    health.quarantine();
                 }
                 // Release only this operation's backing before publishing its
                 // completion. Later operations keep their own borrows.

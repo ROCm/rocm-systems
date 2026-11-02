@@ -989,12 +989,11 @@ endfunction()
 
 # AMO Tests
 function(add_amo_tests)
-    # AMO add tests - don't work with RO backend (AIROCSHMEM-211)
-    begin_test_group(CATEGORY "AMO" TIER quick BACKENDS "ipc;gda" GPUS "all")
+    begin_test_group(CATEGORY "AMO" TIER quick BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1)
     end_test_group()
 
-    begin_test_group(CATEGORY "AMO" TIER standard BACKENDS "ipc;gda" GPUS "all")
+    begin_test_group(CATEGORY "AMO" TIER standard BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 1 THREADS 1024)
         add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 8 THREADS 1)
         add_rocshmem_functional_test(NAME amo_add RANKS 2 WORKGROUPS 32 THREADS 128)
@@ -1170,8 +1169,7 @@ function(add_stream_tests)
         add_rocshmem_functional_test(NAME signal_wait_until_on_stream RANKS 2 WORKGROUPS 1 THREADS 1)
     end_test_group()
 
-    # putmem_signal_on_stream - doesn't work with RO (AIROCSHMEM-217)
-    begin_test_group(CATEGORY "RMA;PUT;STREAM;SIGOPS" TIER full BACKENDS "ipc;gda" GPUS "all")
+    begin_test_group(CATEGORY "RMA;PUT;STREAM;SIGOPS" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME putmem_signal_on_stream RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576)
     end_test_group()
 
