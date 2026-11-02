@@ -7,8 +7,6 @@
 
 #include <gtest/gtest.h>
 
-#include <stdexcept>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -17,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
