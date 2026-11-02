@@ -67,30 +67,17 @@ constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 constexpr std::string_view kCoverageTracefile = "host-coverage.lcov";
 
 // Appended to the merged report's own name to form the directory the children's console output
-// is written into, one <Qualifier>.log per fronted binary. A directory and not one shared file:
-// the children run one after another but each writes thousands of lines, and the question asked
-// of this output is always "what did THIS binary print", which a shared transcript answers only
-// by scrolling. Named after the report so a run's logs sit beside the artefact they explain and
-// two runs writing different reports in one directory cannot overwrite each other's logs.
+// is written into, one <Qualifier>.log per fronted binary.
 constexpr std::string_view kLogDirectorySuffix = ".logs";
 
 // Used when the caller asked for no report at all, so there is no name to derive one from.
 constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
 
 // Overrides that directory; "-" turns the redirection off and lets the children inherit this
-// process's stdout and stderr, which is what a developer running one binary's cases by hand
-// wants and what the dispatcher did before the logs existed.
+// process's stdout and stderr.
 constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
 
-// How many fronted binaries may run at once. Defaults to half the machine's processors: the
-// binaries are single-threaded and independent of one another -- they touch no GPU, no network
-// and no shared file but their own log and their own profile directory -- so the whole tree's
-// wall time is otherwise one core's worth of work on a machine that has dozens. Half and not
-// all of them because the tree is not the only thing on the machine: this runs under a CI agent
-// beside other jobs, and on a developer's laptop beside the build they are waiting on, and the
-// run flattens out well before one job per core anyway (the binaries spend much of their time
-// in the kernel, forking and writing their logs). Set it to 1 to get the old strictly-sequential
-// run back, which is what a developer bisecting an order-dependent failure wants.
+// How many fronted binaries may run at once. Defaults to half the machine's processors.
 constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
 
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
@@ -804,10 +791,6 @@ std::vector<std::string> discoverBinaries(const std::string &directory, const st
 }
 
 // Where the fronted binaries live, given the directory holding this executable.
-//
-// One layout, in the build tree and in an install alike: they are in micro/, this binary is the
-// directory above. That is what lets this be a path join rather than a search -- the front door
-// never has to work out which of several arrangements it is running from.
 std::string binaryDirectory(const std::string &selfDir)
 {
     return (fs::path(selfDir) / kMicroSubdirectory).string();
@@ -954,18 +937,6 @@ std::string shellQuote(const std::string &argument)
 }
 
 // LLVM_PROFILE_FILE for the child at *path*, given the *pattern* this process inherited.
-//
-// Empty when coverage is not being collected. Otherwise the child's own name is inserted as a
-// directory component, so each binary's .profraw files land in <dir>/<binary>/ and nothing else
-// writes there. That separation is not tidiness: the host binaries compile some of the same
-// source under different #defines, so a shared function has a different coverage-mapping hash in
-// each, and a report built from one object over a pool of mixed profiles is rejected as
-// mismatched data. Isolating them is what lets run_host_tests.sh keep emitting a clean
-// per-binary report, which it previously got by exporting a different LLVM_PROFILE_FILE around
-// each binary in the hand-kept loop this dispatcher replaces.
-//
-// The caller's filename pattern is carried over untouched, so its %p/%m/%c specifiers keep
-// meaning what the caller chose.
 std::string childProfileFile(std::string_view pattern, std::string_view path)
 {
     if (pattern.empty()) {
@@ -1000,10 +971,7 @@ std::optional<std::string> listTestsOutput(const std::string &path)
     for (const std::string &name : gtestVariablesToStrip()) {
         environment += fmt::format("-u {} ", shellQuote(name));
     }
-    // The listing run is a run of the binary like any other: it executes its static
-    // initialisers, and an instrumented build writes a profile for them. Point it at the same
-    // per-binary directory the real run uses, so that profile is credited to this binary rather
-    // than left in the dispatcher's own.
+
     const std::string profile = childProfileFile(path);
     if (!profile.empty()) {
         environment += fmt::format("LLVM_PROFILE_FILE={} ", shellQuote(profile));
@@ -1066,11 +1034,6 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
 }
 
 // The directory the children's logs belong in for a run whose merged report is *outputPath*.
-//
-// "/p/host_tests_micro.xml" gives "/p/host_tests_micro.logs"; an empty path (no report asked
-// for) gives the fixed name in the current directory, because there is nothing to derive one
-// from. The suffix replaces the report's extension rather than being appended to the whole
-// name, so the directory cannot be mistaken for a report by a glob that matches *.xml.
 std::string childLogDirectory(std::string_view outputPath)
 {
     if (outputPath.empty()) {
@@ -1098,17 +1061,7 @@ std::string resolveLogDirectory(std::string_view outputPath, const char *overrid
     return std::string_view(override_) == "-" ? std::string() : std::string(override_);
 }
 
-// ── how many binaries run at once ───────────────────────────────────
-
-// How many binaries may be in flight together, given the caller's *request* and the *fallback*
-// an unconfigured run uses (defaultParallelism(), below).
-//
-// Anything that is not a positive number -- unset, empty, "0", "all", "-4" -- means the default,
-// because the only honest reading of "I asked for n jobs" at n <= 0 is that the caller did not
-// mean to constrain it. A request above the processor count is honoured rather than clamped: the
-// children spend a little of their time on exec and on writing their logs, so oversubscribing
-// deliberately is a reasonable thing for a caller to want, and nothing here knows better than
-// they do. The floor is 1, so the result is always a count a loop can run with.
+// How many binaries run at once.
 size_t resolveParallelism(const char *request, size_t fallbackJobs)
 {
     const size_t fallback = fallbackJobs < 1 ? 1 : fallbackJobs;
@@ -1128,10 +1081,7 @@ size_t detectedParallelism()
 
 // How many binaries an unconfigured run puts in flight on a machine with *processors* of them.
 //
-// Half, so the run leaves the machine usable for whatever else is on it -- a CI agent's other
-// jobs, a developer's build -- rather than claiming all of it by default for a test tree that is
-// rarely the only thing running. Rounded down but floored at 1, so a single-processor machine
-// still runs its tests one at a time instead of none at all.
+// Half, so the run leaves the machine usable for whatever else is on it.
 size_t defaultParallelism(size_t processors)
 {
     return processors / 2 < 1 ? 1 : processors / 2;
@@ -1139,14 +1089,8 @@ size_t defaultParallelism(size_t processors)
 
 // Start *path* with *args* and return its pid, or -1 when it could not be forked.
 //
-// *logPath*, when set, is the file the child's stdout and stderr are redirected to; it is opened
-// in the CHILD, after the fork, so a file this process could not open costs that one binary its
-// transcript rather than the run. Empty means inherit this process's stdio. With several
-// binaries in flight at once that redirection is also what keeps the output readable: the logs
-// are per binary, so parallel children do not interleave their lines into one transcript.
-//
-// Starting and reaping are separate so the caller can hold several children at once; reapChild()
-// below turns one of these pids back into an exit status.
+// *logPath*, when set, is the file the child's stdout and stderr are redirected to.
+// Empty means inherit this process's stdio.
 pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
                  const std::string &logPath = "")
 {
@@ -1169,18 +1113,12 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
     }
     if (pid == 0) {
         // In the child, on its own copy of the environment: what the dispatcher has already
-        // decided must not be decided again over the case list this child was handed, and the
-        // profile runtime reads LLVM_PROFILE_FILE once at its own initialisation, so changing it
-        // in this process would not move this process's profile -- it would only be inherited,
-        // which is exactly what is wanted here and nowhere else.
+        // decided must not be decided again over the case list this child was handed.
         stripGtestVariablesInChild(strip);
         if (!profile.empty()) {
             setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
         }
         if (!logPath.empty()) {
-            // O_APPEND and not O_TRUNC: a binary whose selection was split across several
-            // invocations writes one log between them all. The parent truncates it once, before
-            // the first part.
             const int fd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
             if (fd < 0) {
                 fmt::print(stderr, "host-test-dispatch: cannot write {}: {} -- {} will print to"
@@ -1204,12 +1142,6 @@ pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
 
 // Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
 // if killed) and returning its pid; -1 when there is nothing left to wait for.
-//
-// Any child and not a named one, because the caller holds several at once and must react to them
-// in the order they finish rather than in the order they were started -- waiting on a named pid
-// would leave a slot idle behind a slow binary while a finished one went unreaped. Safe to take
-// any: by the time this is called the only children this process has are the ones it spawned
-// here, the listing children having been popen'd and pclose'd before the run began.
 pid_t reapAnyChild(int &exitStatus)
 {
     int status = 0;
@@ -1740,17 +1672,10 @@ int main(int argc, char **argv)
                                           "to start"));
         ++failures;
     }
-    // Several binaries at once. They are independent of one another -- no GPU, no network, and
-    // no shared file but each one's own log and its own profile directory -- so the only thing
-    // the strictly-sequential run bought was a console that read in order, which the per-binary
-    // logs give instead. NUM_PARALLEL_HOST_TEST_BINARIES=1 restores it for a caller wanting it.
+
     const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
                                            defaultParallelism(detectedParallelism()));
 
-    // Each selection's parts form a queue of its own: a selection split across several
-    // invocations writes them all to ONE log, by appending, so two parts of the same binary must
-    // never be in flight together. Parts of different binaries may be, which is the whole of the
-    // parallelism here -- a binary is the unit, as it is everywhere else in this file.
     std::vector<std::vector<std::string>> filters;
     filters.reserve(selections.size());
     for (const Selection &selection : selections) {
@@ -1758,9 +1683,6 @@ int main(int argc, char **argv)
         ran.push_back(selection.path);
     }
     std::vector<size_t> nextPart(selections.size(), 0);
-    // Gathered per selection and flattened once the run is over, so the merged report is in
-    // selection order however the completions happened to interleave. A report whose contents
-    // depended on which binary finished first would be undiffable between two runs.
     std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
 
     struct RunningChild {
@@ -1799,13 +1721,8 @@ int main(int argc, char **argv)
             const std::string logPath =
                 logDir.empty() ? std::string() : childLogPath(logDir, selection.qualifier);
             if (part == 0 && !logPath.empty()) {
-                // Truncated once per binary, not once per part: the parts append to one log.
                 std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
             }
-            // The log is named on the console whether or not the binary fails, so the transcript
-            // of a run that passed is as findable as the one of a run that did not. Printed when
-            // the binary STARTS, so a run that hangs says which binaries it is waiting on; with
-            // several in flight these lines are starts, not a record of what has completed.
             fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
                        selection.cases.size(), part_note,
                        logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
@@ -1813,9 +1730,6 @@ int main(int argc, char **argv)
 
             const pid_t pid = spawnChild(selection.path, childArgs, logPath);
             if (pid < 0) {
-                // Its cases are unaccounted for, exactly as for a binary that wrote no report,
-                // and its remaining parts are abandoned: nothing about the next fork is more
-                // likely to succeed, and reporting the same binary once is enough to fail on.
                 perSelection[index].push_back(crashFragment(
                     selection.qualifier, "binary could not be started -- fork failed"));
                 ++failures;
@@ -1832,9 +1746,6 @@ int main(int argc, char **argv)
                                            return child.pid == finished;
                                        });
         if (slot == running.end()) {
-            // Nothing left to wait for although slots are still marked busy: the children were
-            // reaped by something outside this loop, so their reports will never be read and
-            // waiting again would spin forever. Fail them by name and stop.
             for (const RunningChild &child : running) {
                 perSelection[child.selection].push_back(
                     crashFragment(selections[child.selection].qualifier,
@@ -1854,11 +1765,6 @@ int main(int argc, char **argv)
             cleanReport = fragment->failures == 0 && fragment->errors == 0;
             perSelection[index].push_back(std::move(*fragment));
         } else {
-            // No report: the binary died or never started. Its cases are unaccounted for, so
-            // the run has to fail even if the exit status somehow did not say so.
-            // The log is named in the failure itself: a results consumer showing only the
-            // merged report is where this is usually read, and "no report" is exactly the
-            // case where the binary's own output is the only evidence left.
             perSelection[index].push_back(crashFragment(
                 selection.qualifier,
                 fmt::format("binary wrote no gtest report (exit status {}){}", status,

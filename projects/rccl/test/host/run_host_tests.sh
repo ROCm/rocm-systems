@@ -156,33 +156,7 @@ do_host_tests() {
 
   # The two binaries this script runs directly. Each writes its own JUnit XML
   # (host_tests*.xml, all uploaded) and appends to the single console LOG_FILE.
-  # What the front door's own children print goes to host_tests_micro.logs/<Qualifier>.log as the
-  # run proceeds, rather than onto this console interleaved under one timestamp stream; each of
-  # those files is then appended to LOG_FILE below, so LOG_FILE still holds everything the run
-  # printed and remains the one console artefact CI uploads. See MICROTEST_README.md,
-  # "Where the children's output goes".
-  #
-  # rccl-UnitTestsHostAll is the front door for the ~40 rccl-UnitTestsMicro*
-  # binaries: it discovers them beside itself at run time, runs the ones holding
-  # a selected case, and merges their reports into the one asked for here. That
-  # is why there is no list of them in this script -- adding a host test binary
-  # needs no change here. See MICROTEST_README.md, "rccl-UnitTestsHostAll".
-  # It also absorbs what the list used to encode: a binary that is not built
-  # (rccl-UnitTestsMicroSymKernels needs GENERATE_SYM_KERNELS, off via
-  # install.sh --disable-sym-kernels) is simply not discovered, and a binary
-  # that cannot start is reported as a failing case rather than skipped.
-  #
-  # rccl-HostUnitTests is NOT fronted -- its name does not carry the
-  # rccl-UnitTestsMicro prefix the dispatcher discovers on -- so it is run here,
-  # and keeps host_tests.xml for backward compatibility.
-  #
-  # Third field: where this binary's llvm profiles go, which `coverage` reads
-  # back as $COVERAGE_DIR/<binary>/. For the front door that is $COVERAGE_DIR
-  # itself: the dispatcher inserts each child's own name as a directory
-  # component, so the children land in exactly the per-binary layout `coverage`
-  # expects. (The dispatcher's own profile is then the one file at the top of
-  # $COVERAGE_DIR, which `coverage` ignores; host_test_dispatch.cc's coverage
-  # comes from rccl-UnitTestsMicroHostDispatch, one of the binaries it fronts.)
+
   local -a binaries=(
     "rccl-HostUnitTests:$XML_FILE:$COVERAGE_DIR/rccl-HostUnitTests"
     "rccl-UnitTestsHostAll:$SCRIPT_DIR/host_tests_micro.xml:$COVERAGE_DIR"
@@ -201,16 +175,9 @@ do_host_tests() {
       continue
     fi
     echo "----- $name -----" | tee -a "$LOG_FILE"
-    # Start this binary's log directory empty. The dispatcher truncates each log it is about to
-    # write, but a log left by a binary that is not run this time would otherwise be appended to
-    # LOG_FILE as though it came from this run.
+    # Start this binary's log directory empty.
     rm -rf "${xml%.*}.logs"
     # Direct this binary's llvm profiles into the subdir `coverage` reads back.
-    # Without this, instrumented binaries write default.profraw into the CWD and
-    # coverage sees nothing. %p (PID) + %m (module hash) keep the
-    # process-isolated forks' files distinct; the runner inherits this value (it
-    # sets LLVM_PROFILE_FILE with overwrite=0), as does every binary the front
-    # door forks.
     mkdir -p "$profdir"
     export LLVM_PROFILE_FILE="$profdir/$name-%p-%m.profraw"
     # Shuffle every binary here, not just the micro ones: the init microtests share ~40 mutable
@@ -230,20 +197,11 @@ do_host_tests() {
         | tee -a "$LOG_FILE"
       rc=1
     fi
-    # The front door's children print into <report>.logs/<Qualifier>.log rather than onto this
-    # console, so append those files here once the run is over. LOG_FILE stays the one artefact
-    # that holds everything the run printed -- CI uploads it and nothing else of the console --
-    # while the per-binary files remain for reading a single binary without scrolling. Appending
-    # after the fact keeps the two readable: the children's output arrives grouped by binary
-    # instead of ~40 binaries' lines interleaved under one timestamp stream.
     append_child_logs "${xml%.*}.logs"
   done
   return "$rc"
 }
 
-# Append each per-binary log written by the front door into LOG_FILE, under a banner naming the
-# file it came from. A directory that does not exist is not an error: it only means the binary
-# just run was not the front door, or it fronted nothing.
 append_child_logs() {
   local log_dir="$1" child
   [ -d "$log_dir" ] || return 0
@@ -410,12 +368,6 @@ do_coverage() {
       continue
     fi
 
-    # rccl-UnitTestsHostAll already merged and exported every binary it ran, as
-    # part of the run: it is the only thing that knows which profiles came from
-    # which binary, and llvm-cov rejects a profile read against an object it was
-    # not built from. Those binaries are already in host-coverage.lcov, so they
-    # are not added to the union again below. Everything else (rccl-HostUnitTests,
-    # which the front door does not run) is merged and exported here.
     local from_front_door=0
     if [ -f "$dir/merged.profdata" ] && [ -f "$dir/coverage.lcov" ]; then
       from_front_door=1

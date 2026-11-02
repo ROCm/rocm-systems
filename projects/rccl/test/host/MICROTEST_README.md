@@ -1181,9 +1181,7 @@ there to produce `micro.profraw`, copy it plus the binary to a host that has
 
 ### Why the whole tree's coverage is unioned as lcov, not merged with llvm tooling
 
-The workflow above is for **one** binary, where llvm's own tooling is exactly
-right. It does not generalise to the host tree, and the obvious generalisation
-is wrong in a way that does not announce itself.
+The workflow above is for **one** binary, where llvm's own tooling is fine. 
 
 A coverage profile is tied to the binary that produced it by a per-function
 *coverage-mapping hash*. This tree compiles the same source into many binaries

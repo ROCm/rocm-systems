@@ -1,8 +1,4 @@
 # rccl-UnitTestsHostAll — shared/ctest schema.
-# Every host-only test binary, registered once through the front door: it discovers its
-# rccl-UnitTestsMicro* siblings at run time and publishes their cases as its own, so this file
-# replaces the 46 per-binary yamls that used to enumerate the same suites by hand.
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 
 test_categories:
   quick: &host_all_quick

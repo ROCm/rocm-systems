@@ -4,9 +4,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclAssertSourceLine.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclTargetHelpers.cmake")
 include(GNUInstallDirs)
 
-# Where the binaries rccl-UnitTestsHostAll runs live, relative to the front door itself -- in the
-# build tree and in an install alike, so the front door has one place to look and this tree has
-# one layout to support. kMicroSubdirectory in host_test_dispatch.cc is the same name.
+# Where the binaries rccl-UnitTestsHostAll runs live, relative to its location
 set(RCCL_MICRO_SUBDIR "micro")
 
 # Checked against the original sources because hipify output does not exist yet
@@ -1087,9 +1085,6 @@ endfunction()
 #   EXTRA_DEFS      compile definitions appended after the mode's define baseline
 #   REMOVE_DEFS     defines to drop from the in-build baseline before EXTRA_DEFS are
 #                   added; ignored standalone, whose baseline is fixed
-#
-# These binaries are not registered with CTest individually. rccl-UnitTestsHostAll runs them and
-# publishes their cases as its own, so it carries the one registration for the whole host tree.
 function(rccl_add_micro_binary _name)
   cmake_parse_arguments(_ramb "OBJECT" ""
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
@@ -1120,12 +1115,6 @@ function(rccl_add_micro_binary _name)
       add_dependencies(${_name} rccl_embedded_tuner_configs)
     endif()
     rccl_apply_host_only_flags(${_name})
-    # Installed into the same micro/ subdirectory the build tree uses, so the front door has one
-    # place to look in either tree. rocm_install() cannot express a destination -- it hardcodes
-    # CMAKE_INSTALL_BINDIR -- so this is a plain install() plus the RPATH rocm_install() would
-    # have appended, one level deeper for the subdirectory. Object libraries have nothing to
-    # install. No per-binary CTest registration: rccl-UnitTestsHostAll carries the one
-    # registration for every binary it fronts.
     if(NOT _ramb_OBJECT)
       install(TARGETS ${_name}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
@@ -1676,8 +1665,6 @@ foreach(_fake ionic ionic-no-gda mlx5)
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
   set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
-  # dv_symbols_test.cc dlopens these from beside its own executable, so they are installed where
-  # the binary that loads them is installed, not where libraries normally go.
   if(BUILD_TESTS)
     install(TARGETS rccl-micro-dv-provider-fake-${_fake}
       LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
@@ -3061,9 +3048,6 @@ if(BUILD_TESTS)
   target_link_libraries(rccl-UnitTestsHostAll PRIVATE ${MICRO_TEST_LINK_LIBS})
   rccl_apply_host_only_flags(rccl-UnitTestsHostAll)
   rocm_install(TARGETS rccl-UnitTestsHostAll COMPONENT tests)
-  # The one CTest registration for the whole host tree: the front door publishes every fronted
-  # binary's cases as its own, so a yaml selecting all of them is the whole suite, and a new host
-  # binary is covered with no yaml to edit.
   rccl_register_test_categories(rccl-UnitTestsHostAll
     "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_host_all.yaml")
 else()
