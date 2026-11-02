@@ -20,6 +20,10 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+IR codegen mode (--ir-codegen):
+    rccl-device-compile --ir-codegen --arch=gfx942 -O3 -o out.o in.bc
+    Codegens optimized device bitcode to an object (see ir_codegen_cmd).
+
 Target selection (--arch / --target-id):
     --arch is the bare processor name (gfx942); --target-id is the full target
     ID (gfx942:xnack+) and defaults to --arch.
@@ -591,6 +595,37 @@ def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
     ]
 
 
+def _codegen_flags(forwarded_flags):
+    """The forwarded flags codegen of optimized bitcode still reads."""
+    out = []
+    it = iter(forwarded_flags)
+    for flag in it:
+        if flag.startswith('-O'):
+            out.append(flag)
+        elif flag == '-mllvm':
+            out.extend([flag, next(it, '')])
+    return out
+
+
+def ir_codegen_cmd(clang, target_id, forwarded_flags, out, bitcode):
+    """Codegen of device bitcode that the compile step already optimized.
+
+    The device halves of the fat objects are compiled to bitcode and then
+    codegened here, because ROCm 7.0's clang emits bitcode for
+    -fgpu-rdc --offload-device-only -c even with -fno-offload-lto.
+    """
+    return [
+        clang,
+        '-target', 'amdgcn-amd-amdhsa',
+        f'-mcpu={target_id}',
+        '-x', 'ir',
+        '-w',
+    ] + _codegen_flags(forwarded_flags) + [
+        '-Xclang', '-disable-llvm-passes',
+        '-c', '-o', out, bitcode,
+    ]
+
+
 def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
     """Assemble the ld.lld argv for the per-arch device.elf link.
 
@@ -771,6 +806,8 @@ def parse_compiler_flags(argv):
         elif arg == '--profile-rt' and i + 1 < len(argv):
             our_args.extend([arg, argv[i + 1]])
             i += 1
+        elif arg == '--ir-codegen':
+            our_args.append(arg)
         elif arg == '-o' and i + 1 < len(argv):
             our_args.extend(['-o', argv[i + 1]])
             i += 1
@@ -829,6 +866,7 @@ def main():
     parser.add_argument('--dispatcher', default=None)
     parser.add_argument('--rocshmem-bitcode', default=None, dest='rocshmem_bitcode')
     parser.add_argument('--profile-rt', default=None, dest='profile_rt')
+    parser.add_argument('--ir-codegen', action='store_true', dest='ir_codegen')
     parser.add_argument('-o', '--output', required=False)
     parser.add_argument('--keep-temps', action='store_true')
     parser.add_argument('--version', action='store_true')
@@ -867,6 +905,16 @@ def main():
             raise SystemExit("ERROR: --link requires -o <output>")
         args.objects = positional
         do_link(args, forwarded_flags)
+
+    elif args.ir_codegen:
+        if len(positional) != 1 or not args.output or not args.target_id:
+            raise SystemExit(
+                "ERROR: --ir-codegen requires --arch=<target>, -o <output> and "
+                "one bitcode input")
+        clang, _ = discover_tools(args.clang)
+        run(ir_codegen_cmd(clang, args.target_id, forwarded_flags, args.output,
+                           positional[0]),
+            f"codegen {os.path.basename(positional[0])}")
 
     else:
         raise SystemExit("ERROR: specify --compile or --link mode")
