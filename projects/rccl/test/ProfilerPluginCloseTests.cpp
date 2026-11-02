@@ -97,9 +97,11 @@ TEST(ProfilerPluginClose, UnusablePluginIsUnloaded) {
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
     const std::string stubPath = stubPluginPath();
-    ASSERT_FALSE(stubPath.empty()) << "could not resolve the test binary's own directory";
+    ASSERT_FALSE(stubPath.empty())
+        << "stub profiler plugin not found beside the test binary or in ../lib "
+           "(or /proc/self/exe could not be resolved)";
     ASSERT_EQ(access(stubPath.c_str(), R_OK), 0)
-        << "stub profiler plugin missing: " << stubPath;
+        << "stub profiler plugin not readable: " << stubPath;
     if (stubPath.size() >= kPluginPathLimit)
       GTEST_SKIP() << "stub path exceeds the " << kPluginPathLimit
                    << " byte plugin path limit and would never be loaded: " << stubPath;
