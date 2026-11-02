@@ -908,12 +908,28 @@ TEST(HostDispatchLogMicrotest, TheEnvironmentCanMoveTheLogsOrTurnThemOff)
 
 // ── resolveParallelism ──────────────────────────────────────────────
 
-TEST(HostDispatchParallelismMicrotest, ThePerBinaryDefaultIsOneJobPerProcessor)
+TEST(HostDispatchParallelismMicrotest, AnUnconfiguredRunTakesTheDefault)
 {
-    // The binaries are single-threaded and independent, so an unconfigured run should use the
-    // machine it is on rather than one core of it.
-    EXPECT_EQ(resolveParallelism(nullptr, 32), 32u);
-    EXPECT_EQ(resolveParallelism("", 32), 32u);
+    EXPECT_EQ(resolveParallelism(nullptr, 16), 16u);
+    EXPECT_EQ(resolveParallelism("", 16), 16u);
+}
+
+TEST(HostDispatchParallelismMicrotest, TheDefaultIsHalfTheMachine)
+{
+    // Half and not all of it: the test tree is rarely the only thing on the machine -- a CI
+    // agent runs other jobs beside it, a developer has a build waiting -- and the run flattens
+    // out well before one job per core anyway.
+    EXPECT_EQ(defaultParallelism(32), 16u);
+    EXPECT_EQ(defaultParallelism(8), 4u);
+}
+
+TEST(HostDispatchParallelismMicrotest, ASmallMachineStillRunsOneBinaryAtATime)
+{
+    // Halving rounds down, and 0 would be a loop that starts nothing and never finishes.
+    EXPECT_EQ(defaultParallelism(3), 1u);
+    EXPECT_EQ(defaultParallelism(2), 1u);
+    EXPECT_EQ(defaultParallelism(1), 1u);
+    EXPECT_EQ(defaultParallelism(0), 1u);
 }
 
 TEST(HostDispatchParallelismMicrotest, TheEnvironmentSetsTheNumberOfBinariesInFlight)
@@ -938,7 +954,7 @@ TEST(HostDispatchParallelismMicrotest, ARequestThatIsNotAPositiveCountMeansTheDe
     EXPECT_EQ(resolveParallelism("all", 8), 8u);
 }
 
-TEST(HostDispatchParallelismMicrotest, AMachineThatReportsNoProcessorsStillRunsOneBinary)
+TEST(HostDispatchParallelismMicrotest, ADefaultOfNoneStillRunsOneBinary)
 {
     EXPECT_EQ(resolveParallelism(nullptr, 0), 1u);
 }

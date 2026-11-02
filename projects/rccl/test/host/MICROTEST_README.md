@@ -1367,12 +1367,19 @@ which the biggest binary's 2,199 case names would exceed.
 
 ### How many run at once
 
-The binaries run **in parallel**, as many at a time as the machine has
-processors. They are independent of one another — no GPU, no network, and no
-shared file but each one's own log and its own profile directory — so the only
-thing a strictly sequential run bought was a console that read in order, which
-the per-binary logs below give instead. On a 32-core machine the whole tree goes
-from ~35 s to ~13 s.
+The binaries run **in parallel**, half the machine's processors at a time. They
+are independent of one another — no GPU, no network, and no shared file but each
+one's own log and its own profile directory — so the only thing a strictly
+sequential run bought was a console that read in order, which the per-binary
+logs below give instead. On a 32-core machine the whole tree goes from ~40 s to
+~15 s.
+
+Half and not all of the processors because the test tree is rarely the only
+thing on the machine — a CI agent has other jobs beside it, a developer has a
+build they are waiting on — and the run flattens out well before one job per
+core anyway, since the binaries spend much of their time in the kernel forking
+and writing their logs. A machine with one or two processors still runs one
+binary at a time rather than none.
 
 ```bash
 NUM_PARALLEL_HOST_TEST_BINARIES=1   # one binary at a time, as it used to be

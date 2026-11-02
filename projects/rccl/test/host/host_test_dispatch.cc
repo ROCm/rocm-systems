@@ -82,12 +82,15 @@ constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
 // wants and what the dispatcher did before the logs existed.
 constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
 
-// How many fronted binaries may run at once. Defaults to the machine's processor count: the
-// binaries are single-threaded, CPU-bound and independent of one another -- they touch no GPU,
-// no network and no shared file but their own log and their own profile directory -- so the
-// whole tree's wall time is otherwise one core's worth of work on a machine that has dozens.
-// Set it to 1 to get the old strictly-sequential run back, which is what a developer bisecting
-// an order-dependent failure or reading the console live wants.
+// How many fronted binaries may run at once. Defaults to half the machine's processors: the
+// binaries are single-threaded and independent of one another -- they touch no GPU, no network
+// and no shared file but their own log and their own profile directory -- so the whole tree's
+// wall time is otherwise one core's worth of work on a machine that has dozens. Half and not
+// all of them because the tree is not the only thing on the machine: this runs under a CI agent
+// beside other jobs, and on a developer's laptop beside the build they are waiting on, and the
+// run flattens out well before one job per core anyway (the binaries spend much of their time
+// in the kernel, forking and writing their logs). Set it to 1 to get the old strictly-sequential
+// run back, which is what a developer bisecting an order-dependent failure wants.
 constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
 
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
@@ -1097,8 +1100,8 @@ std::string resolveLogDirectory(std::string_view outputPath, const char *overrid
 
 // ── how many binaries run at once ───────────────────────────────────
 
-// How many binaries may be in flight together, given the caller's *request* and the number of
-// processors *detected*.
+// How many binaries may be in flight together, given the caller's *request* and the *fallback*
+// an unconfigured run uses (defaultParallelism(), below).
 //
 // Anything that is not a positive number -- unset, empty, "0", "all", "-4" -- means the default,
 // because the only honest reading of "I asked for n jobs" at n <= 0 is that the caller did not
@@ -1106,9 +1109,9 @@ std::string resolveLogDirectory(std::string_view outputPath, const char *overrid
 // children spend a little of their time on exec and on writing their logs, so oversubscribing
 // deliberately is a reasonable thing for a caller to want, and nothing here knows better than
 // they do. The floor is 1, so the result is always a count a loop can run with.
-size_t resolveParallelism(const char *request, size_t detected)
+size_t resolveParallelism(const char *request, size_t fallbackJobs)
 {
-    const size_t fallback = detected < 1 ? 1 : detected;
+    const size_t fallback = fallbackJobs < 1 ? 1 : fallbackJobs;
     if (request == nullptr || *request == '\0') {
         return fallback;
     }
@@ -1121,6 +1124,17 @@ size_t detectedParallelism()
 {
     const long online = sysconf(_SC_NPROCESSORS_ONLN);
     return online > 0 ? static_cast<size_t>(online) : 1;
+}
+
+// How many binaries an unconfigured run puts in flight on a machine with *processors* of them.
+//
+// Half, so the run leaves the machine usable for whatever else is on it -- a CI agent's other
+// jobs, a developer's build -- rather than claiming all of it by default for a test tree that is
+// rarely the only thing running. Rounded down but floored at 1, so a single-processor machine
+// still runs its tests one at a time instead of none at all.
+size_t defaultParallelism(size_t processors)
+{
+    return processors / 2 < 1 ? 1 : processors / 2;
 }
 
 // Start *path* with *args* and return its pid, or -1 when it could not be forked.
@@ -1731,7 +1745,7 @@ int main(int argc, char **argv)
     // the strictly-sequential run bought was a console that read in order, which the per-binary
     // logs give instead. NUM_PARALLEL_HOST_TEST_BINARIES=1 restores it for a caller wanting it.
     const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
-                                           detectedParallelism());
+                                           defaultParallelism(detectedParallelism()));
 
     // Each selection's parts form a queue of its own: a selection split across several
     // invocations writes them all to ONE log, by appending, so two parts of the same binary must
