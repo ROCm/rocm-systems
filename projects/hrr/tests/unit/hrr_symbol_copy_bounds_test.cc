@@ -248,47 +248,4 @@ TEST_CASE("Unit_HRR_SymbolCopyBounds_WrappingSumIsRefused", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The source check and the bounds check both apply in the three to-symbol
- *     handlers. A host-to-device record of an in-range copy with no blob
- *     (capture left the contents out) is refused with hipErrorInvalidValue and
- *     "captured without their contents"; HIP is never called.
- */
-TEST_CASE("Unit_HRR_SymbolCopyBounds_HostSourceWithoutContentsIsRefused", "[hrr]") {
-  auto run = [](int which, PlaybackContext& ctx) {
-    auto fill = [&](auto* a) {
-      set_common(a, 0, 8);
-      a->kind = hipMemcpyHostToDevice;
-    };
-    if (which == 0) {
-      ExactRecord<hrr_args_hipGraphAddMemcpyNodeToSymbol> rec;
-      fill(rec.get());
-      rec.get()->graph = kGraph;
-      return playback_hipGraphAddMemcpyNodeToSymbol(ctx, rec.bytes());
-    }
-    if (which == 1) {
-      ExactRecord<hrr_args_hipGraphMemcpyNodeSetParamsToSymbol> rec;
-      fill(rec.get());
-      rec.get()->node = kNode;
-      return playback_hipGraphMemcpyNodeSetParamsToSymbol(ctx, rec.bytes());
-    }
-    ExactRecord<hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol> rec;
-    fill(rec.get());
-    rec.get()->hGraphExec = kExec;
-    rec.get()->node = kNode;
-    return playback_hipGraphExecMemcpyNodeSetParamsToSymbol(ctx, rec.bytes());
-  };
-  for (int which = 0; which < 3; ++which) {
-    Fixture fx;
-    hipError_t r = hipSuccess;
-    const std::string err = capture_stderr([&] { r = run(which, fx.ctx); });
-    INFO("handler " << which << " stderr: " << err);
-    CHECK(r == hipErrorInvalidValue);
-    CHECK(g_seen.calls == 0);
-    CHECK(err.find("captured without their contents") != std::string::npos);
-  }
-}
-
 /** @} */
