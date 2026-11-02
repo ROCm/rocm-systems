@@ -33,7 +33,7 @@
 #elif defined(__GNUC__)
 #    define PROFILER_HUB_ALWAYS_INLINE __attribute__((always_inline))
 #else
-#    define PROFILER_HUB_ALWAYS_INLINE inline
+#    define PROFILER_HUB_ALWAYS_INLINE
 #endif
 
 namespace profiler_hub

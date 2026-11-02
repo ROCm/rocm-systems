@@ -129,6 +129,8 @@ else()
     install(
         TARGETS profiler-hub-sqlite3-shared
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT profiler-hub
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT profiler-hub
     )
 
     add_library(profiler-hub-sqlite3 INTERFACE)

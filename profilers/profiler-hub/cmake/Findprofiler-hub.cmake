@@ -88,10 +88,21 @@ if(WIN32)
 endif()
 
 include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(
-    profiler-hub
-    REQUIRED_VARS profiler-hub_LIBRARY profiler-hub_INCLUDE_DIR
-)
+if(WIN32)
+    # The import library alone is not a usable SHARED IMPORTED location.
+    find_package_handle_standard_args(
+        profiler-hub
+        REQUIRED_VARS
+            profiler-hub_LIBRARY
+            profiler-hub_INCLUDE_DIR
+            profiler-hub_DLL
+    )
+else()
+    find_package_handle_standard_args(
+        profiler-hub
+        REQUIRED_VARS profiler-hub_LIBRARY profiler-hub_INCLUDE_DIR
+    )
+endif()
 
 if(profiler-hub_FOUND)
     set(profiler-hub_INCLUDE_DIRS ${profiler-hub_INCLUDE_DIR})
