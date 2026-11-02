@@ -107,9 +107,11 @@ util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
-  t.loaded.wire_links(t.engine->topology());
+  if (t.loaded.wire_links(t.engine->topology(), emit_error).failed())
+    return util::Result::failure();
   soc->wire_backing(t.engine->topology());
-  t.engine->create();
+  if (t.engine->create(emit_error).failed())
+    return util::Result::failure();
   t.engine->register_as_primary();
 
   return t;

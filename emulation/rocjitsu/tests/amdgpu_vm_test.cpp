@@ -169,6 +169,7 @@ struct VmFixture {
                   uint32_t lds_size_kb = 64, uint32_t sgprs_per_wf = 104,
                   uint32_t vgprs_per_wf = 256, uint32_t num_shader_engines = 1,
                   uint64_t max_ticks = 10000, bool create_engine = true) {
+    util::StringDiagnostic admission_diagnostic;
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string shader_engines;
     std::string links;
@@ -221,9 +222,13 @@ struct VmFixture {
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    if (create_engine)
-      engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    if (create_engine) {
+
+      ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+          << admission_diagnostic.message();
+    }
   }
 
   amdgpu::Xcd *xcd(uint32_t idx = 0) { return soc_ptr->xcd(idx); }
@@ -5714,13 +5719,15 @@ TEST(CommandProcessorTest, FreshStallPullsPendingRecheckEarlier) {
 }
 
 TEST(CommandProcessorTest, PendingRetryDoesNotSurviveEngineShutdown) {
+  util::StringDiagnostic admission_diagnostic;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4", 1, 2));
   auto *cp = f.cp();
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
   f.engine->shutdown();
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   const uint64_t passes_before = cp->doorbell_handle_count_for_test();
   ASSERT_TRUE(cp->schedule_retry_event_for_test());
 
@@ -7717,6 +7724,7 @@ TEST(AqlDispatchTest, CompletedPoolBatchRefillsIdleComputeUnits) {
 }
 
 TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
+  util::StringDiagnostic admission_diagnostic;
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(
       f.initialize("cdna4", /*num_cus=*/2, /*num_wf_slots=*/1, /*lds_size_kb=*/64,
@@ -7728,13 +7736,15 @@ TEST(AqlDispatchTest, PoolFindsWavesAdmittedBeforeEngineAttachment) {
   ASSERT_NE(f.cu(1)->dispatch_wf(/*wg_id=*/0, /*pc=*/0x1000, /*num_sgprs=*/104,
                                  /*num_vgprs=*/256),
             nullptr);
-  f.engine->create();
+  ASSERT_TRUE(f.engine->create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   f.engine->schedule_event_now(f.cp()->doorbell_event());
   f.engine->run();
   EXPECT_TRUE(f.cu(1)->is_idle());
 }
 
 TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave) {
+  util::StringDiagnostic admission_diagnostic;
   const char *json = R"({"max_ticks":10000,"num_threads":1,"vm":{"arch":"cdna4"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
@@ -7766,8 +7776,10 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave
   auto *memory = loaded.memory();
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
   soc_ptr->set_dispatch_threads(2);
 
   const uint32_t waiter_code[] = {
@@ -10416,6 +10428,7 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
   for (uint32_t partitions : {1u, 2u, 8u})
     for (bool uninitialized : {false, true})
       for (uint32_t threads : {1u, 2u}) {
+        util::StringDiagnostic admission_diagnostic;
         SCOPED_TRACE(partitions);
         SCOPED_TRACE(uninitialized);
         SCOPED_TRACE(threads);
@@ -10429,9 +10442,12 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
         loaded.engine_config.max_ticks = 10000;
         auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
         engine->topology().set_root(loaded.take_root());
-        loaded.wire_links(engine->topology());
+        ASSERT_TRUE(
+            loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+            << admission_diagnostic.message();
         ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, partitions));
-        engine->create();
+        ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+            << admission_diagnostic.message();
         for (uint32_t x = 0; x < soc->num_xcds(); ++x)
           for (auto *cu : soc->xcd(x)->command_processor()->compute_units()) {
             cu->set_functional_quantum(1);
