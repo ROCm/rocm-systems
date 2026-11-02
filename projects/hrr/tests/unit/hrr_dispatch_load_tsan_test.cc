@@ -9,7 +9,7 @@
 // This binary is built with -fsanitize=thread. Reader threads call through a function
 // pointer slot with hip::LoadDispatchSlot, the helper behind every entry point in
 // hip_table_interface.cpp. One writer thread installs and uninstalls a shim in that slot
-// with the release store HRR capture uses (store_slot in hip_capture.cpp). The shim reads
+// with a release store, as the dispatch slot contract requires of writers. The shim reads
 // state that the writer set before the first install, as HRR shims read g_real_table.
 //
 // With an ordinary read in LoadDispatchSlot, ThreadSanitizer reports a race on the slot.
@@ -47,7 +47,7 @@ int shim_get_device_count(int* count) {
   return g_real(count);
 }
 
-// The store HRR capture uses on Linux (store_slot in hip_capture.cpp).
+// The contract's release store of a slot, outside Windows.
 void store_slot(GetDeviceCountFn* slot, GetDeviceCountFn value) {
   __atomic_store_n(slot, value, __ATOMIC_RELEASE);
 }

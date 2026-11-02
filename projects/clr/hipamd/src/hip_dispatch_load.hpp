@@ -16,7 +16,7 @@ namespace hip {
 // HRR capture installs its shims with (projects/hrr/DESIGN.md, "Core Mechanism").
 template <typename Fn> inline Fn LoadDispatchSlot(const Fn& slot) {
 #if defined(_WIN32)
-  // Same view as the Windows store in hrr/hip_capture.cpp.
+  // Same std::atomic_ref view as the contract's release store of a slot on Windows.
   void*& raw = reinterpret_cast<void*&>(const_cast<Fn&>(slot));
   return reinterpret_cast<Fn>(std::atomic_ref<void*>(raw).load(std::memory_order_acquire));
 #else
