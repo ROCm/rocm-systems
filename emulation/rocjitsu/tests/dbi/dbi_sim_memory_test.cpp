@@ -126,7 +126,11 @@ TEST(GlobalMemoryBuilders, WideFormsMatchLlvmOnRdna4) {
 // llvm-mc rejects an odd-based tuple on gfx942 and gfx950 ("vgpr tuples must be
 // 64 bit aligned"); the simulator would not, so the encoder does.
 TEST(GlobalMemoryBuilders, CdnaRefusesAnOddBasedTuple) {
-  EXPECT_TRUE(build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3).failed());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter())
+          .failed());
+  EXPECT_EQ(diagnostic.message(), "multi-dword VGPR operand must start on an even register");
   EXPECT_TRUE(build_global_load_dwordx2(7, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
   EXPECT_TRUE(build_global_store_dword(29, 5, 4, 0, ROCJITSU_CODE_ARCH_CDNA3).succeeded());
   EXPECT_TRUE(build_global_store_dwordx2(29, 5, 4, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
@@ -135,7 +139,10 @@ TEST(GlobalMemoryBuilders, CdnaRefusesAnOddBasedTuple) {
 // llvm-mc rejects an odd SGPR base on gfx942, gfx950 and gfx1200 ("invalid
 // register alignment"); the decoder does not.
 TEST(GlobalMemoryBuilders, RefusesAnOddScalarBase) {
-  EXPECT_TRUE(build_global_load_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_CDNA3).failed());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_load_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "SGPR base pair must start on an even register");
   EXPECT_TRUE(build_global_store_dwordx2(28, 5, 5, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
   EXPECT_TRUE(build_global_store_dword(1, 0, 3, 0, ROCJITSU_CODE_ARCH_RDNA4).failed());
 }
@@ -148,7 +155,10 @@ TEST(GlobalMemoryBuilders, RefusesAScalarBasePastTheOrdinarySgprs) {
   for (const rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
     EXPECT_TRUE(build_global_store_dword(1, 0, 128, 0, arch).failed()) << "arch " << arch;
-  EXPECT_TRUE(build_global_store_dword(1, 0, 124, 0, ROCJITSU_CODE_ARCH_RDNA4).failed());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(build_global_store_dword(1, 0, 124, 0, ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "SGPR base pair must lie within the ordinary SGPRs");
   EXPECT_TRUE(build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_RDNA4).failed());
   EXPECT_TRUE(build_global_store_dword(1, 0, 102, 0, ROCJITSU_CODE_ARCH_CDNA3).failed());
   EXPECT_TRUE(build_global_load_dword(1, 0, 106, 0, ROCJITSU_CODE_ARCH_CDNA4).failed());
@@ -161,18 +171,25 @@ TEST(GlobalMemoryBuilders, RefusesAScalarBasePastTheOrdinarySgprs) {
 // rather than truncated into a different address.
 TEST(GlobalMemoryBuilders, RejectsAnOffsetPastTheCdnaField) {
   EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0xFFF, ROCJITSU_CODE_ARCH_CDNA3).succeeded());
-  EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_CDNA3).failed());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_CDNA3, diagnostic.emitter())
+          .failed());
+  EXPECT_EQ(diagnostic.message(), "global memory offset does not fit the immediate field");
   EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0x1000, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
 }
 
 TEST(GlobalMemoryBuilders, RejectUnsupportedArchitectures) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_CDNA1}) {
-    EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0, arch).failed());
-    EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0, arch).failed());
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), "global load for target architecture");
+    EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), "global store for target architecture");
   }
 }
 
-TEST(GlobalMemoryBuilders, RejectsAnOffsetPastTheRdna4Field) {
+TEST(GlobalMemoryBuilders, RejectsAnRdna4OffsetThatSetsTheSignBit) {
   EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0x7fffff, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
   EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0x800000, ROCJITSU_CODE_ARCH_RDNA4).failed());
 }

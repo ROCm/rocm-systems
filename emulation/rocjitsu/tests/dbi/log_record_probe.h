@@ -119,7 +119,7 @@ template <typename Words>
 inline util::Result append(std::vector<uint32_t> &words, const util::FailureOr<Words> &more) {
   if (more.failed())
     return util::Result::failure();
-  const auto &value = more.value();
+  const Words &value = more.value();
   words.insert(words.end(), value.begin(), value.end());
   return util::Result::success();
 }
@@ -145,7 +145,8 @@ inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_ar
 /// @return Failure for an invalid slot count or an unsupported encoding.
 /// @details Invalid slot counts leave words unchanged; encoding failures may leave a partial body.
 inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type,
-                                                uint32_t slot_count, std::vector<uint32_t> &words) {
+                                                uint32_t slot_count, std::vector<uint32_t> &words,
+                                                util::DiagnosticEmitter emit_error = {}) {
   if (slot_count == 0 || (slot_count & (slot_count - 1)) != 0 || slot_count > 64)
     return util::Result::failure();
 
@@ -204,7 +205,8 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
   // the load below.
 
   // Claim the slot at write_ptr.
-  if (detail::append(words, build_global_load_dwordx2(kLoaded, kZero, kBase, kWritePtrOffset, arch))
+  if (detail::append(words, build_global_load_dwordx2(kLoaded, kZero, kBase, kWritePtrOffset, arch,
+                                                      emit_error))
           .failed())
     return util::Result::failure();
   if (detail::append(words, build_wait_loads_complete(arch)).failed())
@@ -241,7 +243,8 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
   if (detail::append(words, build_v_mov_b32_imm(kHeaderData + 2, record_type, arch)).failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx3(kHeaderData, kSlotV, kBase,
-                                                       offsetof(RjLogRecord, abi_version), arch))
+                                                       offsetof(RjLogRecord, abi_version), arch,
+                                                       emit_error))
           .failed())
     return util::Result::failure();
 
@@ -258,8 +261,9 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
   if (detail::append(words, build_v_mov_b32_src(kExecSiteData + 3, kInlineZero, arch)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_global_store_dwordx4(kExecSiteData, kSlotV, kBase,
-                                                       offsetof(RjLogRecord, exec_mask), arch))
+  if (detail::append(words,
+                     build_global_store_dwordx4(kExecSiteData, kSlotV, kBase,
+                                                offsetof(RjLogRecord, exec_mask), arch, emit_error))
           .failed())
     return util::Result::failure();
 
@@ -273,7 +277,8 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
   if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 3, kCount, arch)).failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx4(kWorkgroupData, kSlotV, kBase,
-                                                       offsetof(RjLogRecord, workgroup_x), arch))
+                                                       offsetof(RjLogRecord, workgroup_x), arch,
+                                                       emit_error))
           .failed())
     return util::Result::failure();
 
@@ -287,15 +292,17 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
   if (detail::append(words, build_v_mov_b32_src(kWriterData + 3, kInlineZero, arch)).failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx4(kWriterData, kSlotV, kBase,
-                                                       offsetof(RjLogRecord, writer_lane), arch))
+                                                       offsetof(RjLogRecord, writer_lane), arch,
+                                                       emit_error))
           .failed())
     return util::Result::failure();
 
   // valid, after the rest of the record.
   if (detail::append(words, build_v_mov_b32_src(kValidData, vop3_inline_uint(1), arch)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_global_store_dword(kValidData, kSlotV, kBase,
-                                                     offsetof(RjLogRecord, valid), arch))
+  if (detail::append(words,
+                     build_global_store_dword(kValidData, kSlotV, kBase,
+                                              offsetof(RjLogRecord, valid), arch, emit_error))
           .failed())
     return util::Result::failure();
 
@@ -313,8 +320,8 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
   if (detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch)).failed())
     return util::Result::failure();
-  if (detail::append(words,
-                     build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset, arch))
+  if (detail::append(words, build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset,
+                                                       arch, emit_error))
           .failed())
     return util::Result::failure();
   if (detail::append(words, build_s_setpc_b64(kLink, arch)).failed())
