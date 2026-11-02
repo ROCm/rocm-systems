@@ -53,7 +53,9 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
 | `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind (LSA team only; skipped under `NCCL_GIN_CONNECTION_RAIL`); set exactly `0` to bypass |
-| `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
+| `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default on gfx950 (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
+| `NCCL_GIN_ALLREDUCE_GFX1250_ENABLE` | `0` | Opt in to GinScatter AllReduce on gfx1250 for symmetric `ncclSum` fp32/fp16/bf16 messages from 64 MiB through 4 GiB. `0` leaves gfx1250 on the pre-existing selectors. |
+| `NCCL_GIN_ALLREDUCE_SCRATCH_BYTES` | `536870912` | GinScatter incoming scratch, in bytes (512 MiB, matching CE). `0` skips the allocation and GinScatter is not selected. |
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
 | `NCCL_DMABUF_ENABLE` | `0` | Recommended: enables dmabuf-based MR registration |
 | `NCCL_P2P_DISABLE` | `0` | Set to `1` to force inter-GPU traffic over the network (useful for single-node GIN testing) |

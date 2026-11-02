@@ -247,7 +247,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         volatile int* pfPtr = &shmem->parallelFactor;
         while (parallelFactor == 0) parallelFactor = *pfPtr;
 
-        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int groupSize = patWorkerGroupSize(nworkers, WARP_SIZE, parallelFactor);
         int group = tid / groupSize;
         int nGroups = nworkers / groupSize;
         int tidInGroup = tid - group * groupSize;
@@ -300,7 +300,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         volatile int* pfPtr = &shmem->parallelFactor;
         while (parallelFactor == 0) parallelFactor = *pfPtr;
 
-        int groupSize = nworkers / (WARP_SIZE * parallelFactor) * WARP_SIZE;
+        int groupSize = patWorkerGroupSize(nworkers, WARP_SIZE, parallelFactor);
         int group = tid / groupSize;
         int nGroups = nworkers / groupSize;
         int tidInGroup = tid - group * groupSize;

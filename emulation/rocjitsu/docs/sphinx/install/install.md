@@ -18,7 +18,7 @@ rocJITsu requires:
 Optional prerequisites:
 
 -   **Python 3.10 or later** --- required for ISA code generation with the
-    `amdisa` pipeline and for the VFIO guest launcher. See
+    `amdisa` pipeline, the VFIO guest launcher, and the Python execution API. See
     [Regenerate ISA and DBT source files](../how-to/regenerate-isa-codegen.md)
     and [Run a VFIO guest with QEMU](../how-to/qemu-vfio.md) for details.
 -   **AMD ROCm toolchain** (`hipcc`, `libhsa-runtime64`) --- required
@@ -101,6 +101,23 @@ This installs:
 -   GPU topology JSON configuration files to
     `<prefix>/share/rocjitsu/configs/`
 -   FlatBuffers schema files to `<prefix>/share/rocjitsu/schemas/`
+
+For a source build, install the Python package with `pip install ./python`
+from `emulation/rocjitsu/`;
+see the [Python execution API](../reference/python-api.md) for package setup.
+
+Bundled wheels containing the Python package and native runtime require
+follow-up TheRock packaging support. Wheel builders can explicitly install the
+Linux-only `rocjitsu-python` component to stage package sources under
+`<prefix>/<CMAKE_INSTALL_LIBDIR>/python3/site-packages/rocjitsu/` and packaging
+metadata under `<prefix>/<CMAKE_INSTALL_DATADIR>/rocjitsu/python/`:
+
+```shell
+cmake --install build --prefix /path/to/staging --component rocjitsu-python
+```
+
+The staged sources are not on Python's import path. This component is excluded
+from ordinary native installs and does not build or publish a wheel itself.
 
 #### Third-party dependencies
 

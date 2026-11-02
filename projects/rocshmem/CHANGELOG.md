@@ -29,6 +29,14 @@
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
 
+### Resolved issues
+* Fixed lost updates and hangs on the RO backend when more blocking operations
+  are in flight on one context than its proxy queue holds. A blocking call now
+  waits on its own status flag instead of re-reading it from the queue slot,
+  which the host may already have handed to another thread.
+  The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
+  `putmem_signal_on_stream` functional tests now run on RO.
+
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.

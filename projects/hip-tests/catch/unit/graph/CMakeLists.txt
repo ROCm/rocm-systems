@@ -55,6 +55,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams.cc
   hipGraphExecMemcpyNodeSetParams_old.cc
   hipStreamBeginCapture.cc
+  hipStreamCaptureDeviceScopedInvalidation.cc
   hipGraphAddMemcpyNode1D_old.cc
   hipStreamBeginCapture_old.cc
   hipStreamIsCapturing.cc

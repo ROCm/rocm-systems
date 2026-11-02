@@ -114,6 +114,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   //! completed skips the value check when the caller already knows the signal completed.
   void CacheTimingData(hsa_agent_t gpu_device, bool completed = false);
 
+  //! Caches the timing of a completed compute use from the raw start and end ticks the caller
+  //! read from the signal, as CacheTimingData would
+  void CacheTimingFromTicks(hsa_agent_t gpu_device, uint64_t start_tick, uint64_t end_tick);
+
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
     std::scoped_lock lock(lock_);
@@ -566,7 +570,7 @@ class Device : public NullDevice {
   //! A batched command keeps its completion signal until the batch completes, and replacing a
   //! device-memory signal costs a device allocation, so those queues complete batches sooner
   size_t SubmissionBatchLimit() const override {
-    constexpr size_t kDeviceSignalBatchLimit = 64;
+    constexpr size_t kDeviceSignalBatchLimit = 256;
     return (QueueDeviceSignals() && flagIsDefault(DEBUG_CLR_MAX_BATCH_SIZE))
                ? kDeviceSignalBatchLimit
                : DEBUG_CLR_MAX_BATCH_SIZE;
