@@ -684,7 +684,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaMaterializationLimitIsDiagnosable) {
   EXPECT_TRUE(excessive.elements.empty());
 }
 
-TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedTransferAddresses) {
+TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedGlobalTransferAddresses) {
   using namespace amdgpu::tensor_dma_detail;
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -701,20 +701,59 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedTransferAddresses) {
   desc.tensor_dims[0] = 1;
   desc.tile_dims[0] = 1;
   desc.global_base = UINT64_MAX;
-  TensorDmaState global_state(desc, false);
-  EXPECT_TRUE(prepare_tensor(global_state, *wf).failed());
-  EXPECT_TRUE(global_state.elements.empty());
+  TensorDmaState state(desc, false);
+  EXPECT_TRUE(prepare_tensor(state, *wf).failed());
+  EXPECT_TRUE(state.elements.empty());
+}
 
-  // LDS addresses are formed in 64 bits, so this base does not wrap back into
-  // the wave's LDS. It lies past the allocation, which does not abort a tensor
-  // operation (CDNA5 ISA 4.10.7): the element is kept and all its bytes dropped.
-  desc.global_base = 0;
-  desc.lds_base = UINT32_MAX;
-  TensorDmaState lds_state(desc, false);
-  EXPECT_TRUE(prepare_tensor(lds_state, *wf).succeeded());
-  ASSERT_EQ(lds_state.elements.size(), 1u);
-  EXPECT_EQ(lds_state.elements[0].lds_address, amdgpu::kInvalidLdsAddress);
-  EXPECT_EQ(lds_state.elements[0].lds_dropped_bytes, desc.elem_size);
+// LDS addresses are formed in 64 bits, so a large descriptor LDS base lies past
+// the wave's allocation rather than wrapping back into LDS. That does not abort
+// a tensor operation (CDNA5 ISA 4.10.7): the element is kept, all its bytes are
+// dropped, and it touches no LDS. 0xffffff00 would wrap in 32 bits onto the
+// first byte of the allocation just below the wave's; UINT32_MAX onto its last.
+TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
+  using namespace amdgpu::tensor_dma_detail;
+  constexpr uint64_t kGlobal = 0x1a8000;
+  constexpr uint64_t kGlobalValue = 0x0123456789abcdefu;
+  constexpr uint8_t kLdsSentinel = 0x5e;
+  for (const uint32_t lds_base : {0xffffff00u, UINT32_MAX}) {
+    for (const bool store : {false, true}) {
+      SCOPED_TRACE(testing::Message() << std::hex << lds_base << (store ? " store" : " load"));
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t below = cu->allocate_lds(256);
+      wf->set_lds_base(cu->allocate_lds(256));
+      wf->set_lds_size(256);
+      ASSERT_EQ(wf->lds_base(), below + 256);
+      for (uint32_t byte = 0; byte < 512; ++byte)
+        cu->lds().write8(below + byte, kLdsSentinel);
+      sim.memory->write64(kGlobal, kGlobalValue);
+
+      TensorDmaDescriptor desc;
+      desc.count = 1;
+      desc.elem_size = 8;
+      desc.tensor_rank = 1;
+      desc.tensor_dims[0] = 1;
+      desc.tile_dims[0] = 1;
+      desc.global_base = kGlobal;
+      desc.lds_base = lds_base;
+      TensorDmaState state(desc, store);
+      ASSERT_TRUE(prepare_tensor(state, *wf).succeeded());
+      ASSERT_EQ(state.elements.size(), 1u);
+      EXPECT_EQ(state.elements[0].lds_address, amdgpu::kInvalidLdsAddress);
+      EXPECT_EQ(state.elements[0].lds_dropped_bytes, desc.elem_size);
+      EXPECT_TRUE(tensor_dma_lds_ranges(state).empty());
+
+      EXPECT_EQ(resume_tensor_dma_state(state, *wf), amdgpu::VmAccessOutcome::Complete);
+      for (uint32_t byte = 0; byte < 512; ++byte)
+        EXPECT_EQ(cu->lds().read8(below + byte), kLdsSentinel) << byte;
+      // A load's data is discarded; a store reads its dropped LDS bytes as zero.
+      EXPECT_EQ(sim.memory->read64(kGlobal), store ? 0u : kGlobalValue);
+    }
+  }
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaOverflowSkipsCopyAndBarrier) {
