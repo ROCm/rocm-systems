@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 480 · build snapshot" aria-label="Forks: 480">480</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 480 · build snapshot" aria-label="Forks: 480">480</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
       </ul>
     </div>
   </a>
@@ -2909,7 +2909,12 @@ building and wiring a model.</p>
 <div class="highlight"><pre><span></span><code><span class="n">SimulationEngine</span><span class="w"> </span><span class="nf">engine</span><span class="p">({.</span><span class="n">max_ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">num_threads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">});</span>
 
 <span class="c1">// Create clock domains.</span>
-<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">core_clk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_clock_domain</span><span class="p">(</span><span class="s">"core"</span><span class="p">,</span><span class="w"> </span><span class="mi">1'000'000'000</span><span class="p">);</span>
+<span class="n">util</span><span class="o">::</span><span class="n">StringDiagnostic</span><span class="w"> </span><span class="n">diagnostic</span><span class="p">;</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">maybe_core_clk</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_clock_domain</span><span class="p">(</span><span class="s">"core"</span><span class="p">,</span><span class="w"> </span><span class="mi">1'000'000'000</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">diagnostic</span><span class="p">.</span><span class="n">emitter</span><span class="p">());</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">maybe_core_clk</span><span class="p">.</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">  </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// report diagnostic.message()</span>
+<span class="k">auto</span><span class="w"> </span><span class="o">*</span><span class="n">core_clk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">maybe_core_clk</span><span class="p">.</span><span class="n">value</span><span class="p">();</span>
 
 <span class="c1">// Build the component tree.</span>
 <span class="k">auto</span><span class="w"> </span><span class="n">root</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">make_unique</span><span class="o">&lt;</span><span class="n">CompositeComponent</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"soc"</span><span class="p">);</span>
@@ -2922,8 +2927,10 @@ building and wiring a model.</p>
 <span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">pipe_req_port</span><span class="p">,</span><span class="w"> </span><span class="n">mem_req_port</span><span class="p">,</span><span class="w"> </span><span class="cm">/*latency=*/</span><span class="mi">10</span><span class="p">);</span>
 <span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">mem_resp_port</span><span class="p">,</span><span class="w"> </span><span class="n">pipe_resp_port</span><span class="p">,</span><span class="w"> </span><span class="cm">/*latency=*/</span><span class="mi">5</span><span class="p">);</span>
 
-<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span>
-<span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">();</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">diagnostic</span><span class="p">.</span><span class="n">emitter</span><span class="p">()).</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">  </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// report diagnostic.message()</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">(</span><span class="n">diagnostic</span><span class="p">.</span><span class="n">emitter</span><span class="p">()).</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">  </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// report diagnostic.message()</span>
 <span class="k">auto</span><span class="w"> </span><span class="n">exit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">run</span><span class="p">();</span>
 </code></pre></div>
 <h3 id="graph-partitioning">Graph Partitioning<a class="headerlink" href="#graph-partitioning" title="Permanent link">&para;</a></h3>
@@ -3112,10 +3119,13 @@ empty but primaries are registered, returns true so the caller can poll.</p>
 <hr />
 <h3 id="engine-lifecycle">Engine Lifecycle<a class="headerlink" href="#engine-lifecycle" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="n">SimulationEngine</span><span class="w"> </span><span class="nf">engine</span><span class="p">({.</span><span class="n">max_ticks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">num_threads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">});</span>
+<span class="n">util</span><span class="o">::</span><span class="n">StringDiagnostic</span><span class="w"> </span><span class="n">diagnostic</span><span class="p">;</span>
 <span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">set_root</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">move</span><span class="p">(</span><span class="n">my_model</span><span class="p">));</span>
 <span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">add_link</span><span class="p">(</span><span class="n">src_port</span><span class="p">,</span><span class="w"> </span><span class="n">dst_port</span><span class="p">,</span><span class="w"> </span><span class="n">latency</span><span class="p">);</span>
-<span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span>
-<span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">();</span><span class="w">       </span><span class="c1">// validates partitions, initializes components</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">engine</span><span class="p">.</span><span class="n">topology</span><span class="p">().</span><span class="n">partition_balanced</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="n">diagnostic</span><span class="p">.</span><span class="n">emitter</span><span class="p">()).</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">  </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// report diagnostic.message()</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">engine</span><span class="p">.</span><span class="n">create</span><span class="p">(</span><span class="n">diagnostic</span><span class="p">.</span><span class="n">emitter</span><span class="p">()).</span><span class="n">failed</span><span class="p">())</span>
+<span class="w">  </span><span class="k">return</span><span class="p">;</span><span class="w"> </span><span class="c1">// report diagnostic.message()</span>
 <span class="c1">// (user enqueues work via CP)</span>
 <span class="k">auto</span><span class="w"> </span><span class="n">exit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">engine</span><span class="p">.</span><span class="n">run</span><span class="p">();</span><span class="w">   </span><span class="c1">// starts up components, runs to completion</span>
 <span class="n">engine</span><span class="p">.</span><span class="n">shutdown</span><span class="p">();</span><span class="w">    </span><span class="c1">// called automatically by destructor if needed</span>

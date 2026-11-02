@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 480 · build snapshot" aria-label="Forks: 480">480</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 480 · build snapshot" aria-label="Forks: 480">480</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
       </ul>
     </div>
   </a>
@@ -2155,9 +2155,11 @@ on the <code>LoadedConfig</code> after <code>load_config()</code> returns and be
 engine — the loader resolves the default, it does not enforce it.</p>
 <p><strong>A multi-partition engine needs a partition policy.</strong> Code that builds an
 engine by hand must call <code>partition_topology_by_xcds()</code> after <code>set_root()</code> and
-before <code>create()</code>, or <code>create()</code> throws "multi-threaded SimulationEngine
-requires an explicit topology partition policy". <code>rj_vm_create()</code> already does
-this, so this only affects direct <code>SimulationEngine</code> users.</p>
+before <code>create()</code>, or <code>create()</code> returns failure and emits "multi-threaded
+SimulationEngine requires an explicit topology partition policy" through its
+<code>emit_error</code> parameter. Omitting the emitter discards the diagnostic.
+<code>rj_vm_create()</code> already does this, so this only affects direct
+<code>SimulationEngine</code> users.</p>
 <p>For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
 across all SoCs. Partition assignment follows one global XCD ordering across
 the SoCs and is deliberately locality-agnostic. For example, two 8-XCD GPUs
