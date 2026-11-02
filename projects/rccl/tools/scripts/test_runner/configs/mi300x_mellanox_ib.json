@@ -1079,9 +1079,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -2982,7 +2982,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "timeout": 180,
-      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_CUMEM_ENABLE": "1",
@@ -3918,6 +3918,43 @@
       ]
     },
 
+    "grow_mpi_tests_netbidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_OOB_NET_ENABLE": "1",
+        "NCCL_BOOTSTRAP_BIDIR_NET": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: ncclCommGrow with NCCL_OOB_NET_ENABLE=1 and NCCL_BOOTSTRAP_BIDIR_NET=1 (4 ranks) must not hang; net bidir reverse ring is disabled during grow",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: two sequential grows with net bidir OOB enabled complete and AllReduce verifies on the grown communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_RankPreservation_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: coordinator-only uniqueId grow with net bidir OOB enabled, exercising inner existing ranks that run with nHandles==0 under NCCL_BOOTSTRAP_BIDIR_NET=1",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
+        }
+      ]
+    },
     "grow_mpi_tests": {
       "extends": "default",
       "is_gtest": true,
@@ -4898,7 +4935,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend:GinMPIDeviceTests.Timeout_*",
           "timeout": 600
         },
         {
@@ -4964,6 +5001,11 @@
           "name": "GIN_Log_ReportsUsedBackend",
           "description": "GIN logs the backend each DevComm uses (IB proxy, NCCL_GIN_TYPE=2)",
           "test_filter": "GinMPIDeviceTests.Log_ReportsUsedBackend"
+        },
+        {
+          "name": "GIN_DeviceMPI_Timeouts",
+          "description": "Device-side timeouts over the IB proxy: flush, flushAsync + wait, waitSignal (indexed and VA), waitCounter and their C entry points",
+          "test_filter": "GinMPIDeviceTests.Timeout_*"
         }
       ]
     },
@@ -5859,6 +5901,12 @@
       "name": "Grow MPI Tests (2-rank)",
       "description": "ncclCommGrow coverage at 2 ranks on a single node: argument validation, rank preservation, config inheritance, non-blocking grow, parent destroy lifecycle, error recovery regrow, and ncclCommGetUniqueId edge cases",
       "config": "grow_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
+      "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
+      "config": "grow_mpi_tests_netbidir",
       "enabled": true
     },
     {

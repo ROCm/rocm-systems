@@ -87,6 +87,7 @@
 #include <cfenv>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -870,12 +871,36 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 #undef RUN_HARNESS
 
 template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arch) {
+  struct Case {
+    uint32_t address_offset;
+    int32_t immediate;
+    bool rdna4_in_range;
+    uint32_t rdna4_offset;
+    bool rdna4_only = false;
+  };
+  constexpr std::array kCases{
+      Case{0x40u, 0, true, 0x40u},       Case{0x20040u, 0, true, 0x40u},
+      Case{0x80000040u, 0, true, 0x40u}, Case{0x10000u, 0, false, 0},
+      Case{0xffffffc0u, 0, false, 0},    Case{0x1fffcu, 4, true, 0},
+      Case{0x20004u, -4, true, 0},       Case{0x20000u, 0x40, true, 0x40u},
+      Case{0xfcu, 0, true, 0xfcu, true}, Case{0x100u, 0, false, 0, true},
+      Case{0x200u, 0, false, 0, true},   Case{0x20200u, 0, false, 0, true},
+  };
+  enum class Operation { Load, Store, Atomic };
   for (uint32_t shared_lane : {0u, 1u}) {
     for (bool mixed : {false, true}) {
-      for (uint32_t offset : {0x40u, 0x80000040u, 0xffffffc0u}) {
-        for (bool load : {false, true}) {
-          SCOPED_TRACE(testing::Message() << "shared lane=" << shared_lane << " mixed=" << mixed
-                                          << " offset=" << offset << " load=" << load);
+      for (const Case &test : kCases) {
+        if (arch == ROCJITSU_CODE_ARCH_CDNA4 && (test.immediate != 0 || test.rdna4_only))
+          continue; // Keep the older target's immediate rules out of this matrix.
+        for (Operation operation : {Operation::Load, Operation::Store, Operation::Atomic}) {
+          const bool load = operation == Operation::Load;
+          const bool atomic = operation == Operation::Atomic;
+          if (arch == ROCJITSU_CODE_ARCH_CDNA4 && atomic)
+            continue;
+          SCOPED_TRACE(testing::Message()
+                       << "shared lane=" << shared_lane << " mixed=" << mixed
+                       << " offset=" << test.address_offset << " immediate=" << test.immediate
+                       << " operation=" << static_cast<int>(operation));
           amdgpu::GpuMemory memory("shared_memory");
           amdgpu::L2Cache l2("shared_l2");
           amdgpu::ComputeUnitCore::Config cfg{};
@@ -893,18 +918,26 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           ASSERT_EQ(cu.allocate_lds(256), 0u);
           const uint32_t own_base = cu.allocate_lds(256);
           ASSERT_EQ(own_base, 0x100u);
+          ASSERT_EQ(cu.allocate_lds(512), own_base + 256);
           wf->set_lds_base(own_base);
+          wf->set_lds_size(256);
           constexpr uint32_t canary = 0xdeadbeef, value = 0x12345678;
+          constexpr uint32_t foreign_canary = 0x55aa33cc, inactive_value = 0xabad1dea;
           constexpr uint32_t destination = 0xbaadf00d, global_value = 0x87654321;
-          for (uint32_t address = 0; address < 512; address += 4)
-            wf->lds().write32(address, canary);
+          for (uint32_t address = 0; address < 1024; address += 4)
+            wf->lds().write32(
+                address, address >= own_base && address < own_base + 256 ? canary : foreign_canary);
           memory.write32(0x2000, global_value);
           const uint32_t vb = wf->vgpr_alloc().base;
           for (uint32_t lane = 0; lane < 3; ++lane) {
-            const uint64_t address = lane == shared_lane ? shared_base + offset : 0x2000;
+            // Lane 2 is an inactive shared lane with a distinct store payload.
+            // Compensate the global lane's immediate to keep its final address fixed.
+            const uint64_t address = lane == shared_lane || lane == 2
+                                         ? shared_base + test.address_offset
+                                         : static_cast<uint64_t>(int64_t{0x2000} - test.immediate);
             cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
             cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
-            cu.write_vgpr(vb + 8, lane, value);
+            cu.write_vgpr(vb + 8, lane, lane == 2 ? inactive_value : value);
             cu.write_vgpr(vb + 16, lane, destination);
           }
           std::array<uint32_t, 3> words{};
@@ -915,8 +948,15 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
             std::ranges::copy(encoded, words.begin());
           } else {
             words = rdna4::build_vflat(
-                load ? rdna4::kFlatLoadB32Vflat : rdna4::kFlatStoreB32Vflat,
-                {.saddr = 124, .vdst = uint8_t(load ? 16 : 0), .vsrc = 8, .vaddr = 0});
+                atomic ? rdna4::kFlatAtomicAddU32Vflat
+                : load ? rdna4::kFlatLoadB32Vflat
+                       : rdna4::kFlatStoreB32Vflat,
+                {.saddr = 124,
+                 .vdst = uint8_t(load || atomic ? 16 : 0),
+                 .th = uint8_t(atomic ? 1 : 0),
+                 .vsrc = 8,
+                 .vaddr = 0,
+                 .ioffset = static_cast<uint32_t>(test.immediate) & 0x00FFFFFFu});
           }
           auto decoder = Decoder::create(arch);
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
@@ -926,18 +966,26 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           cu.flush_all();
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           EXPECT_TRUE(wf->wait_counters().empty());
-          for (uint32_t address = 0; address < 512; address += 4)
-            EXPECT_EQ(wf->lds().read32(address),
-                      !load && offset == 0x40 && address == own_base + offset ? value : canary);
-          EXPECT_EQ(memory.read32(0x2000), !load && mixed ? value : global_value);
+          const bool shared_in_range =
+              arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.rdna4_in_range : test.address_offset == 0x40u;
+          const uint32_t shared_offset =
+              arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.rdna4_offset : 0x40u;
+          for (uint32_t address = 0; address < 1024; address += 4) {
+            const uint32_t expected =
+                !load && shared_in_range && address == own_base + shared_offset
+                    ? atomic ? canary + value : value
+                : address >= own_base && address < own_base + 256 ? canary
+                                                                  : foreign_canary;
+            EXPECT_EQ(wf->lds().read32(address), expected);
+          }
+          EXPECT_EQ(memory.read32(0x2000),
+                    !load && mixed ? atomic ? global_value + value : value : global_value);
           for (uint32_t lane = 0; lane < 3; ++lane) {
-            // RDNA4 low-17-bit address truncation is a separate follow-up. Until
-            // then, high LDS offsets retain zero-read/discarded-write behavior.
-            const uint32_t expected = !load || lane == 2 || (!mixed && lane != shared_lane)
-                                          ? destination
-                                      : lane != shared_lane ? global_value
-                                      : offset == 0x40      ? canary
-                                                            : 0;
+            const uint32_t expected =
+                (!load && !atomic) || lane == 2 || (!mixed && lane != shared_lane) ? destination
+                : lane != shared_lane                                              ? global_value
+                : shared_in_range                                                  ? canary
+                                                                                   : 0;
             EXPECT_EQ(cu.read_vgpr(vb + 16, lane), expected);
           }
         }
@@ -950,8 +998,175 @@ TEST(Cdna4MemoryExecutionHarness, HighSharedFlatAddressesDoNotFaultOrWrap) {
   check_high_shared_flat_addresses<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
 }
 
-TEST(Rdna4MemoryExecutionHarness, HighSharedFlatAddressesDoNotFaultOrWrap) {
+TEST(Rdna4MemoryExecutionHarness, HighSharedFlatAddressesUseUnsigned17BitOffsets) {
   check_high_shared_flat_addresses<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAllocations) {
+  struct Case {
+    uint32_t address_offset, logical_offset, valid_words;
+  };
+  // gfx1201 retains complete DWORDs, also when the first address is unaligned.
+  constexpr std::array cases{Case{240, 240, 4},    Case{241, 241, 3}, Case{244, 244, 3},
+                             Case{248, 248, 2},    Case{252, 252, 1}, Case{253, 253, 0},
+                             Case{254, 254, 0},    Case{255, 255, 0}, Case{256, 256, 0},
+                             Case{0x200fc, 252, 1}};
+  constexpr std::array<uint32_t, 4> payload{0x10203040, 0x50607080, 0x90a0b0c0, 0xd0e0f000};
+  for (const Case &test : cases) {
+    for (uint32_t width : {1u, 2u, 4u}) {
+      for (bool load : {false, true}) {
+        for (bool mixed : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "offset=" << test.address_offset << " width=" << width
+                                          << " load=" << load << " mixed=" << mixed);
+          amdgpu::GpuMemory memory("flat_boundary_memory");
+          amdgpu::L2Cache cache("flat_boundary_cache");
+          amdgpu::ComputeUnitCore::Config config{};
+          config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 256;
+          config.lds_size_kb = 64;
+          MemoryTestCu<rdna4::Isa> cu("flat_boundary", config, &memory, &cache);
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          cu.set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+          ASSERT_NE(wave, nullptr);
+          wave->set_exec(mixed ? 3 : 1);
+          ASSERT_EQ(cu.allocate_lds(256), 0u);
+          ASSERT_EQ(cu.allocate_lds(256), 256u);
+          ASSERT_EQ(cu.allocate_lds(512), 512u);
+          wave->set_lds_base(256);
+          wave->set_lds_size(256);
+          std::array<uint8_t, 1024> expected_memory{};
+          for (uint32_t address = 0; address < expected_memory.size(); address += 4) {
+            const uint32_t value = address >= 256 && address < 512 ? 0x11223344u : 0x55aa33ccu;
+            wave->lds().write32(address, value);
+            std::memcpy(expected_memory.data() + address, &value, 4);
+          }
+          for (uint32_t word = 0; word < 5; ++word)
+            memory.write32(0x4000 + word * 4, 0x88770000u + word);
+          const uint32_t vb = wave->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 3; ++lane) {
+            const uint64_t address = lane == 1 ? 0x4000 : shared_base + test.address_offset;
+            cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            for (uint32_t word = 0; word < 4; ++word) {
+              cu.write_vgpr(vb + 8 + word, lane, lane == 2 ? 0xabad0000u + word : payload[word]);
+              cu.write_vgpr(vb + 16 + word, lane, 0xa5a50000u + lane * 16 + word);
+            }
+          }
+          const uint16_t opcode = load ? (width == 1   ? rdna4::kFlatLoadB32Vflat
+                                          : width == 2 ? rdna4::kFlatLoadB64Vflat
+                                                       : rdna4::kFlatLoadB128Vflat)
+                                       : (width == 1   ? rdna4::kFlatStoreB32Vflat
+                                          : width == 2 ? rdna4::kFlatStoreB64Vflat
+                                                       : rdna4::kFlatStoreB128Vflat);
+          const auto words = rdna4::build_vflat(
+              opcode, {.saddr = 124, .vdst = uint8_t(load ? 16 : 0), .vsrc = 8, .vaddr = 0});
+          auto decoder = Decoder::create(config.arch);
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
+          ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+                    amdgpu::VmAccessOutcome::Complete);
+          cu.flush_all();
+          const uint32_t valid_words = std::min(width, test.valid_words);
+          if (!load)
+            for (uint32_t word = 0; word < valid_words; ++word)
+              std::memcpy(expected_memory.data() + 256 + test.logical_offset + word * 4,
+                          &payload[word], 4);
+          for (uint32_t address = 0; address < expected_memory.size(); address += 4) {
+            uint32_t expected;
+            std::memcpy(&expected, expected_memory.data() + address, 4);
+            EXPECT_EQ(wave->lds().read32(address), expected) << "LDS address=" << address;
+          }
+          for (uint32_t word = 0; word < 5; ++word)
+            EXPECT_EQ(memory.read32(0x4000 + word * 4),
+                      !load && mixed && word < width ? payload[word] : 0x88770000u + word);
+          for (uint32_t lane = 0; lane < 3; ++lane) {
+            for (uint32_t word = 0; word < 4; ++word) {
+              uint32_t expected = 0xa5a50000u + lane * 16 + word;
+              if (load && word < width && (lane == 0 || (mixed && lane == 1))) {
+                expected = 0;
+                if (lane == 1)
+                  expected = 0x88770000u + word;
+                else if (word < valid_words)
+                  std::memcpy(&expected,
+                              expected_memory.data() + 256 + test.logical_offset + word * 4, 4);
+              }
+              EXPECT_EQ(cu.read_vgpr(vb + 16 + word, lane), expected);
+            }
+          }
+          EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+          EXPECT_TRUE(wave->wait_counters().empty());
+        }
+      }
+    }
+  }
+}
+
+TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationElement) {
+  // A 252-byte logical bound is deliberately synthetic: real allocations are
+  // granular, so an aligned atomic cannot partially cross their boundary.
+  for (uint32_t logical_size : {252u, 256u}) {
+    for (bool returns : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "logical_size=" << logical_size << " returns=" << returns);
+      amdgpu::GpuMemory memory("flat_atomic_boundary_memory");
+      amdgpu::L2Cache cache("flat_atomic_boundary_cache");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 256;
+      config.lds_size_kb = 64;
+      MemoryTestCu<rdna4::Isa> cu("flat_atomic_boundary", config, &memory, &cache);
+      constexpr uint64_t shared_base = uint64_t{1} << 48;
+      cu.set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+      auto *wave = cu.dispatch_wf(0, 0, 128, 256, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(3);
+      ASSERT_EQ(cu.allocate_lds(256), 0u);
+      ASSERT_EQ(cu.allocate_lds(256), 256u);
+      ASSERT_EQ(cu.allocate_lds(256), 512u);
+      wave->set_lds_base(256);
+      wave->set_lds_size(logical_size);
+      constexpr uint64_t initial = 0x5566778811223344ull;
+      wave->lds().write64(256 + 248, initial);
+      wave->lds().write64(512, 0x55aa33cc55aa33ccull);
+      memory.write64(0x4000, initial);
+      const uint32_t vb = wave->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        const uint64_t address = lane == 0 ? shared_base + 248 : 0x4000;
+        cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+        cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+        cu.write_vgpr(vb + 8, lane, 1);
+        cu.write_vgpr(vb + 9, lane, 0);
+        cu.write_vgpr(vb + 16, lane, 0xa5a5a5a5);
+        cu.write_vgpr(vb + 17, lane, 0xa5a5a5a5);
+      }
+      const auto words =
+          rdna4::build_vflat(rdna4::kFlatAtomicAddU64Vflat,
+                             {.saddr = 124, .vdst = 16, .th = uint8_t(returns), .vsrc = 8});
+      auto decoder = Decoder::create(config.arch);
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
+      ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+                amdgpu::VmAccessOutcome::Complete);
+      cu.flush_all();
+      EXPECT_EQ(wave->lds().read64(256 + 248), logical_size == 256 ? initial + 1 : initial);
+      EXPECT_EQ(wave->lds().read64(512), 0x55aa33cc55aa33ccull);
+      EXPECT_EQ(memory.read64(0x4000), initial + 1);
+      for (uint32_t lane = 0; lane < 2; ++lane) {
+        const uint64_t actual =
+            uint64_t{cu.read_vgpr(vb + 16, lane)} | (uint64_t{cu.read_vgpr(vb + 17, lane)} << 32);
+        EXPECT_EQ(actual, !returns                           ? 0xa5a5a5a5a5a5a5a5ull
+                          : lane == 0 && logical_size == 252 ? 0
+                                                             : initial);
+      }
+      EXPECT_TRUE(wave->wait_counters().empty());
+    }
+  }
 }
 
 TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAllocation) {
@@ -1123,6 +1338,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       ASSERT_EQ(wf->wf_size(), 32u);
       wf->set_exec(0x7);
       wf->set_lds_base(0x200);
+      wf->set_lds_size(512);
       wf->set_scratch_base(scratch_base);
       wf->set_scratch_lane_size(128);
       const uint32_t global_lane = first_space;
@@ -8603,6 +8819,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
       ASSERT_NE(wave, nullptr);
       wave->set_exec(1);
       wave->set_lds_base(kLdsBase);
+      wave->set_lds_size(256);
       const uint32_t vgpr_base = wave->vgpr_alloc().base;
       std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
       ASSERT_NE(decoder, nullptr);

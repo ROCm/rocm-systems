@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -72,13 +73,16 @@ enum class ProbeArgSource {
   AnchorExecHi,   ///< High dword of that mask. Wave64 only.
   LogBufferPtrLo, ///< Low dword of the pointer in the entry-storage pair.
   LogBufferPtrHi, ///< High dword of that pointer.
+  AnchorVgpr,     ///< The original per-lane value of a guest VGPR at the anchor.
+  EntryVgprLane0, ///< Lane zero of a VGPR, captured once at dispatch entry.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
 ///        build-time constant.
 struct ProbeArgValue {
   ProbeArgSource source = ProbeArgSource::Immediate;
-  uint32_t immediate = 0; ///< Read only when source is Immediate.
+  uint32_t immediate = 0;      ///< Read only when source is Immediate.
+  uint16_t register_index = 0; ///< VGPR index for AnchorVgpr or EntryVgprLane0.
 
   constexpr bool operator==(const ProbeArgValue &) const = default;
 };
@@ -91,6 +95,22 @@ struct ProbeArgValue {
   return ProbeArgValue{.source = ProbeArgSource::Immediate, .immediate = imm};
 }
 
+/// @brief Capture a guest VGPR before any argument destination is overwritten.
+[[nodiscard]] inline constexpr ProbeArgValue probe_arg_vgpr(uint16_t index) {
+  return ProbeArgValue{.source = ProbeArgSource::AnchorVgpr, .register_index = index};
+}
+
+/// @brief Registers an observation requires in addition to the guest's own uses.
+/// @details Callers must validate indices against the kernel's ordinary VGPR
+/// allocation before using the set for resource planning.
+[[nodiscard]] inline RegisterSet probe_argument_registers(std::span<const ProbeArgValue> args) {
+  RegisterSet registers;
+  for (const ProbeArgValue &arg : args)
+    if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index < 256)
+      registers.expand(RegisterRef{RegClass::VGPR, arg.register_index, 1});
+  return registers;
+}
+
 /// @brief Does @p source read the saved anchor EXEC pair?
 [[nodiscard]] inline constexpr bool reads_anchor_exec(ProbeArgSource source) {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
@@ -98,7 +118,8 @@ struct ProbeArgValue {
 
 /// @brief Does @p source read the framework's persistent entry-storage pair?
 [[nodiscard]] inline constexpr bool reads_entry_storage(ProbeArgSource source) {
-  return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi;
+  return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi ||
+         source == ProbeArgSource::EntryVgprLane0;
 }
 
 /// @brief Is @p source one of the values ProbeArgSource declares?
@@ -115,6 +136,8 @@ struct ProbeArgValue {
   case ProbeArgSource::AnchorExecHi:
   case ProbeArgSource::LogBufferPtrLo:
   case ProbeArgSource::LogBufferPtrHi:
+  case ProbeArgSource::AnchorVgpr:
+  case ProbeArgSource::EntryVgprLane0:
     return true;
   }
   return false;
@@ -212,8 +235,8 @@ struct ProbeCallable {
   /// Where the framework sources each argument dword, one entry per
   /// abi.num_arg_vgprs. Declared by the caller, like the count the ABI came
   /// from: a body that reads v0 cannot say whether it wants a constant or the
-  /// anchor EXEC mask. Only the *values* behind an Immediate slot vary per
-  /// site.
+  /// anchor EXEC mask. Immediate values and the guest register selected by an
+  /// AnchorVgpr slot can vary per site; the source kinds describe the shared body.
   std::vector<ProbeArgSource> arg_sources;
 
   /// Run the body with every lane enabled rather than under the mask the guest

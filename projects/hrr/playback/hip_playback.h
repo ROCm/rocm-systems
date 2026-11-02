@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
 #include <chrono>
@@ -105,6 +106,24 @@ inline std::vector<HrrVaRange> hrr_place_plan(std::vector<HrrVaRange> allocs,
     return out;
 }
 
+// The granule-aligned range [base, end) that placing `size` bytes at the
+// recorded address `rec` would map, checked: false if `size` is 0 or if
+// `rec + size` or the rounding wraps. `gran` is not 0; `rec` and `size` come
+// from the archive. The range is never empty. Whether it lies in held address
+// space is HrrHeldRanges::take's to say: the held ranges stop at the placement
+// ceiling and do not include 0.
+inline bool hrr_place_range(uint64_t rec, uint64_t size, uint64_t gran,
+                            uint64_t* base, uint64_t* end) {
+    if (size == 0) return false;
+    uint64_t last;  // one past the last byte
+    if (__builtin_add_overflow(rec, size, &last)) return false;
+    uint64_t up;
+    if (__builtin_add_overflow(last, gran - 1, &up)) return false;
+    *base = rec - rec % gran;
+    *end  = up / gran * gran;
+    return true;
+}
+
 // The placeholders still standing, base -> end, kept merged.
 struct HrrHeldRanges {
     std::map<uint64_t, uint64_t> r;
@@ -122,7 +141,7 @@ struct HrrHeldRanges {
         }
         r[b] = e;
     }
-    // Drop [b, e) if one held range covers all of it.
+    // Drop [b, e), e > b, if one held range covers all of it.
     bool take(uint64_t b, uint64_t e) {
         auto it = r.upper_bound(b);
         if (it == r.begin()) return false;
@@ -965,6 +984,11 @@ struct PlaybackContext {
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
+    // Parameter sizes the code object declares for `func`, in order. Empty
+    // means the default, which asks HIP (hipKernelGetParamInfo); a handler test
+    // sets it to stand in for a code object.
+    std::function<void(hipFunction_t, std::vector<size_t>&)> kernel_param_sizes;
+
     // Resolve a playback-time replacement function for a recorded kernel name.
     // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
     // matches a --replace-kernel pattern, or nullptr if no replacement applies
@@ -1059,6 +1083,14 @@ void* hrr_runtime_symbol(const char* name);
 bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
                                  int32_t recorded_ret, hipError_t replayed);
 
+// hrr_decode_kernel_args — the kernel-argument decoder a launch and a graph
+// kernel node share, for a handler test to look at what it hands to HIP: each
+// argument's storage ends with 8 zeroed bytes past the recorded size.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage);
+
 // ---------------------------------------------------------------------------
 // hrr_live_ctx — a usable hipCtx_t for a recorded one.
 //
@@ -1071,6 +1103,13 @@ bool hrr_replayed_recorded_error(PlaybackContext& ctx, const char* api,
 // recorded against. A recording that used a null context keeps one, so a call
 // that capture shows failing that way fails the same way here.
 hipCtx_t hrr_live_ctx(uint64_t recorded);
+
+// Replaces the srcArray and dstArray handles of a recorded hipMemcpy3DParms with
+// the live arrays replay created for them. A handle replay never created is an
+// archive-chosen address the runtime would dereference, so it is named on stderr
+// and false is returned; the copy must then not reach HIP. A null handle stays null.
+bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
+                                   hipMemcpy3DParms& parms);
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers read this to wait for their submission turn at the

@@ -574,7 +574,7 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
                 "virtual-LDS reservation and the shared SGPR scan must agree on "
                 "where ordinary SGPRs end");
-  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks, translation.guest_wavefront_size);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {

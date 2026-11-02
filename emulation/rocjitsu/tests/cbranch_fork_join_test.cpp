@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -108,6 +109,19 @@ protected:
     (void)cu->step();
     EXPECT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, previous + bytes);
+  }
+
+  /// Execute without fetching at the deliberately high PC used by target-width tests.
+  void execute(uint32_t word) {
+    auto decoder = Decoder::create(GetParam());
+    ASSERT_NE(decoder, nullptr);
+    const std::array<uint32_t, 4> words{word, 0, 0, 0};
+    auto decoded = decoder->decode(words.data());
+    ASSERT_FALSE(decoded.failed());
+    Instruction &inst = *decoded.value();
+    ASSERT_EQ(inst.size(), 4u);
+    ASSERT_TRUE(cu->execute_instruction(&inst, *wf).succeeded());
+    wf->pc += inst.size(); // Match the normal CU post-execution increment.
   }
 
   uint32_t sgpr(uint32_t index) { return cu->read_sgpr(wf->sgpr_alloc().base + index); }
@@ -489,6 +503,66 @@ TEST_P(CbranchForkJoinTest, GForkTakesItsTargetFromAnSgprPair) {
   }
   EXPECT_EQ(wf->exec(), ~uint64_t{0});
   EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+}
+
+TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
+  constexpr uint64_t kHighPc = 0x0000FFFF12345000ULL;
+  constexpr uint64_t kExport = 0xFFFFFFFF12345004ULL;
+  constexpr uint64_t kForkPc = 0x2000;
+  constexpr uint64_t kFewLanes = 0x15;
+  for (uint64_t bias : {uint64_t{0}, uint64_t{0x00007FFF00000000ULL}}) {
+    SCOPED_TRACE(::testing::Message() << "bias=" << std::hex << bias);
+    wf->set_code_load_bias(bias);
+    for (uint64_t compare : {~uint64_t{0}, uint64_t{0}, kFewLanes, ~kFewLanes}) {
+      SCOPED_TRACE(::testing::Message() << "compare=" << std::hex << compare);
+      wf->set_exec(~uint64_t{0});
+      wf->set_cond_stack_ptr(0);
+      set_sgpr64(0, kStackSentinel);
+      set_sgpr64(2, kStackSentinel);
+      wf->pc = kHighPc;
+      ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(36, GetParam())));
+      ASSERT_EQ(sgpr64(36), kExport);
+
+      wf->pc = kForkPc;
+      wf->set_vcc(compare);
+      ASSERT_NO_FATAL_FAILURE(execute(kGForkVccS36));
+      const bool pass_runs_first = compare == ~uint64_t{0} || compare == kFewLanes;
+      EXPECT_EQ(wf->pc, pass_runs_first ? kHighPc + 4 : kForkPc + 4);
+      EXPECT_EQ(sgpr64(36), kExport);
+      if (compare == 0 || compare == ~uint64_t{0}) {
+        EXPECT_EQ(wf->exec(), ~uint64_t{0});
+        EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+        EXPECT_EQ(sgpr64(0), kStackSentinel);
+        EXPECT_EQ(sgpr64(2), kStackSentinel);
+      } else {
+        EXPECT_EQ(wf->exec(), kFewLanes);
+        EXPECT_EQ(wf->cond_stack_ptr(), 1u);
+        EXPECT_EQ(sgpr64(0), ~kFewLanes);
+        EXPECT_EQ(sgpr64(2), pass_runs_first ? kForkPc + 4 : kHighPc + 4);
+        set_sgpr(34, 0);                               // Saved CSP for the matching join.
+        ASSERT_NO_FATAL_FAILURE(execute(0xBE802E22u)); // s_cbranch_join s34
+        EXPECT_EQ(wf->pc, pass_runs_first ? kForkPc + 4 : kHighPc + 4);
+        EXPECT_EQ(wf->exec(), ~kFewLanes);
+        EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+      }
+    }
+  }
+}
+
+TEST_P(CbranchForkJoinTest, GForkPreservesLinkedPositiveRel32Targets) {
+  constexpr uint64_t kPositiveTag = 0x0001FFFF00001000ULL;
+  for (uint64_t bias : {uint64_t{0}, uint64_t{0x00007FFF00000000ULL}}) {
+    SCOPED_TRACE(::testing::Message() << "bias=" << std::hex << bias);
+    wf->set_code_load_bias(bias);
+    wf->set_exec(~uint64_t{0});
+    wf->set_vcc(~uint64_t{0});
+    wf->pc = kCodeBase;
+    set_sgpr64(36, kPositiveTag);
+    ASSERT_NO_FATAL_FAILURE(execute(kGForkVccS36));
+    EXPECT_EQ(wf->pc, bias ? bias + 0x1000 : 0x0000FFFF00001000ULL);
+    EXPECT_EQ(sgpr64(36), kPositiveTag);
+    EXPECT_EQ(wf->cond_stack_ptr(), 0u);
+  }
 }
 
 TEST_P(CbranchForkJoinTest, ForkAndJoinCarryControlFlowMetadata) {

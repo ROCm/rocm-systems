@@ -596,8 +596,12 @@ int main(int argc, char *argv[]) {
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
-      auto print = [&](const std::string &label) {
-        const auto plan = settings.resolve(host);
+      auto print = [&](const std::string &label) -> util::Result {
+        util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
+            settings.resolve(host, launch_config_diagnostic.emitter());
+        if (allocation.failed())
+          return util::Result::failure();
+        const auto &plan = allocation.value();
         uint64_t total = uint64_t{plan.engines} + plan.helpers;
         std::string dispatch;
         for (uint32_t width : plan.dispatch) {
@@ -608,11 +612,20 @@ int main(int argc, char *argv[]) {
         }
         std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
                                  plan.helpers, total);
+        return util::Result::success();
       };
-      print("Configured");
+      if (print("Configured").failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
       for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
         settings.request.budget = budget;
-        print(std::to_string(budget));
+        if (print(std::to_string(budget)).failed()) {
+          std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                   launch_config_diagnostic.message());
+          return 1;
+        }
       }
       return 0;
     } catch (const std::exception &e) {

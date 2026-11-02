@@ -101,9 +101,13 @@ jobs:
       - name: Install PyTorch and test dependencies
         timeout-minutes: 15
         run: |
+          # The device-gfx942 extra resolves rocm-sdk-device-gfx942, which is
+          # published to the core index rather than the pytorch one; without
+          # the extra-index-url the resolve fails outright.
           uv pip install --prerelease=allow \
             "torch[device-gfx942]" \
-            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+            --index-url https://nightly.repo.amd.com/rocm/pytorch/whl-next/ \
+            --extra-index-url https://nightly.repo.amd.com/rocm/core/whl-next/
           uv pip install \
             pytest \
             pytest-timeout \
@@ -113,7 +117,13 @@ jobs:
             psutil
 
       - name: Run PyTorch c10d NCCL tests
-        timeout-minutes: ${{ inputs.test_scope == 'all' && 120 || 60 }}
+        # The all scope has come within ~2 min of the old 120 min ceiling twice
+        # (117m44s, 119m09s). Being killed here is worse than a slow run:
+        # pytest never writes pytorch_c10d_results.xml, so the summary, email
+        # and webhook steps skip and the job reports a timeout instead of
+        # results. About 75 min of the budget is known-failure hangs running to
+        # their own timeouts; reclaiming that is tracked separately.
+        timeout-minutes: ${{ inputs.test_scope == 'all' && 150 || 60 }}
         env:
           NCCL_DEBUG: INFO
           TORCH_NCCL_BLOCKING_WAIT: 1

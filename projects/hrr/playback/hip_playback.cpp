@@ -709,6 +709,12 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
     return func;
 }
 
+// Zeroed bytes after each decoded argument; see decode_kernel_args.
+static constexpr size_t kArgOverreadPad = 8;
+static size_t recorded_arg_size(const std::vector<uint8_t>& storage) {
+    return storage.size() - kArgOverreadPad;
+}
+
 // Decode the recorded argument list at `p` into `arg_storage` (owning) and
 // `arg_ptrs` (what a launch or node-parameter build wants), translating every
 // recorded device address on the way. `p` is advanced past the arguments.
@@ -720,6 +726,19 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
 //
 // `rls` is the caller's per-launch guard bookkeeping, or null on the graph
 // kernel-node path where a relocation could never be undone.
+//
+// A payload that ends before the `num_args` arguments the record declares do
+// leaves what was decoded in the outputs: an argument the payload cuts short is
+// dropped whole, so what remains is fewer arguments, never narrower ones, and
+// kernel_args_fit_signature refuses it when that is fewer than the kernel
+// declares.
+//
+// Every `arg_storage` entry carries kArgOverreadPad zeroed bytes past the
+// recorded size, and `arg_ptrs` points at the entry: CLR copies 8 bytes out of
+// kernelParams[i] for any pointer parameter whatever size the code object gives
+// it (rocclr/platform/kernel.cpp, captureHIPArgs), so a record that is narrower
+// than 8 bytes, or empty, must not be the end of the allocation. The recorded
+// size is `size() - kArgOverreadPad`; use recorded_arg_size().
 static void decode_kernel_args(
     PlaybackContext& ctx, const uint8_t*& p, const uint8_t* end,
     uint16_t num_args, const std::string& kernel_name,
@@ -778,11 +797,11 @@ static void decode_kernel_args(
     };
 
     for (uint16_t i = 0; i < num_args; i++) {
-        if (p + 3 > end) break;
+        if (end - p < 3) return;
         uint8_t  value_kind = *p++;
         uint16_t arg_size;
         memcpy(&arg_size, p, 2); p += 2;
-        if (p + arg_size > end) break;
+        if (end - p < arg_size) return;
 
         const uint8_t* data = p;
         p += arg_size;
@@ -818,10 +837,10 @@ static void decode_kernel_args(
         // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
         if (value_kind == 3) {
-            if (p + 2 > end) break;
+            if (end - p < 2) return;
             uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
             for (uint16_t k = 0; k < n_ptrs; k++) {
-                if (p + 2 > end) { n_ptrs = k; break; }
+                if (end - p < 2) return;
                 uint16_t off; memcpy(&off, p, 2); p += 2;
                 ptr_offsets.push_back(off);
             }
@@ -971,6 +990,7 @@ static void decode_kernel_args(
                 fprintf(stderr, "\n");
             }
         }
+        storage.resize(storage.size() + kArgOverreadPad, 0);
         arg_ptrs.push_back(storage.data());
 
         const size_t store_idx = arg_storage.size() - 1;
@@ -1026,6 +1046,87 @@ static void decode_kernel_args(
             prev_half.valid = false;
         }
     }
+}
+
+// Test seam: decode_kernel_args without the launch's guard bookkeeping.
+void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
+                            const uint8_t* end, uint16_t num_args,
+                            std::vector<void*>& arg_ptrs,
+                            std::vector<std::vector<uint8_t>>& arg_storage) {
+    decode_kernel_args(ctx, p, end, num_args, "", arg_ptrs, arg_storage);
+}
+
+// Whether the arguments a launch record carries cover the kernel's signature: at
+// least as many arguments, each at least as many bytes as its parameter. HIP
+// walks the signature of the loaded code object and copies each parameter's size
+// out of kernelParams[i] (rocclr/platform/kernel.cpp, captureHIPArgs), so only a
+// short list or a narrower argument is read past; extra arguments and wider ones
+// are never touched. CLR reads 8 bytes for a pointer parameter whatever its
+// declared size, which the comparison cannot see: kArgOverreadPad covers it.
+// On a mismatch `why` says which.
+static bool kernel_args_match(const std::vector<size_t>& recorded,
+                              const std::vector<size_t>& declared,
+                              std::string& why) {
+    char buf[160];
+    if (recorded.size() < declared.size()) {
+        snprintf(buf, sizeof(buf),
+                 "the record carries %zu arguments, the kernel declares %zu",
+                 recorded.size(), declared.size());
+        why = buf;
+        return false;
+    }
+    for (size_t i = 0; i < declared.size(); i++) {
+        if (recorded[i] >= declared[i]) continue;
+        snprintf(buf, sizeof(buf),
+                 "argument %zu is %zu bytes, the kernel declares %zu", i,
+                 recorded[i], declared[i]);
+        why = buf;
+        return false;
+    }
+    return true;
+}
+
+// Refuse a launch whose decoded arguments do not cover the signature of the
+// kernel it resolved to. A short list or an argument narrower than its
+// parameter is an over-read of replay's own vectors. The archive is input like
+// any other: the record and the code object it names are not guaranteed to
+// agree. Returns true when the launch may go ahead; otherwise says why on
+// stderr.
+static bool kernel_args_fit_signature(
+    PlaybackContext& ctx, const char* api, const std::string& kernel_name,
+    hipFunction_t func,
+    const std::vector<std::vector<uint8_t>>& arg_storage) {
+    std::vector<size_t> declared;
+    if (ctx.kernel_param_sizes) {
+        ctx.kernel_param_sizes(func, declared);
+    } else {
+        // hipKernelGetParamInfo has no count: on a resolved function it
+        // answers hipSuccess for each parameter and hipErrorInvalidValue for the
+        // first index past the end. That last call is not a failure, so it must
+        // not stay HIP's last error: replay would report it against this
+        // launch (--sync-after-event aborts on it, the warm-up pass logs it).
+        // An error already pending from an earlier call is overwritten by that
+        // call anyway, so clearing loses nothing that was still there.
+        for (size_t i = 0;; i++) {
+            size_t off = 0, size = 0;
+            if (hipKernelGetParamInfo(reinterpret_cast<hipKernel_t>(func), i,
+                                      &off, &size) != hipSuccess)
+                break;
+            declared.push_back(size);
+        }
+        (void)hipGetLastError();
+    }
+    std::vector<size_t> recorded;
+    recorded.reserve(arg_storage.size());
+    for (const auto& a : arg_storage) recorded.push_back(recorded_arg_size(a));
+    std::string why;
+    if (kernel_args_match(recorded, declared, why)) return true;
+    fprintf(stderr,
+            "[HRR] %s seq=%llu kernel '%s': %s — launch refused; its arguments "
+            "would not cover the kernel's signature\n",
+            api, (unsigned long long)hrr_dispatch_seq,
+            compact_kernel_name(kernel_name).c_str(), why.c_str());
+    return false;
 }
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
@@ -1101,9 +1202,14 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
-    decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs,
-                       arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
-                       dbg_dump_ptrs ? &dbg_args : nullptr);
+    decode_kernel_args(
+        ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage, &rls,
+        dbg_dump_ptrs ? &dbg_ptrs : nullptr, dbg_dump_ptrs ? &dbg_args : nullptr);
+    if (!kernel_args_fit_signature(ctx, "kernel launch", kernel_name, func,
+                                   arg_storage)) {
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
+        return hipErrorInvalidValue;
+    }
 
     const uint8_t* snapshots = p;
     if (!hrr_host_snapshots_fit(p, end, num_snapshots)) {
@@ -1366,7 +1472,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             uint32_t cursor = 0;
             std::vector<uint32_t> koffsets(arg_storage.size());
             for (size_t i = 0; i < arg_storage.size(); ++i) {
-                uint32_t sz = static_cast<uint32_t>(arg_storage[i].size());
+                uint32_t sz = static_cast<uint32_t>(recorded_arg_size(arg_storage[i]));
                 uint32_t align = (sz >= 8) ? 8u : sz ? sz : 1u;
                 cursor = (cursor + align - 1) & ~(align - 1);
                 koffsets[i] = cursor;
@@ -1374,11 +1480,17 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             }
             // Round up to 64-byte alignment; add 256 bytes for hidden arg space.
             uint32_t kbuf_sz = ((cursor + 63) & ~63u) + 256;
-            std::vector<uint8_t> kbuf(kbuf_sz, 0);
+            // The 256 bytes are inside the size handed to CLR, which only checks
+            // offset + size against it and then reads 8 bytes for a pointer
+            // parameter whatever size the code object gives it (rocclr
+            // captureHIPArgs): a 4-byte pointer at kbuf_sz - 4 would read past
+            // the end. Allocate kArgOverreadPad more than the size we pass.
+            std::vector<uint8_t> kbuf(kbuf_sz + kArgOverreadPad, 0);
             for (size_t i = 0; i < arg_storage.size(); ++i) {
                 const auto& s = arg_storage[i];
-                if (koffsets[i] + s.size() <= kbuf_sz)
-                    memcpy(kbuf.data() + koffsets[i], s.data(), s.size());
+                const size_t n = recorded_arg_size(s);
+                if (koffsets[i] + n <= kbuf_sz)
+                    memcpy(kbuf.data() + koffsets[i], s.data(), n);
             }
             size_t extra_sz = kbuf_sz;
             void* extra[5] = {
@@ -2610,8 +2722,18 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
     if (!ctx.place) return false;
     const int      dev  = hrr_current_device();
     const size_t   gran = hrr_vmm_granularity(dev);
-    const uint64_t base = rec - rec % gran;
-    const uint64_t len  = (rec + size - base + gran - 1) / gran * gran;
+    uint64_t base, end;
+    if (!hrr_place_range(rec, size, gran, &base, &end)) {
+        // hipMalloc(&p, 0) is legal and recorded; it has nothing to place.
+        if (size != 0)
+            fprintf(stderr,
+                    "[HRR] Placement: seq=%llu: refusing 0x%llx + %zu bytes (the range wraps); "
+                    "allocating without placement\n",
+                    (unsigned long long)hrr_dispatch_seq, (unsigned long long)rec, size);
+        ctx.place_fell_back++;
+        return false;
+    }
+    const uint64_t len = end - base;
     bool held;
     {
         std::lock_guard<std::mutex> lk(ctx.place_mutex);
@@ -4509,6 +4631,66 @@ static bool memcpy3d_h2d_src(PlaybackContext& ctx, const char* api, uint64_t has
     return true;
 }
 
+// An array handle in a recorded copy must become the live array replay created,
+// or the copy must not reach HIP: the runtime dereferences the handle, so a
+// recorded address would let the archive choose what it reads. A handle replay
+// never created (array creation APIs other than hipArrayCreate /
+// hipArray3DCreate are not replayed) is named on stderr and refused. A null
+// handle is left alone.
+static bool translate_array_or_refuse(const PlaybackContext& ctx, const char* api,
+                                      const char* what, hipArray_t* arr) {
+    if (!*arr) return true;
+    const uint64_t rec = reinterpret_cast<uint64_t>(*arr);
+    hipArray_t live = ctx.translate_array(rec);
+    if (!live) {
+        fprintf(stderr,
+                "[HRR] %s: the %s array 0x%llx was not created at replay, so the "
+                "copy is refused rather than hand a recorded address to HIP\n",
+                api, what, (unsigned long long)rec);
+        return false;
+    }
+    *arr = live;
+    return true;
+}
+
+// hipMemcpy3D reads srcArray / dstArray as array handles, and CLR dereferences
+// them to size the element and the layered layout.
+bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
+                                   hipMemcpy3DParms& parms) {
+    return translate_array_or_refuse(ctx, api, "source", &parms.srcArray) &&
+           translate_array_or_refuse(ctx, api, "destination", &parms.dstArray);
+}
+
+// A hipMemcpy3D with a host end and an array end, as its kind says, measures
+// extent.width in array elements, but capture sized the host blob, and replay
+// sizes its scratch buffer and reads the blob, as if it were bytes. The runtime
+// would then read past the blob or write past the scratch buffer by the element
+// size, so such a copy is not issued. A copy between an array and device memory,
+// or another array, has no host side and is replayed; so is one whose kind is
+// hipMemcpyDefault, which is issued as a device-to-device copy.
+static bool memcpy3d_is_host_array(const hipMemcpy3DParms& p) {
+    return (p.kind == hipMemcpyHostToDevice && p.dstArray) ||
+           (p.kind == hipMemcpyDeviceToHost && p.srcArray);
+}
+
+// Not issuing the copy leaves its effect out of the replay, so it is reported as
+// unreplayable and returns hipErrorNotSupported, which ends the replay (or
+// counts an event failure under --continue-on-error) instead of passing. An
+// array-to-host copy with a D2H check counts as a failed check.
+static hipError_t refuse_host_array_copy(PlaybackContext& ctx, const char* api,
+                                         const hipMemcpy3DParms& p, uint64_t hash_lo,
+                                         uint64_t hash_hi) {
+    if (p.kind == hipMemcpyDeviceToHost && ctx.validate_d2h && (hash_lo || hash_hi)) {
+        ctx.d2h_attempted++;
+        ctx.note_d2h_fail(hrr_dispatch_seq);
+    }
+    hrr_note_unreplayable(ctx, api,
+                          "a copy between host memory and an array has its extent in array "
+                          "elements but its recorded host rect and blob in bytes, so issuing it "
+                          "would read or write past them");
+    return hipErrorNotSupported;
+}
+
 // hipMemcpy3D runs on the legacy default stream and hipMemcpy3D_spt on this
 // thread's, so an _spt event is reissued as _spt or it can be reordered against
 // work replayed on the per-thread stream.
@@ -4517,6 +4699,11 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
     hipError_t (*const copy)(const hipMemcpy3DParms*) = spt ? hipMemcpy3D_spt : hipMemcpy3D;
+    if (!hrr_translate_memcpy3d_arrays(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms))
+        return hipErrorInvalidValue;
+    if (memcpy3d_is_host_array(parms))
+        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3D_spt" : "hipMemcpy3D", parms,
+                                      a->d2h_hash_lo, a->d2h_hash_hi);
 
     if (parms.kind == hipMemcpyHostToDevice) {
         if (!memcpy3d_h2d_src(ctx, "hipMemcpy3D", a->blob_hash_lo, a->blob_hash_hi, parms))
@@ -4567,6 +4754,12 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DAsync*>(pl);
     hipMemcpy3DParms parms{};
     std::memcpy(&parms, a->parms_bytes, sizeof(parms));
+    if (!hrr_translate_memcpy3d_arrays(
+            ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync", parms))
+        return hipErrorInvalidValue;
+    if (memcpy3d_is_host_array(parms))
+        return refuse_host_array_copy(ctx, spt ? "hipMemcpy3DAsync_spt" : "hipMemcpy3DAsync",
+                                      parms, a->d2h_hash_lo, a->d2h_hash_hi);
     hipStream_t stream = memcpy3d_async_stream(ctx, a->stream, spt);
 
     if (parms.kind == hipMemcpyHostToDevice) {
@@ -4849,15 +5042,30 @@ hipError_t playback_hipMemcpyParam2DAsync(PlaybackContext& ctx, const uint8_t* p
 // here rather than by a ptr_members rewrite in the generator.
 // ---------------------------------------------------------------------------
 
-static void translate_batch_operand(PlaybackContext& ctx,
+// False when the operand cannot be handed to HIP: an array operand whose handle
+// is null or names an array replay never created (CLR dereferences it to size
+// the element), or a type that is neither pointer nor array (CLR would leave the
+// operand's side of the copy uninitialised).
+static bool translate_batch_operand(PlaybackContext& ctx, const char* what,
                                     hipMemcpy3DOperand& operand) {
     if (operand.type == hipMemcpyOperandTypePointer) {
         operand.op.ptr.ptr = ctx.translate_ptr(
             reinterpret_cast<uint64_t>(operand.op.ptr.ptr));
-    } else {
-        operand.op.array.array = ctx.translate_array(
-            reinterpret_cast<uint64_t>(operand.op.array.array));
+        return true;
     }
+    if (operand.type != hipMemcpyOperandTypeArray) {
+        fprintf(stderr, "[HRR] hipMemcpy3DBatchAsync: the %s operand has type %d, which is "
+                        "neither pointer nor array, so the batch is refused\n",
+                what, static_cast<int>(operand.type));
+        return false;
+    }
+    if (!operand.op.array.array) {
+        fprintf(stderr, "[HRR] hipMemcpy3DBatchAsync: the %s array operand is null, so the "
+                        "batch is refused\n", what);
+        return false;
+    }
+    return translate_array_or_refuse(ctx, "hipMemcpy3DBatchAsync", what,
+                                     &operand.op.array.array);
 }
 
 hipError_t playback_hipMemcpy3DBatchAsync(PlaybackContext& ctx,
@@ -4870,8 +5078,9 @@ hipError_t playback_hipMemcpy3DBatchAsync(PlaybackContext& ctx,
     std::vector<hipMemcpy3DBatchOp> ops(n);
     std::memcpy(ops.data(), a->opList_bytes, n * sizeof(hipMemcpy3DBatchOp));
     for (auto& op : ops) {
-        translate_batch_operand(ctx, op.src);
-        translate_batch_operand(ctx, op.dst);
+        if (!translate_batch_operand(ctx, "source", op.src) ||
+            !translate_batch_operand(ctx, "destination", op.dst))
+            return hipErrorInvalidValue;
     }
 
     size_t fail_idx = 0;
@@ -5031,7 +5240,11 @@ hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFreeArray*>(pl);
     hipArray_t arr = ctx.translate_array(a->array);
     if (!arr) return hipSuccess;  // nooped alloc (hipMallocArray noop)
-    return hipFreeArray(arr);
+    hipError_t r = hipFreeArray(arr);
+    // A later copy naming this handle must not translate to the freed array.
+    // Dropped whatever the result: the runtime forgets an array a free reaches.
+    ctx.remove_array(a->array);
+    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -5398,6 +5611,18 @@ static hipError_t node_add_failed(PlaybackContext& ctx, const char* api,
     return r;
 }
 
+// What a kernel set-params handler returns when it could not rebuild the
+// parameters: hipErrorInvalidValue, with the node left on its old arguments.
+// Capture records the call even when HIP refused it, and a null pNodeParams is
+// refused with exactly that error, so a recorded hipErrorInvalidValue is the
+// call failing the same way here.
+static hipError_t set_params_refused(PlaybackContext& ctx, const char* api,
+                                     int32_t recorded_ret) {
+    return hrr_replayed_recorded_error(ctx, api, recorded_ret,
+                                       hipErrorInvalidValue)
+               ? hipSuccess : hipErrorInvalidValue;
+}
+
 // Rebuild hipKernelNodeParams from the recorded struct plus the kernel tail.
 // `storage` and `arg_ptrs` own what the returned params point at and must
 // outlive the call that consumes them.
@@ -5442,6 +5667,8 @@ static bool rebuild_kernel_node_params(
 
     arg_storage.reserve(num_args);
     decode_kernel_args(ctx, p, end, num_args, kernel_name, arg_ptrs, arg_storage);
+    if (!kernel_args_fit_signature(ctx, api, kernel_name, func, arg_storage))
+        return false;
 
     // CLR's GraphKernelNode::getFunc first asks the statically-registered
     // code-object table what host address this is, and falls back to reading
@@ -5506,7 +5733,7 @@ hipError_t playback_hipGraphKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return set_params_refused(ctx, "hipGraphKernelNodeSetParams", a->ret);
     hipError_t r = hipGraphKernelNodeSetParams(node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;
@@ -5527,7 +5754,8 @@ hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx,
                                     sizeof(*a), a->pNodeParams_bytes,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage))
-        return hipSuccess;
+        return set_params_refused(ctx, "hipGraphExecKernelNodeSetParams",
+                                  a->ret);
     hipError_t r = hipGraphExecKernelNodeSetParams(exec, node, &knp);
     return hrr_replayed_recorded_error(ctx, "hipGraphExecKernelNodeSetParams",
                                        a->ret, r) ? hipSuccess : r;
@@ -5725,7 +5953,9 @@ hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx,
 }
 
 // Translate a recorded HIP_MEMCPY3D in place. A host operand is a payload the
-// archive never carried, so it is reported rather than passed through.
+// archive never carried, so it is reported rather than passed through. An array
+// replay never created becomes null, which CLR refuses with hipErrorInvalidValue
+// (ihipDrvMemcpy3D_validate), also for the graph set-params calls.
 static bool translate_drv_memcpy3d(PlaybackContext& ctx, const char* api,
                                    HIP_MEMCPY3D& c) {
     struct Side { const char* what; hipMemoryType type; const void* host;

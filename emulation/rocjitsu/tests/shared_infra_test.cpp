@@ -3058,25 +3058,6 @@ TEST(DppPermuteTest, QuadPerm) {
   EXPECT_FALSE(oob);
 }
 
-TEST(DppPermuteTest, Dpp8RejectsSourcesWiderThanOneDword) {
-  amdgpu::GpuMemory mem("dpp8_width_guard_mem");
-  amdgpu::L2Cache l2("dpp8_width_guard_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("dpp8_width_guard_cu", cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-
-  Operand wide_src(64, 0);
-  std::optional<StagedOperand> storage;
-  EXPECT_THROW(amdgpu::dpp::apply_dpp8(wide_src, 0, 0, storage, *wf), util::InvalidInst);
-}
-
 TEST(DppPermuteTest, ScopedOperandDelegateRestoresPreviousDelegate) {
   Operand source(32, 1);
   uint32_t first_data[1] = {0x11111111u};

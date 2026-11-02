@@ -42,7 +42,7 @@
 ///            backwards compatible code changes in PAL at build time (e.g. new output fields, enums).
 ///
 /// @ingroup LibInit
-#define PAL_INTERFACE_MAJOR_VERSION 1011
+#define PAL_INTERFACE_MAJOR_VERSION 1018
 
 /// Minimum major interface version. This is the minimum interface version PAL supports in order to support backward
 /// compatibility. When it is equal to PAL_INTERFACE_MAJOR_VERSION, only the latest interface version is supported.

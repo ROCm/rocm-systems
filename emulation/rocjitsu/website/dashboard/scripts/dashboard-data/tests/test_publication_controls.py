@@ -107,7 +107,8 @@ def publication(tmp_path):
         'BENCHMARK_BRANCH': 'develop',
         'BENCHMARK_COMMIT_MESSAGE': 'Measured "subject" $(false)\nbody',
         'BENCHMARK_MACHINE': 'fictional-machine',
-        'WORKFLOW_COMMIT_SHA': raw['provenance']['rocjitsu']['rocjitsu_commit_sha'],
+        'WORKFLOW_COMMIT_SHA': 'c' * 40,
+        'BENCHMARK_SHA': raw['provenance']['rocjitsu']['rocjitsu_commit_sha'],
         'TENSILE_COMMIT_SHA': 'd' * 40,
         'SOURCE_BASE_BRANCH': '',
         'SOURCE_BASE_SHA': '',
@@ -143,7 +144,13 @@ def test_publication_only_rerun_keeps_benchmark_artifact_and_identity(
     recorded = subprocess.run(
         ['bash', '-e', '-o', 'pipefail', '-c', source],
         cwd=ctx.repo,
-        env={**ctx.env, 'GITHUB_OUTPUT': str(output)},
+        env={
+            **ctx.env,
+            'GITHUB_OUTPUT': str(output),
+            'GITHUB_SHA': ctx.env['WORKFLOW_COMMIT_SHA'],
+            'BENCHMARK_SHA': git(ctx.repo, 'rev-parse', 'HEAD').stdout.strip(),
+            'BENCHMARK_DIR': ctx.env['RUNNER_TEMP'],
+        },
         capture_output=True,
         text=True,
     )
@@ -190,6 +197,143 @@ def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
             'pull_request': {'number': 42, 'url': 'https://example.invalid/pull/42'},
         },
     }
+
+
+@pytest.mark.parametrize('status', ['completed', 'failed', 'missing'])
+def test_artifact_records_workflow_pin_without_publication(publication, status):
+    ctx = publication
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    steps = workflow['jobs']['benchmark']['steps']
+    record = next(
+        (s for s in steps if s['name'] == 'Record result workflow revision'),
+        {'run': ''},
+    )
+    result_dir = Path(ctx.env['RESULTS_DOWNLOAD_DIR'])
+    result_file = result_dir / 'run.json'
+    raw = json.loads(result_file.read_text())
+    if status == 'missing':
+        result_file.unlink()
+    else:
+        raw['execution_summary']['status'] = status
+        result_file.write_text(json.dumps(raw))
+    result = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', record['run']],
+        env={
+            **ctx.env,
+            'ROCJITSU_RESULT_DIR': str(result_dir),
+            'GITHUB_SHA': ctx.env['WORKFLOW_COMMIT_SHA'],
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if status == 'missing':
+        assert not result_file.exists()
+    else:
+        observed = json.loads(result_file.read_text())
+        expected = json.loads(json.dumps(raw))
+        expected['publication']['workflow_commit_sha'] = ctx.env['WORKFLOW_COMMIT_SHA']
+        assert observed == expected
+        assert observed['provenance'] == ctx.raw['provenance']
+        assert (
+            observed['publication']['workflow_commit_sha'] != ctx.env['BENCHMARK_SHA']
+        )
+    # This step must also run after suite failure, independent of publication.
+    assert (
+        record['if']
+        == "${{ always() && (steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure') }}"
+    )
+    names = [s['name'] for s in steps]
+    assert (
+        names.index('Run performance suite')
+        < names.index(record['name'])
+        < names.index('Upload benchmark diagnostics')
+    )
+    assert not ctx.candidate.exists()
+
+
+def test_selected_source_and_workflow_revisions_reach_real_consumer(publication):
+    ctx = publication
+    benchmark = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']
+    record = next(
+        s for s in benchmark['steps'] if s['name'] == 'Record result workflow revision'
+    )
+    recorded = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', record['run']],
+        env={
+            **ctx.env,
+            'ROCJITSU_RESULT_DIR': ctx.env['RESULTS_DOWNLOAD_DIR'],
+            'GITHUB_SHA': ctx.env['WORKFLOW_COMMIT_SHA'],
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert recorded.returncode == 0, recorded.stdout + recorded.stderr
+    artifact = json.loads(
+        (Path(ctx.env['RESULTS_DOWNLOAD_DIR']) / 'run.json').read_text()
+    )
+    assert (
+        artifact['publication']['workflow_commit_sha'] == ctx.env['WORKFLOW_COMMIT_SHA']
+    )
+    ctx.env.update(
+        BENCHMARK_BRANCH='feature/source',
+        GITHUB_EVENT_NAME='workflow_dispatch',
+        SOURCE_BASE_BRANCH='develop',
+        SOURCE_BASE_SHA='b' * 40,
+        SOURCE_PULL_REQUEST_NUMBER='42',
+        SOURCE_PULL_REQUEST_URL='https://github.com/ROCm/rocm-systems/pull/42',
+    )
+    result = execute(
+        ('Fill publication metadata', 'Validate publication candidate'), ctx
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = subprocess.run(
+        [
+            'node',
+            '--input-type=module',
+            '-e',
+            '''
+import fs from 'node:fs';
+const { adaptPublishedDashboardData } = await import(process.argv[1]);
+const run = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const index = { runFiles: ['runs/side-branches/github-123-attempt-1.json'] };
+const { data, sourceData } = adaptPublishedDashboardData({ index, runs: [run] });
+console.log(JSON.stringify({ normalized: data.allRuns[0], raw: sourceData.runs[0] }));
+''',
+            (DASHBOARD / 'src/data/dashboardDataAdapter.js').as_uri(),
+            str(ctx.candidate),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    consumed = json.loads(result.stdout)
+    native = consumed['normalized']['provenance']
+    assert (
+        native['rocjitsuCommitSha']
+        == ctx.env['BENCHMARK_SHA']
+        != ctx.env['WORKFLOW_COMMIT_SHA']
+    )
+    assert native['commitMessage'] == ctx.env['BENCHMARK_COMMIT_MESSAGE']
+    assert (
+        next(
+            item['value']
+            for item in native['details']
+            if item['key'] == 'rocjitsu.workflow_commit_sha'
+        )
+        == ctx.env['WORKFLOW_COMMIT_SHA']
+    )
+    assert consumed['normalized']['branch'] == 'feature/source'
+    assert consumed['normalized']['sourceBase'] == {
+        'branch': 'develop',
+        'commit': 'b' * 40,
+    }
+    assert consumed['normalized']['pullRequest']['number'] == 42
+    assert consumed['raw'] == json.loads(ctx.candidate.read_text())
+    assert consumed['raw']['provenance'] == ctx.raw['provenance']
 
 
 @pytest.mark.parametrize('optional', ['null', 'absent', 'populated'])
@@ -267,7 +411,7 @@ def test_gate_requires_candidate_path(publication):
 
 def test_gate_rejects_nulls_from_actual_workflow_enrichment(publication):
     ctx = publication
-    ctx.env.update(BENCHMARK_MACHINE='', WORKFLOW_COMMIT_SHA='c' * 40)
+    ctx.env.update(BENCHMARK_MACHINE='', BENCHMARK_SHA='e' * 40)
     result = execute(('Fill publication metadata', *PUBLICATION_STEPS), ctx)
     assert result.returncode == 1, result.stdout + result.stderr
     assert 'publication.machine_label' in result.stdout
@@ -349,6 +493,7 @@ def test_unknown_metadata_and_unaligned_message_stay_null(publication):
     ctx.env.update(
         BENCHMARK_MACHINE='',
         WORKFLOW_COMMIT_SHA='c' * 40,
+        BENCHMARK_SHA='e' * 40,
         TENSILE_COMMIT_SHA='',
         GITHUB_EVENT_NAME='unknown',
     )
