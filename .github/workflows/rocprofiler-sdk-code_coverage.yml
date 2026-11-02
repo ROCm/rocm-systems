@@ -133,7 +133,7 @@ jobs:
       GCC_COMPILER_VERSION: 11
 
     steps:
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & ROCDecode & ROCJPEG
       uses: actions/checkout@v6
       with:
         sparse-checkout: |
@@ -147,6 +147,8 @@ jobs:
           projects/hip
           projects/hrr
           projects/hipfile
+          projects/rocdecode
+          projects/rocjpeg
         submodules: false
         set-safe-directory: true
 
@@ -176,22 +178,6 @@ jobs:
       timeout-minutes: 15
       continue-on-error: true
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
-
-    - name: Clone ROCDecode
-      uses: actions/checkout@v6
-      with:
-        repository: 'ROCm/rocDecode'
-        ref: 'release/rocm-rel-7.0'
-        set-safe-directory: true
-        path: 'rocDecode'
-
-    - name: Clone ROCJPEG
-      uses: actions/checkout@v6
-      with:
-        repository: 'ROCm/rocJPEG'
-        ref: 'release/rocm-rel-7.0'
-        set-safe-directory: true
-        path: 'rocJPEG'
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
