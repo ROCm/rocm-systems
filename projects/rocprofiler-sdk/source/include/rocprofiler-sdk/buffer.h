@@ -113,10 +113,12 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
  * context may precede or follow the flush if no new work is submitted in between; stopping
  * alone does not deliver buffered kernel records.
  *
- * Calls from SDK completion or buffer-callback threads return
- * ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY when waiting could deadlock. Retry from an application
- * thread. If the completion pipeline is unavailable, available buffered records are delivered
- * and the call returns an error instead of promising complete delivery. Always check the status.
+ * ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY means the records already in the buffer were delivered
+ * but the window is not guaranteed complete. It is returned when the caller is an SDK completion
+ * or buffer-callback thread, where waiting could deadlock, and when a completion pipeline is no
+ * longer draining. Treat it as an incomplete window rather than a failed call: retry from an
+ * application thread if the cause was re-entry. Always check the status; do not treat a
+ * non-success return as fatal.
  *
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t

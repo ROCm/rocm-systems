@@ -310,7 +310,7 @@ struct reader_state
     std::atomic<bool> reader_unavailable = {false};
     // Bumped once per completed drain pass. A sync point waits for it to advance
     // twice, which proves a whole pass ran after the request.
-    std::atomic<uint64_t> drain_epoch = {0};
+    std::atomic<uint64_t>                                     drain_epoch = {0};
     common::Synchronized<std::vector<reader_fence_request_t>> fences      = {};
 
     // Copier is the sole producer, processor the sole consumer.
@@ -649,8 +649,6 @@ session_has_pending(const dlog_session& s)
 uint64_t
 process_batch(processor_state& proc, const record_batch& batch)
 {
-    if(batch.complete_fence()) return 0;
-
     const uint32_t _gpu     = batch.gpu_id;
     auto&          _pairing = proc.for_gpu(_gpu);
 
@@ -921,7 +919,9 @@ processor_loop()
             continue;
         }
 
-        process_batch(proc, *_batch);
+        // A fence marker carries no records: fulfilling it IS the processing, and it proves every
+        // batch queued ahead of it has already been paired and handed off.
+        if(!_batch->take_fence()) process_batch(proc, *_batch);
         st.pipe.pop();
 
         // Retained-start eviction is stream-driven inside process_batch (at its
@@ -929,10 +929,11 @@ processor_loop()
         // purge or wall-clock timer here.
     }
 
-    // Drain whatever the reader published on its way out.
+    // Drain whatever the reader published on its way out, markers included: a flush blocked on
+    // one must not outlive the thread that answers it.
     while(auto* _batch = st.pipe.peek())
     {
-        process_batch(proc, *_batch);
+        if(!_batch->take_fence()) process_batch(proc, *_batch);
         st.pipe.pop();
     }
 
@@ -977,7 +978,7 @@ all_live_overflow_empty(const reader_state& st)
 uint64_t
 drain_sessions_bounded(reader_state& st)
 {
-    uint64_t seen = 0;
+    uint64_t seen     = 0;
     auto     requests = st.fences.wlock([](auto& pending) {
         auto captured = std::vector<reader_fence_request_t>{};
         captured.swap(pending);

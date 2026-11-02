@@ -64,8 +64,8 @@ fork_stale()
 
 namespace
 {
-using task_group_vec_t     = common::container::stable_vector<task_group_t*>;
-using thread_pool_config_t = PTL::ThreadPool::Config;
+using task_group_vec_t              = common::container::stable_vector<task_group_t*>;
+using thread_pool_config_t          = PTL::ThreadPool::Config;
 thread_local bool task_group_thread = false;
 
 auto affinity_functor(intmax_t)
@@ -153,7 +153,11 @@ TaskGroup::complete_async(uint64_t ticket)
             m_async_finished.emplace(ticket);
         }
     }
-    m_async_condition.notify_all();
+    // Gated on a waiter actually existing: this runs once per emitted dispatch record, and in the
+    // overwhelmingly common case nobody is fencing. Waiters publish themselves under
+    // m_async_mutex before they wait and re-test the predicate after taking it, so a waiter that
+    // arrives between the unlock above and this load cannot miss the state it just published.
+    if(m_async_waiters.load(std::memory_order_acquire) > 0) m_async_condition.notify_all();
     --m_tasks_count;
 }
 
@@ -191,21 +195,37 @@ TaskGroup::get_async_fence() const
     return m_async_submitted.load(std::memory_order_acquire);
 }
 
+// Registers a waiter for the lifetime of a wait so complete_async can skip notifying when nobody
+// is listening. Counted under m_async_mutex, which is also what the condition variable uses, so a
+// completion either sees the count or has already published the state the waiter re-tests.
+struct TaskGroup::async_waiter
+{
+    explicit async_waiter(TaskGroup& group)
+    : m_group{group}
+    {
+        m_group.m_async_waiters.fetch_add(1, std::memory_order_release);
+    }
+    ~async_waiter() { m_group.m_async_waiters.fetch_sub(1, std::memory_order_release); }
+
+    async_waiter(const async_waiter&) = delete;
+    async_waiter(async_waiter&&)      = delete;
+    async_waiter& operator=(const async_waiter&) = delete;
+    async_waiter& operator=(async_waiter&&) = delete;
+
+private:
+    TaskGroup& m_group;
+};
+
 bool
 TaskGroup::wait_async(uint64_t fence)
 {
     if(is_task_group_thread() ||
        m_fork_generation != g_fork_generation.load(std::memory_order_acquire))
         return false;
-    auto lock = std::unique_lock<std::mutex>{m_async_mutex};
+    auto lock    = std::unique_lock<std::mutex>{m_async_mutex};
+    auto waiting = async_waiter{*this};
     m_async_condition.wait(lock, [this, fence]() { return m_async_completed >= fence; });
     return true;
-}
-
-bool
-TaskGroup::wait_async_for(uint64_t timeout_ns)
-{
-    return wait_async_for(get_async_fence(), timeout_ns);
 }
 
 bool
@@ -215,7 +235,8 @@ TaskGroup::wait_async_for(uint64_t fence, uint64_t timeout_ns)
        m_fork_generation != g_fork_generation.load(std::memory_order_acquire))
         return false;
 
-    auto lock = std::unique_lock<std::mutex>{m_async_mutex};
+    auto lock    = std::unique_lock<std::mutex>{m_async_mutex};
+    auto waiting = async_waiter{*this};
     return m_async_condition.wait_for(lock, std::chrono::nanoseconds{timeout_ns}, [this, fence]() {
         return m_async_completed >= fence;
     });

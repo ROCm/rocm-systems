@@ -279,16 +279,23 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     inside_async_signal_handler = true;
     auto handler_scope          = common::scope_destructor{
         [previous_handler]() { inside_async_signal_handler = previous_handler; }};
+    // find, not at(): a handler reached without a tracked entry still has records to emit, and
+    // throwing out of an HSA callback would take the process with it. Clearing the signal handle
+    // under the same lock is what tells a concurrent flush_async_signal_records that this entry is
+    // already being serviced and its signal must no longer be loaded.
     auto completion = get_async_completions().wlock([data](auto& pending) {
-        auto current    = pending.at(data);
-        current->signal = null_hsa_signal;
-        return current;
+        auto itr = pending.find(data);
+        if(itr == pending.end()) return std::shared_ptr<async_completion_state>{};
+        itr->second->signal = null_hsa_signal;
+        return itr->second;
     });
 
     // cleanup the pooled signal data and release the signal back to the pool for reuse
     auto _cleanup = common::scope_destructor{[&_session_ptr, data, completion]() {
         get_async_completions().wlock([data](auto& pending) { pending.erase(data); });
-        completion->completion.set_value();
+        // Last, after the records above are out: a flush waiting on this future treats it as
+        // proof the batch reached the buffer.
+        if(completion) completion->completion.set_value();
         _session_ptr->reset();
         delete _session_ptr;
         _session_ptr = nullptr;
@@ -1568,10 +1575,21 @@ flush_async_signal_records()
         }
         return ready;
     });
+    // Polled rather than blocking outright. There is deliberately no wall-clock budget -- the
+    // contract is "wait for the work you captured" -- but a handler that finalization has already
+    // taken out of circulation will never run, and its records are not coming, so that is reported
+    // as incomplete delivery instead of parking the caller forever. A broken promise (the entry
+    // was erased before its handler emitted) reaches the same conclusion through get().
     try
     {
         for(const auto& completion : completions)
+        {
+            while(completion.wait_for(std::chrono::milliseconds{1}) != std::future_status::ready)
+            {
+                if(registration::get_fini_status() != 0) return false;
+            }
             completion.get();
+        }
     } catch(const std::future_error&)
     {
         return false;
@@ -1594,8 +1612,11 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
 
     auto completion    = std::make_shared<async_completion_state>();
     completion->signal = raw_signal;
+    // insert_or_assign, not emplace: emplace keeps the existing entry on a key collision, which
+    // would leave this submission waiting on a promise another handler already satisfied -- and
+    // satisfying it twice inside that handler's scope destructor is a std::terminate.
     get_async_completions().wlock(
-        [data, &completion](auto& pending) { pending.emplace(data, completion); });
+        [data, &completion](auto& pending) { pending.insert_or_assign(data, completion); });
 
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);

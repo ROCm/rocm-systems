@@ -81,6 +81,18 @@ TEST(rocprofiler_lib, buffer)
     EXPECT_EQ(destroy_status, ROCPROFILER_STATUS_SUCCESS);
 }
 
+namespace
+{
+// The fence API always names an explicit ticket, because production callers must not be extended
+// by work submitted after they captured it. Most of these cases want "everything submitted so
+// far", so they capture it at the call site.
+bool
+wait_all_for(rocprofiler::internal_threading::task_group_t& group, uint64_t timeout_ns)
+{
+    return group.wait_async_for(group.get_async_fence(), timeout_ns);
+}
+}  // namespace
+
 TEST(rocprofiler_lib, completion_fence_waits_and_recovers_after_timeout)
 {
     auto worker    = rocprofiler::internal_threading::task_group_t{1};
@@ -97,13 +109,13 @@ TEST(rocprofiler_lib, completion_fence_waits_and_recovers_after_timeout)
         completed.store(true, std::memory_order_release);
     });
     EXPECT_EQ(begin.wait_for(std::chrono::seconds{2}), std::future_status::ready);
-    EXPECT_FALSE(worker.wait_async_for(0));
-    EXPECT_FALSE(worker.wait_async_for(1'000'000));
+    EXPECT_FALSE(wait_all_for(worker, 0));
+    EXPECT_FALSE(wait_all_for(worker, 1'000'000));
     EXPECT_FALSE(completed.load(std::memory_order_acquire));
     released.set_value();
-    EXPECT_TRUE(worker.wait_async_for(2'000'000'000));
+    EXPECT_TRUE(wait_all_for(worker, 2'000'000'000));
     EXPECT_TRUE(completed.load(std::memory_order_acquire));
-    EXPECT_TRUE(worker.wait_async_for(0));
+    EXPECT_TRUE(wait_all_for(worker, 0));
     worker.join();
 }
 
@@ -117,8 +129,8 @@ TEST(rocprofiler_lib, completion_fence_rejects_worker_reentry)
         auto ready  = result.get_future();
         auto task   = [&]() {
             result.set_value(rocprofiler::internal_threading::is_task_group_thread() &&
-                             !worker.wait_async_for(1'000'000'000) &&
-                             !other.wait_async_for(1'000'000'000));
+                             !wait_all_for(worker, 1'000'000'000) &&
+                             !wait_all_for(other, 1'000'000'000));
         };
         if(use_async)
             worker.async(task);
@@ -138,7 +150,7 @@ TEST(rocprofiler_lib, completion_fence_rejects_inherited_pool)
     auto child  = fork();
     ASSERT_GE(child, 0);
     if(child == 0)
-        _exit(rocprofiler::internal_threading::fork_stale() && !worker.wait_async_for(0)
+        _exit(rocprofiler::internal_threading::fork_stale() && !wait_all_for(worker, 0)
                   ? EXIT_SUCCESS
                   : EXIT_FAILURE);
 
@@ -146,7 +158,7 @@ TEST(rocprofiler_lib, completion_fence_rejects_inherited_pool)
     ASSERT_EQ(waitpid(child, &status, 0), child);
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(WEXITSTATUS(status), EXIT_SUCCESS);
-    EXPECT_TRUE(worker.wait_async_for(0));
+    EXPECT_TRUE(wait_all_for(worker, 0));
 }
 
 TEST(rocprofiler_lib, completion_fence_supports_concurrent_callers)
@@ -158,7 +170,7 @@ TEST(rocprofiler_lib, completion_fence_supports_concurrent_callers)
     auto callers = std::vector<std::future<bool>>{};
     for(unsigned index = 0; index < 4; ++index)
         callers.emplace_back(std::async(std::launch::async, [&]() {
-            return worker.wait_async_for(2'000'000'000) &&
+            return wait_all_for(worker, 2'000'000'000) &&
                    written.load(std::memory_order_acquire) == 64;
         }));
     for(auto& caller : callers)
@@ -182,9 +194,9 @@ TEST(rocprofiler_lib, completion_fence_waits_for_multiple_workers)
             completed.fetch_add(1, std::memory_order_release);
         });
     EXPECT_EQ(ready.wait_for(std::chrono::seconds{2}), std::future_status::ready);
-    EXPECT_FALSE(worker.wait_async_for(0));
+    EXPECT_FALSE(wait_all_for(worker, 0));
     released.set_value();
-    EXPECT_TRUE(worker.wait_async_for(2'000'000'000));
+    EXPECT_TRUE(wait_all_for(worker, 2'000'000'000));
     EXPECT_EQ(completed.load(std::memory_order_acquire), 2);
     worker.join();
 }
@@ -217,7 +229,7 @@ TEST(rocprofiler_lib, completion_fence_waits_for_another_producer)
     EXPECT_EQ(first_ready.wait_for(std::chrono::seconds{2}), std::future_status::ready);
     auto fence = std::async(std::launch::async, [&]() {
         fence_started.set_value();
-        return worker.wait_async_for(2'000'000'000);
+        return wait_all_for(worker, 2'000'000'000);
     });
     EXPECT_EQ(fence_submitted.wait_for(std::chrono::seconds{2}), std::future_status::ready);
     first_release.set_value();
@@ -240,7 +252,7 @@ TEST(rocprofiler_lib, completion_fence_excludes_later_submissions)
     worker.async([&]() { later_released.wait(); });
     first_release.set_value();
     EXPECT_TRUE(worker.wait_async_for(fence, 2'000'000'000));
-    EXPECT_FALSE(worker.wait_async_for(0));
+    EXPECT_FALSE(wait_all_for(worker, 0));
     later_release.set_value();
     worker.join();
 }

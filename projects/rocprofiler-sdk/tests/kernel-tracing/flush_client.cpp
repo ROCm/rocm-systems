@@ -162,13 +162,33 @@ flush_contract_begin(int delayed, int reentry)
     return check(rocprofiler_start_context(current.context), "start_context") ? 0 : 1;
 }
 
+// A flush issued from another application thread while the window is still running. Several of
+// these at once is what puts more than one requester in the completion fence's queue at a time,
+// which is the state the monitor's queue-swap and its shutdown drain have to agree about. Records
+// delivered early are not a failure: verify() checks the cumulative set, and the buffer callback
+// flags any dispatch id it sees twice.
+extern "C" __attribute__((visibility("default"))) int
+flush_contract_poke()
+{
+    auto& current = state();
+    auto  status  = rocprofiler_flush_buffer(current.buffer);
+    // Another flush already draining this buffer is expected under concurrency.
+    if(status == ROCPROFILER_STATUS_SUCCESS || status == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+        return 0;
+    check(status, "concurrent flush_buffer");
+    current.bad.store(true);
+    return 1;
+}
+
 extern "C" __attribute__((visibility("default"))) int
 flush_contract_end(int stop_first, uint64_t expected)
 {
     auto& current = state();
-    if(stop_first != 0 && !check(rocprofiler_stop_context(current.context), "stop_context")) return 1;
+    if(stop_first != 0 && !check(rocprofiler_stop_context(current.context), "stop_context"))
+        return 1;
     const auto status = rocprofiler_flush_buffer(current.buffer);
-    if(stop_first == 0 && !check(rocprofiler_stop_context(current.context), "stop_context")) return 1;
+    if(stop_first == 0 && !check(rocprofiler_stop_context(current.context), "stop_context"))
+        return 1;
     return check(status, "flush_buffer") ? verify(expected) : 1;
 }
 

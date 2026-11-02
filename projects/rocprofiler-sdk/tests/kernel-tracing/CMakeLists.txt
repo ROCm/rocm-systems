@@ -24,7 +24,7 @@ configure_file(flush_runner.py ${CMAKE_CURRENT_BINARY_DIR}/flush_runner.py COPYO
 
 foreach(_MODE signal expanded signal-less)
     foreach(_ORDER stop-first flush-first)
-        foreach(_CASE tail delayed unfinished reentry repeat)
+        foreach(_CASE tail delayed unfinished reentry repeat concurrent)
             rocprofiler_add_integration_execute_test(
                 kernel-flush-${_MODE}-${_ORDER}-${_CASE}
                 COMMAND

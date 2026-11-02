@@ -41,12 +41,15 @@ not synchronize GPU execution and is not extended by later submissions. There is
 no wall-clock timeout for synchronous delivery. Tool callbacks must return and
 must not wait for the application thread that is itself waiting in flush.
 
-Calling from an SDK completion or buffer-callback thread can return
-``ROCPROFILER_STATUS_ERROR_BUFFER_BUSY`` to avoid self-deadlock. Retry from an
-application thread. If a completion pipeline becomes unavailable, the SDK flushes
-the records already available and returns an error; clients must not interpret
-that result as a complete window. The existing dispatch-log quiescence budget
-applies to lifecycle/teardown operations, not this explicit delivery contract.
+``ROCPROFILER_STATUS_ERROR_BUFFER_BUSY`` reports an incomplete window, not a
+failed call: the records already in the buffer were delivered, but the SDK will
+not promise that every synchronized dispatch is among them. It is returned when
+the caller is an SDK completion or buffer-callback thread, where waiting could
+deadlock, and when a completion pipeline is no longer draining. Retry from an
+application thread if the cause was re-entry. Clients must check the status and
+must not treat a non-success return as fatal; aborting over an incomplete trace
+loses the trace entirely. The existing dispatch-log quiescence budget applies to
+lifecycle/teardown operations, not this explicit delivery contract.
 
 Subscribing to buffer tracing services
 --------------------------------------

@@ -11,6 +11,7 @@
 #include <future>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -70,13 +71,21 @@ main(int argc, char** argv)
     hip_check(hipSetDevice(0));
     hipDeviceProp_t properties = {};
     hip_check(hipGetDeviceProperties(&properties, 0));
-    const auto limit        = static_cast<uint64_t>(properties.clockRate) * 1000 * 20;
+    // clockRate is deprecated and reports 0 on some runtime/device combinations. A zero limit
+    // would make the "unfinished" kernel exit immediately and fail the case for the wrong reason,
+    // so fall back to a nominal 1 GHz. The witness, not this bound, is what the test asserts on;
+    // the bound only stops a wedged kernel from outliving the process.
+    const auto clock_khz    = properties.clockRate > 0 ? static_cast<uint64_t>(properties.clockRate)
+                                                       : static_cast<uint64_t>(1000 * 1000);
+    const auto limit        = clock_khz * 1000 * 20;
     const bool stop_first   = std::string{argv[1]} == "stop-first";
     const auto scenario     = std::string{argv[2]};
     const bool unfinished   = scenario == "unfinished";
+    const bool concurrent   = scenario == "concurrent";
     const int  windows      = scenario == "repeat" ? 3 : 1;
     auto       begin_window = load<int (*)(int, int)>("flush_contract_begin");
     auto       end_window   = load<int (*)(int, uint64_t)>("flush_contract_end");
+    auto       poke_flush   = load<int (*)()>("flush_contract_poke");
     auto       flush_late   = load<int (*)(uint64_t)>("flush_contract_late");
 
     witness_state* host = nullptr;
@@ -124,6 +133,21 @@ main(int argc, char** argv)
                   std::chrono::steady_clock::now() < deadline)
                 std::this_thread::yield();
         }
+        // Background flushers, so the fence queue holds several requests at once while dispatches
+        // are still completing. They are retired before the window's own flush so the record
+        // count stays deterministic; what they exercise is the concurrent path, not the tail.
+        auto pokers      = std::vector<std::thread>{};
+        auto poking      = std::atomic<bool>{concurrent};
+        auto poke_failed = std::atomic<bool>{false};
+        for(int poker = 0; concurrent && poker < 4; ++poker)
+            pokers.emplace_back([&]() {
+                while(poking.load(std::memory_order_acquire))
+                {
+                    if(poke_flush() != 0) poke_failed.store(true, std::memory_order_release);
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+            });
+
         const auto started = std::chrono::steady_clock::now();
         for(int burst = 0; burst < 2; ++burst)
         {
@@ -131,6 +155,16 @@ main(int argc, char** argv)
             for(int dispatch = 0; dispatch < 42; ++dispatch)
                 tiny_dispatch<<<1, 1, 0, stream>>>(device);
             hip_check(hipStreamSynchronize(stream));
+        }
+
+        poking.store(false, std::memory_order_release);
+        for(auto& poker : pokers)
+            poker.join();
+        if(poke_failed.load(std::memory_order_acquire))
+        {
+            std::puts("[flush-contract] FAIL concurrent flush reported an error");
+            result = 1;
+            break;
         }
         result = end_window(stop_first, 84);
         if(__atomic_load_n(&host->count, __ATOMIC_ACQUIRE) != 84) result = 1;
