@@ -52,11 +52,15 @@ using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
+// LL block widths; a two-shot that takes over a one-shot message runs kDdaLLArOneShotThreads.
+constexpr unsigned kDdaLLArOneShotThreads = 512;
+constexpr unsigned kDdaLLArTwoShotThreads = 1024;
+
 // Single source of the launch geometry: 1-D grid over 8-byte LL packets, capped
 // low (LL serves tiny messages where latency, not occupancy, dominates).
 static inline std::pair<dim3, dim3> ddaAllReduceFabricLLGeom(ncclComm* comm, size_t count, int typeSize) {
   const size_t nPk = ((size_t)count * (size_t)typeSize) >> 3; // 8 payload bytes per packet
-  const unsigned threads = 512;
+  const unsigned threads = kDdaLLArOneShotThreads;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -75,7 +79,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  const unsigned threads = 512;
+  const unsigned threads = kDdaLLArOneShotThreads;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -311,20 +315,19 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
 } // namespace
 
 // The LL two-shot pays off once it saves this much wire per rank over the one-shot.
-constexpr size_t kDdaArLLTwoShotMinSavedWireBytes = 1024 * 1024;
+constexpr size_t kDdaLLArTwoShotMinSavedWireBytes = 1024 * 1024;
 
-// Wire the LL two-shot saves per rank over the one-shot, bytes x (n - 1) x (n - 2) / n, is at least the minimum.
-static bool ddaArLLTwoShotSavesWire(size_t bytes, int nRanks) {
+// True when the LL two-shot saves at least that much wire per rank over the one-shot: bytes x (n - 1) x (n - 2) / n.
+static bool ddaLLArTwoShotSavesWire(size_t bytes, int nRanks) {
   const size_t n = (size_t)nRanks;
   const size_t k = (n - 1) * (n - 2);  // 0 at 1 and 2 ranks
   if (k != 0 && bytes > SIZE_MAX / k) {
     return true;
   }
-  return bytes * k / n >= kDdaArLLTwoShotMinSavedWireBytes;
+  return bytes * k / n >= kDdaLLArTwoShotMinSavedWireBytes;
 }
 
-// Shape/resource eligibility for the one-shot variant, independent of whether
-// the tier is switched on for this size.
+// One-shot shape, resources and the RCCL_DDA_LL_ONESHOT_THRESHOLD limit (1 MiB by default), before any crossover.
 static bool ddaLLArOneShotFits(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                ncclDataType_t datatype, ncclRedOp_t op) {
   (void)sendbuff;
@@ -368,7 +371,7 @@ static bool ddaLLArOneShotFits(ncclComm* comm, const void* sendbuff, void* recvb
   return true;
 }
 
-// One-shot eligibility; past rcclDdaLLOneShotThreshold() it yields to an eligible two-shot that saves enough wire.
+// One-shot eligibility; past rcclDdaLLOneShotCrossover() it yields to an eligible two-shot that saves enough wire.
 bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                             ncclDataType_t datatype, ncclRedOp_t op) {
   if (!ddaLLArOneShotFits(comm, sendbuff, recvbuff, count, datatype, op)) {
@@ -376,7 +379,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   }
   // Past the crossover a two-shot that takes the message and saves enough wire wins; the one-shot keeps the rest.
   const size_t bytes = count * ncclTypeSize(datatype);
-  if (bytes > rcclDdaLLOneShotThreshold(comm) && ddaArLLTwoShotSavesWire(bytes, comm->nRanks) &&
+  if (bytes > rcclDdaLLOneShotCrossover(comm) && ddaLLArTwoShotSavesWire(bytes, comm->nRanks) &&
       ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     return false;
   }
@@ -583,8 +586,9 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
   if (ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
-    // A message the one-shot fits but yielded keeps the one-shot's 512-thread blocks; the rest keep 1024.
-    const unsigned threads = ddaLLArOneShotFits(comm, sendbuff, recvbuff, count, datatype, op) ? 512 : 1024;
+    // A message the one-shot fits but yielded keeps the one-shot's block width.
+    const unsigned threads = ddaLLArOneShotFits(comm, sendbuff, recvbuff, count, datatype, op) ? kDdaLLArOneShotThreads
+                                                                                               : kDdaLLArTwoShotThreads;
     switch (datatype) {
     case ncclFloat32:
       return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream, threads);

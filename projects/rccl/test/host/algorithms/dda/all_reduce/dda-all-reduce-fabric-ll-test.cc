@@ -202,7 +202,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOnWh
 // Past this comm's crossover the one-shot yields to a two-shot that takes the message and keeps any other.
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_PastThisCommsCrossoverOnlyWhereTheTwoShotTakesIt) {
   const ncclComm* seen = nullptr;
-  g_rcclDdaLLOneShotThreshold = [&](const ncclComm* c) {
+  g_rcclDdaLLOneShotCrossover = [&](const ncclComm* c) {
     seen = c;
     return size_t{300000};
   };
@@ -214,7 +214,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_PastThisCommsCrossoverOn
 
 // The two-shot takes a message once it saves >= 1 MiB of wire per rank: bytes x (n - 1) x (n - 2) / n, 0 at 2 ranks.
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_TwoShotMustSaveOneMiBOfWirePerRank) {
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{300000}; };
+  g_rcclDdaLLOneShotCrossover = [](const ncclComm*) { return size_t{300000}; };
   comm().nRanks = 2;
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 262144)) << "2 ranks, 1 MiB: a two-shot saves no bytes";
   comm().nRanks = 4;
@@ -229,7 +229,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_TwoShotMustSaveOneMiBOfW
 
 // At 512 KiB and 1 MiB on 2-32 ranks the swap matches "3+ ranks and >= 2 MiB of one-shot wire" wherever a two-shot fits.
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SavedWireRuleKeepsThePowerOfTwoCells) {
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  g_rcclDdaLLOneShotCrossover = [](const ncclComm*) { return size_t{349520}; };
   int compared = 0;
   for (int n = 2; n <= 32; ++n) {
     comm().nRanks = n;
@@ -364,7 +364,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotFirstThenTwoShotElseInternalE
 // The tier gate and the launcher read one crossover: past it the two-shot runs where it takes the message.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_PastThisCommsOneShotCapRunsTwoShot) {
   comm().nRanks = 16;
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{131072}; };
+  g_rcclDdaLLOneShotCrossover = [](const ncclComm*) { return size_t{131072}; };
   EXPECT_EQ(RunOneLL(32768).kernel, (LLOneShot<float, 0>()));
   EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 36864, ncclFloat32, ncclSum));
   EXPECT_EQ(RunOneLL(36864).kernel, (LLTwoShot<float, 0>()));
@@ -540,7 +540,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotGridFollowsShardPackets) {
 
 // A two-shot past the one-shot crossover runs 512-thread blocks, at most the one-shot's grid (4r 1M, 8r/16r 512K, 1M).
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SwappedTwoShotKeepsTheOneShotsBlockWidth) {
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  g_rcclDdaLLOneShotCrossover = [](const ncclComm*) { return size_t{349520}; };
   const std::pair<int, const void*> ranks[] = {
       {4, LLTwoShot<float, 4>()}, {8, LLTwoShot<float, 8>()}, {16, LLTwoShot<float, 0>()}};
   for (int maxBlocks : {256, 8}) {  // 8 blocks: a 1024-thread grid would also fit the cap
@@ -565,7 +565,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SwappedTwoShotKeepsTheOneShotsBlockW
 
 // A two-shot the one-shot cannot take keeps a block per 1024 shard packets: a slot too small, or past its 1 MiB limit.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotTheOneShotRejectsKeepsItsOwnGrid) {
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  g_rcclDdaLLOneShotCrossover = [](const ncclComm*) { return size_t{349520}; };
   comm().ddaScratchBytes = size_t{16} << 20;  // 8 MiB banks on 8 ranks: a 1 MiB message needs 16 for the one-shot
   EXPECT_EQ(RunOneLL((size_t{1} << 20) / 4).kernel, (LLTwoShot<float, 8>()));
   EXPECT_EQ(Only().block.x, 1024u);

@@ -1746,7 +1746,7 @@ constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
-  t.ddaArLLOneShotMaxBytes = 349520;
+  t.ddaArLLOneShotCrossoverBytes = 349520;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
   t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
@@ -6973,7 +6973,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsCap) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 32;
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -6989,7 +6989,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverCap) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 8;
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -7003,7 +7003,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 32;
-        EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm));
+        EXPECT_EQ(349520u, rcclDdaLLOneShotCrossover(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -7829,13 +7829,13 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
           ASSERT_NE(nullptr, comm->archThresholds);
           for (int nRanks : {4, 8, 16, 32}) {
             comm->nRanks = nRanks;
-            EXPECT_EQ(part.second, rcclDdaLLOneShotThreshold(comm)) << (int)part.first << " " << nRanks;
+            EXPECT_EQ(part.second, rcclDdaLLOneShotCrossover(comm)) << (int)part.first << " " << nRanks;
           }
         }
         rcclArchThresholds noCap{};
         comm->archThresholds = &noCap;
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "a table without the field keeps the default";
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr)) << "no comm, no table: the default";
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(comm)) << "a table without the field keeps the default";
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(nullptr)) << "no comm, no table: the default";
         DeleteCommWithArch(comm);
       });
 }

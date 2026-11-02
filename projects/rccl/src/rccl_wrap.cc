@@ -1209,17 +1209,17 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLLTwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
-// RCCL_DDA_LL_ONESHOT_THRESHOLD wins when set; else its default, lowered to the table's ddaArLLOneShotMaxBytes.
-inline size_t rcclDdaLLOneShotThresholdTab(const rcclArchThresholds* table) {
+// RCCL_DDA_LL_ONESHOT_THRESHOLD wins when set; else its default, lowered to a nonzero ddaArLLOneShotCrossoverBytes.
+inline size_t rcclDdaLLOneShotCrossoverTab(const rcclArchThresholds* table) {
   static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_ONESHOT_THRESHOLD");
   const size_t threshold = (size_t)rcclParamDdaLLOneShotThreshold();
-  if (envSet || table == nullptr || table->ddaArLLOneShotMaxBytes == 0) {
+  if (envSet || table == nullptr || table->ddaArLLOneShotCrossoverBytes == 0) {
     return threshold;
   }
-  return std::min(threshold, table->ddaArLLOneShotMaxBytes);
+  return std::min(threshold, table->ddaArLLOneShotCrossoverBytes);
 }
-size_t rcclDdaLLOneShotThreshold(const ncclComm* comm) {
-  return rcclDdaLLOneShotThresholdTab(extAlgoArchTable(comm));
+size_t rcclDdaLLOneShotCrossover(const ncclComm* comm) {
+  return rcclDdaLLOneShotCrossoverTab(extAlgoArchTable(comm));
 }
 
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
