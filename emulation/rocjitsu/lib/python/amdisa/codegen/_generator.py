@@ -6628,15 +6628,18 @@ class CodeGenerator:
 
     @staticmethod
     def _is_unimplemented_execute_stub(body: str) -> bool:
-        # Comments may precede the stub or follow its throw. Require the whole
-        # body to match so conditional failures and side effects stay intact.
+        # Require the entire body to be a failure, so conditional rejection and
+        # side effects still receive modifier setup and restoration.
         statements = re.sub(r'//[^\n]*|/\*.*?\*/', '', body, flags=re.DOTALL)
-        return (
-            re.fullmatch(
+        return any(
+            re.fullmatch(pattern, statements) is not None
+            for pattern in (
+                # Matrix generation still has legacy stubs until its migration lands.
                 r'\s*\(void\)wf;\s*throw\s+util::UnimplementedInst\(mnemonic\(\)\);\s*',
-                statements,
+                r'\s*(?:\(void\)wf;\s*)?wf\.report_instruction_execution_error\(\s*'
+                r'amdgpu::InstructionExecutionError::UnimplementedInstruction\s*\);'
+                r'\s*(?:return;\s*)?',
             )
-            is not None
         )
 
     def _pc_address_format(self) -> tuple[int, str, str]:
@@ -7253,7 +7256,11 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'nop':
-            return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                '  return;'
+            )
 
         if cls == 'setkill':
             # A killed wave still drains outstanding memory operations.
@@ -7986,8 +7993,9 @@ class CodeGenerator:
             # A profile without formatted memory instructions must not acquire
             # executable format operations from metadata alone.
             return (
-                '  (void)wf;\n'
-                '  throw util::UnimplementedInst(mnemonic()); '
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                '  return; '
                 '// packed D16 FORMAT execution intentionally unimplemented'
             )
 
@@ -8232,7 +8240,11 @@ class CodeGenerator:
             )
             return '\n'.join(L)
 
-        return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // unhandled semantic class: {cls}'
+        return (
+            '  wf.report_instruction_execution_error(\n'
+            '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+            f'  return; // unhandled semantic class: {cls}'
+        )
 
     def _gen_smem_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9165,7 +9177,11 @@ class CodeGenerator:
         explicit unimplemented-instruction error.
         """
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled flat_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled flat_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9213,7 +9229,11 @@ class CodeGenerator:
     ) -> str:
         """Generate buffer_atomic execute() body (MUBUF encoding)."""
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled buffer_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled buffer_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9279,7 +9299,11 @@ class CodeGenerator:
     ) -> str:
         """Generate ds_atomic execute() body (DS encoding)."""
         if sem.operation is None or sem.operation not in self._ATOMIC_OP_ENUM:
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_atomic variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled ds_atomic variant ({sem.name})'
+            )
 
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         esz = sem.elem_size or 4
@@ -9472,7 +9496,11 @@ class CodeGenerator:
     ) -> str:
         """Generate ds_append/ds_consume execute() body (DS encoding)."""
         if sem.operation not in ('append', 'consume'):
-            return f'  (void)wf;\n  throw util::UnimplementedInst(mnemonic()); // TODO: unhandled ds_append_consume variant ({sem.name})'
+            return (
+                '  wf.report_instruction_execution_error(\n'
+                '      amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                f'  return; // TODO: unhandled ds_append_consume variant ({sem.name})'
+            )
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         L = []
         L.append(
@@ -13934,11 +13962,9 @@ class CodeGenerator:
                             r'(*this, wf, \1, lane, ',
                             _local_body,
                         )
-                        # Skip DPP/SDWA preamble and cleanup for unimplemented
-                        # instructions whose body is ONLY a throw — the cleanup
-                        # code after the throw would be unreachable. Only match
-                        # pure-throw bodies, not bodies with conditional throws.
-                        body_throws = self._is_unimplemented_execute_stub(body)
+                        # Failure-only stubs need no DPP/SDWA setup or cleanup.
+                        # Conditional rejection retains the modifier wrapper.
+                        body_unimplemented = self._is_unimplemented_execute_stub(body)
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
@@ -13960,7 +13986,7 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
-                        if not body_throws and (can_share or _portable_probe):
+                        if not body_unimplemented and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
                             ] = (inst, sem, body, enc.enc_name, body_true16_vop3)
@@ -14045,7 +14071,7 @@ class CodeGenerator:
                             _ordinary_local_execute_body = (
                                 _local_simd_body + _local_scalar_body
                             )
-                        if _has_dpp_encoding and not body_throws:
+                        if _has_dpp_encoding and not body_unimplemented:
                             class_members.extend(
                                 [
                                     cgen.Line('private:'),
@@ -14054,7 +14080,7 @@ class CodeGenerator:
                                     ),
                                 ]
                             )
-                        if body_throws:
+                        if body_unimplemented:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{\n'
