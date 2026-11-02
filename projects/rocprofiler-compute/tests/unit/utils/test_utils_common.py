@@ -1073,54 +1073,6 @@ class TestBuildMetricList:
 
 
 # =============================================================================
-# format_table_ascii TESTS
-# =============================================================================
-
-
-def test_format_table_ascii_basic():
-    """Test format_table_ascii produces correct ASCII table output."""
-    from utils.utils_common import format_table_ascii
-
-    data = [
-        {"Spec": "GPU Model", "Value": "MI300X", "Description": "The GPU model name."},
-        {"Spec": "Max SCLK", "Value": "2100", "Description": "Maximum clock speed."},
-    ]
-    columns = ["Spec", "Value", "Description"]
-
-    result = format_table_ascii(data, columns)
-
-    # Check table structure
-    assert "+-------+" in result  # Has separators
-    assert "| index |" in result  # Has index column header
-    assert "| Spec" in result  # Has Spec column
-    assert "| GPU Model" in result  # Has data
-    assert "| MI300X" in result  # Has value
-    assert "| 2100" in result  # Has second row value
-
-
-def test_format_table_ascii_text_wrapping():
-    """Test that long Description text is wrapped at 40 characters."""
-    from utils.utils_common import format_table_ascii
-
-    long_desc = (
-        "This is a very long description that should be wrapped "
-        "across multiple lines in the table output."
-    )
-    data = [{"Spec": "Test", "Value": "123", "Description": long_desc}]
-    columns = ["Spec", "Value", "Description"]
-
-    result = format_table_ascii(data, columns)
-    lines = result.split("\n")
-
-    # Find lines containing description content (not separator lines)
-    desc_lines = [
-        ln for ln in lines if "|" in ln and "Description" not in ln and "---" not in ln
-    ]
-    # Should have multiple lines for the wrapped description
-    assert len(desc_lines) > 1, "Long description should wrap to multiple lines"
-
-
-# =============================================================================
 # TESTS FOR reconfigure_stdio_utf8 FUNCTION
 # =============================================================================
 

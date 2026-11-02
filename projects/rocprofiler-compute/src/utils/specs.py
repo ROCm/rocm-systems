@@ -33,9 +33,13 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
-from utils.utils_common import format_table_ascii, get_version
+from utils.utils_common import TABLE_FORMAT, get_version
+from vendored import tabulate
 
 T = TypeVar("T")
+
+# Width the --specs Description column wraps at, as in the analyze tables
+SPEC_DESCRIPTION_WIDTH = 40
 
 VERSION_LOC: list[str] = [
     "version",
@@ -174,6 +178,15 @@ def set_cache_sizes(
             cache_sizes["MALL"] = int(cache_values["cache_size"]) * 1024 // num_dies
 
     return cache_sizes
+
+
+def _spec_cell(value: object) -> str:
+    """Format a --specs table cell: floats to 2 decimals, None as empty."""
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
 
 
 def _kw_only(cls: T) -> T:
@@ -972,7 +985,20 @@ class MachineSpecs:
         if has_unit:
             columns.append("Unit")
 
-        return topstr + format_table_ascii(data, columns, decimal=2)
+        rows = [
+            [index, *(_spec_cell(row.get(column)) for column in columns)]
+            for index, row in enumerate(data)
+        ]
+        return topstr + tabulate(
+            rows,
+            headers=["index", *columns],
+            tablefmt=TABLE_FORMAT,
+            maxcolwidths=[
+                SPEC_DESCRIPTION_WIDTH if column == "Description" else None
+                for column in ["index", *columns]
+            ],
+            disable_numparse=True,
+        )
 
 
 @_kw_only
