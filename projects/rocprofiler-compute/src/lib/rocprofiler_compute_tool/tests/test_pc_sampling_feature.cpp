@@ -3,6 +3,9 @@
 #include "test_pc_sampling_feature.h"
 
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 using namespace rocprofiler_compute_tool;
 
@@ -68,4 +71,36 @@ TEST_F(TestPcSamplingFeature, Write_WithNoCodeObjects_DoesNotWriteFileOrSnapshot
     EXPECT_EQ(m_collector->finalize_count, 1);
     EXPECT_TRUE(m_writer->get_flush_calls().empty());
     EXPECT_TRUE(m_snapshotter->get_snapshot_calls().empty());
+}
+
+TEST_F(TestPcSamplingFeature, DispatchRecords_FinalizesUniqueSymbolKeysRegardlessOfSelection)
+{
+    m_tool_data.kernel_symbols[7].code_object_id = 1;
+    m_tool_data.kernel_symbols[7].mangled_name   = "_Z3fooi";
+    m_tool_data.kernel_symbols[8].code_object_id = 2;
+    m_tool_data.kernel_symbols[8].mangled_name   = "_Z3barv";
+    m_tool_data.target_kernel_ids.insert(7);
+    for (const auto kernel_id : {7, 8, 7})
+    {
+        dispatch_record_t dispatch = {};
+        dispatch.kernel_id         = kernel_id;
+        m_tool_data.dispatch_records.push_back(dispatch);
+    }
+    auto feature = create_feature();
+
+    feature.write(m_tool_data);
+
+    const std::set<std::pair<uint64_t, std::string>> expected = {{1, "_Z3fooi"}, {2, "_Z3barv"}};
+    EXPECT_EQ(m_collector->last_dispatched_symbols, expected);
+}
+
+TEST_F(TestPcSamplingFeature, DispatchWithoutSymbolRecord_Throws)
+{
+    dispatch_record_t dispatch = {};
+    dispatch.kernel_id         = 7;
+    m_tool_data.dispatch_records.push_back(dispatch);
+    auto feature = create_feature();
+
+    EXPECT_THROW(feature.write(m_tool_data), std::runtime_error);
+    EXPECT_EQ(m_collector->finalize_count, 0);
 }
