@@ -1049,8 +1049,7 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
 namespace
 {
 
-// fp16 input: a position term with a prime period plus a distinct term per rank. The largest sum over
-// 8 ranks is 8 * 198 + 16 * 28 = 2032, so every partial sum is an integer fp16 holds exactly.
+// Sums stay integers <= 2032 over 8 ranks, which fp16 holds exactly.
 inline float subWordHalfValue(int rank, size_t idx)
 {
     return static_cast<float>(idx % 199 + 16 * static_cast<size_t>(rank));
@@ -1058,8 +1057,7 @@ inline float subWordHalfValue(int rank, size_t idx)
 
 } // namespace
 
-// A 1- or 2-byte input skew sends fp16 and fp8 through the per-element head and tail alone; a 4-byte
-// skew admits them to the 4-byte tier, which the two larger sizes enter at up to 8 ranks and 2 CTAs.
+// A 1- to 3-byte skew keeps fp16 and fp8 on the per-element head and tail; a 4-byte skew reaches the 4-byte tier.
 TEST_F(SymmetricKernelCorruptionTest, AllReduceSubWord_SkewedHeadAndFourByteTier)
 {
     constexpr int kMaxRanks = 8;
