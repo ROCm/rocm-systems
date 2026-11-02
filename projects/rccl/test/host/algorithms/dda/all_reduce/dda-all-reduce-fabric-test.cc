@@ -325,6 +325,29 @@ TEST_F(DdaAllReduceFabricMicrotest, Launch_CapBoundsThatLaunchOnly) {
   EXPECT_EQ(RunOne(kCount).block.x, uncapped.block.x);
 }
 
+// A VMM thread cap rounds down to whole 64-thread granules, never below one, and the reporter matches the launch.
+TEST_F(DdaAllReduceFabricMicrotest, Launch_ThreadCapRoundsToWholeGranules) {
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 256; };
+  constexpr size_t kCount = 1u << 18;
+  const struct {
+    rcclDdaLaunchCap cap;
+    unsigned threads;
+  } cases[] = {{{0, 96}, 64}, {{0, 160}, 128}, {{0, 32}, 64}, {{3, 192}, 192}, {{0, 1}, 64}};
+  for (const auto& c : cases) {
+    SCOPED_TRACE(testing::Message() << "cap={" << c.cap.blocks << "," << c.cap.threads << "}");
+    g_ddaLaunches.clear();
+    EXPECT_EQ(ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, kCount, ncclFloat32, ncclSum, mock_.get(), kStream, c.cap),
+              ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    const DdaLaunch& launch = g_ddaLaunches.at(0);
+    EXPECT_EQ(launch.block.x, c.threads);
+    if (c.cap.blocks > 0) {
+      EXPECT_EQ(launch.grid.x, c.cap.blocks);
+    }
+    EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mock_.get(), kCount, ncclFloat32, c.cap), launch.grid.x * launch.grid.y);
+  }
+}
+
 TEST_F(DdaAllReduceFabricMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
