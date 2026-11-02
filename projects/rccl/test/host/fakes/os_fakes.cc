@@ -17,6 +17,21 @@
 #include <mutex>
 #include <sched.h>
 
+#include "fail_loud.h"
+#include "signature-drift.h"
+
+// Omitted when RCCL_OS_FAKES_OMIT_ncclSocketClose is defined: the target's own socket model closes sockets.
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+static ncclResult_t DefaultSocketClose(struct ncclSocket*, bool) {
+  FailLoudUnfaked("os_fakes", "ncclSocketClose");
+}
+std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose = DefaultSocketClose;
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+#undef ASSERT_HOOK_MATCHES_PROD
+
+ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool wait) { return g_ncclSocketClose(sock, wait); }
+#endif
+
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
   if (posix_memalign(&p, alignment, size) != 0) return nullptr;
@@ -35,14 +50,18 @@ size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no c
 // Controllable (was fail-loud). Records the mask too: :1608 and exit::2403 both call this, and without the
 // recorder either call site could be handed the wrong affinity (affinitySave instead of comm->cpuAffinity)
 // with nothing noticing. Default 0 keeps exit::2404 from calling ncclOsSetAffinity unless a test asks for it.
+// The counter is atomic and the recorder is locked because gin_host.cc's proxy progress workers reach both
+// of these from spawned threads; see os_fakes.h.
 int g_ncclOsCpuCountValue = 0;
-int g_ncclOsCpuCountCalls = 0;
+std::atomic<int> g_ncclOsCpuCountCalls{0};
+std::mutex g_ncclOsAffinityMutex;
 std::vector<ncclAffinity> g_ncclOsCpuCountMasks;
-static std::mutex g_affinityMutex;  // proxy.cc's two service threads call these concurrently
 int ncclOsCpuCount(const ncclAffinity& affinity) {
-  std::lock_guard<std::mutex> lock(g_affinityMutex);
-  g_ncclOsCpuCountCalls++;
-  g_ncclOsCpuCountMasks.push_back(affinity);
+  g_ncclOsCpuCountCalls.fetch_add(1, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsCpuCountMasks.push_back(affinity);
+  }
   return g_ncclOsCpuCountValue;
 }
 
@@ -61,9 +80,21 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) { return g_ncclOsGetAffin
 ncclResult_t g_ncclOsSetAffinityResult = ncclSuccess;
 std::vector<ncclAffinity> g_ncclOsSetAffinityMasks;
 ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
-  std::lock_guard<std::mutex> lock(g_affinityMutex);
-  g_ncclOsSetAffinityMasks.push_back(affinity);
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsSetAffinityMasks.push_back(affinity);
+  }
   return g_ncclOsSetAffinityResult;
+}
+
+std::vector<ncclAffinity> ncclOsCpuCountMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsCpuCountMasks;
+}
+
+std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsSetAffinityMasks;
 }
 
 // Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
@@ -80,6 +111,18 @@ std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGe
 ncclResult_t ncclOsTopoGetStrFromSys(const char* path, const char* fileName, char* strValue, int maxLen) {
   ++g_ncclOsTopoGetStrFromSysCalls;
   return g_ncclOsTopoGetStrFromSys(path, fileName, strValue, maxLen);
+}
+
+std::function<ncclResult_t(const char*, const char*, char*, int)> SysfsAnswers(const char* bios,
+                                                                              const char* numaBalancing) {
+  return [=](const char*, const char* file, char* value, int maxLen) {
+    const char* answer = std::strcmp(file, "bios_version") == 0     ? bios
+                         : std::strcmp(file, "numa_balancing") == 0 ? numaBalancing
+                                                                     : nullptr;
+    if (answer == nullptr) return ncclSystemError;
+    std::snprintf(value, maxLen, "%s", answer);
+    return ncclSuccess;
+  };
 }
 
 // fillInfo MLOPart PCI-function fallback (init.cc ~1093). The default models what sysfs actually
@@ -155,13 +198,23 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
   return ncclSuccess;
 }
 
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
 void ResetOsFakes() {
+#ifndef RCCL_OS_FAKES_OMIT_ncclSocketClose
+  g_ncclSocketClose = DefaultSocketClose;
+#endif
   g_ncclOsCpuCountValue = 0;
-  g_ncclOsCpuCountCalls = 0;
-  g_ncclOsCpuCountMasks.clear();
+  g_ncclOsCpuCountCalls.store(0, std::memory_order_relaxed);
   g_ncclOsGetAffinity = [](ncclAffinity* a) { CPU_ZERO(a); return ncclSuccess; };
   g_ncclOsSetAffinityResult = ncclSuccess;
-  g_ncclOsSetAffinityMasks.clear();
+  {
+    std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+    g_ncclOsCpuCountMasks.clear();
+    g_ncclOsSetAffinityMasks.clear();
+  }
   g_ncclOsMutexCondSharedCalls = 0;
   g_ncclOsMutexCondUnsharedCalls = 0;
   g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
@@ -173,4 +226,5 @@ void ResetOsFakes() {
   g_pciComputePartition = kDefaultComputePartition;
   g_pciComputePartitionCalls = 0;
   g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
 }

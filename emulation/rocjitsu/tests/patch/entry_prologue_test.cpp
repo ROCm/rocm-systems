@@ -9,6 +9,8 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/register_set.h"
 
@@ -64,13 +66,13 @@ public:
 /// expression that built it.
 class Kernel {
 public:
-  explicit Kernel(const std::vector<uint32_t> &words) : co_(words) {
-    decoder_ = Decoder::create(kArch);
+  explicit Kernel(const std::vector<uint32_t> &words, rj_code_arch_t arch = kArch) : co_(words) {
+    decoder_ = Decoder::create(arch);
     if (decoder_ == nullptr) {
       ADD_FAILURE() << "no decoder for the test arch";
       return;
     }
-    blocks_ = build_valid_blocks(co_, *decoder_, kArch);
+    blocks_ = build_valid_blocks(co_, *decoder_, arch);
     for (const auto &block : blocks_)
       scope_.push_back(block.get());
   }
@@ -161,6 +163,22 @@ TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
                             /*workgroup_id_y=*/true, /*workgroup_id_z=*/true);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), none, kArch), 6u);
   EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), all, kArch), 9u);
+}
+
+// RDNA decoders name v_cmp_eq_u32_e64 s1's mask as s[1:2]. A Wave32 kernel
+// writes s1 alone, so the floor is s2.
+TEST(DbiEntryStorageFloor, CountsAWave32CompareMaskAsOneSgpr) {
+  constexpr rj_code_arch_t kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto compare = rdna4::build_vop3(rdna4::kVCmpEqU32Vop3,
+                                             {.vdst = 1, .src0 = kInlineZero, .src1 = kInlineZero});
+  const Kernel kernel({compare[0], compare[1], build_s_endpgm(kRdna4)}, kRdna4);
+
+  const KD wave64{};
+  KD wave32{};
+  RJ_AMDHSA_BITS_SET(wave32.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave32, kRdna4), 2u);
+  EXPECT_EQ(dbi_entry_storage_floor(kernel.scope(), wave64, kRdna4), 3u);
 }
 
 TEST(PlanDbiEntryStorage, PlacesTheRunAtTheFirstAlignedIndexAboveTheFloor) {
@@ -317,16 +335,22 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload =
+  const auto payload_result =
       build_s_load_dwordx2(kStorage.persistent_base, 0, prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, 0,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, 0, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(0, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -346,16 +370,22 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
   const auto prologue = build_dbi_entry_prologue(desc, kArch, kStorage, &error);
   ASSERT_TRUE(prologue.has_value()) << error;
 
-  const auto payload = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
-                                            prologue->payload_byte_offset, kArch);
-  const auto original = build_s_load_dwordx2(kStorage.entry_temp_base, /*sbase=*/2,
-                                             prologue->original_kernarg_pointer_offset, kArch);
+  const auto payload_result = build_s_load_dwordx2(kStorage.persistent_base, /*sbase=*/2,
+                                                   prologue->payload_byte_offset, kArch);
+  ASSERT_TRUE(payload_result.succeeded());
+  const auto payload = payload_result.value();
+  const auto original_result = build_s_load_dwordx2(
+      kStorage.entry_temp_base, /*sbase=*/2, prologue->original_kernarg_pointer_offset, kArch);
+  ASSERT_TRUE(original_result.succeeded());
+  const auto original = original_result.value();
+  const auto wait = build_wait_scalar_loads_complete(kArch);
+  ASSERT_TRUE(wait.succeeded());
   const std::vector<uint32_t> expected{
       payload[0],
       payload[1],
       original[0],
       original[1],
-      build_wait_scalar_loads_complete(kArch),
+      wait.value(),
       build_s_mov_b32(2, kStorage.entry_temp_base, kArch),
       build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch),
   };
@@ -463,6 +493,17 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
   EXPECT_FALSE(error.empty());
 }
 
+TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+    std::string error;
+    const auto prologue = build_dbi_entry_prologue(
+        kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);
+    EXPECT_FALSE(prologue.has_value());
+    EXPECT_EQ(error, "unsupported target architecture for the SMEM offset range");
+  }
+}
+
 TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
   std::string error;
   EXPECT_FALSE(build_dbi_entry_prologue(kernarg_descriptor(), kArch,
@@ -476,8 +517,10 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAnOddStoragePair) {
 // field width.
 TEST(BuildDbiEntryPrologue, FailsClosedOnAWrapperPastTheSmemImmediateRange) {
   std::string error;
+  const auto offset_max = max_smem_byte_offset(kArch);
+  ASSERT_TRUE(offset_max.succeeded());
   const auto prologue =
-      build_dbi_entry_prologue(kernarg_descriptor(max_smem_byte_offset(kArch)), kArch,
+      build_dbi_entry_prologue(kernarg_descriptor(offset_max.value()), kArch,
                                {.persistent_base = 26, .entry_temp_base = 28}, &error);
   EXPECT_FALSE(prologue.has_value());
   EXPECT_FALSE(error.empty());

@@ -368,7 +368,7 @@ class MIGPUSpecs:
         return cls.set_default_gpu_settings(gpu_arch, gpu_model, compute_partition)
 
     @classmethod
-    def get_num_dies(cls, gpu_arch: str, gpu_model: str) -> int:
+    def get_num_dies(cls, gpu_model: str) -> int:
         """
         Some CDNA models have larger physical AIDs that software divides into
         distinct logical AID partitions. Models without these keys (including
@@ -393,10 +393,6 @@ class MIGPUSpecs:
     @classmethod
     def get_num_xcds_dict(cls) -> dict[str, dict[str, int]]:
         return cls._num_xcds_dict
-
-    @classmethod
-    def get_gpu_arch_to_compute_partition_dict(cls) -> dict[str, dict[str, int]]:
-        return cls._gpu_arch_to_compute_partition_dict
 
     @classmethod
     def get_all_gpu_models(cls) -> list:

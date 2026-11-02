@@ -211,17 +211,12 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // p2p.cc link-satisfying stubs + this file's controllable alloc seams.
 //
 // Defined here (not in a shared fakes/ .cc) because they have no owning fakes
-// file: allocTracker is an alloc.h data symbol p2p.cc alone references. The
-// ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
-// above. They must land after #include P2P_CC_PATH so the production types
-// they mention (allocationTracker, the alloc.h templates, etc.) are already
-// in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
-// live in fakes/utils_fakes.cc, not here.
+// file. The ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro
+// shims above. They must land after #include P2P_CC_PATH so the production
+// types they mention (the alloc.h templates, etc.) are already in scope.
+// busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they live in
+// fakes/utils_fakes.cc, not here.
 // ---------------------------------------------------------------------------
-
-// allocTracker is an array of per-device counters in alloc.h; size it to the
-// same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
 // for the header-only function templates in alloc.h -- the shim macros above
@@ -545,24 +540,6 @@ auto ForceLegacyCudaRegister()
     return [](const char* env, int64_t deftVal) -> int64_t {
         if (std::strcmp(env, "LEGACY_CUDA_REGISTER") == 0) return 1;
         return deftVal;
-    };
-}
-
-// ForceLegacyIpcCapable -- the HIP_VERSION >= 71260540 analogue of
-// ForceLegacyCudaRegister. On that HIP the fresh-registration arm reads
-// legacy-IPC capability from hipPointerGetAttribute (p2p.cc line 1152)
-// rather than from ncclParamLegacyCudaRegister(). Tests that need the
-// `else if (legacyIpcCap)` legacy-export arm install this hook (in addition
-// to ForceLegacyCudaRegister, which drives the < 71260540 branch) so they
-// pass regardless of the toolchain's HIP version. Returns hipSuccess and
-// reports the buffer as legacy-IPC-capable.
-auto ForceLegacyIpcCapable()
-{
-    return [](void* data, hipPointer_attribute attribute,
-              hipDeviceptr_t) -> hipError_t {
-        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
-            *static_cast<int*>(data) = 1;
-        return hipSuccess;
     };
 }
 

@@ -71,6 +71,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     if (!name.starts_with("global_") && !name.starts_with("scratch_"))
       return false;
     for (int i = 1; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op) {
         const auto ref = op->to_register_ref();
@@ -85,24 +87,14 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       const auto *op = inst.dst_operand(i);
       if (!op)
         continue;
-      if (auto ref = op->to_register_ref()) {
-        // Compare, carry-out and divide-scale scalar destinations are wave
-        // masks; encoded operands can retain their maximum two-SGPR width.
-        const bool carry_out = name == "v_add_co_u32" || name == "v_add_co_ci_u32" ||
-                               name == "v_sub_co_u32" || name == "v_sub_co_ci_u32" ||
-                               name == "v_subrev_co_u32" || name == "v_subrev_co_ci_u32" ||
-                               name == "v_mad_co_u64_u32" || name == "v_mad_co_i64_i32" ||
-                               name == "v_mad_u64_u32" || name == "v_mad_i64_i32";
-        const bool wave_mask = (i == 0 && name.starts_with("v_cmp")) ||
-                               (i == 1 && (carry_out || name.starts_with("v_div_scale_")));
-        if (wave_mask && ref->cls == RegClass::SGPR)
-          ref->width = wave_size / 32;
-        effects.defs.expand(*ref);
-      }
+      if (auto ref = op->to_register_ref())
+        effects.defs.expand(wave_sized_register(*op, *ref, wave_size));
     }
   }
   inst.implicit_defs(effects.defs);
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (!op)
       continue;
@@ -113,11 +105,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
       continue;
     if (i == 0 && scalar_address && ref->cls == RegClass::VGPR)
       ref->width = 1;
-    if (i == 2 && ref->cls == RegClass::SGPR &&
-        (name.starts_with("v_cndmask_") || name == "v_add_co_ci_u32" || name == "v_sub_co_ci_u32" ||
-         name == "v_subrev_co_ci_u32"))
-      ref->width = wave_size / 32;
-    effects.uses.expand(*ref);
+    effects.uses.expand(wave_sized_register(*op, *ref, wave_size));
   }
   inst.implicit_uses(effects.uses);
   if (inst.flags() & WRITES_EXEC)
@@ -132,6 +120,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
     const bool destination = i >= inst.num_src_operands();
+    if (!destination && !inst.tracks_explicit_source(i))
+      continue;
     const auto *op =
         destination ? inst.dst_operand(i - inst.num_src_operands()) : inst.src_operand(i);
     if (!op)
@@ -193,9 +183,11 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     const auto name = inst.mnemonic();
     const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
     RegisterSet regs;
-    if (const auto *op = inst.src_operand(index)) {
-      if (auto ref = op->to_register_ref())
-        regs.expand(*ref);
+    if (inst.tracks_explicit_source(index)) {
+      if (const auto *op = inst.src_operand(index)) {
+        if (auto ref = op->to_register_ref())
+          regs.expand(*ref);
+      }
     }
     return regs;
   }
@@ -205,6 +197,12 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
+  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
+      event.kind == WaitEventKind::LdsDirect) {
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
+    });
+  }
   if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
