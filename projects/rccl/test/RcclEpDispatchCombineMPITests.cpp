@@ -97,10 +97,10 @@ float TokenValue(int rank, int token)
     return 1.0f + static_cast<float>((rank * 16 + (token % 16)) % 128) / 128.0f;
 }
 
-// Unique per (rank, token, k) and exact in float, so a misplaced weight is visible.
-float WeightFor(int rank, int token, int k, int numTopk)
+// Unique per (rank, token, k, salt) and exact in float, so a misplaced or stale weight is visible.
+float WeightFor(int rank, int token, int k, int numTopk, int salt)
 {
-    return static_cast<float>((rank * kTokens + token) * numTopk + k);
+    return static_cast<float>((rank * kTokens + token) * numTopk + k) + 0.5f * salt;
 }
 
 // Experts are chosen by OWNER rather than by index, so the number of distinct ranks a
@@ -200,9 +200,8 @@ protected:
     // so it can be re-run after a reconfigure at a different shape.
     void RoundTrip();
 
-    // One dispatch, then every output row checked against the routing computed on the host:
-    // nRecv, row order (source rank, then token), outSrc, rebased outTopk, outTw, and for bf16
-    // the payload. Rows past nRecv must keep the sentinel.
+    // One dispatch, every output row checked against host routing (payload, and fp8 scales);
+    // rows past nRecv must keep the sentinel.
     void CheckDispatchOutputs(int useFp8);
 };
 
@@ -364,8 +363,11 @@ void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
     constexpr uint8_t kPoison    = 0x7B;
     const int         cap        = nRanks_ * kTokens;
     const size_t      hiddenSf   = (kHidden + 127) / 128;
+    const size_t      xBytes     = useFp8 ? 1 : sizeof(__hip_bfloat16);
     const int         myLo       = rank_ * (numExperts_ / nRanks_);
     const int         myHi       = myLo + numExperts_ / nRanks_;
+    // Fresh routing and weights per pass, so window metadata left by an earlier pass cannot match.
+    const int         salt       = useFp8;
     hipStream_t       stream     = nullptr;
     ASSERT_MPI_EQ(hipSuccess, hipStreamCreate(&stream));
     SCOPE_EXIT(if (stream != nullptr) (void)hipStreamDestroy(stream));
@@ -374,42 +376,61 @@ void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
     for (int s = 0; s < nRanks_; ++s) {
         for (int t = 0; t < kTokens; ++t) {
             for (int k = 0; k < topk_; ++k) {
-                allTopk[s][static_cast<size_t>(t) * topk_ + k] = ExpertFor(s, t, k, numExperts_, nRanks_);
+                allTopk[s][static_cast<size_t>(t) * topk_ + k] = ExpertFor(s, t + salt, k, numExperts_, nRanks_);
             }
         }
     }
     const std::vector<int32_t>& hTopk = allTopk[rank_];
 
-    std::vector<__hip_bfloat16> hX(static_cast<size_t>(kTokens) * kHidden);
-    std::vector<float>          hTopkW(static_cast<size_t>(kTokens) * topk_);
+    // fp8 rows are opaque bytes to dispatch: tag the first and last 4 bytes with (rank, token).
+    // Scales are unique per (rank, token, block) and exact in float.
+    auto fp8Tag  = [](int s, int t) { return static_cast<uint32_t>(s * kTokens + t + 1); };
+    auto scaleOf = [&](int s, int t, size_t j) {
+        return static_cast<float>((static_cast<size_t>(s) * kTokens + t) * hiddenSf + j) + 0.25f;
+    };
+
+    std::vector<uint8_t> hX(static_cast<size_t>(kTokens) * kHidden * xBytes);
+    std::vector<float>   hXsf(static_cast<size_t>(kTokens) * hiddenSf);
+    std::vector<float>   hTopkW(static_cast<size_t>(kTokens) * topk_);
     for (int t = 0; t < kTokens; ++t) {
-        std::fill_n(hX.begin() + static_cast<size_t>(t) * kHidden, kHidden, __float2bfloat16(TokenValue(rank_, t)));
+        uint8_t* row = hX.data() + static_cast<size_t>(t) * kHidden * xBytes;
+        if (useFp8) {
+            const uint32_t tag = fp8Tag(rank_, t);
+            std::memcpy(row, &tag, sizeof(tag));
+            std::memcpy(row + kHidden - sizeof(tag), &tag, sizeof(tag));
+        } else {
+            std::fill_n(reinterpret_cast<__hip_bfloat16*>(row), kHidden, __float2bfloat16(TokenValue(rank_, t)));
+        }
+        for (size_t j = 0; j < hiddenSf; ++j) {
+            hXsf[static_cast<size_t>(t) * hiddenSf + j] = scaleOf(rank_, t, j);
+        }
         for (int k = 0; k < topk_; ++k) {
-            hTopkW[static_cast<size_t>(t) * topk_ + k] = WeightFor(rank_, t, k, topk_);
+            hTopkW[static_cast<size_t>(t) * topk_ + k] = WeightFor(rank_, t, k, topk_, salt);
         }
     }
-    const std::vector<float> hXsf(static_cast<size_t>(kTokens) * hiddenSf, 1.0f);
 
     EpBuffers b;
     SCOPE_EXIT(b.Free());
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.x,        hX.size() * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.x,        hX.size()));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.xSf,      hXsf.size() * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.topkIdx,  hTopk.size() * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.topkW,    hTopkW.size() * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.slot,     static_cast<size_t>(nRanks_) * kTokens * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.sendList, static_cast<size_t>(nRanks_) * kTokens * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.sendc,    static_cast<size_t>(nRanks_) * sizeof(int32_t)));
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outX,     static_cast<size_t>(cap) * kHidden * sizeof(__hip_bfloat16)));
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outX,     static_cast<size_t>(cap) * kHidden * xBytes));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSf,    static_cast<size_t>(cap) * hiddenSf * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTopk,  static_cast<size_t>(cap) * topk_ * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outTw,    static_cast<size_t>(cap) * topk_ * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&b.outSrc,   static_cast<size_t>(cap) * sizeof(int32_t)));
 
-    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.x, hX.data(), hX.size() * sizeof(__hip_bfloat16), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.x, hX.data(), hX.size(), hipMemcpyHostToDevice));
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.xSf, hXsf.data(), hXsf.size() * sizeof(float), hipMemcpyHostToDevice));
     ASSERT_MPI_EQ(hipSuccess,
                   hipMemcpy(b.topkIdx, hTopk.data(), hTopk.size() * sizeof(int32_t), hipMemcpyHostToDevice));
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(b.topkW, hTopkW.data(), hTopkW.size() * sizeof(float), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outX, kPoison, static_cast<size_t>(cap) * kHidden * xBytes));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outSf, kPoison, static_cast<size_t>(cap) * hiddenSf * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outTopk, kPoison, static_cast<size_t>(cap) * topk_ * sizeof(int32_t)));
     ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outTw, kPoison, static_cast<size_t>(cap) * topk_ * sizeof(float)));
     ASSERT_MPI_EQ(hipSuccess, hipMemset(b.outSrc, kPoison, static_cast<size_t>(cap) * sizeof(int32_t)));
@@ -440,23 +461,38 @@ void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
     std::vector<int32_t> gotTopk(static_cast<size_t>(rows) * topk_);
     std::vector<float>   gotTw(static_cast<size_t>(rows) * topk_);
     std::vector<int32_t> gotSrc(static_cast<size_t>(rows));
-    std::vector<__hip_bfloat16> gotX0(static_cast<size_t>(nRecv));
+    // bf16: first element of each row (every element is identical). fp8: the head and tail tags.
+    std::vector<__hip_bfloat16> gotX0(static_cast<size_t>(rows));
+    std::vector<uint32_t>       gotHead(static_cast<size_t>(rows)), gotTail(static_cast<size_t>(rows));
+    std::vector<float>          gotSf(useFp8 ? static_cast<size_t>(rows) * hiddenSf : 0);
     ASSERT_MPI_EQ(hipSuccess,
                   hipMemcpy(gotTopk.data(), b.outTopk, gotTopk.size() * sizeof(int32_t), hipMemcpyDeviceToHost));
     ASSERT_MPI_EQ(hipSuccess, hipMemcpy(gotTw.data(), b.outTw, gotTw.size() * sizeof(float), hipMemcpyDeviceToHost));
     ASSERT_MPI_EQ(hipSuccess,
                   hipMemcpy(gotSrc.data(), b.outSrc, gotSrc.size() * sizeof(int32_t), hipMemcpyDeviceToHost));
-    // First element of each bf16 row; every element of a row is identical.
-    if (!useFp8) {
+    if (useFp8) {
+        const uint8_t* outX = static_cast<const uint8_t*>(b.outX);
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy2D(gotHead.data(), sizeof(uint32_t), outX, kHidden, sizeof(uint32_t),
+                                              static_cast<size_t>(rows), hipMemcpyDeviceToHost));
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy2D(gotTail.data(), sizeof(uint32_t), outX + kHidden - sizeof(uint32_t),
+                                              kHidden, sizeof(uint32_t), static_cast<size_t>(rows),
+                                              hipMemcpyDeviceToHost));
+        ASSERT_MPI_EQ(hipSuccess,
+                      hipMemcpy(gotSf.data(), b.outSf, gotSf.size() * sizeof(float), hipMemcpyDeviceToHost));
+    } else {
         ASSERT_MPI_EQ(hipSuccess, hipMemcpy2D(gotX0.data(), sizeof(__hip_bfloat16), b.outX,
                                               kHidden * sizeof(__hip_bfloat16), sizeof(__hip_bfloat16),
-                                              static_cast<size_t>(nRecv), hipMemcpyDeviceToHost));
+                                              static_cast<size_t>(rows), hipMemcpyDeviceToHost));
     }
 
-    int32_t poisonI;
-    float   poisonF;
+    int32_t        poisonI;
+    float          poisonF;
+    uint32_t       poisonU;
+    __hip_bfloat16 poisonB;
     std::memset(&poisonI, kPoison, sizeof(poisonI));
     std::memset(&poisonF, kPoison, sizeof(poisonF));
+    std::memset(&poisonU, kPoison, sizeof(poisonU));
+    std::memset(&poisonB, kPoison, sizeof(poisonB));
 
     int bad = 0;
     auto report = [&](int row, const char* what, double got, double expected) {
@@ -471,11 +507,19 @@ void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
         for (int k = 0; k < topk_; ++k) {
             const int32_t e        = allTopk[s][static_cast<size_t>(t) * topk_ + k];
             const int32_t expTopk  = (e >= myLo && e < myHi) ? e - myLo : -1;
+            const float   expTw    = WeightFor(s, t, k, topk_, salt);
             const size_t  idx      = static_cast<size_t>(i) * topk_ + k;
             if (gotTopk[idx] != expTopk) report(i, "outTopk", gotTopk[idx], expTopk);
-            if (gotTw[idx] != WeightFor(s, t, k, topk_)) report(i, "outTw", gotTw[idx], WeightFor(s, t, k, topk_));
+            if (gotTw[idx] != expTw) report(i, "outTw", gotTw[idx], expTw);
         }
-        if (!useFp8) {
+        if (useFp8) {
+            if (gotHead[i] != fp8Tag(s, t)) report(i, "outX head", gotHead[i], fp8Tag(s, t));
+            if (gotTail[i] != fp8Tag(s, t)) report(i, "outX tail", gotTail[i], fp8Tag(s, t));
+            for (size_t j = 0; j < hiddenSf; ++j) {
+                const float got = gotSf[static_cast<size_t>(i) * hiddenSf + j];
+                if (got != scaleOf(s, t, j)) report(i, "outSf", got, scaleOf(s, t, j));
+            }
+        } else {
             const float expX = __bfloat162float(__float2bfloat16(TokenValue(s, t)));
             if (__bfloat162float(gotX0[i]) != expX) report(i, "outX", __bfloat162float(gotX0[i]), expX);
         }
@@ -488,6 +532,15 @@ void RcclEpDispatchCombineTest::CheckDispatchOutputs(int useFp8)
             if (std::memcmp(&gotTw[idx], &poisonF, sizeof(float)) != 0) {
                 report(i, "outTw past nRecv", gotTw[idx], poisonF);
             }
+        }
+        if (useFp8) {
+            if (gotHead[i] != poisonU) report(i, "outX past nRecv", gotHead[i], poisonU);
+            for (size_t j = 0; j < hiddenSf; ++j) {
+                const float* got = &gotSf[static_cast<size_t>(i) * hiddenSf + j];
+                if (std::memcmp(got, &poisonF, sizeof(float)) != 0) report(i, "outSf past nRecv", *got, poisonF);
+            }
+        } else if (std::memcmp(&gotX0[i], &poisonB, sizeof(poisonB)) != 0) {
+            report(i, "outX past nRecv", __bfloat162float(gotX0[i]), __bfloat162float(poisonB));
         }
     }
     ASSERT_MPI_EQ(0, bad);
