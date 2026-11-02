@@ -8080,18 +8080,7 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
 
 // One CTA carries the whole per-rank count, so lsaRank 1 starts 1 MiB in, wraps, and ends on a ragged chunk.
 TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
-    GTEST_SKIP() << "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
-  // anvil-sdma is single-node. Symmetric AllGather is a multi-node test.
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
-    GTEST_SKIP() << "Symmetric AllGather not supported for anvil-sdma: single-node backend";
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = crossNodeReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = intraNodeSymReason(); !reason.empty())
+  if (auto reason = railRingAllGatherSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
@@ -8099,9 +8088,7 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
 
   // NCCL_SYM_CTAS is cached on first read, so it must come from the launch environment.
   const char* ctasEnv = std::getenv("NCCL_SYM_CTAS");
-  int oneCta = (ctasEnv != nullptr && std::strcmp(ctasEnv, "1") == 0) ? 1 : 0;
-  MPI_Allreduce(MPI_IN_PLACE, &oneCta, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-  if (!oneCta)
+  if (!MPIHelpers::allRanksTrue(ctasEnv != nullptr && std::strcmp(ctasEnv, "1") == 0))
     GTEST_SKIP() << "Requires NCCL_SYM_CTAS=1 in the launch environment on every rank";
 
   // Read at communicator init; a forced kernel that cannot run fails the call instead of falling back.
@@ -8140,9 +8127,10 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
     });
 
     ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    if (!inPlace)
+    if (!inPlace) {
       ASSERT_MPI_EQ(ncclSuccess,
           ncclCommWindowRegister(comm, dSendBuf, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    }
     ASSERT_MPI_EQ(ncclSuccess,
         ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
     auto winCleanup = makeScopeGuard([&]() {
@@ -8168,8 +8156,9 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
       std::vector<float> hostRecv(recvElems, -1.0f);
       if (inPlace) std::copy(hostSend.begin(), hostSend.end(), hostRecv.begin() + ownOffset);
       ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
-      if (!inPlace)
+      if (!inPlace) {
         ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+      }
 
       MPI_Barrier(MPI_COMM_WORLD);
 
@@ -8180,12 +8169,17 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
 
       ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
       size_t firstBad = recvElems;
-      for (size_t j = 0; j < recvElems && firstBad == recvElems; j++)
-        if (hostRecv[j] != expected(run, j)) firstBad = j;
-      if (firstBad != recvElems)
+      for (size_t j = 0; j < recvElems; j++) {
+        if (hostRecv[j] != expected(run, j)) {
+          firstBad = j;
+          break;
+        }
+      }
+      if (firstBad != recvElems) {
         ADD_FAILURE() << "rank=" << rank << " j=" << firstBad << " (src=" << firstBad / count
                       << " byte=" << (firstBad % count) * sizeof(float) << ") expected="
                       << expected(run, firstBad) << " got=" << hostRecv[firstBad];
+      }
       ASSERT_MPI_EQ(recvElems, firstBad);
     }
   }
