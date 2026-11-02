@@ -38,7 +38,11 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+from utils.utils_common import (
+    TABLE_FORMAT,
+    convert_filter_blocks_to_panel_ids,
+    strip_ansi,
+)
 from vendored import tabulate
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
@@ -145,7 +149,7 @@ def get_table_string(
     return tabulate(
         df_with_index.values,
         headers=list(df_with_index.columns),
-        tablefmt="fancy_grid",
+        tablefmt=TABLE_FORMAT,
         floatfmt=f".{decimal}f",
     )
 
@@ -586,7 +590,7 @@ def show_operator_summary(summary_df: pd.DataFrame) -> None:
         tabulate(
             display_df.values,
             headers=headers,
-            tablefmt="fancy_grid",
+            tablefmt=TABLE_FORMAT,
             floatfmt=floatfmt,
             colalign=colalign,
             missingval="N/A",

@@ -44,6 +44,8 @@ NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
+# tabulate table style of the analyze tables, used in every mode
+TABLE_FORMAT = "fancy_grid"
 
 # Shared suffix for the invalid --block error in the profile and analyze paths.
 INVALID_BLOCK_HINT = (
