@@ -1070,15 +1070,20 @@ endfunction()
 #   REMOVE_DEFS     defines to drop from the in-build baseline before EXTRA_DEFS are
 #                   added; ignored standalone, whose baseline is fixed
 function(rccl_add_micro_binary _name)
-  cmake_parse_arguments(_ramb "" "CATEGORIES_YAML"
+  cmake_parse_arguments(_ramb "OBJECT" "CATEGORIES_YAML"
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
+  # OBJECT builds an object library with the same compile settings, for sources several binaries share.
+  if(_ramb_OBJECT)
+    add_library(${_name} OBJECT ${_ramb_SOURCES})
+  else()
+    add_executable(${_name} ${_ramb_SOURCES})
+  endif()
 
   if(BUILD_TESTS)
     set(_ramb_base_defs ${RCCL_COMMON_COMPILE_DEFS})
     if(_ramb_REMOVE_DEFS)
       list(REMOVE_ITEM _ramb_base_defs ${_ramb_REMOVE_DEFS})
     endif()
-    add_executable(${_name} ${_ramb_SOURCES})
     target_include_directories(${_name} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR} ${RCCL_COMMON_INCLUDE_DIRS} ${_ramb_EXTRA_INCLUDES})
     target_compile_definitions(${_name} PRIVATE
@@ -1094,15 +1099,22 @@ function(rccl_add_micro_binary _name)
       add_dependencies(${_name} rccl_embedded_tuner_configs)
     endif()
     rccl_apply_host_only_flags(${_name})
+    if(_ramb_OBJECT)
+      return()
+    endif()
     rocm_install(TARGETS ${_name} COMPONENT tests)
     if(_ramb_CATEGORIES_YAML)
       rccl_register_test_categories(${_name} "${_ramb_CATEGORIES_YAML}")
     endif()
   else()
-    add_executable(${_name} ${_ramb_SOURCES})
     # Mirror add_test_executable(): record for the HOST_TEST_COVERAGE loop.
-    list(APPEND HOST_TEST_BINARIES ${_name})
-    set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
+    if(_ramb_OBJECT)
+      list(APPEND HOST_TEST_OBJECT_LIBS ${_name})
+      set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
+    else()
+      list(APPEND HOST_TEST_BINARIES ${_name})
+      set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
+    endif()
     target_compile_options(${_name} PRIVATE
       -Wno-unused-parameter -Wno-unused-variable -ffunction-sections)
     target_include_directories(${_name} PRIVATE
@@ -1446,6 +1458,10 @@ function(rccl_standalone_coverage)
       target_link_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
       target_compile_definitions(${_cov_tgt} PRIVATE RCCL_TEST_CODE_COVERAGE=1)
       target_link_libraries(${_cov_tgt} PRIVATE ${CMAKE_DL_LIBS})
+    endforeach()
+    foreach(_cov_tgt ${HOST_TEST_OBJECT_LIBS})
+      target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+      target_compile_definitions(${_cov_tgt} PRIVATE RCCL_TEST_CODE_COVERAGE=1)
     endforeach()
     target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
@@ -2405,20 +2421,38 @@ set(_MICRO_TRANSPORT_DEFS
 
 # One src/transport/ test file per binary. SOURCES lists the fakes and the real sibling units the test file
 # reaches; a sibling unit is compiled real or faked, never both. PROCESS_ISOLATED links the forking runner.
+# Every source but the test file compiles once, into an object library each binary links; a binary with its
+# own EXTRA_DEFS compiles its sources itself.
 function(rccl_add_transport_micro_binary _name _test)
   cmake_parse_arguments(_ratmb "PROCESS_ISOLATED" "" "SOURCES;EXTRA_DEFS" ${ARGN})
-  set(_ratmb_runner "")
+  set(_ratmb_shared ${_ratmb_SOURCES} ../common/main_altrsmi.cpp)
   if(_ratmb_PROCESS_ISOLATED)
-    set(_ratmb_runner ../common/ProcessIsolatedTestRunner.cpp)
+    list(APPEND _ratmb_shared ../common/ProcessIsolatedTestRunner.cpp)
   endif()
-  rccl_add_micro_binary(${_name}
-    SOURCES transport/${_test} ${_ratmb_SOURCES} ${_ratmb_runner} ../common/main_altrsmi.cpp
+  set(_ratmb_args
     EXTRA_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/transport
       ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h and the other cast headers
-    EXTRA_DEFS ${_MICRO_TRANSPORT_DEFS} ${_ratmb_EXTRA_DEFS}
+    EXTRA_DEFS ${_MICRO_TRANSPORT_DEFS} ${_ratmb_EXTRA_DEFS})
+  set(_ratmb_sources transport/${_test})
+  if(_ratmb_EXTRA_DEFS)
+    list(APPEND _ratmb_sources ${_ratmb_shared})
+  else()
+    foreach(_src ${_ratmb_shared})
+      string(REPLACE "${RCCL_HOST_HIPIFY_DIR}/" "" _obj "${_src}")
+      string(MAKE_C_IDENTIFIER "rccl-transport-obj-${_obj}" _obj)
+      if(NOT TARGET ${_obj})
+        rccl_add_micro_binary(${_obj} OBJECT SOURCES ${_src} ${_ratmb_args})
+      endif()
+      list(APPEND _ratmb_sources $<TARGET_OBJECTS:${_obj}>)
+    endforeach()
+  endif()
+  rccl_add_micro_binary(${_name}
+    SOURCES ${_ratmb_sources}
+    ${_ratmb_args}
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
   set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
+  set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
 endfunction()
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportCollNet coll-net-test.cc
