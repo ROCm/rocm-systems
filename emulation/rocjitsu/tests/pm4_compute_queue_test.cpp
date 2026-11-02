@@ -134,6 +134,7 @@ private:
 class Pm4ComputeQueueTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    util::StringDiagnostic admission_diagnostic;
     memory = std::make_shared<Pm4QueueMemory>();
     address_space = gpu_vm.register_translated(1, memory, memory);
     ASSERT_TRUE(address_space);
@@ -152,8 +153,10 @@ protected:
     gpu_memory = loaded.soc()->memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     cp->set_gpu_vm(&gpu_vm, address_space);
   }
 
@@ -357,6 +360,17 @@ TEST_F(Pm4ComputeQueueTest, BlockedSubmissionsKeepStallRecheckWorkBounded) {
 }
 
 TEST_F(Pm4ComputeQueueTest, FailedDependencyCancelsQueuedSubmissionsOnce) {
+  l2->set_backing_memory(gpu_memory);
+  l2->set_gpu_vm(&gpu_vm);
+  auto foreign_memory = std::make_shared<Pm4QueueMemory>();
+  const AddressSpaceHandle foreign_space =
+      gpu_vm.register_translated(2, foreign_memory, foreign_memory);
+  ASSERT_TRUE(foreign_space);
+  constexpr uint64_t kDirtyLine = 0x1000;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0xab);
+  ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1), VmAccessOutcome::Complete);
+  ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 2), VmAccessOutcome::Complete);
   ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = 1}));
   uint32_t completions = 0;
   for (uint32_t i = 0; i < 2; ++i) {
@@ -372,8 +386,13 @@ TEST_F(Pm4ComputeQueueTest, FailedDependencyCancelsQueuedSubmissionsOnce) {
   }
   EXPECT_NO_THROW(service());
   EXPECT_EQ(completions, 2u);
+  EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
+  EXPECT_EQ(foreign_memory->load<uint32_t>(kDirtyLine), 0u);
   service();
   EXPECT_EQ(completions, 2u);
+  // Cancellation publishes only this queue's writes, retaining foreign dirty data.
+  EXPECT_EQ(l2->flush_address_space(2), VmAccessOutcome::Complete);
+  EXPECT_EQ(foreign_memory->load<uint32_t>(kDirtyLine), 0xababababu);
 }
 
 class Pm4FlushPlugin final : public ExecutionPlugin {
