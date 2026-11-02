@@ -23,6 +23,7 @@
 //   MultiReg_*      — multi-register loads
 //   Mixed_*         — simultaneous vmcnt and lgkmcnt events
 //   DualOffset_*    — dual-offset LDS events
+//   TensorDma_*     — tensor load/store LDS races and tensorcnt waits
 
 #include "race_test_builder.h"
 #include "race_test_instruction.h"

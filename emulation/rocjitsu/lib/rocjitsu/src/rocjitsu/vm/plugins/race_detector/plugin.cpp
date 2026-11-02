@@ -15,8 +15,10 @@
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <format>
 #include <mutex>
