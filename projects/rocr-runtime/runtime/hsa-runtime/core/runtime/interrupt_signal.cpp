@@ -100,6 +100,7 @@ InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, SignalBatch* 
                                  SharedSignal* slot)
     : LocalSignal(initial_value, batch, slot), Signal(signal()) {
   host_access_via_hdp_ = batch->host_access_via_hdp();
+  host_can_monitor_ = !batch->host_access_across_link();
   AttachEvent(nullptr);
 }
 
@@ -186,18 +187,14 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
     if (wait_hint == HSA_WAIT_STATE_ACTIVE) {
-      if (g_use_mwaitx) {
-        // Short timeout for active waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 1000, true);
-      }
+      // Short timeout for active waiting
+      WaitForValueChange(value, 1000);
       continue;
     }
 
     if (now - start_time < kMaxElapsed) {
-      if (g_use_mwaitx) {
-        // Longer timeout with timer for passive waiting
-        timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);
-      }
+      // Longer timeout with timer for passive waiting
+      WaitForValueChange(value, 60000);
       continue;
     }
 
