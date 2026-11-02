@@ -1592,7 +1592,7 @@ TEST(RaceDetector, TensorDma_TensorcntDoesNotRetireDsWrite) {
 }
 
 TEST(RaceDetector, TensorDma_CrossWaveLoadBarrierWithoutTensorcntRace) {
-  // A barrier retires only transfers their wave has already waited for.
+  // A barrier retires only transfers that their wave has already waited for.
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   b.barrier();
@@ -1733,7 +1733,7 @@ TEST(RaceDetector, TensorDma_RetiredTransferWithoutRangesNoLongerCounts) {
 }
 
 TEST(RaceDetector, TensorDma_UnwaitedTransferWithoutRangesKeepsItsSlotAcrossBarrier) {
-  // A barrier retires only transfers their wave has waited for.
+  // A barrier retires only transfers that their wave has waited for.
   RaceTestBuilder b(/*numWaves=*/1, /*vgprs=*/4, /*sgprs=*/4);
   b.tensorLoad(/*wave=*/0, {});
   b.barrier();
