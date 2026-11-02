@@ -19,6 +19,7 @@
 #include "SymmetricMemPrereq.hpp"
 #include "TestChecks.hpp"
 #include "comm.h"
+#include "rccl_common.h"
 
 #include "nccl_device.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
@@ -267,6 +268,24 @@ std::string sdmaInternalA2ACommSkipReason(ncclComm_t comm) {
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL)
     return "GIN-SDMA alltoall requires full GIN connectivity";
   return "";
+}
+
+std::string sdmaGinAllReduceEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "GIN-SDMA AllReduce requires NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+  if (const char* e = std::getenv("NCCL_GIN_ALLREDUCE_ENABLE"); e && std::strcmp(e, "0") == 0)
+    return "GIN-SDMA AllReduce disabled (NCCL_GIN_ALLREDUCE_ENABLE=0)";
+  if (std::getenv("NCCL_ALGO"))
+    return "NCCL_ALGO bypasses the GIN-SDMA AllReduce selection";
+  return "";
+}
+
+// Comm-side subset of ginAllReduceBaseEligible in gin_all_reduce_sdma.cu.
+std::string sdmaGinAllReduceCommSkipReason(ncclComm_t comm) {
+  if (comm->archName == nullptr || std::strstr(comm->archName, "gfx950") == nullptr)
+    return "GIN-SDMA AllReduce is gfx950-only";
+  return sdmaInternalA2ACommSkipReason(comm);
 }
 
 // Initialized reqs with ginConnectionType=FULL; default for all tests here.
@@ -5133,6 +5152,124 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
             << "rank=" << rank << " src=" << src << " i=" << i;
       }
     }
+  }
+}
+
+// >= 256 MiB of float (the GIN two-shot floor) and a multiple of 4 * lcm(1..8) = 3360,
+// so every rank count up to 8 gets a whole, 16-byte aligned slice.
+constexpr size_t kGinArTwoShotCount =
+    ((size_t{256} << 20) / sizeof(float) + 3359) / 3360 * 3360;
+static_assert(kGinArTwoShotCount % 12 == 0, "count must split evenly over 2 and 3 ranks");
+
+// Small integers, so every sum is exact; differs per run, rank and index.
+float ginArTwoShotFill(int run, int rank, size_t i) {
+  return run == 0 ? static_cast<float>((rank + 1) * 7 + static_cast<int>(i % 65521))
+                  : static_cast<float>((rank + 1) * 11 + static_cast<int>((i * 3 + 1) % 65519));
+}
+
+// Called by members of `comm` only, so it uses plain gtest checks; the caller
+// votes on MPI_COMM_WORLD afterwards.
+void runGinSdmaTwoShotAllReduce(ncclComm_t comm, hipStream_t stream, MPI_Comm mpiComm) {
+  int rank = -1, nRanks = -1;
+  ASSERT_EQ(ncclSuccess, ncclCommUserRank(comm, &rank));
+  ASSERT_EQ(ncclSuccess, ncclCommCount(comm, &nRanks));
+  SCOPED_TRACE(::testing::Message() << "nRanks=" << nRanks);
+  const size_t count = kGinArTwoShotCount;
+  const size_t bytes = count * sizeof(float);
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclMemAlloc(&dSend, bytes));
+  ASSERT_EQ(ncclSuccess, ncclMemAlloc(&dRecv, bytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, dSend, bytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_EQ(ncclSuccess, ncclCommWindowRegister(comm, dRecv, bytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
+  int algo = -1, protocol = -1, maxChannels = -1;
+  ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, count, ncclFloat32, ncclSum, dSend,
+                                             dRecv, /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+  const char* algoName = nullptr;
+  rcclGetAlgoName(algo, &algoName);
+  ASSERT_EQ(static_cast<int>(RCCL_GIN_SDMA), algo) << "selected " << (algoName ? algoName : "?");
+
+  std::vector<float> host(count);
+  for (int run = 0; run < 2; run++) {
+    SCOPED_TRACE(::testing::Message() << "run=" << run);
+    for (size_t i = 0; i < count; i++) host[i] = ginArTwoShotFill(run, rank, i);
+    ASSERT_EQ(hipSuccess, hipMemcpy(dSend, host.data(), bytes, hipMemcpyHostToDevice));
+    // All-ones bits are NaN, so an unwritten element never matches.
+    ASSERT_EQ(hipSuccess, hipMemset(dRecv, 0xFF, bytes));
+    MPI_Barrier(mpiComm);
+
+    ASSERT_EQ(ncclSuccess, ncclAllReduce(dSend, dRecv, count, ncclFloat32, ncclSum, comm, stream));
+    // No peer barrier before the readback: a put that lands after the kernel returns shows as NaN.
+    ASSERT_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/120));
+
+    ASSERT_EQ(hipSuccess, hipMemcpy(host.data(), dRecv, bytes, hipMemcpyDeviceToHost));
+    size_t mismatches = 0, firstBad = 0;
+    float firstExpected = 0.0f;
+    for (size_t i = 0; i < count; i++) {
+      float expected = 0.0f;
+      for (int r = 0; r < nRanks; r++) expected += ginArTwoShotFill(run, r, i);
+      if (host[i] != expected && mismatches++ == 0) {
+        firstBad = i;
+        firstExpected = expected;
+      }
+    }
+    EXPECT_EQ(size_t{0}, mismatches) << "rank " << rank << ": first mismatch at " << firstBad
+                                     << " expected " << firstExpected << " got " << host[firstBad];
+  }
+}
+
+// ncclAllReduce takes ginAllReduceTwoShotKernel at >= 256 MiB on gfx950 with
+// Anvil SDMA. The 3-rank sub-comm reaches the odd-rank final add of the
+// reduce-scatter double buffer; two runs with different data catch stale signals.
+TEST_F(GinMPIDeviceTests, AllReduce_SdmaGinTwoShot) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = sdmaGinAllReduceEnvSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/3, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 3-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  std::string reason = sdmaGinAllReduceCommSkipReason(comm);
+  int anySkip = reason.empty() ? 0 : 1;
+  MPI_Allreduce(MPI_IN_PLACE, &anySkip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  if (anySkip) GTEST_SKIP() << (reason.empty() ? "a peer rank is not eligible" : reason);
+
+  const int rank = getTestMpiRank();
+
+  runGinSdmaTwoShotAllReduce(comm, stream, MPI_COMM_WORLD);
+  ASSERT_MPI_TRUE(!::testing::Test::HasFailure());
+
+  for (int subSize : {3, 2}) {
+    SCOPED_TRACE(::testing::Message() << "subComm=" << subSize);
+    const bool member = rank < subSize;
+    ncclComm_t sub = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+        ncclCommSplit(comm, member ? 0 : NCCL_SPLIT_NOCOLOR, rank, &sub, nullptr));
+    MPI_Comm subMpi = MPI_COMM_NULL;
+    MPI_Comm_split(MPI_COMM_WORLD, member ? 0 : MPI_UNDEFINED, rank, &subMpi);
+    if (member) {
+      EXPECT_NE(nullptr, sub);
+      if (sub) runGinSdmaTwoShotAllReduce(sub, stream, subMpi);
+    }
+    if (sub) (void)ncclCommDestroy(sub);
+    if (subMpi != MPI_COMM_NULL) MPI_Comm_free(&subMpi);
+    ASSERT_MPI_TRUE(!::testing::Test::HasFailure());
   }
 }
 
