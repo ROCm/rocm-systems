@@ -779,16 +779,7 @@ extern hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx, const u
 
 extern hipError_t playback_hipEventDestroy(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(payload);
-  float _out_ms{};
-  hipError_t _r = (hipError_t)hipEventElapsedTime(&_out_ms, (hipEvent_t)ctx.translate_event(a->start), (hipEvent_t)ctx.translate_event(a->stop));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipEventElapsedTime", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload);
 
