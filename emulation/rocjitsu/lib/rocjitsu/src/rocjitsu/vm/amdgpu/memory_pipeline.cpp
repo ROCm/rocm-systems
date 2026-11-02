@@ -687,31 +687,33 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
   }
 
+  // Compatibility caches route by registration VMID, which need not be the
+  // CPU process's KFD identity (independent DRM files have separate VMs).
+  const uint32_t vmid = d.translated.access ? d.translated.access->info().vmid : wf.process_id();
   if (d.atomic_op != AtomicOp::NONE) {
     // GpuVmAccess rejects and reports scalar atomics not aligned to their access
     // width. VMID 0 reaches physical memory without it, so reject here to match; a
     // misaligned X2 atomic was observed to fault without updating memory on gfx90a.
-    if (wf.process_id() == 0 && d.addr % d.elem_size != 0)
+    if (vmid == 0 && d.addr % d.elem_size != 0)
       return VmAccessOutcome::Malformed;
     L2Cache &l2 = *wf.raw_cu().l2();
     return d.elem_size == sizeof(uint32_t)
-               ? execute_cached_scalar_atomic_rmw<uint32_t>(d, l2, wf.process_id())
-               : execute_cached_scalar_atomic_rmw<uint64_t>(d, l2, wf.process_id());
+               ? execute_cached_scalar_atomic_rmw<uint32_t>(d, l2, vmid)
+               : execute_cached_scalar_atomic_rmw<uint64_t>(d, l2, vmid);
   }
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
       // Descriptor bounds suppress memory access while preserving zero writeback.
     } else if (d.elem_size < 4) {
       uint8_t bytes[4] = {};
-      const VmAccessOutcome outcome =
-          l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id(), d.mtype);
+      const VmAccessOutcome outcome = l1_->load_bytes(d.addr, d.elem_size, bytes, vmid, d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
     } else if (d.load_dword_mask != 0xffff) {
       for (uint32_t i = 0; i < d.num_dwords; ++i)
         if (d.load_dword_mask & (1u << i)) {
-          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id(),
+          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], vmid,
                                          /*allow_private_batch=*/false, d.mtype);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
@@ -720,8 +722,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       auto &cu = wf.raw_cu();
       const bool allow_private_batch =
           GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
-      const VmAccessOutcome outcome = l1_->load(d.addr, d.num_dwords, d.response_data,
-                                                wf.process_id(), allow_private_batch, d.mtype);
+      const VmAccessOutcome outcome =
+          l1_->load(d.addr, d.num_dwords, d.response_data, vmid, allow_private_batch, d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
@@ -731,7 +733,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
         const auto index = d.translated.request_index;
         if (d.load_dword_mask & (1u << index)) {
           const auto outcome =
-              l1_->store(d.addr + index * 4, 1, &d.store_data[index], wf.process_id(), d.mtype);
+              l1_->store(d.addr + index * 4, 1, &d.store_data[index], vmid, d.mtype);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
         }
@@ -739,8 +741,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       }
       return VmAccessOutcome::Complete;
     }
-    const VmAccessOutcome outcome =
-        l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
+    const VmAccessOutcome outcome = l1_->store(d.addr, d.num_dwords, d.store_data, vmid, d.mtype);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
   }
@@ -1334,10 +1335,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
   const bool translated_address_space =
       d.translated.access && !d.translated.access->info().legacy_cache_compatible;
 
+  const uint32_t vmid = d.translated.access ? d.translated.access->info().vmid : wf.process_id();
   if (d.atomic_op != AtomicOp::NONE) {
     if (translated_address_space)
       return execute_translated_atomic_rmw(d, request_lanes);
-    return execute_atomic_rmw(d, l2_, wf.process_id(), request_lanes);
+    return execute_atomic_rmw(d, l2_, vmid, request_lanes);
   }
 
   // Swizzle is a per-lane layout property. FLAT can mix private-aperture and
@@ -1366,15 +1368,15 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     if (swizzled_lanes) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems, d.response_data.data(),
-          d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), stride,
-          base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit);
+          d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, vmid, stride, base_offset,
+          d.element_lane_masks.view(), d.scratch_swizzle_unit);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
     if (plain_lanes) {
       const VmAccessOutcome outcome = l1_->load(
           d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems, d.response_data.data(),
-          d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, wf.process_id(), 0,
+          d.mtype, d.non_temporal, d.request_force_l1_bypass, d.wf_size, vmid, 0,
           /*addr_base_offset=*/0, d.element_lane_masks.view());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
@@ -1383,8 +1385,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     if (swizzled_lanes) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), swizzled_lanes, d.elem_size, d.num_elems,
-                     d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(),
-                     stride, base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
+                     d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, vmid, stride,
+                     base_offset, d.element_lane_masks.view(), d.scratch_swizzle_unit,
                      GpuVmAccessBatchGuard::active() && !wf.raw_cu().debug_active() &&
                          wf.raw_cu().plugin_group().empty());
       if (outcome != VmAccessOutcome::Complete)
@@ -1393,7 +1395,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
     if (plain_lanes) {
       const VmAccessOutcome outcome =
           l1_->store(d.per_lane_addr.data(), plain_lanes, d.elem_size, d.num_elems,
-                     d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, wf.process_id(), 0,
+                     d.store_data.data(), d.mtype, d.non_temporal, d.wf_size, vmid, 0,
                      /*addr_base_offset=*/0, d.element_lane_masks.view());
       if (outcome != VmAccessOutcome::Complete)
         return outcome;

@@ -1492,10 +1492,10 @@ TEST(L1ScalarCacheTest, UcReadInvalidatesResidentWriteThroughLine) {
   constexpr uint32_t kStoredValue = 0x22222222;
   constexpr uint32_t kReloadValue = 0x33333333;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kAddr >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   mem.write32(kAddr, kBackingValue, kVmid);
@@ -1503,7 +1503,7 @@ TEST(L1ScalarCacheTest, UcReadInvalidatesResidentWriteThroughLine) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::UC;
   }
   uint32_t read_value = 0;
   l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
@@ -1515,7 +1515,7 @@ TEST(L1ScalarCacheTest, UcReadInvalidatesResidentWriteThroughLine) {
            amdgpu::Mtype::RW, kVmid);
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::RW;
   }
 
   read_value = 0;
@@ -1537,10 +1537,10 @@ TEST(L1ScalarCacheTest, UcLoadBytesInvalidatesResidentWriteThroughLine) {
   constexpr uint32_t kStoredValue = 0x44332211;
   constexpr uint32_t kReloadValue = 0x88776655;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kAddr >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   mem.write32(kAddr, kBackingValue, kVmid);
@@ -1548,7 +1548,7 @@ TEST(L1ScalarCacheTest, UcLoadBytesInvalidatesResidentWriteThroughLine) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::UC;
   }
 
   std::array<uint8_t, 2> read_bytes{};
@@ -1562,7 +1562,7 @@ TEST(L1ScalarCacheTest, UcLoadBytesInvalidatesResidentWriteThroughLine) {
            amdgpu::Mtype::RW, kVmid);
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::RW;
   }
 
   read_bytes.fill(0);
@@ -1585,10 +1585,10 @@ TEST(L1ScalarCacheTest, CcReadInvalidatesResidentWriteThroughLine) {
   constexpr uint32_t kStoredValue = 0x22222222;
   constexpr uint32_t kReloadValue = 0x33333333;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kAddr >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   mem.write32(kAddr, kBackingValue, kVmid);
@@ -1596,7 +1596,7 @@ TEST(L1ScalarCacheTest, CcReadInvalidatesResidentWriteThroughLine) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::CC;
   }
   uint32_t read_value = 0;
   l1.load(kAddr, /*num_dwords=*/1, &read_value, kVmid);
@@ -1608,7 +1608,7 @@ TEST(L1ScalarCacheTest, CcReadInvalidatesResidentWriteThroughLine) {
            amdgpu::Mtype::RW, kVmid);
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::RW;
   }
 
   read_value = 0;
@@ -1630,10 +1630,10 @@ TEST(L1ScalarCacheTest, CcLoadBytesInvalidatesResidentWriteThroughLine) {
   constexpr uint32_t kStoredValue = 0x44332211;
   constexpr uint32_t kReloadValue = 0x88776655;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kAddr >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   mem.write32(kAddr, kBackingValue, kVmid);
@@ -1641,7 +1641,7 @@ TEST(L1ScalarCacheTest, CcLoadBytesInvalidatesResidentWriteThroughLine) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::CC;
   }
 
   std::array<uint8_t, 2> read_bytes{};
@@ -1655,7 +1655,7 @@ TEST(L1ScalarCacheTest, CcLoadBytesInvalidatesResidentWriteThroughLine) {
            amdgpu::Mtype::RW, kVmid);
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kAddr >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::RW;
+    page_table[kAddr >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::RW;
   }
 
   read_bytes.fill(0);
@@ -1679,10 +1679,10 @@ TEST(L1ScalarCacheTest, UcWriteInvalidatesResidentLineBeforeBypassStore) {
   constexpr uint32_t kStoredTargetValue = 0x22222222;
   constexpr uint32_t kUcStoreValue = 0x33333333;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kBase >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kBase >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   const uint32_t stored_values[] = {kStoredOutsideValue, kStoredTargetValue};
@@ -1690,7 +1690,7 @@ TEST(L1ScalarCacheTest, UcWriteInvalidatesResidentLineBeforeBypassStore) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kBase >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::UC;
+    page_table[kBase >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::UC;
   }
   l1.store(kStoreAddr, /*num_dwords=*/1, &kUcStoreValue, kVmid);
   l1.writeback_all(kVmid);
@@ -1716,10 +1716,10 @@ TEST(L1ScalarCacheTest, CcWriteInvalidatesResidentLineBeforeBypassStore) {
   constexpr uint32_t kStoredTargetValue = 0x22222222;
   constexpr uint32_t kCcStoreValue = 0x33333333;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kBase >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kBase >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   mem.write32(kBase, kBackingOutsideValue, kVmid);
@@ -1729,7 +1729,7 @@ TEST(L1ScalarCacheTest, CcWriteInvalidatesResidentLineBeforeBypassStore) {
 
   {
     std::unique_lock lock(page_table_mutex);
-    page_table[kBase >> KfdProcess::kPageShift].mtype = amdgpu::Mtype::CC;
+    page_table[kBase >> KfdAddressSpace::kPageShift].mtype = amdgpu::Mtype::CC;
   }
   l1.store(kStoreAddr, /*num_dwords=*/1, &kCcStoreValue, kVmid);
 
@@ -1782,10 +1782,10 @@ TEST(L1ScalarCacheTest, CacheableStoresWriteThroughBeforeWriteback) {
     l2.set_gpu_vm(&mem.gpu_vm());
     l1.set_gpu_vm(&mem.gpu_vm());
 
-    std::array<uint8_t, KfdProcess::kPageSize> backing{};
-    KfdProcess::PageTable page_table;
+    std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+    KfdAddressSpace::PageTable page_table;
     util::DistributedSharedMutex page_table_mutex;
-    page_table[kAddr >> KfdProcess::kPageShift] = {backing.data(), mtype};
+    page_table[kAddr >> KfdAddressSpace::kPageShift] = {backing.data(), mtype};
     mem.register_process(kVmid, &page_table, &page_table_mutex);
 
     const uint32_t value = 0xCAFE0000u + static_cast<uint32_t>(mtype);
@@ -1811,11 +1811,11 @@ TEST(L1ScalarCacheTest, UnalignedStoreCrossingLineWritesThroughExactBytes) {
   constexpr uint64_t kAddr = kPageBase + (uint64_t{1} << amdgpu::L1ScalarCache::LINE_SIZE_BITS) - 2;
   constexpr uint32_t kValue = 0x44332211;
 
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
   backing.fill(0xA5);
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kPageBase >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kPageBase >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   l1.store(kAddr, /*num_dwords=*/1, &kValue, kVmid);
@@ -1849,10 +1849,10 @@ TEST(L1ScalarCacheTest, ScalarWritebackDoesNotClobberAtomicAtDisjointAddress) {
   constexpr uint32_t kVmid = 17;
   constexpr uint64_t kVa = 0x500000;
   constexpr uint32_t kScalarValue = 0x5A5A5A5A;
-  std::array<uint8_t, KfdProcess::kPageSize> backing{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
-  page_table[kVa >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+  page_table[kVa >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 
   l1.store(kVa + sizeof(uint32_t), /*num_dwords=*/1, &kScalarValue, kVmid);
@@ -1924,10 +1924,10 @@ TEST(L1ScalarCacheTest, UcAndCcFlushDoNotClobberAtomicAtDisjointAddress) {
     amdgpu::L1ScalarCache l1(&l2a);
     l1.set_gpu_vm(&mem.gpu_vm());
 
-    std::array<uint8_t, KfdProcess::kPageSize> backing{};
-    KfdProcess::PageTable page_table;
+    std::array<uint8_t, KfdAddressSpace::kPageSize> backing{};
+    KfdAddressSpace::PageTable page_table;
     util::DistributedSharedMutex page_table_mutex;
-    page_table[kVa >> KfdProcess::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
+    page_table[kVa >> KfdAddressSpace::kPageShift] = {backing.data(), amdgpu::Mtype::RW};
     mem.register_process(kVmid, &page_table, &page_table_mutex);
 
     l1.store(kVa + sizeof(uint32_t), /*num_dwords=*/1, &kScalarValue, kVmid);
@@ -1944,7 +1944,7 @@ TEST(L1ScalarCacheTest, UcAndCcFlushDoNotClobberAtomicAtDisjointAddress) {
 
     {
       std::unique_lock lock(page_table_mutex);
-      page_table[kVa >> KfdProcess::kPageShift].mtype = mtype;
+      page_table[kVa >> KfdAddressSpace::kPageShift].mtype = mtype;
     }
     uint32_t ignored = 0;
     l1.load(kVa + 2 * sizeof(uint32_t), /*num_dwords=*/1, &ignored, kVmid);
@@ -2237,13 +2237,13 @@ TEST(GpuMemoryTest, BlockAccessSpansSparseFallbackPages) {
 TEST(GpuMemoryTest, BlockAccessSpansMappedPages) {
   test::LegacyGpuMemoryFixture mem("test_mem");
   constexpr uint32_t kVmid = 8;
-  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr uint64_t kAddr = KfdAddressSpace::kPageSize - 8;
   constexpr std::array<uint8_t, 16> kData = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
                                              0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
-  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
-  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> first_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> second_page{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[0] = {first_page.data(), amdgpu::Mtype::RW};
   page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
@@ -2259,15 +2259,15 @@ TEST(GpuMemoryTest, BlockAccessSpansMappedPages) {
 TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
   test::LegacyGpuMemoryFixture mem("test_mem");
   constexpr uint32_t kVmid = 9;
-  constexpr uint64_t kAddr = KfdProcess::kPageSize - 8;
+  constexpr uint64_t kAddr = KfdAddressSpace::kPageSize - 8;
   constexpr std::array<uint8_t, 16> kReadData = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
                                                  0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27};
   constexpr std::array<uint8_t, 16> kWriteData = {0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
                                                   0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47};
 
-  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> second_page{};
   std::ranges::copy(std::span(kReadData).subspan(8), second_page.begin());
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   page_table[1] = {second_page.data(), amdgpu::Mtype::RW};
   mem.register_process(kVmid, &page_table, &page_table_mutex);
@@ -2288,13 +2288,13 @@ TEST(GpuMemoryTest, BlockAccessRechecksTranslationAfterSparseFallbackPage) {
 TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) {
   test::LegacyGpuMemoryFixture mem("test_mem");
   constexpr uint32_t kVmid = 10;
-  constexpr uint64_t kGpuAddr = 0x100000 + KfdProcess::kPageSize - 11;
-  constexpr size_t kSize = KfdProcess::kPageSize + 37;
+  constexpr uint64_t kGpuAddr = 0x100000 + KfdAddressSpace::kPageSize - 11;
+  constexpr size_t kSize = KfdAddressSpace::kPageSize + 37;
 
-  std::array<uint8_t, KfdProcess::kPageSize> first_page{};
-  std::array<uint8_t, KfdProcess::kPageSize> second_page{};
-  std::array<uint8_t, KfdProcess::kPageSize> third_page{};
-  KfdProcess::PageTable page_table;
+  std::array<uint8_t, KfdAddressSpace::kPageSize> first_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> second_page{};
+  std::array<uint8_t, KfdAddressSpace::kPageSize> third_page{};
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   const uint64_t first_page_number = kGpuAddr >> amdgpu::GpuMemory::PAGE_SHIFT;
   page_table[first_page_number] = {first_page.data(), amdgpu::Mtype::RW};
@@ -2326,7 +2326,7 @@ TEST(GpuMemoryTest, CopyBlockTransfersPageableClientMemoryAcrossPageBoundaries) 
 TEST(GpuMemoryTest, AuthorizedProcMemAccessesAnonymousTargetMemory) {
   test::LegacyGpuMemoryFixture mem("test_mem");
   constexpr uint32_t kVmid = 11;
-  KfdProcess::PageTable page_table;
+  KfdAddressSpace::PageTable page_table;
   util::DistributedSharedMutex page_table_mutex;
   mem.register_process(kVmid, &page_table, &page_table_mutex);
 

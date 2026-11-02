@@ -329,19 +329,25 @@ public:
   /// but the first.
   class GpuFaultReporter : public amdgpu::MemoryFaultReporter {
   public:
-    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id, std::shared_ptr<KfdProcess> process)
-        : driver_(driver), gpu_id_(gpu_id), process_(std::move(process)) {}
+    GpuFaultReporter(SimulatedKfd *driver, uint32_t gpu_id, std::shared_ptr<KfdProcess> process,
+                     uint32_t vmid = 0)
+        : driver_(driver), gpu_id_(gpu_id), process_(process),
+          process_lifetime_(vmid ? nullptr : process), vmid_(vmid ? vmid : process->process_id()) {}
 
     void report_memory_fault(uint32_t vmid, uint64_t addr,
                              amdgpu::MemoryFaultCause cause) override {
-      if (process_ != nullptr && process_->process_id() == vmid)
-        driver_->report_memory_fault(process_, addr, gpu_id_, cause);
+      if (auto process = process_.lock(); process && vmid_ == vmid)
+        driver_->report_memory_fault(process, addr, gpu_id_, cause);
     }
 
   private:
     SimulatedKfd *driver_ = nullptr;
     uint32_t gpu_id_ = 0;
-    std::shared_ptr<KfdProcess> process_;
+    std::weak_ptr<KfdProcess> process_;
+    // Legacy snapshots reference the process-owned table. DRM snapshots retain
+    // their separate translation state and must not form a process/VM cycle.
+    std::shared_ptr<KfdProcess> process_lifetime_;
+    uint32_t vmid_ = 0;
   };
 
   /// @brief Deliver a GPU memory violation to the faulting process.
@@ -456,28 +462,20 @@ public:
   /// requested allocation flags. mapping_flags_for_handle encodes that policy as
   /// COHERENT for the interposer's GEM_VA path.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
-  /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
-  int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
+  /// @brief Create a DRM VM bounded by this runtime's GPU-service lifetime.
+  [[nodiscard]] std::shared_ptr<DrmVm> create_drm_vm(uint32_t render_minor);
+  /// @brief Retain a resolved DRM file for the local process and selected GPU.
+  int acquire_vm(uint32_t gpu_id, const std::shared_ptr<DrmFileState> &file);
+  /// @brief Submit compute IBs using the submitting DRM file's address space.
+  int submit_pm4(const std::shared_ptr<DrmVm> &vm, uint64_t queue_key,
+                 amdgpu::Pm4Submission submission);
+  /// @brief Map private retained buffer backing into the specified DRM VM.
+  [[nodiscard]] bool gem_va_map(const std::shared_ptr<DrmVm> &vm, uint64_t gpu_va, void *host_ptr,
+                                size_t size, uint32_t alloc_flags, bool sealed_ram = false);
+  [[nodiscard]] bool gem_va_unmap(const std::shared_ptr<DrmVm> &vm, uint64_t gpu_va, size_t size);
+
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
   void retire_pm4_queue(uint64_t queue_key);
-
-  /// @brief Install a host range into the local process's GPU page table.
-  /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
-  /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
-  /// @p alloc_flags.
-  /// @pre host_ptr names the interposer-owned read-write dmabuf mapping, which
-  /// remains alive until these GPU mappings are removed. Application-owned
-  /// pointers must use map_to_gpu with HostExtentOwner::Application instead.
-  /// @retval true the range was installed.
-  /// @retval false the local process is gone, so nothing was mapped (the caller
-  ///         must surface an error rather than report a phantom success).
-  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
-                                bool sealed_ram = false);
-
-  /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
-  /// @retval true the range was unmapped.
-  /// @retval false the local process is gone, so nothing was unmapped.
-  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
 
   /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
   /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
@@ -553,10 +551,12 @@ private:
     return 0;
   }
 
+  amdgpu::LegacyGpuVmAdapter &address_space_adapter(KfdProcess &proc, uint32_t gpu_ordinal);
+
   void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
-                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
-  void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+                  amdgpu::Mtype mtype, KfdAddressSpace::HostExtentOwner owner,
+                  uint32_t gpu_ordinal);
+  void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size, uint32_t gpu_ordinal);
   /// @brief Withdraw GPU backing and release driver-owned allocation mappings.
   /// @details Caller holds proc.alloc_mutex_; caller-owned client views survive.
   void release_allocation_mappings(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
@@ -566,6 +566,11 @@ private:
   /// current PTEs. Returns the new fd or a negative errno; failure leaves the
   /// policy unchanged. Caller holds proc.alloc_mutex_.
   int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
+
+  void map_allocation_pages(
+      KfdProcess &proc, const KfdProcess::GpuAllocation &alloc, void *host_ptr, size_t size,
+      KfdAddressSpace::HostExtentOwner owner = KfdAddressSpace::HostExtentOwner::Application);
+  void unmap_allocation_pages(KfdProcess &proc, const KfdProcess::GpuAllocation &alloc);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
@@ -773,7 +778,8 @@ private:
   int set_xnack_mode_ioctl(KfdProcess &proc, void *arg);
   int get_tile_config_ioctl(void *arg);
   /// @brief Back scratch for test-registered queues without the KFD queue ABI.
-  bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size);
+  bool allocate_scratch_backing(uint32_t process_id, uint64_t gpu_va, size_t size,
+                                uint32_t gpu_ordinal);
 
   /// @brief Lazily create the pollable KFD event descriptor across racing opens.
   /// @details CAS-publishes fd_ so concurrent open()/open_process() callers agree
@@ -844,6 +850,7 @@ private:
   // counter would let two live frontends publish the same numeric identity and
   // silently replace each other's memory binding.
   inline static std::atomic<uint32_t> next_process_id_{1};
+  inline static std::atomic<uint64_t> next_drm_vmid_{0x80000000u};
 
   /// @brief Debugger sessions keyed by the target inferior's Linux pid.
   /// @details Decoupled from KfdProcess so a debugger (rocgdb) can enable a

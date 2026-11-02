@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -1147,7 +1147,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
 
   ScopedMapping mapping;
   ASSERT_NE(mapping.data(), nullptr);
-  KfdProcess legacy_process(kProcessId);
+  KfdAddressSpace legacy_process;
   legacy_process.map_pages(kDirtyAddress, mapping.data(), GpuMemory::PAGE_SIZE);
   GpuMemory legacy_memory("legacy_memory");
   GpuVm legacy_gpu_vm;

@@ -647,6 +647,12 @@ TEST_F(DaemonTest, InterposerProcMapsNamesRemoteKfdMarker) {
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
 
+TEST_F(DaemonTest, AcquireVmRemainsCompatibilityNoOp) {
+  const auto result = run_hip_test(
+      interposer_dup_bin(), "InterposerGpuVmAcquireTest.RemoteAcquireRemainsCompatibilityNoOp");
+  EXPECT_EQ(result.exit_code, 0) << result.output;
+}
+
 // --- RCCL collective tests (2-GPU daemon) ---
 
 class RcclDaemonTest : public ::testing::Test {

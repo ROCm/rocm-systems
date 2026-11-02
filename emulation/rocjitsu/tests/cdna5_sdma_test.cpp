@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 
@@ -420,8 +420,7 @@ class HostSdmaQueueForTest {
 public:
   explicit HostSdmaQueueForTest(Gfx1250Sim &sim, uint64_t initial_doorbell = 0,
                                 uint64_t last_doorbell = 0)
-      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), process_(kProcessId),
-        doorbells_{initial_doorbell} {
+      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), doorbells_{initial_doorbell} {
     address_space_ = legacy_vm_.register_address_space(kProcessId, &process_.page_table_,
                                                        &process_.page_table_mutex_,
                                                        process_.page_table_generation());
@@ -504,7 +503,7 @@ private:
 
   Gfx1250Sim &sim_;
   amdgpu::LegacyGpuVmAdapter legacy_vm_;
-  KfdProcess process_;
+  KfdAddressSpace process_;
   amdgpu::AddressSpaceHandle address_space_;
   amdgpu::QueueHandle queue_handle_;
   amdgpu::QueueSubmissionStatus last_submission_status_ = amdgpu::QueueSubmissionStatus::Accepted;
@@ -521,7 +520,7 @@ private:
 class TranslatedSdmaQueueForTest {
 public:
   explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim, amdgpu::InterruptSink interrupt_sink = {})
-      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()), process_(kProcessId),
+      : sim_(sim), legacy_vm_(sim.soc->gpu_vm(), sim.soc->memory()),
         interrupt_sink_(std::move(interrupt_sink)) {
     address_space_ = legacy_vm_.register_address_space(kProcessId, &process_.page_table_,
                                                        &process_.page_table_mutex_,
@@ -637,16 +636,16 @@ public:
   void map_low_test_page() { process_.map_pages(0, low_page_.data(), low_page_.size()); }
 
   void unmap_src_tail_page() {
-    process_.unmap_pages(kSrcVa + KfdProcess::kPageSize, KfdProcess::kPageSize);
+    process_.unmap_pages(kSrcVa + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize);
   }
 
   void unmap_dst_tail_page() {
-    process_.unmap_pages(kDstVa + KfdProcess::kPageSize, KfdProcess::kPageSize);
+    process_.unmap_pages(kDstVa + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize);
   }
 
   void remap_dst_tail_page() {
-    process_.map_pages(kDstVa + KfdProcess::kPageSize, dst_.data() + KfdProcess::kPageSize,
-                       KfdProcess::kPageSize);
+    process_.map_pages(kDstVa + KfdAddressSpace::kPageSize,
+                       dst_.data() + KfdAddressSpace::kPageSize, KfdAddressSpace::kPageSize);
   }
 
   void submit(uint32_t dwords, SdmaSubmissionWait wait = SdmaSubmissionWait::RetirementOrTerminal) {
@@ -696,7 +695,7 @@ private:
 
   Gfx1250Sim &sim_;
   amdgpu::LegacyGpuVmAdapter legacy_vm_;
-  KfdProcess process_;
+  KfdAddressSpace process_;
   amdgpu::AddressSpaceHandle address_space_;
   amdgpu::QueueHandle queue_handle_;
   amdgpu::InterruptSink interrupt_sink_;
@@ -712,7 +711,7 @@ private:
   alignas(4096) std::array<uint8_t, 8192> dst2_{};
   alignas(4096) std::array<int64_t, 512> signal_{};
   alignas(4096) std::array<uint64_t, 512> poll_{};
-  alignas(4096) std::array<uint8_t, KfdProcess::kPageSize> low_page_{};
+  alignas(4096) std::array<uint8_t, KfdAddressSpace::kPageSize> low_page_{};
   std::array<uint64_t, 1> doorbells_{};
 };
 
@@ -901,7 +900,7 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   constexpr uint32_t kProcessId = 71;
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
   const amdgpu::AddressSpaceHandle address_space =
       legacy_vm.register_address_space(kProcessId, &process.page_table_, &process.page_table_mutex_,
@@ -1207,7 +1206,7 @@ TEST(Gfx1250SdmaTest, StaleAddressSpaceCannotExecuteThroughLegacyBacking) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   constexpr uint32_t kProcessId = 1252;
-  KfdProcess process(kProcessId);
+  KfdAddressSpace process;
   amdgpu::LegacyGpuVmAdapter legacy_vm(sim.soc->gpu_vm(), sim.soc->memory());
   const amdgpu::AddressSpaceHandle stale =
       legacy_vm.register_address_space(kProcessId, &process.page_table_, &process.page_table_mutex_,
@@ -1808,11 +1807,11 @@ TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
   // exit-time tracer inside its own thread-scanning code -- with a bare
   // SYS_munmap as readily as with munmap(3), so nothing in rocjitsu is on that
   // path. Reserving the page keeps the case testable under ASan.
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+  void *raw = mmap(nullptr, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   queue.set_read_ptr_va(reinterpret_cast<uint64_t>(raw));
-  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_NONE), 0);
+  ASSERT_EQ(mprotect(raw, KfdAddressSpace::kPageSize, PROT_NONE), 0);
 
   auto *packet = queue.ring();
   packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
@@ -1833,8 +1832,8 @@ TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
 
-  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
-  munmap(raw, KfdProcess::kPageSize);
+  ASSERT_EQ(mprotect(raw, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
+  munmap(raw, KfdAddressSpace::kPageSize);
 }
 
 // The read pointer is how the owner learns which packets are done. If it cannot
@@ -1853,11 +1852,11 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   }
 
   // A read pointer the queue can read but not write.
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_READ | PROT_WRITE,
+  void *raw = mmap(nullptr, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   queue.set_read_ptr_va(reinterpret_cast<uint64_t>(raw));
-  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ), 0);
+  ASSERT_EQ(mprotect(raw, KfdAddressSpace::kPageSize, PROT_READ), 0);
 
   auto *packet = queue.ring();
   packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
@@ -1878,8 +1877,8 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
 
-  mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE);
-  munmap(raw, KfdProcess::kPageSize);
+  mprotect(raw, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE);
+  munmap(raw, KfdAddressSpace::kPageSize);
 }
 
 /// @brief A poll on a faulted address must halt rather than spin forever.
@@ -1894,7 +1893,8 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   TranslatedSdmaQueueForTest queue(sim);
   queue.set_passthrough(true);
 
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *raw =
+      mmap(nullptr, KfdAddressSpace::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
 
@@ -1919,14 +1919,14 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   // Parking the read pointer looks the same whether the queue faulted or is
   // merely waiting, so make the address satisfy the poll and ring again. A
   // waiting queue would proceed; a faulted one is over.
-  ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  ASSERT_EQ(mprotect(raw, KfdAddressSpace::kPageSize, PROT_READ | PROT_WRITE), 0);
   const uint64_t read_idx_after_fault = queue.read_idx();
   queue.submit(11);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
   EXPECT_EQ(queue.signal_value(), 5) << "a faulted queue resumed once its address became readable";
   EXPECT_EQ(queue.read_idx(), read_idx_after_fault) << "the queue advanced after faulting";
 
-  munmap(raw, KfdProcess::kPageSize);
+  munmap(raw, KfdAddressSpace::kPageSize);
 }
 
 TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
@@ -1935,7 +1935,8 @@ TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   TranslatedSdmaQueueForTest queue(sim);
   queue.set_passthrough(true);
 
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *raw =
+      mmap(nullptr, KfdAddressSpace::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
 
@@ -1979,7 +1980,8 @@ TEST(Gfx1250SdmaTest, FaultedCopyDoesNotPublishItsCompletionSignal) {
   TranslatedSdmaQueueForTest queue(sim);
   queue.set_passthrough(true);
 
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *raw =
+      mmap(nullptr, KfdAddressSpace::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
 
@@ -2015,7 +2017,7 @@ TEST(Gfx1250SdmaTest, FaultedCopyDoesNotPublishItsCompletionSignal) {
     ASSERT_EQ(queue.dst()[i], kSentinel) << "destination byte " << i;
   }
 
-  munmap(raw, KfdProcess::kPageSize);
+  munmap(raw, KfdAddressSpace::kPageSize);
 }
 
 TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) {
@@ -2026,7 +2028,8 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
   // address at all, so it is required to reach the faulting path.
   queue.set_passthrough(true);
 
-  void *raw = mmap(nullptr, KfdProcess::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *raw =
+      mmap(nullptr, KfdAddressSpace::kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(raw, MAP_FAILED);
   const uint64_t faulted_va = reinterpret_cast<uint64_t>(raw);
 
@@ -2052,7 +2055,7 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
         << "a faulted source must not overwrite the destination with fabricated bytes, byte " << i;
   }
 
-  munmap(raw, KfdProcess::kPageSize);
+  munmap(raw, KfdAddressSpace::kPageSize);
 }
 
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {

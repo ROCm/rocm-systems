@@ -1431,9 +1431,10 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
     }
   } reporter;
   amdgpu::LegacyGpuVmAdapter legacy_vm(fx.soc->gpu_vm(), fx.memory);
-  const amdgpu::AddressSpaceHandle address_space =
-      legacy_vm.register_address_space(process.process_id(), &process.page_table_,
-                                       &process.page_table_mutex_, process.page_table_generation());
+  const amdgpu::AddressSpaceHandle address_space = legacy_vm.register_address_space(
+      process.process_id(), &process.legacy_address_space_.page_table_,
+      &process.legacy_address_space_.page_table_mutex_,
+      process.legacy_address_space_.page_table_generation());
   ASSERT_TRUE(address_space);
   ASSERT_TRUE(legacy_vm.set_fault_reporter(address_space, &reporter));
 
@@ -1445,7 +1446,7 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   std::unique_ptr<void, decltype(release)> reservation(mapping, release);
   const uint64_t scratch_va = reinterpret_cast<uint64_t>(reservation.get());
   std::vector<uint8_t> backing(kScratchSize);
-  process.map_pages(scratch_va, backing.data(), backing.size());
+  process.legacy_address_space_.map_pages(scratch_va, backing.data(), backing.size());
   std::atomic_uint allocations{0};
   for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     amdgpu::CommandProcessor *cp = fx.soc->xcd(xi)->command_processor();
@@ -1456,7 +1457,7 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
       EXPECT_EQ(size, backing.size());
       EXPECT_EQ(reporter.faults.load(std::memory_order_relaxed), 0u);
       if (allocations.load(std::memory_order_relaxed) == 0) {
-        process.map_pages(va, backing.data(), backing.size());
+        process.legacy_address_space_.map_pages(va, backing.data(), backing.size());
         allocations.fetch_add(1, std::memory_order_relaxed);
       }
       return true;
@@ -1494,9 +1495,9 @@ TEST(XcdDistributionTest, RuntimeQueueScratchUsesItsOwnBackingWithoutSyntheticAl
   queue_desc.compute_tmpring_size =
       (kTotalCus / kTotalXcds) |
       ((1024 / isa_properties(ROCJITSU_CODE_ARCH_CDNA4).compute_tmpring_wavesize_granule) << 12);
-  process.map_pages(kKernelVa, &kernel, sizeof(kernel));
-  process.map_pages(kRingVa, ring.data(), sizeof(ring));
-  process.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
+  process.legacy_address_space_.map_pages(kKernelVa, &kernel, sizeof(kernel));
+  process.legacy_address_space_.map_pages(kRingVa, ring.data(), sizeof(ring));
+  process.legacy_address_space_.map_pages(kQueueVa, &queue_desc, sizeof(queue_desc));
   uint64_t doorbell = 1;
   amdgpu::ComputeQueueConfig hw{};
   hw.address_space = address_space;

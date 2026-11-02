@@ -3,6 +3,7 @@
 
 rj_add_object_library(rocjitsu_kmd
     cwsr.cpp
+    drm_retirement_owner.cpp
     events.cpp
     guest_kfd.cpp
     legacy_gpu_vm.cpp

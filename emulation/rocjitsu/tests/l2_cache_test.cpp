@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
-#include "rocjitsu/kmd/linux/kfd_process.h"
+#include "rocjitsu/kmd/linux/kfd_address_space.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -985,7 +985,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   ASSERT_NE(second_raw, MAP_FAILED);
   ScopedMapping second_mapping(second_raw, GpuMemory::PAGE_SIZE);
 
-  rocjitsu::KfdProcess process(kVmid);
+  rocjitsu::KfdAddressSpace process;
   process.map_pages(kGpuAddress, initial_mapping.data(), GpuMemory::PAGE_SIZE);
   GpuMemory memory("memory");
   rocjitsu::amdgpu::GpuVm gpu_vm;
@@ -1059,7 +1059,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   ASSERT_NE(raw_mapping, MAP_FAILED);
   ScopedMapping mapping(raw_mapping, GpuMemory::PAGE_SIZE);
 
-  rocjitsu::KfdProcess process(kVmid);
+  rocjitsu::KfdAddressSpace process;
   process.map_pages(kGpuAddress, mapping.data(), GpuMemory::PAGE_SIZE);
   GpuMemory memory("memory");
   rocjitsu::amdgpu::GpuVm gpu_vm;
@@ -1292,7 +1292,7 @@ protected:
 
   std::array<uint8_t, GpuMemory::PAGE_SIZE> first_page_{};
   std::array<uint8_t, GpuMemory::PAGE_SIZE> second_page_{};
-  rocjitsu::KfdProcess process_{kVmid};
+  rocjitsu::KfdAddressSpace process_;
   GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::GpuVm gpu_vm_;
   rocjitsu::amdgpu::LegacyGpuVmAdapter legacy_vm_{gpu_vm_, &memory_};
@@ -1309,8 +1309,8 @@ protected:
 
   void SetUp() override {
     std::ranges::fill(backing_, uint8_t{0x5a});
-    page_table_[kBase >> rocjitsu::KfdProcess::kPageShift] = {backing_.data(), Mtype::RW,
-                                                              backing_.size(), 0};
+    page_table_[kBase >> rocjitsu::KfdAddressSpace::kPageShift] = {backing_.data(), Mtype::RW,
+                                                                   backing_.size(), 0};
     address_space_ = legacy_vm_.register_address_space(kVmid, &page_table_, &page_table_mutex_);
     ASSERT_TRUE(address_space_);
     l2_.set_backing_memory(&memory_);
@@ -1318,7 +1318,7 @@ protected:
   }
 
   std::array<uint8_t, kBackingSize> backing_{};
-  rocjitsu::KfdProcess::PageTable page_table_;
+  rocjitsu::KfdAddressSpace::PageTable page_table_;
   util::DistributedSharedMutex page_table_mutex_;
   GpuMemory memory_{"memory"};
   rocjitsu::amdgpu::GpuVm gpu_vm_;
@@ -1369,7 +1369,7 @@ protected:
   }
 
   std::array<uint8_t, 8192> backing_{};
-  rocjitsu::KfdProcess process_{kVmid};
+  rocjitsu::KfdAddressSpace process_;
   GpuMemory memory_{"scalar_ram"};
   rocjitsu::amdgpu::GpuVm vm_;
   rocjitsu::amdgpu::LegacyGpuVmAdapter adapter_{vm_, &memory_};
@@ -1595,11 +1595,11 @@ TEST_F(VectorRamBatchTest, StrictSubextentFailuresRetainExactWrittenPrefix) {
     for (const bool allow : {false, true}) {
       map(Owner::DriverSealedRam, Mtype::UC, kind == 0 ? 10 : 8192);
       if (kind == 1)
-        process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
+        process_.page_table_[kBase >> rocjitsu::KfdAddressSpace::kPageShift].host_extents = {
             {backing_.data(), 6, 0, Owner::DriverSealedRam},
             {backing_.data() + 6, 58, 6, Owner::DriverSealedRam}};
       if (kind == 2)
-        process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
+        process_.page_table_[kBase >> rocjitsu::KfdAddressSpace::kPageShift].host_extents = {
             {backing_.data(), 64, 0, Owner::DriverSealedRam},
             {backing_.data() + 8, 8, 8, Owner::DriverSealedRam}};
       reset_bytes();
@@ -1892,7 +1892,7 @@ TEST_F(ScalarRamBatchTest, AdjacentSealedExtentsRetainDwordFaultBoundaries) {
     map();
     // Populate before first access rather than using map_pages, which merges
     // contiguous extents. The translation interface also accepts split PTEs.
-    process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
+    process_.page_table_[kBase >> rocjitsu::KfdAddressSpace::kPageShift].host_extents = {
         {backing_.data(), split, 0, Owner::DriverSealedRam},
         {backing_.data() + split, 64 - split, split, Owner::DriverSealedRam}};
     for (const bool allow : {false, true}) {
@@ -1910,7 +1910,7 @@ TEST_F(ScalarRamBatchTest, AdjacentSealedExtentsRetainDwordFaultBoundaries) {
 
 TEST_F(ScalarRamBatchTest, OverlappingSealedExtentsKeepSuccessfulDwordPrefix) {
   map();
-  process_.page_table_[kBase >> rocjitsu::KfdProcess::kPageShift].host_extents = {
+  process_.page_table_[kBase >> rocjitsu::KfdAddressSpace::kPageShift].host_extents = {
       {backing_.data(), 32, 0, Owner::DriverSealedRam},
       {backing_.data() + 8, 8, 8, Owner::DriverSealedRam}};
   for (const bool allow : {false, true}) {
@@ -2316,7 +2316,7 @@ TEST_F(L1CacheMtypeTest, VmidRebindingRefreshesNewResolverAndUsesNewPolicy) {
   l1.load(kAddr, 1, &result, kVmid);
   ASSERT_EQ(result, kFirst);
 
-  rocjitsu::KfdProcess replacement_process(kVmid);
+  rocjitsu::KfdAddressSpace replacement_process;
   std::array<uint8_t, GpuMemory::PAGE_SIZE> replacement_page{};
   std::memcpy(replacement_page.data() + GpuMemory::PAGE_SIZE - sizeof(kFirstReplacement),
               &kFirstReplacement, sizeof(kFirstReplacement));
@@ -2437,7 +2437,7 @@ TEST_F(L1CacheMtypeTest, LiveResolverObservesUnmapAndRemapOnSamePage) {
 }
 
 TEST_F(L1CacheMtypeTest, LiveResolverSurvivesRegisteredProcessDestruction) {
-  auto process = std::make_unique<rocjitsu::KfdProcess>(kVmid);
+  auto process = std::make_unique<rocjitsu::KfdAddressSpace>();
   process->map_pages(kBase, first_page_.data(), first_page_.size(), Mtype::UC);
   address_space_ = legacy_vm_.register_address_space(
       kVmid, {.page_table = &process->page_table_,
@@ -3004,7 +3004,7 @@ TEST(L2CacheTest, FullLineStoreEvictsDirtyLineUnderItsOwningVmid) {
   constexpr uint64_t kSetStride = L2Cache::LINE_SIZE * L2Cache::NUM_SETS;
   std::array<std::array<uint8_t, GpuMemory::PAGE_SIZE>, L2Cache::ASSOCIATIVITY> pages_a{};
   std::array<uint8_t, GpuMemory::PAGE_SIZE> page_b{};
-  rocjitsu::KfdProcess process_a(kVmidA), process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a, process_b;
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   for (uint32_t way = 0; way < pages_a.size(); ++way)
     process_a.map_pages(kAddr + way * kSetStride, pages_a[way].data(), pages_a[way].size());
@@ -3322,8 +3322,8 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwAliasedVasIsSerialized) {
   constexpr uint32_t kThreads = 8;
   constexpr uint32_t kIterations = 1000;
 
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
   std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
   process_a.map_pages(kVaA, backing.data(), backing.size());
   process_b.map_pages(kVaB, backing.data(), backing.size());
@@ -3394,8 +3394,8 @@ TEST(L2CacheThreadingTest, CrossL2AtomicRmwDistinctSharedMappingsIncludesDirtyWr
   constexpr uint64_t kVaA = 0x310000;
   constexpr uint64_t kVaB = 0x420000;
   constexpr uint32_t kOffset = 64;
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
   process_a.map_pages(kVaA, mapping_a.data(), kMappingSize, Mtype::CC);
   process_b.map_pages(kVaB, mapping_b.data(), kMappingSize, Mtype::CC);
 
@@ -3483,8 +3483,8 @@ TEST(DeviceCacheCoherenceTest, ScalarWriteThroughSurvivesAliasedRemoteAtomic) {
   constexpr uint64_t kScalarAddr = kScalarVa + kLineOffset + sizeof(uint32_t);
   constexpr uint32_t kScalarValue = 0xA5A5A5A5;
 
-  rocjitsu::KfdProcess scalar_process(kScalarVmid);
-  rocjitsu::KfdProcess atomic_process(kAtomicVmid);
+  rocjitsu::KfdAddressSpace scalar_process;
+  rocjitsu::KfdAddressSpace atomic_process;
   scalar_process.map_pages(kScalarVa, scalar_mapping.data(), kMappingSize, Mtype::RW);
   atomic_process.map_pages(kAtomicVa, atomic_mapping.data(), kMappingSize, Mtype::RW);
 
@@ -3557,9 +3557,9 @@ TEST(DeviceCacheCoherenceTest, DisjointDirtyL2AliasesSurviveRemoteAtomic) {
   constexpr uint32_t kOffsetA = sizeof(uint32_t);
   constexpr uint32_t kOffsetB = 2 * sizeof(uint32_t);
 
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
-  rocjitsu::KfdProcess atomic_process(kAtomicVmid);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
+  rocjitsu::KfdAddressSpace atomic_process;
   process_a.map_pages(kVaA, mapping_a.data(), kMappingSize, Mtype::RW);
   process_b.map_pages(kVaB, mapping_b.data(), kMappingSize, Mtype::RW);
   atomic_process.map_pages(kAtomicVa, mapping_atomic.data(), kMappingSize, Mtype::RW);
@@ -3713,8 +3713,8 @@ TEST(L2CacheTest, LinkedPortAtomicRmwRefreshesStaleMemorySideAlias) {
   constexpr uint32_t kOffset = 64;
   constexpr uint32_t kPublishedValue = 40;
 
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
   std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
   process_a.map_pages(kVaA, backing.data(), backing.size(), Mtype::RW);
   process_b.map_pages(kVaB, backing.data(), backing.size(), Mtype::RW);
@@ -3795,8 +3795,8 @@ TEST(L2CacheTest, AliasedVasRequireCoherenceBoundary) {
   constexpr uint64_t kVaA = 0x100000;
   constexpr uint64_t kVaB = 0x201000;
 
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
   std::array<uint8_t, GpuMemory::PAGE_SIZE> backing{};
   process_a.map_pages(kVaA, backing.data(), backing.size());
   process_b.map_pages(kVaB, backing.data(), backing.size());
@@ -4005,8 +4005,8 @@ TEST(L2CacheTest, InvalidateRangeOnlyAffectsRequestedVmid) {
   constexpr uint32_t kVmidA = 7;
   constexpr uint32_t kVmidB = 8;
   constexpr uint64_t kAddr = 0x500000;
-  rocjitsu::KfdProcess process_a(kVmidA);
-  rocjitsu::KfdProcess process_b(kVmidB);
+  rocjitsu::KfdAddressSpace process_a;
+  rocjitsu::KfdAddressSpace process_b;
   std::array<uint8_t, GpuMemory::PAGE_SIZE> backing_a{};
   std::array<uint8_t, GpuMemory::PAGE_SIZE> backing_b{};
   process_a.map_pages(kAddr, backing_a.data(), backing_a.size());

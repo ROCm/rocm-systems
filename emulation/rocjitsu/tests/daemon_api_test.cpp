@@ -274,7 +274,7 @@ TEST(DaemonApi, RemoteUserptrUsesCpuAddressIndependentOfGpuVa) {
   const auto *gpu = client.gpu_info_for_render_minor(128);
   ASSERT_NE(gpu, nullptr);
 
-  constexpr size_t kPage = KfdProcess::kPageSize;
+  constexpr size_t kPage = KfdAddressSpace::kPageSize;
   void *cpu = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   ASSERT_NE(cpu, MAP_FAILED);
   *static_cast<uint32_t *>(cpu) = 0x12345678;
