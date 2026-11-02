@@ -282,13 +282,15 @@ public:
   }
 
   void checkLdsRead(int wave, int lane, int addr, int bytes,
-                    MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
-    detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
+                    MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
+                    std::optional<uint64_t> accessPc = std::nullopt) {
+    detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder, accessPc);
   }
 
   void checkLdsWrite(int wave, int lane, int addr, int bytes,
-                     MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
-    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder);
+                     MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
+                     std::optional<uint64_t> accessPc = std::nullopt) {
+    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder, accessPc);
   }
 
   // -- Results --
@@ -345,9 +347,9 @@ private:
       const int addr = static_cast<int>(range.address);
       const int bytes = static_cast<int>(range.bytes);
       if (type == MemoryEventType::GLOBAL_TO_LDS)
-        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder, pc_);
       else
-        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder);
+        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, memoryOrder, pc_);
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};

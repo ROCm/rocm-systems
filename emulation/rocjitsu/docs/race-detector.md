@@ -498,9 +498,9 @@ gfx1151, using absolute paths from this source tree. The original
 - **Deferred tensor DMA transfers**: a tensor DMA transfer is registered when it
   completes. When the emulator defers a transfer until its memory becomes
   available, the issuing wave stalls, but other waves keep running. Their LDS
-  accesses during the delay are checked when the transfer is registered, and
-  such a race is reported at the issuing wave's PC at completion, which is past
-  the tensor instruction.
+  accesses during the delay are checked when the transfer is registered. Such a
+  race is still reported at the tensor instruction, not at the PC the wave has
+  moved on to.
 
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked, and the LDS barrier arrival a descriptor can

@@ -286,7 +286,10 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
-    const InstructionSnapshot current = current_instruction(*ws, *wf);
+    // A deferred access, such as a tensor DMA callback, names its own
+    // instruction; any other access belongs to the wave's newest one.
+    const InstructionSnapshot current =
+        v.accessPc ? traced_instruction(*ws, *v.accessPc) : current_instruction(*ws, *wf);
     uint64_t pc = current.pc();
 
     {
@@ -532,8 +535,10 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   const int elementBytes = static_cast<int>(access.element_size_bytes);
 
-  // A transfer has no lanes; its violations report lane -1. The core takes its
-  // own range type, independent of the observation protocol.
+  // A transfer has no lanes; its violations report lane -1, and the
+  // instruction's PC rather than the wave's current one, which a deferred
+  // transfer has moved past. The core takes its own range type, independent
+  // of the observation protocol.
   std::vector<LdsByteRange> ranges;
   ranges.reserve(access.lds_ranges.size());
   for (const auto &range : access.lds_ranges) {
@@ -543,9 +548,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
       continue;
     const int addr = static_cast<int>(range.address);
     if (access.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder, access.pc);
     else
-      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
+      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder, access.pc);
   }
 
   const std::array obligations{

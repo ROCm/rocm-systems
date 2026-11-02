@@ -552,6 +552,40 @@ protected:
 
   void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
 
+  /// Wave 0 executes a tensor load at 0x2010 that overwrites bytes wave 1 is
+  /// still reading. When `deferred`, its callback arrives after wave 0 has
+  /// executed the next instruction at 0x201c. Returns the race report.
+  std::string tensor_load_racing_an_older_read(bool deferred) {
+    EXPECT_FALSE(ds_read(1, 4));
+    util::StringDiagnostic error;
+    const std::array<uint32_t, 3> tensor_words{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+    auto tensor = decoder->decode_window(tensor_words, kTensorPc, error.emitter());
+    EXPECT_TRUE(tensor.succeeded()) << error.message();
+    waves[0]->pc = kTensorPc;
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(kTensorPc, *tensor.value(), *waves[0]);
+    if (deferred) {
+      const std::array<uint32_t, 1> nop_words{0xbf800000u}; // s_nop 0
+      auto nop = decoder->decode_window(nop_words, kNextPc, error.emitter());
+      EXPECT_TRUE(nop.succeeded()) << error.message();
+      waves[0]->pc = kNextPc;
+      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(kNextPc, *nop.value(), *waves[0]);
+    }
+    const std::array<TensorDmaLdsRange, 1> ranges{{{.address = 0, .bytes = 16}}};
+    TensorDmaMemoryAccessObservation access;
+    access.mnemonic = "tensor_load_to_lds";
+    access.pc = kTensorPc;
+    access.element_size_bytes = sizeof(uint32_t);
+    access.data_size = 2;
+    access.is_load = true;
+    access.lds_ranges = ranges;
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuTensorDmaMemoryAccess(access, *waves[0]);
+    return sink->str().substr(previous);
+  }
+
+  static constexpr uint64_t kTensorPc = 0x2010;
+  static constexpr uint64_t kNextPc = 0x201c;
+
   std::unique_ptr<Decoder> decoder;
 };
 
@@ -586,6 +620,23 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   const std::string report = sink->str().substr(previous);
   EXPECT_NE(report.find("type=LDS access=write"), std::string::npos) << report;
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, RaceFoundByADeferredTransferIsReportedAtItsInstruction) {
+  const std::string report = tensor_load_racing_an_older_read(/*deferred=*/true);
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_load_to_lds", kTensorPc)),
+            std::string::npos)
+      << report;
+  EXPECT_NE(report.find("; <-- wave 0"), std::string::npos) << report;
+  EXPECT_EQ(report.find(std::format("==>  0x{:x}", kNextPc)), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, RaceFoundByAnImmediateTransferIsReportedAtItsInstruction) {
+  const std::string report = tensor_load_racing_an_older_read(/*deferred=*/false);
+  EXPECT_NE(report.find(std::format("==>  0x{:x}  tensor_load_to_lds", kTensorPc)),
+            std::string::npos)
+      << report;
+  EXPECT_NE(report.find("; <-- wave 0"), std::string::npos) << report;
 }
 
 TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {

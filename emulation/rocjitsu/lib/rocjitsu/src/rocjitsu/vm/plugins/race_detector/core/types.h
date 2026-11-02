@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -79,11 +80,14 @@ struct RaceViolation {
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+  /// PC of the violating access, when it is not its wave's current PC: a
+  /// deferred transfer is checked after the wave has moved past it.
+  std::optional<uint64_t> accessPc;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
-                EventId conflictingEvent)
+                EventId conflictingEvent, std::optional<uint64_t> accessPc = std::nullopt)
       : space(space), index(index), wave(wave), lane(lane), isWrite(isWrite),
-        workgroupId(workgroupId), conflictingEvent(conflictingEvent) {}
+        workgroupId(workgroupId), conflictingEvent(conflictingEvent), accessPc(accessPc) {}
 };
 
 struct WaitCounterUpdate {
