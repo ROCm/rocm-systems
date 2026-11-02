@@ -69,6 +69,17 @@ public:
   uint32_t route_count = 0;
 };
 
+class InvalidAtomicOperationPlugin final : public ExecutionPlugin {
+public:
+  InvalidAtomicOperationPlugin() : ExecutionPlugin("invalid-atomic-operation") {}
+
+  void onAmdgpuRouteMemoryInstruction(const Instruction &inst, amdgpu::Wavefront &) override {
+    // Inject a malformed operation after valid instruction execution prepares its state.
+    auto *state = const_cast<amdgpu::VectorMemState *>(inst.data_as<amdgpu::VectorMemState>());
+    state->atomic_op = static_cast<amdgpu::AtomicOp>(0xff);
+  }
+};
+
 class TestExternalAddressSpace final : public amdgpu::AddressSpaceTranslator,
                                        public amdgpu::PhysicalMemoryAccess {
 public:
@@ -605,6 +616,55 @@ TEST(GpuVmPipeline, TranslatedScalarLoadAndStoreUseExternalBacking) {
   EXPECT_EQ(context.sim.memory->read32(kAddress), kLegacyValue);
   EXPECT_EQ(context.external->read_calls, 1u);
   EXPECT_EQ(context.external->write_calls, 1u);
+}
+
+TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSuccessor) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kCode = 0x1000, kData = 0x2000;
+  constexpr uint32_t kSentinel = 0x12345678, kDestination = 1;
+  constexpr auto load = cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                             {.saddr = 0, .vdst = kDestination, .vaddr = 0});
+  context.external->store(kCode, std::array{load[0], load[1], load[2], S_ENDPGM_GFX12});
+  context.external->store(kData, kSentinel);
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::make_unique<InvalidAtomicOperationPlugin>()));
+  context.sim.soc->set_plugin_group(group);
+  context.wf->pc = kCode;
+  context.wf->set_exec(1);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base, kData);
+  context.cu->write_sgpr(context.wf->sgpr_alloc().base + 1, 0);
+  const uint32_t base = context.wf->vgpr_alloc().base;
+  context.cu->write_vgpr(base, 0, 0);
+  context.cu->write_vgpr(base + kDestination, 0, kSentinel);
+  uint32_t failures = 0;
+  context.cu->set_execution_failure_handler([&](amdgpu::Wavefront &wf, bool retain_wave) {
+    ++failures;
+    EXPECT_TRUE(retain_wave);
+    EXPECT_EQ(wf.instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    wf.set_debug_halted(true);
+    return true;
+  });
+  testing::internal::CaptureStderr();
+  context.cu->step();
+  context.cu->step();
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string reason = "unsupported integer atomic operation";
+  const auto warning = diagnostic.find(reason);
+  EXPECT_NE(warning, std::string::npos) << diagnostic;
+  EXPECT_EQ(diagnostic.find(reason, warning == std::string::npos ? 0 : warning + 1),
+            std::string::npos)
+      << diagnostic;
+  EXPECT_EQ(failures, 1u);
+  EXPECT_TRUE(context.wf->debug_paused());
+  EXPECT_FALSE(context.wf->is_halted());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.cu->read_vgpr_storage(base + kDestination, 0), kSentinel);
+  EXPECT_EQ(context.external->write_calls, 0u);
+  for (const auto &read : context.external->read_history)
+    EXPECT_NE(read.address, kData);
 }
 
 TEST(GpuVmPipeline, DdsStepReportsUnsupportedInstructionAndPcBeforeFaulting) {

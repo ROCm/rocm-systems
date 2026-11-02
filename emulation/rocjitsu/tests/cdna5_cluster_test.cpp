@@ -18,6 +18,21 @@ public:
   }
 };
 
+class LdsWritebackPipeline : public amdgpu::GlobalMemPipeline {
+public:
+  explicit LdsWritebackPipeline(amdgpu::ComputeUnitCore &cu)
+      : GlobalMemPipeline(&cu.l1_vector(), cu.l2()) {}
+  using GlobalMemPipeline::complete_access;
+  bool unavailable_once = false;
+
+protected:
+  amdgpu::VmAccessOutcome initiate_access(Instruction &, amdgpu::Wavefront &) override {
+    if (std::exchange(unavailable_once, false))
+      return amdgpu::VmAccessOutcome::Unavailable;
+    return amdgpu::VmAccessOutcome::Complete;
+  }
+};
+
 class DeferredClusterLdsMulticastEngine : public amdgpu::ClusterLdsMulticastEngine {
 public:
   amdgpu::ClusterLdsMulticastResult
@@ -629,7 +644,7 @@ TEST(Gfx1250ExecutionTest, ClusterLdsMulticastTransactionCapturesRemapState) {
   EXPECT_EQ(txn.targets[0].wg_id, 11u);
   EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 0, txn.targets[0].lds_base), 0x410u);
   EXPECT_EQ(amdgpu::cluster_lds_lane_addr(txn, 1, txn.targets[0].lds_base), 0x424u);
-  EXPECT_THROW((void)amdgpu::remap_cluster_lds_addr(0x100, 0x400, 0xfc), std::runtime_error);
+  EXPECT_TRUE(amdgpu::remap_cluster_lds_addr(0x100, 0x400, 0xfc).failed());
 }
 
 TEST(Gfx1250ExecutionTest, ClusterLdsSourceRankSelectionCoversDefaultAndMasks) {
@@ -767,7 +782,13 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsUndersizedPa
   txn.targets = {{cu, /*wg_id=*/0, /*lds_base=*/0x200, /*cluster_rank=*/0}};
 
   amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+  uint32_t callbacks = 0;
+  const uint32_t sentinel = 0x12345678;
+  cu->lds().write32(txn.targets[0].lds_base, sentinel);
+  EXPECT_EQ(engine.submit(std::move(txn), [&]() { ++callbacks; }),
+            amdgpu::ClusterLdsMulticastResult::InvalidPayload);
+  EXPECT_EQ(callbacks, 0u);
+  EXPECT_EQ(cu->lds().read32(0x200), sentinel);
 }
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsOutOfRangeTarget) {
@@ -798,14 +819,20 @@ TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineRejectsStridedOutOf
   amdgpu::ClusterLdsMulticastTransaction txn{};
   txn.source_lds_base = 0;
   txn.bytes_per_lane = 4;
-  txn.wf_size = 1;
-  txn.lane_mask = 0x1;
-  txn.payload.resize(4);
-  txn.targets = {{cu, /*wg_id=*/0, static_cast<uint32_t>(cu->lds().size_bytes()) - 2,
-                  /*cluster_rank=*/0}};
+  txn.wf_size = 2;
+  txn.lane_mask = 0x3;
+  txn.payload.resize(8, 0x5a);
+  const uint32_t target_base = static_cast<uint32_t>(cu->lds().size_bytes()) - 4;
+  txn.targets = {{cu, /*wg_id=*/0, target_base, /*cluster_rank=*/0}};
+  constexpr uint32_t kSentinel = 0x11223344;
+  cu->lds().write32(target_base, kSentinel);
 
   amdgpu::ImmediateClusterLdsMulticastEngine engine;
-  EXPECT_THROW((void)engine.submit(std::move(txn), []() {}), std::runtime_error);
+  uint32_t callbacks = 0;
+  EXPECT_EQ(engine.submit(std::move(txn), [&]() { ++callbacks; }),
+            amdgpu::ClusterLdsMulticastResult::InvalidTarget);
+  EXPECT_EQ(callbacks, 0u);
+  EXPECT_EQ(cu->lds().read32(target_base), kSentinel);
 }
 
 TEST(Gfx1250ExecutionTest, ImmediateClusterLdsMulticastEngineDropsWidenedRemapOverflow) {
@@ -870,6 +897,120 @@ TEST(Gfx1250ExecutionTest, ClusterLdsPinPreventsAllocatorReuseUntilClusterComple
   // Once the pin is released and the CU is idle, the LDS allocator resets.
   cu->maybe_reset_lds_alloc();
   EXPECT_EQ(cu->allocate_lds(257), 0u);
+}
+
+TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCompletion) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_cluster_info(0, 2);
+  LdsWritebackPipeline pipeline(*cu);
+  constexpr uint32_t kSentinel = 0x12345678;
+  for (bool multicast : {false, true}) {
+    SCOPED_TRACE(multicast);
+    wf->clear_instruction_execution_error();
+    cu->lds().write32(0, kSentinel);
+    const auto make_state = [&]() {
+      auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      state->elem_size = 4;
+      state->num_elems = 1;
+      state->is_load = true;
+      state->lds_dst = true;
+      state->cluster_multicast = multicast;
+      state->wf_size = 32;
+      state->lane_mask = 3;
+      state->exec_mask = 3;
+      state->response_data.resize(4, 0x5a);
+      return state;
+    };
+    TestMemoryInstruction instruction(make_state());
+    uint32_t callbacks = 0;
+    EXPECT_EQ(pipeline.complete_access(instruction, *wf, [&]() { ++callbacks; }),
+              amdgpu::MemoryAccessCompletion::Failed);
+    EXPECT_EQ(callbacks, 0u);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+
+    wf->clear_instruction_execution_error();
+    wf->set_state(amdgpu::WfState::ENDING);
+    EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(make_state()), *wf),
+              amdgpu::VmAccessOutcome::Malformed);
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_EQ(wf->state(), amdgpu::WfState::ENDING);
+    wf->set_state(amdgpu::WfState::RUNNING);
+    EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+
+    wf->clear_instruction_execution_error();
+    uint32_t faults = 0;
+    pipeline.set_fault_handler(
+        [&](amdgpu::Wavefront &failed_wave, amdgpu::VmAccessOutcome outcome, uint64_t) {
+          EXPECT_EQ(&failed_wave, wf);
+          EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Malformed);
+          ++faults;
+        });
+    pipeline.unavailable_once = true;
+    EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(make_state()), *wf),
+              amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wf->wait_counters().vmcnt, 1u);
+    pipeline.tick();
+    EXPECT_EQ(faults, 1u);
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
+    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    pipeline.tick();
+    EXPECT_EQ(faults, 1u);
+    wf->set_state(amdgpu::WfState::RUNNING);
+  }
+}
+
+TEST(Gfx1250ExecutionTest, MemoryPipelinesRejectUnsupportedIntegerAtomicBeforeSideEffects) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  constexpr uint32_t kSentinel = 0x12345678;
+  amdgpu::ScalarMemPipeline scalar(&cu->l1_scalar());
+  amdgpu::GlobalMemPipeline global(&cu->l1_vector(), cu->l2());
+  amdgpu::LocalMemPipeline local;
+  for (amdgpu::MemoryPipeline *pipeline :
+       std::array<amdgpu::MemoryPipeline *, 3>{&scalar, &global, &local}) {
+    wf->clear_instruction_execution_error();
+    cu->lds().write32(0, kSentinel);
+    sim.memory->write32(0x9000, kSentinel);
+    std::unique_ptr<DynamicInstState> state;
+    if (pipeline == &scalar) {
+      auto scalar_state = std::make_unique<amdgpu::ScalarMemState>();
+      scalar_state->atomic_op = static_cast<amdgpu::AtomicOp>(0xff);
+      scalar_state->addr = 0x9000;
+      scalar_state->elem_size = 4;
+      scalar_state->num_dwords = 1;
+      state = std::move(scalar_state);
+    } else {
+      auto vector_state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+      vector_state->atomic_op = static_cast<amdgpu::AtomicOp>(0xff);
+      vector_state->elem_size = 4;
+      vector_state->wf_size = 32;
+      vector_state->lane_mask = 1;
+      vector_state->per_lane_addr[0] = pipeline == &global ? 0x9000 : 0;
+      state = std::move(vector_state);
+    }
+    EXPECT_EQ(pipeline->issue(new TestMemoryInstruction(std::move(state)), *wf),
+              amdgpu::VmAccessOutcome::Malformed);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    EXPECT_TRUE(pipeline->empty());
+    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+    EXPECT_EQ(sim.memory->read32(0x9000), kSentinel);
+  }
 }
 
 TEST(Gfx1250ExecutionTest, OrdinaryLdsDstLoadWritesDirectlyAndCompletesAsyncCounter) {
