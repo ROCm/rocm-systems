@@ -458,6 +458,21 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AgentQueryFails_StillSta
     EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
 }
 
+TEST_F(TestRocprofilerComputeTool, PcSamplingWithoutCounters_InitializesDispatchTracing)
+{
+    m_input_parameters->set_requested_counters("");
+    m_input_parameters->set_pc_sampling_method("stochastic");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_TRUE(get_tool_data(cfg)->pc_sampling->enabled());
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    ASSERT_EQ(services.size(), 2);
+    EXPECT_EQ(services[0].kind, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT);
+    EXPECT_EQ(services[1].kind, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH);
+    EXPECT_EQ(services[1].operations,
+              std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE});
+}
+
 //////////////////////////////////////////////////////////////////////////
 /// TestRocprofilerComputeTool
 void TestRocprofilerComputeTool::SetUp()
