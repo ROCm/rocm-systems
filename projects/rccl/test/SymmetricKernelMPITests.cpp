@@ -27,7 +27,6 @@
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
-#include "ResourceGuards.hpp"
 #include "SymmetricBufferHelpers.hpp"
 #include "TestChecks.hpp"
 #include "VerifiableFp8.hpp"
@@ -1470,8 +1469,6 @@ __global__ void inspectLLA2AKernel(struct ncclDevComm devComm, struct ncclLLA2AH
 
 } // namespace
 
-// Seeds the header to -4u, so the next two ReduceScatter_LL calls run at epochs -2u and -1u,
-// each clearing one slot half, and leave the header at 0 (epoch 2).
 TEST_F(SymmetricKernelCorruptionTest, LLA2A_EpochWraparound)
 {
     constexpr int kMaxRanks = 8;
@@ -1640,13 +1637,13 @@ TEST_F(SymmetricKernelCorruptionTest, LLA2A_EpochWraparound)
         }
     }
 
-    // The call after the wrap ran at epoch 2.
+    // Epoch 2 after the wrap.
     ASSERT_MPI_TRUE(inspect());
     ASSERT_MPI_EQ(1u, hostHeaders[0]);
 }
 
 // ===========================================================================
-// Test group 6: AllReduce deep loop peer rotation
+// Test group 7: AllReduce deep loop peer rotation
 //
 // allreduceDeep reduces and stores peers in batches of UnrollPeers (2 or 4 on
 // gfx942, 8 on gfx950) plus one partial batch. At 8 ranks the partial store
