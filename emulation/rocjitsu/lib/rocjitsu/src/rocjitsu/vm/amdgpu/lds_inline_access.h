@@ -55,16 +55,14 @@ struct LdsAccessRequest {
   bool d16_lo = false;      ///< Loads write the lower 16 bits.
 };
 
-/// @brief A plain load between its LDS read and its writeback: where its data
-/// is, and where and how the writeback stores it.
+/// @brief One access of a plain load between its LDS read and its writeback:
+/// where its data is, and which registers and lanes the writeback stores.
 struct LdsStagedLoad {
   uint8_t *dst[4]; ///< Raw lanes of each destination VGPR.
   /// Lanes 16g..16g+15, lane-major: in staging, or in place in LDS when those
   /// lanes read consecutive bytes.
   const uint8_t *group[4];
   uint64_t exec;
-  uint32_t wave;
-  bool sram_ecc;
 };
 
 /// @brief Completes DS accesses inside execute_impl() when the CU allows it,
@@ -104,7 +102,7 @@ public:
   static bool complete(const Instruction &inst, VectorMemState &d, Wavefront &wf);
 
 private:
-  /// Steps 1-6 of a plain load, or both loads of a two-address one, in
+  /// Steps 1-5 of a plain load, or of both loads of a two-address one, in
   /// lds_inline_access_steps.h. It stops before the writeback, with access a's
   /// data read through @p load[a].group (staging: @p staging + a * 64 *
   /// kMaxLaneBytes) and its destination in @p load[a].

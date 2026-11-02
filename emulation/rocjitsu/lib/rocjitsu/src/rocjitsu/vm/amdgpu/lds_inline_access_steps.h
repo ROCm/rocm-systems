@@ -69,48 +69,45 @@ template <bool IsLoad, bool Dual = false>
   }
 }
 
-/// Steps 2-5 of a load for a wave of @p Wave lanes, after the gate passed: it
-/// stops with its data read through @p load.group (in @p staging or in place
-/// in LDS) and its destination in @p load.
+/// Steps 2-4 of one load for a wave of @p Wave lanes, after the gate passed.
+/// It stops with the data readable through @p load.group (in @p staging or in
+/// place in LDS) and the writeback's registers and lanes in @p load.
+///
+/// Hazards: every address lane is read here, before any writeback starts (a
+/// two-address load reads both accesses first), so a destination overlapping
+/// the address register is safe.
 template <uint32_t Wave>
 [[gnu::always_inline]] inline void
-read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint32_t stride,
-           uint32_t req_offset, uint32_t dst_vgpr, uint8_t *staging, LdsStagedLoad &load) {
+read_steps(const LdsAccessRequest &req, Wavefront &wf, ComputeUnitCore &cu, uint32_t offset,
+           uint32_t dst_vgpr, uint32_t dst_vgprs, uint8_t *staging, LdsStagedLoad &load) {
   const uint64_t exec = wf.exec(); // == lane_mask == exec_mask for DS; no lanes past Wave
 
-  // 2. Addresses: lane l accesses (address_lanes[l] + offset) mod 2^32. The
+  // 2. Addresses: lane l reads at (address_lanes[l] + lds_offset) mod 2^32. The
   //    reader adds the offset only where it needs an address.
   const uint32_t *address_lanes = vgpr_lanes(cu, req.addr_vgpr);
-  const uint32_t offset = req_offset + wf.lds_base();
+  const uint32_t lds_offset = offset + wf.lds_base();
 
-  // 3. Hazards before any write: the reader reads the address lanes before the
-  //    writeback starts (a two-address load reads both accesses first), so a
-  //    destination overlapping the address register is safe.
+  // 3. LDS -> staging, by address shape (lds_load_plans.h, on the proofs in
+  //    lds_lane_shapes.h): contiguous 16-lane groups are not copied but pointed
+  //    at in place, b64 rows where lane l + 16 follows lane l are read one
+  //    16-byte column per pair, up to four lanes take fixed copies, and other
+  //    dense masks one bounds check, then fixed copies. Lanes not fully backed
+  //    keep Lds' exact rule. The reader may write any lane of the span.
+  wf.lds().vector_load32<Wave>(address_lanes, lds_offset, exec, req.elem_size, req.num_elems,
+                               staging, load.group);
 
-  // 4. Reader by address shape (lds_load_plans.h, on the proofs in
-  //    lds_lane_shapes.h): contiguous 16-lane groups are read in place, b64
-  //    rows where lane l + 16 follows lane l one 16-byte column per pair, up to
-  //    four lanes fixed copies, other dense masks one bounds check and fixed
-  //    copies. Lanes not fully backed keep Lds' exact rules.
-
-  // 5. LDS -> staging, except 16-lane groups proved contiguous and backed,
-  //    which the writeback reads in place. The reader may write any lane of the
-  //    span; the caller's typed writeback (lds_writeback.h) then stores the
-  //    active lanes to the destination VGPR(s), applying sign_extend / d16;
-  //    ownership was checked in 1d.
-  wf.lds().vector_load32<Wave>(address_lanes, offset, exec, req.elem_size, req.num_elems, staging,
-                               load.group);
-  for (uint32_t i = 0; i < dst_vgpr_count(stride); ++i)
+  // 4. The writeback's registers (ownership was checked in 1d) and lanes. The
+  //    caller's typed writeback (lds_writeback.h) stores the active lanes,
+  //    applying sign_extend / d16.
+  for (uint32_t i = 0; i < dst_vgprs; ++i)
     load.dst[i] = cu.raw_vgpr_data(dst_vgpr + i);
   load.exec = exec;
-  load.wave = Wave;
-  load.sram_ecc = cu.sram_ecc();
 }
 
 } // namespace lds_inline
 
 /// A whole plain load, or both accesses of a two-address one, from the gate
-/// to step 6, all but the writebacks.
+/// to step 5, all but the writebacks.
 template <bool Dual>
 [[gnu::always_inline]] inline bool LdsInlineAccess::read(const Instruction &inst,
                                                          const LdsAccessRequest &req, Wavefront &wf,
@@ -123,13 +120,14 @@ template <bool Dual>
   if (!lds_inline::can_complete_inline<true, Dual>(req, cu, wf, stride))
     return false;
 
-  // 2-5, specialized by wave size; a second access reads into the registers
+  // 2-4, specialized by wave size; a second access reads into the registers
   // right after the first's.
+  const uint32_t dst_vgprs = lds_inline::dst_vgpr_count(stride);
   const auto steps = [&]<uint32_t Wave>() __attribute__((always_inline)) {
-    lds_inline::read_steps<Wave>(req, wf, cu, stride, req.offset, req.dst_vgpr, staging, load[0]);
+    lds_inline::read_steps<Wave>(req, wf, cu, req.offset, req.dst_vgpr, dst_vgprs, staging,
+                                 load[0]);
     if constexpr (Dual)
-      lds_inline::read_steps<Wave>(req, wf, cu, stride, req.offset2,
-                                   req.dst_vgpr + lds_inline::dst_vgpr_count(stride),
+      lds_inline::read_steps<Wave>(req, wf, cu, req.offset2, req.dst_vgpr + dst_vgprs, dst_vgprs,
                                    staging + 64 * kMaxLaneBytes, load[1]);
   };
   if (wf.wf_size() == 32)
@@ -137,7 +135,7 @@ template <bool Dual>
   else
     steps.template operator()<64>();
 
-  // 6. No wait counters (acquire and release would cancel), no routing, no state.
+  // 5. No wait counters (acquire and release would cancel), no routing, no state.
   //    Register writes bypass instruction write callbacks, as VM completion does.
   cu.note_lds_inline_completion(inst); // CU caches the decoded instruction
   return true;
@@ -154,7 +152,8 @@ LdsInlineAccess::load(const Instruction &inst, const LdsAccessRequest &req, Wave
   LdsStagedLoad staged;
   if (!read<false>(inst, req, wf, staging, &staged))
     return false;
-  lds_writeback::write_back_as<F>(staged.dst, staged.sram_ecc, staged.wave, staged.exec,
+  // 6. Writeback.
+  lds_writeback::write_back_as<F>(staged.dst, wf.raw_cu().sram_ecc(), wf.wf_size(), staged.exec,
                                   staged.group);
   return true;
 }
@@ -168,9 +167,10 @@ LdsInlineAccess::load2(const Instruction &inst, const LdsAccessRequest &req, Wav
   LdsStagedLoad staged[2];
   if (!read<true>(inst, req, wf, staging, staged))
     return false;
+  // 6. Writebacks, first access first.
+  const bool sram_ecc = wf.raw_cu().sram_ecc();
   for (const LdsStagedLoad &access : staged)
-    lds_writeback::write_back_as<F>(access.dst, access.sram_ecc, access.wave, access.exec,
-                                    access.group);
+    lds_writeback::write_back_as<F>(access.dst, sram_ecc, wf.wf_size(), access.exec, access.group);
   return true;
 }
 
@@ -189,6 +189,7 @@ LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wav
 
   // 2. Addresses and payload: the address VGPR's lanes and the data VGPRs' rows
   //    as they sit in raw storage; lane l stores at (addr[l] + offset) mod 2^32.
+  //    No LDS write can reach them, so the writer may read them as it goes.
   const uint32_t *addr = lds_inline::vgpr_lanes(cu, req.addr_vgpr);
   const uint64_t exec = wf.exec(); // no lanes past the wave
   const auto request = [&](uint32_t offset, uint32_t data_vgpr) {
@@ -199,13 +200,10 @@ LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wav
     return r;
   };
 
-  // 3. Hazards: every payload and address lane is read from registers, which
-  //    no store changes, so LDS writes cannot reach them.
-
-  // 4-5. Writer by EXEC and address shape (lds_store_plans.h): lanes in order,
-  //    so the highest lane wins on overlap; only active lanes are written. A
-  //    two-address store writes its first access for every lane, then its
-  //    second, which therefore wins where they overlap.
+  // 3. VGPR rows -> LDS, by EXEC and address shape (lds_store_plans.h): lanes
+  //    in order, so the highest lane wins on overlap; only active lanes are
+  //    written. A two-address store writes its first access for every lane,
+  //    then its second, which therefore wins where they overlap.
   const auto store = [&]<uint32_t Wave>() __attribute__((always_inline)) {
     lds_store::store<F, Wave>(wf.lds(), request(req.offset, req.data_vgpr));
     if constexpr (Dual)
@@ -216,7 +214,7 @@ LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wav
   else
     store.template operator()<64>();
 
-  // 6. As for loads: no wait counters, no routing, no state.
+  // 4. As for loads: no wait counters, no routing, no state.
   cu.note_lds_inline_completion(inst);
   return true;
 }
