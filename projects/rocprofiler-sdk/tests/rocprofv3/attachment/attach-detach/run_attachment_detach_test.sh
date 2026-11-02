@@ -67,13 +67,30 @@ wait_for_detach_prompt() {
     return 1
 }
 
-# Wait for a process to exit, escalating SIGTERM and SIGKILL if it lingers, so a hang
-# fails this script instead of the ctest timeout. Pass 'no' as the third argument when
-# the detach trigger was already delivered and no further SIGINT may be sent.
+# Normal detachment flushes the whole tracing session and, with --attach-sync-output,
+# waits for output generation, which rocprof-attach reports can take up to a couple of
+# minutes. Bound the wait so a stuck detach is reported with its log here rather than as
+# a ctest timeout; the shorter terminate_and_wait grace is for failure cleanup only.
+wait_for_profiler_exit() {
+    local pid=$1
+    local max_wait=120
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if ! kill -0 ${pid} 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "Timed out after ${max_wait}s waiting for rocprofv3 to exit after detachment"
+    return 1
+}
+
+# Wait for a process to exit, escalating SIGTERM and SIGKILL if it lingers, so a stuck
+# process fails this script instead of the ctest timeout.
 terminate_and_wait() {
     local pid=$1
     local process_name=$2
-    local send_interrupt=${3:-yes}
     local interrupt_grace_seconds=5
     local terminate_grace_seconds=2
     local watchdog_pid=""
@@ -84,13 +101,11 @@ terminate_and_wait() {
     fi
 
     if kill -0 "${pid}" 2>/dev/null; then
-        if [ "${send_interrupt}" = "yes" ]; then
-            kill -2 "${pid}" 2>/dev/null || true
-        fi
+        kill -2 "${pid}" 2>/dev/null || true
         (
             sleep "${interrupt_grace_seconds}"
             if kill -0 "${pid}" 2>/dev/null; then
-                echo "${process_name} did not exit; sending SIGTERM"
+                echo "${process_name} did not exit after SIGINT; sending SIGTERM"
                 kill -15 "${pid}" 2>/dev/null || true
             fi
 
@@ -140,15 +155,30 @@ mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 
 # Check for permissions. We need to be able to ptrace any process in the system. (ptrace_scope == 0)
 # First, if the ptrace_scope variable is not present, we assume there is no restriction and we can proceed normally.
-# Next, if ptrace_scope would disallow this test, also confirm we are not root (which would allow it anyways.) (id -u != 0)
-# Finally, confirm this process or python3 doesn't have CAP_SYS_PTRACE, which would allow the test also.
+# Otherwise, confirm this process or python3 has CAP_SYS_PTRACE, which is what allows tracing a
+# non-descendant under ptrace_scope=1; being root is not sufficient when the capability is dropped
+# (a default Docker root, for example). The effective set is read from /proc rather than parsed from
+# getpcaps, which may be absent or print "=ep" instead of names when every capability is held.
+has_cap_sys_ptrace() {
+    local cap_eff python_path
+    cap_eff=$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null)
+    # CAP_SYS_PTRACE is capability number 19.
+    if [ -n "${cap_eff}" ] && [ $(( (0x${cap_eff} >> 19) & 1 )) -eq 1 ]; then
+        return 0
+    fi
+    python_path=$(command -v python3 || true)
+    if [ -n "${python_path}" ] && command -v getcap >/dev/null 2>&1 \
+    && [[ $(getcap "$(readlink -f "${python_path}")" 2>/dev/null) == *"cap_sys_ptrace"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
 if [ -e /proc/sys/kernel/yama/ptrace_scope ]                             \
 && [ $(cat /proc/sys/kernel/yama/ptrace_scope) -ne 0 ]                   \
-&& [ $(id -u) -ne 0 ]                                                    \
-&& [[ $(getpcaps self) != *"cap_sys_ptrace"* ]]                          \
-&& [[ $(getcap $(readlink -f $(which python3))) != *"cap_sys_ptrace"* ]]
+&& ! has_cap_sys_ptrace
     then
-    echo "ptrace_scope is not 0, user is not root, and CAP_SYS_PTRACE is not present, so test cannot be completed. This test is skipped."
+    echo "ptrace_scope is not 0 and CAP_SYS_PTRACE is not present, so test cannot be completed. This test is skipped."
     touch ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/skipped
     exit 0
 fi
@@ -212,6 +242,14 @@ wait_for_detach_prompt ${ROCPROF_PID} ${ROCPROF_LOG}
 echo "Profiling for ${SETTLE}s before detaching via '${DETACH_MODE}'..."
 sleep ${SETTLE}
 
+# A profiler that exited during the settle interval would let an Enter write below
+# succeed without proving the newline caused the detach.
+if ! kill -0 ${ROCPROF_PID} 2>/dev/null; then
+    echo "Error: rocprofv3 exited before the '${DETACH_MODE}' detach trigger was delivered"
+    cat ${ROCPROF_LOG}
+    exit 1
+fi
+
 case ${DETACH_MODE} in
     enter)
         printf '\n' >&3
@@ -222,14 +260,16 @@ case ${DETACH_MODE} in
         ;;
 esac
 
-# The detach trigger was delivered above, so no further SIGINT is sent; the watchdog
-# still bounds the wait so a hang fails here instead of the ctest timeout.
-if terminate_and_wait "${ROCPROF_PID}" "rocprofv3" no; then
-    ROCPROF_PID=""
-    ROCPROF_EXIT_CODE=0
-else
-    ROCPROF_EXIT_CODE=$?
+if ! wait_for_profiler_exit ${ROCPROF_PID}; then
+    cat ${ROCPROF_LOG}
+    exit 1
 fi
+
+set +e
+wait ${ROCPROF_PID}
+ROCPROF_EXIT_CODE=$?
+set -e
+ROCPROF_PID=""
 exec 3>&-
 rm -f ${FIFO}
 cat ${ROCPROF_LOG}
@@ -239,13 +279,13 @@ if [ ${ROCPROF_EXIT_CODE} -ne 0 ]; then
     exit 1
 fi
 
-echo "Profiler detached successfully"
-
 # rocprofv3 exits 0 even when the detach call fails, so require the success report.
 if ! grep -Eq "Detaching from PID ${APP_PID} using library .* :: success" ${ROCPROF_LOG}; then
     echo "Error: rocprofv3 did not report a successful detach from PID ${APP_PID}"
     exit 1
 fi
+
+echo "Profiler detached successfully"
 
 # Only the SIGINT handler reports the signal, so this shows which trigger ended the attach.
 case ${DETACH_MODE} in
