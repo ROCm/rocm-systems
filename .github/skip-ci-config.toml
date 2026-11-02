@@ -26,6 +26,67 @@ common = [
     ".github/label*.yml",
     "*CODEOWNERS",
     "*LICENSE",
+
+    # This file defines CI gating, so a change here is not validated by any CI
+    # run it skips. Review it on that basis: a too-broad pattern added here can
+    # silently stop CI for unrelated paths.
+    ".github/skip-ci-config.toml",
+
+    # Only `.github/workflows/therock-*.yml` participate in TheRock CI. Every
+    # workflow below runs on its own triggers and is never called by a TheRock
+    # run, so editing one cannot affect a TheRock build.
+    #
+    # Per-project workflows:
+    ".github/workflows/abi-compliance-*.yml",
+    ".github/workflows/amdsmi-*.yml",
+    ".github/workflows/aqlprofile-*.yml",
+    ".github/workflows/cuid-*.yml",
+    ".github/workflows/hip-*.yml",
+    ".github/workflows/hipfile-*.yml",
+    ".github/workflows/kpack-*.yml",
+    ".github/workflows/lstt-*.yml",
+    ".github/workflows/media-libs-*.yml",
+    ".github/workflows/profiler-hub-*.yml",
+    ".github/workflows/rccl-*.yml",
+    ".github/workflows/rdc-*.yml",
+    ".github/workflows/rocjitsu-*.yml",
+    ".github/workflows/rocm_ci_caller.yml",
+    ".github/workflows/rocprof-trace-decoder-*.yml",
+    ".github/workflows/rocprofiler-*.yml",
+    ".github/workflows/rocr-runtime-*.yml",
+
+    # Repo plumbing: labelling, imports, subtree sync, docs previews, bots.
+    ".github/workflows/apply-labels.yml",
+    ".github/workflows/auto-label.yml",
+    ".github/workflows/close-stale-prs.yml",
+    ".github/workflows/codeql.yml",
+    ".github/workflows/collect-labels.yml",
+    ".github/workflows/docs-pr-preview*.yml",
+    ".github/workflows/hrr-skills.yml",
+    ".github/workflows/import-prep-workflow-*.yml",
+    ".github/workflows/import_pr_list.yml",
+    ".github/workflows/initial-setup.yml",
+    ".github/workflows/issue-import.yml",
+    ".github/workflows/labeler.yml",
+    ".github/workflows/merge-codeowners.yml",
+    ".github/workflows/merge-submodules.yml",
+    ".github/workflows/new-subtree-setup*.yml",
+    ".github/workflows/pr-import.yml",
+    ".github/workflows/pr-merge-sync-patches*.yml",
+    ".github/workflows/pr-org-label.yml",
+    ".github/workflows/pre-formatting.yml",
+    ".github/workflows/resolve-ci-config-tests.yml",
+    ".github/workflows/systems-pr-bot.yml",
+    ".github/workflows/update-docs.yml",
+    ".github/workflows/update-subtrees*.yml",
+
+    # `therock-rccl-*` is rooted at therock-rccl-ci.yml (schedule +
+    # workflow_dispatch only), so it is likewise outside TheRock PR CI.
+    ".github/workflows/therock-rccl-*.yml",
+    # Test drivers invoked only by those therock-rccl-* workflows; nothing in
+    # the build consumes them.
+    "projects/rccl/ci/scripts/*",
+
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
 

@@ -56,6 +56,7 @@ pub(super) enum Call<'a> {
     Version(&'a mut uapi::Version),
     ClockCounters(&'a mut uapi::ClockCounters),
     AvailableMemory(&'a mut uapi::AvailableMemory),
+    XnackMode(&'a mut uapi::XnackMode),
     TileConfig(&'a mut uapi::TileConfig, &'a mut [u32], &'a mut [u32]),
     Apertures(&'a mut uapi::Apertures, &'a mut [uapi::Aperture]),
     AcquireVm(&'a mut uapi::AcquireVm),
@@ -80,6 +81,7 @@ pub(super) enum Call<'a> {
     ResetEvent(&'a mut uapi::ResetEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
     WaitSignal(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 3]),
+    WaitExceptions(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 2]),
     SetScratchBackingVa(&'a mut uapi::SetScratchBackingVa),
     SetTrapHandler(&'a mut uapi::SetTrapHandler),
     CreateQueue(&'a mut uapi::CreateQueue),
@@ -233,6 +235,7 @@ impl Kfd {
             Call::AvailableMemory(args) => {
                 (uapi::GET_AVAILABLE_MEMORY, ptr::from_mut(*args).cast())
             }
+            Call::XnackMode(args) => (uapi::SET_XNACK_MODE, ptr::from_mut(*args).cast()),
             Call::TileConfig(args, _, _) => (uapi::GET_TILE_CONFIG, ptr::from_mut(*args).cast()),
             Call::Apertures(args, entries) => {
                 args.pointer = if entries.is_empty() {
@@ -277,6 +280,10 @@ impl Kfd {
             Call::SetEvent(args) => (uapi::SET_EVENT, ptr::from_mut(*args).cast()),
             Call::ResetEvent(args) => (uapi::RESET_EVENT, ptr::from_mut(*args).cast()),
             Call::WaitSignal(args, events) => {
+                args.events = events.as_mut_ptr() as u64;
+                (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
+            }
+            Call::WaitExceptions(args, events) => {
                 args.events = events.as_mut_ptr() as u64;
                 (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
             }
@@ -373,6 +380,16 @@ impl Kfd {
         };
         self.call(Call::ClockCounters(&mut counters))?;
         Ok(counters)
+    }
+
+    pub(super) fn xnack_enabled(&self) -> io::Result<bool> {
+        let mut mode = uapi::XnackMode { xnack_enabled: -1 };
+        self.call(Call::XnackMode(&mut mode))?;
+        match mode.xnack_enabled {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(invalid_data("KFD returned an invalid XNACK mode")),
+        }
     }
 
     pub(super) fn tile_config(&self, gpu_id: u32) -> io::Result<uapi::TileConfig> {
@@ -891,7 +908,7 @@ impl Kfd {
         // KFD encodes the mapping type in bits 63:62. This is an opaque mmap
         // token, not a nonnegative render-file position. Preserve all bits when
         // passing it through the signed off_t parameter in the libc ABI.
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
@@ -902,7 +919,7 @@ impl Kfd {
 
     pub(super) fn map_mmio(&self, mapping: &mut Reservation, offset: u64) -> io::Result<()> {
         self.check_process()?;
-        mapping.map_file_read_write(
+        mapping.map_kfd_file_in_place(
             self.file
                 .as_ref()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?,
@@ -1037,6 +1054,38 @@ impl Kfd {
             ))),
             uapi::WAIT_TIMEOUT => Ok(None),
             _ => Err(invalid_data("KFD signal wait returned an unknown result")),
+        }
+    }
+
+    /// Blocks until either persistent GPU exception event is signaled.
+    pub(super) fn wait_exception_events(
+        &self,
+        hardware_event_id: u32,
+        memory_event_id: u32,
+        timeout_ms: u32,
+    ) -> io::Result<bool> {
+        let mut events = [
+            uapi::EventData {
+                event_id: hardware_event_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                event_id: memory_event_id,
+                ..uapi::EventData::default()
+            },
+        ];
+        let mut args = uapi::WaitEvents {
+            count: 2,
+            timeout: timeout_ms,
+            ..uapi::WaitEvents::default()
+        };
+        self.call(Call::WaitExceptions(&mut args, &mut events))?;
+        match args.result {
+            uapi::WAIT_COMPLETE => Ok(true),
+            uapi::WAIT_TIMEOUT => Ok(false),
+            _ => Err(invalid_data(
+                "KFD exception wait returned an unknown result",
+            )),
         }
     }
 

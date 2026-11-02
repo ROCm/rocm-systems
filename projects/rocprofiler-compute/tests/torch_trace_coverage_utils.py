@@ -7,23 +7,584 @@
 builds arguments or records a skip reason.
 """
 
+import functools
 import os
 import shutil
 import signal
 import subprocess
 import sys
 import textwrap
-import threading
-import uuid
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-import pandas as pd
 import pytest
 import torch
 from common import normalize_kernel_names
+
+# dense unary-float name list
+# fmt: off
+_UNARY_FLOAT_ELEMENTWISE_NAMES = (
+    # trig / inverse trig / hyperbolic
+    "acos", "acosh", "asin", "asinh", "atan", "atanh",
+    "cos", "cosh", "sin", "sinh", "tan", "tanh", "sinc",
+    # exponentials / logarithms / power
+    "exp", "exp2", "expm1", "log", "log10", "log1p", "log2",
+    "logit",
+    "reciprocal", "rsqrt", "sqrt", "square",
+    # rounding / sign / fractional
+    "ceil", "floor", "trunc", "round", "neg", "frac", "sgn", "sign",
+    "signbit", "positive",
+    # gamma / Bessel-ish
+    "digamma", "erf", "erfc", "erfinv", "i0", "lgamma",
+    # complex / angle helpers
+    "angle", "conj_physical",
+    # predicates (BoolTensor)
+    "isfinite", "isinf", "isnan", "isneginf", "isposinf", "isreal",
+    # angle conversion
+    "deg2rad", "rad2deg",
+    # activations
+    "elu", "gelu", "glu", "hardshrink", "hardsigmoid", "hardswish",
+    "hardtanh", "leaky_relu", "mish", "relu", "sigmoid", "silu",
+    "softplus", "softshrink",
+)
+# fmt: on
+
+
+# Zero-copy view ops that launch no GPU kernels. RecordFunction often
+# does not emit a ROCTX marker for them; compare_single_op then skips.
+KNOWN_KERNEL_FREE_ATEN_OPS: Set[str] = {
+    "view",
+    "view_as_real",
+    "view_as_complex",
+    "unfold",
+}
+
+
+# CUDA-only / NVIDIA-only backends that cannot run on ROCm. Ops whose
+# OpSpec.skip text contains any of these keywords are filtered out at
+# discovery time.
+_HARDWARE_INCOMPATIBLE_CUDA_KEYWORDS: Tuple[str, ...] = (
+    "cuda-only",
+    "cuda only",
+    "nvidia-only",
+    "nvidia only",
+    "cudnn-only",
+    "cudnn only",
+    "cutlass",
+    "cusparselt",
+    "xformers",
+    "flashattention",
+    "flash attention",
+    "fp8 gemm",
+    "fp8 tensors",
+    "packed int4",
+    "int8 packed",
+    "grouped matmul",
+    "mat2 to be transposed",
+)
+
+
+# Subprocess runner that records one ``torch.profiler`` window per
+# operator and dumps results to JSON.
+COVERAGE_GROUND_TRUTH_RUNNER_SOURCE = textwrap.dedent(
+    """
+import importlib.util
+import json
+import os
+import sys
+
+# Synchronous dispatch attributes faults to the launching op.
+os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")
+
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+
+def probe_device() -> None:
+    \"\"\"Launch a small kernel and synchronise to surface device faults.\"\"\"
+    t = torch.empty(1, device=\"cuda\")
+    t.add_(1)
+    torch.cuda.synchronize()
+
+
+def main() -> None:
+    workload_path, output_path = sys.argv[1], sys.argv[2]
+    spec = importlib.util.spec_from_file_location(
+        "_torch_trace_coverage_workload",
+        workload_path,
+    )
+    wl = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(wl)
+    results: dict = {}
+    for op_name, run_fn in zip(wl.OP_NAMES, wl.ALL_OPS):
+        print(f"[torch-trace-cov] START {op_name}", file=sys.stderr, flush=True)
+        try:
+            with profile(
+                activities=[
+                    ProfilerActivity.CPU,
+                    ProfilerActivity.CUDA,
+                ],
+                acc_events=True,
+            ) as prof:
+                run_fn()
+                torch.cuda.synchronize()
+            events = list(prof.events())
+            cuda_events = [
+                e
+                for e in events
+                if e.device_type == torch.autograd.DeviceType.CUDA
+            ]
+
+            def _cuda_us(event):
+                for attr in (
+                    "device_time_total",
+                    "cuda_time_total",
+                    "device_time",
+                    "cuda_time",
+                ):
+                    value = getattr(event, attr, None)
+                    if value:
+                        return float(value)
+                return 0.0
+
+            results[op_name] = {
+                "cuda_kernels": [e.name for e in cuda_events],
+                "cuda_time_us": sum(_cuda_us(e) for e in cuda_events),
+            }
+        except Exception as exc:
+            results[op_name] = {
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            print(
+                f"[torch-trace-cov] FAIL  {op_name} {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                probe_device()
+            except Exception as exc2:
+                print(
+                    f"[torch-trace-cov] DEVICE_DEAD after {op_name} "
+                    f"{type(exc2).__name__}: {exc2}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                sys.exit(1)
+            continue
+        print(f"[torch-trace-cov] OK    {op_name}", file=sys.stderr, flush=True)
+    with open(output_path, "w", encoding="utf-8") as out_f:
+        json.dump(results, out_f)
+
+
+if __name__ == "__main__":
+    main()
+"""
+).strip()
+
+
+_SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
+    "out",
+    "Tensor_out",
+    "OutTensor",
+    "m_out",
+    "out_mode",
+})
+
+
+# Short names excluded from generic .out injection because the output
+# dtype does not follow the input dtype.
+_OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
+    "eq",
+    "ne",
+    "lt",
+    "gt",
+    "ge",
+    "le",
+    "isnan",
+    "isinf",
+    "isfinite",
+    "isneginf",
+    "isposinf",
+    "logical_and",
+    "logical_or",
+    "logical_xor",
+    "logical_not",
+    "isclose",
+    "isin",
+    "argmax",
+    "argmin",
+    "argsort",
+    "all",
+    "any",
+    "nonzero",
+    "tril_indices",
+    "triu_indices",
+})
+
+
+# Maximum content width for emitted workload bodies (88 - 4 indent).
+WORKLOAD_EMIT_BODY_CONTENT_MAX = 84
+
+
+# Single-GPU process-group bootstrap inlined by distributed builders.
+# Uses a per-process ``file://`` rendezvous and destroys the group at
+# interpreter shutdown. The rendezvous directory is removed after shutdown
+# and if ``init_process_group`` fails.
+DISTRIBUTED_BOOTSTRAP_SETUP: Tuple[str, ...] = (
+    "import atexit as _atexit",
+    "import shutil as _shutil",
+    "import tempfile as _tempfile",
+    "import torch.distributed as _dist",
+    "if not _dist.is_initialized():",
+    "    _dist_init_dir = _tempfile.mkdtemp(prefix='torch_trace_cov_dist_')",
+    "    try:",
+    "        _dist.init_process_group(",
+    '            backend="nccl",',
+    '            init_method=f"file://{_dist_init_dir}/init",',
+    "            rank=0,",
+    "            world_size=1,",
+    "        )",
+    "    except Exception:",
+    "        _shutil.rmtree(_dist_init_dir, ignore_errors=True)",
+    "        raise",
+    "    def _shutdown_dist():",
+    "        try:",
+    "            if _dist.is_initialized():",
+    "                _dist.destroy_process_group()",
+    "        except Exception:",
+    "            pass",
+    "        _shutil.rmtree(_dist_init_dir, ignore_errors=True)",
+    "    _atexit.register(_shutdown_dist)",
+)
+
+
+# Per-module builders: name -> ``(ctor_expr, input_expr, extra_setup)``.
+NN_MODULE_BUILDERS: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {
+    # Dense / linear layers
+    "nn.Module.Linear.__call__": (
+        "nn.Linear(4, 4)",
+        "torch.randn(2, 4, device=device)",
+        (),
+    ),
+    "nn.Module.Bilinear.__call__": (
+        "nn.Bilinear(4, 4, 4)",
+        "torch.randn(2, 4, device=device), torch.randn(2, 4, device=device)",
+        (),
+    ),
+    # Convolutional layers
+    "nn.Module.Conv1d.__call__": (
+        "nn.Conv1d(3, 8, 3, padding=1)",
+        "torch.randn(1, 3, 16, device=device)",
+        (),
+    ),
+    "nn.Module.Conv2d.__call__": (
+        "nn.Conv2d(3, 8, 3, padding=1)",
+        "torch.randn(1, 3, 16, 16, device=device)",
+        (),
+    ),
+    "nn.Module.Conv3d.__call__": (
+        "nn.Conv3d(3, 8, 3, padding=1)",
+        "torch.randn(1, 3, 4, 8, 8, device=device)",
+        (),
+    ),
+    "nn.Module.ConvTranspose2d.__call__": (
+        "nn.ConvTranspose2d(3, 8, 3, padding=1)",
+        "torch.randn(1, 3, 16, 16, device=device)",
+        (),
+    ),
+    # Normalization
+    "nn.Module.BatchNorm1d.__call__": (
+        "nn.BatchNorm1d(4)",
+        "torch.randn(8, 4, device=device)",
+        (),
+    ),
+    "nn.Module.BatchNorm2d.__call__": (
+        "nn.BatchNorm2d(3)",
+        "torch.randn(2, 3, 8, 8, device=device)",
+        (),
+    ),
+    "nn.Module.LayerNorm.__call__": (
+        "nn.LayerNorm(8)",
+        "torch.randn(2, 8, device=device)",
+        (),
+    ),
+    "nn.Module.GroupNorm.__call__": (
+        "nn.GroupNorm(2, 4)",
+        "torch.randn(2, 4, 8, 8, device=device)",
+        (),
+    ),
+    "nn.Module.InstanceNorm2d.__call__": (
+        "nn.InstanceNorm2d(3)",
+        "torch.randn(2, 3, 8, 8, device=device)",
+        (),
+    ),
+    # Embedding
+    "nn.Module.Embedding.__call__": (
+        "nn.Embedding(16, 4)",
+        "torch.randint(0, 16, (2, 4), device=device)",
+        (),
+    ),
+    "nn.Module.EmbeddingBag.__call__": (
+        "nn.EmbeddingBag(16, 4, mode='mean')",
+        "torch.randint(0, 16, (8,), device=device), "
+        "torch.tensor([0, 4], device=device)",
+        (),
+    ),
+    # Attention / transformer
+    "nn.Module.MultiheadAttention.__call__": (
+        "nn.MultiheadAttention(8, 2, batch_first=True)",
+        "_q, _q, _q",
+        ("_q = torch.randn(2, 4, 8, device=device)",),
+    ),
+    "nn.Module.TransformerEncoderLayer.__call__": (
+        "nn.TransformerEncoderLayer(d_model=8, nhead=2, batch_first=True)",
+        "torch.randn(2, 4, 8, device=device)",
+        (),
+    ),
+    # Recurrent
+    "nn.Module.RNN.__call__": (
+        "nn.RNN(4, 4, batch_first=True)",
+        "torch.randn(2, 3, 4, device=device)",
+        (),
+    ),
+    "nn.Module.LSTM.__call__": (
+        "nn.LSTM(4, 4, batch_first=True)",
+        "torch.randn(2, 3, 4, device=device)",
+        (),
+    ),
+    "nn.Module.GRU.__call__": (
+        "nn.GRU(4, 4, batch_first=True)",
+        "torch.randn(2, 3, 4, device=device)",
+        (),
+    ),
+    # Activations (trainable / parameter-free)
+    "nn.Module.ReLU.__call__": (
+        "nn.ReLU()",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.GELU.__call__": (
+        "nn.GELU()",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.SiLU.__call__": (
+        "nn.SiLU()",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.Softmax.__call__": (
+        "nn.Softmax(dim=-1)",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.LogSoftmax.__call__": (
+        "nn.LogSoftmax(dim=-1)",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    # Dropout
+    "nn.Module.Dropout.__call__": (
+        "nn.Dropout(p=0.5)",
+        "torch.randn(4, 4, device=device)",
+        (),
+    ),
+    # Pooling
+    "nn.Module.MaxPool2d.__call__": (
+        "nn.MaxPool2d(2)",
+        "torch.randn(1, 3, 8, 8, device=device)",
+        (),
+    ),
+    "nn.Module.AvgPool2d.__call__": (
+        "nn.AvgPool2d(2)",
+        "torch.randn(1, 3, 8, 8, device=device)",
+        (),
+    ),
+    "nn.Module.AdaptiveAvgPool2d.__call__": (
+        "nn.AdaptiveAvgPool2d((4, 4))",
+        "torch.randn(1, 3, 8, 8, device=device)",
+        (),
+    ),
+    # Upsample / pixel shuffle / reshape
+    "nn.Module.Upsample.__call__": (
+        "nn.Upsample(scale_factor=2, mode='nearest')",
+        "torch.randn(1, 3, 4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.PixelShuffle.__call__": (
+        "nn.PixelShuffle(2)",
+        "torch.randn(1, 4, 4, 4, device=device)",
+        (),
+    ),
+    "nn.Module.Flatten.__call__": (
+        "nn.Flatten()",
+        "torch.randn(2, 3, 4, 4, device=device)",
+        (),
+    ),
+    # Containers (just to exercise the wrapper forward)
+    "nn.Module.Sequential.__call__": (
+        "nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 4))",
+        "torch.randn(2, 4, device=device)",
+        (),
+    ),
+}
+
+
+# Per-optimizer builders.
+OPTIMIZER_BUILDERS: Dict[str, str] = {
+    "Optimizer.SGD.step": "torch.optim.SGD(PARAMS, lr=0.01)",
+    "Optimizer.Adam.step": "torch.optim.Adam(PARAMS, lr=1e-3)",
+    "Optimizer.AdamW.step": "torch.optim.AdamW(PARAMS, lr=1e-3)",
+    "Optimizer.RMSprop.step": "torch.optim.RMSprop(PARAMS, lr=1e-3)",
+    "Optimizer.Adagrad.step": "torch.optim.Adagrad(PARAMS, lr=1e-2)",
+    "Optimizer.Adadelta.step": "torch.optim.Adadelta(PARAMS, lr=1.0)",
+    "Optimizer.NAdam.step": "torch.optim.NAdam(PARAMS, lr=1e-3)",
+    "Optimizer.RAdam.step": "torch.optim.RAdam(PARAMS, lr=1e-3)",
+    "Optimizer.Adamax.step": "torch.optim.Adamax(PARAMS, lr=1e-3)",
+    "Optimizer.ASGD.step": "torch.optim.ASGD(PARAMS, lr=1e-3)",
+}
+
+
+# Skip-reason categorization. Each bucket is identified by a stable
+# keyword in the outcome reason string.
+
+SKIP_CATEGORY_LABELS: Dict[str, str] = {
+    "argument_builder_gap": (
+        "argument-builder coverage gap "
+        "(no OpSpec.build registered for this op in OP_SPECS - "
+        "register a per-operator builder to enable coverage)"
+    ),
+    "workload_runtime_error": (
+        "workload runtime error (synthetic workload raised before profiling completed)"
+    ),
+    "upstream_rocm_bug": (
+        "upstream ROCm bug (SIGSEGV / HIP illegal memory access under torch.profiler)"
+    ),
+    "hardware_incompatible_cuda_only": (
+        "hardware-incompatible "
+        "(CUDA-only feature: CUTLASS / cuDNN / xFormers / cuSPARSELt / "
+        "FlashAttention / fp8 / packed int4-int8 / grouped matmul)"
+    ),
+    "stateful_op_dependency": (
+        "stateful-op dependency "
+        "(backward op needs state / output from a matched forward run)"
+    ),
+    "external_library_required": (
+        "external library required (e.g. MAGMA) - not present in this build"
+    ),
+    "incomplete_op_spec": (
+        "OpSpec pending (builder declared but shape / argument contract TBD)"
+    ),
+    "no_kernel_in_ground_truth": (
+        "no GPU kernels in ground truth "
+        "(torch.profiler reported zero kernels for this op)"
+    ),
+    "structural_marker_gap": (
+        "structural marker gap "
+        "(structural pattern not exercised or no ROCTX marker emitted)"
+    ),
+    "opspec_builder_present_but_not_emitted": (
+        "OpSpec builder present but op was not emitted into the workload"
+    ),
+    "other": "other / uncategorized",
+}
+
+
+# Family classifier for the ``argument_builder_gap`` bucket. Maps each
+# op name to a structural family and a short fix-pattern hint.
+
+
+_MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
+    "out / output-buffer overload (.out / .grad_input)": (
+        "wrap the default-overload builder and pass out=torch.empty_like(...)"
+    ),
+    "autograd backward (*_backward)": (
+        "synthesize grad_output + the forward inputs/outputs the schema needs"
+    ),
+    "in-place (trailing underscore)": (
+        "same args as the out-of-place sibling; just call the in-place variant"
+    ),
+    "foreach / vectorized list ops": (
+        "wrap inputs in [t1, t2, t3] lists; lengths must match across args"
+    ),
+    "special functions (Bessel / Chebyshev / Hermite / ...)": (
+        "single Tensor -> Tensor; randn(d, N) works for most "
+        "(some need x ∈ [-1, 1] or x > 0)"
+    ),
+    "linear algebra (linalg_*)": (
+        "well-conditioned square matrices (A = randn(N,N) + N*eye(N))"
+    ),
+    "softmax / log_softmax family": (
+        "(input, dim, half_to_float=False) for forward; backward needs "
+        "grad_output + output (not input)"
+    ),
+    "batch normalization": (
+        "input (N,C,*) + weight/bias (C,) + running_mean/var (C,) + "
+        "training flag; backward also needs save_mean / save_invstd"
+    ),
+    "layer / group / instance normalization": (
+        "input (N,C,*) + normalized_shape + weight/bias matching the normalized dims"
+    ),
+    "FFT family": ("complex input, or real input with appropriate signal_ndim"),
+    "sparse tensor ops": ("explicit indices/values constructor; never randn"),
+    "quantization": ("needs scale + zero_point tensors matching the quantized dtype"),
+    "distribution / random sampler": (
+        "shape arg + optional generator; some take param tensors (mean, std)"
+    ),
+    "convolution": ("input (N,C,H,W) + weight (C_out,C_in,Kh,Kw) + optional bias"),
+    "pooling": ("input (N,C,H,W) + kernel_size + stride/padding"),
+    "loss function": ("input + target with matching shapes / dtypes"),
+    "indexing / gather / scatter": (
+        "source tensor + int64 index tensor; bounds must lie inside source"
+    ),
+    "cumulative reduction": ("input tensor + dim; dtype kwarg optional"),
+    "reduction along dim": ("input tensor + dim (int or list-of-int) + keepdim kwarg"),
+    "elementwise - Tensor overload": ("two same-shape tensors"),
+    "elementwise - Scalar overload": ("tensor + python scalar"),
+    "elementwise - unary float Tensor -> Tensor": (
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) - most accept any "
+        "float tensor (a few need x ∈ [-1, 1] or x > 0)"
+    ),
+    "reduction (whole-tensor)": (
+        "single template: lambda d: ([float_tensor(d, N, N)], {}) - operates over "
+        "all elements (some have .dim variants which fall in the "
+        "'reduction along dim' bucket)"
+    ),
+    "other / uncategorized": ("inspect the schema; no shared template applies"),
+}
+
+
+# Curated short-name allowlists for the family classifier.
+_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset(_UNARY_FLOAT_ELEMENTWISE_NAMES)
+
+
+_KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset({
+    "all",
+    "any",
+    "amax",
+    "amin",
+    "aminmax",
+    "argmax",
+    "argmin",
+    "max",
+    "min",
+    "median",
+    "mode",
+    "nanmedian",
+    "prod",
+    "sum",
+    "mean",
+    "nansum",
+    "trace",
+    "std",
+    "var",
+    "std_mean",
+    "var_mean",
+    "norm",
+})
 
 
 class CoverageTensorArg(NamedTuple):
@@ -427,7 +988,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 float_tensor(d, 10, 8),
                 int_vector(d, 6),
-                torch.tensor([0, 3], device=d, dtype=torch.int64),
+                CoverageTensorArg(shape=(1,), emit="cumsum_offsets", scale=3.0),
             ],
             {},
         ),
@@ -437,7 +998,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 float_tensor(d, 10, 8),
                 int_vector(d, 6),
-                torch.tensor([0, 3], device=d, dtype=torch.int64),
+                CoverageTensorArg(shape=(1,), emit="cumsum_offsets", scale=3.0),
                 False,
                 0,
                 False,
@@ -1459,46 +2020,18 @@ OP_SPECS: Dict[str, OpSpec] = {
 # per-operator overrides in ``OP_SPECS``.
 
 
+def _single_float_matrix_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+    return ([float_tensor(device, 8, 8)], {})
+
+
 def _register_bulk_unary_float_builders() -> None:
     """Register builders for unary float ``Tensor -> Tensor`` operators."""
-
-    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([float_tensor(device, 8, 8)], {})
-
-    # fmt: off
-    bulk_short_names = (
-        # trig / inverse trig / hyperbolic
-        "acos", "acosh", "asin", "asinh", "atan", "atanh",
-        "cos", "cosh", "sin", "sinh", "tan", "tanh", "sinc",
-        # exponentials / logarithms / power
-        "exp", "exp2", "expm1", "log", "log10", "log1p", "log2",
-        "logit",
-        "reciprocal", "rsqrt", "sqrt", "square",
-        # rounding / sign / fractional
-        "ceil", "floor", "trunc", "round", "neg", "frac", "sgn", "sign",
-        "positive",
-        # gamma / Bessel-ish
-        "digamma", "erf", "erfc", "erfinv", "i0", "lgamma",
-        # complex / angle helpers
-        "angle", "conj_physical",
-        # angle conversion
-        "deg2rad", "rad2deg",
-        # activations
-        "elu", "gelu", "hardshrink", "hardsigmoid", "hardswish",
-        "hardtanh", "leaky_relu", "mish", "relu", "sigmoid", "silu",
-        "softplus", "softshrink",
-    )
-    # fmt: on
-    for name in bulk_short_names:
-        OP_SPECS.setdefault(name, OpSpec(build=template))
+    for name in _UNARY_FLOAT_ELEMENTWISE_NAMES:
+        OP_SPECS.setdefault(name, OpSpec(build=_single_float_matrix_args))
 
 
 def _register_bulk_whole_tensor_reduction_builders() -> None:
     """Register builders for whole-tensor reduction operators."""
-
-    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([float_tensor(device, 8, 8)], {})
-
     bulk_short_names = (
         "all",
         "any",
@@ -1521,15 +2054,15 @@ def _register_bulk_whole_tensor_reduction_builders() -> None:
         "var_mean",
     )
     for name in bulk_short_names:
-        OP_SPECS.setdefault(name, OpSpec(build=template))
+        OP_SPECS.setdefault(name, OpSpec(build=_single_float_matrix_args))
+
+
+def _unary_special_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+    return ([torch.rand(8, 8, device=device) * 2.0], {})
 
 
 def _register_bulk_unary_special_builders() -> None:
     """Register builders for unary ``special_*`` functions."""
-
-    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([torch.rand(8, 8, device=device) * 2.0], {})
-
     bulk_short_names = (
         "special_airy_ai",
         "special_bessel_j0",
@@ -1550,15 +2083,15 @@ def _register_bulk_unary_special_builders() -> None:
         "special_i1e",
     )
     for name in bulk_short_names:
-        OP_SPECS.setdefault(name, OpSpec(build=template))
+        OP_SPECS.setdefault(name, OpSpec(build=_unary_special_args))
+
+
+def _binary_float_matrix_args(device: str) -> Tuple[List[Any], Dict[str, Any]]:
+    return ([float_tensor(device, 8, 8), float_tensor(device, 8, 8)], {})
 
 
 def _register_bulk_binary_tensor_elementwise_builders() -> None:
     """Register builders for binary elementwise operators."""
-
-    def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
-        return ([float_tensor(device, 8, 8), float_tensor(device, 8, 8)], {})
-
     bulk_short_names = (
         "add",
         "sub",
@@ -1581,13 +2114,13 @@ def _register_bulk_binary_tensor_elementwise_builders() -> None:
         "clamp_min",
     )
     for name in bulk_short_names:
-        OP_SPECS.setdefault(name, OpSpec(build=template))
+        OP_SPECS.setdefault(name, OpSpec(build=_binary_float_matrix_args))
 
 
 def _register_high_impact_individual_builders() -> None:
     """Register individual builders for high-impact operators."""
     individual = {
-        # (input, value, value) — fused multiply-add variants
+        # (input, value, value) - fused multiply-add variants
         "addcmul": OpSpec(
             build=lambda d: (
                 [float_tensor(d, 4, 4), float_tensor(d, 4, 4), float_tensor(d, 4, 4)],
@@ -1619,14 +2152,14 @@ def _register_high_impact_individual_builders() -> None:
                 {},
             ),
         ),
-        # softmax / log_softmax forward — (input, dim, half_to_float=False)
+        # softmax / log_softmax forward - (input, dim, half_to_float=False)
         "_softmax": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
         "_log_softmax": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 8), -1, False], {}),
         ),
-        # dim-reduction helpers — (input, dim, keepdim?)
+        # dim-reduction helpers - (input, dim, keepdim?)
         "all.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
         "any.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
         "max.dim": OpSpec(build=lambda d: ([float_tensor(d, 4, 4), -1], {})),
@@ -1666,7 +2199,7 @@ def _register_high_impact_individual_builders() -> None:
         "histc": OpSpec(
             build=lambda d: ([float_tensor(d, 64), 10, -3.0, 3.0], {}),
         ),
-        # native_dropout: (input, p, train) → (Tensor, Bool mask)
+        # native_dropout: (input, p, train) -> (Tensor, Bool mask)
         "native_dropout": OpSpec(
             build=lambda d: ([float_tensor(d, 4, 4), 0.5, True], {}),
         ),
@@ -1746,7 +2279,7 @@ def _register_high_impact_individual_builders() -> None:
         "topk": OpSpec(build=lambda d: ([float_tensor(d, 16), 4], {})),
         # sort: (input, dim?, descending?)
         "sort": OpSpec(build=lambda d: ([float_tensor(d, 16)], {})),
-        # nonzero: (input,) → indices
+        # nonzero: (input,) -> indices
         "nonzero": OpSpec(build=lambda d: ([float_tensor(d, 4, 4)], {})),
         # unique_consecutive / unique_dim
         "unique_consecutive": OpSpec(
@@ -1771,40 +2304,6 @@ _register_bulk_binary_tensor_elementwise_builders()
 _register_high_impact_individual_builders()
 
 
-# Zero-copy view ops that launch no GPU kernels. A correct ROCTX trace
-# shows the marker with an empty kernel-correlation set.
-KNOWN_KERNEL_FREE_ATEN_OPS: Set[str] = {
-    "view",
-    "view_as_real",
-    "view_as_complex",
-    "unfold",
-}
-
-
-# CUDA-only / NVIDIA-only backends that cannot run on ROCm. Ops whose
-# OpSpec.skip text contains any of these keywords are filtered out at
-# discovery time.
-_HARDWARE_INCOMPATIBLE_CUDA_KEYWORDS: Tuple[str, ...] = (
-    "cuda-only",
-    "cuda only",
-    "nvidia-only",
-    "nvidia only",
-    "cudnn-only",
-    "cudnn only",
-    "cutlass",
-    "cusparselt",
-    "xformers",
-    "flashattention",
-    "flash attention",
-    "fp8 gemm",
-    "fp8 tensors",
-    "packed int4",
-    "int8 packed",
-    "grouped matmul",
-    "mat2 to be transposed",
-)
-
-
 def is_hardware_incompatible_cuda_only(text: Optional[str]) -> bool:
     """Return True when ``text`` references a CUDA-only or NVIDIA-only backend."""
     if not text:
@@ -1826,100 +2325,6 @@ class OpCompareOutcome(NamedTuple):
     status: str
     reason: str
     log_lines: Tuple[str, ...]
-
-
-# Subprocess runner that records one ``torch.profiler`` window per
-# operator and dumps results to JSON.
-COVERAGE_GROUND_TRUTH_RUNNER_SOURCE = textwrap.dedent(
-    """
-import importlib.util
-import json
-import os
-import sys
-
-# Synchronous dispatch attributes faults to the launching op.
-os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")
-
-import torch
-from torch.profiler import profile, ProfilerActivity
-
-
-def probe_device() -> None:
-    \"\"\"Launch a small kernel and synchronise to surface device faults.\"\"\"
-    t = torch.empty(1, device=\"cuda\")
-    t.add_(1)
-    torch.cuda.synchronize()
-
-
-def main() -> None:
-    workload_path, output_path = sys.argv[1], sys.argv[2]
-    spec = importlib.util.spec_from_file_location(
-        "_torch_trace_coverage_workload",
-        workload_path,
-    )
-    wl = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(wl)
-    results: dict = {}
-    for op_name, run_fn in zip(wl.OP_NAMES, wl.ALL_OPS):
-        print(f"[torch-trace-cov] START {op_name}", file=sys.stderr, flush=True)
-        try:
-            with profile(
-                activities=[
-                    ProfilerActivity.CPU,
-                    ProfilerActivity.CUDA,
-                ],
-                acc_events=True,
-            ) as prof:
-                run_fn()
-                torch.cuda.synchronize()
-            results[op_name] = {
-                "aten_ops": [
-                    e.name
-                    for e in prof.events()
-                    if e.name.startswith("aten::")
-                ],
-                "cuda_kernels": [
-                    e.name
-                    for e in prof.events()
-                    if e.device_type == torch.autograd.DeviceType.CUDA
-                ],
-            }
-        except Exception as exc:
-            results[op_name] = {
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-            print(
-                f"[torch-trace-cov] FAIL  {op_name} {type(exc).__name__}: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            try:
-                probe_device()
-            except Exception as exc2:
-                print(
-                    f"[torch-trace-cov] DEVICE_DEAD after {op_name} "
-                    f"{type(exc2).__name__}: {exc2}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                break
-            continue
-        print(f"[torch-trace-cov] OK    {op_name}", file=sys.stderr, flush=True)
-    with open(output_path, "w", encoding="utf-8") as out_f:
-        json.dump(results, out_f)
-
-
-if __name__ == "__main__":
-    main()
-"""
-).strip()
-
-
-def unique_output_param_id(prefix: str) -> str:
-    """Return a unique ``param_id`` for ``get_output_dir``."""
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
 
 # Sample labels: ``torch.ops.aten.<op>`` for the default overload and
@@ -1952,46 +2357,6 @@ def aten_packet_call_path(op_name: str) -> str:
 # Argument synthesis. An ATen operator is emitted only when ``OP_SPECS``
 # holds a builder for the overload key or the packet key. ``.out`` and
 # in-place overloads reuse the out-of-place builder when guards pass.
-
-
-_SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES: frozenset = frozenset({
-    "out",
-    "Tensor_out",
-    "OutTensor",
-    "m_out",
-    "out_mode",
-})
-
-
-# Short names excluded from generic .out injection because the output
-# dtype does not follow the input dtype.
-_OUT_MECHANISM_EXCLUDED_SHORT_NAMES: frozenset = frozenset({
-    "eq",
-    "ne",
-    "lt",
-    "gt",
-    "ge",
-    "le",
-    "isnan",
-    "isinf",
-    "isfinite",
-    "isneginf",
-    "isposinf",
-    "logical_and",
-    "logical_or",
-    "logical_xor",
-    "logical_not",
-    "isclose",
-    "isin",
-    "argmax",
-    "argmin",
-    "argsort",
-    "all",
-    "any",
-    "nonzero",
-    "tril_indices",
-    "triu_indices",
-})
 
 
 def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
@@ -2094,7 +2459,7 @@ def _op_skip_text(op: OpEntry) -> Optional[str]:
 
 
 def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
-    """Enumerate ATen and structural operators for the coverage sample.
+    """Enumerate CUDA ``torch.ops`` and structural operators for the coverage sample.
 
     Returns ``(kept_aten_ops, structural_ops, excluded_aten_ops)``;
     excluded ops are CUDA-only backends incompatible with ROCm.
@@ -2102,7 +2467,9 @@ def discover_operators() -> Tuple[List[OpEntry], List[OpEntry], List[OpEntry]]:
     aten_ops: List[OpEntry] = []
     seen: Set[str] = set()
 
-    for ns_name in ("aten",):
+    for ns_name in dir(torch.ops):
+        if ns_name.startswith("_"):
+            continue
         ns = getattr(torch.ops, ns_name, None)
         if ns is None:
             continue
@@ -2187,23 +2554,30 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
         return False
 
     if op_name.startswith("torch.ops.aten."):
-        op_short = aten_op_short_name(op_name)
-        if op_short:
-            packet = aten_packet_call_path(op_name)
-            if marker_leaf == packet:
-                return True
-            marker_norm = marker_leaf.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
-            if marker_norm == op_short:
-                return True
-            if marker_leaf.endswith(f".{op_short}"):
-                return True
-            return False
+        suffix = op_name[len("torch.ops.aten.") :]
+        packet = aten_op_short_name(op_name)
+        return marker_leaf in (
+            f"aten::{suffix}",
+            f"aten::{packet}",
+            aten_packet_call_path(op_name),
+        )
+
+    if op_name.startswith("torch.Tensor."):
+        method = op_name[len("torch.Tensor.") :]
+        if marker_leaf == op_name:
+            return True
+        if marker_leaf.endswith("Tensor." + method):
+            return True
+        return False
+
+    if op_name.startswith("torch.") and not op_name.startswith("torch.ops."):
+        return marker_leaf == op_name
 
     op_leaf = op_name.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
     marker_norm = marker_leaf.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
     if marker_norm == op_leaf:
         return True
-    if marker_leaf.endswith(f".{op_leaf}"):
+    if marker_leaf.endswith("." + op_leaf):
         return True
 
     if op_name == "Optimizer.step" and marker_leaf.endswith(".step"):
@@ -2218,9 +2592,6 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 
 
 # -- Workload script generation --
-
-# Maximum content width for emitted workload bodies (88 - 4 indent).
-WORKLOAD_EMIT_BODY_CONTENT_MAX = 84
 
 
 def workload_emit_tensor_rand_uniform_setup(
@@ -2451,6 +2822,18 @@ def serialize_arg(argument_value: Any, vname: str) -> Tuple[List[str], str]:
 StructuralBuilder = Callable[[str], Tuple[List[str], str, str]]
 
 
+def _build_nn_module_call(
+    ctor_expr: str,
+    input_expr: str,
+    extra_setup: Tuple[str, ...],
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    setup: List[str] = ["import torch.nn as nn"]
+    setup.extend(extra_setup)
+    setup.append(f"_mod_{safe_var} = ({ctor_expr}).cuda()")
+    return setup, f"_mod_{safe_var}", input_expr
+
+
 def builder_nn_module_call(
     ctor_expr: str,
     input_expr: str,
@@ -2458,14 +2841,25 @@ def builder_nn_module_call(
     extra_setup: Tuple[str, ...] = (),
 ) -> StructuralBuilder:
     """Instantiate ``ctor_expr`` on CUDA and call it with ``input_expr``."""
+    return functools.partial(_build_nn_module_call, ctor_expr, input_expr, extra_setup)
 
-    def build(safe_var: str) -> Tuple[List[str], str, str]:
-        setup: List[str] = ["import torch.nn as nn"]
-        setup.extend(extra_setup)
-        setup.append(f"_mod_{safe_var} = ({ctor_expr}).cuda()")
-        return setup, f"_mod_{safe_var}", input_expr
 
-    return build
+def _build_optimizer_step(
+    optimizer_ctor: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    params_expr = f"_m_{safe_var}.parameters()"
+    optim_src = optimizer_ctor.replace("PARAMS", params_expr)
+    return (
+        [
+            "import torch.nn as nn",
+            f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
+            f"_opt_{safe_var} = {optim_src}",
+            (f"_m_{safe_var}(torch.randn(2, 4, device=device)).sum().backward()"),
+        ],
+        f"_opt_{safe_var}.step",
+        "",
+    )
 
 
 def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
@@ -2474,47 +2868,17 @@ def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
     ``optimizer_ctor`` must reference ``PARAMS`` where the Linear
     parameters should be substituted.
     """
-
-    def build(safe_var: str) -> Tuple[List[str], str, str]:
-        params_expr = f"_m_{safe_var}.parameters()"
-        optim_src = optimizer_ctor.replace("PARAMS", params_expr)
-        return (
-            [
-                "import torch.nn as nn",
-                f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
-                f"_opt_{safe_var} = {optim_src}",
-                (f"_m_{safe_var}(torch.randn(2, 4, device=device)).sum().backward()"),
-            ],
-            f"_opt_{safe_var}.step",
-            "",
-        )
-
-    return build
+    return functools.partial(_build_optimizer_step, optimizer_ctor)
 
 
-# Single-GPU process-group bootstrap inlined by distributed builders.
-# Uses a per-process ``file://`` rendezvous and destroys the group at
-# interpreter shutdown.
-DISTRIBUTED_BOOTSTRAP_SETUP: Tuple[str, ...] = (
-    "import atexit as _atexit",
-    "import tempfile as _tempfile",
-    "import torch.distributed as _dist",
-    "if not _dist.is_initialized():",
-    "    _dist_init_dir = _tempfile.mkdtemp(prefix='torch_trace_cov_dist_')",
-    "    _dist.init_process_group(",
-    '        backend="nccl",',
-    '        init_method=f"file://{_dist_init_dir}/init",',
-    "        rank=0,",
-    "        world_size=1,",
-    "    )",
-    "    def _shutdown_dist():",
-    "        try:",
-    "            if _dist.is_initialized():",
-    "                _dist.destroy_process_group()",
-    "        except Exception:",
-    "            pass",
-    "    _atexit.register(_shutdown_dist)",
-)
+def _build_distributed(
+    call_expr: str,
+    tensor_setup: Tuple[str, ...],
+    call_args: str,
+    _safe_var: str,
+) -> Tuple[List[str], str, str]:
+    setup = list(DISTRIBUTED_BOOTSTRAP_SETUP) + list(tensor_setup)
+    return setup, call_expr, call_args
 
 
 def builder_distributed(
@@ -2524,199 +2888,7 @@ def builder_distributed(
     call_args: str = "_t",
 ) -> StructuralBuilder:
     """Run a ``torch.distributed.*`` collective on a single-GPU group."""
-
-    def build(_safe_var: str) -> Tuple[List[str], str, str]:
-        setup = list(DISTRIBUTED_BOOTSTRAP_SETUP) + list(tensor_setup)
-        return setup, call_expr, call_args
-
-    return build
-
-
-# Per-module builders: name -> ``(ctor_expr, input_expr, extra_setup)``.
-NN_MODULE_BUILDERS: Dict[str, Tuple[str, str, Tuple[str, ...]]] = {
-    # Dense / linear layers
-    "nn.Module.Linear.__call__": (
-        "nn.Linear(4, 4)",
-        "torch.randn(2, 4, device=device)",
-        (),
-    ),
-    "nn.Module.Bilinear.__call__": (
-        "nn.Bilinear(4, 4, 4)",
-        "torch.randn(2, 4, device=device), torch.randn(2, 4, device=device)",
-        (),
-    ),
-    # Convolutional layers
-    "nn.Module.Conv1d.__call__": (
-        "nn.Conv1d(3, 8, 3, padding=1)",
-        "torch.randn(1, 3, 16, device=device)",
-        (),
-    ),
-    "nn.Module.Conv2d.__call__": (
-        "nn.Conv2d(3, 8, 3, padding=1)",
-        "torch.randn(1, 3, 16, 16, device=device)",
-        (),
-    ),
-    "nn.Module.Conv3d.__call__": (
-        "nn.Conv3d(3, 8, 3, padding=1)",
-        "torch.randn(1, 3, 4, 8, 8, device=device)",
-        (),
-    ),
-    "nn.Module.ConvTranspose2d.__call__": (
-        "nn.ConvTranspose2d(3, 8, 3, padding=1)",
-        "torch.randn(1, 3, 16, 16, device=device)",
-        (),
-    ),
-    # Normalization
-    "nn.Module.BatchNorm1d.__call__": (
-        "nn.BatchNorm1d(4)",
-        "torch.randn(8, 4, device=device)",
-        (),
-    ),
-    "nn.Module.BatchNorm2d.__call__": (
-        "nn.BatchNorm2d(3)",
-        "torch.randn(2, 3, 8, 8, device=device)",
-        (),
-    ),
-    "nn.Module.LayerNorm.__call__": (
-        "nn.LayerNorm(8)",
-        "torch.randn(2, 8, device=device)",
-        (),
-    ),
-    "nn.Module.GroupNorm.__call__": (
-        "nn.GroupNorm(2, 4)",
-        "torch.randn(2, 4, 8, 8, device=device)",
-        (),
-    ),
-    "nn.Module.InstanceNorm2d.__call__": (
-        "nn.InstanceNorm2d(3)",
-        "torch.randn(2, 3, 8, 8, device=device)",
-        (),
-    ),
-    # Embedding
-    "nn.Module.Embedding.__call__": (
-        "nn.Embedding(16, 4)",
-        "torch.randint(0, 16, (2, 4), device=device)",
-        (),
-    ),
-    "nn.Module.EmbeddingBag.__call__": (
-        "nn.EmbeddingBag(16, 4, mode='mean')",
-        "torch.randint(0, 16, (8,), device=device), "
-        "torch.tensor([0, 4], device=device)",
-        (),
-    ),
-    # Attention / transformer
-    "nn.Module.MultiheadAttention.__call__": (
-        "nn.MultiheadAttention(8, 2, batch_first=True)",
-        "_q, _q, _q",
-        ("_q = torch.randn(2, 4, 8, device=device)",),
-    ),
-    "nn.Module.TransformerEncoderLayer.__call__": (
-        "nn.TransformerEncoderLayer(d_model=8, nhead=2, batch_first=True)",
-        "torch.randn(2, 4, 8, device=device)",
-        (),
-    ),
-    # Recurrent
-    "nn.Module.RNN.__call__": (
-        "nn.RNN(4, 4, batch_first=True)",
-        "torch.randn(2, 3, 4, device=device)",
-        (),
-    ),
-    "nn.Module.LSTM.__call__": (
-        "nn.LSTM(4, 4, batch_first=True)",
-        "torch.randn(2, 3, 4, device=device)",
-        (),
-    ),
-    "nn.Module.GRU.__call__": (
-        "nn.GRU(4, 4, batch_first=True)",
-        "torch.randn(2, 3, 4, device=device)",
-        (),
-    ),
-    # Activations (trainable / parameter-free)
-    "nn.Module.ReLU.__call__": (
-        "nn.ReLU()",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.GELU.__call__": (
-        "nn.GELU()",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.SiLU.__call__": (
-        "nn.SiLU()",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.Softmax.__call__": (
-        "nn.Softmax(dim=-1)",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.LogSoftmax.__call__": (
-        "nn.LogSoftmax(dim=-1)",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    # Dropout
-    "nn.Module.Dropout.__call__": (
-        "nn.Dropout(p=0.5)",
-        "torch.randn(4, 4, device=device)",
-        (),
-    ),
-    # Pooling
-    "nn.Module.MaxPool2d.__call__": (
-        "nn.MaxPool2d(2)",
-        "torch.randn(1, 3, 8, 8, device=device)",
-        (),
-    ),
-    "nn.Module.AvgPool2d.__call__": (
-        "nn.AvgPool2d(2)",
-        "torch.randn(1, 3, 8, 8, device=device)",
-        (),
-    ),
-    "nn.Module.AdaptiveAvgPool2d.__call__": (
-        "nn.AdaptiveAvgPool2d((4, 4))",
-        "torch.randn(1, 3, 8, 8, device=device)",
-        (),
-    ),
-    # Upsample / pixel shuffle / reshape
-    "nn.Module.Upsample.__call__": (
-        "nn.Upsample(scale_factor=2, mode='nearest')",
-        "torch.randn(1, 3, 4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.PixelShuffle.__call__": (
-        "nn.PixelShuffle(2)",
-        "torch.randn(1, 4, 4, 4, device=device)",
-        (),
-    ),
-    "nn.Module.Flatten.__call__": (
-        "nn.Flatten()",
-        "torch.randn(2, 3, 4, 4, device=device)",
-        (),
-    ),
-    # Containers (just to exercise the wrapper forward)
-    "nn.Module.Sequential.__call__": (
-        "nn.Sequential(nn.Linear(4, 4), nn.ReLU(), nn.Linear(4, 4))",
-        "torch.randn(2, 4, device=device)",
-        (),
-    ),
-}
-
-
-# Per-optimizer builders.
-OPTIMIZER_BUILDERS: Dict[str, str] = {
-    "Optimizer.SGD.step": "torch.optim.SGD(PARAMS, lr=0.01)",
-    "Optimizer.Adam.step": "torch.optim.Adam(PARAMS, lr=1e-3)",
-    "Optimizer.AdamW.step": "torch.optim.AdamW(PARAMS, lr=1e-3)",
-    "Optimizer.RMSprop.step": "torch.optim.RMSprop(PARAMS, lr=1e-3)",
-    "Optimizer.Adagrad.step": "torch.optim.Adagrad(PARAMS, lr=1e-2)",
-    "Optimizer.Adadelta.step": "torch.optim.Adadelta(PARAMS, lr=1.0)",
-    "Optimizer.NAdam.step": "torch.optim.NAdam(PARAMS, lr=1e-3)",
-    "Optimizer.RAdam.step": "torch.optim.RAdam(PARAMS, lr=1e-3)",
-    "Optimizer.Adamax.step": "torch.optim.Adamax(PARAMS, lr=1e-3)",
-    "Optimizer.ASGD.step": "torch.optim.ASGD(PARAMS, lr=1e-3)",
-}
+    return functools.partial(_build_distributed, call_expr, tensor_setup, call_args)
 
 
 # Autograd builders.
@@ -2739,7 +2911,7 @@ def builder_autograd_grad(safe_var: str) -> Tuple[List[str], str, str]:
 
 
 def builder_autograd_backward(safe_var: str) -> Tuple[List[str], str, str]:
-    """torch.autograd.backward([loss]) — functional form of .backward()."""
+    """torch.autograd.backward([loss]) - functional form of .backward()."""
     return (
         [
             "import torch.nn as nn",
@@ -2826,6 +2998,84 @@ def builder_autograd_functional_jvp(safe_var: str) -> Tuple[List[str], str, str]
         "torch.autograd.functional.jvp",
         f"lambda z: _m_{safe_var}(z), _x_{safe_var}, _v_{safe_var}",
     )
+
+
+def _build_autograd_functional_hvp_family(
+    call_expr: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    return (
+        [
+            f"_x_{safe_var} = torch.randn(4, device=device)",
+            f"_v_{safe_var} = torch.randn(4, device=device)",
+        ],
+        call_expr,
+        f"lambda z: (z * z).sum(), _x_{safe_var}, _v_{safe_var}",
+    )
+
+
+def builder_autograd_functional_hvp_family(call_expr: str) -> StructuralBuilder:
+    """hvp/vhp(func, inputs, v) on a scalar quadratic."""
+    return functools.partial(_build_autograd_functional_hvp_family, call_expr)
+
+
+def _build_size_factory(
+    call_expr: str,
+    _safe_var: str,
+) -> Tuple[List[str], str, str]:
+    return [], call_expr, "(4, 4), device=device"
+
+
+def builder_size_factory(call_expr: str) -> StructuralBuilder:
+    """Call empty/ones/rand/randn/zeros with a Size, not a Tensor."""
+    return functools.partial(_build_size_factory, call_expr)
+
+
+def builder_torch_eq(safe_var: str) -> Tuple[List[str], str, str]:
+    """torch.eq(input, other) on two CUDA tensors."""
+    return (
+        [f"_t_{safe_var} = torch.randn(4, 4, device=device)"],
+        "torch.eq",
+        f"_t_{safe_var}, _t_{safe_var}",
+    )
+
+
+def _build_pairwise_loss(
+    call_expr: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    return (
+        [
+            f"_in_{safe_var} = torch.randn(4, 4, device=device)",
+            f"_tg_{safe_var} = torch.randn(4, 4, device=device)",
+        ],
+        call_expr,
+        f"_in_{safe_var}, _tg_{safe_var}",
+    )
+
+
+def builder_pairwise_loss(call_expr: str) -> StructuralBuilder:
+    """mse_loss(input, target) with matching float tensors."""
+    return functools.partial(_build_pairwise_loss, call_expr)
+
+
+def _build_class_index_loss(
+    call_expr: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    return (
+        [
+            f"_in_{safe_var} = torch.randn(2, 4, device=device)",
+            f"_tg_{safe_var} = torch.randint(0, 4, (2,), device=device)",
+        ],
+        call_expr,
+        f"_in_{safe_var}, _tg_{safe_var}",
+    )
+
+
+def builder_class_index_loss(call_expr: str) -> StructuralBuilder:
+    """nll_loss / cross_entropy(input, target) with class indices."""
+    return functools.partial(_build_class_index_loss, call_expr)
 
 
 # Compile / JIT builders.
@@ -2947,52 +3197,32 @@ def builder_cuda_event(safe_var: str) -> Tuple[List[str], str, str]:
 # Registry assembly.
 
 
+def _generic_tensor_backward(safe_var: str) -> Tuple[List[str], str, str]:
+    return (
+        [
+            f"_lin_{safe_var} = torch.nn.Linear(4, 4).cuda()",
+            f"_loss_{safe_var} = _lin_{safe_var}(",
+            "    torch.randn(2, 4, device=device),",
+            ").sum()",
+        ],
+        f"_loss_{safe_var}.backward",
+        "",
+    )
+
+
 def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
     """Flat name -> StructuralBuilder map. Duplicate names raise."""
     registry: Dict[str, StructuralBuilder] = {}
 
     # Generic fallbacks used when no class-specific builder applies.
-    def _generic_nn_call(safe_var: str) -> Tuple[List[str], str, str]:
-        return (
-            [
-                "import torch.nn as nn",
-                f"_model_{safe_var} = nn.Linear(4, 4).cuda()",
-            ],
-            f"_model_{safe_var}",
-            "torch.randn(2, 4, device=device)",
-        )
+    registry["nn.Module.__call__"] = builder_nn_module_call(
+        "nn.Linear(4, 4)",
+        "torch.randn(2, 4, device=device)",
+    )
+    registry["Optimizer.step"] = builder_optimizer_step(
+        "torch.optim.SGD(PARAMS, lr=0.01)",
+    )
 
-    def _generic_optimizer_step(safe_var: str) -> Tuple[List[str], str, str]:
-        return (
-            [
-                "import torch.nn as nn",
-                f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
-                f"_opt_{safe_var} = torch.optim.SGD(",
-                f"    _m_{safe_var}.parameters(),",
-                "    lr=0.01,",
-                ")",
-                f"_m_{safe_var}(",
-                "    torch.randn(2, 4, device=device),",
-                ").sum().backward()",
-            ],
-            f"_opt_{safe_var}.step",
-            "",
-        )
-
-    def _generic_tensor_backward(safe_var: str) -> Tuple[List[str], str, str]:
-        return (
-            [
-                f"_lin_{safe_var} = torch.nn.Linear(4, 4).cuda()",
-                f"_loss_{safe_var} = _lin_{safe_var}(",
-                "    torch.randn(2, 4, device=device),",
-                ").sum()",
-            ],
-            f"_loss_{safe_var}.backward",
-            "",
-        )
-
-    registry["nn.Module.__call__"] = _generic_nn_call
-    registry["Optimizer.step"] = _generic_optimizer_step
     registry["torch.Tensor.backward"] = _generic_tensor_backward
 
     for name, (ctor, input_expr, extra_setup) in NN_MODULE_BUILDERS.items():
@@ -3023,6 +3253,32 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
         ),
         ("torch.autograd.functional.vjp", builder_autograd_functional_vjp),
         ("torch.autograd.functional.jvp", builder_autograd_functional_jvp),
+        (
+            "torch.autograd.functional.hvp",
+            builder_autograd_functional_hvp_family("torch.autograd.functional.hvp"),
+        ),
+        (
+            "torch.autograd.functional.vhp",
+            builder_autograd_functional_hvp_family("torch.autograd.functional.vhp"),
+        ),
+        ("torch.eq", builder_torch_eq),
+        (
+            "torch.nn.functional.mse_loss",
+            builder_pairwise_loss("torch.nn.functional.mse_loss"),
+        ),
+        (
+            "torch.nn.functional.nll_loss",
+            builder_class_index_loss("torch.nn.functional.nll_loss"),
+        ),
+        (
+            "torch.nn.functional.cross_entropy",
+            builder_class_index_loss("torch.nn.functional.cross_entropy"),
+        ),
+        ("torch.empty", builder_size_factory("torch.empty")),
+        ("torch.ones", builder_size_factory("torch.ones")),
+        ("torch.rand", builder_size_factory("torch.rand")),
+        ("torch.randn", builder_size_factory("torch.randn")),
+        ("torch.zeros", builder_size_factory("torch.zeros")),
         ("torch.compile", builder_torch_compile),
         ("torch.jit.trace", builder_torch_jit_trace),
         ("torch.jit.script", builder_torch_jit_script),
@@ -3093,6 +3349,96 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
 
 
 STRUCTURAL_BUILDERS: Dict[str, StructuralBuilder] = build_structural_builder_registry()
+
+
+def _build_fallback_structural(
+    op_name: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    return (
+        [f"_t_{safe_var} = torch.randn(4, 4, device=device)"],
+        op_name,
+        f"_t_{safe_var}",
+    )
+
+
+def _fallback_structural_builder(op_name: str) -> StructuralBuilder:
+    return functools.partial(_build_fallback_structural, op_name)
+
+
+def _build_tensor_method(
+    method_name: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    setup = [f"_t_{safe_var} = torch.randn(4, 4, device=device)"]
+    call = f"_t_{safe_var}.{method_name}"
+    args = ""
+    if method_name in ("item", "tolist"):
+        setup = [f"_t_{safe_var} = torch.tensor(1.0, device=device)"]
+    elif method_name == "numpy":
+        setup = [f'_t_{safe_var} = torch.tensor(1.0, device="cpu")']
+    elif method_name == "to":
+        args = "device"
+    elif method_name == "cpu":
+        setup = [f"_t_{safe_var} = torch.randn(4, 4, device=device)"]
+    elif method_name == "cuda":
+        setup = [f"_t_{safe_var} = torch.randn(4, 4)"]
+    elif method_name == "eq":
+        args = f"_t_{safe_var}"
+    return setup, call, args
+
+
+def _tensor_method_builder(method_name: str) -> StructuralBuilder:
+    return functools.partial(_build_tensor_method, method_name)
+
+
+def _build_nn_module_method(
+    method_name: str,
+    safe_var: str,
+) -> Tuple[List[str], str, str]:
+    if method_name == "__init__":
+        return (
+            ["import torch.nn as nn"],
+            "nn.Linear",
+            "4, 4",
+        )
+    setup = [
+        "import torch.nn as nn",
+        f"_m_{safe_var} = nn.Linear(4, 4)",
+    ]
+    if method_name == "cuda":
+        return setup, f"_m_{safe_var}.cuda", ""
+    if method_name == "cpu":
+        setup.append(f"_m_{safe_var} = _m_{safe_var}.cuda()")
+        return setup, f"_m_{safe_var}.cpu", ""
+    return setup, f"_m_{safe_var}.to", "device"
+
+
+def _nn_module_method_builder(method_name: str) -> StructuralBuilder:
+    return functools.partial(_build_nn_module_method, method_name)
+
+
+def _register_wrap_constant_builders() -> None:
+    from utils.inject_roctx._backends.torch import (
+        DEEP_TENSOR_METHOD_WRAPS,
+        EXTRA_STRUCTURAL_WRAPS,
+        TENSOR_METHOD_WRAPS,
+    )
+
+    for _module_path, _attr_name, marker_name in EXTRA_STRUCTURAL_WRAPS:
+        if marker_name not in STRUCTURAL_BUILDERS:
+            STRUCTURAL_BUILDERS[marker_name] = _fallback_structural_builder(marker_name)
+    for method_name in TENSOR_METHOD_WRAPS + DEEP_TENSOR_METHOD_WRAPS:
+        key = f"torch.Tensor.{method_name}"
+        if key not in STRUCTURAL_BUILDERS:
+            STRUCTURAL_BUILDERS[key] = _tensor_method_builder(method_name)
+    for method_name in ("__init__", "to", "cuda", "cpu"):
+        key = f"nn.Module.{method_name}"
+        if key not in STRUCTURAL_BUILDERS:
+            STRUCTURAL_BUILDERS[key] = _nn_module_method_builder(method_name)
+
+
+_register_wrap_constant_builders()
 
 
 def emit_structural_preamble(
@@ -3190,14 +3536,19 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
     lines.append("    torch.cuda.synchronize()")
     lines.append("")
     lines.append("def run_all():")
+    lines.append("    import roctx")
     lines.append("    for op_label, fn in zip(OP_NAMES, ALL_OPS):")
     lines.append(
         '        print(f"[torch-trace-cov] START {op_label}", '
         "file=sys.stderr, flush=True)"
     )
     lines.append("        try:")
-    lines.append("            fn()")
-    lines.append("            torch.cuda.synchronize()")
+    lines.append("            roctx.rangePush(op_label)")
+    lines.append("            try:")
+    lines.append("                fn()")
+    lines.append("                torch.cuda.synchronize()")
+    lines.append("            finally:")
+    lines.append("                roctx.rangePop()")
     lines.append("        except Exception as exc:")
     lines.append(
         '            print(f"[torch-trace-cov] FAIL  {op_label} '
@@ -3243,243 +3594,6 @@ def write_coverage_workload_artifacts(
         encoding="utf-8",
     )
     write_coverage_ground_truth_runner_script(ground_truth_runner_script_path)
-
-
-# -- ROCTX marker CSV parsing --
-
-
-def with_correlation_id_standard_name(marker_df: pd.DataFrame) -> pd.DataFrame:
-    """Normalise the correlation-id column name across rocprof-compute versions."""
-    if "Correlation_Id" not in marker_df.columns:
-        return marker_df
-    return marker_df.rename(columns={"Correlation_Id": "Correlation_ID"})
-
-
-def segments_from_function_cell(func: object) -> List[str]:
-    """Return chain segments of a ROCTX ``Function`` cell, in order."""
-    if not isinstance(func, str):
-        return []
-    op_path = func.split(":#")[0] if ":#" in func else func
-    return [seg for seg in (s.strip() for s in op_path.split("/")) if seg]
-
-
-def leaf_from_function_cell(func: object) -> Optional[str]:
-    """Return the last path segment of a ROCTX Function cell, or None."""
-    segments = segments_from_function_cell(func)
-    return segments[-1] if segments else None
-
-
-def collect_marker_ops_and_correlations(
-    marker_df: pd.DataFrame,
-) -> tuple[set[str], dict[str, set]]:
-    """Return (marker_leaves, segment -> correlation_ids).
-
-    The correlation map attributes each row's Correlation_ID to every
-    segment of its chain so a kernel inside a nested marker is visible
-    when the harness probes the enclosing op. Monotonic: only adds
-    correlations the outer marker genuinely enclosed.
-    """
-    marker_ops: set[str] = set()
-    op_to_corr: dict[str, set] = {}
-    func_col = marker_df.get("Function")
-    corr_col = marker_df.get("Correlation_ID")
-    if func_col is None:
-        return marker_ops, op_to_corr
-
-    for row_index, function_cell in enumerate(func_col):
-        segments = segments_from_function_cell(function_cell)
-        if not segments:
-            continue
-        marker_ops.add(segments[-1])
-        if corr_col is None:
-            continue
-        correlation_id = corr_col.iloc[row_index]
-        if not pd.notna(correlation_id):
-            continue
-        for segment in segments:
-            op_to_corr.setdefault(segment, set()).add(correlation_id)
-
-    return marker_ops, op_to_corr
-
-
-def merge_kernel_names_for_correlation_ids(
-    correlation_ids: set,
-    correlation_id_to_kernels: dict,
-) -> set[str]:
-    """Union the kernel-name sets for every correlation id in correlation_ids."""
-    kernels: set[str] = set()
-    for correlation_id in correlation_ids:
-        kernels |= correlation_id_to_kernels.get(correlation_id, set())
-    return kernels
-
-
-def kernels_by_marker_leaf(
-    op_to_corr: dict[str, set],
-    counter_files: list[Path],
-) -> dict[str, set[str]]:
-    """Return leaf -> {kernel_name} by joining marker correlations to counters."""
-    counter_df = pd.concat(
-        [pd.read_csv(f) for f in counter_files],
-        ignore_index=True,
-    )
-    counter_df = with_correlation_id_standard_name(counter_df)
-    if "Kernel_Name" not in counter_df.columns:
-        return {}
-
-    all_corr_ids: set = set()
-    for ids in op_to_corr.values():
-        all_corr_ids |= ids
-
-    matched = counter_df[counter_df["Correlation_ID"].isin(all_corr_ids)]
-    correlation_id_to_kernels: dict = {}
-    for correlation_id, kernel_name in zip(
-        matched["Correlation_ID"],
-        matched["Kernel_Name"],
-    ):
-        if not pd.notna(kernel_name):
-            continue
-        correlation_id_to_kernels.setdefault(correlation_id, set()).add(kernel_name)
-
-    op_to_kernels: dict[str, set[str]] = {}
-    for leaf, correlation_ids_for_leaf in op_to_corr.items():
-        kernels = merge_kernel_names_for_correlation_ids(
-            correlation_ids_for_leaf,
-            correlation_id_to_kernels,
-        )
-        if kernels:
-            op_to_kernels[leaf] = kernels
-    return op_to_kernels
-
-
-def _read_roctx_marker_dataframe(workload_dir: str) -> Optional[pd.DataFrame]:
-    """Concatenate ``marker_api_trace.csv.gz`` files under ``workload_dir``."""
-    marker_files = sorted(Path(workload_dir).glob("**/*marker_api_trace.csv.gz"))
-    if not marker_files:
-        return None
-    marker_df = pd.concat(
-        [pd.read_csv(f) for f in marker_files],
-        ignore_index=True,
-    )
-    return with_correlation_id_standard_name(marker_df)
-
-
-def parse_roctx_markers(
-    workload_dir: str,
-) -> Tuple[Dict[str, Set[str]], Set[str]]:
-    """Parse rocprof-compute marker and counter CSVs under ``workload_dir``.
-
-    Returns ``(op_to_kernels, marker_ops)`` where ``marker_ops`` lists
-    every distinct marker leaf and ``op_to_kernels`` maps a leaf to its
-    correlated GPU kernel names.
-    """
-    marker_df = _read_roctx_marker_dataframe(workload_dir)
-    if marker_df is None:
-        return {}, set()
-
-    counter_files = sorted(Path(workload_dir).glob("**/*counter_collection.csv"))
-    marker_ops, op_to_corr = collect_marker_ops_and_correlations(marker_df)
-
-    op_to_kernels: Dict[str, Set[str]] = {}
-    if counter_files and op_to_corr:
-        op_to_kernels = kernels_by_marker_leaf(op_to_corr, counter_files)
-
-    return op_to_kernels, marker_ops
-
-
-# Sentinel leaf-context labels emitted by the C++ RecordFunction tier.
-# Source of truth: leaf_context.h ``default_leaf_context``.
-C_TIER_LEAF_CONTEXT_SENTINELS: Tuple[str, ...] = (
-    "aten:0",
-    "aten.nested:0",
-    "autograd.engine:0",
-    "autograd.bwd:0",
-)
-
-# Backward-pass sentinels.
-C_TIER_BACKWARD_SENTINELS: Tuple[str, ...] = (
-    "autograd.engine:0",
-    "autograd.bwd:0",
-)
-
-
-def cpp_tier_signature_in_markers(
-    marker_df: pd.DataFrame,
-) -> Tuple[bool, Dict[str, int]]:
-    """Scan ``marker_df["Function"]`` for ``@<sentinel>`` tokens.
-
-    Returns ``(cpp_tier_active, sentinel_counts)``. The ``@`` prefix
-    avoids false positives against file paths. A missing column returns
-    ``(False, {})``.
-    """
-    counts: Dict[str, int] = {}
-    if marker_df is None or marker_df.empty:
-        return False, counts
-    func_col = marker_df.get("Function")
-    if func_col is None:
-        return False, counts
-
-    tokens = tuple(f"@{sentinel}" for sentinel in C_TIER_LEAF_CONTEXT_SENTINELS)
-    for cell in func_col:
-        if not isinstance(cell, str):
-            continue
-        for sentinel, token in zip(C_TIER_LEAF_CONTEXT_SENTINELS, tokens):
-            n = cell.count(token)
-            if n:
-                counts[sentinel] = counts.get(sentinel, 0) + n
-    return bool(counts), counts
-
-
-def detect_cpp_tier_signature(
-    workload_dir: str,
-) -> Tuple[bool, Dict[str, int]]:
-    """Workload-dir entry point for :func:`cpp_tier_signature_in_markers`."""
-    marker_df = _read_roctx_marker_dataframe(workload_dir)
-    if marker_df is None:
-        return False, {}
-    return cpp_tier_signature_in_markers(marker_df)
-
-
-def format_cpp_tier_signature_report(
-    cpp_tier_active: bool,
-    sentinel_counts: Dict[str, int],
-) -> Tuple[str, ...]:
-    """Render the C++ tier outcome as ``NONE``, ``FORWARD-ONLY``, or ``FULL``."""
-    if not cpp_tier_active:
-        return (
-            "C++ tier signature: NONE; workload ran on the Python "
-            "TorchDispatchMode fallback.",
-        )
-
-    backward_observed = any(
-        sentinel_counts.get(name, 0) > 0 for name in C_TIER_BACKWARD_SENTINELS
-    )
-    forward_observed = any(
-        sentinel_counts.get(name, 0) > 0 for name in ("aten:0", "aten.nested:0")
-    )
-    parts = []
-    if forward_observed:
-        parts.append(
-            f"forward (aten:0={sentinel_counts.get('aten:0', 0)}, "
-            f"aten.nested:0={sentinel_counts.get('aten.nested:0', 0)})"
-        )
-    if backward_observed:
-        parts.append(
-            f"backward (autograd.engine:0="
-            f"{sentinel_counts.get('autograd.engine:0', 0)}, "
-            f"autograd.bwd:0={sentinel_counts.get('autograd.bwd:0', 0)})"
-        )
-    summary = "  ".join(parts) if parts else "(no sentinels counted)"
-
-    if backward_observed:
-        return (f"C++ tier signature: FULL — {summary}.",)
-
-    return (
-        f"C++ tier signature: FORWARD-ONLY — {summary}.",
-        "  No autograd.engine:0 / autograd.bwd:0 sentinels observed.",
-    )
-
-
-# -- Per-operator comparison --
 
 
 def torch_trace_coverage_color_enabled() -> bool:
@@ -3560,51 +3674,6 @@ def describe_missing_or_errored_op(
     )
 
 
-# Skip-reason categorization. Each bucket is identified by a stable
-# keyword in the outcome reason string.
-
-SKIP_CATEGORY_LABELS: Dict[str, str] = {
-    "argument_builder_gap": (
-        "argument-builder coverage gap "
-        "(no OpSpec.build registered for this op in OP_SPECS — "
-        "register a per-operator builder to enable coverage)"
-    ),
-    "workload_runtime_error": (
-        "workload runtime error (synthetic workload raised before profiling completed)"
-    ),
-    "upstream_rocm_bug": (
-        "upstream ROCm bug (SIGSEGV / HIP illegal memory access under torch.profiler)"
-    ),
-    "hardware_incompatible_cuda_only": (
-        "hardware-incompatible "
-        "(CUDA-only feature: CUTLASS / cuDNN / xFormers / cuSPARSELt / "
-        "FlashAttention / fp8 / packed int4-int8 / grouped matmul)"
-    ),
-    "stateful_op_dependency": (
-        "stateful-op dependency "
-        "(backward op needs state / output from a matched forward run)"
-    ),
-    "external_library_required": (
-        "external library required (e.g. MAGMA) — not present in this build"
-    ),
-    "incomplete_op_spec": (
-        "OpSpec pending (builder declared but shape / argument contract TBD)"
-    ),
-    "no_kernel_in_ground_truth": (
-        "no GPU kernels in ground truth "
-        "(torch.profiler reported zero kernels for this op)"
-    ),
-    "structural_marker_gap": (
-        "structural marker gap "
-        "(structural pattern not exercised or no ROCTX marker emitted)"
-    ),
-    "opspec_builder_present_but_not_emitted": (
-        "OpSpec builder present but op was not emitted into the workload"
-    ),
-    "other": "other / uncategorized",
-}
-
-
 def categorize_skip_reason(reason: str) -> str:
     """Return the SKIP-category key for an ``outcome.reason`` string."""
     r = reason.lower()
@@ -3659,70 +3728,6 @@ def _short_op_name(op_name: str) -> str:
     """Strip the torch.ops.aten. prefix for compact breakdown listings."""
     prefix = "torch.ops.aten."
     return op_name[len(prefix) :] if op_name.startswith(prefix) else op_name
-
-
-# Family classifier for the ``argument_builder_gap`` bucket. Maps each
-# op name to a structural family and a short fix-pattern hint.
-
-
-_MISSING_BUILDER_FAMILY_HINTS: Dict[str, str] = {
-    "out / output-buffer overload (.out / .grad_input)": (
-        "wrap the default-overload builder and pass out=torch.empty_like(...)"
-    ),
-    "autograd backward (*_backward)": (
-        "synthesize grad_output + the forward inputs/outputs the schema needs"
-    ),
-    "in-place (trailing underscore)": (
-        "same args as the out-of-place sibling; just call the in-place variant"
-    ),
-    "foreach / vectorized list ops": (
-        "wrap inputs in [t1, t2, t3] lists; lengths must match across args"
-    ),
-    "special functions (Bessel / Chebyshev / Hermite / ...)": (
-        "single Tensor → Tensor; randn(d, N) works for most "
-        "(some need x ∈ [-1, 1] or x > 0)"
-    ),
-    "linear algebra (linalg_*)": (
-        "well-conditioned square matrices (A = randn(N,N) + N*eye(N))"
-    ),
-    "softmax / log_softmax family": (
-        "(input, dim, half_to_float=False) for forward; backward needs "
-        "grad_output + output (not input)"
-    ),
-    "batch normalization": (
-        "input (N,C,*) + weight/bias (C,) + running_mean/var (C,) + "
-        "training flag; backward also needs save_mean / save_invstd"
-    ),
-    "layer / group / instance normalization": (
-        "input (N,C,*) + normalized_shape + weight/bias matching the normalized dims"
-    ),
-    "FFT family": ("complex input, or real input with appropriate signal_ndim"),
-    "sparse tensor ops": ("explicit indices/values constructor; never randn"),
-    "quantization": ("needs scale + zero_point tensors matching the quantized dtype"),
-    "distribution / random sampler": (
-        "shape arg + optional generator; some take param tensors (mean, std)"
-    ),
-    "convolution": ("input (N,C,H,W) + weight (C_out,C_in,Kh,Kw) + optional bias"),
-    "pooling": ("input (N,C,H,W) + kernel_size + stride/padding"),
-    "loss function": ("input + target with matching shapes / dtypes"),
-    "indexing / gather / scatter": (
-        "source tensor + int64 index tensor; bounds must lie inside source"
-    ),
-    "cumulative reduction": ("input tensor + dim; dtype kwarg optional"),
-    "reduction along dim": ("input tensor + dim (int or list-of-int) + keepdim kwarg"),
-    "elementwise — Tensor overload": ("two same-shape tensors"),
-    "elementwise — Scalar overload": ("tensor + python scalar"),
-    "elementwise — unary float Tensor → Tensor": (
-        "single template: lambda d: ([float_tensor(d, N, N)], {}) — most accept any "
-        "float tensor (a few need x ∈ [-1, 1] or x > 0)"
-    ),
-    "reduction (whole-tensor)": (
-        "single template: lambda d: ([float_tensor(d, N, N)], {}) — operates over "
-        "all elements (some have .dim variants which fall in the "
-        "'reduction along dim' bucket)"
-    ),
-    "other / uncategorized": ("inspect the schema; no shared template applies"),
-}
 
 
 def missing_builder_family(op_name: str) -> str:
@@ -3813,123 +3818,15 @@ def missing_builder_family(op_name: str) -> str:
         return "reduction along dim"
 
     if suffix in ("Tensor", "Tensor_Tensor"):
-        return "elementwise — Tensor overload"
+        return "elementwise - Tensor overload"
     if suffix in ("Scalar", "Tensor_Scalar", "Scalar_Tensor"):
-        return "elementwise — Scalar overload"
+        return "elementwise - Scalar overload"
 
     if short in _KNOWN_UNARY_FLOAT_ELEMENTWISE:
-        return "elementwise — unary float Tensor → Tensor"
+        return "elementwise - unary float Tensor -> Tensor"
     if short in _KNOWN_WHOLE_TENSOR_REDUCTIONS:
         return "reduction (whole-tensor)"
     return "other / uncategorized"
-
-
-# Curated short-name allowlists for the family classifier.
-_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
-    # trig / hyperbolic
-    "acos",
-    "acosh",
-    "asin",
-    "asinh",
-    "atan",
-    "atanh",
-    "cos",
-    "cosh",
-    "sin",
-    "sinc",
-    "sinh",
-    "tan",
-    "tanh",
-    # exponentials / logs
-    "exp",
-    "exp2",
-    "expm1",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "logit",
-    # roots, powers, reciprocals
-    "reciprocal",
-    "rsqrt",
-    "sqrt",
-    "square",
-    # rounding / sign
-    "ceil",
-    "floor",
-    "frac",
-    "neg",
-    "round",
-    "sgn",
-    "sign",
-    "signbit",
-    "trunc",
-    "positive",
-    # gamma / bessel-ish
-    "digamma",
-    "erf",
-    "erfc",
-    "erfinv",
-    "i0",
-    "lgamma",
-    "polygamma",
-    # complex / angle
-    "angle",
-    "conj_physical",
-    # predicates → BoolTensor
-    "isfinite",
-    "isinf",
-    "isnan",
-    "isneginf",
-    "isposinf",
-    "isreal",
-    # angle conversion
-    "deg2rad",
-    "rad2deg",
-    # activations
-    "elu",
-    "gelu",
-    "glu",
-    "hardshrink",
-    "hardsigmoid",
-    "hardswish",
-    "hardtanh",
-    "leaky_relu",
-    "mish",
-    "relu",
-    "sigmoid",
-    "silu",
-    "softplus",
-    "softshrink",
-    "threshold",
-    # other
-    "nonzero",
-})
-
-_KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset({
-    "all",
-    "any",
-    "amax",
-    "amin",
-    "aminmax",
-    "argmax",
-    "argmin",
-    "max",
-    "min",
-    "median",
-    "mode",
-    "nanmedian",
-    "prod",
-    "sum",
-    "mean",
-    "nansum",
-    "trace",
-    "std",
-    "var",
-    "std_mean",
-    "var_mean",
-    "norm",
-})
 
 
 def format_missing_arg_builder_report(
@@ -3953,7 +3850,7 @@ def format_missing_arg_builder_report(
     width = max(len(str(len(ops))) for _, ops in rows)
     sub_indent = f"{indent}{' ' * width}  "
 
-    lines = [f"  argument-builder gap — by family ({len(op_names)} ops):"]
+    lines = [f"  argument-builder gap - by family ({len(op_names)} ops):"]
     for family, names in rows:
         sample = sorted(names)[:max_examples]
         suffix = (
@@ -4018,7 +3915,7 @@ def multiline_coverage_failure_warning(
     lines = [
         f"{len(failure_detail)} operator(s) failed ROCTX/kernel coverage.",
         f"Re-run with -s: pytest tests/integration/test_torch_trace_coverage.py -m "
-        f"torch_trace --coverage-seed={seed} --coverage-n={sample_budget} -s",
+        f"torch_trace_coverage --coverage-seed={seed} --coverage-n={sample_budget} -s",
         "",
     ]
     shown = failure_detail[:max_ops]
@@ -4033,19 +3930,107 @@ def multiline_coverage_failure_warning(
     return "\n".join(lines)
 
 
+def call_trees_from_workload(workload_dir: str) -> Dict[str, List[Any]]:
+    """Build analyze call trees from a profiled workload directory."""
+    from utils.schema import Workload
+    from utils.utils_analysis import process_ml_api_trace_output
+
+    workload = Workload()
+    process_ml_api_trace_output(workload, workload_dir)
+    return workload.ml_api_call_trees
+
+
+def iter_nodes(forest: Dict[str, List[Any]]):
+    """Yield every node in ``forest`` depth-first."""
+    for roots in forest.values():
+        for root in roots:
+            yield from _iter_subtree(root)
+
+
+def _iter_subtree(node: Any):
+    yield node
+    for child in node.children:
+        yield from _iter_subtree(child)
+
+
+def op_run_subtrees(forest: Dict[str, List[Any]], op_name: str) -> List[Any]:
+    """Return user-range nodes named ``op_name`` that wrap one op run."""
+    return [
+        node
+        for node in iter_nodes(forest)
+        if node.name == op_name and node.backend == "user"
+    ]
+
+
+def nodes_matching_op(forest: Dict[str, List[Any]], op_name: str) -> List[Any]:
+    """Return matching nodes under that op's user-range run."""
+    matched: List[Any] = []
+    for run_root in op_run_subtrees(forest, op_name):
+        for node in _iter_subtree(run_root):
+            if node is run_root:
+                continue
+            if marker_matches_op(op_name, node.name):
+                matched.append(node)
+    return matched
+
+
+def inclusive_kernel_names(node: Any) -> Set[str]:
+    """Kernel names on ``node`` and every descendant."""
+    names = set(node.kernels)
+    for child in node.children:
+        names |= inclusive_kernel_names(child)
+    return names
+
+
+def inclusive_gpu_ns(node: Any) -> float:
+    """Sum of kernel durations on ``node`` and every descendant."""
+    total = sum(stats.total_duration_ns for stats in node.kernels.values())
+    for child in node.children:
+        total += inclusive_gpu_ns(child)
+    return total
+
+
+def _trunc(label: str, items) -> str:
+    items_sorted = sorted(items)
+    head = items_sorted[:8]
+    ellipsis = "…" if len(items_sorted) > 8 else ""
+    return f"    [match] {label}: {head}{ellipsis}"
+
+
+def _match_verbose_lines(
+    match_verbose: bool,
+    matched_nodes: List[Any],
+    profiler_kernel_set: Set[str],
+    tree_kernels: Set[str],
+    gpu_ns: float,
+    cuda_time_us: float,
+) -> Tuple[str, ...]:
+    if not match_verbose:
+        return ()
+    return (
+        _trunc("matched_nodes", [node.name for node in matched_nodes]),
+        _trunc("profiler_kernels", profiler_kernel_set),
+        _trunc("tree_kernels", tree_kernels),
+        _trunc("kernel_overlap", profiler_kernel_set & tree_kernels),
+        f"    [match] inclusive_gpu_ns: {gpu_ns}",
+        f"    [match] cuda_time_us: {cuda_time_us}",
+    )
+
+
 def compare_single_op(
     op: OpEntry,
     ground_truth: Dict[str, Any],
-    roctx_marker_names: Set[str],
-    roctx_kernels_map: Dict[str, Set[str]],
+    forest: Dict[str, List[Any]],
     *,
     match_verbose: bool = False,
 ) -> OpCompareOutcome:
-    """Compare one op's profiler entry against ROCTX markers and kernels.
+    """Compare one op's profiler entry against the analyze forest.
 
-    Structural ops pass when a matching marker leaf is present. ATen
-    ops with profiler kernels also require a non-empty intersection of
-    profiler ``cuda_kernels`` and ROCTX-correlated kernels.
+    Name match. Structural ops pass when a matching node is present.
+    When the profiler recorded CUDA kernels, ATen ops require a
+    non-empty intersection of those names with inclusive tree kernels,
+    except ops in ``KNOWN_KERNEL_FREE_ATEN_OPS``.
+    Kernel-free ATen ops with no matching node skip; other ATen ops fail.
     """
     ground_truth_entry = ground_truth.get(op.name)
 
@@ -4056,127 +4041,98 @@ def compare_single_op(
         if match_verbose:
             log_lines = log_lines + (
                 "    [match] no ground-truth entry (op skipped before "
-                "marker/kernel comparison)",
+                "forest comparison)",
             )
         return OpCompareOutcome("skip", reason, log_lines)
 
     profiler_kernels = ground_truth_entry.get("cuda_kernels", [])
     profiler_kernel_set = normalize_kernel_names(set(profiler_kernels))
+    cuda_time_us = float(ground_truth_entry.get("cuda_time_us") or 0.0)
 
-    matched_marker_leaves: List[str] = []
-    roctx_kernels: Set[str] = set()
-    for observed_marker_leaf in roctx_marker_names:
-        if marker_matches_op(op.name, observed_marker_leaf):
-            matched_marker_leaves.append(observed_marker_leaf)
-            roctx_kernels |= roctx_kernels_map.get(observed_marker_leaf, set())
-    roctx_kernels = normalize_kernel_names(roctx_kernels)
-    marker_found = bool(matched_marker_leaves)
+    matched_nodes = nodes_matching_op(forest, op.name)
+    tree_kernels: Set[str] = set()
+    gpu_ns = 0.0
+    for node in matched_nodes:
+        tree_kernels |= inclusive_kernel_names(node)
+        gpu_ns += inclusive_gpu_ns(node)
+    tree_kernels = normalize_kernel_names(tree_kernels)
 
-    def _match_verbose_lines() -> Tuple[str, ...]:
-        """Indented per-op match diagnostic, truncated at 8 entries."""
-        if not match_verbose:
-            return ()
+    verbose_tail = _match_verbose_lines(
+        match_verbose,
+        matched_nodes,
+        profiler_kernel_set,
+        tree_kernels,
+        gpu_ns,
+        cuda_time_us,
+    )
 
-        def _trunc(label: str, items) -> str:
-            items_sorted = sorted(items)
-            head = items_sorted[:8]
-            ellipsis = "…" if len(items_sorted) > 8 else ""
-            return f"    [match] {label}: {head}{ellipsis}"
-
-        return (
-            _trunc("matched_marker_leaves", matched_marker_leaves),
-            _trunc("profiler_kernels", profiler_kernel_set),
-            _trunc("roctx_kernels", roctx_kernels),
-            _trunc(
-                "kernel_overlap",
-                profiler_kernel_set & roctx_kernels,
-            ),
-        )
-
-    verbose_tail = _match_verbose_lines()
-
-    if op.category == "structural":
-        if marker_found:
+    if not matched_nodes:
+        if op.category == "structural":
+            skip_msg = "no matching analyze node - inject_roctx instrumentation gap"
             return OpCompareOutcome(
-                "pass",
-                "",
-                coverage_log_pass(op.name, note="structural: marker present")
-                + verbose_tail,
+                "skip",
+                skip_msg,
+                coverage_log_skip(op.name, skip_msg) + verbose_tail,
             )
-        skip_msg = "no ROCTX marker — inject_roctx instrumentation gap"
-        return OpCompareOutcome(
-            "skip",
-            skip_msg,
-            coverage_log_skip(op.name, skip_msg) + verbose_tail,
-        )
-
-    if not profiler_kernel_set:
-        if marker_found:
-            return OpCompareOutcome(
-                "pass",
-                "",
-                coverage_log_pass(
-                    op.name,
-                    note="marker present; no kernels in ground truth",
-                )
-                + verbose_tail,
-            )
-        skip_msg = "no GPU kernels in ground truth"
-        return OpCompareOutcome(
-            "skip",
-            skip_msg,
-            coverage_log_skip(op.name, skip_msg) + verbose_tail,
-        )
-
-    if marker_found and roctx_kernels:
-        overlap = profiler_kernel_set & roctx_kernels
-        if overlap:
-            return OpCompareOutcome(
-                "pass",
-                "",
-                coverage_log_pass(op.name) + verbose_tail,
-            )
-        reason = (
-            "marker found and ROCTX correlated kernels, but none overlap "
-            f"torch.profiler cuda_kernels "
-            f"(profiler={sorted(profiler_kernel_set)[:6]}"
-            f"{'…' if len(profiler_kernel_set) > 6 else ''}, "
-            f"roctx={sorted(roctx_kernels)[:6]}"
-            f"{'…' if len(roctx_kernels) > 6 else ''})"
-        )
-        mismatch_lines = (
-            f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
-            *(f"      {k}" for k in sorted(profiler_kernel_set)),
-            f"    roctx correlated kernels ({len(roctx_kernels)}):",
-            *(f"      {k}" for k in sorted(roctx_kernels)),
-        )
-        return OpCompareOutcome(
-            "fail",
-            reason,
-            coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
-        )
-
-    if marker_found:
         short_name = aten_op_short_name(op.name)
         if short_name and short_name in KNOWN_KERNEL_FREE_ATEN_OPS:
-            note_lines = ("kernel-free aten op (zero-copy view).",)
-            return OpCompareOutcome(
-                "pass",
-                "",
-                coverage_log_pass(op.name, note="\n".join(note_lines)) + verbose_tail,
+            skip_msg = (
+                "no matching analyze node - kernel-free ATen op has no ROCTX marker"
             )
-        reason = "marker found but no correlated kernels"
+            return OpCompareOutcome(
+                "skip",
+                skip_msg,
+                coverage_log_skip(op.name, skip_msg) + verbose_tail,
+            )
+        reason = "marker not found"
         return OpCompareOutcome(
             "fail",
             reason,
             coverage_log_fail(op.name, reason) + verbose_tail,
         )
 
-    reason = "marker not found"
+    if op.category == "structural":
+        return OpCompareOutcome(
+            "pass",
+            "",
+            coverage_log_pass(op.name, note="structural: matching analyze node")
+            + verbose_tail,
+        )
+
+    if profiler_kernel_set:
+        overlap = profiler_kernel_set & tree_kernels
+        if not overlap:
+            short_name = aten_op_short_name(op.name)
+            if short_name and short_name in KNOWN_KERNEL_FREE_ATEN_OPS:
+                return OpCompareOutcome(
+                    "pass",
+                    "",
+                    coverage_log_pass(op.name, note="kernel-free aten op")
+                    + verbose_tail,
+                )
+            reason = (
+                "no inclusive kernel overlap with torch.profiler cuda_kernels "
+                f"(profiler={sorted(profiler_kernel_set)[:6]}"
+                f"{'…' if len(profiler_kernel_set) > 6 else ''}, "
+                f"tree={sorted(tree_kernels)[:6]}"
+                f"{'…' if len(tree_kernels) > 6 else ''})"
+            )
+            mismatch_lines = (
+                f"    profiler cuda_kernels ({len(profiler_kernel_set)}):",
+                *(f"      {k}" for k in sorted(profiler_kernel_set)),
+                f"    analyze inclusive kernels ({len(tree_kernels)}):",
+                *(f"      {k}" for k in sorted(tree_kernels)),
+            )
+            return OpCompareOutcome(
+                "fail",
+                reason,
+                coverage_log_fail(op.name, reason) + verbose_tail + mismatch_lines,
+            )
+
     return OpCompareOutcome(
-        "fail",
-        reason,
-        coverage_log_fail(op.name, reason) + verbose_tail,
+        "pass",
+        "",
+        coverage_log_pass(op.name, note="forest match") + verbose_tail,
     )
 
 
@@ -4202,7 +4158,7 @@ def print_torch_trace_coverage_session_header(
         )
     print()
     reproduce_cmd = (
-        "pytest tests/integration/test_torch_trace_coverage.py -m torch_trace "
+        "pytest tests/integration/test_torch_trace_coverage.py "
         f"--coverage-seed={seed} --coverage-n={sample_budget}"
     )
     warnings.warn(
@@ -4376,12 +4332,19 @@ def run_ground_truth_torch_profiler_subprocess(
             runner_script_path,
         )
         due = op_workload_failure_due_to(timed_out=True, returncode=None)
-        # TimeoutExpired output is bytes even with text=True.
-        stdout = (exc.stdout or b"").decode(errors="replace")
-        stderr = (exc.stderr or b"").decode(errors="replace")
-        out_tail = stderr_tail_collapsed(stdout, max_lines=8)
-        err_tail = stderr_tail_collapsed(stderr)
-        fault_hint = extract_device_fault_banner(stderr)
+        stdout_text = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
+        stderr_text = (
+            exc.stderr.decode(errors="replace")
+            if isinstance(exc.stderr, bytes)
+            else (exc.stderr or "")
+        )
+        out_tail = stderr_tail_collapsed(stdout_text, max_lines=8)
+        err_tail = stderr_tail_collapsed(stderr_text)
+        fault_hint = extract_device_fault_banner(stderr_text)
         hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
         pytest.fail(
             f"Op workload failed: {due}.{repro}{copy_note}\n\n"

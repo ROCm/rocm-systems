@@ -3,7 +3,10 @@
 
 //! Virtual-address reservations, detached memory, mappings, and interval ownership.
 
-use super::{DeviceAccess, MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemoryInfo};
+use super::{
+    DeviceAccess, MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemoryInfo,
+    VirtualMemoryOptions,
+};
 use crate::device::Device;
 use crate::driver::{self, AddressSpaceInfo, CachedInfo, VirtualMemoryOperations};
 use crate::memory::storage::TryPush;
@@ -556,6 +559,16 @@ pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        if self.host_intervals.is_none() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual host mapping is no longer live",
+            });
+        }
+        D::set_virtual_host_mapping_permissions(&mut self.inner, permissions)
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
         let mut ranges = self
             .host_intervals
@@ -601,6 +614,15 @@ pub struct VirtualHostMapping {
 }
 
 impl VirtualHostMapping {
+    /// Changes process-wide CPU page permissions on a live host map.
+    ///
+    /// # Errors
+    /// Reports invalid permissions or a native protection failure without
+    /// releasing the mapping.
+    pub fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        self.inner.set_permissions(permissions)
+    }
+
     /// Removes the host mapping while preserving the encompassing address
     /// reservation for reuse.
     ///
@@ -678,11 +700,9 @@ impl Device {
         &self,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
-        self.driver_state
-            .create_virtual_memory(kind, size, pinned, uncached)
+        self.driver_state.create_virtual_memory(kind, size, options)
     }
 
     /// Maps a subrange of detached physical backing into this device's VM at a
@@ -867,10 +887,10 @@ mod tests {
         let device = session.activate(&endpoint.unwrap()).unwrap();
         let size = 2 * 1024 * 1024;
         let mut first_memory = device
-            .create_virtual_memory(MemoryKind::System, size, false, false)
+            .create_virtual_memory(MemoryKind::System, size, VirtualMemoryOptions::default())
             .unwrap();
         let mut second_memory = device
-            .create_virtual_memory(MemoryKind::System, size, false, false)
+            .create_virtual_memory(MemoryKind::System, size, VirtualMemoryOptions::default())
             .unwrap();
         let granularity = first_memory
             .info()
@@ -948,10 +968,10 @@ mod tests {
         let device = session.activate(&endpoint).unwrap();
         let mut reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0).unwrap();
         let mut first_memory = device
-            .create_virtual_memory(MemoryKind::System, 4096, false, false)
+            .create_virtual_memory(MemoryKind::System, 4096, VirtualMemoryOptions::default())
             .unwrap();
         let mut second_memory = device
-            .create_virtual_memory(MemoryKind::System, 4096, false, false)
+            .create_virtual_memory(MemoryKind::System, 4096, VirtualMemoryOptions::default())
             .unwrap();
         let address = reservation.info().address;
         let mut first = first_memory

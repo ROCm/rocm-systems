@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -122,31 +123,31 @@ void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SGetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 47))
+    next_pc |= ~kPcAddressMask;
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
 void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
-  constexpr uint64_t kPcSignBit = 1ULL << 47;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
+  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
     target = wf.code_load_bias() + static_cast<int32_t>(encoded);
-  else if (target & kPcSignBit)
-    target |= ~kPcAddressMask;
   wf.pc = target - size_;
 }
 
 void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
-  constexpr uint64_t kPcSignBit = 1ULL << 47;
-  uint64_t next_pc = wf.pc + size_;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 47))
+    next_pc |= ~kPcAddressMask;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if ((encoded >> 32 == 0x1FFFFu || encoded >> 32 == 0xFFFFFFFFu) && wf.code_load_bias() != 0)
-    target = next_pc - 20 + static_cast<int32_t>(encoded);
-  else if (target & kPcSignBit)
-    target |= ~kPcAddressMask;
+  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
+    target = wf.pc + size_ - 20 + static_cast<int32_t>(encoded);
   wf.pc = target - size_;
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
@@ -252,7 +253,8 @@ void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_join_sop1(*this, wf);
+  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;
 }
 
 void SAbsI32Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_abs_i32_sop1(*this, wf); }

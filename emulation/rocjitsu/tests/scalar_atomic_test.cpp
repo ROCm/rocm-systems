@@ -626,7 +626,7 @@ TEST_P(ScalarAtomicTest, DecodedDependenciesFollowReturnBit) {
       const auto words = cdna3::build_smem(opcode, {.sdata = 4, .glc = glc, .imm = 1});
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       const RegisterRef sdata{RegClass::SGPR, 4, static_cast<uint8_t>(dwords)};
       EXPECT_TRUE(def_use.uses.contains(sdata));
       EXPECT_TRUE(def_use.uses.contains({RegClass::SGPR, 0, 2}));

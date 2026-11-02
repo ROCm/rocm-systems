@@ -55,7 +55,6 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
-#include <link.h>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -76,8 +75,6 @@
         agent_error ("%s:%d: %s failed (rc=%d)", __FILE__, __LINE__, #expr,   \
                      status);                                                 \
   } while (false)
-
-extern r_debug _amdgpu_r_debug;
 
 using namespace amd::debug_agent;
 using namespace std::string_literals;
@@ -114,6 +111,18 @@ bool g_precise_emmory{ false };
 bool g_precise_alu_exceptions{ false };
 bool g_lazy{ true };
 bool g_delay_loading{ false };
+
+/* Set once OnLoad hooked the runtime's executable freeze/destroy (ROCr's HSA API table): the
+   code object list is then refreshed as code objects load. Without the hooks, any runtime that
+   registers its r_debug with the driver works: the list is refreshed from r_debug when waves
+   stop, as with --lazy.  */
+std::atomic<bool> g_api_hooks_installed{ false };
+
+bool
+delay_loading ()
+{
+  return g_delay_loading || !g_api_hooks_installed.load (std::memory_order_acquire);
+}
 
 static std::shared_mutex g_r_debug_r_state_mutex;
 
@@ -195,11 +204,15 @@ static amd_dbgapi_callbacks_t dbgapi_callbacks = {
       [] (amd_dbgapi_client_process_id_t client_process_id,
           amd_dbgapi_global_address_t address,
           amd_dbgapi_breakpoint_id_t breakpoint_id) {
-        if (address == _amdgpu_r_debug.r_brk)
+        /* The only breakpoint amd-dbgapi requests is the runtime's r_brk, which
+           it reads from the r_debug the runtime registered with the driver.  */
+        if (!g_rbrk_breakpoint_id.has_value ())
           {
             g_rbrk_breakpoint_id.emplace (breakpoint_id);
             return AMD_DBGAPI_STATUS_SUCCESS;
           }
+        agent_warning ("amd-dbgapi requested a second breakpoint; only r_brk "
+                       "is supported");
         return AMD_DBGAPI_STATUS_ERROR;
       },
 
@@ -222,7 +235,7 @@ static amd_dbgapi_callbacks_t dbgapi_callbacks = {
   /* log_message callback.  */
   .log_message =
       [] (amd_dbgapi_log_level_t level, const char *message) {
-        agent_out << "rocm-dbgapi: " << message << std::endl;
+        agent_out () << "rocm-dbgapi: " << message << std::endl;
       }
 };
 
@@ -322,7 +335,7 @@ print_registers (amd_dbgapi_wave_id_t wave_id)
           continue;
         }
 
-      agent_out << std::endl << class_name << " registers:";
+      agent_out () << std::endl << class_name << " registers:";
 
       size_t last_register_size = 0;
       for (size_t j = 0, column = 0; j < register_count; ++j)
@@ -372,20 +385,20 @@ print_registers (amd_dbgapi_wave_id_t wave_id)
               || register_size != last_register_size
               || (column++ % num_register_per_line) == 0)
             {
-              agent_out << std::endl;
+              agent_out () << std::endl;
               column = 1;
             }
 
           last_register_size = register_size;
 
-          agent_out << std::right << std::setfill (' ') << std::setw (16)
+          agent_out () << std::right << std::setfill (' ') << std::setw (16)
                     << (register_name + ": ")
                     << register_value_string (register_type, buffer);
 
           printed_registers.emplace (register_id);
         }
 
-      agent_out << std::endl;
+      agent_out () << std::endl;
     }
 
   free (register_ids);
@@ -413,15 +426,15 @@ print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
     size = end_address - segment_address;
 
   if (!header.empty ())
-    agent_out << std::endl << header;
+    agent_out () << std::endl << header;
 
   if (auto pad = segment_address % (num_columns * word_size); pad != 0)
     {
-      agent_out << std::endl
+      agent_out () << std::endl
                 << "    0x" << std::setfill ('0') << std::setw (4)
                 << (segment_address - pad) << ":";
       for (size_t i = 0; i < pad; i += word_size)
-        agent_out << std::setfill (' ') << std::setw (2 * word_size + 1)
+        agent_out () << std::setfill (' ') << std::setw (2 * word_size + 1)
                   << ' ';
     }
 
@@ -443,13 +456,13 @@ print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
         {
           if ((column++ % num_columns) == 0)
             {
-              agent_out << std::endl
+              agent_out () << std::endl
                         << "    0x" << std::setfill ('0') << std::setw (4)
                         << (segment_address + i * word_size) << ":";
               column = 1;
             }
 
-          agent_out << " " << std::hex << std::setfill ('0')
+          agent_out () << " " << std::hex << std::setfill ('0')
                     << std::setw (2 * word_size) << +buffer[i];
         }
 
@@ -460,7 +473,7 @@ print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
         break;
     }
 
-  agent_out << std::endl;
+  agent_out () << std::endl;
 }
 
 void
@@ -723,12 +736,12 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
         }
 
       if (i)
-        agent_out << std::endl;
+        agent_out () << std::endl;
 
-      agent_out << "--------------------------------------------------------"
+      agent_out () << "--------------------------------------------------------"
                 << std::endl;
 
-      agent_out << "wave_" << std::dec << wave_id.handle << ": pc=0x"
+      agent_out () << "wave_" << std::dec << wave_id.handle << ": pc=0x"
                 << std::hex << pc << " (kernel_code_entry=";
 
       using kernel_descriptor_t = struct
@@ -752,7 +765,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
       if (kernel_entry.has_value ())
         {
-          agent_out << "0x" << std::hex << *kernel_entry;
+          agent_out () << "0x" << std::hex << *kernel_entry;
 
           /* Find the code object that contains this kernel.  */
           for ([[maybe_unused]] auto &&[id, code_object] : code_object_map)
@@ -761,7 +774,7 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                        < code_object.load_address () + code_object.mem_size ())
               {
                 if (auto symbol = code_object.find_symbol (*kernel_entry))
-                  agent_out << " <" << symbol->m_name << ">";
+                  agent_out () << " <" << symbol->m_name << ">";
 
                 /* In case the kernel entry point and reported PC are in
                    different code objects, report both.  */
@@ -791,12 +804,12 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           if (requested_size != sizeof (kernarg_size))
             kernarg_size = {};
 
-          agent_out << ", kernargs=0x" << std::hex << *kernarg_ptr;
+          agent_out () << ", kernargs=0x" << std::hex << *kernarg_ptr;
         }
       else
-        agent_out << "not available";
+        agent_out () << "not available";
 
-      agent_out << ")";
+      agent_out () << ")";
 
       std::string stop_reason_str;
       auto stop_reason_bits{ stop_reason };
@@ -860,12 +873,12 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           }(static_cast<amd_dbgapi_wave_stop_reasons_t> (one_bit));
       } while (stop_reason_bits);
 
-      agent_out << " (";
+      agent_out () << " (";
       if (stop_reason != AMD_DBGAPI_WAVE_STOP_REASON_NONE)
-        agent_out << "stopped, reason: " << stop_reason_str;
+        agent_out () << "stopped, reason: " << stop_reason_str;
       else
-        agent_out << "running";
-      agent_out << ")" << std::endl;
+        agent_out () << "running";
+      agent_out () << ")" << std::endl;
 
       print_registers (wave_id);
       print_local_memory (wave_id);
@@ -1106,6 +1119,61 @@ print_usage ()
 /* Called when we expect dbgapi events to be present.  Fetch all events from
    dbgapi and act on the required events.  */
 
+void process_dbgapi_events (amd_dbgapi_process_id_t process_id,
+                            bool all_wavefronts,
+                            code_object_map_t &code_object_map);
+
+/* Brings the code object map up to date before waves are printed.  Without code
+   object hooks (delay_loading), the list is refreshed from r_debug here; with
+   --lazy,-z, code objects are opened now so PCs resolve to them.  */
+void
+load_code_objects (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
+                   code_object_map_t &code_object_map)
+{
+  if (delay_loading () && g_rbrk_breakpoint_id.has_value ())
+    {
+      amd_dbgapi_breakpoint_action_t bpaction;
+      {
+        /* With the OnLoad hooks (--lazy), this lock keeps the hooked
+           executable freeze/destroy from changing r_debug while amd-dbgapi
+           reads it.  Without them (the agent preloaded), the runtime updates
+           r_debug without taking the lock, so it protects nothing there.
+           amd-dbgapi skips the list while the runtime marks it inconsistent
+           (r_state != RT_CONSISTENT); an update starting during the read is
+           a known, accepted race: the worst case is a stale or missing code
+           object in this dump.  Not reading the list at all would leave
+           preloaded runs without disassembly.  */
+        std::unique_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
+        DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
+            g_rbrk_breakpoint_id.value (), 0, &bpaction));
+      }
+
+      if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
+        process_dbgapi_events (process_id, all_wavefronts, code_object_map);
+    }
+
+  for (auto it = code_object_map.begin (); it != code_object_map.end ();)
+    if (!it->second.is_open () && !it->second.open ())
+      {
+        agent_warning ("could not open code_object_%ld", it->first.handle);
+        it = code_object_map.erase (it);
+      }
+    else
+      ++it;
+}
+
+/* Fails if the runtime that loaded cannot be debugged.  */
+void
+check_runtime_state (amd_dbgapi_event_id_t event_id)
+{
+  amd_dbgapi_runtime_state_t runtime_state;
+  DBGAPI_CHECK (
+      amd_dbgapi_event_get_info (event_id, AMD_DBGAPI_EVENT_INFO_RUNTIME_STATE,
+                                 sizeof (runtime_state), &runtime_state));
+  if (runtime_state == AMD_DBGAPI_RUNTIME_STATE_LOADED_ERROR_RESTRICTION)
+    agent_error ("unable to enable GPU debugging due to a restriction error");
+}
+
 void
 process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                        code_object_map_t &code_object_map)
@@ -1175,7 +1243,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   {
                     code_object_t code_object (code_objects_ids[i]);
 
-                    if (!g_delay_loading)
+                    if (!delay_loading () || !g_lazy)
                       {
                         if (!code_object.open ())
                           {
@@ -1201,6 +1269,10 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
           }
 
         case AMD_DBGAPI_EVENT_KIND_RUNTIME:
+          /* The runtime loads after the agent attached, or unloads.  */
+          check_runtime_state (event_id);
+          break;
+
         case AMD_DBGAPI_EVENT_KIND_BREAKPOINT_RESUME:
           /* Ignore.  */
           break;
@@ -1231,30 +1303,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
   if (need_print_waves)
     {
-      if (g_delay_loading)
-        {
-          amd_dbgapi_breakpoint_action_t bpaction;
-          {
-            std::unique_lock<std::shared_mutex> lock (g_r_debug_r_state_mutex);
-            DBGAPI_CHECK (amd_dbgapi_report_breakpoint_hit (
-                g_rbrk_breakpoint_id.value (), 0, &bpaction));
-          }
-
-          if (bpaction == AMD_DBGAPI_BREAKPOINT_ACTION_HALT)
-            process_dbgapi_events (process_id, all_wavefronts,
-                                   code_object_map);
-        }
-
-      /* With --lazy,-z, code objects may not have been opened yet.
-         Open them now so we can resolve PCs to code objects.  */
-      for (auto it = code_object_map.begin (); it != code_object_map.end ();)
-        if (!it->second.is_open () && !it->second.open ())
-          {
-            agent_warning ("could not open code_object_%ld", it->first.handle);
-            it = code_object_map.erase (it);
-          }
-        else
-          ++it;
+      load_code_objects (process_id, all_wavefronts, code_object_map);
 
       auto code_objects_disassembled
           = print_wavefronts (process_id, all_wavefronts, code_object_map);
@@ -1401,34 +1450,18 @@ dbgapi_worker (int listen_fd, bool all_wavefronts, bool precise_memory,
       reinterpret_cast<amd_dbgapi_client_process_id_t> (&self_mem_fd),
       &process_id));
 
-  /* Runtime has been activated just before tools are loaded.  We do expect
-     a runtime loaded event to be ready to be consumed.  */
+  /* A runtime loaded before the agent (one that loads it as a tool) has a runtime
+     event pending.  One loaded later (the agent preloaded) reports it through the
+     event loop.  */
   DBGAPI_CHECK (amd_dbgapi_process_next_pending_event (process_id, &event_id,
                                                        &event_kind));
-  if (event_kind != AMD_DBGAPI_EVENT_KIND_RUNTIME)
-    agent_error ("Unexpected event kind %d", event_kind);
-
-  amd_dbgapi_runtime_state_t runtime_state;
-
-  DBGAPI_CHECK (
-      amd_dbgapi_event_get_info (event_id, AMD_DBGAPI_EVENT_INFO_RUNTIME_STATE,
-                                 sizeof (runtime_state), &runtime_state));
-
-  switch (runtime_state)
+  if (event_kind == AMD_DBGAPI_EVENT_KIND_RUNTIME)
     {
-    case AMD_DBGAPI_RUNTIME_STATE_LOADED_SUCCESS:
-      break;
-
-    case AMD_DBGAPI_RUNTIME_STATE_UNLOADED:
-      agent_error ("invalid runtime state %d", runtime_state);
-
-    case AMD_DBGAPI_RUNTIME_STATE_LOADED_ERROR_RESTRICTION:
-      agent_error ("unable to enable GPU debugging due to a "
-                   "restriction error");
-      break;
+      check_runtime_state (event_id);
+      DBGAPI_CHECK (amd_dbgapi_event_processed (event_id));
     }
-
-  DBGAPI_CHECK (amd_dbgapi_event_processed (event_id));
+  else if (event_kind != AMD_DBGAPI_EVENT_KIND_NONE)
+    agent_error ("Unexpected event kind %d", event_kind);
 
   DBGAPI_CHECK (amd_dbgapi_process_get_info (process_id,
                                              AMD_DBGAPI_PROCESS_INFO_NOTIFIER,
@@ -1512,6 +1545,9 @@ dbgapi_worker (int listen_fd, bool all_wavefronts, bool precise_memory,
               switch (buf)
                 {
                 case 'p':
+                  /* SIGQUIT: print every wave, with code objects up to date.  */
+                  load_code_objects (process_id, all_wavefronts,
+                                     code_object_map);
                   print_wavefronts (process_id, true, code_object_map);
                   break;
                 case 'q':
@@ -1798,12 +1834,12 @@ debug_agent_hsa_executable_destroy (hsa_executable_t executable)
   return retval;
 }
 
-} /* namespace.  */
-
-extern "C" void __attribute__ ((visibility ("default"))) OnUnload ();
-extern "C" bool __attribute__ ((visibility ("default")))
-OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
-        const char *const *failed_tool_names)
+/* Starts the agent: parses ROCM_DEBUG_AGENT_OPTIONS, attaches amd-dbgapi to
+   this process (the worker thread) and installs the SIGQUIT wave dump.  Runs
+   once, when the library is loaded, whoever loads it: a runtime loading tools
+   (HSA_TOOLS_LIB), or LD_PRELOAD.  */
+void
+start_agent ()
 {
   bool disable_sigquit{ false };
 
@@ -1927,8 +1963,8 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
 
           {
             std::string file_name = expand_format_tokens (*argument);
-            agent_out.open (file_name);
-            if (!agent_out.is_open ())
+            agent_out ().open (file_name);
+            if (!agent_out ().is_open ())
               {
                 std::cerr << "could not open `" << file_name << "'"
                           << std::endl;
@@ -1956,11 +1992,11 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
 
   std::for_each (args.begin (), args.end (), [] (char *str) { free (str); });
 
-  if (!agent_out.is_open ())
+  if (!agent_out ().is_open ())
     {
-      agent_out.copyfmt (std::cerr);
-      agent_out.clear (std::cerr.rdstate ());
-      agent_out.basic_ios<char>::rdbuf (std::cerr.rdbuf ());
+      agent_out ().copyfmt (std::cerr);
+      agent_out ().clear (std::cerr.rdstate ());
+      agent_out ().basic_ios<char>::rdbuf (std::cerr.rdbuf ());
     }
 
   get_worker_thread ().start ();
@@ -1973,7 +2009,7 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
       sigemptyset (&sig_action.sa_mask);
 
       sig_action.sa_sigaction = [] (int signal, siginfo_t *, void *) {
-        agent_out << std::endl;
+        agent_out () << std::endl;
         get_worker_thread ().query_print_waves ();
       };
 
@@ -1981,7 +2017,17 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
       sig_action.sa_flags = SA_RESTART;
       sigaction (SIGQUIT, &sig_action, nullptr);
     }
+}
 
+} /* namespace.  */
+
+extern "C" void __attribute__ ((visibility ("default"))) OnUnload ();
+extern "C" bool __attribute__ ((visibility ("default")))
+OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
+        const char *const *failed_tool_names)
+{
+  /* ROCr: the agent already started when the library was loaded (dlopen ran
+     AgentStarter); only hook code object loads.  */
   CoreApiTable *core_table = reinterpret_cast<HsaApiTable *> (table)->core_;
 
   original_hsa_executable_freeze = core_table->hsa_executable_freeze_fn;
@@ -1989,6 +2035,7 @@ OnLoad (void *table, uint64_t runtime_version, uint64_t failed_tool_count,
 
   core_table->hsa_executable_freeze_fn = debug_agent_hsa_executable_freeze;
   core_table->hsa_executable_destroy_fn = debug_agent_hsa_executable_destroy;
+  g_api_hooks_installed.store (true, std::memory_order_release);
 
   return true;
 }
@@ -1998,3 +2045,12 @@ OnUnload ()
 {
   get_worker_thread ().stop ();
 }
+
+namespace
+{
+/* Defined last: starts the agent once every other initializer of this file ran.  */
+struct AgentStarter
+{
+  AgentStarter () { start_agent (); }
+} agent_starter;
+} /* namespace.  */

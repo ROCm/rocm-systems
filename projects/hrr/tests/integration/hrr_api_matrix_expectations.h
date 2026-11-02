@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 557 HIP APIs.
+ * Generated from 559 HIP APIs.
  */
 
 #pragma once
@@ -291,6 +291,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipExtHostAlloc", "T4", 1, false, true, false, false},
     {"hipExtLaunchMultiKernelMultiDevice", "T4", 5, false, true, false, false},
     {"hipExtMallocWithFlags", "T4", 0, false, true, false, false},
+    {"hipExtMemcpyBatchAsync", "T4", 0, false, true, false, false},
     {"hipExtSetLoggingParams", "T4", 0, false, true, false, false},
     {"hipExtStreamCreateWithCUMask", "T4", 1, false, true, false, false},
     {"hipExtStreamGetCUMask", "T4", 1, false, true, false, false},
@@ -394,6 +395,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipKernelNameRefByPtr", "T4", 1, false, true, false, false},
     {"hipKernelSetAttribute", "T4", 1, false, true, false, false},
     {"hipKernelSetAttributeForDevice", "T4", 1, false, true, false, false},
+    {"hipKernelSetCacheConfig", "T4", 1, false, true, false, false},
     {"hipLaunchCooperativeKernel_spt", "T4", 0, false, true, false, false},
     {"hipLaunchHostFunc_spt", "T4", 5, false, true, false, false},
     {"hipLaunchKernel_spt", "T4", 0, false, true, false, false},

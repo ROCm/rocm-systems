@@ -20,6 +20,8 @@ Exits 0 when every case passes, 1 on a failure, and 77 when the `claude` CLI
 is missing so a caller can treat that as skipped rather than broken.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -32,7 +34,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 SKILLS_ROOT = Path(__file__).resolve().parent
 EXIT_SKIPPED = 77
@@ -80,10 +82,10 @@ class JudgeError(RuntimeError):
 class Options:
     """Settings shared by every agent and judge invocation."""
 
-    model: Optional[str]
+    model: str | None
     isolate: bool
     behavioural: bool
-    transcripts: Optional[Path] = None
+    transcripts: Path | None = None
 
 
 @dataclass
@@ -97,7 +99,7 @@ class Outcome:
     model: str = ""
 
 
-def discover_skills(only: Optional[str]) -> list[Path]:
+def discover_skills(only: str | None) -> list[Path]:
     """Return skill directories that ship an evals dataset."""
     found = sorted(p.parent.parent for p in SKILLS_ROOT.glob("*/evals/evals.json"))
     if only:
@@ -107,7 +109,7 @@ def discover_skills(only: Optional[str]) -> list[Path]:
     return found
 
 
-def _text_list_problem(case: dict[str, Any], key: str) -> Optional[str]:
+def _text_list_problem(case: dict[str, Any], key: str) -> str | None:
     """Return what is wrong with an optional list-of-strings field, if anything."""
     if key not in case:
         return None

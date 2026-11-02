@@ -42,7 +42,8 @@ class architecture_t;
 
 enum class amdgpu_regnum_t : uint32_t
 {
-  first_regnum = 0,
+  absent = 0,
+  first_regnum = 1,
   first_raw = first_regnum,
 
   /* Raw registers.  */

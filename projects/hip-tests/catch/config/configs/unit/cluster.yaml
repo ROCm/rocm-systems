@@ -22,3 +22,7 @@ cluster:
     <<: *level_default
   Unit_hipClusterLaunch_LaunchApi_Basic:
     <<: *level_default
+  Unit_hipClusterLaunch_StreamCapture_LaunchAttribute:
+    <<: *level_default
+  Unit_hipClusterLaunch_StreamCapture_CompilerDirective:
+    <<: *level_default

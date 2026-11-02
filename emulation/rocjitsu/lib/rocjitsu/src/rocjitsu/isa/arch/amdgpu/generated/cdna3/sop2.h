@@ -427,6 +427,7 @@ class SCbranchGForkSop2 : public Sop2 {
 public:
   SCbranchGForkSop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void implicit_defs(RegisterSet &defs) const override;
   Operand ssrc0;
   Operand ssrc1;
   Operand pc;

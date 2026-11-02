@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <unordered_map>
 
 namespace rocr {
 namespace AMD {
@@ -242,6 +243,8 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   std::map<uint32_t, std::map<uint32_t, std::vector<RelocSite>>> group_arg_sites;
   // group section index -> (PDI section index, patch offset) for each PDI site
   std::map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> group_pdi_sites;
+  // group section index -> external symbols its control code references
+  std::map<uint32_t, std::map<std::string, ExternalSymbol>> group_ext_sites;
 
   // PDI sections are not group members, so a relocation names its PDI by section name only, and a
   // multi-kernel ELF can repeat a name (MLIR-AIR repeats .pdi.1.. for each kernel). A name is
@@ -316,9 +319,18 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
 
       uint32_t arg_index = 0;
       if (!ParseArgIndex(sym_name, &arg_index)) {
-        // A scratch pad, control packet or similar. Skipping it would leave a dangling address in
-        // the control code, so refuse instead.
-        return fail(std::string("unsupported relocation symbol: ") + sym_name);
+        // An external variable, such as the control scratchpad, resolved by the loader.
+        if (site.scheme != PatchScheme::kAddress64) {
+          return fail(std::string("unsupported patch scheme for external symbol ") + sym_name);
+        }
+        auto [ext, inserted] = group_ext_sites[grp_it->second].try_emplace(sym_name);
+        if (inserted) {
+          ext->second.size = sym.st_size;
+        } else if (ext->second.size != sym.st_size) {
+          return fail(std::string("external symbol ") + sym_name + " has two sizes");
+        }
+        ext->second.sites.push_back(PatchSite{site.offset, site.addend});
+        continue;
       }
       if (site.scheme != PatchScheme::kShimDma48) {
         return fail("unsupported patch scheme for a kernel argument");
@@ -343,6 +355,11 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
 
     auto pdi_sites_it = group_pdi_sites.find(grp_index);
     if (pdi_sites_it != group_pdi_sites.end()) {
+      // Two sites sharing one Pdi entry (and so one device placement) are keyed by *section
+      // index*, not by content: see the Kernel::pdis doc comment for why two sections with
+      // identical bytes must not collapse into one placement, even though this is where that
+      // used to happen.
+      std::unordered_map<uint32_t, size_t> pdi_index_of_section;
       for (const auto& [pdi_section, offset] : pdi_sites_it->second) {
         // A 64-bit address is written here, so it must lie wholly inside the control code.
         if (offset + sizeof(uint64_t) > k.ctrl_code.size() || offset % sizeof(uint32_t) != 0) {
@@ -353,13 +370,15 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         if (offset == 0) {
           return fail("PDI patch site at offset 0 is indistinguishable from no patch");
         }
-        std::vector<uint8_t> bytes;
-        if (!section_bytes(pdi_section, &bytes)) return fail("section extends past end of file");
-        // Each distinct PDI is placed in device memory once, however many sites load it.
-        auto pdi = std::find_if(k.pdis.begin(), k.pdis.end(),
-                                [&](const Pdi& p) { return p.bytes == bytes; });
-        if (pdi == k.pdis.end()) pdi = k.pdis.insert(k.pdis.end(), Pdi{std::move(bytes), {}});
-        pdi->patch_offsets.push_back(offset);
+        auto [it, inserted] = pdi_index_of_section.try_emplace(pdi_section, k.pdis.size());
+        if (inserted) {
+          std::vector<uint8_t> bytes;
+          if (!section_bytes(pdi_section, &bytes)) {
+            return fail("section extends past end of file");
+          }
+          k.pdis.push_back(Pdi{std::move(bytes), {}});
+        }
+        k.pdis[it->second].patch_offsets.push_back(offset);
       }
     }
 
@@ -382,6 +401,20 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
           dst.push_back(PatchSite{site.offset, site.addend});
         }
       }
+    }
+
+    auto ext_it = group_ext_sites.find(grp_index);
+    if (ext_it != group_ext_sites.end()) {
+      for (const auto& [name, ext] : ext_it->second) {
+        for (const PatchSite& site : ext.sites) {
+          // A 64-bit address is stored here.
+          if (site.offset % sizeof(uint32_t) != 0 ||
+              site.offset + sizeof(uint64_t) > k.ctrl_code.size()) {
+            return fail("external symbol patch site does not fit the control code");
+          }
+        }
+      }
+      k.external_symbols = std::move(ext_it->second);
     }
 
     // Kernels are looked up by name, so two groups with one name would make the lookup ambiguous.

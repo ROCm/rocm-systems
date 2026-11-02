@@ -27,12 +27,13 @@ libc = "0.2.189"
 rocelf = { path = "../../loader/rocelf" }
 
 [lints.rust]
-missing_docs = "allow"
+missing_docs = "warn"
 unsafe_code = "allow"
 unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+missing_docs_in_private_items = "warn"
 expect_used = "deny"
 panic = "deny"
 pedantic = { level = "warn", priority = -1 }

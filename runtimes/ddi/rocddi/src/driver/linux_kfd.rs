@@ -28,7 +28,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingIntervalUnit,
-    PcSamplingMethod, PcSamplingRequest,
+    PcSamplingMethod, PcSamplingRequest, SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
@@ -44,7 +44,7 @@ use crate::memory::interop::linux::{
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
-    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
+    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
@@ -59,7 +59,7 @@ pub(crate) use queue::KfdQueue;
 use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 pub(crate) use sysfs::KfdNode as LinuxSelector;
 pub(crate) use vmem::{
     KfdVirtualAddress, KfdVirtualDeviceMapping, KfdVirtualHostMapping, KfdVirtualMemory,
@@ -99,17 +99,132 @@ struct KfdContextResources {
 struct ProcessState {
     /// Retained connection and VM bindings. KFD holds the exact primary DRM
     /// file after session shutdown, so this owner remains until process exit.
-    resources: Option<KfdContextResources>,
+    resources: Option<Arc<KfdContextResources>>,
     /// Sessions that still require KFD runtime enablement.
     joined_sessions: u64,
+    /// The last session left, but KFD has not confirmed runtime disable.
+    pending_disable: bool,
+    /// One thread is discharging the pending disable outside the slot lock.
+    disabling: bool,
 }
 
 /// Process-local lock and identity for the shared primary KFD context.
 struct ProcessSlot {
     /// Forked children replace the inherited slot before touching its lock.
     process: u32,
+    /// Wipe-on-fork witness for this exact slot; zero in descendants.
+    fork_witness: Option<usize>,
     /// Serializes primary-context activation and shutdown across sessions.
     state: Mutex<ProcessState>,
+    /// Wakes sessions waiting for one pending native disable to finish.
+    changed: Condvar,
+}
+
+impl ProcessSlot {
+    /// Waits for the current disable transaction without holding the mutex
+    /// across the native ioctl.
+    fn lock_ready(&self) -> Result<MutexGuard<'_, ProcessState>, Error> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        while state.disabling {
+            state = self
+                .changed
+                .wait(state)
+                .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        }
+        Ok(state)
+    }
+
+    /// Resolves a failed last-session disable before a new session can join.
+    fn finish_pending_disable(&self) -> Result<(), Error> {
+        let mut state = self.lock_ready()?;
+        if !state.pending_disable {
+            return Ok(());
+        }
+        let kfd = state
+            .resources
+            .as_ref()
+            .and_then(|resources| resources.kfd.get())
+            .cloned()
+            .ok_or_else(|| {
+                error(
+                    ErrorKind::Internal,
+                    "pending KFD disable lost its connection",
+                )
+            })?;
+        state.disabling = true;
+        drop(state);
+        let result = kfd
+            .disable_runtime()
+            .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source));
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
+        state.disabling = false;
+        if result.is_ok() {
+            state.pending_disable = false;
+        }
+        self.changed.notify_all();
+        result
+    }
+
+    /// Joins the process context after any outstanding disable completes.
+    fn join(&self, joined: &AtomicBool) -> Result<Arc<KfdContextResources>, Error> {
+        loop {
+            self.finish_pending_disable()?;
+            let mut state = self.lock_ready()?;
+            if state.pending_disable {
+                continue;
+            }
+            if !joined.load(Ordering::Acquire) {
+                state.joined_sessions = state.joined_sessions.checked_add(1).ok_or_else(|| {
+                    error(
+                        ErrorKind::ResourceExhausted,
+                        "too many primary KFD sessions",
+                    )
+                })?;
+                // Even a failed activation can enable KFD or retain a VM.
+                joined.store(true, Ordering::Release);
+            }
+            return Ok(state
+                .resources
+                .get_or_insert_with(|| Arc::new(KfdContextResources::new()))
+                .clone());
+        }
+    }
+
+    /// Leaves the process context, then discharges the last-session disable.
+    fn leave(&self, joined: &AtomicBool) -> Result<(), Error> {
+        let mut state = self.lock_ready()?;
+        if !joined.load(Ordering::Acquire) {
+            drop(state);
+            return self.finish_pending_disable();
+        }
+        if state.joined_sessions == 0 {
+            return Err(error(
+                ErrorKind::Internal,
+                "KFD primary session accounting underflow",
+            ));
+        }
+        state.joined_sessions -= 1;
+        joined.store(false, Ordering::Release);
+        let last = state.joined_sessions == 0;
+        if last {
+            state.pending_disable = state
+                .resources
+                .as_ref()
+                .and_then(|resources| resources.kfd.get())
+                .is_some();
+        }
+        drop(state);
+        if last {
+            self.finish_pending_disable()?;
+        }
+        Ok(())
+    }
 }
 
 // A fork child replaces the inherited slot before touching its mutex. The
@@ -124,22 +239,35 @@ fn primary_slot() -> &'static ProcessSlot {
         let current = PRIMARY_SLOT.load(Ordering::Acquire);
         if !current.is_null() {
             // SAFETY: Published slots remain allocated for the process lifetime.
-            if unsafe { (*current).process == process } {
+            if unsafe {
+                (*current).process == process
+                    && os_process::fork_witness_valid((*current).fork_witness)
+            } {
                 // SAFETY: The matching published slot is never freed or moved.
                 return unsafe { &*current };
             }
         }
+        let witness = os_process::FreshForkWitness::new();
         let candidate = Box::into_raw(Box::new(ProcessSlot {
             process,
+            fork_witness: witness.as_ref().map(os_process::FreshForkWitness::address),
             state: Mutex::new(ProcessState {
                 resources: None,
                 joined_sessions: 0,
+                pending_disable: false,
+                disabling: false,
             }),
+            changed: Condvar::new(),
         }));
         match PRIMARY_SLOT.compare_exchange(current, candidate, Ordering::AcqRel, Ordering::Acquire)
         {
             // SAFETY: Publication gives this allocation static process scope.
-            Ok(_) => return unsafe { &*candidate },
+            Ok(_) => {
+                if let Some(witness) = witness {
+                    witness.retain_until_exit();
+                }
+                return unsafe { &*candidate };
+            }
             Err(_) => {
                 // SAFETY: This candidate was never published or borrowed.
                 unsafe { drop(Box::from_raw(candidate)) };
@@ -325,17 +453,13 @@ impl LinuxKfdDriver {
             ));
         }
         let slot = primary_slot();
-        let state = slot
-            .state
-            .lock()
-            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-        let resources = state.resources.as_ref().ok_or_else(|| {
+        let resources = slot.lock_ready()?.resources.clone().ok_or_else(|| {
             error(
                 ErrorKind::InvalidArgument,
                 "KFD primary context is not active",
             )
         })?;
-        f(resources)
+        f(&resources)
     }
 
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
@@ -513,33 +637,7 @@ impl Driver for LinuxKfdDriver {
         if self.lifetime == DriverContextLifetime::Session {
             return self.local.shutdown();
         }
-        if !self.joined_primary.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let slot = primary_slot();
-        let mut state = slot
-            .state
-            .lock()
-            .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-        if state.joined_sessions == 0 {
-            return Err(error(
-                ErrorKind::Internal,
-                "KFD primary session accounting underflow",
-            ));
-        }
-        if state.joined_sessions == 1 {
-            if let Some(kfd) = state
-                .resources
-                .as_ref()
-                .and_then(|resources| resources.kfd.get())
-            {
-                kfd.disable_runtime()
-                    .map_err(|source| native_error("AMDKFD_IOC_RUNTIME_ENABLE disable", source))?;
-            }
-        }
-        state.joined_sessions -= 1;
-        self.joined_primary.store(false, Ordering::Release);
-        Ok(())
+        primary_slot().leave(&self.joined_primary)
     }
     fn enumerate(
         &self,
@@ -627,23 +725,7 @@ impl Driver for LinuxKfdDriver {
         let vm = if self.lifetime == DriverContextLifetime::Session {
             self.local.activate_device(self.lifetime, &native)?
         } else {
-            let slot = primary_slot();
-            let mut state = slot
-                .state
-                .lock()
-                .map_err(|_| error(ErrorKind::Internal, "KFD primary context lock poisoned"))?;
-            if !self.joined_primary.load(Ordering::Acquire) {
-                state.joined_sessions = state.joined_sessions.checked_add(1).ok_or_else(|| {
-                    error(
-                        ErrorKind::ResourceExhausted,
-                        "too many primary KFD sessions",
-                    )
-                })?;
-                // Even a failed activation can enable KFD or retain a VM.
-                // Its session must discharge runtime enablement on shutdown.
-                self.joined_primary.store(true, Ordering::Release);
-            }
-            let resources = state.resources.get_or_insert_with(KfdContextResources::new);
+            let resources = primary_slot().join(&self.joined_primary)?;
             resources.activate_device(self.lifetime, &native)?
         };
         let gpu_counter_frequency_hz = vm
@@ -664,6 +746,8 @@ impl Driver for LinuxKfdDriver {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Weak};
 
     #[test]
     fn marketing_name_matches_device_and_revision() {
@@ -721,5 +805,56 @@ mod tests {
 
         native.process = std::process::id();
         native.shutdown().unwrap();
+    }
+
+    #[test]
+    fn failed_primary_disable_stays_pending_until_kfd_confirms_it() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let slot_ref = Arc::new(OnceLock::<Weak<ProcessSlot>>::new());
+        let hook_slot = slot_ref.clone();
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let mut kfd = sys::Kfd::with_hook(
+            file,
+            Arc::new(move |call| {
+                let sys::Call::RuntimeEnable(args) = call else {
+                    return Err(std::io::Error::other("unexpected KFD call"));
+                };
+                assert_eq!(args.mode_mask, 0);
+                let slot = hook_slot.get().and_then(Weak::upgrade).unwrap();
+                assert!(slot.state.try_lock().is_ok());
+                if observed.fetch_add(1, Ordering::Relaxed) == 0 {
+                    Err(std::io::Error::from_raw_os_error(errno::EINTR))
+                } else {
+                    Ok(())
+                }
+            }),
+        );
+        kfd.mark_runtime_enabled_for_test();
+        let resources = KfdContextResources::new();
+        assert!(resources.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+        let slot = Arc::new(ProcessSlot {
+            process: std::process::id(),
+            fork_witness: None,
+            state: Mutex::new(ProcessState {
+                resources: Some(Arc::new(resources)),
+                joined_sessions: 0,
+                pending_disable: true,
+                disabling: false,
+            }),
+            changed: Condvar::new(),
+        });
+        slot_ref.set(Arc::downgrade(&slot)).unwrap();
+        assert_eq!(
+            slot.finish_pending_disable()
+                .unwrap_err()
+                .native_error_code(),
+            Some(errno::EINTR)
+        );
+        assert!(slot.state.lock().unwrap().pending_disable);
+        slot.finish_pending_disable().unwrap();
+        assert!(!slot.state.lock().unwrap().pending_disable);
+        slot.finish_pending_disable().unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
     }
 }

@@ -539,6 +539,25 @@ TEST_F(SdmaQueueSchedulerTest, HostDoorbellSynchronizesWithoutExtendingPublished
   EXPECT_TRUE(scheduler_.detach(queue));
 }
 
+TEST_F(SdmaQueueSchedulerTest, HostDoorbellSynchronizationTimesOutWithoutDiscardingWork) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->set_reads_unavailable(true);
+  alignas(8) uint64_t doorbell = sizeof(uint32_t);
+  SdmaQueueConfig info = queue_info();
+  info.doorbell_base = &doorbell;
+  info.host_accessible = true;
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(info, {});
+  ASSERT_TRUE(queue);
+
+  EXPECT_FALSE(scheduler_.synchronize_host_queue_for_test(kProcessId, kQueueId, 20ms));
+  EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), 0u);
+  memory_->set_reads_unavailable(false);
+  EXPECT_TRUE(scheduler_.synchronize_host_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
+  EXPECT_TRUE(scheduler_.detach(queue));
+}
+
 TEST_F(SdmaQueueSchedulerTest, HostDoorbellPublicationDoesNotTearAcross32BitBoundary) {
   constexpr uint64_t kInitialCursor = (uint64_t{1} << 32) - sizeof(uint32_t);
   constexpr uint32_t kPackets = 128;
@@ -769,6 +788,35 @@ TEST_F(SdmaQueueSchedulerTest, RetriesUnavailablePacketWithoutSecondDoorbell) {
       wait_until([this]() { return memory_->load<uint64_t>(kReadPointer) == sizeof(uint32_t); }));
   EXPECT_GE(memory_->read_attempts(), 2u);
   EXPECT_TRUE(scheduler_.detach(queue));
+}
+
+TEST_F(SdmaQueueSchedulerTest, TestSynchronizationTimesOutWithoutDiscardingBlockedPacket) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->set_reads_unavailable(true);
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), {});
+  ASSERT_TRUE(queue);
+  ASSERT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
+
+  EXPECT_FALSE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId, {}, 20ms));
+  EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), 0u);
+  memory_->set_reads_unavailable(false);
+  EXPECT_TRUE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
+}
+
+TEST_F(SdmaQueueSchedulerTest, TestSynchronizationTimesOutWhileServiceIsActive) {
+  memory_->store<uint32_t>(kRing, 0);
+  memory_->block_reads();
+  const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), {});
+  ASSERT_TRUE(queue);
+  ASSERT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
+  ASSERT_TRUE(memory_->wait_for_read_attempts(1));
+
+  EXPECT_FALSE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId, {}, 20ms));
+  memory_->unblock_reads();
+  EXPECT_TRUE(scheduler_.synchronize_queue_for_test(kProcessId, kQueueId));
+  EXPECT_EQ(memory_->load<uint64_t>(kReadPointer), sizeof(uint32_t));
 }
 
 TEST_F(SdmaQueueSchedulerTest, GracefulDetachPreservesBlockedPacketStateUntilItDrains) {

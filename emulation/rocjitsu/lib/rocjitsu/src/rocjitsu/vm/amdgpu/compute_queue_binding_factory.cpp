@@ -12,8 +12,9 @@ namespace {
 class ComputeQueueBinding final : public QueueBinding {
 public:
   ComputeQueueBinding(CommandProcessor &command_processor, uint64_t registration_id,
-                      QueuePacketFormat format)
-      : command_processor_(command_processor), registration_id_(registration_id), format_(format) {}
+                      QueuePacketFormat format, uint64_t ring_base, uint32_t ring_size)
+      : command_processor_(command_processor), registration_id_(registration_id), format_(format),
+        ring_base_(ring_base), ring_size_(ring_size) {}
 
   ~ComputeQueueBinding() override {
     if (registration_id_)
@@ -33,15 +34,18 @@ public:
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
-    if (!valid_aql_packet_ring(request.ring_base_address, request.ring_size_bytes))
-      return QueueReconfigureStatus::Invalid;
-    if (!registration_id_ || !command_processor_.update_queue_registration(
-                                 registration_id_, request.ring_base_address,
-                                 request.ring_size_bytes, request.scheduling_percentage)) {
-      return QueueReconfigureStatus::Stale;
+    QueueReconfigureRequest effective = request;
+    if (!request.scheduling_percentage) {
+      effective.ring_base_address = ring_base_;
+      effective.ring_size_bytes = ring_size_;
     }
-    return request.scheduling_percentage == 0 ? QueueReconfigureStatus::Disabled
-                                              : QueueReconfigureStatus::Applied;
+    const QueueReconfigureStatus status =
+        command_processor_.reconfigure_queue_registration(registration_id_, effective);
+    if (status == QueueReconfigureStatus::Applied) {
+      ring_base_ = effective.ring_base_address;
+      ring_size_ = effective.ring_size_bytes;
+    }
+    return status;
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
@@ -57,6 +61,8 @@ private:
   CommandProcessor &command_processor_;
   uint64_t registration_id_ = 0;
   QueuePacketFormat format_;
+  uint64_t ring_base_;
+  uint32_t ring_size_;
 };
 
 class ComputeQueueBindingFactory final : public QueueBindingFactory {
@@ -97,8 +103,9 @@ public:
       return {};
     try {
       return {.status = QueueBindingCreateStatus::Bound,
-              .binding = std::make_unique<ComputeQueueBinding>(command_processor_, registration_id,
-                                                               request.packet_format)};
+              .binding = std::make_unique<ComputeQueueBinding>(
+                  command_processor_, registration_id, request.packet_format,
+                  request.ring.base_address, request.ring.size_bytes)};
     } catch (...) {
       (void)command_processor_.unregister_queue_registration(registration_id);
       throw;
