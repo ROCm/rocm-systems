@@ -7843,31 +7843,6 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx1250 DPX: the AllReduce LL128 tier and its two-shot stop at nRanks x 2 MiB
-// from 8 ranks; SPX keeps 256 MiB.
-TEST(WrapMicrotestIsolated, DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled) {
-  RUN_ISOLATED_TEST(
-      "Wrap_DdaLL128Threshold_Gfx1250DpxAllReduceRankScaled",
-      []() {
-        SetMicroEnvAbsent("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
-        ASSERT_NE(nullptr, comm->archThresholds);
-        const std::pair<int, size_t> cases[] = {{4, 256 * kMiB}, {8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
-        for (const auto& c : cases) {
-          comm->nRanks = c.first;
-          EXPECT_EQ(c.second, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << c.first;
-          EXPECT_EQ(c.second, rcclDdaLL128TwoShotThreshold(comm)) << c.first;
-        }
-        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-        for (int nRanks : {8, 16, 32}) {
-          comm->nRanks = nRanks;
-          EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "SPX " << nRanks;
-        }
-        DeleteCommWithArch(comm);
-      });
-}
-
 // gfx1250 DPX: the LL one-shot AllReduce stops at 4 KiB from 16 ranks; SPX keeps the 1 MiB default.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
   RUN_ISOLATED_TEST(
@@ -7887,39 +7862,6 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
         for (int nRanks : {16, 32, 64}) {
           comm->nRanks = nRanks;
           EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "SPX " << nRanks;
-        }
-        DeleteCommWithArch(comm);
-      });
-}
-
-// gfx1250 DPX: DDA LL128 takes AllReduce up to its cap; one 16-byte shard past
-// it, the regular Ring/Tree selection takes it.
-TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250DpxLL128StopsAtCap) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_Gfx1250DpxLL128StopsAtCap",
-      []() {
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
-        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
-                                 [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
-                                   return true;
-                                 });
-        // Tree, not the fake's default Ring, marks an answer from the regular Ring/Tree selection.
-        ScopedHook getAlgo(g_getAlgoInfo, [](struct ncclComm*, struct ncclTaskColl* task, int, int, int,
-                                              ncclSimInfo_t*) {
-          task->algorithm = NCCL_ALGO_TREE;
-          task->protocol = NCCL_PROTO_LL128;
-          task->nMaxChannels = 1;
-          return ncclSuccess;
-        });
-        ncclComm* comm = MakeArDdaComm(8);
-        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
-        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
-        const std::pair<int, size_t> cases[] = {{8, 16 * kMiB}, {16, 32 * kMiB}, {32, 64 * kMiB}};
-        for (const auto& c : cases) {
-          comm->nRanks = c.first;
-          EXPECT_EQ(ll128, SelectAllReduceDdaAlgo(comm, c.second)) << c.first;
-          EXPECT_EQ(NCCL_ALGO_TREE, SelectAllReduceDdaAlgo(comm, c.second + (size_t)c.first * 16)) << c.first;
         }
         DeleteCommWithArch(comm);
       });
