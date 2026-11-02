@@ -3,6 +3,7 @@
 
 #include "core/perfetto/emitter.hpp"
 
+#include "core/node_info.hpp"
 #include "core/track_registry.hpp"
 
 #include <cstdint>
@@ -87,5 +88,18 @@ ensure_synthetic_process_track_emitted(int pid)
     auto       desc  = track.Serialize();
     desc.mutable_process()->set_pid(pid);
     ::perfetto::TrackEvent::SetTrackDescriptor(track, desc);
+}
+
+void
+emit_system_info_packet(const node_info& info)
+{
+    ::perfetto::TrackEvent::Trace([&](::perfetto::TrackEvent::TraceContext ctx) {
+        auto  packet  = ctx.NewTracePacket();
+        auto* utsname = packet->set_system_info()->set_utsname();
+        utsname->set_sysname(info.system_name);
+        utsname->set_release(info.release);
+        utsname->set_version(info.version);
+        utsname->set_machine(info.machine);
+    });
 }
 }  // namespace rocprofsys::core::perfetto

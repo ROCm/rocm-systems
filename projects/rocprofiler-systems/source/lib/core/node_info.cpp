@@ -16,6 +16,20 @@ namespace rocprofsys
 
 node_info::node_info()
 {
+    struct utsname _sys_info;
+    if(uname(&_sys_info) != 0)
+    {
+        LOG_WARNING("Error: Unable to get system information!");
+        return;
+    }
+
+    system_name = _sys_info.sysname;
+    node_name   = _sys_info.nodename;
+    release     = _sys_info.release;
+    version     = _sys_info.version;
+    machine     = _sys_info.machine;
+    domain_name = _sys_info.domainname;
+
     auto ifs = std::ifstream{ "/etc/machine-id" };
     if(!ifs.is_open())
     {
@@ -30,20 +44,6 @@ node_info::node_info()
     hash =
         std::hash<std::string>{}(machine_id) % std::numeric_limits<std::int64_t>::max();
     id = hash % std::numeric_limits<size_t>::max();
-
-    struct utsname _sys_info;
-    if(uname(&_sys_info) != 0)
-    {
-        LOG_WARNING("Error: Unable to get system information!");
-        return;
-    }
-
-    system_name = _sys_info.sysname;
-    node_name   = _sys_info.nodename;
-    release     = _sys_info.release;
-    version     = _sys_info.version;
-    machine     = _sys_info.machine;
-    domain_name = _sys_info.domainname;
 }
 
 node_info&
