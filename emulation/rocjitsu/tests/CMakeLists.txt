@@ -1144,6 +1144,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(file_loading_allocation_failure_test)
 
+    # Keep queue allocation fault injection out of the shared test executable.
+    add_executable(
+        queue_registration_allocation_failure_test
+        queue_registration_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        queue_registration_allocation_failure_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(queue_registration_allocation_failure_test TEST)
+    rj_add_gtest_tests(queue_registration_allocation_failure_test)
+
     # Exercise the model ISA contract in a decoder-only final link.
     add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
     target_include_directories(

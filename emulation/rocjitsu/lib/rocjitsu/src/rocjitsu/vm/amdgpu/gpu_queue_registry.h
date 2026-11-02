@@ -221,7 +221,10 @@ public:
   explicit GpuQueueRegistry(GpuVm &gpu_vm) : gpu_vm_(gpu_vm) {}
   ~GpuQueueRegistry();
 
-  /// @brief Register a queue; allocation and factory exceptions propagate after rollback.
+  /// @brief Register a queue; allocation and factory exceptions propagate.
+  /// @details Registry-owned state and any returned binding are released before
+  /// exceptions propagate. A factory must roll back its own state if it throws
+  /// before returning a binding.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);
