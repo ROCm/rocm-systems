@@ -21,7 +21,8 @@ namespace writer {
 bool open(const char* output_dir);
 
 // True while events.bin is open: from a successful open() until close(), or
-// until capture stops because the file system fell to the reserve.
+// until capture stops because the file system fell to the reserve or the archive
+// reached HIP_HRR_CAPTURE_MAX_MB.
 bool is_open();
 
 // Cache process-level metadata JSON for manifest writers. The emergency
@@ -90,7 +91,8 @@ void note_unreplayable(const char* api, const char* reason);
 
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
 // writer is not open, flush() has written the trailer, or capture has stopped
-// for lack of space.
+// for lack of space or at the size limit. A buffer over HIP_HRR_CAPTURE_MAX_BLOB_MB
+// is not written either: {} is returned and the capture marked incomplete.
 // Thread-safe. Skips the write when the same bytes are already in this archive.
 Hash128 write_blob(const void* data, size_t len);
 

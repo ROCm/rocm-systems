@@ -5,11 +5,34 @@
 
 use super::*;
 use crate::api::queue::index::*;
+use rocddi::device::gpu::queue::replace_scratch_owner;
 use std::sync::atomic::AtomicUsize;
 
 /// Independent fixture positions for the public AMD queue control ABI.
 const WRITE_INDEX_OFFSET: usize = 56;
 const READ_INDEX_OFFSET: usize = 128;
+
+#[test]
+/// Verifies a fault deferred to the system worker falls back only once.
+fn deferred_fault_uses_queue_callback_after_system_failure() {
+    let mut delivery = VmFaultCallbackState::Unseen;
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Defer);
+    // KFD may report the same fault through both queue signals.
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Ignore);
+    assert!(delivery.take_after_system_failure());
+    assert!(!delivery.take_after_system_failure());
+    assert_eq!(delivery.observe(false), VmFaultCallbackAction::Ignore);
+}
+
+#[test]
+/// Verifies a delivered system fault is not replayed through the queue.
+fn delivered_system_fault_has_no_queue_fallback() {
+    let mut delivery = VmFaultCallbackState::Unseen;
+    assert_eq!(delivery.observe(true), VmFaultCallbackAction::Defer);
+    delivery.report_by_system();
+    assert!(!delivery.take_after_system_failure());
+    assert_eq!(delivery.observe(false), VmFaultCallbackAction::Ignore);
+}
 
 /// Counts owner drops during queue scratch rollback tests.
 struct DropCount(
@@ -32,10 +55,11 @@ fn failed_scratch_update_retains_both_old_and_candidate_owners() {
     let mut current = Some(DropCount(old_drops.clone()));
     let mut uncertain = Vec::new();
     assert!(matches!(
-        update_scratch_owner(
+        replace_scratch_owner(
             &mut current,
             &mut uncertain,
             DropCount(new_drops.clone()),
+            OUT_OF_RESOURCES,
             || Err(ERROR),
         ),
         Err(ERROR)
@@ -57,10 +81,11 @@ fn scratch_update_unwind_keeps_candidate_owned() {
     let mut current = None;
     let mut uncertain = Vec::new();
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = update_scratch_owner(
+        let _ = replace_scratch_owner(
             &mut current,
             &mut uncertain,
             DropCount(drops.clone()),
+            OUT_OF_RESOURCES,
             || -> Result<(), Status> { panic!("injected scratch update unwind") },
         );
     }));
@@ -247,8 +272,8 @@ fn soft_queue_control_uses_the_direct_index_path() {
 }
 
 #[test]
-/// Verifies that counted queue index operations reach the hardware control.
-fn counted_queue_index_operations_reach_the_hardware_control() {
+/// Verifies counted inactivation rejects a handle without changing shared indices.
+fn counted_inactivation_rejects_without_stopping_shared_indices() {
     let mut hardware = PublicQueueStorage([0; 256]);
     let hardware_queue = hardware.0.as_mut_ptr().cast::<HsaQueue>();
     // SAFETY: The storage is aligned and retains the public header and
@@ -286,6 +311,15 @@ fn counted_queue_index_operations_reach_the_hardware_control() {
         assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
         assert_eq!((*write).load(Ordering::Relaxed), 25);
         assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
+        let mut state = QueueState::new();
+        state.counted_queues.insert(public as usize, counted);
+        assert_eq!(
+            inactivate_unintercepted_queue(&mut state, public),
+            INVALID_QUEUE
+        );
+        assert_eq!((*write).load(Ordering::Relaxed), 25);
+        assert_eq!(hsa_queue_add_write_index_relaxed(public, 1), 25);
+        assert_eq!((*write).load(Ordering::Relaxed), 26);
     }
 }
 

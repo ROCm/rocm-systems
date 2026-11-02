@@ -39,7 +39,7 @@ pub(crate) unsafe extern "C" fn create(
                 .event_service
                 .lock()
                 .map_err(|_| INTERNAL)?
-                .create(&device.native, &[], SignalEventAddressing::Mapped)
+                .create(&device.native, SignalEventAddressing::Mapped)
                 .map_err(|error| device.native_error_status(&error))
         })();
         let (mut event, mailbox) = match result {
@@ -105,17 +105,23 @@ pub(crate) unsafe extern "C" fn wait(pointer: *mut amdf_gpu_event_t, timeout: u6
         if device.current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
         }
+        if device.event_observation_failed() {
+            return Err(INTERNAL);
+        }
         let result = event.native.wait(timeout);
         if device.current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
         }
+        if let Err(error) = &result {
+            if error.kind() == rocddi::ErrorKind::DeviceLost {
+                device.observe_loss(event.info.reset_epoch);
+                return Err(LOST);
+            }
+        }
         match result {
             Ok(true) => Ok(()),
+            Ok(false) | Err(_) if device.event_observation_failed() => Err(INTERNAL),
             Ok(false) => Err(DEADLINE),
-            Err(error) if error.kind() == rocddi::ErrorKind::DeviceLost => {
-                device.observe_loss(event.info.reset_epoch);
-                Err(LOST)
-            }
             Err(error) => Err(device.native_error_status(&error)),
         }
     })

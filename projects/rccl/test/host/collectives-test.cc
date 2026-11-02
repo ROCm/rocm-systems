@@ -436,10 +436,11 @@ struct SharedHooks {
                                                 hipStream_t st, bool q, bool h, rcclCollDecision* d) {
         return RecordSelect("AllGather", s, r, n, ncclNumOps, st, q, h, d);
       }};
-  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool, rcclCollDecision*)>
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool, rcclCollDecision*,
+                          bool)>
       selectReduceScatter{g_rcclSelectReduceScatter, [](ncclComm*, const void* s, void* r, size_t n, ncclDataType_t,
-                                                        ncclRedOp_t op, bool q, rcclCollDecision* d) {
-        return RecordSelect("ReduceScatter", s, r, n, op, nullptr, q, false, d);
+                                                        ncclRedOp_t op, bool q, rcclCollDecision* d, bool h) {
+        return RecordSelect("ReduceScatter", s, r, n, op, nullptr, q, h, d);
       }};
   ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t, bool, bool,
                           rcclCollDecision*)>
@@ -487,6 +488,15 @@ struct SharedHooks {
                                     ncclDataType_t datatype, ncclRedOp_t op, hipStream_t, ncclDevrWindow* win,
                                     ncclCeCollArgs* args) {
         fake.trace.push_back("ceAllReduce");
+        fake.ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
+        return fake.ceArResult;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, hipStream_t,
+                          ncclDevrWindow*, ncclCeCollArgs*)>
+      ceReduceScatter{g_ceReduceScatter, [](ncclComm*, const void* sendbuff, void* recvbuff, size_t count,
+                                            ncclDataType_t datatype, ncclRedOp_t op, hipStream_t, ncclDevrWindow* win,
+                                            ncclCeCollArgs* args) {
+        fake.trace.push_back("ceReduceScatter");
         fake.ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
         return fake.ceArResult;
       }};
@@ -696,14 +706,7 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(fake.thresholdFuncs.empty());
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(fake.thresholdFuncs.empty());
 }
@@ -712,7 +715,7 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
   SetArch("gfx1250");
   fake.ddaEnabled = true;
   fake.ddaThreshold = 4096;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, true, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 2, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
@@ -722,22 +725,22 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
 
 TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
   fake.ddaThreshold = 64;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedStillAsksDda) {
+TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithoutDdaEnabledReturnsFalse) {
   SetArch("gfx1250");
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
   fake.ddaEnabled = true;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
 }
 
@@ -1813,10 +1816,14 @@ TEST_F(CollectivesMicrotest, ReduceScatter_FailuresBeforeDispatchStopIt) {
   fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ReduceScatter());
   EXPECT_TRUE(fake.selects.empty());
+  EXPECT_TRUE(fake.captureModes.empty());  // capture is after record
   fake.recordResult = ncclSuccess;
   fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, ReduceScatter());
-  EXPECT_TRUE(fake.captureModes.empty());
+  // Capture is latched before select so CE sees graph mode; select failure
+  // still stops before enqueue.
+  EXPECT_EQ(std::vector<int>{2}, fake.captureModes);
+  EXPECT_TRUE(fake.enqueued.empty());
   fake.selectResult = ncclSuccess;
   fake.captureResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, ReduceScatter());

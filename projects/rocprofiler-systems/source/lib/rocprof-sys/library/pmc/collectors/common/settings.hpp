@@ -347,7 +347,7 @@ struct settings_policy
                     {
                         continue;
                     }
-                    if(device_str.empty() || !std::ranges::all_of(device_str, ::isdigit))
+                    if(!utility::string::is_numeric(device_str))
                     {
                         LOG_ERROR("Invalid :device= value in "
                                   "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",

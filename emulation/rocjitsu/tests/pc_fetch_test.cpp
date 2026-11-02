@@ -4,47 +4,21 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <gtest/gtest.h>
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <memory>
-#include <span>
 #include <string>
 
 namespace {
 
 using namespace rocjitsu;
-
-class PcFetchPhysicalMemory final : public amdgpu::PhysicalMemoryAccess {
-public:
-  explicit PcFetchPhysicalMemory(amdgpu::GpuMemory &memory) : memory_(memory) {}
-
-  amdgpu::VmAccessOutcome read(amdgpu::VmMemoryDomain domain, uint64_t address,
-                               std::span<std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
-      return amdgpu::VmAccessOutcome::Malformed;
-    memory_.read_block(address, {reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()});
-    return amdgpu::VmAccessOutcome::Complete;
-  }
-
-  amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain domain, uint64_t address,
-                                std::span<const std::byte> bytes) override {
-    if (domain != amdgpu::VmMemoryDomain::Local)
-      return amdgpu::VmAccessOutcome::Malformed;
-    memory_.write_block(address, {reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()});
-    return amdgpu::VmAccessOutcome::Complete;
-  }
-
-private:
-  amdgpu::GpuMemory &memory_;
-};
 
 struct PcFetchArchitecture {
   rj_code_arch_t arch;
@@ -60,7 +34,7 @@ protected:
                              : amdgpu::Gfx12VmConfig::gfx12_1();
     first_page_table_shift = 12 + 9 * (profile.page_table_levels() - 1);
     vm = std::make_unique<amdgpu::GpuVm>(profile);
-    physical = std::make_shared<PcFetchPhysicalMemory>(memory);
+    physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(memory);
     address_space = vm->register_gfx12_address_space(77, kPageTableRoot, physical);
     ASSERT_TRUE(address_space);
 
@@ -152,7 +126,7 @@ protected:
   uint32_t first_page_table_shift = 0;
   amdgpu::GpuMemory memory{"pc_fetch_memory"};
   amdgpu::L2Cache cache{"pc_fetch_cache"};
-  std::shared_ptr<PcFetchPhysicalMemory> physical;
+  std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> physical;
   std::unique_ptr<amdgpu::GpuVm> vm;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   amdgpu::AddressSpaceHandle address_space;

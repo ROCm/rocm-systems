@@ -43,12 +43,13 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::{
     ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+    SpmDestinationFailure, SpmDestinationReport,
 };
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
-    VirtualMemoryInfo,
+    VirtualMemoryInfo, VirtualMemoryOptions,
 };
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, NativeNodeId, NodeKind, SourceKind, TopologySnapshot};
@@ -266,8 +267,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         device: &Self::DeviceState,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<Owned<Self::VirtualMemory>, Error>;
     /// Releases physical backing after its mappings are gone.
     fn free_virtual_memory(memory: &mut Self::VirtualMemory) -> Result<(), Error>;
@@ -507,9 +507,7 @@ pub(crate) trait GpuInstrumentationOperations: GpuDriver {
         &self,
         device: &Self::DeviceState,
         size: u32,
-        timeout: &mut u32,
-        bytes_copied: &mut u32,
+        timeout: u32,
         destination: Option<usize>,
-        data_loss: &mut bool,
-    ) -> Result<(), Error>;
+    ) -> Result<SpmDestinationReport, SpmDestinationFailure>;
 }

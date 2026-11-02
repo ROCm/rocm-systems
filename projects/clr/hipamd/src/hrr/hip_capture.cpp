@@ -331,7 +331,10 @@ struct PinnedSnapshot {
       if (!s.copy) continue;
       s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
       s.copy.reset();
-      s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != s.last.lo || s.hash.hi != s.last.hi);
+      // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
+      // recorded with hash {0,0} on every launch. Replay refuses such a launch
+      // unless it goes into a stream capture, where it restores nothing.
+      s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
     }
   }
   ~PinnedSnapshot() { t_snaps.clear(); }
