@@ -80,20 +80,17 @@ public:
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
-  /// non-UNORDERED completion class. accessPc, when given, is reported as the
-  /// violating access's PC instead of its wave's current PC.
+  /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
-                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                    std::optional<uint64_t> accessPc = std::nullopt) const;
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
-  /// non-UNORDERED completion class. accessPc is reported as in validateRead.
+  /// non-UNORDERED completion class.
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
-                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                     std::optional<uint64_t> accessPc = std::nullopt) const;
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {

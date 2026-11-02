@@ -553,8 +553,10 @@ protected:
   void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
 
   /// Wave 0 executes a tensor load at 0x2010 that overwrites bytes wave 1 is
-  /// still reading. When `deferred`, its callback arrives after wave 0 has
-  /// executed the next instruction at 0x201c. Returns the race report.
+  /// still reading. When `deferred`, its callback arrives as the pipeline
+  /// completes a deferred transfer: wave 0's PC has advanced to 0x201c, but
+  /// the wave, held in VM_RETRY, has issued nothing else. Returns the race
+  /// report.
   std::string tensor_load_racing_an_older_read(bool deferred) {
     EXPECT_FALSE(ds_read(1, 4));
     util::StringDiagnostic error;
@@ -563,13 +565,8 @@ protected:
     EXPECT_TRUE(tensor.succeeded()) << error.message();
     waves[0]->pc = kTensorPc;
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(kTensorPc, *tensor.value(), *waves[0]);
-    if (deferred) {
-      const std::array<uint32_t, 1> nop_words{0xbf800000u}; // s_nop 0
-      auto nop = decoder->decode_window(nop_words, kNextPc, error.emitter());
-      EXPECT_TRUE(nop.succeeded()) << error.message();
+    if (deferred)
       waves[0]->pc = kNextPc;
-      fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(kNextPc, *nop.value(), *waves[0]);
-    }
     const std::array<TensorDmaLdsRange, 1> ranges{{{.address = 0, .bytes = 16}}};
     TensorDmaMemoryAccessObservation access;
     access.mnemonic = "tensor_load_to_lds";
@@ -637,6 +634,24 @@ TEST_F(TensorDmaRaceTest, RaceFoundByAnImmediateTransferIsReportedAtItsInstructi
             std::string::npos)
       << report;
   EXPECT_NE(report.find("; <-- wave 0"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, RejectsATransferThatIsNotTheCurrentInstruction) {
+  // The wave issues nothing after a tensor instruction until its transfer is
+  // observed, so a callback for any other PC is a protocol error.
+  execute_tensor(0, /*is_load=*/true);
+  const std::array<TensorDmaLdsRange, 1> ranges{{{.address = 0, .bytes = 16}}};
+  TensorDmaMemoryAccessObservation access;
+  access.mnemonic = "tensor_load_to_lds";
+  access.pc = waves[0]->pc + 8;
+  access.element_size_bytes = sizeof(uint32_t);
+  access.data_size = 2;
+  access.is_load = true;
+  access.lds_ranges = ranges;
+  EXPECT_THROW(fixture.plugin_group_->onAmdgpuTensorDmaMemoryAccess(access, *waves[0]),
+               std::logic_error);
+  // Nothing was registered: the bytes are not pending.
+  EXPECT_FALSE(ds_read(1, 4));
 }
 
 TEST_F(TensorDmaRaceTest, EventIsRecordedAtTheObservedInstructionPc) {

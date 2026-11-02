@@ -1288,23 +1288,6 @@ TEST(RaceDetector, Dtl_SameWavePartialVmcntRetiresOldest) {
   EXPECT_TRUE(b.hasLdsRace(64));
 }
 
-TEST(RaceDetector, LdsViolation_ReportsTheGivenAccessPc) {
-  // A deferred access is checked after its wave has moved on, so it supplies
-  // its own PC; other accesses leave the report to use the wave's current PC.
-  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
-  b.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  b.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4, MemoryOrderClass::LDS,
-                 /*accessPc=*/0x2010);
-  ASSERT_EQ(b.raceCount(), 1);
-  EXPECT_EQ(b.violations()[0].accessPc, std::optional<uint64_t>{0x2010});
-
-  b.clearViolations();
-  b.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/8, /*bytes=*/4, /*vgprDst=*/0);
-  b.checkLdsWrite(/*wave=*/0, /*lane=*/0, /*addr=*/8, /*bytes=*/4);
-  ASSERT_EQ(b.raceCount(), 1);
-  EXPECT_EQ(b.violations()[0].accessPc, std::nullopt);
-}
-
 // ---- Tensor DMA (tensor_load_to_lds / tensor_store_from_lds) ----
 
 TEST(RaceDetector, TensorDma_CrossWaveLoadRace) {

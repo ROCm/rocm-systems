@@ -89,8 +89,7 @@ void RaceDetector::retireEvent(EventId eventId) {
 }
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
-                                MemoryOrderClass currentMemoryOrder,
-                                std::optional<uint64_t> accessPc) const {
+                                MemoryOrderClass currentMemoryOrder) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
@@ -110,15 +109,13 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
       }
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId,
-                   accessPc});
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, false, workgroupId, eventId});
     }
   }
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
-                                 MemoryOrderClass currentMemoryOrder,
-                                 std::optional<uint64_t> accessPc) const {
+                                 MemoryOrderClass currentMemoryOrder) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
@@ -139,8 +136,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
         continue;
     }
     if (events_.ldsIntervals(eventId).overlapsRange(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId, eventId,
-                   accessPc});
+      raceHandler({RaceViolation::Space::LDS, addr, wave.value, lane, true, workgroupId, eventId});
     }
   }
 }

@@ -56,17 +56,6 @@ const InstructionSnapshot &current_instruction(const RaceWavefrontState &state,
   return state.trace[state.trace.size() - 1];
 }
 
-// A tensor DMA observation carries only its instruction's PC, and its callback
-// can arrive after the wave has executed later instructions, so look the
-// instruction up in the wave's trace rather than taking the newest entry.
-const InstructionSnapshot &traced_instruction(const RaceWavefrontState &state, uint64_t pc) {
-  for (size_t i = state.trace.size(); i > 0; --i) {
-    if (state.trace[i - 1].pc() == pc)
-      return state.trace[i - 1];
-  }
-  throw std::logic_error(std::format("race detector has no traced instruction at PC {:#x}", pc));
-}
-
 void warn_cluster_peer_writes_ignored_once() {
   static std::once_flag warned;
   std::call_once(warned, [] {
@@ -286,10 +275,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     amdgpu::Wavefront *wf = wf_ptrs[v.wave];
     auto *ws = get_state(wf);
     assert(ws && ws->race_state && "no wavefront state for race");
-    // A deferred access, such as a tensor DMA callback, names its own
-    // instruction; any other access belongs to the wave's newest one.
-    const InstructionSnapshot current =
-        v.accessPc ? traced_instruction(*ws, *v.accessPc) : current_instruction(*ws, *wf);
+    const InstructionSnapshot current = current_instruction(*ws, *wf);
     uint64_t pc = current.pc();
 
     {
@@ -529,16 +515,24 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
     return;
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  // The callback arrives while the tensor instruction executes or, for a
+  // transfer deferred until its memory is available, when the pipeline
+  // completes it. A deferred transfer holds the wave in VM_RETRY, so the wave
+  // issues nothing else first and the newest trace entry is still the tensor
+  // instruction, although wf.pc has advanced past it.
+  const InstructionSnapshot &instruction = current_instruction(*s, wf);
+  if (instruction.pc() != access.pc)
+    throw std::logic_error(std::format("race detector tensor DMA access at PC {:#x} is not the "
+                                       "current instruction at PC {:#x}",
+                                       access.pc, instruction.pc()));
   auto *rs = s->race_state;
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
   constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
   const int elementBytes = static_cast<int>(access.element_size_bytes);
 
-  // A transfer has no lanes; its violations report lane -1, and the
-  // instruction's PC rather than the wave's current one, which a deferred
-  // transfer has moved past. The core takes its own range type, independent
-  // of the observation protocol.
+  // A transfer has no lanes; its violations report lane -1. The core takes
+  // its own range type, independent of the observation protocol.
   std::vector<LdsByteRange> ranges;
   ranges.reserve(access.lds_ranges.size());
   for (const auto &range : access.lds_ranges) {
@@ -548,17 +542,16 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaMemoryAccess(
       continue;
     const int addr = static_cast<int>(range.address);
     if (access.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder, access.pc);
+      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
     else
-      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder, access.pc);
+      detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), memoryOrder);
   }
 
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(traced_instruction(*s, access.pc),
-                            access.is_load ? MemoryEventType::GLOBAL_TO_LDS
-                                           : MemoryEventType::LDS_TO_GLOBAL,
-                            ranges, elementBytes, obligations, memoryOrder);
+  rs->registerLdsRangeEvent(
+      instruction, access.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
+      ranges, elementBytes, obligations, memoryOrder);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
