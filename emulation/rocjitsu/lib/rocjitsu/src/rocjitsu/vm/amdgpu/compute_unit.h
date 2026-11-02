@@ -510,12 +510,12 @@ public:
   /// @brief Whether the instruction now executing may complete its LDS access
   /// inside its own execute_impl() instead of being routed to the local memory
   /// pipeline.
-  /// @details Decided by this CU's issue loop before each execution, so a caller
-  /// that executes an instruction directly still gets state to route. Off while
-  /// a plugin observes the instruction after execution or its memory routing,
-  /// or while a debugger is attached: they rely on the routed order.
+  /// @details Only while this CU's issue loop executes the instruction, so a
+  /// caller that executes an instruction directly still gets state to route.
+  /// Off while a plugin observes the instruction after execution or its memory
+  /// routing, or while a debugger is attached: they rely on the routed order.
   /// RJ_DS_INLINE=0 turns it off for comparison.
-  bool completes_lds_inline() const { return lds_inline_issue_; }
+  bool completes_lds_inline() const { return lds_inline_issue_ && lds_inline_allowed(); }
 
   /// @brief Record that @p inst completed its LDS access inline and holds no state.
   void note_lds_inline_completion(const Instruction &inst) { lds_inline_completed_ = &inst; }
@@ -1771,7 +1771,7 @@ protected:
   bool observes_memory_routing_ = false;
   bool observes_register_access_ = false;
   bool lds_inline_enabled_ = lds_inline_enabled_by_env();
-  /// Set by the issue loop for one execution when completes_lds_inline() applies.
+  /// Set by the issue loop for the duration of one execution.
   bool lds_inline_issue_ = false;
   /// Instruction whose current execute_impl() completed its LDS access inline.
   const Instruction *lds_inline_completed_ = nullptr;
