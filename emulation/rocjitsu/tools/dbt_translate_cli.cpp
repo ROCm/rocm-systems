@@ -183,12 +183,12 @@ struct DbtFlags {
                     {},
                     "Only allocate free VGPR scratch at or above this index"},
       UINT16_MAX, std::nullopt);
-  std::shared_ptr<cli::BoolFlag> keep_going = std::make_shared<cli::BoolFlag>(
+  std::shared_ptr<cli::BoolFlag> debug_continue_after_failure = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--debug-continue-after-failure",
                     {},
                     "Continue collecting diagnostics after failures",
                     cli::ValueMode::Switch});
-  std::shared_ptr<cli::BoolFlag> skip_failed = std::make_shared<cli::BoolFlag>(
+  std::shared_ptr<cli::BoolFlag> skip_failed_kernels = std::make_shared<cli::BoolFlag>(
       cli::FlagInfo{"--skip-failed-kernels",
                     {},
                     "Preserve failed kernels and continue other kernels",
@@ -246,8 +246,8 @@ struct DbtFlags {
             .failed() ||
         command
             .add_flags("Validation and diagnostics",
-                       {debug_min_free_vgpr, keep_going, skip_failed, verify_idempotence,
-                        verify_rewrite_discharge, show_all_translations},
+                       {debug_min_free_vgpr, debug_continue_after_failure, skip_failed_kernels,
+                        verify_idempotence, verify_rewrite_discharge, show_all_translations},
                        diagnostic)
             .failed())
       return util::Result::failure();
@@ -309,8 +309,8 @@ void print_help(const cli::Command &command) {
   if (flags.debug_min_free_vgpr->value())
     options.translate.debug_min_free_vgpr =
         static_cast<uint16_t>(*flags.debug_min_free_vgpr->value());
-  options.translate.debug_continue_after_failure = flags.keep_going->value();
-  options.translate.skip_failed_kernels = flags.skip_failed->value();
+  options.translate.debug_continue_after_failure = flags.debug_continue_after_failure->value();
+  options.translate.skip_failed_kernels = flags.skip_failed_kernels->value();
   options.translate.verify_idempotence = flags.verify_idempotence->value();
   options.translate.verify_rewrite_discharge = flags.verify_rewrite_discharge->value();
   options.output_mode = *flags.output_mode->value();
