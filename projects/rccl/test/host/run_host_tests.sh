@@ -32,7 +32,7 @@
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
-#                   with -DHOST_TEST_COVERAGE=ON, which the `configure` phase
+#                   with -DENABLE_CODE_COVERAGE=ON, which the `configure` phase
 #                   passes explicitly; it is OFF by default). Also runs the
 #                   checks in the `guards` phase above.
 #   coverage        turn the per-binary *.profraw profiles from `run` into
@@ -114,7 +114,7 @@ do_configure() {
   echo "==> Configure host tests  (BUILD_TYPE=$BUILD_TYPE  ROCM_PATH=$ROCM_PATH)"
   cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DROCM_PATH="$ROCM_PATH" \
-    -DHOST_TEST_COVERAGE=ON
+    -DENABLE_CODE_COVERAGE=ON
 }
 
 do_build() {
@@ -404,9 +404,9 @@ do_coverage() {
   if [ "${#tracefiles[@]}" -eq 0 ]; then
     echo "error: no .profraw files found under $COVERAGE_DIR --" >&2
     echo "       run the 'run' phase first. If you did, the tests were built" >&2
-    echo "       with -DHOST_TEST_COVERAGE=OFF, which produces no profiles" >&2
+    echo "       with -DENABLE_CODE_COVERAGE=OFF, which produces no profiles" >&2
     echo "       (the default; re-run the 'configure' phase of this script," >&2
-    echo "        which passes -DHOST_TEST_COVERAGE=ON)" >&2
+    echo "        which passes -DENABLE_CODE_COVERAGE=ON)" >&2
     exit 1
   fi
 

@@ -1167,8 +1167,7 @@ triage it into the right bucket:
 
 `rccl-UnitTestsMicroTransportP2p` builds with llvm source-based coverage
 (`-fprofile-instr-generate -fcoverage-mapping`) only when coverage is requested
-with `-DENABLE_CODE_COVERAGE=ON` (in-RCCL build) or `-DHOST_TEST_COVERAGE=ON`
-(standalone). Render a report with ROCm's
+with `-DENABLE_CODE_COVERAGE=ON`. Render a report with ROCm's
 llvm tooling directly. Scope it to the unit under test -- the file compiled in
 via `P2P_CC_PATH`, i.e. the unroll-transformed
 `hipify/src/transport/p2p_tmp.cc` (there is no plain `p2p.cc` in the hipify
@@ -1462,7 +1461,7 @@ cmake --build build -j"$(nproc)"
 ```
 
 Coverage instrumentation for the standalone host-only test binaries is OFF by
-default; enable it with `-DHOST_TEST_COVERAGE=ON` (`run_host_tests.sh
+default; enable it with `-DENABLE_CODE_COVERAGE=ON` (`run_host_tests.sh
 configure` does this).
 
 

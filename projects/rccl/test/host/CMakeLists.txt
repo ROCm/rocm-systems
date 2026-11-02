@@ -1106,7 +1106,7 @@ function(rccl_add_micro_binary _name)
       endif()
     endif()
   else()
-    # Mirror add_test_executable(): record for the HOST_TEST_COVERAGE loop.
+    # Mirror add_test_executable(): record for the standalone coverage loop.
     if(_ramb_OBJECT)
       list(APPEND HOST_TEST_OBJECT_LIBS ${_name})
       set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
@@ -1448,8 +1448,8 @@ endfunction()
 # Standalone Coverage
 # =====================================================================
 function(rccl_standalone_coverage)
-  option(HOST_TEST_COVERAGE "Build the host-only test binaries with llvm source-based coverage" OFF)
-  if(HOST_TEST_COVERAGE)
+  option(ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
+  if(ENABLE_CODE_COVERAGE)
     # HOST_TEST_BINARIES is populated by add_test_executable() and by
     # rccl_add_micro_binary(), so new test binaries are instrumented automatically.
     foreach(_cov_tgt ${HOST_TEST_BINARIES})
