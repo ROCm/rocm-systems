@@ -36,7 +36,7 @@ These options apply on Linux and Windows.
 
 ### Requirements
 
-- CMake 3.21+
+- CMake 3.25+
 - C++20 compatible compiler
 - SQLite3 (bundled via CMake module)
 - spdlog and fmt (system packages or FetchContent fallback)
@@ -90,7 +90,7 @@ target_link_libraries(your_target PRIVATE profiler-hub::profiler-hub)
 
 ## Windows
 
-A native MSVC build is supported (CI runs on Linux only). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
+A native MSVC build is supported (CI runs on Linux and Windows). fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are fetched when they are not already installed. SQLite3 is fetched only when `-DPROFILER_HUB_FETCH_DEPENDENCIES=ON` is set.
 
 ### Requirements
 
