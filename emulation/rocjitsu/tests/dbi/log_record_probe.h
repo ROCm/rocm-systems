@@ -233,9 +233,9 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
           .failed())
     return util::Result::failure();
   detail::append_salu_sgpr_write_wait(words, arch);
-  if (detail::append(
-          words,
-          build_s_lshl_b32(kSlot, kSlot, scalar_positive_inline_u32(detail::kRecordShift), arch))
+  if (detail::append(words, build_s_lshl_b32(kSlot, kSlot,
+                                             scalar_positive_inline_u32(detail::kRecordShift), arch,
+                                             &emit_error))
           .failed())
     return util::Result::failure();
   detail::append_salu_sgpr_write_wait(words, arch);
