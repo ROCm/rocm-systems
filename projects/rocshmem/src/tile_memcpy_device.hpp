@@ -47,14 +47,97 @@ __device__ __forceinline__ void tile_scope_workers(int* worker_id,
   }
 }
 
+// The generic memcpy_wg path uses an out-of-line bulk-copy helper. Tile
+// workgroup copies are frequently only a few KiB, so keeping the short vector
+// loop in the caller avoids the call frame and distributes the vectors over
+// the whole workgroup.
+template <MemcpyKind Kind, int W>
+__device__ __forceinline__ void tile_copy_contig_wg_vectors(
+    char* dst, char* src, uint32_t bytes, int worker_id, int worker_count) {
+  constexpr CachePolicy LP =
+      is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope;
+  constexpr CachePolicy SP =
+      is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard;
+  using Acc = AsmAccess<W, LP, SP>;
+  using T = typename Acc::type;
+  constexpr int Unroll = 4;
+
+  const uint32_t total = bytes / W;
+  const uint32_t stride = static_cast<uint32_t>(worker_count);
+  uint32_t v = static_cast<uint32_t>(worker_id);
+
+  for (; v + (Unroll - 1) * stride < total; v += Unroll * stride) {
+    T regs[Unroll];
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      const uint32_t offset = (v + u * stride) * W;
+      if constexpr (is_put(Kind)) {
+        regs[u] = Acc::load(src + offset);
+      } else {
+        regs[u] = Acc::load_buffer(src, bytes, offset);
+      }
+    }
+#pragma unroll
+    for (int u = 0; u < Unroll; u++) {
+      const uint32_t offset = (v + u * stride) * W;
+      if constexpr (is_put(Kind)) {
+        Acc::store_buffer(dst, bytes, offset, regs[u]);
+      } else {
+        Acc::store(dst + offset, regs[u]);
+      }
+    }
+  }
+  for (; v < total; v += stride) {
+    const uint32_t offset = v * W;
+    if constexpr (is_put(Kind)) {
+      Acc::store_buffer(dst, bytes, offset, Acc::load(src + offset));
+    } else {
+      Acc::store(dst + offset, Acc::load_buffer(src, bytes, offset));
+    }
+  }
+}
+
+template <MemcpyKind Kind>
+__device__ __forceinline__ void tile_memcpy_contig_wg(char* dst, char* src,
+                                                       size_t bytes,
+                                                       int worker_id,
+                                                       int worker_count) {
+  if (bytes == 0) return;
+  if (bytes > UINT32_MAX) {
+    memcpy_wg<Kind>(dst, src, bytes);
+    return;
+  }
+
+  const uintptr_t bits = bytes | reinterpret_cast<uintptr_t>(dst) |
+                         reinterpret_cast<uintptr_t>(src);
+  const uint32_t size = static_cast<uint32_t>(bytes);
+  if ((bits & 15) == 0) {
+    tile_copy_contig_wg_vectors<Kind, 16>(dst, src, size, worker_id,
+                                          worker_count);
+  } else if ((bits & 7) == 0) {
+    tile_copy_contig_wg_vectors<Kind, 8>(dst, src, size, worker_id,
+                                         worker_count);
+  } else if ((bits & 3) == 0) {
+    tile_copy_contig_wg_vectors<Kind, 4>(dst, src, size, worker_id,
+                                         worker_count);
+  } else if ((bits & 1) == 0) {
+    tile_copy_contig_wg_vectors<Kind, 2>(dst, src, size, worker_id,
+                                         worker_count);
+  } else {
+    tile_copy_contig_wg_vectors<Kind, 1>(dst, src, size, worker_id,
+                                         worker_count);
+  }
+}
+
 template <MemcpyKind Kind, TileScope Scope>
 __device__ __forceinline__ void tile_memcpy_contig(char* dst, char* src,
                                                    size_t bytes,
-                                                   [[maybe_unused]] int worker_id) {
+                                                   int worker_id) {
   if constexpr (Scope == TileScope::Wave) {
     memcpy_wave<Kind>(dst, src, bytes);
   } else if constexpr (Scope == TileScope::Wg) {
-    memcpy_wg<Kind>(dst, src, bytes);
+    tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id,
+                                get_flat_block_size());
   } else {
     memcpy_lane<Kind>(dst, src, bytes);
   }
@@ -294,30 +377,36 @@ __device__ inline void tile_memcpy_rma(
           view.dst_base, view.src_base,
           view.ext[0] * view.ext[1] * view.element_size, worker_id);
     } else if (layout == TileLayout::RowContig) {
-      const size_t row_size = view.ext[1] * view.element_size;
-      for (size_t i = worker_id; i < view.ext[0]; i += worker_count) {
-        memcpy_lane<Kind>(view.dst_base + i * view.dst_s[0] * view.element_size,
-                          view.src_base + i * view.src_s[0] * view.element_size,
-                          row_size);
+      if (!tile_memcpy_runs<Kind>(view, worker_id, worker_count)) {
+        const size_t row_size = view.ext[1] * view.element_size;
+        for (size_t i = worker_id; i < view.ext[0]; i += worker_count) {
+          memcpy_lane<Kind>(
+              view.dst_base + i * view.dst_s[0] * view.element_size,
+              view.src_base + i * view.src_s[0] * view.element_size, row_size);
+        }
       }
     } else if (layout == TileLayout::ColContig) {
-      const size_t col_size = view.ext[0] * view.element_size;
-      for (size_t j = worker_id; j < view.ext[1]; j += worker_count) {
-        memcpy_lane<Kind>(view.dst_base + j * view.dst_s[1] * view.element_size,
-                          view.src_base + j * view.src_s[1] * view.element_size,
-                          col_size);
+      if (!tile_memcpy_runs<Kind>(view, worker_id, worker_count)) {
+        const size_t col_size = view.ext[0] * view.element_size;
+        for (size_t j = worker_id; j < view.ext[1]; j += worker_count) {
+          memcpy_lane<Kind>(
+              view.dst_base + j * view.dst_s[1] * view.element_size,
+              view.src_base + j * view.src_s[1] * view.element_size, col_size);
+        }
       }
     } else {
-      const int total_elements = view.ext[0] * view.ext[1];
-      for (int idx = worker_id; idx < total_elements; idx += worker_count) {
-        const int i = idx / view.ext[1];
-        const int j = idx % view.ext[1];
-        memcpy_lane<Kind>(
-            view.dst_base +
-                (i * view.dst_s[0] + j * view.dst_s[1]) * view.element_size,
-            view.src_base +
-                (i * view.src_s[0] + j * view.src_s[1]) * view.element_size,
-            view.element_size);
+      if (!tile_memcpy_runs<Kind>(view, worker_id, worker_count)) {
+        const int total_elements = view.ext[0] * view.ext[1];
+        for (int idx = worker_id; idx < total_elements; idx += worker_count) {
+          const int i = idx / view.ext[1];
+          const int j = idx % view.ext[1];
+          memcpy_lane<Kind>(
+              view.dst_base +
+                  (i * view.dst_s[0] + j * view.dst_s[1]) * view.element_size,
+              view.src_base +
+                  (i * view.src_s[0] + j * view.src_s[1]) * view.element_size,
+              view.element_size);
+        }
       }
     }
   } else if (view.ndim == 1) {
@@ -325,7 +414,7 @@ __device__ inline void tile_memcpy_rma(
       tile_memcpy_contig<Kind, Scope>(view.dst_base, view.src_base,
                                       view.ext[0] * view.element_size,
                                       worker_id);
-    } else {
+    } else if (!tile_memcpy_runs<Kind>(view, worker_id, worker_count)) {
       for (size_t i = worker_id; i < view.ext[0]; i += worker_count) {
         memcpy_lane<Kind>(
             view.dst_base + i * view.dst_s[0] * view.element_size,
