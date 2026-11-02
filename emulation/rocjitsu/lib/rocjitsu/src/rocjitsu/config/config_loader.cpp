@@ -715,7 +715,8 @@ const FactoryMap &factories(BuildMode build_mode) {
                            rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
                            const AsyncResources &resources,
                            util::DiagnosticEmitter emit_error) -> ComponentResult {
-      auto maybe_cu_config = parse_compute_unit_config(cfg, arch, target, resources, emit_error);
+      util::FailureOr<amdgpu::ComputeUnitCore::Config> maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, emit_error);
       if (maybe_cu_config.failed())
         return util::Result::failure();
       auto compute_unit = amdgpu::ComputeUnitCore::create(n, maybe_cu_config.value(), mem, nullptr,

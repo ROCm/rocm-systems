@@ -203,7 +203,8 @@ public:
   /// @brief Create a compute unit for the given architecture and execution mode.
   /// @details Validation finishes before allocating execution state. Allocation failures may still
   /// throw; already constructed resources are owned by RAII members and are cleaned during
-  /// unwinding.
+  /// unwinding. Diagnostic-sink exceptions propagate for both configuration and execution-mode
+  /// rejection.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).

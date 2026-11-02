@@ -293,6 +293,7 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   if (validate(config, emit_error).failed())
     return nullptr;
   if (exec_mode != simdojo::ExecMode::FUNCTIONAL && exec_mode != simdojo::ExecMode::CLOCKED) {
+    // Emit explicitly: the diagnostic destructor suppresses sink exceptions.
     (void)(emit_error.emit() << "Unsupported execution mode for ComputeUnit").emit();
     return nullptr;
   }
