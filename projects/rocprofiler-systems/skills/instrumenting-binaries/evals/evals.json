@@ -17,7 +17,7 @@
                 "warns that combining --module-restrict with --function-restrict ignores the function restriction"
             ],
             "id": "instrumenting-exclude-a-library",
-            "prompt": "How do I stop rocprof-sys-instrument from instrumenting libm, and separately how do I limit it to only the functions in solver.cpp?",
+            "prompt": "How do I stop rocprof-sys-instrument from instrumenting libm, and separately how do I limit it to only the functions in solver.cpp? I was planning to pass --module-restrict for the file and --function-restrict for a couple of its functions.",
             "skill_should_trigger": true
         },
         {
