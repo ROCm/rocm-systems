@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build and run the RCCL CPU-only host unit tests: rccl-HostUnitTests plus the
-# host-only microtests. The authoritative list is the `binaries` array in the
-# run phase below -- it is not duplicated here, so the two cannot drift.
+# host-only microtests. The authoritative list is host_test_binaries.txt in the
+# build directory, which test/host/CMakeLists.txt writes from its
+# rccl_add_micro_binary() calls -- it is not duplicated here, so the two cannot drift.
 #
 # Single source of truth for every command the host-test pipeline needs, so the
 # same steps run locally and in CI and nothing is scattered in the workflow YAML.

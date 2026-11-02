@@ -42,7 +42,8 @@
 extern int64_t IbCastArThreshold;  // p2p.cc
 
 // Puts the net_ib_cast globals init.cc writes back to their load-time values. init.cc's file-scope netRefCount
-// is reset by each test TU that compiles init.cc.
+// is reset only by NetIbCastResetInitRefCount() (NetIbCastInit.h), in the TUs that compile init.cc; the common
+// and gdr binaries link init.cc as a plain source, so their tests must not drive IbCastInit or IbCastInitDevices.
 inline void NetIbCastResetGlobals() {
   for (struct ncclIbDev& dev : IbCastDevs) {
     free(dev.pciPath);

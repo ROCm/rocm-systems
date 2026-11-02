@@ -567,8 +567,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroTransport<Unit>`** — `src/transport/`, one binary per test file;
   tests mirror the source tree under `test/host/transport/`, and `<Unit>` is the test's
   path in UpperCamel, less a leading `net-ib-` or `net-ib-cast-` (`net_ib/connect-test.cc`
-  builds `rccl-UnitTestsMicroTransportNetIbConnect`), and no two test files share a basename
-  (llvm-cov keys `static` functions by it). Each binary links the fakes and the
+  builds `rccl-UnitTestsMicroTransportNetIbConnect`), and no two test files under
+  `test/host/transport/` share a basename (llvm-cov keys `static` functions by it). Each binary links the fakes and the
   real sibling units its test file reaches, and a sibling is compiled real or faked, never
   both. They share `test_categories_micro_transport.yaml`, and define
   `ENABLE_FAULT_INJECTION` in both build modes so the TUs it gates whole are present

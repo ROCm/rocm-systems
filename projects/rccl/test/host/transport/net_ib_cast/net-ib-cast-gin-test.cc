@@ -29,12 +29,8 @@
 #include "fakes/param_redirect.h"
 
 #include NET_IB_CAST_GIN_CC_PATH
-// gin.cc brings the devices up through init.cc; compiled here so TearDown can reset its netRefCount. No test host
-// has /sys/class/infiniband/<hca>/device, so its realpath() of it finds nothing.
-static char* GinTestRealpath(const char*, char*) { return nullptr; }
-#define realpath GinTestRealpath
-#include NET_IB_CAST_INIT_CC_PATH
-#undef realpath
+// gin.cc brings the devices up through init.cc; compiled here so TearDown can reset its netRefCount.
+#include "transport/net_ib_cast/NetIbCastInit.h"
 
 namespace {
 
@@ -81,7 +77,7 @@ class NetIbCastGinMicrotest : public ::testing::Test {
   }
   void TearDown() override {
     NetIbCastResetGlobals();
-    netRefCount = 0;
+    NetIbCastResetInitRefCount();
     ResetIbvwrapFakes();
     ResetNetIbCastConnectFakes();
     ResetNetIbCastP2pFakes();

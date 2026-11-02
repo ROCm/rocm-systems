@@ -30,14 +30,7 @@
 #include "net-ib-cast-test-common.h"
 #include "fakes/param_redirect.h"
 
-// No test host has /sys/class/infiniband/<hca>/device, so init.cc's realpath() of it is renamed
-// onto this seam.
-static std::function<char*(const char*, char*)> g_initRealpath = [](const char*, char*) -> char* { return nullptr; };
-static char* InitTestRealpath(const char* path, char* resolved) { return g_initRealpath(path, resolved); }
-
-#define realpath InitTestRealpath
-#include NET_IB_CAST_INIT_CC_PATH
-#undef realpath
+#include "transport/net_ib_cast/NetIbCastInit.h"
 
 namespace {
 
@@ -50,7 +43,7 @@ class NetIbCastInitMicrotest : public ::testing::Test {
   void TearDown() override {
     world_.reset();
     NetIbCastResetGlobals();
-    netRefCount = 0;
+    NetIbCastResetInitRefCount();
     ResetEnvFakes();
     ResetIbvwrapFakes();
     ResetMlx5dvwrapFakes();
@@ -74,7 +67,7 @@ class NetIbCastInitMicrotest : public ::testing::Test {
   void ResetForAnotherInit() {
     World().Quiesce();
     NetIbCastResetGlobals();
-    netRefCount = 0;
+    NetIbCastResetInitRefCount();
   }
 
   // A physical device as IbCastInitDevices leaves it, for the tests that start past discovery.
@@ -1150,7 +1143,7 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_IbHca_IsAnnouncedOncePerProce
     EXPECT_TRUE(LogHas(log, "NCCL_IB_HCA set to ionic_0")) << log;
     world.Quiesce();
     NetIbCastResetGlobals();
-    netRefCount = 0;
+    NetIbCastResetInitRefCount();
     log = CaptureLog([&] { ASSERT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess); });
     EXPECT_FALSE(LogHas(log, "NCCL_IB_HCA set to")) << log;
   });
