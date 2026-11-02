@@ -151,6 +151,9 @@ struct Pm4Submission {
   /// The processor logs that reason and invokes fault_queue; the CP then invokes each
   /// installed completion callback for every queued submission with false.
   std::function<util::FailureOr<bool>(util::DiagnosticEmitter)> ready;
+  /// @brief Report submission retirement, failure, or cancellation.
+  /// @details Called with true after successful retirement, including an empty stream,
+  /// or false when the submission fails or is cancelled.
   std::function<void(bool)> complete;
 };
 
