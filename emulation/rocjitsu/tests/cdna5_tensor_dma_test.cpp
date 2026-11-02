@@ -1118,8 +1118,9 @@ TEST(Gfx1250ExecutionTest, TensorDmaIssueFiresAfterAStoreSamplesLds) {
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims) {
-  // "tile_dim0: If 0, this tensor is a NOP" (CDNA5 ISA, Table 80). Pipelines
-  // empty a prefetch this way and leave the higher tile dimensions set.
+  // A zero tile_dim0 makes the tensor a NOP (CDNA5 ISA 10.11.4, D# field
+  // tile_dim0). Pipelines empty a prefetch this way and leave the higher tile
+  // dimensions set.
   constexpr uint64_t kGlobal = 0x188000;
   constexpr uint32_t kSentinel = 0x5e5e5e5eu;
   Gfx1250Sim sim;
@@ -1233,7 +1234,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
-  // A gather may have zero valid indices (CDNA5 ISA, Table 80), and a zero
+  // A gather may have zero valid indices (CDNA5 ISA 10.11.4, D# field
+  // tile_dim1, which gather mode uses as the valid-index count), and a zero
   // tile_dim0 makes it a NOP like any other tile.
   constexpr uint64_t kGlobal = 0x189000;
   constexpr uint32_t kSentinel = 0x5e5e5e5eu;
