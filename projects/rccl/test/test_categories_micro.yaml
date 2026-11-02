@@ -113,6 +113,8 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # plugin/rma.cc
+      - "RmaPluginInitTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
@@ -183,6 +185,8 @@ test_categories:
       - "ProcessIsolatedRunnerMicrotest.*"
       # register/*.cc
       - "Register*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:
