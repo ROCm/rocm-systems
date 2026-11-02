@@ -33,12 +33,12 @@ are just examples, custom implementations may make other design decisions.
 
 ### Plugin name and supporting multiple GIN plugins
 
-When NCCL is initialized, it will look for a `libnccl-gin.so` library and
+When RCCL is initialized, it will look for a `librccl-gin.so` library and
 dynamically load it, then look for symbols inside the library.
 
 The `NCCL_GIN_PLUGIN` environment variable allows users to select one or more
-GIN plugins. If set to a bare plugin name such as `mygin`, NCCL can load a
-library named `libnccl-gin-mygin.so`. `NCCL_GIN_PLUGIN` can also be set to a
+GIN plugins. If set to a bare plugin name such as `mygin`, RCCL can load a
+library named `librccl-gin-mygin.so`. `NCCL_GIN_PLUGIN` can also be set to a
 shared library file name or an absolute path to the plugin file. Multiple
 plugins can be specified as a comma-separated list.
 
@@ -46,8 +46,8 @@ For example, any of the following can be used to load a plugin:
 
 ```shell
 export NCCL_GIN_PLUGIN=mygin
-export NCCL_GIN_PLUGIN=libnccl-gin-mygin.so
-export NCCL_GIN_PLUGIN=/path/to/your/plugin/libnccl-gin-mygin.so
+export NCCL_GIN_PLUGIN=librccl-gin-mygin.so
+export NCCL_GIN_PLUGIN=/path/to/your/plugin/librccl-gin-mygin.so
 ```
 
 Set the `LD_LIBRARY_PATH` to include the plugin directory when using a bare name
@@ -111,18 +111,18 @@ and the plugins. NCCL decides how user contexts map to plugin connections and co
 
 ### Operations
 
-**Put/PutValue**  
+**Put/PutValue**
 Put moves data from a local source buffer to a (likely remote) target buffer. PutValue places
 a value in a target buffer. Puts are not required to be completed in the order they are requested.
 
 A single call to `Put` or `PutValue` may include a signal or counter operation. See below for
 more details.
 
-**Get**  
+**Get**
 Get moves data from a (likely remote) source buffer to a local target buffer. Gets are
 not required to be completed in the order they are requested.
 
-**Signal**  
+**Signal**
 Signal increments a target memory address by a fixed value. There's 2 types of visibility guarantees:
 strong and weak. The visibility of a *strong* signal guarantees the completion/visibility of all previous
 puts and signals, including the bundled put in the case of put+signal. The visibility of a *weak*
@@ -135,12 +135,12 @@ current signal value, while `waitSignal` blocks until the signal meets or exceed
 value. `resetSignal` reinitializes a signal before reuse and must not race with concurrent
 signal updates.
 
-**Flush**  
+**Flush**
 Flush ensures all previous operations are locally complete. In the case of gets, flush indicates
 the data is visible and ready to use. In the case of puts, flush indicates source buffers are
 ready for reuse.
 
-**Counter**  
+**Counter**
 Counter increments a local memory address by a fixed value. The completion/visibility of a counter
 guarantees the local completion of a bundled put. It does not guarantee completion at the target,
 nor local completion of any previous puts.
@@ -254,7 +254,7 @@ A `ncclGinCtx` contains metadata associated with a GIN context. The most importa
 
 This is the pointer returned as `ginHandle` in `regMrSym`.
 
-**Coop**  
+**Coop**
 
 In many places, the backend API supplies a `coop` argument. `coop` specifies the threads
 calling/participating in the operation. `coop` can be used for both correctness and performance:
@@ -276,14 +276,14 @@ Some backends choose to "reset" indexed signals by caching an offset (the value 
 Accordingly, `GetSignalPtr` returns an offset. Backends can return an offset of 0 if `ResetSignal`
 actually sets the memory location of the indexed signal to 0.
 
-**Abort flag**  
+**Abort flag**
 
 Many blocking functions supply an `abortFlag` argument. When true, the function should return
 immediately. The function (and corresponding state) can have undefined behavior if it returns
 early due to an abort flag. `abortFlag` may be null, in which case the function should return
 only when the requested operation is complete.
 
-**Counter**  
+**Counter**
 
 A counter is a 64-bit *local* memory location allocated by the custom implementation. All
 writes are done via the backend API (e.g. either `ResetCounter` or `Put` (with counter)).
@@ -291,14 +291,14 @@ All reads are done via `GetCounterPtr`, which should return a device-side addres
 be read using CUDA atomic operations (e.g. `cuda::atomic_ref`). Similar to signals,
 `GetCounterPtr` returns an offset in case backends wish to "reset" counters by caching an offset.
 
-**DescriptorSmem**  
+**DescriptorSmem**
 
 `DescriptorSmem` is a 64-byte, user-allocated, shared-memory scratch pad. As an optional
 performance improvement, implementations may use this scratch pad instead of reallocating
 internal structs on each API call. Users can reuse one `DescriptorSmem` across many
 non-overlapping GIN calls, but they do not have to.
 
-**Optimization flags**  
+**Optimization flags**
 
 GIN exposes several optimization flags in the form of `ncclGinOptFlags`.
 The flags include:
@@ -351,7 +351,7 @@ make -C plugins/gin/example
 Set the `LD_LIBRARY_PATH` to include the example plugin directory:
 
 ```shell
-export LD_LIBRARY_PATH=/path/to/nccl/plugins/gin/example:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/path/to/rccl/plugins/gin/example:$LD_LIBRARY_PATH
 ```
 
 Set `NCCL_GIN_PLUGIN` to either the plugin name, the shared library file name, or
@@ -359,8 +359,8 @@ the absolute path to the plugin file. Any of the following can work:
 
 ```shell
 export NCCL_GIN_PLUGIN=example
-export NCCL_GIN_PLUGIN=libnccl-gin-example.so
-export NCCL_GIN_PLUGIN=/path/to/nccl/plugins/gin/example/libnccl-gin-example.so
+export NCCL_GIN_PLUGIN=librccl-gin-example.so
+export NCCL_GIN_PLUGIN=/path/to/rccl/plugins/gin/example/librccl-gin-example.so
 ```
 
-NCCL will automatically discover and load the plugin based on the exported symbol names.
+RCCL will automatically discover and load the plugin based on the exported symbol names.

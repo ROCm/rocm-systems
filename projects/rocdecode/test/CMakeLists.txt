@@ -20,7 +20,7 @@
 # SOFTWARE.
 #
 # ##############################################################################
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 if(NOT DEFINED ENHANCED_MESSAGE)
   string(ASCII 27 Esc)
@@ -43,7 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
+if (NOT WIN32 AND NOT DEFINED CMAKE_CXX_COMPILER)
   set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
   set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
 endif()
@@ -159,6 +159,14 @@ macro(set_test_env TEST_NAME)
   endif()
 endmacro()
 
+# Helper macro: report a decode test as skipped, not failed, when the GPU's VCN doesn't support the
+# stream's codec (e.g. AV1 on gfx90a). videoDecodeRaw and videoDecode print this message and exit
+# with 77 in that case. ctest --build-and-test reports any non-zero test exit code as 1, so match
+# the message instead of setting SKIP_RETURN_CODE.
+macro(set_codec_skip TEST_NAME)
+  set_property(TEST ${TEST_NAME} PROPERTY SKIP_REGULAR_EXPRESSION "Codec not supported on GPU, skipping!")
+endmacro()
+
 # Option to enable extended tests
 option(ENABLE_EXTENDED_TESTS "Enable extended FFmpeg-based tests" OFF)
 
@@ -175,6 +183,7 @@ add_test(
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.265
 )
 set_test_env(video_decodeRaw-HEVC)
+set_codec_skip(video_decodeRaw-HEVC)
 
 # 2 - videoDecodeRaw AVC
 add_test(
@@ -189,6 +198,7 @@ add_test(
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.264
 )
 set_test_env(video_decodeRaw-AVC)
+set_codec_skip(video_decodeRaw-AVC)
 
 # 3 - videoDecodeRaw AV1
 add_test(
@@ -203,6 +213,7 @@ add_test(
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.ivf
 )
 set_test_env(video_decodeRaw-AV1)
+set_codec_skip(video_decodeRaw-AV1)
 
 # 4 - videoDecodeRaw VP9
 add_test(
@@ -217,6 +228,7 @@ add_test(
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
 )
 set_test_env(video_decodeRaw-VP9)
+set_codec_skip(video_decodeRaw-VP9)
 
 # 5 - rocdecDecode
 add_test(
@@ -258,6 +270,23 @@ add_test(
 )
 set_test_env(video_decodeCaps)
 
+# Windows only - rocDecodeMissingVaLibTest: rocdecode.dll must fail cleanly when the
+# TheRock VA-API DLLs cannot be found. TheRock builds load them at runtime; a
+# directly linked rocdecode.dll could not even be loaded without them.
+if(WIN32 AND USING_THE_ROCK)
+  add_test(
+    NAME
+    rocDecode_Missing_VA_Lib_Test
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+              --build-and-test "${ROCM_PATH}/share/rocdecode/test/rocDecodeMissingVaLibTest"
+                                "${CMAKE_CURRENT_BINARY_DIR}/rocdecodemissingvalibtest"
+              --build-generator "${CMAKE_GENERATOR}"
+              --test-command "rocdecodemissingvalibtest"
+  )
+  set_test_env(rocDecode_Missing_VA_Lib_Test)
+endif()
+
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   # 8 - videoDecode HEVC
   add_test(
@@ -272,6 +301,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
   )
   set_test_env(video_decode-HEVC)
+  set_codec_skip(video_decode-HEVC)
 
   # 9 - videoDecode AVC
   add_test(
@@ -286,6 +316,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-H264.mp4
   )
   set_test_env(video_decode-AVC)
+  set_codec_skip(video_decode-AVC)
 
   # 10 - videoDecode AV1
   add_test(
@@ -300,6 +331,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
   )
   set_test_env(video_decode-AV1)
+  set_codec_skip(video_decode-AV1)
 
   # 11 - videoDecode VP9
   add_test(
@@ -314,6 +346,7 @@ if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
             -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
   )
   set_test_env(video_decode-VP9)
+  set_codec_skip(video_decode-VP9)
 
   # 12 - videoDecodePerf
   add_test(

@@ -27,9 +27,5 @@ find_path(ROCSHMEM_INCLUDE_DIR
 find_library(ROCSHMEM_LIBRARY
     NAMES rocshmem
         HINTS ${ROCSHMEM_INSTALL_DIR}/lib)
-  
-## -- todo --- what to do with verbs? add to handle args call below? -- ##
-find_library(IBVERBS ibverbs)
 
 find_package_handle_standard_args(rocshmem_static DEFAULT_MSG ROCSHMEM_INCLUDE_DIR ROCSHMEM_LIBRARY)
-## mark_as_advanced(MSCCLPP_INCLUDE_DIRS MSCCLPP_NCCL_STATIC_LIB) add this for Rocshmem?

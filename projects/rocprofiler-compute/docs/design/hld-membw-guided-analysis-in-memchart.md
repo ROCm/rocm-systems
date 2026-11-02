@@ -1,7 +1,8 @@
 # Memory Bandwidth Analysis in Memory Chart
 
-**Status:** Draft (architecture revision)
+**Status:** Implemented (Phase A: pipeline, Phase B: chart integration)
 **Target:** rocprofiler-compute, gfx950, analyze mode (CLI)
+**User docs:** `docs/how-to/membw_analysis.rst`
 
 ---
 
@@ -66,7 +67,7 @@ Downstream tools (Optiq) hardcode the memory chart structure rather than consumi
 
 | Item | Notes |
 |------|-------|
-| TUI / GUI rendering | Future work -- would consume the same renderer-agnostic analysis result model |
+| TUI / GUI rendering | Not planned -- the TUI and GUI analyze modes were removed in https://github.com/ROCm/rocm-systems/pull/12220 |
 | Non-CLI output and Optiq integration (PS4) | HTML, structured JSON, Optiq database persistence, and the Optiq JSON schema contract are downstream concerns. `MemBwAnalysisResult` is JSON-serializable to support future integration, but defining export schemas is out of scope. See Open Items for the HTML rendering and Optiq discussions. |
 
 ---
@@ -89,7 +90,7 @@ Show bottleneck detection results on the memory chart at the relevant memory lev
 - **[FR1.2a]** When no bottlenecks are detected across GL1/GL2/EA, print a single status line below the chart: `Memory Bandwidth Analysis: No bottlenecks detected (GL1 / GL2 / EA).`
 - **[FR1.3]** Show supporting metric values alongside each active bottleneck (e.g. `stall rate = 15.2%`). Multiple metrics use the format: `metric1=42% | metric2=1.2M`.
 - **[FR1.4]** CLI renderer only.
-- **[FR1.5]** This feature requires both `--experimental` and `--membw-analysis` flags. gfx950 only.
+- **[FR1.5]** Profile mode requires both `--experimental` and `--membw-analysis` flags. Analyze mode auto-detects from `profiling_config.yaml`. gfx950 only.
 
 **Acceptance (FR1.1):** Given a profiled workload from the membw analysis test suite with a known bottleneck, the engine must mark the corresponding leaf node active and all mutually exclusive siblings inactive.
 
@@ -107,7 +108,7 @@ When a bottleneck is detected, provide textual guidance to the user.
 
 ### FR3 -- Gate consolidation (PS2)
 
-The `--membw-analysis` flag is currently checked in multiple independent callsites across the codebase. Consolidate these to a single policy function that returns an availability status (available, arch unsupported, counters missing, or disabled by flag). All existing gate callsites delegate to this function.
+Profile mode injects block 30 into `filter_blocks` at profile time and records `membw_analysis: true` in `profiling_config.yaml`. Analyze mode reads this config and auto-detects whether membw data was collected, with no explicit flag needed.
 
 ---
 
@@ -208,7 +209,7 @@ flowchart TD
     DB -- raw counters --> CALC[[calc_metrics]]
     B30 -- equations --> CALC
 
-    CALC -- "DataFrame<br/>(Metric -> Value)" --> MC[[mem_chart_gfx9<br/>plot_mem_chart]]
+    CALC -- "DataFrame<br/>(Metric -> Value)" --> MC[[memory_chart.render<br/>plot_mem_chart]]
     CALC -- "DataFrame<br/>(Metric -> Value)" --> B30T[[Block 30 tables<br/>flat metric display]]
 
     MC -- chart string --> TTY[tty.py<br/>CLI output]
@@ -236,7 +237,7 @@ flowchart TD
 
     ENG -- "MemBwAnalysisResult<br/>(nodes + guidance blocks)" --> AR{Analysis result}
 
-    AR -- "active nodes<br/>+ supporting metrics" --> MC[[mem_chart_gfx9<br/>plot_mem_chart<br/>+ panel annotations]]
+    AR -- "active nodes<br/>+ supporting metrics" --> MC[[memory_chart.render<br/>plot_mem_chart<br/>+ panel annotations]]
     AR -- "guidance blocks<br/>(filled templates)" --> GR[[render_membw_guidance<br/>post-chart text]]
     CALC -- "DataFrame<br/>(unchanged)" --> B30T[[Block 30 tables]]
 
@@ -292,7 +293,7 @@ flowchart LR
 
     P3b["<b>3b -- Aggregation audit</b><br/><i>Modify:</i> 3000_mem_bw.yaml<br/><br/><i>Input:</i> current YAML equations<br/><i>Output:</i> all tree-referenced<br/>metrics use SUM/SUM"]
 
-    P4["<b>4 -- UX</b><br/><i>New:</i> guidance.py<br/><i>Modify:</i> mem_chart_gfx9.py,<br/>tty.py<br/><br/><i>Input:</i> MemBwAnalysisResult<br/><i>Output:</i> annotated chart +<br/>guidance text in CLI"]
+    P4["<b>4 -- UX</b><br/><i>New:</i> guidance.py<br/><i>Modify:</i> memory_chart/render.py,<br/>tty.py<br/><br/><i>Input:</i> MemBwAnalysisResult<br/><i>Output:</i> annotated chart +<br/>guidance text in CLI"]
 
     P5["<b>5 -- Ship</b><br/><i>New:</i> e2e golden tests<br/><i>Modify:</i> test_profiler_base.py<br/><br/><i>Input:</i> membw_analysis_test_suite<br/><i>Output:</i> snapshot-verified<br/>CLI output"]
 
@@ -303,7 +304,7 @@ flowchart LR
     P4 --> P5
 ```
 
-All new files live under `src/rocprof_compute_analysis/membw/`. Implementation details for all phases are in `lld-membw-guided-analysis-in-memchart.md`.
+All new files live under `src/membw_analysis/`. Implementation details for all phases are in `lld-membw-guided-analysis-in-memchart.md`.
 
 ---
 

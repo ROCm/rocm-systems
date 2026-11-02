@@ -325,6 +325,11 @@ spm_construct_packet(const rocprofiler_agent_id_t                     agent_id,
                 params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
                                   AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK});
                 break;
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, param.value});
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+                                  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK});
+                break;
             case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
             case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:
                 ROCP_FATAL << "Invalid SPM parameter type: " << static_cast<int>(param.type);

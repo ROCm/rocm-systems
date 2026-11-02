@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from copy import deepcopy
 import os
 from pathlib import Path
 
@@ -8,8 +9,20 @@ import pytest
 
 from amdisa.codegen import CodeGenerator
 from amdisa.gpuisa import Instruction
-from amdisa.isa_profile import Cdna4Profile, CdnaProfile, Rdna4Profile
+from amdisa.isa_profile import (
+    Cdna1Profile,
+    Cdna2Profile,
+    Cdna4Profile,
+    Cdna5Profile,
+    CdnaProfile,
+    Rdna1Profile,
+    Rdna2Profile,
+    Rdna3Profile,
+    Rdna3_5Profile,
+    Rdna4Profile,
+)
 from amdisa.parser import Parser
+from amdisa.semantics import derive_semantics
 
 
 def _mrisa_dir() -> Path:
@@ -117,3 +130,134 @@ def test_modifier_availability_requires_explicit_encoding_provenance():
     with pytest.raises(ValueError, match='V_SYNTHETIC.*encoding provenance'):
         generator._instruction_supports_dpp(unknown, 'ENC_VOP1')
     assert not generator._instruction_supports_dpp(known_absent, 'ENC_VOP1')
+
+
+@pytest.mark.parametrize(
+    'arch,profile,encoding,name',
+    [
+        ('rdna1', Rdna1Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna2', Rdna2Profile(), 'ENC_VOP3', 'V_LSHLREV_B64'),
+        ('rdna3', Rdna3Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+        ('rdna3_5', Rdna3_5Profile(), 'ENC_MIMG', 'IMAGE_GATHER4H'),
+    ],
+)
+def test_subdecoder_keeps_opcodes_across_primary_prefixes(
+    arch, profile, encoding, name
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile).parse()
+    inst = _find_instruction(spec, encoding, name)
+    enc = spec.encoding_map[encoding]
+    # The generator emits one named table for every primary prefix of an encoding.
+    # Every such table must route the documented instruction, including opcodes
+    # whose prefix was first encountered without another instruction beside it.
+    for index in set(enc.primary_dt_ptrs) - {-1}:
+        entry = spec.primary_decode_table[index]
+        assert entry.sub_decode_funcs[inst.opcode] == f'decode{inst.fmt_name}'
+
+
+@pytest.mark.parametrize(
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+    ],
+)
+def test_dpp8_admission_keeps_staged_sources_within_one_dword(arch, profile):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile).parse()
+    generator = CodeGenerator(spec, '')
+    admitted = 0
+    for enc in spec.encoding_map.values():
+        if profile.is_alt_encoding(enc.enc_name):
+            continue
+        _, dpp8_struct = generator._vop_dpp_struct_names(enc.enc_name)
+        if dpp8_struct is None:
+            continue
+        for inst in enc.insts:
+            if not generator._instruction_supports_dpp8(inst, enc.enc_name):
+                continue
+            admitted += 1
+    if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+        assert admitted == 0
+    else:
+        assert admitted > 0
+
+
+def test_dpp8_admission_rejects_wide_encoded_source():
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    generator = CodeGenerator(spec, '')
+    inst = deepcopy(_find_instruction(spec, 'ENC_VOP1', 'V_MOV_B32'))
+    assert generator._instruction_supports_dpp8(inst, 'ENC_VOP1')
+    generator._encoded_source_operands(inst)[0].size = 64
+
+    with pytest.raises(
+        AssertionError, match='DPP8 requires a source no wider than 32 bits'
+    ):
+        generator._instruction_supports_dpp8(inst, 'ENC_VOP1')
+
+
+def test_dpp8_movrel_rejects_wide_semantic_source(monkeypatch):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    generator = CodeGenerator(spec, '')
+    inst = _find_instruction(spec, 'ENC_VOP1', 'V_MOVRELS_B32')
+    assert generator._instruction_supports_dpp8(inst, 'ENC_VOP1')
+    sem = derive_semantics(inst.name, inst.enc_name)
+    sources, destinations = generator._execute_operand_roles(inst, sem)
+    sources = deepcopy(sources)
+    sources[0].size = 64
+    # Keep encoded admission valid while changing the source MOVREL emits.
+    monkeypatch.setattr(
+        generator, '_execute_operand_roles', lambda *_: (sources, destinations)
+    )
+
+    with pytest.raises(
+        AssertionError, match='DPP8 requires a source no wider than 32 bits'
+    ):
+        generator._gen_execute_body(inst, sem, 'ENC_VOP1')
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT2_F32_F16',
+        'V_DOT2_F32_BF16',
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    ],
+)
+def test_rdna4_floating_dot_dpp_availability(name):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP3P', name)
+    generator = CodeGenerator(spec, '')
+    if name.startswith('V_DOT4_'):
+        assert 'VOP3P_VOP_DPP16' not in inst.available_encodings
+        assert 'VOP3P_VOP_DPP8' not in inst.available_encodings
+    assert generator._instruction_supports_dpp(inst, 'ENC_VOP3P')
+    assert generator._instruction_supports_dpp8(inst, 'ENC_VOP3P')
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_DOT4_I32_IU8',
+        'V_DOT4_U32_U8',
+        'V_DOT8_U32_U4',
+        'V_PK_ADD_F16',
+        'V_PK_ADD_U16',
+    ],
+)
+def test_rdna4_unsupported_packed_dpp_remains_forbidden(name):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna4.xml'), Rdna4Profile()).parse()
+    inst = _find_instruction(spec, 'ENC_VOP3P', name)
+    generator = CodeGenerator(spec, '')
+    assert not generator._instruction_supports_dpp(inst, 'ENC_VOP3P')
+    assert not generator._instruction_supports_dpp8(inst, 'ENC_VOP3P')

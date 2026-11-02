@@ -8,11 +8,26 @@ The video decode picture files sample illustrates decoding an elementary video s
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_pic_files && cd video_decode_pic_files
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_pic_files && cd video_decode_pic_files
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

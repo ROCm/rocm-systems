@@ -83,8 +83,7 @@ void SBitcmp1B64Sopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSetvskipSopc::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_s_setvskip_sopc(*this, wf);
 }
 
 void SSetGprIdxOnSopc::execute_impl(amdgpu::Wavefront &wf) {

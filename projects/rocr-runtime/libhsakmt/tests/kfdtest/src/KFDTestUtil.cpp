@@ -349,6 +349,8 @@ HsaMemoryBuffer::HsaMemoryBuffer(HSAuint64 size, unsigned int node, bool zero, b
         } else {
             m_Flags.ui32.HostAccess = 1;
             m_Flags.ui32.NonPaged = NonPaged ? 1 : 0;
+            /* NonPaged from a GPU node is VRAM; keep it in system memory */
+            m_Flags.ui32.GTTAccess = NonPaged ? 1 : 0;
             m_Flags.ui32.CoarseGrain = 0;
             m_Flags.ui32.NoNUMABind = 1;
             m_Flags.ui32.Uncached = isUncached;

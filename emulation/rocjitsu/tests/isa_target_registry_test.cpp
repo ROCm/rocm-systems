@@ -428,6 +428,7 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   constexpr std::array kExecutableTargets{
       ROCJITSU_CODE_TARGET_GFX90A,  ROCJITSU_CODE_TARGET_GFX942,  ROCJITSU_CODE_TARGET_GFX950,
       ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX1250,
+      ROCJITSU_CODE_TARGET_GFX1251,
   };
   for (rj_code_target_id_t target : kExecutableTargets) {
     const IsaGpuTargetDescription *binding = registry.find_gpu_target(target);
@@ -436,8 +437,6 @@ TEST(IsaTargetRegistryTest, BuiltinRegistryUsesDescriptorOwnedPublicEnumBindings
   }
   EXPECT_EQ(gfx1250_binding->gfx_target_version, 120500u);
   EXPECT_EQ(gfx1251_binding->gfx_target_version, 120501u);
-  EXPECT_TRUE(gfx1250_binding->capabilities.execution_implemented);
-  EXPECT_FALSE(gfx1251_binding->capabilities.execution_implemented);
   EXPECT_NE(gfx1250_binding->capabilities.instruction_features,
             gfx1251_binding->capabilities.instruction_features);
   EXPECT_EQ(registry.find_default_gpu_target(*gfx1250), gfx1250_binding);

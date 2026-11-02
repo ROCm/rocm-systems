@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gfx1250_vgpr_msb.h
-/// @brief Forward CFG analysis for gfx1250 WAVE_MODE.VGPR_MSB state.
+/// @brief Forward CFG analysis for CDNA5 WAVE_MODE.VGPR_MSB state.
 
 #pragma once
 
@@ -18,14 +18,16 @@ namespace rocjitsu {
 
 class Instruction;
 
-/// @brief Resolve gfx1250 encoded VGPR operands to their 256-register bank.
+/// @brief Resolve CDNA5 encoded VGPR operands to their 256-register bank.
 ///
-/// @details gfx1250 stores only the low eight bits of a VGPR index in vector
+/// @details CDNA5 stores only the low eight bits of a VGPR index in vector
 /// instructions. S_SET_VGPR_MSB and MODE register writes provide two high bits
 /// independently for DST, SRC0, SRC1, and SRC2. This analysis propagates those
 /// four fields through a kernel-local CFG. A field is known at a join only when
 /// every reachable predecessor agrees; otherwise bank_before() returns
-/// std::nullopt so clients can behave conservatively.
+/// std::nullopt so clients can behave conservatively. The concrete target
+/// capability selects whether MODE setreg instructions use gfx1250's clobber
+/// and adjacency-hazard semantics or ordinary right-justified HWREG writes.
 class Gfx1250VgprMsbAnalysis {
 public:
   /// @param text Raw .text image, used to read S_SETREG_IMM32_B32 literals safely
@@ -36,10 +38,17 @@ public:
   ///        device function whose address is only ever taken has no decoded edge
   ///        into it, so without this its blocks stay unreachable and every bank
   ///        query over them answers nullopt. See the note on entry_state().
+  /// @param setreg_vgpr_msb_fixup Whether MODE setreg instructions clobber all
+  ///        VGPR-MSB fields from source bits 19:12 and S_SETREG_IMM32_B32(MODE)
+  ///        can drop an immediately following S_SET_VGPR_MSB. Pass the selected
+  ///        concrete target's capability; gfx1250 enables it and gfx1251 does
+  ///        not. The default preserves the class's original gfx1250-only
+  ///        contract.
   Gfx1250VgprMsbAnalysis(KernelBlockScope blocks, BasicBlock *entry,
                          std::span<const ScopedCfgEdge> extra_edges = {},
                          std::span<const uint8_t> text = {},
-                         std::span<BasicBlock *const> additional_entries = {});
+                         std::span<BasicBlock *const> additional_entries = {},
+                         bool setreg_vgpr_msb_fixup = true);
   ~Gfx1250VgprMsbAnalysis();
 
   Gfx1250VgprMsbAnalysis(const Gfx1250VgprMsbAnalysis &) = delete;

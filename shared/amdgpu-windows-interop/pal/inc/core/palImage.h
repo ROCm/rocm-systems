@@ -457,7 +457,11 @@ struct PresentableImageCreateInfo
                                         ///  Implies an array size of 2. Fullscreen must be set.
             uint32 turbosync    :  1;   ///< Image supports turbosync flip
             uint32 peerWritable :  1;   ///< Indicates if the memory allocated will be writable by other devices
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
             uint32 tmzProtected :  1;   ///< Indicates this presenatble image's memory is tmz Protected.
+#else
+            uint32 placeholder1 :  1;
+#endif
 #if PAL_AMDGPU_BUILD
             uint32 initializeToZero :  1; ///< If set, PAL will request that the host OS zero-initializes
                                           ///  the allocation upon creation, currently, only GpuHeapLocal and
@@ -496,6 +500,13 @@ struct PresentableImageCreateInfo
     ///          @ref GetImageCreateInfo.
     uint32                viewFormatCount; ///< Must be 0, AllCompatibleFormats, or the length of pViewFormats.
     const SwizzledFormat* pViewFormats;    ///< See the block comment above for a full description.
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Sets the tmz mode for this image, indicates this presentable image's memory is tmz protected if not set to
+    /// Disabled. Note that some TmzMode values additionally restrict GPU access to specific groups of HW functionality
+    /// (e.g. HwdrmPlus forbids shader access).
+    TmzMode tmzMode;
+#endif
 };
 
 /// Specifies properties for private screen @ref IImage image creation.  Input structure to

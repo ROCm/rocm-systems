@@ -37,6 +37,8 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  if (inst_.simm16 & 1u)
+    flags_ |= PROGRAM_TERMINATOR;
 }
 
 namespace detail {
@@ -588,6 +590,7 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -610,6 +613,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

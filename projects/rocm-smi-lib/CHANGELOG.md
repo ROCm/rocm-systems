@@ -4,6 +4,18 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 10.2.0
+
+### Added
+
+- **Deprecation warnings**.
+  - `rsmi_init()` prints a deprecation warning to stderr, and the installed headers print a compile-time message.
+
+### Changed
+
+- **ROCm SMI is included in TheRock builds again**.
+  - It was left out of ROCm 10.1 and remains deprecated. Use [AMD SMI](https://github.com/ROCm/amdsmi) instead.
+
 ## rocm_smi_lib for ROCm 10.0.0
 
 ### Changed

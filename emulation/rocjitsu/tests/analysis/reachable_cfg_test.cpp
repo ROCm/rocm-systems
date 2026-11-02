@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
@@ -114,6 +115,38 @@ protected:
   std::unique_ptr<TestCodeObject> object_;
   util::StringDiagnostic error_;
 };
+
+std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, uint16_t hwreg,
+                                                        uint32_t literal) {
+  const auto set_banks = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = initial_banks});
+  const auto setreg = cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = hwreg});
+  return {
+      0xBE804700u, // 0x00: s_get_pc_i64 s[0:1].
+      0xA980FE00u,
+      60u,
+      0u, // 0x04: s_add_nc_u64 ..., lit64(60) -> target 0x40.
+      set_banks[0],
+      0xD761002Cu,
+      0x02010000u, // 0x14: v_writelane_b32 encoded v44, s0, 0.
+      0xD761002Cu,
+      0x02010201u, // 0x1c: v_writelane_b32 encoded v44, s1, 1.
+      setreg[0],
+      literal,
+      0xD7600000u,
+      0x0201012Cu, // 0x2c: v_readlane_b32 s0, encoded v44, 0.
+      0xD7600001u,
+      0x0201032Cu,                              // 0x34: v_readlane_b32 s1, encoded v44, 1.
+      0xBE9E4900u,                              // 0x3c: s_swap_pc_i64 s[30:31], s[0:1].
+      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5), // 0x40: target/continuation.
+  };
+}
+
+size_t static_fixup_count(const Blocks &blocks) {
+  size_t count = 0;
+  for (const auto &block : blocks)
+    count += block->static_indirect_call_fixups().size();
+  return count;
+}
 
 TEST_F(ReachableCfg, SkipsMalformedDisconnectedTextAndPreservesOffsets) {
   const auto result = build_reachable({kInvalid, kNop, kEnd, kInvalid}, {4});
@@ -436,7 +469,7 @@ TEST_F(ReachableCfg, RepeatsDiscoveryThroughNewlyDecodedCode) {
   auto words = indirect_branch_words();
   words.resize(13, kInvalid);
   const auto second = indirect_branch_words();
-  std::copy(second.begin(), second.end(), words.begin() + 6);
+  std::ranges::copy(second, words.begin() + 6);
   const auto result = build_reachable(words);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(offsets(result.value()), (std::vector<uint64_t>{0, 16, 24, 40, 48}));
@@ -810,6 +843,88 @@ TEST_F(ReachableCfg, SharedDecodePoliciesRejectInapplicableOptions) {
   options.entry_policy = ExternalEntryPolicy::InferPredecessorless;
   EXPECT_TRUE(BasicBlock::build_cfg(object, *decoder, kArch, options, error_.emitter()).failed());
   EXPECT_NE(error_.message().find("requires explicit external entries"), std::string::npos);
+}
+
+TEST_F(ReachableCfg, FullSectionBuildPreservesExplicitTargetForTargetlessObject) {
+  constexpr uint16_t kModeBit25Hwreg = 1u | (25u << 6);
+  const std::vector<uint32_t> words =
+      target_sensitive_lane_stash_words(/*initial_banks=*/0x41, kModeBit25Hwreg, /*literal=*/1);
+  TestCodeObject object;
+  object.add_text(words);
+  auto decoder = Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_TARGET_GFX1251);
+  ASSERT_NE(decoder, nullptr);
+
+  const auto result = BasicBlock::build(
+      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, error_.emitter(), {},
+      ExternalEntryPolicy::InferPredecessorless, {}, ROCJITSU_CODE_TARGET_GFX1251);
+
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(static_fixup_count(result.value()), 1u)
+      << "gfx1251 must preserve the bank-one PC stash across the disjoint MODE write";
+}
+
+TEST_F(ReachableCfg, ReachableBuildPreservesExplicitTargetForTargetlessObject) {
+  constexpr uint16_t kAllVgprMsbFieldsHwreg = 1u | (12u << 6) | (7u << 11);
+  const std::vector<uint32_t> words = target_sensitive_lane_stash_words(
+      /*initial_banks=*/0, kAllVgprMsbFieldsHwreg, /*literal=*/5);
+  TestCodeObject object;
+  object.add_text(words);
+  auto decoder = Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_TARGET_GFX1251);
+  ASSERT_NE(decoder, nullptr);
+  const std::array<uint64_t, 1> entries = {0};
+
+  const auto result = BasicBlock::build_cfg(
+      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5,
+      {.target = ROCJITSU_CODE_TARGET_GFX1251, .entries = entries}, error_.emitter());
+
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(static_fixup_count(result.value()), 0u)
+      << "gfx1251 must not recover the bank-zero stash after MODE selects source bank one";
+}
+
+const BasicBlock *block_at(const Blocks &blocks, uint64_t offset) {
+  const auto it = std::ranges::find(blocks, offset, &BasicBlock::start_offset);
+  return it == blocks.end() ? nullptr : it->get();
+}
+
+TEST_F(ReachableCfg, JoinKeepsItsFallthroughEdge) {
+  // If/else through S_CBRANCH_I_FORK. The join's resume target comes from SGPRs,
+  // but its second arrival falls through to the code after it.
+  const auto result = build_reachable({
+      0xB8A21741u, // 0x00 s_getreg_b32 s34, hwreg(HW_REG_MODE, 29, 3)
+      0xBEA0017Eu, // 0x04 s_mov_b64 s[32:33], exec
+      0xB86A0002u, // 0x08 s_cbranch_i_fork vcc, THEN
+      0x7E000282u, // 0x0C v_mov_b32 v0, 2
+      0xBF820001u, // 0x10 s_branch JOIN
+      0x7E000281u, // 0x14 THEN: v_mov_b32 v0, 1
+      0xBE802E22u, // 0x18 JOIN: s_cbranch_join s34
+      0xBEFE0120u, // 0x1C s_mov_b64 exec, s[32:33]
+      kEnd,        // 0x20
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x0C, 0x14, 0x18, 0x1C}));
+  EXPECT_EQ(successors(*block_at(blocks, 0x00)), (std::vector<uint64_t>{0x0C, 0x14}));
+  const BasicBlock *join = block_at(blocks, 0x18);
+  EXPECT_EQ(successors(*join), (std::vector<uint64_t>{0x1C}));
+  // The SGPR-held resume target is still unknown.
+  EXPECT_EQ(join->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, GForkKeepsItsFallthroughEdge) {
+  const auto result = build_reachable({
+      0x9480246Au, // 0x00 s_cbranch_g_fork vcc, s[36:37]
+      0x7E000282u, // 0x04 v_mov_b32 v0, 2
+      0xBE802E22u, // 0x08 s_cbranch_join s34
+      kEnd,        // 0x0C
+  });
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const Blocks &blocks = result.value();
+  ASSERT_EQ(offsets(blocks), (std::vector<uint64_t>{0x00, 0x04, 0x0C}));
+  const BasicBlock *fork = block_at(blocks, 0x00);
+  EXPECT_EQ(successors(*fork), (std::vector<uint64_t>{0x04}));
+  EXPECT_EQ(fork->successor_issue(), Issue::IndirectControlFlow);
+  EXPECT_EQ(successors(*block_at(blocks, 0x04)), (std::vector<uint64_t>{0x0C}));
 }
 
 } // namespace

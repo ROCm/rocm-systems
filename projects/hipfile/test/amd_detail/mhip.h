@@ -52,5 +52,6 @@ struct MHip : Hip {
     MOCK_METHOD(int, hipGetDevice, (), (const, override));
     MOCK_METHOD(void, hipSetDevice, (int device_id), (const, override));
     MOCK_METHOD(int, hipGetDeviceCount, (), (const, override));
+    MOCK_METHOD(hipUUID, hipDeviceGetUuid, (int device_id), (const, override));
 };
 }

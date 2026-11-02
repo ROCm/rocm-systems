@@ -65,8 +65,10 @@ enum class finalize_reason
 // resync magnitude (2.0-2.7 ms observed) with generous margin -- these are seconds,
 // far above the ~100 ms kKfdFutureSlackNs the after_now clamp still absorbs. Both
 // tests are written as subtractions so nothing wraps at the UINT64_MAX boundary.
-constexpr uint64_t kMaxStaleNs  = 1'000'000'000;  // 1 s before enqueue
-constexpr uint64_t kMaxFutureNs = 1'000'000'000;  // 1 s past now
+// The future bound also admits a fixed GPU timestamp epoch offset (~10.43 s on
+// MI450 A0), which the after_now clamp then repairs like the signal path does.
+constexpr uint64_t kMaxStaleNs  = 1'000'000'000;   // 1 s before enqueue
+constexpr uint64_t kMaxFutureNs = 60'000'000'000;  // 60 s past now
 
 // Everything the finalizer learned, for diagnostics.
 struct finalize_detail

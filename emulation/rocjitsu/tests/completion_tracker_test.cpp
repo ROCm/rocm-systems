@@ -49,7 +49,8 @@ public:
       return failure_outcome_;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     ++successful_reads_[address];
     return VmAccessOutcome::Complete;
   }
@@ -58,7 +59,7 @@ public:
                         std::span<const std::byte> bytes) override {
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
@@ -201,7 +202,7 @@ public:
   CompletionTracker tracker;
   InterruptSubscription subscription;
   CompletionEndCounter *end_counter = nullptr;
-  std::vector<AqlQueueRecord> queues;
+  std::vector<ComputeQueueRecord> queues;
   uint32_t retired = 0;
   uint32_t interrupts = 0;
 };
@@ -288,6 +289,25 @@ TEST(CompletionTrackerTest, RetryKeepsTheAddressSpaceSnapshotThatStartedPublicat
   EXPECT_EQ(replacement->successful_stores(CompletionFixture::kMailbox), 0u);
 }
 
+TEST(CompletionTrackerTest, RevokedPublicationSnapshotBecomesTerminal) {
+  CompletionFixture fixture;
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
+                            CompletionFixture::kSignal + CompletionFixture::kValueOffset);
+
+  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(first.retry_pending);
+  ASSERT_FALSE(first.terminal_fault);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second.retry_pending);
+  ASSERT_TRUE(second.terminal_fault);
+  EXPECT_EQ(second.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_TRUE(fixture.queues.front().entries.front().terminal_faulted);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
 TEST(CompletionTrackerTest, UnavailableQueueDoesNotStarveIndependentQueueRetirement) {
   constexpr uint64_t kSecondSignal = 0x400;
   constexpr uint64_t kSecondMailbox = 0x480;
@@ -298,7 +318,7 @@ TEST(CompletionTrackerTest, UnavailableQueueDoesNotStarveIndependentQueueRetirem
   fixture.memory->store(kSecondSignal + CompletionFixture::kMailboxOffset, kSecondMailbox);
   fixture.memory->store(kSecondSignal + CompletionFixture::kEventOffset, kSecondEvent);
 
-  AqlQueueRecord second_queue{};
+  ComputeQueueRecord second_queue{};
   second_queue.fanout_replica = true;
   DispatchEntry second_entry{};
   second_entry.dispatch_id = 8;

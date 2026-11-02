@@ -53,9 +53,15 @@ rocprofiler_samples_get_ld_library_path_env(
 
 set(callback-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there for this heavy transpose-based sample.
+rocprofiler_sdk_wsl_timeout_scale(_CALLBACK_API_TRACING_TIMEOUT BASE 45)
+
 add_test(NAME callback-api-tracing COMMAND $<TARGET_FILE:callback-api-tracing>)
 
 set_tests_properties(
     callback-api-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${callback-api-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT ${_CALLBACK_API_TRACING_TIMEOUT} LABELS "samples" ENVIRONMENT
+               "${callback-api-tracing-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

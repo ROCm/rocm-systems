@@ -50,9 +50,16 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(intercept-table-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
+# up.
+rocprofiler_sdk_wsl_timeout_scale(_INTERCEPT_TABLE_TIMEOUT BASE 45)
+
 add_test(NAME intercept-table COMMAND $<TARGET_FILE:intercept-table>)
 
 set_tests_properties(
     intercept-table
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${intercept-table-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT ${_INTERCEPT_TABLE_TIMEOUT} LABELS "samples" ENVIRONMENT
+               "${intercept-table-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

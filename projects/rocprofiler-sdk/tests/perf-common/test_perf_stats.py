@@ -17,11 +17,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import perf_stats
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
-
-import perf_stats
 
 
 def _load(name: str, path: Path):

@@ -54,7 +54,7 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src, amdgpu::HwregWriteKind::Setreg);
   if (result != amdgpu::HwregAccessResult::Success)
     util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result),
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
@@ -63,14 +63,18 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(literal);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src, amdgpu::HwregWriteKind::SetregImm32);
   if (result != amdgpu::HwregAccessResult::Success)
     util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
 }
 
 void SCallI64Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::RegisterAccess(wf).write_scalar64(sdst, wf.pc + size_);
+  constexpr uint64_t kPcAddressMask = 0x01FFFFFFFFFFFFFFULL;
+  uint64_t next_pc = (wf.pc + size_) & kPcAddressMask;
+  if (next_pc & (1ULL << 56))
+    next_pc |= ~kPcAddressMask;
+  amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
   int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
   wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
 }

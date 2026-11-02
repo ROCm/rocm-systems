@@ -17,9 +17,21 @@
 // Conform to pthread and NVTX standard
 #define NCCL_THREAD_NAMELEN 16
 
-extern int ncclDebugLevel;
+extern uint32_t ncclDebugLevelMask;
 extern uint64_t ncclDebugMask;
 extern FILE* ncclDebugFile;
+
+#define NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED (~0u)
+#define NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED (~1u)
+
+static inline bool ncclDebugShouldLog(int msgLevel, unsigned long flags, uint64_t mask) {
+  uint32_t levelMask = COMPILER_ATOMIC_LOAD(&ncclDebugLevelMask, std::memory_order_acquire);
+  // Let the first log call initialize the masks, then re-check them.
+  if (levelMask == NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED || levelMask == NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED)
+    return true;
+  if ((flags & mask) == 0) return false;
+  return levelMask & (1u << msgLevel);
+}
 
 #ifdef NCCL_OS_LINUX
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line, const char* fmt, ...)
@@ -38,6 +50,7 @@ extern char ncclLastError[];
 #define ERROR(...) ncclDebugLog(NCCL_LOG_ERROR, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
 #define VERSION(...) ncclDebugLog(NCCL_LOG_VERSION, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
 #define WARN(...) ncclDebugLog(NCCL_LOG_WARN, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
+#define ATTN(...) ncclDebugLog(NCCL_LOG_ATTN, NCCL_ALL, __FILE__, __LINE__, __VA_ARGS__)
 
 #define NOWARN(EXPR, FLAGS) \
   do { \
@@ -49,8 +62,7 @@ extern char ncclLastError[];
 
 #define INFO(FLAGS, ...) \
   do { \
-    int level = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire); \
-    if ((level >= NCCL_LOG_INFO && ((unsigned long)(FLAGS) & ncclDebugMask)) || (level < 0)) \
+    if (ncclDebugShouldLog(NCCL_LOG_INFO, (unsigned long)(FLAGS), ncclDebugMask)) \
       ncclDebugLog(NCCL_LOG_INFO, (unsigned long)(FLAGS), __func__, __LINE__, __VA_ARGS__); \
   } while (0)
 
@@ -60,8 +72,7 @@ extern char ncclLastError[];
 
 #define TRACE_CALL(...) \
   do { \
-    int level = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire); \
-    if ((level >= NCCL_LOG_TRACE && (NCCL_CALL & ncclDebugMask)) || (level < 0)) { \
+    if (ncclDebugShouldLog(NCCL_LOG_TRACE, NCCL_CALL, ncclDebugMask)) { \
       ncclDebugLog(NCCL_LOG_TRACE, NCCL_CALL, __func__, __LINE__, __VA_ARGS__); \
     } \
   } while (0)
@@ -69,8 +80,7 @@ extern char ncclLastError[];
 #ifdef ENABLE_TRACE
 #define TRACE(FLAGS, ...) \
   do { \
-    int level = COMPILER_ATOMIC_LOAD(&ncclDebugLevel, std::memory_order_acquire); \
-    if ((level >= NCCL_LOG_TRACE && ((unsigned long)(FLAGS) & ncclDebugMask)) || (level < 0)) { \
+    if (ncclDebugShouldLog(NCCL_LOG_TRACE, (unsigned long)(FLAGS), ncclDebugMask)) { \
       ncclDebugLog(NCCL_LOG_TRACE, (unsigned long)(FLAGS), __func__, __LINE__, __VA_ARGS__); \
     } \
   } while (0)

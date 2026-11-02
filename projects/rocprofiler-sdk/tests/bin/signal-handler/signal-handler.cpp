@@ -428,6 +428,70 @@ mode_bad_spawn(const char* self_path)
     return 0;
 }
 
+// ============================================================================
+// PR# 6717 regression: profiled app leaves a long-lived child alive at NORMAL exit.
+//
+// No signal is involved. Child outliving the parent must not hang
+// ============================================================================
+int
+mode_lingering_child()
+{
+    fprintf(stderr, "Mode: lingering-child, PID=%d (normal exit, long-lived child)\n", getpid());
+
+    // Fork BEFORE any HIP/HSA init so the child holds no GPU state (GPU is not fork-safe).
+    pid_t pid = fork();
+    if(pid == 0)
+    {
+        // Compile-worker-pool style: ignore term signals and outlive the parent's exit.
+        signal(SIGINT, SIG_IGN);
+        signal(SIGTERM, SIG_IGN);
+
+        // Detach stdio so the harness capturing our output gets EOF when the parent exits;
+        // otherwise this child holds the inherited pipe write-end open and the reader blocks.
+        int devnull = open("/dev/null", O_RDWR);
+        if(devnull >= 0)
+        {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            if(devnull > STDERR_FILENO) close(devnull);
+        }
+
+        // Exit once the original parent is gone (robust to subreapers that adopt orphans),
+        // with a hard cap as a safety net.
+        const pid_t orig_parent = getppid();
+        for(int i = 0; i < 30 && getppid() == orig_parent; ++i)
+        {
+            sleep(1);
+        }
+
+        _exit(0);
+    }
+
+    // Parent does a bounded amount of GPU work (so there is data to flush), then returns
+    // normally. It deliberately does NOT wait for or kill the child.
+    float* d_buf = nullptr;
+    HIP_CHECK(hipMalloc(&d_buf, 1024 * sizeof(float)));
+    roctxRangePush(str_join("parent_pid_", getpid()).c_str());
+    for(int iter = 0; iter < 20; ++iter)
+    {
+        roctxRangePush(str_join("parent_iter_", iter).c_str());
+        test_kernel<<<4, 256>>>(d_buf, 1024);
+        roctxRangePop();
+        usleep(10000);
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipFree(d_buf));
+    roctxRangePop();
+
+    emit_roctx_marker("exit_marker parent lingering-child ppid:%d pid:%d", getppid(), getpid());
+    fprintf(stderr,
+            "Parent PID=%d: normal exit with lingering child %d: clean exit\n",
+            getpid(),
+            static_cast<int>(pid));
+    return 0;  // NORMAL exit -> rocprofv3 finalize must complete without hanging
+}
+
 }  // namespace
 // ============================================================================
 // Main
@@ -442,7 +506,8 @@ main(int argc, char** argv)
     for(int i = 1; i < argc; i++)
     {
         if(std::strcmp(argv[i], "--single-process") == 0 || std::strcmp(argv[i], "--fork") == 0 ||
-           std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0)
+           std::strcmp(argv[i], "--fork-exec") == 0 || std::strcmp(argv[i], "--spawn") == 0 ||
+           std::strcmp(argv[i], "--lingering-child") == 0)
         {
             mode = argv[i];
         }
@@ -461,6 +526,9 @@ main(int argc, char** argv)
             mode,
             static_cast<int>(app_handles_signals),
             getpid());
+
+    // Normal-exit regression mode (no signal); independent of app_handles_signals.
+    if(std::strcmp(mode, "--lingering-child") == 0) return mode_lingering_child();
 
     if(app_handles_signals)
     {

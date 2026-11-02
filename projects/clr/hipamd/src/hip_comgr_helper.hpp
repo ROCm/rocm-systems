@@ -84,8 +84,6 @@ typedef ComgrUniqueHandle<amd_comgr_data_t> ComgrDataUniqueHandle;
 }  // namespace comgr_helper
 
 namespace helpers {
-bool UnbundleBitCode(std::string_view bundled_bit_code, const std::string& isa, size_t& co_offset,
-                     size_t& co_size);
 bool addCodeObjData(comgr_helper::ComgrDataSetUniqueHandle& input, std::string_view source,
                     const std::string& name, const amd_comgr_data_kind_t type);
 bool extractBuildLog(comgr_helper::ComgrDataSetUniqueHandle& dataSet, std::string& buildLog);

@@ -16,11 +16,26 @@ If the number of files is lesser than the number of threads requested by the use
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_batch && cd video_decode_batch
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_batch && cd video_decode_batch
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

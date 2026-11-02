@@ -78,6 +78,8 @@ protected:
 
     Vp9UncompressedHeader uncompressed_header_;
     uint32_t uncomp_header_size_;
+    size_t frame_data_size_in_bits_; // bit limit of the frame currently being parsed
+    bool bitstream_overrun_; // set when a read was refused for passing that limit
     uint8_t last_frame_type_; // LastFrameType
     uint8_t frame_is_intra_;
     RocdecVp9SliceParams tile_params_;
@@ -106,9 +108,9 @@ protected:
     /*! \brief Function to detect a superframe and parse the frame sizes. Annex B.
      *  \param [in] p_stream Pointer to the frame data chunk
      *  \param [in] chunk_data_size Size of the frame data chunk
-     *  \return None
+     *  \return <tt>ParserResult</tt>
      */
-    void CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size);
+    ParserResult CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size);
 
     /*! \brief Function to notify decoder about new sequence format through callback
      * \return <tt>ParserResult</tt>
@@ -156,6 +158,14 @@ protected:
      * \return <tt>ParserResult</tt>
      */
     ParserResult ParseUncompressedHeader(uint8_t *p_stream, size_t size);
+
+    /*! \brief Body of ParseUncompressedHeader(). Call that instead: it restores the carried
+     *         header state when this returns an error.
+     * \param [in] p_stream Pointer to the bit stream
+     * \param [in] size Byte size of the stream
+     * \return <tt>ParserResult</tt>
+     */
+    ParserResult ParseUncompressedHeaderBody(uint8_t *p_stream, size_t size);
 
     /*! \brief Function to parse frame sync syntax (frame_sync_code(), 6.2.1)
      * \param [in] p_stream Pointer to the bit stream
@@ -295,9 +305,41 @@ protected:
      * \return The signed value
      */
     inline int32_t ReadSigned(const uint8_t *p_stream, size_t &bit_offset, int num_bits) {
-        uint32_t u_value = Parser::ReadBits(p_stream, bit_offset, num_bits);
-        uint8_t sign = Parser::GetBit(p_stream, bit_offset);
+        uint32_t u_value = ReadBitsChecked(p_stream, bit_offset, num_bits);
+        uint8_t sign = GetBitChecked(p_stream, bit_offset);
         return sign ? -u_value : u_value;
+    }
+
+    /*! \brief Size checked wrappers around the bit readers, used for everything in the
+     *         uncompressed header. The header syntax is driven by the bitstream, so a frame whose
+     *         advertised size is shorter than the header it codes would otherwise read past the
+     *         end of the picture data. A read that would pass the end of the current frame leaves
+     *         bit_offset alone, records the overrun and yields 0, so the caller can keep its
+     *         straight line shape and the frame is rejected once the syntax is done.
+     * \param [in] p_stream Bit stream pointer
+     * \param [in,out] bit_offset Bit offset, advanced only when the read is in range
+     * \param [in] num_bits Number of bits to read
+     * \return The value read, or 0 if the read was refused
+     */
+    inline uint32_t ReadBitsChecked(const uint8_t *p_stream, size_t &bit_offset, size_t num_bits) {
+        if (num_bits > frame_data_size_in_bits_ || bit_offset > frame_data_size_in_bits_ - num_bits) {
+            bitstream_overrun_ = true;
+            return 0;
+        }
+        return Parser::ReadBits(p_stream, bit_offset, num_bits);
+    }
+
+    /*! \brief Single bit form of ReadBitsChecked().
+     * \param [in] p_stream Bit stream pointer
+     * \param [in,out] bit_offset Bit offset, advanced only when the read is in range
+     * \return The bit read, or false if the read was refused
+     */
+    inline bool GetBitChecked(const uint8_t *p_stream, size_t &bit_offset) {
+        if (bit_offset >= frame_data_size_in_bits_) {
+            bitstream_overrun_ = true;
+            return false;
+        }
+        return Parser::GetBit(p_stream, bit_offset);
     }
 
     /*! \brief Function to log VAAPI parameters

@@ -20,6 +20,10 @@
  */
 
 static bool hipDynamicLoggingTest() {
+  // Dynamic logging must start from AMD_LOG_LEVEL = 0. Force logging off here,
+  // before startCapture(), so this call's own API-entry line isn't captured.
+  HIP_CHECK(hipExtDisableLogging());
+
   // Create output capture instance
   OutCapture capture;
   capture.startCapture();

@@ -18,9 +18,7 @@
 #include <array>
 #include <vector>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct stop<rocprofsys::component::pthread_create_gotcha_t>
@@ -35,8 +33,7 @@ struct stop<rocprofsys::component::pthread_create_gotcha_t>
     void operator()(type&, Args&&...)
     {}
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 namespace rocprofsys
 {
@@ -49,7 +46,10 @@ auto&
 get_bundle()
 {
     static auto _v = std::unique_ptr<bundle_t>{};
-    if(!_v) _v = std::make_unique<bundle_t>("pthread_gotcha");
+    if(!_v)
+    {
+        _v = std::make_unique<bundle_t>("pthread_gotcha");
+    }
     return _v;
 }
 

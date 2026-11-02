@@ -160,7 +160,7 @@ std::optional<uint32_t> read_u32_file(const fs::path &path) {
 }
 
 void append_unique_gpu_id(std::vector<uint32_t> *ids, uint32_t gpu_id) {
-  if (std::find(ids->begin(), ids->end(), gpu_id) == ids->end())
+  if (std::ranges::find(*ids, gpu_id) == ids->end())
     ids->push_back(gpu_id);
 }
 

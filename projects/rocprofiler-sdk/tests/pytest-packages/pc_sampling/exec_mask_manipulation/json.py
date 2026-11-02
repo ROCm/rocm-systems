@@ -24,7 +24,6 @@
 from __future__ import absolute_import
 
 import numpy as np
-import pandas as pd
 
 
 def find_wavefront_size(agents_json):
@@ -66,9 +65,6 @@ def validate_json_exec_mask_manipulation(
     # For GFX9, this represents the number of SIMDs per CU.
     # For GFX10+, this represents the number of SIMDs per WGP.
     simd_per_cu = 4
-
-    gfx_target_version = first_gpu_agent["gfx_target_version"]
-    gfx_ip_major = gfx_target_version // 10000
 
     instructions = data_json["strings"]["pc_sample_instructions"]
     comments = data_json["strings"]["pc_sample_comments"]

@@ -7,7 +7,7 @@ myst:
 
 # Supported GPU architectures
 
-rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic binary instrumentation (DBI) across multiple AMD GPU architecture generations and a RISC-V target. The tables below list every supported target together with its public API enum values and ISA family grouping.
+rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic binary instrumentation (DBI) across multiple AMD GPU architecture generations and a RISC-V target. The tables below list the supported architecture groups and concrete CDNA5 targets together with their ISA family grouping. Individual tools can support different subsets, as noted below and in their command reference.
 
 ## Architecture table
 
@@ -22,7 +22,7 @@ rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic bina
 | RDNA3 | GFX11 | GFX11 |
 | RDNA3.5 | GFX11.5 | GFX11 |
 | RDNA4 | GFX12 | GFX12 |
-| gfx1250 | gfx1250 | GFX12 |
+| CDNA5 | gfx1250, gfx1251 | GFX12.5 |
 | RV32I | --- | RV |
 | RV64I | --- | RV |
 
@@ -33,6 +33,12 @@ The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the r
 ## Target ID enum
 
 The `rj_code_target_id_t` enumeration identifies a specific GPU target within an architecture. Use these values when filtering code objects inside an executable or creating instruction lists. For the full enumeration, see [API reference: code object](/reference/api-code-object.md).
+
+gfx1250 and gfx1251 both have concrete functional-simulator bindings. The
+checked-in gfx1251 configuration is a minimal synthetic topology for functional
+execution, not a product model or a claim of cycle/timing fidelity. Decoder-only
+consumers use a separate model provider whose instructions have no execution
+callbacks.
 
 ## ISA family groupings
 
@@ -50,9 +56,12 @@ RDNA1 and RDNA2 share the GFX10 encoding family with Wave32 as the default wavef
 
 RDNA3 and RDNA3.5 share the GFX11 encoding family. This generation introduces WMMA matrix instructions, VOPD dual-issue encodings, and a restructured `S_WAITCNT` layout.
 
-### GFX12 (RDNA4 and gfx1250)
+### GFX12 and GFX12.5 (RDNA4 and CDNA5)
 
-RDNA4 and gfx1250 share the GFX12 encoding family. Memory encodings are restructured into independent `ENC_VFLAT`, `ENC_VGLOBAL`, `ENC_VSCRATCH`, `ENC_VBUFFER`, and `ENC_VDS` formats. The `S_WAITCNT` instruction is replaced by split `S_WAIT_*` instructions.
+RDNA4 uses the GFX12 ISA family. CDNA5 targets gfx1250 and gfx1251 use
+GFX12.5. Their memory encodings are structured as independent `ENC_VFLAT`,
+`ENC_VGLOBAL`, `ENC_VSCRATCH`, `ENC_VBUFFER`, and `ENC_VDS` formats, and
+split `S_WAIT_*` instructions replace `S_WAITCNT`.
 
 ### RV (RISC-V)
 

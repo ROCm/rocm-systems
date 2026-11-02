@@ -391,6 +391,65 @@ HIP_TEST_CASE(Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify that a 3D memset update uses the new allocation while preserving the operation extent.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphMemsetNodeFlatAlloc.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_3DMemset_AllocationExtent) {
+  const hipExtent allocation_extent_a = make_hipExtent(64, 4, 2);
+  const hipExtent allocation_extent_b = make_hipExtent(128, 8, 2);
+  const hipExtent operation_extent = make_hipExtent(16, 2, 2);
+  LinearAllocGuard3D<unsigned char> allocation_a(allocation_extent_a);
+  LinearAllocGuard3D<unsigned char> allocation_b(allocation_extent_b);
+  HIP_CHECK(hipMemset3D(allocation_b.pitched_ptr(), 0, allocation_extent_b));
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  auto capture_graph = [&](hipPitchedPtr allocation, int value) {
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipMemset3DAsync(allocation, value, operation_extent, stream));
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    return graph;
+  };
+
+  hipGraph_t graph_a = capture_graph(allocation_a.pitched_ptr(), 0x11);
+  hipGraph_t graph_b = capture_graph(allocation_b.pitched_ptr(), 0x5A);
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph_a, nullptr, nullptr, 0));
+  hipGraphNode_t error_node = nullptr;
+  hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+  HIP_CHECK(hipGraphExecUpdate(exec, graph_b, &error_node, &result));
+  REQUIRE(result == hipGraphExecUpdateSuccess);
+  HIP_CHECK(hipGraphLaunch(exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  auto allocation = allocation_b.pitched_ptr();
+  auto* base = static_cast<unsigned char*>(allocation.ptr);
+  unsigned char first_slice = 0;
+  unsigned char second_slice = 0;
+  HIP_CHECK(hipMemcpy(&first_slice, base, 1, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&second_slice, base + allocation.pitch * allocation.ysize, 1,
+                      hipMemcpyDeviceToHost));
+  REQUIRE(first_slice == 0x5A);
+  REQUIRE(second_slice == 0x5A);
+  unsigned char outside_width = 0xFF, outside_height = 0xFF;
+  HIP_CHECK(hipMemcpy(&outside_width, base + operation_extent.width, 1, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&outside_height, base + allocation.pitch * operation_extent.height, 1,
+                      hipMemcpyDeviceToHost));
+  REQUIRE(outside_width == 0);
+  REQUIRE(outside_height == 0);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph_b));
+  HIP_CHECK(hipGraphDestroy(graph_a));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
 #if HT_AMD
 /**
  * Test Description

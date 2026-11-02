@@ -14,9 +14,6 @@ point-to-point communication, and advanced features like buffer registration
 and custom reduction operators.
 """
 
-from nccl._version import __version__
-from nccl._show_versions import LibraryInfo, VersionInfo, get_version, show_versions
-
 # Register the local HIP-backed cuda.core shim under the `cuda.core`
 # namespace via sys.modules. Idempotent and gated on
 # `"cuda.core" not in sys.modules`, so it is a no-op if a real
@@ -26,11 +23,15 @@ from nccl._show_versions import LibraryInfo, VersionInfo, get_version, show_vers
 # top-level `cuda` package on disk (a regular non-PEP-420
 # `cuda/__init__.py` would shadow co-installed distributions that
 # legitimately contribute to `cuda.*`), so users must `import nccl`
-# before reaching `cuda.core`.
+# before reaching `cuda.core`. It runs first: importing nccl.core
+# (even for _version) pulls in cuda.core.
 from nccl._hip_compat.cuda_core_shim import _register_as_cuda_core as _register_cuda_core_shim
 
 _register_cuda_core_shim()
 del _register_cuda_core_shim
+
+from nccl.core._version import __version__
+from nccl._show_versions import LibraryInfo, VersionInfo, get_version, show_versions
 
 
 # Re-export get_version() lazily. Importing nccl alone does not load

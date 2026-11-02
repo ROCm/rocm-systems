@@ -1,0 +1,399 @@
+{
+ "kfd": {
+  "generation_id": "26",
+  "nodes": {
+   "0": {
+    "gpu_id": 0,
+    "properties": "cpu_cores_count 128\nsimd_count 0\nmem_banks_count 1\ncaches_count 0\nio_links_count 5\np2p_links_count 11\ncpu_core_id_base 0\nsimd_id_base 0\nmax_waves_per_simd 0\nlds_size_in_kb 0\ngds_size_in_kb 0\nnum_gws 0\nwave_front_size 0\narray_count 0\nsimd_arrays_per_engine 0\ncu_per_simd_array 0\nsimd_per_cu 0\nmax_slots_scratch_cu 0\ngfx_target_version 0\nvendor_id 0\ndevice_id 0\nlocation_id 0\ndomain 0\ndrm_render_minor 0\nhive_id 0\nnum_sdma_engines 0\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 0\nnum_cp_queues 0\ncwsr_size 0\nctl_stack_size 0\nmax_engine_clk_ccompute 3300\n"
+   },
+   "1": {
+    "gpu_id": 0,
+    "properties": "cpu_cores_count 128\nsimd_count 0\nmem_banks_count 1\ncaches_count 0\nio_links_count 12\np2p_links_count 4\ncpu_core_id_base 128\nsimd_id_base 0\nmax_waves_per_simd 0\nlds_size_in_kb 0\ngds_size_in_kb 0\nnum_gws 0\nwave_front_size 0\narray_count 0\nsimd_arrays_per_engine 0\ncu_per_simd_array 0\nsimd_per_cu 0\nmax_slots_scratch_cu 0\ngfx_target_version 0\nvendor_id 0\ndevice_id 0\nlocation_id 0\ndomain 0\ndrm_render_minor 0\nhive_id 0\nnum_sdma_engines 0\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 0\nnum_cp_queues 0\ncwsr_size 0\nctl_stack_size 0\nmax_engine_clk_ccompute 3300\n"
+   },
+   "10": {
+    "gpu_id": 10017,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 70\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488068\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62721\ndomain 0\ndrm_render_minor 161\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509070\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "11": {
+    "gpu_id": 10024,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 72\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488104\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62722\ndomain 0\ndrm_render_minor 162\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509072\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "12": {
+    "gpu_id": 10005,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 70\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488140\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62723\ndomain 0\ndrm_render_minor 163\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 5923454485891121159\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "13": {
+    "gpu_id": 10009,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 70\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488176\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62724\ndomain 0\ndrm_render_minor 164\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 447077339008598017\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "14": {
+    "gpu_id": 10020,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 70\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488212\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62725\ndomain 0\ndrm_render_minor 165\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509076\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "15": {
+    "gpu_id": 10028,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 74\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488248\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62726\ndomain 0\ndrm_render_minor 166\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509073\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "16": {
+    "gpu_id": 10001,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 72\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488284\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62727\ndomain 0\ndrm_render_minor 167\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509078\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   },
+   "2": {
+    "gpu_id": 10016,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 548\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487744\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 29952\ndomain 0\ndrm_render_minor 128\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 5923454485891121157\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "3": {
+    "gpu_id": 10019,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 546\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487780\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 1280\ndomain 0\ndrm_render_minor 136\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 447077339008598018\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "4": {
+    "gpu_id": 10022,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 548\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487816\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 25856\ndomain 0\ndrm_render_minor 144\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 5923454485891121161\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "5": {
+    "gpu_id": 10011,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 546\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487852\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 5376\ndomain 0\ndrm_render_minor 152\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 5923454485891121158\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "6": {
+    "gpu_id": 10008,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 548\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487924\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 34048\ndomain 0\ndrm_render_minor 168\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509080\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "7": {
+    "gpu_id": 10003,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 554\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487960\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 58624\ndomain 0\ndrm_render_minor 176\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 10535140504318509081\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "8": {
+    "gpu_id": 10030,
+    "properties": "cpu_cores_count 0\nsimd_count 1024\nmem_banks_count 1\ncaches_count 546\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147487996\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 32\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 38144\ndomain 0\ndrm_render_minor 184\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 14\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 1311768467463733251\nnum_xcc 8\nmax_engine_clk_ccompute 3300\n"
+   },
+   "9": {
+    "gpu_id": 10013,
+    "properties": "cpu_cores_count 0\nsimd_count 128\nmem_banks_count 1\ncaches_count 70\nio_links_count 15\np2p_links_count 1\ncpu_core_id_base 0\nsimd_id_base 2147488032\nmax_waves_per_simd 8\nlds_size_in_kb 160\ngds_size_in_kb 0\nnum_gws 64\nwave_front_size 64\narray_count 4\nsimd_arrays_per_engine 1\ncu_per_simd_array 9\nsimd_per_cu 4\nmax_slots_scratch_cu 32\ngfx_target_version 90500\nvendor_id 4098\ndevice_id 30112\nlocation_id 62720\ndomain 0\ndrm_render_minor 160\nhive_id 5923454485891121163\nnum_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine 8\nnum_cp_queues 24\ncwsr_size 22687744\nctl_stack_size 12288\nmax_engine_clk_fcompute 2200\nlocal_mem_size 0\nfw_version 44\ncapability 2889327296\ncapability2 1\ndebug_prop 1494\nsdma_fw_version 14\nunique_id 3617611476677427204\nnum_xcc 1\nmax_engine_clk_ccompute 3300\n"
+   }
+  }
+ },
+ "pci": {
+  "0000:05:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card9",
+    "renderD136"
+   ],
+   "path": "/sys/devices/pci0000:00/0000:00:01.1/0000:01:00.0/0000:02:00.0/0000:03:00.0/0000:04:00.0/0000:05:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:15:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card25",
+    "renderD152"
+   ],
+   "path": "/sys/devices/pci0000:10/0000:10:01.1/0000:11:00.0/0000:12:00.0/0000:13:00.0/0000:14:00.0/0000:15:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:65:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card17",
+    "renderD144"
+   ],
+   "path": "/sys/devices/pci0000:60/0000:60:01.1/0000:61:00.0/0000:62:00.0/0000:63:00.0/0000:64:00.0/0000:65:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:75:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card1",
+    "renderD128"
+   ],
+   "path": "/sys/devices/pci0000:70/0000:70:01.1/0000:71:00.0/0000:72:00.0/0000:73:00.0/0000:74:00.0/0000:75:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:85:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card41",
+    "renderD168"
+   ],
+   "path": "/sys/devices/pci0000:80/0000:80:01.1/0000:81:00.0/0000:82:00.0/0000:83:00.0/0000:84:00.0/0000:85:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:95:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card57",
+    "renderD184"
+   ],
+   "path": "/sys/devices/pci0000:90/0000:90:01.1/0000:91:00.0/0000:92:00.0/0000:93:00.0/0000:94:00.0/0000:95:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:e5:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "SPX",
+   "device": "0x75a0",
+   "drm": [
+    "card49",
+    "renderD176"
+   ],
+   "path": "/sys/devices/pci0000:e0/0000:e0:01.1/0000:e1:00.0/0000:e2:00.0/0000:e3:00.0/0000:e4:00.0/0000:e5:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  },
+  "0000:f5:00.0": {
+   "class": "0x120000",
+   "current_compute_partition": "CPX",
+   "device": "0x75a0",
+   "drm": [
+    "card33",
+    "renderD160"
+   ],
+   "path": "/sys/devices/pci0000:f0/0000:f0:01.1/0000:f1:00.0/0000:f2:00.0/0000:f3:00.0/0000:f4:00.0/0000:f5:00.0",
+   "revision": "0x00",
+   "vendor": "0x1002"
+  }
+ },
+ "platform": {
+  "amdgpu_xcp_0": [
+   "card2",
+   "renderD129"
+  ],
+  "amdgpu_xcp_1": [
+   "card3",
+   "renderD130"
+  ],
+  "amdgpu_xcp_10": [
+   "card13",
+   "renderD140"
+  ],
+  "amdgpu_xcp_11": [
+   "card14",
+   "renderD141"
+  ],
+  "amdgpu_xcp_12": [
+   "card15",
+   "renderD142"
+  ],
+  "amdgpu_xcp_13": [
+   "card16",
+   "renderD143"
+  ],
+  "amdgpu_xcp_14": [
+   "card18",
+   "renderD145"
+  ],
+  "amdgpu_xcp_15": [
+   "card19",
+   "renderD146"
+  ],
+  "amdgpu_xcp_16": [
+   "card20",
+   "renderD147"
+  ],
+  "amdgpu_xcp_17": [
+   "card21",
+   "renderD148"
+  ],
+  "amdgpu_xcp_18": [
+   "card22",
+   "renderD149"
+  ],
+  "amdgpu_xcp_19": [
+   "card23",
+   "renderD150"
+  ],
+  "amdgpu_xcp_2": [
+   "card4",
+   "renderD131"
+  ],
+  "amdgpu_xcp_20": [
+   "card24",
+   "renderD151"
+  ],
+  "amdgpu_xcp_21": [
+   "card26",
+   "renderD153"
+  ],
+  "amdgpu_xcp_22": [
+   "card27",
+   "renderD154"
+  ],
+  "amdgpu_xcp_23": [
+   "card28",
+   "renderD155"
+  ],
+  "amdgpu_xcp_24": [
+   "card29",
+   "renderD156"
+  ],
+  "amdgpu_xcp_25": [
+   "card30",
+   "renderD157"
+  ],
+  "amdgpu_xcp_26": [
+   "card31",
+   "renderD158"
+  ],
+  "amdgpu_xcp_27": [
+   "card32",
+   "renderD159"
+  ],
+  "amdgpu_xcp_28": [
+   "card34",
+   "renderD161"
+  ],
+  "amdgpu_xcp_29": [
+   "card35",
+   "renderD162"
+  ],
+  "amdgpu_xcp_3": [
+   "card5",
+   "renderD132"
+  ],
+  "amdgpu_xcp_30": [
+   "card36",
+   "renderD163"
+  ],
+  "amdgpu_xcp_31": [
+   "card37",
+   "renderD164"
+  ],
+  "amdgpu_xcp_32": [
+   "card38",
+   "renderD165"
+  ],
+  "amdgpu_xcp_33": [
+   "card39",
+   "renderD166"
+  ],
+  "amdgpu_xcp_34": [
+   "card40",
+   "renderD167"
+  ],
+  "amdgpu_xcp_35": [
+   "card42",
+   "renderD169"
+  ],
+  "amdgpu_xcp_36": [
+   "card43",
+   "renderD170"
+  ],
+  "amdgpu_xcp_37": [
+   "card44",
+   "renderD171"
+  ],
+  "amdgpu_xcp_38": [
+   "card45",
+   "renderD172"
+  ],
+  "amdgpu_xcp_39": [
+   "card46",
+   "renderD173"
+  ],
+  "amdgpu_xcp_4": [
+   "card6",
+   "renderD133"
+  ],
+  "amdgpu_xcp_40": [
+   "card47",
+   "renderD174"
+  ],
+  "amdgpu_xcp_41": [
+   "card48",
+   "renderD175"
+  ],
+  "amdgpu_xcp_42": [
+   "card50",
+   "renderD177"
+  ],
+  "amdgpu_xcp_43": [
+   "card51",
+   "renderD178"
+  ],
+  "amdgpu_xcp_44": [
+   "card52",
+   "renderD179"
+  ],
+  "amdgpu_xcp_45": [
+   "card53",
+   "renderD180"
+  ],
+  "amdgpu_xcp_46": [
+   "card54",
+   "renderD181"
+  ],
+  "amdgpu_xcp_47": [
+   "card55",
+   "renderD182"
+  ],
+  "amdgpu_xcp_48": [
+   "card56",
+   "renderD183"
+  ],
+  "amdgpu_xcp_49": [
+   "card58",
+   "renderD185"
+  ],
+  "amdgpu_xcp_5": [
+   "card7",
+   "renderD134"
+  ],
+  "amdgpu_xcp_50": [
+   "card59",
+   "renderD186"
+  ],
+  "amdgpu_xcp_51": [
+   "card60",
+   "renderD187"
+  ],
+  "amdgpu_xcp_52": [
+   "card61",
+   "renderD188"
+  ],
+  "amdgpu_xcp_53": [
+   "card62",
+   "renderD189"
+  ],
+  "amdgpu_xcp_54": [
+   "card63",
+   "renderD190"
+  ],
+  "amdgpu_xcp_55": [
+   "card192",
+   "renderD191"
+  ],
+  "amdgpu_xcp_6": [
+   "card8",
+   "renderD135"
+  ],
+  "amdgpu_xcp_7": [
+   "card10",
+   "renderD137"
+  ],
+  "amdgpu_xcp_8": [
+   "card11",
+   "renderD138"
+  ],
+  "amdgpu_xcp_9": [
+   "card12",
+   "renderD139"
+  ]
+ }
+}

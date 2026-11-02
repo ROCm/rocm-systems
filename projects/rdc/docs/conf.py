@@ -18,7 +18,14 @@ with open('../CMakeLists.txt', encoding='utf-8') as f:
     version_number = match[1]
 
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-systems",
+    "path_to_docs": "projects/rdc/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 html_title = f"RDC {version_number} documentation"
 external_toc_path = "./sphinx/_toc.yml"
 

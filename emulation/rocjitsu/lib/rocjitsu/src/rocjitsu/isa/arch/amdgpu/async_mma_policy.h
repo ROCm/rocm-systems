@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
 
@@ -62,7 +63,8 @@ inline bool encoding_may_be_candidate(rj_code_arch_t arch, uint32_t word) {
 
 class Access {
 public:
-  std::bitset<512> reads, writes;
+  static constexpr uint32_t kRegistersPerBank = 256;
+  std::bitset<2 * kRegistersPerBank> reads, writes;
   bool conflicts(const Access &next) const {
     return (writes & (next.reads | next.writes)).any() || (reads & next.writes).any();
   }
@@ -74,6 +76,12 @@ inline bool ordinary_memory(std::string_view name) {
 inline bool safe_inline(const Instruction &inst) {
   if (inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR |
                       BARRIER | WRITES_EXEC))
+    return false;
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  // DPP execution temporarily narrows the wave's VGPR write mask. Keep that
+  // wave-wide state stable while an asynchronous MMA may still consult it.
+  if (modifiers.dpp)
     return false;
   const auto name = inst.mnemonic();
   if (name == "s_delay_alu" || name == "s_nop" || name == "v_nop")
@@ -120,11 +128,12 @@ inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgp
       if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
         continue;
       const bool acc = ref->cls == RegClass::ACC_VGPR;
-      const uint32_t limit = acc ? (has_accvgprs ? 256 : 0) : std::min(256u, num_vgprs);
+      const uint32_t limit = acc ? (has_accvgprs ? Access::kRegistersPerBank : 0)
+                                 : std::min(Access::kRegistersPerBank, num_vgprs);
       const uint32_t index = ref->index, width = ref->width;
       if (index >= limit || width > limit - index)
         return std::nullopt;
-      const uint32_t reg = index + (acc ? 256 : 0);
+      const uint32_t reg = index + (acc ? Access::kRegistersPerBank : 0);
       for (uint32_t r = reg; r != reg + width; ++r) {
         (dst ? access.writes : access.reads).set(r);
         // A store's encoding can describe its data as a destination operand.

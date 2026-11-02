@@ -18,7 +18,8 @@ To build the Docker image and run the container, follow these steps.
    of the rocm-systems repository.
 
    By default, the Dockerfile uses ``docker.io/rocm/dev-ubuntu-22.04:latest`` as the base Docker image.
-   It then installs RCCL and rccl-tests (in both cases, it uses the version from the ``develop`` branch).
+   It then fetches ``projects/rccl``, ``projects/rccl-tests``, and ``projects/rocshmem`` from the ``develop`` branch of the
+   `rocm-systems <https://github.com/ROCm/rocm-systems>`_ repository and builds RCCL and rccl-tests for ``gfx942`` GPUs.
 
    Use this command to build the Docker image:
 
@@ -26,13 +27,26 @@ To build the Docker image and run the container, follow these steps.
 
       docker build -t rccl-tests -f docker/Dockerfile.ubuntu --pull .
 
-   The base Docker image, rccl repository, rccl-tests repository, and GPU targets can be modified
-   by using ``--build-arg`` in the ``docker build`` command above. For example, to use a different base Docker image and target a specific GPU architecture,
+   The base Docker image, rocm-systems repository (``ROCM_SYSTEMS_REPO``), branch, tag, or commit SHA
+   (``ROCM_SYSTEMS_REF``), and GPU targets can be modified
+   by using ``--build-arg`` in the ``docker build`` command above.
+   ``GPU_TARGETS`` takes one target (for example, ``gfx950``), several separated by ``;`` (for example, ``"gfx942;gfx950"``),
+   or an empty value (``GPU_TARGETS=``) to build every target RCCL and rccl-tests support, which makes the build several times slower and the image larger.
+   ``ROCM_SYSTEMS_REF`` must be a branch, a tag that contains ``projects/`` (for example, ``therock-*``), or a full commit SHA,
+   because short SHAs fail the shallow fetch and ``rocm-7.2.x`` tags predate the monorepo layout.
+   For example, to use a different base Docker image and target a specific GPU architecture,
    use this command:
 
    .. code-block:: shell
 
       docker build -t rccl-tests -f docker/Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-24.04" --build-arg="ROCM_IMAGE_TAG=6.4.2" --build-arg="GPU_TARGETS=gfx942" --pull .
+
+   Extra RCCL ``install.sh`` flags can be passed with ``RCCL_BUILD_ARGS``, which is empty by default.
+   For example, to build RCCL with rocSHMEM, use this command:
+
+   .. code-block:: shell
+
+      docker build -t rccl-tests -f docker/Dockerfile.ubuntu --build-arg="RCCL_BUILD_ARGS=--rocshmem" --pull .
 
 #. Launch an interactive Docker container on a system with AMD GPUs:
 

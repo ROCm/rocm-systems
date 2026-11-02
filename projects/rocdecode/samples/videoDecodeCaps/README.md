@@ -17,11 +17,26 @@ Unlike the other samples, this app does not decode a stream, so it needs no inpu
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir build && cd build
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir build && cd build
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 

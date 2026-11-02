@@ -114,7 +114,8 @@ template <typename Float> struct DivisionScaleResult {
 /// SCALE requires source 0 to equal the numerator or denominator, as in the ISA.
 template <typename Float>
 inline DivisionScaleResult<Float> div_scale(Float value, Float denominator, Float numerator,
-                                            uint32_t rounding = 0, uint32_t denorm = 3) {
+                                            uint32_t rounding = 0, uint32_t denorm = 3,
+                                            bool quiet_nan = true) {
   using F = DivisionFormat<Float>;
   using Bits = typename F::Bits;
   Bits vbits = std::bit_cast<Bits>(value), dbits = std::bit_cast<Bits>(denominator),
@@ -150,7 +151,8 @@ inline DivisionScaleResult<Float> div_scale(Float value, Float denominator, Floa
   if (d == 0 || n == 0)
     return {std::bit_cast<Float>(Bits(F::sign | F::infinity | F::quiet)), post_scale};
   if ((vbits & ~F::sign) >= F::infinity)
-    return {std::bit_cast<Float>(Bits(vbits | ((vbits & F::fraction_mask) ? F::quiet : 0))),
+    return {std::bit_cast<Float>(
+                Bits(vbits | (quiet_nan && (vbits & F::fraction_mask) ? F::quiet : 0))),
             post_scale};
   const int ve = F::exponent(vbits);
   const Bits significand = (vbits & F::fraction_mask) | (ve ? Bits{1} << F::fraction : 0);
@@ -249,6 +251,42 @@ inline Float div_fixup(Float quotient, Float denominator, Float numerator, uint3
   if ((p & ~F::sign) >= F::infinity)
     return div_overflow<Float>(sign != 0, rounding);
   return std::bit_cast<Float>(Bits(sign | (p & ~F::sign)));
+}
+
+/// @brief Half-precision FIXUP in the exact promoted F32 domain.
+/// Nonfinite provisional values use the guest overflow result for finite
+/// operands. The F32/F64 extreme-exponent underflow shortcut does not apply.
+inline float div_fixup_f16(float quotient, float denominator, float numerator,
+                           uint32_t rounding = 0, uint32_t denorm = 3) {
+  uint32_t denominator_bits = std::bit_cast<uint32_t>(denominator);
+  uint32_t numerator_bits = std::bit_cast<uint32_t>(numerator);
+  if (!(denorm & 1u)) {
+    // Inputs are promoted F16, whose minimum normal has F32 bits 0x38800000.
+    if ((denominator_bits & 0x7fffffffu) < 0x38800000u)
+      denominator_bits &= 0x80000000u;
+    if ((numerator_bits & 0x7fffffffu) < 0x38800000u)
+      numerator_bits &= 0x80000000u;
+  }
+  const uint32_t denominator_magnitude = denominator_bits & 0x7fffffffu;
+  const uint32_t numerator_magnitude = numerator_bits & 0x7fffffffu;
+  const uint32_t sign = (denominator_bits ^ numerator_bits) & 0x80000000u;
+  if (numerator_magnitude > 0x7f800000u)
+    return std::bit_cast<float>(numerator_bits | 0x00400000u);
+  if (denominator_magnitude > 0x7f800000u)
+    return std::bit_cast<float>(denominator_bits | 0x00400000u);
+  if ((denominator_magnitude == 0 && numerator_magnitude == 0) ||
+      (denominator_magnitude == 0x7f800000u && numerator_magnitude == 0x7f800000u))
+    return std::bit_cast<float>(0xffc00000u);
+  if (denominator_magnitude == 0 || numerator_magnitude == 0x7f800000u)
+    return std::bit_cast<float>(sign | 0x7f800000u);
+  if (numerator_magnitude == 0 || denominator_magnitude == 0x7f800000u)
+    return std::bit_cast<float>(sign);
+  const uint32_t magnitude = std::bit_cast<uint32_t>(quotient) & 0x7fffffffu;
+  if (magnitude >= 0x7f800000u) {
+    const bool to_infinity = rounding == 0 || (rounding == 1 && !sign) || (rounding == 2 && sign);
+    return std::bit_cast<float>(sign | (to_infinity ? 0x7f800000u : 0x477fe000u));
+  }
+  return std::bit_cast<float>(magnitude | sign);
 }
 
 /// @brief Apply FIXUP OMOD using guest rounding only when scaling overflows.

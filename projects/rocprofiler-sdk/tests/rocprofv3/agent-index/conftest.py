@@ -28,7 +28,6 @@ import json
 
 from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 from rocprofiler_sdk.pytest_utils import collapse_dict_list
-from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
 
 
 def pytest_addoption(parser):

@@ -83,6 +83,7 @@ set(tstSources
     ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_common.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_utils.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_fixture_utils.cc
 )
 
 # Build rules
@@ -103,6 +104,22 @@ target_include_directories(
 
 # Absolute path to the committed mock CPER fixtures (unit/gpu/mock_cper).
 target_compile_definitions(${TEST} PRIVATE AMDSMI_TEST_MOCK_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/gpu/mock_cper")
+
+# This directory is only added when BUILD_TESTS is ON (see top-level
+# CMakeLists.txt), so the test-only amdsmi_test_register_node_handle()
+# declaration (amd_smi_test_internal.h) is always needed here.
+target_compile_definitions(${TEST} PRIVATE BUILD_TESTS)
+
+# The ABI is identical either way, so without this the tests cannot tell a build
+# without libamdcuid from one where the library has nothing to say for this
+# device, and they skip on AMDSMI_STATUS_NOT_SUPPORTED in both cases. The cached
+# BUILD_CUID is the request (AUTO is truthy); src/ publishes the outcome.
+if(AMDSMI_WITH_CUID)
+    target_compile_definitions(${TEST} PRIVATE BUILD_CUID)
+    if(AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+        target_compile_definitions(${TEST} PRIVATE AMDSMI_CUID_TEST_SYSFS_OVERRIDE)
+    endif()
+endif()
 
 if(ENABLE_WSL_BACKEND)
     target_compile_definitions(${TEST} PRIVATE ENABLE_WSL_BACKEND)

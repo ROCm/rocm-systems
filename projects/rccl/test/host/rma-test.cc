@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "../common/LogCapture.hpp"  // DebugLevelToMask
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/dev_runtime_micro_fakes.h"
@@ -1453,16 +1454,16 @@ struct FailAt {
 
 class RmaDebugLoggingTest : public RmaScheduleTest {
 protected:
-  int savedLevel_ = 0;
+  uint32_t savedLevel_ = 0;
   uint64_t savedMask_ = 0;
   int savedNoWarn_ = 0;
 
   void SetUp() override {
     RmaScheduleTest::SetUp();
-    savedLevel_ = ncclDebugLevel;
+    savedLevel_ = ncclDebugLevelMask;
     savedMask_ = ncclDebugMask;
     savedNoWarn_ = ncclDebugNoWarn;
-    ncclDebugLevel = NCCL_LOG_INFO;
+    ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(NCCL_LOG_INFO);
     ncclDebugMask = ~0ULL;  // every subsystem, so NCCL_COLL passes the mask test
     // Establish it rather than inherit it: the tests below that do not call
     // SetDebug exist to take NCCLCHECKGOTO's `ncclDebugNoWarn == 0` arm, and
@@ -1471,7 +1472,7 @@ protected:
   }
 
   void SetDebug(const DebugState& d) {
-    ncclDebugLevel = d.level;
+    ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(d.level);
     ncclDebugMask = d.mask;
     ncclDebugNoWarn = d.noWarn;
   }
@@ -1501,7 +1502,7 @@ protected:
   }
 
   void TearDown() override {
-    ncclDebugLevel = savedLevel_;
+    ncclDebugLevelMask = savedLevel_;
     ncclDebugMask = savedMask_;
     ncclDebugNoWarn = savedNoWarn_;
     RmaScheduleTest::TearDown();
@@ -1815,6 +1816,52 @@ TEST_F(RmaProxyReadyTest, ConnectOnceFails_Propagates) {
   EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSystemError);
   EXPECT_EQ(connect.calls, 1);
   EXPECT_TRUE(log_.entries.empty());
+}
+
+// NCCL_RMA_DISABLE left the proxy down on purpose. Connecting now would be a
+// comm-wide all-gather reached from one rank's launch, which hangs, so the gate
+// refuses without attempting it.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_FailsWithoutConnecting) {
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// ...on the WaitSignal side as well, which the receiving rank reaches.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_WaitSignalFailsWithoutConnecting) {
+  args_.func = ncclFuncWaitSignal;
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaWaitSignal(comm_.get(), plan_.get(), kMainStream), ncclInvalidUsage);
+  EXPECT_EQ(connect.calls, 0);
+  EXPECT_TRUE(log_.entries.empty());
+}
+
+// The flag leaves CE work alone: a plan with only LSA peers never reaches the
+// gate, so it still launches.
+TEST_F(RmaProxyReadyTest, RmaDisableSet_CeOnlyPlanStillLaunches) {
+  args_.nRmaTasksProxy = 0;
+  args_.nRmaTasksCe = 1;
+  comm_->rmaState.rmaProxyState.connected = false;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deflt) -> int64_t {
+    return std::string(env) == "RMA_DISABLE" ? 1 : deflt;
+  });
+  AllHooks hooks(log_);
+
+  EXPECT_EQ(ncclRmaPut(comm_.get(), plan_.get(), kMainStream), ncclSuccess);
+  EXPECT_EQ(log_.CountOf(LaunchLog::kCePut), 1);
 }
 
 // No proxy work means the gate is skipped entirely, so a disconnected proxy is

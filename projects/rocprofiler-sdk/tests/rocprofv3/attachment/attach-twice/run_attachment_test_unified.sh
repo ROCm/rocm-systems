@@ -41,6 +41,43 @@ wait_for_attach_ready() {
     return 1
 }
 
+expect_reattach_config_rejected() {
+    local option_name=$1
+    local selected_regions=$2
+    local selected_regions_ref_count=$3
+    local log_file="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/reject-${option_name}.log"
+    local exit_code=0
+
+    echo "Reattaching with changed ${option_name}..."
+    LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
+        --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary \
+        --group-by-queue --attach-sync-output -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
+        --log-level "${LOG_LEVEL}" --selected-regions "${selected_regions}" \
+        --selected-regions-ref-count "${selected_regions_ref_count}" \
+        >"${log_file}" 2>&1 || exit_code=$?
+
+    if [ "${exit_code}" -ne 1 ]; then
+        echo "Expected changed ${option_name} to be rejected with exit code 1; got ${exit_code}"
+        cat "${log_file}"
+        return 1
+    fi
+
+    local expected_message="Option '${option_name}' has conflicting values: True vs False"
+    if ! grep -Fq "${expected_message}" "${log_file}"; then
+        echo "Reattachment did not report the expected ${option_name} mismatch"
+        cat "${log_file}"
+        return 1
+    fi
+
+    if ! kill -0 "${APP_PID}" 2>/dev/null; then
+        echo "Test application exited after the rejected reattachment"
+        cat "${log_file}"
+        return 1
+    fi
+
+    echo "Reattachment rejected changed ${option_name} as expected"
+}
+
 # Arguments
 TEST_APP=$1
 ROCPROFV3=$2
@@ -53,6 +90,16 @@ export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-output"
 OUTPUT_FORMAT="json rocpd"
+SELECTED_REGION_ARGS=(--selected-regions false --selected-regions-ref-count false)
+APP_PID=""
+
+cleanup() {
+    if [ -n "${APP_PID}" ] && kill -0 "${APP_PID}" 2>/dev/null; then
+        kill -2 "${APP_PID}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT
 
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
@@ -100,7 +147,10 @@ echo "First attachment: Attaching profiler to PID $APP_PID for 500 milliseconds.
 
 # Run first rocprofv3 with --attach option.
 # No -o flag: the process uses the default %hostname%/%pid% naming.
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} &
+LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
+    --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary \
+    --group-by-queue --attach-sync-output -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
+    --log-level "${LOG_LEVEL}" "${SELECTED_REGION_ARGS[@]}" &
 FIRST_ROCPROF_PID=$!
 ROCPROF_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -150,12 +200,19 @@ fi
 # Wait for the application to be ready for second attachment
 wait_for_attach_ready $APP_PID
 
+# Changing either selected-region control must be rejected before a second attachment.
+expect_reattach_config_rejected selected_regions true false
+expect_reattach_config_rejected selected_regions_ref_count false true
+
 # Second attachment
 echo "Second attachment: Attaching profiler to PID $APP_PID for 500 milliseconds..."
 
 # Run second rocprofv3 with --attach option.
 # No -o flag: the process uses the default %hostname%/%pid% naming.
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary --group-by-queue --attach-sync-output -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} &
+LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
+    --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary \
+    --group-by-queue --attach-sync-output -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
+    --log-level "${LOG_LEVEL}" "${SELECTED_REGION_ARGS[@]}" &
 SECOND_ROCPROF_PID=$!
 ROCPROF_PID=$SECOND_ROCPROF_PID
 echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"

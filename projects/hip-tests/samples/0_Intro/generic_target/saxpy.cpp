@@ -92,6 +92,7 @@ int main() {
    * "--offload-arch=gfx10-1-generic",
    * "--offload-arch=gfx10-3-generic",
    * "--offload-arch=gfx11-generic",
+   * "--offload-arch=gfx11-7-generic",
    * "--offload-arch=gfx12-generic"
    *
    * */

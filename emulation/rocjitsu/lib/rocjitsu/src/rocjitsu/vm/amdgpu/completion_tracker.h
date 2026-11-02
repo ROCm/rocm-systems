@@ -45,7 +45,7 @@ public:
   /// Unavailable keeps the completed entry queued so a durable external
   /// publication can resume without firing the dispatch completion twice.
   using DispatchRetirementGate =
-      std::function<VmAccessOutcome(AqlQueueRecord &queue, const DispatchEntry &entry)>;
+      std::function<VmAccessOutcome(ComputeQueueRecord &queue, const DispatchEntry &entry)>;
   /// Called by the one shard whose publish completes a fanned-out dispatch, so
   /// every participating XCD can be woken: the owner to fire the completion
   /// signal, and any peer parked behind a barrier bit waiting on this dispatch.
@@ -69,10 +69,10 @@ public:
 
   /// @brief Notify that a workgroup has completed all its wavefronts.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
-                          std::vector<AqlQueueRecord> &queues);
+                          std::vector<ComputeQueueRecord> &queues);
 
   /// @brief Scan all queues and fire completion signals for retired dispatches.
-  [[nodiscard]] CompletionDrainResult drain_completions(std::vector<AqlQueueRecord> &queues);
+  [[nodiscard]] CompletionDrainResult drain_completions(std::vector<ComputeQueueRecord> &queues);
 
   /// @brief Deliver an out-of-order-ready non-kernel packet's completion.
   [[nodiscard]] VmAccessOutcome complete_non_kernel(DispatchEntry &entry);
@@ -81,7 +81,7 @@ public:
   void flush_caches(uint32_t vmid = 0);
 
   /// @brief Check if all queues have no pending entries.
-  bool all_complete(const std::vector<AqlQueueRecord> &queues) const;
+  bool all_complete(const std::vector<ComputeQueueRecord> &queues) const;
 
 private:
   [[nodiscard]] VmAccessOutcome deliver_completion(DispatchEntry &entry);

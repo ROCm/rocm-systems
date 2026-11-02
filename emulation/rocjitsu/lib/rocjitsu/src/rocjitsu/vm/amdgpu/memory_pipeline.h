@@ -12,6 +12,9 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <queue>
@@ -44,7 +47,14 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 /// in a single tick() and then complete on the next tick().
 class MemoryPipeline {
 public:
-  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome)>;
+  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
+  static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
+      MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
+
+  struct WaitCounterTokens {
+    std::array<WaitCounterType, MAX_WAIT_COUNTER_TOKENS> types{};
+    uint8_t size = 0;
+  };
 
   explicit MemoryPipeline(WaitCounterType type) : counter_type_(type) {}
   virtual ~MemoryPipeline();
@@ -52,17 +62,18 @@ public:
   struct PipelineEntry {
     Instruction *inst;
     Wavefront *wf;
-    WaitCounterType counter;
+    WaitCounterTokens counters;
     uint64_t wave_generation;
+    uint64_t issue_pc;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
   ///
   /// In functional mode, memory accesses normally complete synchronously:
   /// the load or store is initiated and completed within this call, and the
-  /// wait counter is released only after complete_access() finishes all
-  /// writeback work.  A timing backend may return Deferred and release the
-  /// counter later through finish_completed_access().
+  /// wait-counter obligations are released only after complete_access()
+  /// finishes all writeback work. A timing backend may return Deferred and
+  /// release the counters later through finish_completed_access().
   VmAccessOutcome issue(Instruction *inst, Wavefront &wf);
 
   /// @brief Issue an instruction and retain it for retry on Unavailable.
@@ -74,6 +85,10 @@ public:
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
+  /// @brief Retry only one queue's retained work without requesting an engine yield.
+  /// @details The caller holds the CU wave-state lock and owns this queue's pause.
+  void retry_for_queue(uint32_t process_id, uint32_t queue_id);
+
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
   WaitCounterType counter_type() const { return counter_type_; }
@@ -81,6 +96,11 @@ public:
 
   /// @brief Retain an operation whose first access attempt already returned Unavailable.
   void defer_unavailable(Instruction *inst, Wavefront &wf);
+
+  /// @brief Cancel one unavailable side-effect-free load and rewind its issuing PC.
+  /// @details Used by debugger suspension so an unresolved load can be saved and
+  /// re-issued after restore. Stores, atomics and LDS-destination loads are retained.
+  bool rewind_unavailable_load(Wavefront &wf);
 
   /// @brief Cancel every retained operation belonging to one wave-slot occupant.
   void cancel(Wavefront &wf);
@@ -92,17 +112,21 @@ protected:
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
+  void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
-  [[nodiscard]] WaitCounterType issue_counter(const Instruction &inst) const;
+  [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
+  void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  bool cancel_wait_check_issue(const PipelineEntry &entry);
   void complete_entry(PipelineEntry entry);
 
-  void finish_completed_access(Instruction *inst, Wavefront &wf, WaitCounterType counter,
+  void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,
                                uint64_t wave_generation) {
     if (wf.dispatch_generation() != wave_generation) {
       delete inst;
       return;
     }
-    wf.release_wait_counter(counter);
+    release_wait_counters(wf, counters);
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
@@ -147,6 +171,8 @@ protected:
                                          MemoryAccessDeferredCompletion complete) override;
 
 private:
+  VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
+                                         uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
 };

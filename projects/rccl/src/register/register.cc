@@ -115,7 +115,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     struct ncclRegNetHandles* netHandlePrev;
     while (netHandle) {
       if (ncclNetDeregBuffer(comm, netHandle->proxyConn, netHandle->handle) != ncclSuccess) {
-        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle,
+        ATTN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle,
              netHandle->proxyConn->rank);
       }
       netHandlePrev = netHandle;
@@ -124,16 +124,11 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     }
   }
   if (reg->state & NVLS_REG_COMPLETE) {
-    if (ncclNvlsDeregBuffer(comm, &reg->mcHandle, reg->regAddr, reg->dev, reg->regUCSize, reg->regMCSize) !=
-        ncclSuccess) {
-      WARN("rank %d deregister NVLS buffer %p dev %d ucsize %ld mcsize %ld failed", comm->rank, (void*)reg->regAddr,
-           reg->dev, reg->regUCSize, reg->regMCSize);
-    }
-    reg->regAddr = (CUdeviceptr)NULL;
+    NCCLCHECK(ncclNvlsUbDeregister(comm, reg));
   }
   if (reg->state & COLLNET_REG_COMPLETE) {
     if (ncclCollnetDeregBuffer(comm, reg->collnetProxyconn, reg->collnetHandle) != ncclSuccess) {
-      WARN("rank %d deregister COLLNET buffer handle %p proxy rank %d failed", comm->rank, reg->collnetHandle,
+      ATTN("rank %d deregister COLLNET buffer handle %p proxy rank %d failed", comm->rank, reg->collnetHandle,
            reg->collnetProxyconn->rank);
     }
   }
@@ -145,7 +140,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     for (int i = 0; i < reg->ipcInfosSize; ++i)
       if (reg->ipcInfos[i]) {
         if (ncclIpcDeregBuffer(comm, reg->ipcInfos[i]) != ncclSuccess) {
-          WARN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
+          ATTN("rank %d deregister IPC buffer %p peerRank %d failed", comm->rank, reg->ipcInfos[i]->baseAddr,
                reg->ipcInfos[i]->peerRank);
         }
         free(reg->ipcInfos[i]);
@@ -178,6 +173,11 @@ ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t siz
   if (!ncclParamLocalRegister()) *handle = NULL;
   else {
     INFO(NCCL_INIT, "RCCL: ncclCommRegister");
+    // Explicit host registration must observe completed graph reclamation
+    // before looking up a virtual address that VMM may have reused. Internal
+    // graph registration intentionally relies on group.cc's throttled drain.
+    NCCLCHECKGOTO(CommCheck(comm, "ncclCommRegister", "comm"), ret, end);
+    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/false), ret, end);
     NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
   }
 end:
@@ -198,7 +198,8 @@ ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t siz
 }
 
 static ncclResult_t commDeregister(struct ncclComm* comm, bool isGraph, struct ncclReg* reg) {
-  NCCLCHECK(CommCheck(comm, "ncclCommRegister", "comm"));
+  NCCLCHECK(CommCheck(comm, "ncclCommDeregister", "comm"));
+
   struct ncclRegCache* cache = &comm->regCache;
   int slot;
   int saveDev;
@@ -225,7 +226,11 @@ exit:
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
 ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void* handle) {
   NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
+  // Explicit host deregistration observes completed graph reclamation before
+  // touching the cache. Internal graph deregistration relies on group.cc's
+  // throttled drain and can itself run from a reclamation callback.
+  NCCLCHECK(CommCheck(comm, "ncclCommDeregister", "comm"));
+  NCCLCHECK(ncclCommPollCallbacks(comm, /*waitSome=*/false));
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }

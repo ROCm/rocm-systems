@@ -20,6 +20,12 @@ from conftest import ProfileModeImportGuard
 
 from tests.integration.common import gpu_soc, inject_mpirun
 
+# Exit code rocprof-compute uses when the SDK reports the GPU firmware is too old.
+OUTDATED_FIRMWARE_EXIT_CODE = 3
+OUTDATED_FIRMWARE_SKIP_REASON = (
+    "GPU firmware on this runner is below the minimum rocprofiler-sdk requires"
+)
+
 rocprof_compute_script_path = Path(ROOT) / "src/rocprof-compute"
 if not rocprof_compute_script_path.exists():
     rocprof_compute_script_path = Path(ROOT) / "rocprof-compute"
@@ -148,6 +154,9 @@ def binary_handler_profile_rocprof_compute(request):
                 stream=stream,
             )
 
+            if process.returncode == OUTDATED_FIRMWARE_EXIT_CODE:
+                pytest.skip(OUTDATED_FIRMWARE_SKIP_REASON)
+
             # Verify run status
             if check_success:
                 assert process.returncode == 0
@@ -170,6 +179,8 @@ def binary_handler_profile_rocprof_compute(request):
                         "rocprof-compute", rocprof_compute_script_path
                     ).load_module()
                     rocprof_compute.main()
+        if e.value.code == OUTDATED_FIRMWARE_EXIT_CODE:
+            pytest.skip(OUTDATED_FIRMWARE_SKIP_REASON)
         # verify run status
         if check_success:
             assert e.value.code == 0

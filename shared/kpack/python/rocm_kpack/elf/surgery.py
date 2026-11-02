@@ -250,8 +250,29 @@ class ElfSurgery:
 
     @staticmethod
     def has_fatbin_section(file_path: Path) -> bool:
-        """Fast check for .hip_fatbin without loading the full binary."""
-        return ElfSurgery._section_location(file_path, ".hip_fatbin") is not None
+        """Fast check for a .hip_fatbin that contains device code.
+
+        A missing section and an SHT_NOBITS section are not device code.
+        A zero-sized SHT_PROGBITS section is not either: hipcc
+        --offload-host-only leaves that header, and parsing the empty
+        payload fails with "Unrecognized fatbin format".
+        """
+        location = ElfSurgery._section_location(file_path, ".hip_fatbin")
+        if location is None:
+            return False
+        _offset, size = location
+        return size > 0
+
+    @staticmethod
+    def has_kpack_ref_section(file_path: Path) -> bool:
+        """Fast check for .rocm_kpack_ref without loading the full binary.
+
+        Its presence means the binary has already been through
+        kpack_offload_binary(): the device code lives in a .kpack archive and
+        the .hip_fatbin section header that remains is a leftover, not
+        splittable content.
+        """
+        return ElfSurgery._section_location(file_path, ".rocm_kpack_ref") is not None
 
     @staticmethod
     def read_section(file_path: Path, section_name: str) -> bytes | None:

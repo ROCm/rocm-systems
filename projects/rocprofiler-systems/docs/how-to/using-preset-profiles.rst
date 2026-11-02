@@ -389,7 +389,7 @@ fields with descriptions and types.
    * - Section
      - Description
    * - ``tracing``
-     - Perfetto trace output: ``enabled``, ``legacy``, ``buffer_size_kb``,
+     - Perfetto trace output: ``enabled``, ``buffer_size_kb``,
        ``fill_policy``
    * - ``profiling``
      - Call-stack profiling: ``enabled``, ``flat_profile``

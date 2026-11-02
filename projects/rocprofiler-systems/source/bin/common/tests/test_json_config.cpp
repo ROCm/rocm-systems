@@ -17,7 +17,7 @@ class json_config_test : public ::testing::Test
 
 TEST_F(json_config_test, resolves_tracing_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "tracing": {
             "enabled": true,
             "buffer_size_kb": {"value": 2048},
@@ -34,7 +34,7 @@ TEST_F(json_config_test, resolves_tracing_section)
 
 TEST_F(json_config_test, resolves_profiling_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "profiling": {
             "enabled": true,
             "flat_profile": {"enabled": true}
@@ -49,7 +49,7 @@ TEST_F(json_config_test, resolves_profiling_section)
 
 TEST_F(json_config_test, resolves_sampling_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "sampling": {
             "enabled": true,
             "timer": {"value": "realtime"},
@@ -71,7 +71,7 @@ TEST_F(json_config_test, resolves_sampling_section)
 // Test new schema format - domains.gpu section
 TEST_F(json_config_test, resolves_gpu_domain)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "domains": {
             "gpu": {
                 "enabled": true,
@@ -90,7 +90,7 @@ TEST_F(json_config_test, resolves_gpu_domain)
     EXPECT_EQ(result.at(env_vars::USE_AMD_SMI), "true");
     EXPECT_EQ(result.at(env_vars::USE_PROCESS_SAMPLING), "true");
     // Order might vary, but should contain temp and power
-    auto metrics = result.at(env_vars::AMD_SMI_METRICS);
+    auto const metrics = result.at(env_vars::AMD_SMI_METRICS);
     EXPECT_NE(metrics.find("temp"), std::string::npos);
     EXPECT_NE(metrics.find("power"), std::string::npos);
     EXPECT_EQ(metrics.find("busy"), std::string::npos);  // busy is disabled
@@ -100,7 +100,7 @@ TEST_F(json_config_test, resolves_gpu_domain)
 // Test new schema format - domains.rocm section
 TEST_F(json_config_test, resolves_rocm_domain)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "domains": {
             "rocm": {
                 "api_domains": {
@@ -114,7 +114,7 @@ TEST_F(json_config_test, resolves_rocm_domain)
 
     auto result = resolve_config(j);
 
-    auto domains = result.at(env_vars::ROCM_DOMAINS);
+    auto const domains = result.at(env_vars::ROCM_DOMAINS);
     EXPECT_NE(domains.find("hip_runtime_api"), std::string::npos);
     EXPECT_NE(domains.find("kernel_dispatch"), std::string::npos);
     EXPECT_EQ(domains.find("memory_copy"), std::string::npos);
@@ -123,7 +123,7 @@ TEST_F(json_config_test, resolves_rocm_domain)
 // Test new schema format - domains.parallel section
 TEST_F(json_config_test, resolves_parallel_domain)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "domains": {
             "parallel": {
                 "runtimes": {
@@ -145,7 +145,7 @@ TEST_F(json_config_test, resolves_parallel_domain)
 // Test new schema format - output section
 TEST_F(json_config_test, resolves_output_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "output": {
             "path": {"value": "/tmp/my-traces"},
             "unified_memory_output_path": {"value": "/tmp/my-ump"},
@@ -166,7 +166,7 @@ TEST_F(json_config_test, resolves_output_section)
 // Test new schema format - hardware_counters section
 TEST_F(json_config_test, rasolves_hw_counters_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "hardware_counters": {
             "enabled": true,
             "rocm_events": {"value": ["VALUUtilization", "Occupancy"]},
@@ -183,7 +183,7 @@ TEST_F(json_config_test, rasolves_hw_counters_section)
 // Test new schema format - causal section
 TEST_F(json_config_test, resolves_causal_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "causal": {
             "enabled": true,
             "mode": {"value": "function"},
@@ -203,7 +203,7 @@ TEST_F(json_config_test, resolves_causal_section)
 // Test new schema format - advanced section
 TEST_F(json_config_test, resolves_advanced_configuration_section)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "advanced": {
             "max_depth": {"value": 100},
             "verbose": {"value": 2},
@@ -224,7 +224,7 @@ TEST_F(json_config_test, resolves_advanced_configuration_section)
 // Test combined sections
 TEST_F(json_config_test, combines_multiple_sections)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "metadata": {"name": "test-config"},
         "tracing": {"enabled": true},
         "profiling": {"enabled": true},
@@ -246,8 +246,8 @@ TEST_F(json_config_test, combines_multiple_sections)
 // Test empty JSON returns empty map
 TEST_F(json_config_test, empty_json_returns_empty_map)
 {
-    auto j      = nlohmann::json::parse("{}");
-    auto result = resolve_config(j);
+    auto const j      = nlohmann::json::parse("{}");
+    auto const result = resolve_config(j);
 
     EXPECT_TRUE(result.empty());
 }
@@ -255,7 +255,7 @@ TEST_F(json_config_test, empty_json_returns_empty_map)
 // Test get_config_metadata extraction
 TEST_F(json_config_test, extract_configuration_metadata)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "metadata": {
             "name": "balanced",
             "description": "Balanced profiling mode",
@@ -283,14 +283,14 @@ TEST_F(json_config_test, json_values_to_sting_types)
     EXPECT_EQ(json_value_to_string(nlohmann::json(false)), "false");
     EXPECT_EQ(json_value_to_string(nlohmann::json(42)), "42");
 
-    auto arr = nlohmann::json::array({ "a", "b", "c" });
+    auto const arr = nlohmann::json::array({ "a", "b", "c" });
     EXPECT_EQ(json_value_to_string(arr), "a,b,c");
 }
 
 // Test output.rocpd_output resolution
 TEST_F(json_config_test, resolves_rocpd_output)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "output": {
             "rocpd_output": {"enabled": true}
         }
@@ -304,7 +304,7 @@ TEST_F(json_config_test, resolves_rocpd_output)
 // Test advanced.network_interface resolution
 TEST_F(json_config_test, resolves_network_interface)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "advanced": {
             "network_interface": {"value": "eth0"}
         }
@@ -318,7 +318,7 @@ TEST_F(json_config_test, resolves_network_interface)
 // Test advanced.trace_periods resolution
 TEST_F(json_config_test, resolves_trace_periods)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "advanced": {
             "trace_periods": {"value": "0:10,20:30"}
         }
@@ -332,7 +332,7 @@ TEST_F(json_config_test, resolves_trace_periods)
 // Test hardware_counters.papi_multiplexing resolution
 TEST_F(json_config_test, resolves_papi_multiplexing)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "hardware_counters": {
             "enabled": true,
             "papi_multiplexing": {"enabled": true}
@@ -347,7 +347,7 @@ TEST_F(json_config_test, resolves_papi_multiplexing)
 // Test domains.rocm.enabled top-level flag
 TEST_F(json_config_test, resolves_rocm_enabled_flag)
 {
-    auto j = nlohmann::json::parse(R"({
+    auto const j = nlohmann::json::parse(R"({
         "domains": {
             "rocm": {
                 "enabled": true

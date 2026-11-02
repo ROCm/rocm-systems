@@ -487,7 +487,7 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
   } else {
     // Hardware doorbell supports AQL semantics.
-    _mm_sfence();
+    store_fence();
     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
@@ -1565,8 +1565,10 @@ hsa_status_t AqlQueue::SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* 
       }
     }
 
-    return agent_->driver().SetQueueCUMask(queue_id_, mask.size() * 32,
-                                           reinterpret_cast<HSAuint32*>(&mask[0]));
+    hsa_status_t status = agent_->driver().SetQueueCUMask(
+        queue_id_, mask.size() * 32, reinterpret_cast<HSAuint32*>(&mask[0]));
+    // On failure leave cu_mask_ describing the mask the driver still has.
+    if (status != HSA_STATUS_SUCCESS) return status;
   }
 
   // update current cu masking tracking.
@@ -1735,7 +1737,7 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
   if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
+    store_fence();
   }
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 

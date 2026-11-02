@@ -172,7 +172,7 @@ def _emit_types(path: Path) -> None:
         '    uint16_t encoding_id, uint16_t opcode) {',
         '    InstructionLegalization key{.src_opcode = opcode, .src_encoding_id = encoding_id,',
         '                               .action = Action::Illegal, .target_opcode = 0};',
-        '    auto it = std::lower_bound(table.begin(), table.end(), key);',
+        '    auto it = std::ranges::lower_bound(table, key);',
         '    if (it != table.end() && *it == key)',
         '        return &*it;',
         '    return nullptr;',

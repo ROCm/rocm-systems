@@ -23,8 +23,8 @@ ncclProfilerCallback_t IbCastProfilerFunction;
 NCCL_PARAM(IbCastSplitDataOnQps, "IB_SPLIT_DATA_ON_QPS", 0);
 NCCL_PARAM(IbCastPrepostReceiveWorkRequests, "IB_PREPOST_RECEIVE_WORK_REQUESTS", -2);
 NCCL_PARAM(IbCastAsyncEvents, "IB_RETURN_ASYNC_EVENTS", 1);
-extern int ncclParamIbCastOooRq();
-extern int ncclParamIbCastResiliencyPortFailover();
+RCCL_PARAM(IbCastOptionalRecvCompletion, "IB_OPTIONAL_RECV_COMPLETION", 0);
+extern int64_t ncclParamNetOptionalRecvCompletion();
 
 
 ncclResult_t IbCastStatsCheckFatalCount(struct ncclIbStats* stat, const char* funcName) {
@@ -59,6 +59,7 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   }
   baseComm->nqps = -1;
   baseComm->splitDataOnQps = ncclParamIbCastSplitDataOnQps();
+  baseComm->optRecvCompletion = false;
   baseComm->nDataQps = -1;
   baseComm->isSend = isSend;
   baseComm->ready = 0;
@@ -66,6 +67,24 @@ ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
   NCCLCHECK(IbCastResiliencyInit(baseComm, &baseComm->resiliency));
 
   return ncclSuccess;
+}
+
+// Resiliency and QP scheduling need receiver completions.
+static bool IbCastOptRecvCompletionBlocked(const struct ncclIbNetCommBase* baseComm) {
+  return baseComm->resiliency != nullptr || castGlobalQpSchedParms.enable;
+}
+
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload) {
+  // On from the control or CTS offload. Off if blocked, or if this rank will not send the hint.
+  const bool blocked = IbCastOptRecvCompletionBlocked(baseComm);
+  const bool netHint = ncclParamNetOptionalRecvCompletion() != 0;
+  bool optRecvCompletion = rcclParamIbCastOptionalRecvCompletion() != 0;
+  if (useCtsOffload) optRecvCompletion = true;
+  if (!netHint || blocked) optRecvCompletion = false;
+  baseComm->optRecvCompletion = optRecvCompletion;
+  INFO(NCCL_NET, "NET/IB: %s: optRecvCompletion=%d (useCtsOffload=%d blocked=%d control=%ld netHint=%d)", __func__,
+       (int)baseComm->optRecvCompletion, (int)useCtsOffload, (int)blocked,
+       rcclParamIbCastOptionalRecvCompletion(), (int)netHint);
 }
 
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
@@ -95,6 +114,37 @@ ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm) {
 
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm) {
   NCCLCHECK(IbCastBaseCommInit(&sendComm->base, true));
+  return ncclSuccess;
+}
+
+static ncclResult_t IbCastEventGidChange(struct ncclIbDev* dev) {
+  INFO(NCCL_NET, "NET/IB: %s: GID table changed on %s:%d", __func__, dev->devName, dev->portNum);
+  if (dev->gidInfo.link_layer != IBV_LINK_LAYER_ETHERNET) {
+    INFO(NCCL_NET, "NET/IB : %s:%d link is not Ethernet; ignoring GID change", dev->devName, dev->portNum);
+    return ncclSuccess;
+  }
+  struct ibv_port_attr portAttr;
+  ncclResult_t res = wrap_ibv_query_port(dev->context, dev->portNum, &portAttr);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d query_port failed during GID change (res=%d)", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+
+  std::lock_guard<std::mutex> lock(dev->mutex);
+  int oldIdx = dev->gidInfo.localGidIndex;
+  union ibv_gid oldGid = dev->gidInfo.localGid;
+  res = IbCastGidInfoQuery(dev->context, dev->portNum, &portAttr, &dev->gidInfo);
+  if (res != ncclSuccess) {
+    WARN("NET/IB : %s:%d GID info query failed (%d) during GID change", dev->devName, dev->portNum, (int)res);
+    return res;
+  }
+  dev->portAttr = portAttr; // publish only once everything succeeded
+  char oldGidStr[INET6_ADDRSTRLEN] = "";
+  char newGidStr[INET6_ADDRSTRLEN] = "";
+  ibvGetGidStr(&oldGid, oldGidStr, sizeof(oldGidStr));
+  ibvGetGidStr(&dev->gidInfo.localGid, newGidStr, sizeof(newGidStr));
+  INFO(NCCL_NET, "NET/IB : %s:%d GID refreshed: idx %d -> %d, gid %s -> %s", dev->devName, dev->portNum, oldIdx,
+       dev->gidInfo.localGidIndex, oldGidStr, newGidStr);
   return ncclSuccess;
 }
 
@@ -148,7 +198,11 @@ void* IbCastAsyncThreadMain(void* args) {
       WARN("NET/IB : %s:%d async fatal event on SRQ, unused for now (%p): %s", dev->devName, dev->portNum, srq, str);
       break;
     case IBV_EVENT_GID_CHANGE:
-      WARN("NET/IB : %s:%d GID table changed", dev->devName, dev->portNum);
+      if (IbCastEventGidChange(dev) != ncclSuccess) {
+        WARN("NET/IB : %s:%d marking device with fatal error after GID-change event handler failed", dev->devName,
+             dev->portNum);
+        IbCastDevFatalError(dev);
+      }
       break;
     case IBV_EVENT_PATH_MIG_ERR:
     case IBV_EVENT_PORT_ERR:
@@ -202,3 +256,12 @@ ncclNet_t netIbCast = {
   IbCastFinalize,
   IbCastSetNetAttr,
 };
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_gid_inspect.h"
+
+extern "C" ncclResult_t ncclIbCastGidChangeEvent(int ibDev) {
+  if (ibDev < 0 || ibDev >= IbCastNDevs) return ncclInvalidArgument;
+  return IbCastEventGidChange(&IbCastDevs[ibDev]);
+}
+#endif /* ENABLE_FAULT_INJECTION */

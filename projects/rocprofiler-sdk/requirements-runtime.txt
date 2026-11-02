@@ -1,0 +1,6 @@
+dataclasses
+jinja2
+otf2
+pandas
+pyyaml
+reportlab

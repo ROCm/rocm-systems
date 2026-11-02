@@ -100,10 +100,19 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
   uint32_t reserved2;
 
   /**
-   * Address of the instruction sequence.
+   * Opaque kernel object handle, as returned by ::HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT for a
+   * kernel symbol of an executable loaded on the agent that owns the queue. The executable must
+   * not be destroyed until the dispatch has completed.
+   *
+   * The kernel's code object selects the dispatch type: PDI plus instruction sequence, or full
+   * ELF. Full ELF is supported only on aie2p agents.
+   *
+   * The packets submitted by one doorbell ring fix the dispatch type for the batch, and a
+   * packet of the other type in the same batch is rejected. A later batch on the same queue
+   * may use the other type, at the cost of a hardware context rebuild.
    */
-  uint32_t insts_addr_low;
-  uint32_t insts_addr_high;
+  uint32_t kernel_object_low;
+  uint32_t kernel_object_high;
 
   /**
    * Number of kernel arguments. Must be 0 if ::kernarg_address is NULL, and must be greater than 0
@@ -127,23 +136,26 @@ typedef struct hsa_amd_aie_kernel_dispatch_packet_s {
    * - entries [0 .. ::num_kernargs - 1] are the argument addresses
    * - entries [::num_kernargs .. 2 * ::num_kernargs - 1] are the corresponding argument sizes in
    * bytes
+   *
+   * A size of 0 for a kernarg means no cacheline is flushed for that argument; the argument is
+   * still resolved and kept resident for the duration of the dispatch.
    */
   void* kernarg_address;
-
-  /**
-   * Size of the instruction sequence in bytes.
-   */
-  uint64_t insts_size;
-
-  /**
-   * PDI address.
-   */
-  void* pdi_addr;
 
   /**
    * Reserved. Must be 0.
    */
   uint64_t reserved4;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  void* reserved5;
+
+  /**
+   * Reserved. Must be 0.
+   */
+  uint64_t reserved6;
 } hsa_amd_aie_kernel_dispatch_packet_t;
 
 /** @} */

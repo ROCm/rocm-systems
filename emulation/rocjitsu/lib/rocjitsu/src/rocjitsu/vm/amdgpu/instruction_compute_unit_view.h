@@ -11,6 +11,7 @@
 #include "simdojo/sim/sim_types.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace simdojo {
@@ -32,6 +33,17 @@ class RegisterAccess;
 struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
+/// @brief Completion contract for a deferred runtime queue exception.
+enum class QueueExceptionDeliveryPolicy {
+  /// Preserve the trap-handler acknowledgment and debugger-ownership protocol.
+  WaitForAcknowledgment,
+  /// Publish without waiting for ROCr; fail the engine if publication fails.
+  PublishOrFail,
+  /// Publish without waiting; the caller cancels all queue replicas and fails
+  /// the engine after their acknowledgments, even if publication fails.
+  PublishAndCancel,
+};
+
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
 ///
 /// @details This view deliberately omits public physical register storage APIs.
@@ -47,17 +59,36 @@ public:
   L2Cache *l2() const;
   Lds &lds();
   bool sram_ecc() const;
+  bool setreg_vgpr_msb_fixup() const;
+  /// Whether register accesses have a diagnostic or plugin consumer.
+  bool observes_register_access() const;
+  bool debug_active() const;
   rj_code_arch_t arch() const;
+  uint32_t cus_per_shader_array() const;
+  uint32_t shader_array_cu_id() const;
+  uint32_t shader_engine_id() const;
+  uint32_t shader_engine_cu_count() const;
+  std::optional<uint32_t> xcc_id() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
   uint32_t vgpr_allocation_block_size() const;
   std::string full_path() const;
   simdojo::ComponentID id() const;
   simdojo::SimulationEngine *engine() const;
+  uint32_t fetch_instruction_word(uint64_t address, uint32_t process_id) const;
   void request_functional_yield();
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
-  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status);
+  /// Queue a runtime exception for delivery after instruction execution drops
+  /// the compute unit's wave-state lock. A caller without a debugger fallback
+  /// can require engine failure if the runtime cannot take ownership. Set
+  /// retain_wave=false when the dispatch will abort before delivery completes.
+  bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
+                              bool clear_debug_stop_on_success = false,
+                              bool retain_failure_for_debugger = true,
+                              QueueExceptionDeliveryPolicy delivery_policy =
+                                  QueueExceptionDeliveryPolicy::WaitForAcknowledgment,
+                              bool retain_wave = true);
   bool observes_tensor_dma_memory_access() const;
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
 

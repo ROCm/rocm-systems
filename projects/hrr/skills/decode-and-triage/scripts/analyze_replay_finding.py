@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from archive_text import sanitize
+
 # --- regex library (diverse workloads) ---
 
 RE_PROGRESS = re.compile(
@@ -29,12 +31,12 @@ RE_MAF = re.compile(
     r"Memory access fault by GPU node-(\d+).*on address (0x[0-9a-fA-F]+)\.\s*"
     r"Reason:\s*([^.\n]+)"
 )
-# The leading fields of this bracket vary by ROCm build -- some emit `host:`,
-# some start at `GPU index:` -- so anchor on the two fields actually consumed
-# rather than on the whole prefix. Requiring `host:` dropped the kernel name on
-# every build that omits it, which is the one field the report exists to give.
+# CLR prints "Memory Fault Error" and this bracket with separate log calls, and
+# the first only at AMD_LOG_LEVEL>=1, so the bracket is matched on its own. Its
+# leading fields vary (`host:` is omitted without a hostname), so anchor on the
+# two fields actually consumed.
 RE_MEM_FAULT_ERR = re.compile(
-    r"Memory Fault Error \[[^\]]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
+    r"\[[^\]\n]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
 # The runner bounds the replay and records the fact when it had to stop it.
@@ -97,11 +99,16 @@ RE_EVENT_PROGRESS = re.compile(
 RE_ATEN_CHEVRON = re.compile(r"_ZN2at6native|at::native::")
 RE_CAPTURE_MAF = RE_MAF
 RE_D2H_SUMMARY = re.compile(r"D2H checks\s+: (\d+) pass.*?, (\d+) fail, (\d+) skipped")
+RE_KERNELS_LAUNCHED = re.compile(r"\[HRR\]\s+Kernels launched:\s*(\d+)")
 RE_KERNARG = re.compile(r"kernarg_address=(0x[0-9a-fA-F]+)")
 RE_GRID = re.compile(r"grid=\[([^\]]+)\], workgroup=\[([^\]]+)\]")
 RE_CIJK = re.compile(r"(Cijk_[A-Za-z0-9_]+)")
 RE_CAPTURE_HIP = re.compile(r"\[capture\] HIP_SO=(\S+)")
-RE_VERSION_MISMATCH = re.compile(r"\[HRR\] Version mismatch: file=(\d+) reader=(\d+)")
+RE_VERSION_MISMATCH = re.compile(
+    r"\[HRR\] Version mismatch(?: in [^\n]*)?: file=(\d+) reader=(\d+)"
+)
+# `--sync-after-launch` names the kernel it synchronized after when the sync fails.
+RE_SYNC_GPU_ERROR = re.compile(r"\[HRR\] GPU error after '([^'\n]+)'")
 
 
 @dataclass
@@ -325,6 +332,11 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.kernel_name = m.group(2).strip()
 
     if not finding.kernel_name:
+        m = RE_SYNC_GPU_ERROR.search(text)
+        if m:
+            finding.kernel_name = m.group(1)
+
+    if not finding.kernel_name:
         m = RE_QUEUE_ABORT_KERNEL.search(text)
         if m:
             finding.kernel_name = m.group(1).strip()
@@ -343,10 +355,19 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.grid = m.group(1)
         finding.workgroup = m.group(2)
 
+    # The replay summary carries the end-of-run totals, so it wins over the
+    # last progress line, which is printed at the first kernel and then only
+    # periodically. It gives skipped rather than attempted, and skipped is
+    # attempted less pass and fail.
     m = RE_D2H_SUMMARY.search(text)
     if m:
         finding.d2h_pass = int(m.group(1))
         finding.d2h_fail = int(m.group(2))
+        finding.d2h_attempted = finding.d2h_pass + finding.d2h_fail + int(m.group(3))
+
+    m = RE_KERNELS_LAUNCHED.search(text)
+    if m:
+        finding.kernels_launched = int(m.group(1))
 
     new_class = _classify(text, finding)
     if new_class != "unknown" or finding.fault_class in (None, "unknown"):
@@ -392,11 +413,18 @@ def finalize(finding: Finding) -> Finding:
     """
     # A clean replay implicates no kernel. The archive still lists the kernels
     # it ran, and a GEMM matched out of that listing would sit in the report
-    # next to a pass as though it were a culprit.
+    # next to a pass as though it were a culprit. The same holds for the event
+    # and kernel a progress line named on the way, and the JSON report prints
+    # every field, so they are cleared rather than left for markdown to hide.
     if finding.fault_class == "replay_pass":
         finding.kernel_name = None
         finding.kernel_family = None
         finding.last_event_kernel = None
+        finding.last_progress_kernel = None
+        finding.failing_event_seq = None
+        finding.failing_call_index = None
+        finding.failing_thread = None
+        finding.failing_api = None
         return finding
 
     # The replay process died without reaching a verdict, so nothing here is a
@@ -420,7 +448,7 @@ def finalize(finding: Finding) -> Finding:
         finding.kernel_name = finding.last_event_kernel
         finding.notes.append(
             f"kernel name taken from the last launch to start before the fault "
-            f"({finding.last_event_kernel}); the runtime fault line named no "
+            f"({sanitize(finding.last_event_kernel)}); the runtime fault line named no "
             f"kernel. Valid only for a replay run with --verbose, which is what "
             f"prints those per-event lines."
         )
@@ -437,7 +465,7 @@ def finalize(finding: Finding) -> Finding:
         finding.kernel_name = finding.archive_kernel_names[0]
         finding.notes.append(
             f"kernel name inferred from the archive, which contains exactly one "
-            f"kernel ({finding.kernel_name}); the replay log carried no "
+            f"kernel ({sanitize(finding.kernel_name)}); the replay log carried no "
             f"per-launch attribution. Re-run with --sync-after-launch to "
             f"confirm the faulting dispatch directly."
         )
@@ -485,49 +513,76 @@ def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
 
 
 def render_markdown(f: Finding) -> str:
+    # Every value below came from the archive or from a log its replay wrote, so
+    # each goes through the one sanitizer before it is printed: a value is a line
+    # of the report, never a way to start another.
+    d2h = (
+        f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} "
+        f"attempted={f.d2h_attempted or 0}"
+    )
+    # A replay can launch no kernels at all, and that zero is still a count.
+    kernels = "n/a" if f.kernels_launched is None else f.kernels_launched
     lines = [
         "# HRR replay finding",
         "",
         "## Summary",
-        f"- **Outcome**: {f.outcome}",
-        f"- **Fault class**: `{f.fault_class}`",
-        f"- **Kernel**: `{f.kernel_name or 'unknown'}`",
-        f"- **Kernel family**: `{f.kernel_family or 'unknown'}`",
+        f"- **Outcome**: {sanitize(f.outcome)}",
+        f"- **Fault class**: `{sanitize(f.fault_class)}`",
+        f"- **Kernel**: `{sanitize(f.kernel_name or 'unknown')}`",
+        f"- **Kernel family**: `{sanitize(f.kernel_family or 'unknown')}`",
         "",
-        "## Fault details",
-        f"- **Fault address**: `{f.fault_address or 'n/a'}`",
-        f"- **Fault reason**: {f.fault_reason or 'n/a'}",
-        f"- **Failing event seq**: {f.failing_event_seq or 'n/a'}",
-        f"- **Failing call index**: {f.failing_call_index or 'n/a'}",
-        f"- **Failing API**: {f.failing_api or 'n/a'}",
-        f"- **Kernarg address**: `{f.kernarg_address or 'n/a'}`",
-        f"- **GPU node**: {f.gpu_node or 'n/a'}",
-        f"- **Grid / workgroup**: {f.grid or 'n/a'} / {f.workgroup or 'n/a'}",
-        "",
-        "## Replay progress at fault",
-        f"- **Kernels launched**: {f.kernels_launched or 'n/a'}",
-        f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} attempted={f.d2h_attempted or 0}",
-        f"- **Last progress kernel**: `{f.last_progress_kernel or 'n/a'}`",
-        f"- **Last launch before fault**: `{f.last_event_kernel or 'n/a'}`",
-        "",
+    ]
+    # A clean replay has no fault details and no fault to be at, and printing
+    # a progress counter under "at fault" read as one: a PASS came back naming
+    # a failing event and a kernel taken from a progress line. Keyed on the
+    # class, as finalize() is, so a PASS line with D2H failures, which is a
+    # divergence, keeps its fault details.
+    if f.fault_class == "replay_pass":
+        lines += [
+            "## Replay result",
+            d2h,
+            f"- **Kernels launched**: {kernels}",
+            "",
+        ]
+    else:
+        lines += [
+            "## Fault details",
+            f"- **Fault address**: `{sanitize(f.fault_address or 'n/a')}`",
+            f"- **Fault reason**: `{sanitize(f.fault_reason or 'n/a')}`",
+            # Both are zero-based, so 0 is the first event, not a missing one.
+            f"- **Failing event seq**: {'n/a' if f.failing_event_seq is None else f.failing_event_seq}",
+            f"- **Failing call index**: {'n/a' if f.failing_call_index is None else f.failing_call_index}",
+            f"- **Failing API**: `{sanitize(f.failing_api or 'n/a')}`",
+            f"- **Kernarg address**: `{sanitize(f.kernarg_address or 'n/a')}`",
+            f"- **GPU node**: `{sanitize(f.gpu_node or 'n/a')}`",
+            f"- **Grid / workgroup**: `{sanitize(f.grid or 'n/a')}` / `{sanitize(f.workgroup or 'n/a')}`",
+            "",
+            "## Replay progress at fault",
+            f"- **Kernels launched**: {kernels}",
+            d2h,
+            f"- **Last progress kernel**: `{sanitize(f.last_progress_kernel or 'n/a')}`",
+            f"- **Last launch before fault**: `{sanitize(f.last_event_kernel or 'n/a')}`",
+            "",
+        ]
+    lines += [
         "## Archive / capture",
         f"- **Events**: {f.archive_events or 'n/a'}",
         f"- **Kernels (archive)**: {f.archive_kernels or 'n/a'}",
-        f"- **Kernel names (archive)**: {', '.join(f.archive_kernel_names) or 'n/a'}",
-        f"- **Complete**: {f.archive_complete or 'n/a'}",
+        f"- **Kernel names (archive)**: {', '.join(f'`{sanitize(n)}`' for n in f.archive_kernel_names) or 'n/a'}",
+        f"- **Complete**: `{sanitize(f.archive_complete or 'n/a')}`",
         f"- **Archive / reader format**: "
         f"{f.archive_format_version if f.archive_format_version is not None else 'n/a'}"
         f" / {f.reader_format_version if f.reader_format_version is not None else 'n/a'}",
-        f"- **Capture HIP**: `{f.capture_hip_so or 'n/a'}`",
-        f"- **Capture HIP runtime**: `{f.capture_hip_runtime_version or 'n/a'}`",
-        f"- **Capture comgr**: `{f.capture_comgr_version or 'n/a'}`",
+        f"- **Capture HIP**: `{sanitize(f.capture_hip_so or 'n/a')}`",
+        f"- **Capture HIP runtime**: `{sanitize(f.capture_hip_runtime_version or 'n/a')}`",
+        f"- **Capture comgr**: `{sanitize(f.capture_comgr_version or 'n/a')}`",
         f"- **Capture device count**: {f.capture_device_count if f.capture_device_count is not None else 'n/a'}",
-        f"- **Capture GPU arch**: `{f.capture_gcn_arch or 'n/a'}`",
+        f"- **Capture GPU arch**: `{sanitize(f.capture_gcn_arch or 'n/a')}`",
         "",
         "## Sources",
     ]
     for s in f.sources:
-        lines.append(f"- `{s}`")
+        lines.append(f"- `{sanitize(s)}`")
     if f.notes:
         lines.extend(["", "## Notes"])
         lines.extend(f"- {n}" for n in f.notes)
@@ -573,7 +628,7 @@ def main() -> int:
     for log_path in args.log:
         p = Path(log_path)
         if not p.is_file():
-            finding.notes.append(f"log not found: {p}")
+            finding.notes.append(f"log not found: {sanitize(p)}")
             continue
         parse_text(p.read_text(encoding="utf-8", errors="replace"), str(p), finding)
 

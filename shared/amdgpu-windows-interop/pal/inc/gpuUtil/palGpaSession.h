@@ -33,15 +33,15 @@
 
 #include "palDeque.h"
 #include "palDevice.h"
+#include "palGpuMemory.h"
 #include "palGpuUtil.h"
 #include "palHashSet.h"
 #include "palMutex.h"
 #include "palPipeline.h"
-#include "palVector.h"
 #include "palPlatform.h"
+#include "palSpan.h"
 #include "palSysMemory.h"
-#include "palGpuMemory.h"
-#include "palMemTrackerImpl.h"
+#include "palVector.h"
 
 // Forward declarations.
 namespace Pal
@@ -60,11 +60,13 @@ namespace Pal
     enum   ThreadTraceWaveStartExt : Pal::uint32;
     enum   PipelineStageFlag : uint32;
 }
-struct SqttFileChunkCpuInfo;
-struct SqttFileChunkAsicInfo;
-struct SqttCodeObjectDatabaseRecord;
 
-struct GpuMemoryInfo;
+namespace Util
+{
+    class SpanWriter;
+}
+
+struct SqttCodeObjectDatabaseRecord;
 
 namespace GpuUtil
 {
@@ -923,7 +925,7 @@ private:
     struct GpuMemoryInfo
     {
         Pal::IGpuMemory* pGpuMemory;
-        void*            pCpuAddr;
+        Util::ByteSpan   mappedSpan;
     };
 
     // Event type for code object load events
@@ -1121,19 +1123,27 @@ private:
                                         TimedQueueState** ppQueueState,
                                         Pal::uint32* pQueueIndex);
 
-    /// Injects an external timed queue semaphore operation event
+    // Injects an external timed queue semaphore operation event
     Pal::Result ExternalTimedQueueSemaphoreOperation(Pal::uint64 queueContext,
                                                      Pal::uint64 cpuSubmissionTimestamp,
                                                      Pal::uint64 cpuCompletionTimestamp,
                                                      const TimedQueueSemaphoreInfo& timedSemaphoreInfo,
                                                      bool isSignalOperation);
 
-    /// Converts a CPU timestamp to a GPU timestamp using a CalibratedTimestamps struct
+    // Converts a CPU timestamp to a GPU timestamp using a CalibratedTimestamps struct
     Pal::uint64 ConvertCpuTimestampToGpuTimestamp(Pal::uint64                      cpuTimestamp,
                                                   const Pal::CalibratedTimestamps& calibration) const;
 
-    /// Extracts a GPU timestamp from a queue event
-    Pal::uint64 ExtractGpuTimestampFromQueueEvent(const TimedQueueEventItem& queueEvent) const;
+    // Converts a queue event's CPU timestamp into the GPU timestamp timeline.
+    Pal::uint64 GetCpuTimestampInGpuDomain(const TimedQueueEventItem& queueEvent) const;
+
+    // Gets one of the two GPU timestamps in a queue event.
+    static Pal::uint64 GetGpuTimestamp(const TimedQueueEventItem& queueEvent,
+                                       Pal::uint32                timestampIdx);
+
+    // Helper functions for GetQueueTimingsData and DumpRgpData.
+    QueueTimingsTraceInfo GetQueueTimingsInfo() const;
+    void WriteQueueTimingsData(Util::SpanWriter* pWriter) const;
 
     // Creates a new command buffer for use on pQueue
     Pal::Result CreateCmdBufferForQueue(Pal::IQueue* pQueue,
@@ -1186,23 +1196,10 @@ private:
         Pal::gpusize*           pHeapSize,
         Pal::IQueryPool**       ppQuery);
 
-    // Dump SQ thread trace data in rgp format
-    Pal::Result DumpRgpData(const GpaSampleConfig* pTraceConfig,
-                            TraceSample*           pTraceSample,
-                            void*                  pRgpOutput,
-                            size_t*                pTraceSize) const;
-
-    // Dumps the spm trace data in the buffer provided.
-    Pal::Result AppendSpmTraceData(TraceSample*  pTraceSample,
-                                   size_t        bufferSize,
-                                   void*         pData,
-                                   Pal::gpusize* pSizeInBytes) const;
-
-    // Dumps the df spm trace data in the buffer provided.
-    Pal::Result AppendDfSpmTraceData(TraceSample*  pTraceSample,
-                                     size_t        bufferSize,
-                                     void*         pData,
-                                     Pal::gpusize* pSizeInBytes) const;
+    // Dump SQ thread trace data in rgp format. The writer must start out with nothing written to it!
+    void DumpRgpData(const GpaSampleConfig& traceConfig,
+                     TraceSample*           pTraceSample,
+                     Util::SpanWriter*      pWriter) const;
 
     Pal::Result AddCodeObjectLoadEvent(const Pal::IPipeline* pPipeline, CodeObjectLoadEventType eventType);
     Pal::Result AddCodeObjectLoadEvent(const Pal::IShaderLibrary* pLibrary, CodeObjectLoadEventType eventType);

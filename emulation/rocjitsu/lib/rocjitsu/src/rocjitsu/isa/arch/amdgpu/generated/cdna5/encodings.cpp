@@ -859,6 +859,9 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst));
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -1283,6 +1286,9 @@ Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const VopcVopDpp16MachineInst *>(inst));
 }
 
 bool Vopc::default_encoding() {
@@ -1466,6 +1472,9 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst));
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -1774,7 +1783,6 @@ bool Vop3::has_encoded_literal32() const {
   case 647:
   case 648:
   case 649:
-  case 865:
   case 882:
   case 883:
     return inst_.src0 == 255;
@@ -2028,6 +2036,7 @@ bool Vop3::has_encoded_literal32() const {
   case 830:
   case 833:
   case 834:
+  case 865:
   case 866:
   case 867:
   case 868:
@@ -2170,6 +2179,7 @@ bool Vop3::has_encoded_literal32() const {
   case 721:
   case 722:
   case 788:
+  case 864:
     return inst_.src1 == 255;
   case 603:
   case 604:

@@ -3640,6 +3640,61 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int flags;
     } hipInitDevice;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 34
+    struct
+    {
+        hipFunction_t* functions;
+        unsigned int   numFunctions;
+        hipModule_t    mod;
+    } hipModuleEnumerateFunctions;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 35
+    struct
+    {
+        enum hipFlushGPUDirectRDMAWritesTarget target;
+        enum hipFlushGPUDirectRDMAWritesScope  scope;
+    } hipDeviceFlushGPUDirectRDMAWrites;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
+    struct
+    {
+        hipModule_t* pMod;
+        hipLibrary_t library;
+    } hipLibraryGetModule;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 37
+    struct
+    {
+        hipKernel_t      kernel;
+        hipFuncAttribute attr;
+        int              value;
+        int              device;
+    } hipKernelSetAttributeForDevice;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
+    struct
+    {
+        hipKernel_t    kernel;
+        hipFuncCache_t config;
+        hipDevice_t    device;
+    } hipKernelSetCacheConfig;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
+    struct
+    {
+        void**                  dsts;
+        void**                  srcs;
+        size_t*                 sizes;
+        size_t*                 sizesDst;
+        hipExtMemcpyWait*       waits;
+        hipExtMemcpySignal*     signals;
+        size_t                  count;
+        hipExtMemcpyAttributes* attrs;
+        size_t*                 attrsIdxs;
+        size_t                  numAttrs;
+        hipStream_t             stream;
+    } hipExtMemcpyBatchAsync;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

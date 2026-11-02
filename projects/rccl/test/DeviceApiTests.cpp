@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "nccl_device/host.h"  // ncclDevCommRequirements_t / ncclDevCommCreate (moved out of core.h in NCCL 2.32)
 #include "nccl_device/impl/core__funcs.h"
 #include "nccl_device/impl/lsa_barrier__funcs.h"
 

@@ -16,10 +16,7 @@
 
 using namespace std::chrono_literals;
 
-namespace rocprofsys
-{
-
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 struct cacheable_t
@@ -167,7 +164,7 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
                       type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(arg)>;
-        using ItemType          = typename ContainerType::value_type;
+        using ItemType          = ContainerType::value_type;
         const size_t item_size  = sizeof(ItemType);
         size_t       total_size = 0;
         std::memcpy(&total_size, data_pos, sizeof(size_t));
@@ -213,5 +210,4 @@ parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
 }
 
 }  // namespace utility
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

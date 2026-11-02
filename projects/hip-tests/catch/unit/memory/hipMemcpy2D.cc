@@ -36,11 +36,7 @@ HIP_TEST_CASE(Unit_hipMemcpy2D_Positive_Synchronization_Behavior) {
   }
 
   SECTION("Device to Device") {
-#if HT_NVIDIA
     Memcpy2DDtoDSyncBehavior(hipMemcpy2D, false);
-#else
-    Memcpy2DDtoDSyncBehavior(hipMemcpy2D, true);
-#endif
   }
 
 #if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-232

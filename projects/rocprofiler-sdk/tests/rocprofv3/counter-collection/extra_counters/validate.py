@@ -24,9 +24,12 @@
 
 import sys
 import pytest
-import numpy as np
 import pandas as pd
 import re
+
+from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    skip_if_hw_counter_values_unavailable,
+)
 
 kernel_list = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
@@ -66,6 +69,7 @@ def test_validate_counter_collection_pmc1_extra_counters(input_data: pd.DataFram
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains("TEST_YAML_LOAD").all()
+    skip_if_hw_counter_values_unavailable(df["Counter_Value"])
     assert (df["Counter_Value"].astype(int).values > 0).all()
 
     di_list = df["Dispatch_Id"].astype(int).values.tolist()

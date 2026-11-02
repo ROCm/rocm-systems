@@ -21,6 +21,9 @@
 #include "CollectiveArgs.hpp"
 #include "ProcessIsolatedTestRunner.hpp"
 
+// C++ linkage, matching rocmwrap.h / librccl.so.
+extern int ncclCuMemRuntimeSupported();
+
 namespace RcclUnitTesting
 {
   int const UT_SINGLE_PROCESS = (1<<0);
@@ -51,6 +54,9 @@ namespace RcclUnitTesting
     }
     int const fd = atoi(fdStr);
 
+    int hipRuntimeVersion = 0;
+    (void)hipRuntimeGetVersion(&hipRuntimeVersion);
+
     int numGpus = 0;
     if (hipGetDeviceCount(&numGpus) != hipSuccess)
     {
@@ -65,13 +71,14 @@ namespace RcclUnitTesting
     int isGfx94 = (numGpus > 0);
     int isGfx95 = (numGpus > 0);
     int isGfx12 = (numGpus > 0);
+    int isGfx1250 = (numGpus > 0);
     int isGfx90 = (numGpus > 0);
     for (int dev = 0; dev < numGpus; ++dev)
     {
       hipDeviceProp_t devProp;
       if (hipGetDeviceProperties(&devProp, dev) != hipSuccess)
       {
-        isGfx94 = isGfx95 = isGfx12 = isGfx90 = 0;
+        isGfx94 = isGfx95 = isGfx12 = isGfx1250 = isGfx90 = 0;
         break;
       }
       char const* tok  = strtok(devProp.gcnArchName, ":");
@@ -79,6 +86,7 @@ namespace RcclUnitTesting
       isGfx94 &= (std::strncmp("gfx94", arch, 5) == 0);
       isGfx95 &= (std::strncmp("gfx95", arch, 5) == 0);
       isGfx12 &= (std::strncmp("gfx12", arch, 5) == 0);
+      isGfx1250 &= (std::strcmp("gfx1250", arch) == 0);
       isGfx90 &= (std::strncmp("gfx90", arch, 5) == 0);
     }
 
@@ -96,6 +104,16 @@ namespace RcclUnitTesting
           break;
         }
       }
+    }
+
+    // cuMem runtime capability (kernel, driver, VMM attribute and a functional
+    // VMM probe). Only evaluated when NCCL_CUMEM_ENABLE requests cuMem, since
+    // the probe allocates and maps device memory.
+    int cuMemSupported = 0;
+    char const* cuMemEnv = getenv("NCCL_CUMEM_ENABLE");
+    if (numGpus > 0 && cuMemEnv != nullptr && atoi(cuMemEnv) > 0 && hipSetDevice(0) == hipSuccess)
+    {
+      cuMemSupported = ncclCuMemRuntimeSupported();
     }
 
     // GPU priority order: group devices by physical PCI bus id, largest group
@@ -136,7 +154,8 @@ namespace RcclUnitTesting
       }
     }
 
-    // Serialize: numGpus, 4 arch flags, cpx flag, then numGpus priority ints.
+    // Serialize: runtime version, numGpus, 5 arch flags, cpx flag, cuMem flag,
+    // then numGpus priority ints.
     auto writeAll = [fd](void const* buf, size_t len)
     {
       size_t off = 0;
@@ -150,12 +169,15 @@ namespace RcclUnitTesting
         off += (size_t)n;
       }
     };
+    writeAll(&hipRuntimeVersion, sizeof(hipRuntimeVersion));
     writeAll(&numGpus, sizeof(numGpus));
     writeAll(&isGfx94, sizeof(isGfx94));
     writeAll(&isGfx95, sizeof(isGfx95));
     writeAll(&isGfx12, sizeof(isGfx12));
+    writeAll(&isGfx1250, sizeof(isGfx1250));
     writeAll(&isGfx90, sizeof(isGfx90));
     writeAll(&isCpx,   sizeof(isCpx));
+    writeAll(&cuMemSupported, sizeof(cuMemSupported));
     if (numGpus > 0)
     {
       writeAll(priority.data(), (size_t)numGpus * sizeof(int));
@@ -226,10 +248,13 @@ namespace RcclUnitTesting
       return true;
     };
 
-    int numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g90 = 0, cpx = 0;
-    bool ok = readAll(&numGpus, sizeof(numGpus)) && readAll(&g94, sizeof(g94))
+    int runtimeVersion = 0, numGpus = 0, g94 = 0, g95 = 0, g12 = 0, g1250 = 0, g90 = 0, cpx = 0,
+        cuMem = 0;
+    bool ok = readAll(&runtimeVersion, sizeof(runtimeVersion)) && readAll(&numGpus, sizeof(numGpus))
+              && readAll(&g94, sizeof(g94))
               && readAll(&g95, sizeof(g95)) && readAll(&g12, sizeof(g12))
-              && readAll(&g90, sizeof(g90)) && readAll(&cpx, sizeof(cpx));
+              && readAll(&g1250, sizeof(g1250)) && readAll(&g90, sizeof(g90))
+              && readAll(&cpx, sizeof(cpx)) && readAll(&cuMem, sizeof(cuMem));
     std::vector<int> priority;
     if (ok && numGpus > 0)
     {
@@ -247,10 +272,13 @@ namespace RcclUnitTesting
       return;
     }
 
+    hipRuntimeVersion = runtimeVersion;
+    cuMemRuntimeSupported = (cuMem != 0);
     numDetectedGpus = numGpus;
     isGfx94 = (g94 != 0);
     isGfx95 = (g95 != 0);
     isGfx12 = (g12 != 0);
+    isGfx1250 = (g1250 != 0);
     isGfx90 = (g90 != 0);
     if (isCpxOut != nullptr)
     {
@@ -296,13 +324,15 @@ namespace RcclUnitTesting
     // there and concurrent hipGetDeviceCount forks cause KFD contention.
     const bool isIsolatedChild = (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr);
 
-    // Collect GPU info (count / arch / CPX / priority). All HIP calls run inside a
+    // Collect GPU info (runtime version / count / arch / CPX / priority). All HIP calls run inside a
     // fork()+execv()'d probe child (DetectGpuInfo), so this is safe under
     // rocprofv3 --hip-trace; a bare fork()+HIP child deadlocks the tracer.
     // NOTE: HIP must not be used in this parent before the tests launch their own
     // child processes, hence the isolated probe.
+    hipRuntimeVersion = 0;
+    cuMemRuntimeSupported = false;
     numDetectedGpus = 0;
-    isGfx94 = isGfx95 = isGfx12 = isGfx90 = false;
+    isGfx94 = isGfx95 = isGfx12 = isGfx1250 = isGfx90 = false;
     bool             isCpxMode = false;
     std::vector<int> detectedPriority;
     if (!isIsolatedChild)
@@ -485,7 +515,7 @@ namespace RcclUnitTesting
         std::make_tuple("UT_COMM_POOL"        , commPool      , "Reuse child processes across configs"),
         std::make_tuple("UT_DEVICE_DATA"      , -1            , "Build/validate test data on GPU (0=host path; default on)"),
         std::make_tuple("UT_DEVICE_DATA_MIN_ELEMS", -1        , "Min elements for the device-data path (default 1Mi)"),
-        std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected element (default off)"),
+        std::make_tuple("UT_DEVICE_DATA_FAULT", -1            , "Negative control: corrupt one expected (FP8 verifiable: output) element (default off)"),
       };
 
     printf("================================================================================\n");

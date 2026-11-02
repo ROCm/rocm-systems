@@ -645,8 +645,8 @@ struct name_info
 {
     using value_type   = name_info_impl<EnumT, ValueT>;
     using enum_type    = EnumT;
-    using support_type = typename value_type::support_type;
-    using return_type  = typename value_type::return_type;
+    using support_type = value_type::support_type;
+    using return_type  = value_type::return_type;
     using item_type    = const value_type*;
     using item_array_t = std::vector<item_type>;
 
@@ -698,7 +698,10 @@ struct name_info
     // get_operations_impl can iterate an empty .items() without throwing.
     value_type& operator[](std::size_t idx)
     {
-        if(idx >= impl.size()) impl.resize(idx + 1);
+        if(idx >= impl.size())
+        {
+            impl.resize(idx + 1);
+        }
         return impl[idx];
     }
     const value_type& operator[](std::size_t idx) const
@@ -856,8 +859,9 @@ struct wrapper
         ::rocprofsys::mock::rocprofiler_sdk::callback_tracing_record_t;
     using code_object_load_data =
         ::rocprofsys::mock::rocprofiler_sdk::code_object_load_data_t;
-    using kernel_symbol_data = ::rocprofsys::mock::rocprofiler_sdk::kernel_symbol_data_t;
-    using marker_payload_t   = ::rocprofsys::mock::rocprofiler_sdk::marker_payload_t;
+    using code_object_kernel_symbol_register_data =
+        ::rocprofsys::mock::rocprofiler_sdk::kernel_symbol_data_t;
+    using marker_payload_t = ::rocprofsys::mock::rocprofiler_sdk::marker_payload_t;
 
     // ─── Callback / iterator function pointer types ───────────────────────────
     using buffer_tracing_cb_t = ::rocprofsys::mock::rocprofiler_sdk::buffer_tracing_cb_t;

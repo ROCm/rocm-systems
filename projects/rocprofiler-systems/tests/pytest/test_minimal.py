@@ -6,9 +6,12 @@ These tests exercise minimal examples to verify targeted behavior of the profile
 """
 
 from __future__ import annotations
+
 import os
-import pytest
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 from conftest import RocprofsysTest, check_use_perfetto
 
 pytestmark = [pytest.mark.minimal]
@@ -353,16 +356,15 @@ class TestMinimal(RocprofsysTest):
         )
 
     SLEEP_ITERATIONS = 60
-    SAMPLING_ENV = {
-        "ROCPROFSYS_USE_SAMPLING": "ON",
-        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
-        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "1000",
-        "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
-    }
 
     def _run_sleep_interrupts(self, env_overrides: dict[str, str]):
-        env = dict(self.SAMPLING_ENV)
-        env.update(env_overrides)
+        env = {
+            "ROCPROFSYS_USE_SAMPLING": "ON",
+            "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+            "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "1000",
+            "ROCPROFSYS_SAMPLING_CPUTIME": "OFF",
+            **env_overrides,
+        }
         return self.run_test(
             "sys_run",
             "minimal-sleep-interrupts",
@@ -410,7 +412,7 @@ class TestMinimal(RocprofsysTest):
 
     # <nfib> <nthreads> <nitr>. Long enough that a thread accrues far more CPU
     # time than the delay below, so the CPU-time timer is guaranteed to fire.
-    CPU_WORKLOAD_ARGS = ["20", "2", "100000"]
+    CPU_WORKLOAD_ARGS: ClassVar[list[str]] = ["20", "2", "100000"]
 
     def test_cputime_sampling_survives_pause_resume(self):
         """

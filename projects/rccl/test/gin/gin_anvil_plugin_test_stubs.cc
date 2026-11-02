@@ -4,31 +4,59 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Test doubles for gin_plugin_anvil_sdma.cc (bootstrap, devr, factory, debug).
+// Test doubles for gin_plugin_anvil_sdma.cc (bootstrap, devr, factory, debug,
+// and a HIP allocation ledger).
 
 #include "gin_anvil_plugin_test_stubs.h"
 
-#include <gin_anvil/sdma_factory.h>
+#include "gin/gin_anvil_sdma_factory.h"
 
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
-
+#include <dlfcn.h>
 #include <hip/hip_runtime.h>
+#include <malloc.h>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <vector>
 
 namespace GinAnvilPluginStubs {
+
+struct IntraNodeBootstrapCall {
+  std::vector<int> ranks;
+  int rank = -1;
+  int nranks = 0;
+  int tag = -1;
+};
 
 struct State {
   int probeResult = 1;
   bool bootstrapFail = false;
   int bootstrapNranks = 1;
+  std::vector<std::vector<int>> bootstrapIntResults;
+  IntraNodeBootstrapCall lastIntraNodeAllGather;
+  IntraNodeBootstrapCall lastIntraNodeBarrier;
   bool factoryCreateFail = false;
   bool factoryNullHandles = false;
   bool lsaAddrFail = false;
+  int connCheckMissingCalls = 0;
+  int connCheckWriteCalls = 0;
+  int connCheckVerifyCalls = 0;
+  std::vector<unsigned long long> connCheckWriteStamps;
+  int bootstrapAllGatherCalls = 0;
+  int lastWideAllGatherSize = 0;
+  int wideAllGatherOverruns = 0;
+  int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  // First input address resolved since the last Reset/SetLsaSelfAddr. Later
+  // inputs map to lsaSelfAddr plus their offset from it. A flag marks it latched,
+  // so an input of 0 is not mistaken for "unset".
+  uintptr_t lsaInputBase = 0;
+  bool lsaInputBaseSet = false;
+  std::set<const void*> liveHipAllocs;
+  bool failNextExtMalloc = false;
 };
 
 struct FakeSdmaOpaque {
@@ -46,16 +74,78 @@ void Reset() { g = State{}; }
 void SetProbeResult(int result) { g.probeResult = result; }
 void SetBootstrapFail(bool fail) { g.bootstrapFail = fail; }
 void SetBootstrapNranks(int nranks) { g.bootstrapNranks = nranks; }
+void SetBootstrapIntResult(const int* values, int count) {
+  g.bootstrapIntResults.emplace_back(values, values + count);
+}
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
-void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetLsaSelfAddr(void* addr) {
+  g.lsaSelfAddr = addr;
+  // Drop the latched input base so the next resolve is relative to this address,
+  // not the first arena that happened to be resolved.
+  g.lsaInputBase = 0;
+  g.lsaInputBaseSet = false;
+}
+void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
+int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
+int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
+unsigned long long GetConnCheckWriteStamp(int call) {
+  return call >= 0 && static_cast<size_t>(call) < g.connCheckWriteStamps.size()
+             ? g.connCheckWriteStamps[static_cast<size_t>(call)]
+             : 0;
+}
+const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
+int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
+int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
+int GetLastWideAllGatherSize() { return g.lastWideAllGatherSize; }
+int GetWideAllGatherOverruns() { return g.wideAllGatherOverruns; }
+int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
+const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
+int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
+int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
+bool IsLiveHipAllocation(const void* ptr) { return g.liveHipAllocs.count(ptr) == 1; }
+int GetLiveHipAllocationCount() { return static_cast<int>(g.liveHipAllocs.size()); }
+void SetFailNextExtMalloc(bool fail) { g.failNextExtMalloc = fail; }
 
 }  // namespace GinAnvilPluginStubs
 
-int ncclDebugLevel = NCCL_LOG_VERSION;
+extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
+  using Fn = hipError_t (*)(void**, size_t);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipMalloc"));
+  const hipError_t err = real(ptr, size);
+  if (err == hipSuccess) GinAnvilPluginStubs::g.liveHipAllocs.insert(*ptr);
+  return err;
+}
+
+extern "C" hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags) {
+  if (GinAnvilPluginStubs::g.failNextExtMalloc) {
+    GinAnvilPluginStubs::g.failNextExtMalloc = false;
+    *ptr = nullptr;
+    return hipErrorOutOfMemory;
+  }
+  using Fn = hipError_t (*)(void**, size_t, unsigned int);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipExtMallocWithFlags"));
+  const hipError_t err = real(ptr, sizeBytes, flags);
+  if (err == hipSuccess) GinAnvilPluginStubs::g.liveHipAllocs.insert(*ptr);
+  return err;
+}
+
+extern "C" hipError_t hipFree(void* ptr) {
+  using Fn = hipError_t (*)(void*);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipFree"));
+  GinAnvilPluginStubs::g.liveHipAllocs.erase(ptr);
+  return real(ptr);
+}
+
+uint32_t ncclDebugLevelMask = (1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION);
 uint64_t ncclDebugMask = NCCL_INIT;
 thread_local int ncclDebugNoWarn = 0;
+
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
 
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* filefunc, int line,
                   const char* fmt, ...) {
@@ -66,26 +156,106 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char* file
   (void)fmt;
 }
 
-ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
-  (void)commState;
+static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
   if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
-  if (size == static_cast<int>(sizeof(int))) {
-    int* devs = static_cast<int*>(allData);
-    for (int i = 0; i < GinAnvilPluginStubs::g.bootstrapNranks; ++i) {
-      if (devs[i] < 0) devs[i] = 0;
+  if (size != static_cast<int>(sizeof(int)) || nranks < 1) return ncclSuccess;
+  int* devs = static_cast<int*>(allData);
+  if (!GinAnvilPluginStubs::g.bootstrapIntResults.empty()) {
+    const std::vector<int>& vals = GinAnvilPluginStubs::g.bootstrapIntResults.front();
+    for (int i = 0; i < nranks; ++i) {
+      devs[i] = static_cast<size_t>(i) < vals.size() ? vals[static_cast<size_t>(i)] : 0;
     }
+    GinAnvilPluginStubs::g.bootstrapIntResults.erase(GinAnvilPluginStubs::g.bootstrapIntResults.begin());
+    return ncclSuccess;
+  }
+  int known = -1;
+  int maxv = 0;
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] >= 0) known = devs[i];
+    if (devs[i] > maxv) maxv = devs[i];
+  }
+  for (int i = 0; i < nranks; ++i) {
+    if (devs[i] < 0 && known >= 0) devs[i] = known;
+    if (devs[i] < 0) devs[i] = 0;
+  }
+  // Conn-check allgather: replicate the max missing count (single-process sim).
+  if (maxv > 0) {
+    for (int i = 0; i < nranks; ++i) devs[i] = maxv;
   }
   return ncclSuccess;
 }
 
+// bootstrapAllGather writes one slot per world rank. Non-int callers pass a
+// calloc'd buffer, so check it can hold nranks slots before writing them; an
+// undersized buffer is recorded rather than overrun.
+static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  GinAnvilPluginStubs::g.lastWideAllGatherSize = size;
+  if (nranks < 1 || size < 1) return ncclSuccess;
+  const size_t slot = static_cast<size_t>(size);
+  if (malloc_usable_size(allData) < static_cast<size_t>(nranks) * slot) {
+    GinAnvilPluginStubs::g.wideAllGatherOverruns++;
+    return ncclInternalError;
+  }
+  // Single-process sim: keep the caller's own slot, give every empty slot peer data.
+  unsigned char* bytes = static_cast<unsigned char*>(allData);
+  std::vector<unsigned char> zero(slot, 0);
+  for (int i = 0; i < nranks; ++i) {
+    unsigned char* p = bytes + static_cast<size_t>(i) * slot;
+    if (memcmp(p, zero.data(), slot) == 0) memset(p, 0xA5, slot);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
+  (void)commState;
+  GinAnvilPluginStubs::g.bootstrapAllGatherCalls++;
+  if (size != static_cast<int>(sizeof(int))) {
+    return stubWideAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
+  }
+  return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
+}
+
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  (void)commState;
+  (void)rank;
+  (void)nranks;
+  (void)tag;
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  return ncclSuccess;
+}
+
+ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData,
+                                         int size) {
+  (void)commState;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  GinAnvilPluginStubs::g.intraNodeAllGatherCalls++;
+  return stubIntAllGather(allData, nranks, size);
+}
+
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.ranks.assign(ranks, ranks + nranks);
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.rank = rank;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.nranks = nranks;
+  GinAnvilPluginStubs::g.lastIntraNodeBarrier.tag = tag;
+  return bootstrapBarrier(commState, rank, nranks, tag);
+}
+
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   (void)devr;
-  (void)addr;
   if (GinAnvilPluginStubs::g.lsaAddrFail) {
     *outAddr = nullptr;
     return ncclSuccess;
   }
-  *outAddr = GinAnvilPluginStubs::g.lsaSelfAddr;
+  uintptr_t input = reinterpret_cast<uintptr_t>(addr);
+  if (!GinAnvilPluginStubs::g.lsaInputBaseSet) {
+    GinAnvilPluginStubs::g.lsaInputBase = input;
+    GinAnvilPluginStubs::g.lsaInputBaseSet = true;
+  }
+  uintptr_t offset = input - GinAnvilPluginStubs::g.lsaInputBase;
+  *outAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.lsaSelfAddr) + offset);
   return ncclSuccess;
 }
 
@@ -130,11 +300,16 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
   }
   if (hipExtMallocWithFlags(reinterpret_cast<void**>(&dirty), sizeof(uint64_t),
                             hipDeviceMallocFinegrained) != hipSuccess) {
-    hipFree(row);
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
     delete impl;
     return -1;
   }
-  (void)hipMemset(dirty, 0, sizeof(uint64_t));
+  if (hipMemset(dirty, 0, sizeof(uint64_t)) != hipSuccess) {
+    if (hipFree(row) != hipSuccess) fprintf(stderr, "hipFree(row) failed in stub cleanup\n");
+    if (hipFree(dirty) != hipSuccess) fprintf(stderr, "hipFree(dirty) failed in stub cleanup\n");
+    delete impl;
+    return -1;
+  }
   impl->deviceHandles_d = row;
   impl->sdmaDirty_d = dirty;
 
@@ -147,8 +322,10 @@ extern "C" int gin_anvil_sdma_create(int nRanks, int myRank, int my_device_id,
 extern "C" void gin_anvil_sdma_destroy(gin_anvil_sdma_handle_t handle) {
   if (!handle) return;
   auto* impl = reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle);
-  if (impl->deviceHandles_d) hipFree(impl->deviceHandles_d);
-  if (impl->sdmaDirty_d) hipFree(impl->sdmaDirty_d);
+  if (impl->deviceHandles_d && hipFree(impl->deviceHandles_d) != hipSuccess)
+    fprintf(stderr, "hipFree(deviceHandles_d) failed in stub destroy\n");
+  if (impl->sdmaDirty_d && hipFree(impl->sdmaDirty_d) != hipSuccess)
+    fprintf(stderr, "hipFree(sdmaDirty_d) failed in stub destroy\n");
   delete impl;
 }
 
@@ -162,4 +339,44 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+// [GIN-CONN-CHECK] Host stubs for gin_plugin_anvil_sdma.cc when this TU is linked
+// into rccl-UnitTestsGinAnvilPlugin without gin_anvil_conn_check_device.cc (compiled
+// as plain C++). Production librccl resolves these from the HIP device TU instead.
+extern "C" int ginAnvilConnWrite(void* remoteAddrsDev, int nRanks, int selfRank,
+                                 unsigned long long stamp, hipStream_t stream) {
+  (void)remoteAddrsDev;
+  (void)nRanks;
+  (void)selfRank;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckWriteCalls;
+  GinAnvilPluginStubs::g.connCheckWriteStamps.push_back(stamp);
+  return 0;
+}
+
+extern "C" int ginAnvilConnCheck(void* localSignals, int nRanks, unsigned long long stamp,
+                                 int* missingDev, hipStream_t stream) {
+  (void)localSignals;
+  (void)stamp;
+  (void)stream;
+  ++GinAnvilPluginStubs::g.connCheckVerifyCalls;
+  if (missingDev && nRanks > 0) {
+    const bool alwaysMissing = GinAnvilPluginStubs::g.connCheckMissingCalls < 0;
+    bool missingForRetry = GinAnvilPluginStubs::g.connCheckMissingCalls > 0;
+    if (missingForRetry) --GinAnvilPluginStubs::g.connCheckMissingCalls;
+    bool injectMissing = false;
+#ifdef ENABLE_FAULT_INJECTION
+    if (const char* injEnv = getenv("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK")) {
+      injectMissing = atoi(injEnv) >= 0;
+    }
+#endif
+    const bool simulateMissing = alwaysMissing || missingForRetry || injectMissing;
+    std::vector<int> missing(static_cast<size_t>(nRanks), simulateMissing ? 1 : 0);
+    if (hipMemcpy(missingDev, missing.data(), sizeof(int) * static_cast<size_t>(nRanks),
+                  hipMemcpyHostToDevice) != hipSuccess) {
+      return -1;
+    }
+  }
+  return 0;
 }

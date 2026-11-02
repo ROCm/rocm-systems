@@ -48,10 +48,10 @@ TEST(Alloc, ncclIbMallocDebugZeroSize)
     EXPECT_EQ(ptr, nullptr);
 }
 
-#if ROCM_VERSION < 71200
+#if !NCCL_CUMEM_HOST_GATE
 // These tests exercise the unsupported-fallback path of ncclCuMemHostAlloc/Free
-// that returns ncclInternalError. On ROCm 7.12+ the real implementation is
-// compiled in, so the fallback no longer exists and these tests are not applicable.
+// that returns ncclInternalError. They do not apply to native support or the
+// ROCm 7.0.2.x host-VMM backport.
 TEST(Alloc, ncclCuMemHostAlloc)
 {
     RUN_ISOLATED_TEST(
@@ -79,7 +79,7 @@ TEST(Alloc, ncclCuMemHostFree)
         }
     );
 }
-#endif // ROCM_VERSION < 71200
+#endif // !NCCL_CUMEM_HOST_GATE
 
 #if ROCM_VERSION < 70000
 // This test is only valid for ROCm versions < 7.0.0
@@ -571,6 +571,51 @@ TEST(Alloc, CuMemAllocNoScopeLeavesPoolEmpty)
             ASSERT_EQ(ncclCuMemFree(ptr, /*manager=*/nullptr), ncclSuccess);
         },
         {{"NCCL_CUMEM_ENABLE", "1"}}
+    );
+}
+
+// ncclCuMemRuntimeSupported() must run the capability check once, not once per
+// call. clearVariable: an inherited NCCL_DEBUG_FILE repoints the log off stdout.
+TEST(Alloc, CuMemRuntimeSupportedChecksOnce)
+{
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+            "CuMemRuntimeSupportedChecksOnce",
+            []()
+            {
+                ASSERT_EQ(hipSetDevice(0), hipSuccess);
+
+                // Nothing may assert while the capture is active: gtest writes
+                // failure text to stdout, which would land in the buffer.
+                constexpr int kRepeats = 64;
+                int           later[kRepeats];
+                testing::internal::CaptureStdout();
+                const int first = ncclCuMemRuntimeSupported();
+                for(int i = 0; i < kRepeats; ++i)
+                {
+                    later[i] = ncclCuMemRuntimeSupported();
+                }
+                const std::string log = testing::internal::GetCapturedStdout();
+
+                for(int i = 0; i < kRepeats; ++i)
+                {
+                    EXPECT_EQ(later[i], first) << "call " << i << " disagreed";
+                }
+
+                // Trailing space keeps this off init.cc's "Kernel version: <string>".
+                size_t seen = 0;
+                for(size_t pos = log.find("Kernel version "); pos != std::string::npos;
+                    pos      = log.find("Kernel version ", pos + 1))
+                {
+                    ++seen;
+                }
+                EXPECT_EQ(seen, 1u) << "expected exactly one capability check, log:\n" << log;
+            }
+        )
+            .withEnvironment(
+                {{"NCCL_CUMEM_ENABLE", "1"}, {"NCCL_DEBUG", "INFO"}, {"NCCL_DEBUG_SUBSYS", "INIT"}}
+            )
+            .clearVariable("NCCL_DEBUG_FILE")
     );
 }
 #endif // ROCM_VERSION >= 70000

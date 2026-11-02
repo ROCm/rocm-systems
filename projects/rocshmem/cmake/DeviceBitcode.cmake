@@ -106,6 +106,15 @@ if(${ROCM_MAJOR_VERSION} LESS 7)
   list(APPEND BITCODE_COMPILE_FLAGS_BASE -DHIP_ENABLE_WARP_SYNC_BUILTINS=1)
 endif()
 
+# This path invokes clang directly and so inherits nothing from
+# CMAKE_CXX_FLAGS. The compile below skips the pass pipeline, so this only
+# marks functions sanitize_address; the asan pass runs in the opt step.
+set(_BITCODE_OPT_PASSES -O3)
+if(ASAN)
+  list(APPEND BITCODE_COMPILE_FLAGS_BASE -fsanitize=address)
+  set(_BITCODE_OPT_PASSES "-passes=default<O3>,asan")
+endif()
+
 # Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
 # when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
 if(MPI_CXX_FOUND)
@@ -154,31 +163,15 @@ if(USE_IPC)
   )
 endif()
 
-# GDA queue_pair implementations are guarded by GDA_MLX5/GDA_IONIC/GDA_BNXT in
-# queue_pair.hpp. Only compile the backend(s) enabled for this build so that
-# declarations and definitions match.
+# GDA QueuePair implementations are guarded by GDA_MUX/GDA_IONIC/GDA_BNXT/GDA_MLX5
+# in queue_pair_provider.hpp and (if GDA_MUX is enabled) queue_pair_mux.hpp.
+# Only compile the backend(s) enabled for this build so that declarations and definitions match.
 if(USE_GDA)
   list(APPEND BITCODE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/context_gda_device_coll.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/backend_gda.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/queue_pair.cpp
   )
-  if(GDA_MLX5)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/mlx5/queue_pair_mlx5.cpp
-    )
-  endif()
-  if(GDA_IONIC)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/ionic/queue_pair_ionic.cpp
-    )
-  endif()
-  if(GDA_BNXT)
-    list(APPEND BITCODE_SOURCES
-      ${CMAKE_CURRENT_SOURCE_DIR}/src/gda/bnxt/queue_pair_bnxt.cpp
-    )
-  endif()
 endif()
 
 # Build bitcode for each GPU architecture
@@ -242,7 +235,7 @@ foreach(gpu_arch ${BITCODE_GPU_ARCHS})
 
   add_custom_command(
     OUTPUT ${BITCODE_OUTPUT_${gpu_arch}}
-    COMMAND ${LLVM_OPT} -O3 -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
+    COMMAND ${LLVM_OPT} ${_BITCODE_OPT_PASSES} -mtriple=amdgcn-amd-amdhsa -mcpu=${gpu_arch}
             ${_UNOPT_BC} -o ${BITCODE_OUTPUT_${gpu_arch}}
     DEPENDS ${_UNOPT_BC}
     COMMENT "Optimizing device bitcode for ${gpu_arch}"

@@ -1,0 +1,25 @@
+CodeObj,Vaddr,Instruction,Latency,HiddenIdle,HiddenStall,HiddenIssue
+1,5632,global_wb scope:SCOPE_SE,4,10,0,0
+1,5644,s_barrier_signal -1,4,5,0,2
+1,5648,s_barrier_wait 0xffff,80,0,0,17
+1,5664,"ds_load_b128 v[1:4], v0",1642,30,355,0
+1,5680,"ds_load_b128 v[1:4], v0",70,0,7,0
+1,5696,"ds_load_b128 v[1:4], v0",70,0,7,0
+1,5712,"ds_load_b128 v[1:4], v0",70,0,7,0
+1,5728,"ds_load_b128 v[1:4], v0",70,0,7,0
+1,5744,"ds_load_b128 v[1:4], v0",74,0,11,0
+1,5760,"ds_load_b128 v[1:4], v0",70,0,6,0
+1,5768,"ds_load_b128 v[1:4], v0",7,0,3,0
+1,5776,"ds_load_b128 v[1:4], v0",70,0,6,0
+1,5792,"ds_load_b128 v[1:4], v0",73,0,9,0
+1,5808,"ds_load_b128 v[1:4], v0",88,0,16,0
+1,5824,"ds_load_b128 v[1:4], v0",92,0,8,0
+1,5840,"ds_load_b128 v[1:4], v0",92,0,8,0
+1,5856,"ds_load_b128 v[1:4], v0",92,0,8,0
+1,5872,"ds_load_b128 v[1:4], v0",92,0,8,0
+1,5888,"ds_load_b128 v[1:4], v0",174,175,25,0
+1,5904,"ds_load_b128 v[1:4], v0",92,0,8,0
+1,5920,global_wb scope:SCOPE_SE,4,62,0,0
+1,5936,s_barrier_wait 0xffff,1295,0,0,186
+1,5952,"v_add_f32_e64 v0, v0, 1",4,6,0,0
+1,5960,s_endpgm,266,0,0,6

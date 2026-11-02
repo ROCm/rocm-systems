@@ -5,12 +5,11 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
-import os
-import subprocess
+import shutil
 
 from rocm_docs import ROCmDocs
 
-os.system("cp ../include/amd-dbgapi.h.in ../include/amd-dbgapi.h")
+shutil.copyfile("../include/amd-dbgapi.h.in", "../include/amd-dbgapi.h")
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
     match = re.search(r'.*\bproject\(amd-dbgapi VERSION\s+\"?([0-9.]+)[^0-9.]+', f.read())
@@ -37,3 +36,13 @@ external_projects_current_project = "rocdbgapi"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+html_theme_options.update(
+    {
+        "repository_url": "https://github.com/ROCm/rocm-systems",
+        "path_to_docs": "projects/rocdbgapi/docs",
+        "use_repository_button": True,
+        "use_issues_button": True,
+        "use_download_button": True,
+    }
+)

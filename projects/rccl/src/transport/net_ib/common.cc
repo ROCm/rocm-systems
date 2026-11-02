@@ -85,6 +85,8 @@ ncclResult_t ncclIbBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend)
 }
 
 ncclResult_t ncclIbRecvCommInit(struct ncclIbRecvComm* recvComm) {
+  // Set before anything can fail: the accept fail path closes this fd.
+  recvComm->flagFlushDmabufFd = -1;
   NCCLCHECK(ncclIbBaseCommInit(&recvComm->base, false));
   recvComm->ibRecvWorkRequest = {.wr_id = NCCL_IB_RECV_WR_ID_DUMMY, .next = NULL, .sg_list = NULL, .num_sge = 0};
 
@@ -253,7 +255,7 @@ ncclNet_t ncclNetIb = {
   ncclIbInit,
   ncclIbDevices,
   ncclIbGetProperties,
-  ncclIbListen,
+  ncclIbNetListen,
   ncclIbConnect,
   ncclIbAccept,
   ncclIbRegMr,
@@ -272,3 +274,12 @@ ncclNet_t ncclNetIb = {
   ncclIbFinalize,
   ncclIbSetNetAttr,
 };
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_gid_inspect.h"
+
+extern "C" ncclResult_t ncclIbGidChangeEvent(int ibDev) {
+  if (ibDev < 0 || ibDev >= ncclNIbDevs) return ncclInvalidArgument;
+  return ncclIbEventGidChange(&ncclIbDevs[ibDev]);
+}
+#endif /* ENABLE_FAULT_INJECTION */

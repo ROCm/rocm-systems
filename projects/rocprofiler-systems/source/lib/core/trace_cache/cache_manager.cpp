@@ -4,7 +4,6 @@
 #include "cache_manager.hpp"
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/perfetto/cached_perfetto_session.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/data_types.hpp"
@@ -18,9 +17,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 cache_manager&
 cache_manager::get_instance()
@@ -30,8 +27,7 @@ cache_manager::get_instance()
 }
 
 void
-cache_manager::post_process_bulk(output_file_registry& _output_registry,
-                                 progress::tracker&    _tracker)
+cache_manager::post_process_bulk(progress::tracker& _tracker)
 {
     LOG_TRACE("Starting trace cache bulk post-processing");
 
@@ -71,7 +67,7 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             std::make_shared<agent_manager>(get_agent_manager_instance().get_agents())));
 
         LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
-        post_processor processor{ _tracker, _output_registry };
+        post_processor processor{ _tracker };
 
         const auto combine_traces = config::get_perfetto_combined_traces();
 
@@ -81,13 +77,14 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             std::vector<int> source_pids;
             source_pids.reserve(processor_configs.size());
             for(const auto& cfg : processor_configs)
+            {
                 source_pids.push_back(static_cast<int>(cfg->_pid));
+            }
 
             try
             {
                 session = std::make_unique<core::cached_perfetto_session>(
-                    _output_registry, static_cast<pid_t>(root_pid), combine_traces,
-                    source_pids, processor);
+                    static_cast<pid_t>(root_pid), combine_traces, source_pids, processor);
             } catch(const std::exception& exp)
             {
                 LOG_ERROR("Perfetto engine initialization failed: {}. Skipping "
@@ -117,5 +114,4 @@ cache_manager::shutdown()
     LOG_TRACE("Cache manager storage shutdown complete");
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

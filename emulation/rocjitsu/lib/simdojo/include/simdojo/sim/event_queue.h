@@ -130,7 +130,7 @@ public:
     std::vector<EventQueueEntry> &entries =
         entry.asynchronous ? asynchronous_entries_ : local_entries_;
     entries.push_back(std::move(entry));
-    std::push_heap(entries.begin(), entries.end(), std::greater<>{});
+    std::ranges::push_heap(entries, std::greater<>{});
   }
 
   /// @brief Dequeue and return the earliest entry.
@@ -194,7 +194,7 @@ public:
 private:
   /// @brief Remove the minimum entry from one of the source-specific heaps.
   static EventQueueEntry pop_from(std::vector<EventQueueEntry> &entries) {
-    std::pop_heap(entries.begin(), entries.end(), std::greater<>{});
+    std::ranges::pop_heap(entries, std::greater<>{});
     EventQueueEntry entry = std::move(entries.back());
     entries.pop_back();
     return entry;

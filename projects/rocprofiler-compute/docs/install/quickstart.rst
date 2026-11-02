@@ -76,7 +76,7 @@ Ensure ROCm is installed and follow the steps:
         - Supported Python versions
       * - Profile mode (standard library only)
         - 3.8 through 3.14
-      * - Analyze mode (numpy, pandas, dash, textual, etc.)
+      * - Analyze mode (numpy, pandas, plotly, rich, etc.)
         - 3.9 through 3.14
 
    Analyze mode aborts with a clear message if launched on Python older
@@ -95,12 +95,15 @@ Ensure ROCm is installed and follow the steps:
 
       python3 -m venv ~/.venvs/rocprof-compute-analyze
       source ~/.venvs/rocprof-compute-analyze/bin/activate
-      pip install -r <ROCM_PATH>/libexec/rocprofiler-compute/requirements.txt
+      pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
-   **Note:** Replace ``<ROCM_PATH>`` with the ROCm installation path (e.g., ``/opt/rocm`` or ``/opt/rocm-7.3.0``).
+   To check that the environment has everything analyze mode needs, run
+   ``rocprof-compute analyze --verify-deps``.
 
    Profile your application with its own Python environment, then activate this
-   environment to run analyze mode on the results.
+   environment to run analyze mode on the results. For the packaged ROCm
+   installation and other ways to install these dependencies, see
+   :ref:`analyze-deps`.
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
@@ -180,7 +183,7 @@ generate interactive HTML roofline charts, run analyze mode on the output:
 .. code-block:: shell-session
 
     $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
-    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-data-type FP32
+    $ rocprof-compute analyze -p workloads/vcopy/MI200/
 
 
 Collect the counters to compute the metric for compute throughput utilization, skipping roofline
@@ -240,10 +243,6 @@ analysis options are available to accommodate different workflows.
     - When to Use
   * - :doc:`CLI (Command Line Interface) </how-to/analyze/cli>`
     - Fast, scriptable insights; great for automation and quick checks.
-  * - :doc:`GUI (Standalone Graphical Interface) </how-to/analyze/standalone-gui>`
-    - Interactive exploration, visual drill-down, and detailed charts.
-  * - :doc:`TUI (Textual User Interface) </how-to/analyze/tui>`
-    - Lightweight, keyboard-driven experience for terminals.
   * - :doc:`ROCm Optiq </how-to/analyze/optiq>`
     - Interactive graphical exploration of generated ROCm Compute Profiler
       analysis databases.

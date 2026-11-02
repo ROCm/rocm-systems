@@ -21,9 +21,7 @@
 #include <string>
 #include <utility>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 template <typename TypeIdentifierEnum, typename... SupportedTypes>
 class storage_parser
@@ -152,5 +150,4 @@ private:
     type_registry<TypeIdentifierEnum, SupportedTypes...> m_registry;
 };
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

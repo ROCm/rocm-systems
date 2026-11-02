@@ -222,7 +222,14 @@ private:
   void read_backing(uint32_t addr, uint8_t *dst, uint32_t size) const {
     const size_t begin = addr;
     const size_t backed = begin < data_.size() ? std::min<size_t>(size, data_.size() - begin) : 0;
-    if (backed != 0)
+    // Expose common load widths so the compiler can replace memcpy with fixed-size loads.
+    if (backed == 4)
+      std::memcpy(dst, &data_[begin], 4);
+    else if (backed == 8)
+      std::memcpy(dst, &data_[begin], 8);
+    else if (backed == 2)
+      std::memcpy(dst, &data_[begin], 2);
+    else if (backed != 0)
       std::memcpy(dst, &data_[begin], backed);
     if (backed != size)
       std::memset(dst + backed, 0, size - backed);

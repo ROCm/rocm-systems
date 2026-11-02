@@ -1129,7 +1129,10 @@ class Parser:
                     dte.sub_decode_table = f'sub_decode_{inst_enc.fmt_enc_name}'.lower()
                     if dte.sub_decode_funcs is None:
                         dte.is_primary = False
-                        dte.sub_decode_funcs = list(sub_decode_funcs)
+                        # Prefixes of one encoding share the same opcode table.
+                        # A private copy loses high opcodes when code generation
+                        # emits the first table with this encoding's name.
+                        dte.sub_decode_funcs = sub_decode_funcs
                     for j in range(1, dte.num_dupe_entries):
                         dt[i + j] = dte
 
@@ -1326,6 +1329,13 @@ class Parser:
                         opnd_name = synthesize_fieldless_name(opnd_type)
                         data_format_name = ''
                         is_fieldless = True
+                    # Read from the node rather than data_format_name, which is
+                    # blank for fieldless operands: a VOPC's fieldless VCC
+                    # destination becomes an SGPR under SDWA sd=1.
+                    is_wave_mask = (
+                        data_format_name_node is not None
+                        and xs.get_node_text(data_format_name_node) == 'FMT_NUM_M64'
+                    )
                     opnds.append(
                         Operand(
                             opnd_name,
@@ -1338,6 +1348,7 @@ class Parser:
                             order,
                             data_format_name,
                             is_fieldless,
+                            is_wave_mask,
                         )
                     )
                 opnds.sort(key=lambda x: x.order)
@@ -1350,6 +1361,8 @@ class Parser:
                             item
                             for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
                             if item.opcode == opcode
+                            and item.required_flat_segment
+                            == self.profile.unique_flat_segment(enc_name)
                         ),
                         None,
                     )
@@ -1409,6 +1422,15 @@ class Parser:
                     if dt_ptr == -1:
                         continue
                     decode_func = f'decode{inst.fmt_name}'
+                    if (
+                        retain_segment
+                        and sum(
+                            item.opcode == opcode
+                            for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
+                        )
+                        > 1
+                    ):
+                        decode_func = f'decodeFlatSegment{opcode}'
                     if enc.is_primary_decode:
                         dt[dt_ptr].decode_func = decode_func
                         dt[dt_ptr].inst_name = inst.fmt_name

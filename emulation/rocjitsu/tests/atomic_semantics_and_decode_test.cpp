@@ -26,8 +26,12 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -48,6 +52,8 @@
 #include <utility>
 using namespace rocjitsu;
 namespace {
+constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+
 class InstructionPolicyMachine {
 public:
   explicit InstructionPolicyMachine(rj_code_arch_t arch)
@@ -75,7 +81,7 @@ public:
     cu->write_vgpr(base + 2, 0, c);
     cu->write_vgpr(base + 6, 0, 0xfacebeef);
     std::array<uint32_t, 4> padded{};
-    std::copy(words.begin(), words.end(), padded.begin());
+    std::ranges::copy(words, padded.begin());
     DecodeResult decoded = decoder->decode(padded.data());
     if (decoded.failed())
       throw std::runtime_error("Instruction encoding rejected by decoder");
@@ -97,7 +103,8 @@ public:
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    cu->write_sgpr(scalar + 7, 0);
+    // CDNA requires a valid DATA_FORMAT; RDNA selects COMPLETE byte-range bounds.
+    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     const uint32_t returned = run(words, src, 0, 0, 0xf0, true, buffer);
@@ -114,6 +121,18 @@ public:
 void witness(const char *name, rj_code_arch_t arch, uint32_t got, uint32_t expected) {
   EXPECT_EQ(got, expected) << name << " arch=" << unsigned(arch);
 }
+TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
+  for (amdgpu::AtomicOp op :
+       {amdgpu::AtomicOp::NONE, amdgpu::AtomicOp::FCMPSWAP, amdgpu::AtomicOp::FADD,
+        amdgpu::AtomicOp::FMIN, amdgpu::AtomicOp::FMAX, amdgpu::AtomicOp::PK_ADD_F16,
+        amdgpu::AtomicOp::PK_ADD_BF16, amdgpu::AtomicOp::APPEND, amdgpu::AtomicOp::CONSUME,
+        amdgpu::AtomicOp::BARRIER_ARRIVE, static_cast<amdgpu::AtomicOp>(0xff)}) {
+    SCOPED_TRACE(static_cast<unsigned>(op));
+    EXPECT_THROW(amdgpu::apply_int_atomic<uint32_t>(op, 1, 2, 1), std::invalid_argument);
+    EXPECT_THROW(amdgpu::apply_int_atomic<uint64_t>(op, 1, 2, 1), std::invalid_argument);
+  }
+}
+
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -592,7 +611,14 @@ protected:
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
     compute_unit_->write_sgpr(scalar_base + 5, 0);
     compute_unit_->write_sgpr(scalar_base + 6, 4096);
-    compute_unit_->write_sgpr(scalar_base + 7, 0);
+    // RDNA selects this fixture's range rule; CDNA1-4 needs a valid DATA_FORMAT.
+    // CDNA5 uses the default descriptor encoding.
+    uint32_t word3 = 0;
+    if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
+      word3 = 2u << 28;
+    else if (arch_is_cdna_4_or_lower(GetParam()))
+      word3 = kGfx9DataFormat32;
+    compute_unit_->write_sgpr(scalar_base + 7, word3);
     compute_unit_->write_vgpr(base_, 0, source_bits);
     compute_unit_->write_vgpr(base_ + 1, 0, compare_bits);
     compute_unit_->write_vgpr(base_ + 4, 0, 0);
@@ -624,6 +650,54 @@ protected:
   uint32_t base_ = 0;
 };
 
+TEST_P(AtomicPolicyExecutionTest, DirectLdsLoadConvertsAndBroadcastsToActiveQuads) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP() << "Direct LDS loads start with RDNA3";
+  // Physical GFX1100/1201: M0 addresses one DWORD; any active lane enables
+  // all four writes in its quad. Preserve the workgroup allocation offset.
+  wave_->set_lds_base(4096);
+  wave_->lds().write32(16, 0xfacefeed);
+  wave_->lds().write32(4096 + 16, 0x918293e4);
+  const std::array<uint32_t, 5> types{0, 1, 2, 4, 5};
+  const std::array<uint32_t, 5> values{0xe4, 0x93e4, 0x918293e4, 0xffffffe4, 0xffff93e4};
+  for (uint32_t i = 0; i < types.size(); ++i) {
+    for (uint64_t mask :
+         {uint64_t{0}, uint64_t{0x81810101}, uint64_t{1} << (wave_->wf_size() - 1)}) {
+      SCOPED_TRACE(testing::Message() << types[i] << ',' << mask);
+      wave_->set_exec(mask);
+      wave_->set_m0((types[i] << 16) | 16);
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        compute_unit_->write_vgpr(base_ + 6, lane, 0xdeadbeef);
+      std::array<uint32_t, 1> words;
+      if (gfx12)
+        words = rdna4::build_vdsdir(1, {.vdst = 6});
+      else
+        words = rdna3::build_ldsdir(1, {.vdst = 6});
+      auto decoded = decoder_->decode(words.data());
+      ASSERT_FALSE(decoded.failed());
+      auto instruction = std::move(decoded).value();
+      ASSERT_TRUE(compute_unit_->execute_instruction(instruction.get(), *wave_).succeeded());
+      ASSERT_FALSE(wave_->instruction_execution_failed());
+      ASSERT_TRUE(instruction->is_memory_op());
+      if (mask) {
+        ASSERT_NE(instruction->data(), nullptr);
+        amdgpu::LocalMemPipeline pipeline;
+        pipeline.issue(instruction.release(), *wave_);
+      } else {
+        EXPECT_EQ(instruction->data(), nullptr);
+      }
+      for (uint32_t lane = 0; lane < wave_->wf_size(); ++lane)
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, lane),
+                  mask & (uint64_t{15} << (lane & ~3u)) ? values[i] : 0xdeadbeefu)
+            << lane;
+      EXPECT_EQ(wave_->exec(), mask);
+      EXPECT_TRUE(wave_->wait_counters().empty());
+    }
+  }
+  EXPECT_EQ(wave_->lds().read32(16), 0xfacefeedu);
+}
+
 TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
   for (uint16_t opcode : {uint16_t{21}, ds_add_return_opcode()}) {
     for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
@@ -644,7 +718,7 @@ TEST_P(AtomicPolicyExecutionTest, DsScalarDenormalModesAndRounding) {
   EXPECT_EQ(execute_ds(18, 1, 0x3f800000, 0, 0), modern_policy() ? 0u : 1u);
   EXPECT_EQ(execute_ds(18, 0, 0x80000000, 0, 0xf0), 0x80000000u);
   EXPECT_EQ(execute_ds(19, 0x80000000, 0, 0, 0xf0), 0u);
-  EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00002u);
+  EXPECT_EQ(execute_ds(21, 0x7fc00002, 0x7fc00004, 0, 0), 0x7fc00004u);
   EXPECT_EQ(execute_ds(21, 0x7f800000, 0xff800000, 0, 0), 0xffc00000u);
   EXPECT_EQ(execute_ds(21, 0xff800000, 0x7f800000, 0, 0), 0xffc00000u);
   for (uint16_t opcode : {18, 19}) {
@@ -722,6 +796,190 @@ TEST_P(AtomicPolicyExecutionTest, DsIntegerCompareStoreOrderAndReturn) {
   }
 }
 
+TEST_P(AtomicPolicyExecutionTest, DsWrapUsesUnsignedComparisonAndBothSourceRegisters) {
+  if (modern_policy())
+    GTEST_SKIP() << "RDNA4 and CDNA5 do not expose DS_WRAP_RTN_B32";
+  struct Case {
+    uint32_t old, sub, add, expected;
+  };
+  // These boundary cases also match a compute-only witness on physical gfx1100.
+  constexpr Case cases[] = {
+      {9, 4, 20, 5},
+      {3, 4, 20, 23},
+      {4, 4, 20, 0},
+      {0, 0, 1, 0},
+      {0x80000000u, 1, 7, 0x7fffffffu},
+      {1, 0x80000000u, 7, 8},
+      {0xffffffffu, 0xffffffffu, 17, 0},
+      {0xfffffff0u, 0xffffffffu, 32, 16},
+  };
+  for (const auto &c : cases)
+    EXPECT_EQ(execute_ds(cdna4::kDsWrapRtnB32Ds, c.old, c.sub, c.add, 0), c.expected);
+}
+
+TEST_P(AtomicPolicyExecutionTest, DsWrapSerializesSharedAddressesAndPreservesInactiveLanes) {
+  if (modern_policy())
+    GTEST_SKIP() << "RDNA4 and CDNA5 do not expose DS_WRAP_RTN_B32";
+  const uint32_t last = wave_->wf_size() - 1;
+  wave_->set_exec(1 | (uint64_t{1} << last));
+  wave_->lds().write32(0x100, 9);
+  for (uint32_t lane : {0u, 1u, last}) {
+    compute_unit_->write_vgpr(base_, lane, 4);
+    compute_unit_->write_vgpr(base_ + 2, lane, 20);
+    compute_unit_->write_vgpr(base_ + 4, lane, 0x100);
+    compute_unit_->write_vgpr(base_ + 6, lane, 0xdeadbeef);
+  }
+  const auto words = ds_words(cdna4::kDsWrapRtnB32Ds);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
+  ASSERT_NE(inst->data(), nullptr);
+  const auto *request = inst->data_as<amdgpu::VectorMemState>();
+  EXPECT_EQ(request->wait_counter_type,
+            GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5
+                ? amdgpu::WaitCounterType::DSCNT
+                : amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_EQ(request->lane_mask, wave_->exec());
+  amdgpu::LocalMemPipeline pipeline;
+  pipeline.issue(inst.release(), *wave_);
+  EXPECT_EQ(wave_->lds().read32(0x100), 1);
+  const auto first = compute_unit_->read_vgpr(base_ + 6, 0);
+  const auto second = compute_unit_->read_vgpr(base_ + 6, last);
+  EXPECT_TRUE((first == 9 && second == 5) || (first == 5 && second == 9));
+  EXPECT_EQ(compute_unit_->read_vgpr(base_ + 6, 1), 0xdeadbeef);
+}
+
+TEST_P(AtomicPolicyExecutionTest, LdsStackUpdatesPointerAndResultWithoutAnIntersectionEngine) {
+  const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+  if (!gfx12 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    GTEST_SKIP() << "This target has no LDS stack instruction";
+  const uint32_t high = wave_->wf_size() - 1;
+  wave_->set_exec(1 | (uint64_t{1} << high));
+  std::array<uint32_t, 2> words;
+  if (gfx12)
+    words = rdna4::build_vds(rdna4::kDsBvhStackPush4Pop1RtnB32Vds,
+                             {.offset0 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
+  else if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3)
+    words = rdna3::build_ds(rdna3::kDsBvhStackRtnB32Ds,
+                            {.offset1 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
+  else
+    words = rdna3_5::build_ds(rdna3_5::kDsBvhStackRtnB32Ds,
+                              {.offset1 = 16, .addr = 16, .data0 = 0, .data1 = 4, .vdst = 12});
+  for (uint32_t lane : {0u, 1u, high}) {
+    compute_unit_->write_vgpr(base_, lane, 0xffffffff);
+    compute_unit_->write_vgpr(base_ + 16, lane, lane << (gfx12 ? 15 : 18));
+    compute_unit_->write_vgpr(base_ + 12, lane, 0xdeadbeef);
+  }
+  for (uint32_t step = 0; step < 8; ++step) {
+    for (uint32_t lane : {0u, high}) {
+      compute_unit_->write_vgpr(base_, lane, step == 7 ? 0xfffffff8 : 0xffffffff);
+      for (uint32_t i = 0; i < 4; ++i)
+        compute_unit_->write_vgpr(base_ + 4 + i, lane,
+                                  step == 0 || step == 7 ? 0x104 + i * 0x100
+                                  : step == 6 && i == 0  ? 0xfffffffd
+                                                         : 0xffffffff);
+    }
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const InstDefUse def_use(*inst, 64);
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 16, 1}));
+    EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 16, 1}));
+    ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
+    ASSERT_NE(inst->data(), nullptr);
+    EXPECT_EQ(inst->data_as<amdgpu::VectorMemState>()->wait_counter_type,
+              amdgpu::WaitCounterType::DSCNT);
+    amdgpu::LocalMemPipeline pipeline;
+    pipeline.issue(inst.release(), *wave_);
+    EXPECT_TRUE(wave_->wait_counters().empty());
+    for (uint32_t lane : {0u, high}) {
+      EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, lane), step < 4 ? 0x104 + step * 0x100
+                                                            : step == 6 && !gfx12 ? 0xfffffffd
+                                                            : step == 7 && gfx12  ? 0x104
+                                                                                  : 0xfffffffe);
+      const uint32_t left = step == 7 && gfx12 ? 3 : step < 3 ? 3 - step : 0;
+      EXPECT_EQ(compute_unit_->read_vgpr(base_ + 16, lane),
+                (lane << (gfx12 ? 15 : 18)) | (gfx12 ? (left << 10) | (left << 5) | left : left));
+    }
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, 1), 0xdeadbeef);
+    EXPECT_EQ(compute_unit_->read_vgpr(base_ + 16, 1), 1u << (gfx12 ? 15 : 18));
+  }
+}
+
+TEST_P(AtomicPolicyExecutionTest, Rdna4StackPairsParentTransitionsAndPrimitiveRanges) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP() << "RDNA4 stack variants";
+  struct Case {
+    uint32_t pop, size, flags, last, first, seventh, eighth, ptr, result0, result1;
+  };
+  constexpr Case cases[] = {
+      {2, 16, 0, 0xffffffff, 0x1004, 0x1604, 0x1704, 0x18c6, 0x1004, 0x1104},
+      {2, 16, 0, 0xffffffff, 0x1006, 0x1604, 0x1704, 0x20001c07, 0x1006, 0xffffffff},
+      {2, 16, 1, 0xffffffff, 0x1001, 0x1604, 0x1704, 0x1ce7, 0x1001, 0x1000},
+      {1, 16, 2, 0xfffffff8, 0x1004, 0x1604, 0x4001, 0, 0x4002, 0xdeadbeef},
+      {1, 16, 2, 0xfffffff9, 0x1004, 0x1604, 0x4001, 0, 0x4010, 0xdeadbeef},
+      {1, 16, 2, 0xfffffffa, 0x1004, 0x1604, 0x4001, 0, 0xfffffffe, 0xdeadbeef},
+      {1, 16, 0, 0xffffffff, 0x1004, 0xfffffffb, 0x1704, 0x1084, 0x1004, 0xdeadbeef},
+      {1, 16, 0, 0xffffffff, 0x1004, 0xfffffffd, 0x1704, 0x842, 0x1404, 0xdeadbeef},
+      {1, 0, 0, 0xffffffff, 0x1004, 0x1604, 0x1704, 0x40002000, 0xffffffff, 0xdeadbeef},
+  };
+  // Use a nonzero allocation to catch accidental sharing between workgroups.
+  wave_->set_lds_base(4096);
+  const uint32_t high = wave_->wf_size() - 1;
+  wave_->set_exec(1 | (uint64_t{1} << high));
+  const uint32_t last_vgpr = wave_->vgpr_alloc().count - 1;
+  ASSERT_LE(last_vgpr, 255u);
+  for (uint32_t addr : {16u, last_vgpr}) {
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message() << "addr=" << addr << " pop=" << c.pop << " flags=" << c.flags
+                                      << " last=" << std::hex << c.last);
+      for (uint32_t lane : {0u, 1u, high}) {
+        compute_unit_->write_vgpr(base_, lane, c.last);
+        compute_unit_->write_vgpr(base_ + addr, lane, lane << 15);
+        compute_unit_->write_vgpr(base_ + 12, lane, 0xdeadbeef);
+        compute_unit_->write_vgpr(base_ + 13, lane, 0xdeadbeef);
+        if (addr != last_vgpr)
+          compute_unit_->write_vgpr(base_ + addr + 1, lane, 0xfacefeed);
+        for (uint32_t i = 0; i < 8; ++i)
+          compute_unit_->write_vgpr(base_ + 4 + i, lane,
+                                    i == 0   ? c.first
+                                    : i == 6 ? c.seventh
+                                    : i == 7 ? c.eighth
+                                             : 0x1004 + i * 0x100);
+      }
+      wave_->lds().write32(0, 0xfacefeed);
+      const auto words = rdna4::build_vds(c.pop == 2 ? rdna4::kDsBvhStackPush8Pop2RtnB64Vds
+                                                     : rdna4::kDsBvhStackPush8Pop1RtnB32Vds,
+                                          {.offset0 = static_cast<uint8_t>(c.size),
+                                           .offset1 = static_cast<uint8_t>(c.flags),
+                                           .addr = static_cast<uint8_t>(addr),
+                                           .data0 = 0,
+                                           .data1 = 4,
+                                           .vdst = 12});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(compute_unit_->execute_instruction(inst.get(), *wave_).succeeded());
+      amdgpu::LocalMemPipeline pipeline;
+      pipeline.issue(inst.release(), *wave_);
+      for (uint32_t lane : {0u, 1u, high}) {
+        SCOPED_TRACE(testing::Message() << "lane=" << lane);
+        const bool active = lane != 1;
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + addr, lane),
+                  (lane << 15) | (active ? c.ptr : 0));
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 12, lane), active ? c.result0 : 0xdeadbeef);
+        EXPECT_EQ(compute_unit_->read_vgpr(base_ + 13, lane), active ? c.result1 : 0xdeadbeef);
+        if (addr != last_vgpr) {
+          EXPECT_EQ(compute_unit_->read_vgpr(base_ + addr + 1, lane), 0xfacefeed);
+        }
+      }
+      EXPECT_EQ(wave_->lds().read32(0), 0xfacefeed);
+    }
+  }
+}
+
+// LDS F32/F64 expectations are captured on gfx1010/gfx1030/gfx1100. CDNA1-4 and RDNA3.5
+// inherit them without equivalent captures (CDNA5/RDNA4 skip this test). RDNA3/3.5 ISA 13.2
+// and CDNA2 ISA 9.5.2 / CDNA3/4 ISA 9.2.2 specify flushing the CompareStore result; the
+// measured paths instead flush comparison inputs and preserve the stored/retained bits.
 TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
   if (modern_policy())
     GTEST_SKIP() << "This ISA exposes integer compare-store only";
@@ -735,10 +993,12 @@ TEST_P(AtomicPolicyExecutionTest, DsFloatCompareStoreEqualityAndDenormals) {
     EXPECT_EQ(execute_ds(opcode, nan, one, nan, 0xf0, width), nan);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0, width), one);
     EXPECT_EQ(execute_ds(opcode, 1, one, 0, 0xf0, width), 1u);
-    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 0u);
-    // Compare-store flushes its result using the input control, including a failed comparison.
-    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 0u);
-    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero);
+    // Flushing applies only to the comparison: RDNA1, RDNA2 and RDNA3 hardware
+    // stores a matching denormal source unchanged and leaves memory untouched
+    // on a mismatch.
+    EXPECT_EQ(execute_ds(opcode, one, 1, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, 1, one, one, 0, width), 1u);
+    EXPECT_EQ(execute_ds(opcode, negative_zero | 1, one, one, 0, width), negative_zero | 1);
     EXPECT_EQ(execute_ds(opcode, 1, one, one, 0x50, width), 1u);
   }
 }
@@ -748,6 +1008,11 @@ TEST_P(AtomicPolicyExecutionTest, MemoryAddDenormalsAndHostRounding) {
     GTEST_SKIP() << "No F32 atomic add on this ISA";
   for (bool buffer : {false, true}) {
     for (uint32_t mode : {0u, 0xffu}) {
+      // Physical RDNA3 L2 chooses memory's NaN; RDNA4 chooses the operand.
+      for (uint32_t old_nan : {0x7f800002u, 0x7fc00002u})
+        for (uint32_t source_nan : {0xff800004u, 0xffc00004u})
+          EXPECT_EQ(execute_memory(buffer, old_nan, source_nan, mode),
+                    (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? source_nan : old_nan) | 0x400000u);
       EXPECT_EQ(execute_memory(buffer, 1, 1, mode), modern_policy() ? 2u : 0u);
       EXPECT_EQ(execute_memory(buffer, 0x00800001, 0x80800000, mode), 1u);
       for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
@@ -777,13 +1042,13 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
           GetParam() == ROCJITSU_CODE_ARCH_RDNA1
               ? rdna1::build_mubuf(rdna1::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1})
               : rdna2::build_mubuf(rdna2::kBufferAtomicFcmpswapX2Mubuf, {.glc = 1});
-      std::copy(wide_words.begin(), wide_words.end(), words.begin());
+      std::ranges::copy(wide_words, words.begin());
     }
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
     ASSERT_NE(instruction, nullptr);
     ASSERT_EQ(instruction->num_dst_operands(), 2);
     EXPECT_EQ(instruction->dst_operand(1)->size_bits(), width * 32);
-    const InstDefUse def_use(*instruction);
+    const InstDefUse def_use(*instruction, 64);
     EXPECT_TRUE(
         def_use.uses.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width * 2)}));
     EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::VGPR, 0, static_cast<uint8_t>(width)}));
@@ -793,6 +1058,8 @@ TEST_P(AtomicPolicyExecutionTest, BufferFloatCompareSwapDefinesOnlyReturnedEleme
   }
 }
 
+// Only gfx1100 global F32 was captured. RDNA1/2 cache F32, RDNA3 BUFFER F32, and RDNA3.5
+// cache F32 inherit the same compare-store policy without equivalent hardware captures.
 TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
   if (GetParam() != ROCJITSU_CODE_ARCH_RDNA1 && GetParam() != ROCJITSU_CODE_ARCH_RDNA2 &&
       GetParam() != ROCJITSU_CODE_ARCH_RDNA3 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3_5)
@@ -801,6 +1068,11 @@ TEST_P(AtomicPolicyExecutionTest, MemoryFloatCompareStore) {
     EXPECT_EQ(execute_memory(buffer, 0, 0x3f800000, 0xf0, true, 0x80000000), 0x3f800000u);
     EXPECT_EQ(execute_memory(buffer, 0x7fc00002, 0x3f800000, 0xf0, true, 0x7fc00002), 0x7fc00002u);
     EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0), 0x3f800000u);
+    // Flushing applies only to the comparison: a matching denormal replacement is
+    // stored unchanged and a mismatch leaves denormal memory untouched.
+    EXPECT_EQ(execute_memory(buffer, 0x3f800000, 1, 0, true, 0x3f800000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 1, 0x3f800000, 0, true, 0x40400000), 1u);
+    EXPECT_EQ(execute_memory(buffer, 0x80000001, 0x3f800000, 0, true, 0x3f800000), 0x80000001u);
   }
 }
 
@@ -830,4 +1102,141 @@ INSTANTIATE_TEST_SUITE_P(AllAmdgpu, AtomicPolicyExecutionTest,
                                          ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
                                          ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                                          ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+
+class Gfx12AtomicTemporalHintTest : public testing::TestWithParam<rj_code_arch_t> {};
+
+TEST_P(Gfx12AtomicTemporalHintTest, ReturnBitIsIndependentOfTemporalAndCascadeHints) {
+  amdgpu::GpuMemory memory("atomic_th_memory");
+  amdgpu::L2Cache l2("atomic_th_l2");
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto compute_unit = amdgpu::ComputeUnitCore::create("atomic_th_cu", config, &memory, &l2);
+  ASSERT_NE(compute_unit, nullptr);
+  auto *wave = compute_unit->dispatch_wf(0, 0, 128, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  auto decoder = Decoder::create(GetParam());
+  ASSERT_NE(decoder, nullptr);
+  const uint32_t sgpr_base = wave->sgpr_alloc().base;
+  const uint32_t vgpr_base = wave->vgpr_alloc().base;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kSentinel = 0xDEADBEEF;
+  constexpr uint8_t kDeviceScope = 2;
+  constexpr uint8_t kSystemScope = 3;
+  amdgpu::GlobalMemPipeline pipeline(&compute_unit->l1_vector(), &l2);
+  enum class Form { Buffer, Global, Flat };
+  for (const auto memory_form : {Form::Buffer, Form::Global, Form::Flat}) {
+    for (const bool is_64bit : {false, true}) {
+      for (const uint8_t memory_scope : {kDeviceScope, kSystemScope}) {
+        for (const uint8_t th : {0, 1, 2, 3, 4, 5, 6, 7}) {
+          // SYS coverage uses the physically qualified returning forms.
+          if (memory_scope == kSystemScope && th != amdgpu::GFX12_TH_ATOMIC_RETURN &&
+              th != (amdgpu::GFX12_TH_ATOMIC_RETURN | amdgpu::GFX12_TH_ATOMIC_CASCADE))
+            continue;
+          SCOPED_TRACE(testing::Message()
+                       << "arch=" << GetParam() << " memory_form=" << static_cast<int>(memory_form)
+                       << " is_64bit=" << is_64bit << " scope=" << unsigned(memory_scope)
+                       << " th=" << unsigned(th));
+          const bool returns_value = (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0;
+          const auto expected_counter =
+              returns_value ? amdgpu::WaitCounterType::LOADCNT : amdgpu::WaitCounterType::STORECNT;
+          const uint64_t old_value = is_64bit ? 0x1234'5678'0000'0007ULL : 7;
+          memory.write64(kAddress, old_value);
+          l2.invalidate_all();
+          compute_unit->write_sgpr(sgpr_base + 4, kAddress);
+          compute_unit->write_sgpr(sgpr_base + 5, memory_form == Form::Buffer &&
+                                                          GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+                                                      ? 64u << 25
+                                                      : 0);
+          compute_unit->write_sgpr(
+              sgpr_base + 6,
+              memory_form == Form::Buffer && GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 64 : 0);
+          compute_unit->write_sgpr(sgpr_base + 7,
+                                   GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x30020000 : 0);
+          compute_unit->write_sgpr(sgpr_base + 12, 0);
+          compute_unit->write_vgpr(vgpr_base + 2, 0, memory_form == Form::Flat ? kAddress : 0);
+          compute_unit->write_vgpr(vgpr_base + 3, 0, 0);
+          compute_unit->write_vgpr(vgpr_base, 0, kSentinel);
+          compute_unit->write_vgpr(vgpr_base + 1, 0, kSentinel);
+          compute_unit->write_vgpr(vgpr_base + 8, 0, 5);
+          compute_unit->write_vgpr(vgpr_base + 9, 0, 0);
+          for (uint32_t reg : {0u, 1u, 8u, 9u})
+            compute_unit->write_vgpr(vgpr_base + reg, 1, kSentinel);
+
+          // These ADD encodings and operand layouts are shared by both GFX12 targets.
+          std::array<uint32_t, 3> encoded_instruction;
+          if (memory_form == Form::Buffer) {
+            encoded_instruction = cdna5::build_vbuffer(is_64bit ? cdna5::kBufferAtomicAddU64Vbuffer
+                                                                : cdna5::kBufferAtomicAddU32Vbuffer,
+                                                       {.soffset = 12,
+                                                        .vdata = 8,
+                                                        .rsrc = 4,
+                                                        .scope = memory_scope,
+                                                        .th = th,
+                                                        .offen = 1,
+                                                        .vaddr = 2});
+          } else if (memory_form == Form::Global) {
+            encoded_instruction = cdna5::build_vglobal(
+                is_64bit ? cdna5::kGlobalAtomicAddU64Vglobal : cdna5::kGlobalAtomicAddU32Vglobal,
+                {.saddr = 4, .vdst = 0, .scope = memory_scope, .th = th, .vsrc = 8, .vaddr = 2});
+          } else {
+            encoded_instruction = cdna5::build_vflat(is_64bit ? cdna5::kFlatAtomicAddU64Vflat
+                                                              : cdna5::kFlatAtomicAddU32Vflat,
+                                                     {.saddr = amdgpu::kModernNullSelector,
+                                                      .vdst = 0,
+                                                      .scope = memory_scope,
+                                                      .th = th,
+                                                      .vsrc = 8,
+                                                      .vaddr = 2});
+          }
+          std::unique_ptr<Instruction> instruction(
+              decode_valid(*decoder, encoded_instruction.data()));
+          ASSERT_NE(instruction, nullptr);
+          const uint32_t result_vgpr = memory_form == Form::Buffer ? 8 : 0;
+          bool has_vgpr_result = false;
+          for (int i = 0; i < instruction->num_dst_operands(); ++i)
+            has_vgpr_result |= instruction->dst_operand(i)->is_vgpr();
+          EXPECT_EQ(has_vgpr_result, returns_value);
+          ASSERT_NE(instruction->amdgpu_memory_issue_info(), nullptr);
+          const auto counter_obligations =
+              instruction->amdgpu_memory_issue_info()->counter_obligations();
+          EXPECT_TRUE(std::ranges::any_of(counter_obligations, [&](const auto &obligation) {
+            return obligation.wait_counter_type() == expected_counter;
+          }));
+          ASSERT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+          const auto *memory_state = instruction->data_as<amdgpu::VectorMemState>();
+          ASSERT_NE(memory_state, nullptr);
+          EXPECT_EQ(memory_state->is_load, returns_value);
+          EXPECT_EQ(memory_state->wait_counter_type, expected_counter);
+          ASSERT_EQ(pipeline.issue(instruction.release(), *wave),
+                    amdgpu::VmAccessOutcome::Complete);
+          EXPECT_EQ(is_64bit ? memory.read64(kAddress) : memory.read32(kAddress), old_value + 5);
+          EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + result_vgpr, 0),
+                    returns_value                 ? static_cast<uint32_t>(old_value)
+                    : memory_form == Form::Buffer ? 5u
+                                                  : kSentinel);
+          if (is_64bit) {
+            EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + result_vgpr + 1, 0),
+                      returns_value                 ? static_cast<uint32_t>(old_value >> 32)
+                      : memory_form == Form::Buffer ? 0u
+                                                    : kSentinel);
+          }
+          for (uint32_t reg : {0u, 1u, 8u, 9u}) {
+            EXPECT_EQ(compute_unit->read_vgpr(vgpr_base + reg, 1), kSentinel);
+          }
+        }
+      }
+    }
+  }
+  wave->halt();
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx12Targets, Gfx12AtomicTemporalHintTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+
 } // namespace

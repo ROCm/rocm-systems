@@ -154,6 +154,7 @@ __device__ int rocshmem_ctx_tile_get_wg_internal(
  *****************************************************************************/
 
 __device__ int rocshmem_tile_allgather_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -165,12 +166,13 @@ __device__ int rocshmem_tile_allgather_internal(
     size_t element_size,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_allgather(team, dst_data, src_data, dst_strides, src_strides,
                                       start_coord, boundary, ndim, element_size, flags);
 }
 
 __device__ int rocshmem_tile_allgather_wave_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -182,12 +184,13 @@ __device__ int rocshmem_tile_allgather_wave_internal(
     size_t element_size,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_allgather_wave(team, dst_data, src_data, dst_strides, src_strides,
                                            start_coord, boundary, ndim, element_size, flags);
 }
 
 __device__ int rocshmem_tile_allgather_wg_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -199,7 +202,7 @@ __device__ int rocshmem_tile_allgather_wg_internal(
     size_t element_size,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_allgather_wg(team, dst_data, src_data, dst_strides, src_strides,
                                          start_coord, boundary, ndim, element_size, flags);
 }
@@ -209,6 +212,7 @@ __device__ int rocshmem_tile_allgather_wg_internal(
  *****************************************************************************/
 
 __device__ int rocshmem_tile_broadcast_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -221,12 +225,13 @@ __device__ int rocshmem_tile_broadcast_internal(
     int pe_root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_broadcast(team, dst_data, src_data, dst_strides, src_strides,
                                       start_coord, boundary, ndim, element_size, pe_root, flags);
 }
 
 __device__ int rocshmem_tile_broadcast_wave_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -239,12 +244,13 @@ __device__ int rocshmem_tile_broadcast_wave_internal(
     int pe_root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_broadcast_wave(team, dst_data, src_data, dst_strides, src_strides,
                                            start_coord, boundary, ndim, element_size, pe_root, flags);
 }
 
 __device__ int rocshmem_tile_broadcast_wg_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -257,7 +263,7 @@ __device__ int rocshmem_tile_broadcast_wg_internal(
     int pe_root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_broadcast_wg(team, dst_data, src_data, dst_strides, src_strides,
                                          start_coord, boundary, ndim, element_size, pe_root, flags);
 }
@@ -267,6 +273,7 @@ __device__ int rocshmem_tile_broadcast_wg_internal(
  *****************************************************************************/
 
 __device__ int rocshmem_tile_sum_reduce_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -279,12 +286,13 @@ __device__ int rocshmem_tile_sum_reduce_internal(
     int root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_sum_reduce(team, dst_data, src_data, dst_strides, src_strides,
                                        start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_sum_reduce_wave_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -297,12 +305,13 @@ __device__ int rocshmem_tile_sum_reduce_wave_internal(
     int root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_sum_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
                                             start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_sum_reduce_wg_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -315,7 +324,7 @@ __device__ int rocshmem_tile_sum_reduce_wg_internal(
     int root,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_sum_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
                                           start_coord, boundary, ndim, element_size, root, flags);
 }
@@ -329,6 +338,7 @@ __device__ int rocshmem_tile_sum_reduce_wg_internal(
  *****************************************************************************/
 
 __device__ int rocshmem_tile_max_reduce_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -341,12 +351,13 @@ __device__ int rocshmem_tile_max_reduce_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_max_reduce(
+  return get_internal_ctx(ctx)->tile_max_reduce(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_max_reduce_wave_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -359,12 +370,13 @@ __device__ int rocshmem_tile_max_reduce_wave_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_max_reduce_wave(
+  return get_internal_ctx(ctx)->tile_max_reduce_wave(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_max_reduce_wg_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -377,7 +389,7 @@ __device__ int rocshmem_tile_max_reduce_wg_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_max_reduce_wg(
+  return get_internal_ctx(ctx)->tile_max_reduce_wg(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
@@ -387,6 +399,7 @@ __device__ int rocshmem_tile_max_reduce_wg_internal(
  *****************************************************************************/
 
 __device__ int rocshmem_tile_min_reduce_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -399,12 +412,13 @@ __device__ int rocshmem_tile_min_reduce_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_min_reduce(
+  return get_internal_ctx(ctx)->tile_min_reduce(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_min_reduce_wave_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -417,12 +431,13 @@ __device__ int rocshmem_tile_min_reduce_wave_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_min_reduce_wave(
+  return get_internal_ctx(ctx)->tile_min_reduce_wave(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_min_reduce_wg_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     void* dst_data,
     const void* src_data,
@@ -435,16 +450,17 @@ __device__ int rocshmem_tile_min_reduce_wg_internal(
     int root,
     uint64_t flags) {
 
-  return get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->tile_min_reduce_wg(
+  return get_internal_ctx(ctx)->tile_min_reduce_wg(
       team, dst_data, src_data, dst_strides, src_strides,
       start_coord, boundary, ndim, element_size, root, flags);
 }
 
 __device__ int rocshmem_tile_collective_wait_internal(
+    rocshmem_ctx_t ctx,
     rocshmem_team_t team,
     uint64_t flags) {
 
-  auto* internal_ctx = get_internal_ctx(ROCSHMEM_CTX_DEFAULT);
+  auto* internal_ctx = get_internal_ctx(ctx);
   return internal_ctx->tile_collective_wait(team, flags);
 }
 

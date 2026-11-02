@@ -201,6 +201,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case WGSyncAllTestType:
     case TeamSyncTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalAddTestType:
+    case SignalSetTestType:
+    case SignalWaitUntilTestType:
       min_msg_size = 8;
       max_msg_size = 8;
       break;
@@ -352,6 +355,7 @@ void TesterArguments::get_arguments() {
     case FloodFAddTestType:
     case FloodWaitAmoTestType:
     case DeviceBitcodeTestType:
+    case BufferRegisterSymmetricTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:

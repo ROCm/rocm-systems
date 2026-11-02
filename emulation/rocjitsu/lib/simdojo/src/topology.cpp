@@ -463,7 +463,7 @@ Partitioner::CoarsenLevel Partitioner::coarsen(const AdjacencyGraph &graph) {
   std::vector<uint32_t> order(n);
   std::iota(order.begin(), order.end(), 0);
   std::mt19937 rng(42);
-  std::shuffle(order.begin(), order.end(), rng);
+  std::ranges::shuffle(order, rng);
 
   // Heavy-edge matching.
   std::vector<bool> matched(n, false);
@@ -551,7 +551,7 @@ void Partitioner::fm_bisect(const AdjacencyGraph &graph, std::vector<uint8_t> &a
   // Sort nodes by degree (descending) for better initial balance.
   std::vector<uint32_t> order(n);
   std::iota(order.begin(), order.end(), 0);
-  std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+  std::ranges::sort(order, [&](uint32_t a, uint32_t b) {
     return graph.adjacency[a].size() > graph.adjacency[b].size();
   });
 
@@ -671,7 +671,7 @@ int64_t Partitioner::fm_refine(const AdjacencyGraph &graph, std::vector<uint8_t>
     return 0;
 
   // Find the prefix with the best cumulative gain.
-  auto best_it = std::max_element(cumulative_gain.begin(), cumulative_gain.end());
+  auto best_it = std::ranges::max_element(cumulative_gain);
   int64_t best_total_gain = *best_it;
 
   if (best_total_gain <= 0) {

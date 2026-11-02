@@ -33,23 +33,9 @@ rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
 
 # Configuring the thread trace service succeeds without the trace decoder, but reading the
 # collected data back needs it: aqlprofile_att_iterate_data fails and the SDK reports that
-# as a CI error, which aborts the sample. Locate the decoder the way the thread_trace
-# sample does so the ATT samples can be handed its path, and skip them when it is absent.
-include(FindPackageHandleStandardArgs)
-
-find_library(
-    attdecoder_LIBRARY
-    NAMES rocprof-trace-decoder
-    HINTS ${ROCM_PATH}
-    PATHS ${ROCM_PATH}
-    PATH_SUFFIXES lib)
-
-if(attdecoder_LIBRARY)
-    cmake_path(GET attdecoder_LIBRARY PARENT_PATH attdecoder_LIB_DIR)
-endif()
-
-find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
-                                                           attdecoder_LIBRARY)
+# as a CI error, which aborts the sample. Locate the decoder so the ATT samples can be
+# handed its path, and skip them when it is absent.
+rocprofiler_sdk_find_trace_decoder()
 
 # PC sampling is agent-wide and does not consult localized pass overrides yet. Samples
 # that assign counters and PC sampling to different replay passes still run both on every
@@ -126,6 +112,16 @@ add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
 add_kernel_replay_sample(kernel-replay-att att_client.cpp ATT)
 add_kernel_replay_sample(kernel-replay-spm spm_client.cpp SPM)
+
+# This replay sample aborts during KFD acquisition on gfx120x CI runners. Tracking issue:
+# https://github.com/ROCm/rocm-systems/issues/13606
+foreach(_gfx IN LISTS rocprofiler-sdk-samples-gfx-info)
+    if(_gfx MATCHES "^gfx120[0-9](-strict)?$")
+        set_tests_properties(kernel-replay-spm PROPERTIES DISABLED ON)
+        break()
+    endif()
+endforeach()
+
 add_kernel_replay_sample(
     kernel-replay-services-first service_sequence_client.cpp PC_SAMPLING SPM ATT
     ENVIRONMENT "KR_SERVICE_ORDER=services-first")

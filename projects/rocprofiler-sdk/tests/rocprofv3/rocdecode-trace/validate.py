@@ -2,9 +2,6 @@
 
 import sys
 import pytest
-import json
-
-from collections import defaultdict
 
 
 # helper function
@@ -45,7 +42,6 @@ def test_rocdeocde(json_data):
 
     assert len(bf_op_names) == 16
 
-    rocdecode_reported_agent_ids = set()
     # check buffering data
     for node in rocdecode_data:
         assert "size" in node

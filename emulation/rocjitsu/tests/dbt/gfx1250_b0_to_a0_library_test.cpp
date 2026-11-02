@@ -56,6 +56,24 @@ uint64_t source_identity(const std::vector<uint8_t> &bytes) {
 }
 #endif
 
+TEST(Gfx1250B0ToA0Library, InternalErrorsTakePrecedenceOverInputRejection) {
+  rocjitsu::TranslationDiagnostic internal;
+  internal.severity = rocjitsu::DiagnosticSeverity::Error;
+  internal.kind = rocjitsu::DiagnosticKind::InternalError;
+  rocjitsu::TranslationDiagnostic skipped;
+  skipped.kind = rocjitsu::DiagnosticKind::KernelSkipped;
+  rocjitsu::TranslationDiagnostic rejected;
+  rejected.severity = rocjitsu::DiagnosticSeverity::Error;
+  rejected.kind = rocjitsu::DiagnosticKind::ExpandFailed;
+  for (const std::vector<rocjitsu::TranslationDiagnostic> &diagnostics :
+       {std::vector{internal}, std::vector{internal, skipped}, std::vector{skipped, internal}}) {
+    EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status(diagnostics, true, false),
+              ROCJITSU_STATUS_ERROR);
+  }
+  EXPECT_EQ(rocjitsu::gfx1250_b0_to_a0_translation_status({rejected}, true, false),
+            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+}
+
 TEST(Gfx1250B0ToA0Library, RejectsInvalidArgumentsAndClearsOutputs) {
   auto *output = reinterpret_cast<uint8_t *>(0x1);
   size_t output_size = 1;
@@ -91,7 +109,7 @@ TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
                                           &info, capture_diagnostic, &diagnostics),
             ROCJITSU_STATUS_INVALID_CODE_OBJECT);
   ASSERT_FALSE(diagnostics.empty());
-  const auto matching = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+  const auto matching = std::ranges::find_if(diagnostics, [](const auto &item) {
     return item.severity == "error" && item.kind == "input-invalid-code-object" &&
            item.message.find("valid gfx1250") != std::string::npos;
   });
@@ -145,7 +163,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
   EXPECT_EQ(output_size, 0u);
   ASSERT_FALSE(diagnostics.empty());
 
-  const auto primary = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+  const auto primary = std::ranges::find_if(diagnostics, [](const auto &item) {
     return !item.required_work && item.severity == "error" &&
            item.kind == "translator-expand-failed";
   });
@@ -177,7 +195,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   EXPECT_EQ(output_size, 0u);
   ASSERT_FALSE(diagnostics.empty());
 
-  const auto primary = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+  const auto primary = std::ranges::find_if(diagnostics, [](const auto &item) {
     return !item.required_work && item.severity == "error" &&
            item.kind == "translator-expand-failed";
   });
@@ -186,7 +204,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   EXPECT_EQ(primary->guest_offset, 0u);
   EXPECT_EQ(primary->mnemonic, "s_barrier_signal_isfirst");
 
-  const auto required = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+  const auto required = std::ranges::find_if(diagnostics, [](const auto &item) {
     return item.required_work && item.kind == "translator-expand-failed";
   });
   ASSERT_NE(required, diagnostics.end());
@@ -194,6 +212,26 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   EXPECT_EQ(required->guest_offset, 0u);
   EXPECT_EQ(required->mnemonic, "s_barrier_signal_isfirst");
   EXPECT_NE(required->message.find("different barrier id"), std::string::npos);
+}
+
+TEST(Gfx1250B0ToA0Library, PreservesLivenessContractDiagnostic) {
+  const std::vector<rocjitsu::TranslationDiagnostic> source = {{
+      .severity = rocjitsu::DiagnosticSeverity::Error,
+      .kind = rocjitsu::DiagnosticKind::InternalError,
+      .guest_offset = std::nullopt,
+      .output_offset = std::nullopt,
+      .mnemonic = "",
+      .message = "liveness query from a rule marked liveness-free",
+      .required_work = {},
+  }};
+  std::vector<CapturedDiagnostic> captured;
+
+  rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(capture_diagnostic, &captured, source);
+
+  ASSERT_EQ(captured.size(), 1u);
+  EXPECT_EQ(captured[0].severity, "error");
+  EXPECT_EQ(captured[0].kind, "translation-exception");
+  EXPECT_EQ(captured[0].message, source[0].message);
 }
 
 TEST(Gfx1250B0ToA0Library, FansOutRequiredWorkAsCallbackViews) {
@@ -249,7 +287,7 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   EXPECT_NE(output, nullptr);
   rj_gfx1250_b0_to_a0_free(output);
 
-  const auto reported = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
+  const auto reported = std::ranges::find_if(diagnostics, [](const auto &item) {
     return item.severity == "warning" && item.kind == "translator-legalization" &&
            item.mnemonic == "s_monitor_sleep";
   });
@@ -258,9 +296,8 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   EXPECT_NE(reported->message.find("not yet implemented"), std::string::npos);
 
   // Two instructions, one report: the gap is a property of the mnemonic.
-  const auto count = std::count_if(diagnostics.begin(), diagnostics.end(), [](const auto &item) {
-    return item.mnemonic == "s_monitor_sleep";
-  });
+  const auto count = std::ranges::count_if(
+      diagnostics, [](const auto &item) { return item.mnemonic == "s_monitor_sleep"; });
   EXPECT_EQ(count, 1);
 }
 
@@ -283,7 +320,7 @@ TEST(Gfx1250B0ToA0Library, TranslatesRealGfx1250CodeObject) {
   EXPECT_GT(info.changed_instruction_count, 0u);
   constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
   ASSERT_GE(output_size, kElfMagic.size());
-  EXPECT_TRUE(std::equal(kElfMagic.begin(), kElfMagic.end(), output));
+  EXPECT_TRUE(std::ranges::equal(kElfMagic, std::span(output, kElfMagic.size())));
 
   rj_gfx1250_b0_to_a0_free(output);
 }
