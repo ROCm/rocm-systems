@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -20,12 +21,32 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <span>
 #include <string_view>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
+
+TEST(AmdGpuElfFixture, RejectsInvalidCallerExtentAndTargetWithoutThrowing) {
+  const std::vector<uint32_t> text(4, 0);
+  std::vector<uint8_t> image;
+  EXPECT_NONFATAL_FAILURE(
+      image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(text, 3, 2),
+      "text function extent exceeds .text fixture");
+  EXPECT_TRUE(image.empty());
+  EXPECT_NONFATAL_FAILURE(image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+                              text, 1, std::numeric_limits<size_t>::max()),
+                          "text function extent exceeds .text fixture");
+  EXPECT_TRUE(image.empty());
+  EXPECT_NONFATAL_FAILURE(image = test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+                              text, std::nullopt, 0, 4),
+                          "function pointer target exceeds .text fixture");
+  EXPECT_TRUE(image.empty());
+  EXPECT_FALSE(
+      test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(text, 2, 2, 3).empty());
+}
 
 uint32_t add_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());

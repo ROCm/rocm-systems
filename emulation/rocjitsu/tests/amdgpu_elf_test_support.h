@@ -44,6 +44,7 @@ uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr sec
                                      std::span<const uint8_t> contents);
 
 /// @pre The optional function extent and pointer-table target must lie within @p text_words.
+/// Invalid caller arguments record a nonfatal test failure and return an empty image.
 /// @param export_text_function Give the `.text` function global binding and a name of its own.
 /// @details A device function is LOCAL and shares the fixture's "kernel" name by default, which
 /// object_defines_only_kernels() then pairs with the "kernel.kd" descriptor and counts as a kernel.

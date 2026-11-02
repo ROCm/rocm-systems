@@ -105,13 +105,17 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
     const std::vector<uint32_t> &text_words, std::optional<size_t> text_function_words,
     size_t text_function_offset_words, std::optional<size_t> function_pointer_table_target_words,
     bool name_function_pointer_table_with_symbol, bool export_text_function) {
-  assert((!text_function_words ||
-          (text_function_offset_words <= text_words.size() &&
-           *text_function_words <= text_words.size() - text_function_offset_words)) &&
-         "text function extent exceeds .text fixture");
-  assert((!function_pointer_table_target_words ||
-          *function_pointer_table_target_words < text_words.size()) &&
-         "function pointer target exceeds .text fixture");
+  if (text_function_words &&
+      (text_function_offset_words > text_words.size() ||
+       *text_function_words > text_words.size() - text_function_offset_words)) {
+    ADD_FAILURE() << "text function extent exceeds .text fixture";
+    return {};
+  }
+  if (function_pointer_table_target_words &&
+      *function_pointer_table_target_words >= text_words.size()) {
+    ADD_FAILURE() << "function pointer target exceeds .text fixture";
+    return {};
+  }
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
