@@ -19,8 +19,8 @@
 #include <new>
 #include <string>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "fakes/env_fakes.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
@@ -39,28 +39,6 @@ static char* InitTestRealpath(const char* path, char* resolved) { return g_initR
 #include NET_IB_CAST_INIT_CC_PATH
 #undef realpath
 
-void NetIbCastResetGlobals() {
-  netRefCount = 0;
-  for (struct ncclIbDev& dev : IbCastDevs) {
-    free(dev.pciPath);
-    free(dev.mrCache.slots);
-    dev.~ncclIbDev();
-    new (&dev) ncclIbDev();
-  }
-  memset(IbCastMergedDevs, 0, sizeof(IbCastMergedDevs));
-  IbCastNDevs = -1;
-  IbCastNMergedDevs = -1;
-  memset(IbCastIfName, 0, sizeof(IbCastIfName));
-  memset(&IbCastIfAddr, 0, sizeof(IbCastIfAddr));
-  IbCastRelaxedOrderingEnabled = 0;
-  IbCastProfilerFunction = nullptr;
-  IbCastAinicRoce = IbCastMultiplaneEnable = IbCastOffloadEnabled = IbCastUseInline = IbCastAinicCtsInlineData = false;
-  IbCastGdrFlushDisable = 0;
-  IbCastArThreshold = 8192;
-  IbCastQpSharingGlobalEnable = false;
-  memset(&castGlobalQpSchedParms, 0, sizeof(castGlobalQpSchedParms));
-}
-
 namespace {
 
 using RcclUnitTesting::CaptureLog;
@@ -72,6 +50,7 @@ class NetIbCastInitMicrotest : public ::testing::Test {
   void TearDown() override {
     world_.reset();
     NetIbCastResetGlobals();
+    netRefCount = 0;
     ResetEnvFakes();
     ResetIbvwrapFakes();
     ResetMlx5dvwrapFakes();
@@ -95,6 +74,7 @@ class NetIbCastInitMicrotest : public ::testing::Test {
   void ResetForAnotherInit() {
     World().Quiesce();
     NetIbCastResetGlobals();
+    netRefCount = 0;
   }
 
   // A physical device as IbCastInitDevices leaves it, for the tests that start past discovery.
@@ -1170,6 +1150,7 @@ TEST_F(NetIbCastInitMicrotestIsolated, InitDevices_IbHca_IsAnnouncedOncePerProce
     EXPECT_TRUE(LogHas(log, "NCCL_IB_HCA set to ionic_0")) << log;
     world.Quiesce();
     NetIbCastResetGlobals();
+    netRefCount = 0;
     log = CaptureLog([&] { ASSERT_EQ(IbCastInitDevices(nullptr, nullptr), ncclSuccess); });
     EXPECT_FALSE(LogHas(log, "NCCL_IB_HCA set to")) << log;
   });

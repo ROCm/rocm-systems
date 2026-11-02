@@ -90,7 +90,5 @@ ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm*) { ::abort(); }
-#ifndef RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t) { ::abort(); }
-#endif

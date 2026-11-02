@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <arpa/inet.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +21,7 @@
 #include <set>
 #include <vector>
 
+#include "HipVmmLedger.h"
 #include "IbVerbsScene.h"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
@@ -29,8 +31,8 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/os_fakes.h"
+#include "fakes/rocmwrap_fakes.h"
 #include "fakes/socket_fakes.h"
-#include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
 #include "fakes/transport_net_ib_wqe_lat_fakes.h"
 #include "transport/net_ib/NetIbGlobals.h"
@@ -53,19 +55,6 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 
 }  // namespace
 
-// Keep the generic owner fakes linked for sibling transport tests while this
-// TU compiles the real connect.cc under unit-qualified names.
-#define ncclParamIbQpsPerConn NetIbConnectParamIbQpsPerConn
-#define ncclIbGidInfoQuery NetIbConnectGidInfoQuery
-#define ncclIbListen NetIbConnectListen
-#define ncclIbNetListen NetIbConnectNetListen
-#define ncclIbGdrFlushFlagLocalSupport NetIbConnectGdrFlushFlagLocalSupport
-#define ncclIbSetGdrFlushFlag NetIbConnectSetGdrFlushFlag
-#define ncclIbConnect NetIbConnectConnect
-#define ncclIbAccept NetIbConnectAccept
-#define ncclIbCloseSend NetIbConnectCloseSend
-#define ncclIbCloseRecv NetIbConnectCloseRecv
-#define ncclIbCloseListen NetIbConnectCloseListen
 #define open TestConnectOpen
 #define read TestConnectRead
 #define close TestConnectClose
@@ -79,18 +68,6 @@ ncclResult_t TestConnectMemAlloc(void** ptr, size_t size) { return g_connectMemA
 #undef close
 #undef read
 #undef open
-#undef ncclIbCloseListen
-#undef ncclIbCloseRecv
-#undef ncclIbCloseSend
-#undef ncclIbAccept
-#undef ncclIbConnect
-#undef ncclIbSetGdrFlushFlag
-#undef ncclIbGdrFlushFlagLocalSupport
-#undef ncclIbNetListen
-#undef ncclIbListen
-#undef ncclIbGidInfoQuery
-#undef ncclParamIbQpsPerConn
-
 namespace {
 
 union ibv_gid Ipv4Gid(const char* address) {
@@ -243,10 +220,12 @@ class NetIbConnectMicrotest : public ::testing::Test {
       return ncclSuccess;
     };
     g_ibvModifyQp = [](ibv_qp*, ibv_qp_attr*, int) { return ncclSuccess; };
-    g_ibvRegMr = [this](ibv_mr** out, ibv_pd* pd, void*, size_t, int) {
+    g_ibvRegMr = [this](ibv_mr** out, ibv_pd* pd, void* addr, size_t length, int) {
       mrs_.emplace_back();
       auto& mr = mrs_.back();
       mr.pd = pd;
+      mr.addr = addr;
+      mr.length = length;
       mr.lkey = nextKey_++;
       mr.rkey = nextKey_++;
       *out = &mr;
@@ -264,7 +243,6 @@ class NetIbConnectMicrotest : public ::testing::Test {
     ResetNetIbSupportSeams();
     ResetTransportNetIbWqeLatFakes();
     ResetTransportNetIbResiliencyFakes();
-    ResetTransportNetIbFakes();
     ResetSocketFakes();
     ResetOsFakes();
     ResetHipFakes();
@@ -503,7 +481,7 @@ TEST_F(NetIbConnectMicrotest, GidInfoQuery_ConfiguredIndexPublishesLinkLayerInde
   });
   ncclIbGidInfo info{};
 
-  ASSERT_EQ(NetIbConnectGidInfoQuery(&context, 3, &port, &info), ncclSuccess);
+  ASSERT_EQ(ncclIbGidInfoQuery(&context, 3, &port, &info), ncclSuccess);
   EXPECT_EQ(info.link_layer, IBV_LINK_LAYER_ETHERNET);
   EXPECT_EQ(info.localGidIndex, 2);
   EXPECT_EQ(std::memcmp(&info.localGid, &expected, sizeof(expected)), 0);
@@ -515,9 +493,9 @@ TEST_F(NetIbConnectMicrotest, GidInfoQuery_NullInputIsRejected) {
   ibv_port_attr port{};
   ncclIbGidInfo info{};
 
-  EXPECT_EQ(NetIbConnectGidInfoQuery(nullptr, 1, &port, &info), ncclInternalError);
-  EXPECT_EQ(NetIbConnectGidInfoQuery(&context, 1, nullptr, &info), ncclInternalError);
-  EXPECT_EQ(NetIbConnectGidInfoQuery(&context, 1, &port, nullptr), ncclInternalError);
+  EXPECT_EQ(ncclIbGidInfoQuery(nullptr, 1, &port, &info), ncclInternalError);
+  EXPECT_EQ(ncclIbGidInfoQuery(&context, 1, nullptr, &info), ncclInternalError);
+  EXPECT_EQ(ncclIbGidInfoQuery(&context, 1, &port, nullptr), ncclInternalError);
 }
 
 TEST_F(NetIbConnectMicrotest, PkeyIndex_ConfiguredIndexSkipsTableQuery) {
@@ -1032,11 +1010,11 @@ TEST_F(NetIbConnectMicrotest, Listen_SuccessPublishesHandleAndCloseReleasesComm)
   ncclIbHandle handle{};
   void* comm = nullptr;
 
-  ASSERT_EQ(NetIbConnectListen(nullptr, 0, &handle, &comm), ncclSuccess);
+  ASSERT_EQ(ncclIbListen(nullptr, 0, &handle, &comm), ncclSuccess);
   ASSERT_NE(comm, nullptr);
   EXPECT_EQ(handle.magic, NCCL_SOCKET_MAGIC);
   EXPECT_EQ(handle.connectAddr.sa.sa_family, AF_INET);
-  EXPECT_EQ(NetIbConnectCloseListen(comm), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseListen(comm), ncclSuccess);
   EXPECT_EQ(close.calls, 1);
 }
 
@@ -1049,7 +1027,7 @@ TEST_F(NetIbConnectMicrotest, Listen_SetupFailureClosesSocketAndDoesNotPublishCo
   ncclIbHandle handle{};
   void* comm = nullptr;
 
-  EXPECT_EQ(NetIbConnectListen(nullptr, 0, &handle, &comm), ncclSystemError);
+  EXPECT_EQ(ncclIbListen(nullptr, 0, &handle, &comm), ncclSystemError);
   EXPECT_EQ(comm, nullptr);
   EXPECT_EQ(close.calls, 1);
 }
@@ -1098,7 +1076,7 @@ TEST_F(NetIbConnectMicrotest, Connect_NotReadyThenCompletedHandshakePublishesSen
   EXPECT_EQ(peer.partialStages.size(), 5u);
   EXPECT_EQ(peer.sentIsP2p, 1);
 
-  EXPECT_EQ(NetIbConnectCloseSend(comm), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseSend(comm), ncclSuccess);
 }
 
 TEST_F(NetIbConnectMicrotest, ConnectWrapper_UnexpectedStageIsRejected) {
@@ -1106,7 +1084,7 @@ TEST_F(NetIbConnectMicrotest, ConnectWrapper_UnexpectedStageIsRejected) {
   handle.stage.state = ncclIbCommStateAccept;
   void* comm = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbConnectConnect(nullptr, 0, &handle, &comm, nullptr), ncclInternalError);
+  EXPECT_EQ(ncclIbConnect(nullptr, 0, &handle, &comm, nullptr), ncclInternalError);
   EXPECT_EQ(comm, nullptr);
 }
 
@@ -1153,7 +1131,7 @@ TEST_F(NetIbConnectMicrotest, Accept_CompletedHandshakePublishesRecvCommAndClear
   EXPECT_EQ(rtrs[0].ah_attr.sl, 2);
   EXPECT_EQ(rtrs[0].ah_attr.grh.traffic_class, 19);
 
-  EXPECT_EQ(NetIbConnectCloseRecv(comm), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
 }
 
 TEST_F(NetIbConnectMicrotest, AcceptWrapper_UnexpectedStageIsRejected) {
@@ -1163,9 +1141,258 @@ TEST_F(NetIbConnectMicrotest, AcceptWrapper_UnexpectedStageIsRejected) {
   listen.stage = &stage;
   void* comm = reinterpret_cast<void*>(0x1);
 
-  EXPECT_EQ(NetIbConnectAccept(&listen, &comm, nullptr), ncclInternalError);
+  EXPECT_EQ(ncclIbAccept(&listen, &comm, nullptr), ncclInternalError);
   EXPECT_EQ(comm, nullptr);
 }
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// Accept's GDR flush scratchpad under cuMem: a VMM buffer registered through its own DMA-BUF fd, or the HSA buffer
+// when any step of that fails. rcclParamIbGdrFlushGpuMemNoRelaxedOrdering, which gates both, defaults on.
+class NetIbConnectCuMemFlushMicrotest : public NetIbConnectMicrotest {
+ protected:
+  struct DmaBufReg {
+    ibv_pd* pd;
+    uint64_t offset;
+    size_t length;
+    uint64_t iova;
+    int fd;
+    int access;
+    ibv_mr* mr;
+  };
+
+  void SetUp() override {
+    ConfigureSingleDevice();
+    InstallSingleDeviceResourceFakes();
+    vmm_.Install();
+    exports_.Install();
+    g_hipDeviceGetPCIBusIdResult = hipSuccess;  // ncclCuMemAlloc looks its side stream up by bus id
+    g_cuMemEnable = [] { return 1; };
+    g_netIbGdrSupport = [] { return ncclSuccess; };  // peermem, so accept enables the flush
+    g_connectMemAlloc = [](void** ptr, size_t size) {
+      return ncclCuMemAlloc(ptr, nullptr, hipMemHandleTypePosixFileDescriptor, size);
+    };
+    g_ibvRegDmabufMr = [this](ibv_mr** out, ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                              int access) {
+      ibv_mr* mr = dmabufRegResult_ == ncclSuccess ? &mrs_.emplace_back() : nullptr;
+      dmabufRegs_.push_back({pd, offset, length, iova, fd, access, mr});
+      if (mr == nullptr) return dmabufRegResult_;
+      *out = mr;
+      return ncclSuccess;
+    };
+    g_connectClose = [this](int fd) {
+      closed_.push_back(fd);
+      return ::close(fd);
+    };
+  }
+
+  void TearDown() override {
+    exports_.CloseOpen();
+    NetIbConnectMicrotest::TearDown();
+  }
+
+  // Runs accept to completion against a one-device peer.
+  ncclResult_t Accept(ncclIbRecvComm** comm) {
+    ncclIbListenComm listenComm{};
+    ScriptedHandshakePeer peer([&listenComm] { return static_cast<int>(listenComm.stage->state); },
+                               PeerMetadata(/*ctsAddr=*/0xa000, /*qpn=*/300, /*lid=*/9, /*rkey=*/0xa1,
+                                            Ipv6Gid("2001:db8::2")));
+    g_ncclSocketAccept = [](ncclSocket*, ncclSocket*, bool) { return ncclSuccess; };
+    g_ncclSocketReady = [](ncclSocket*, int* ready) {
+      *ready = 1;
+      return ncclSuccess;
+    };
+    void* recvComm = nullptr;
+    for (int step = 0; step < 10 && recvComm == nullptr; ++step) {
+      ncclResult_t ret = ncclIbAcceptImpl(&listenComm, &recvComm, nullptr, /*nQpsPerDev=*/1);
+      if (ret != ncclSuccess) return ret;
+    }
+    *comm = static_cast<ncclIbRecvComm*>(recvComm);
+    return *comm != nullptr ? ncclSuccess : ncclInternalError;
+  }
+
+  // The HSA buffer, registered through peermem, with nothing of the cuMem attempt left live.
+  void ExpectHsaFallback(const ncclIbRecvComm& comm) {
+    const ncclIbGpuFlush& flush = comm.devs[0].gpuFlush;
+    EXPECT_TRUE(flush.gpuFlushMemIsHipAlloc);
+    EXPECT_EQ(vmm_.liveBuffers.count(flush.gpuFlushGpuMem), 1u);
+    ASSERT_NE(flush.gpuMr, nullptr);
+    EXPECT_EQ(flush.gpuMr->addr, flush.gpuFlushGpuMem);
+    EXPECT_EQ(flush.gpuMr->length, sizeof(int));
+    EXPECT_EQ(flush.dmabuf_fd, -1);
+    EXPECT_TRUE(vmm_.reserved.empty());
+    EXPECT_TRUE(vmm_.liveHandles.empty());
+  }
+
+  // Closes the comm and returns every MR it deregistered.
+  std::vector<ibv_mr*> CloseRecvDeregs(ncclIbRecvComm* comm) {
+    std::vector<ibv_mr*> deregs;
+    ScopedHook dereg(g_ibvDeregMr, [&deregs](ibv_mr* mr) {
+      deregs.push_back(mr);
+      return ncclSuccess;
+    });
+    EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+    return deregs;
+  }
+
+  HipVmmLedger vmm_;
+  CuMemExportRecorder exports_;
+  ncclResult_t dmabufRegResult_ = ncclSuccess;
+  std::vector<DmaBufReg> dmabufRegs_;
+  std::vector<int> closed_;
+};
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_GdrFlushGpuMemOff_RegistersNoScratchpad) {
+  auto params = g_loadParam;
+  ScopedHook scratchpadOff(g_loadParam, [params](const char* name, int64_t fallback) {
+    if (std::strcmp(name, "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING") == 0) return int64_t{0};
+    return params(name, fallback);
+  });
+  auto vmmAlloc = g_connectMemAlloc;
+  ScopedHook alloc(g_connectMemAlloc, vmmAlloc);
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  EXPECT_EQ(comm->flushEnabled, 1);
+  const ncclIbGpuFlush& flush = comm->devs[0].gpuFlush;
+  EXPECT_EQ(flush.gpuFlushGpuMem, nullptr);
+  EXPECT_EQ(flush.gpuMr, nullptr);
+  EXPECT_EQ(flush.dmabuf_fd, -1);
+  EXPECT_EQ(alloc.calls, 0);
+  EXPECT_TRUE(exports_.empty());
+  EXPECT_TRUE(vmm_.liveBuffers.empty());
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_CuMemOff_RegistersTheHsaBuffer) {
+  ScopedHook cuMemOff(g_cuMemEnable, [] { return 0; });
+  auto vmmAlloc = g_connectMemAlloc;
+  ScopedHook alloc(g_connectMemAlloc, vmmAlloc);
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  ExpectHsaFallback(*comm);
+  EXPECT_EQ(alloc.calls, 0);
+  EXPECT_TRUE(exports_.empty());
+  EXPECT_TRUE(dmabufRegs_.empty());
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_CuMemStepsSucceed_RegistersTheVmmBufferThroughItsDmaBufFd) {
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+  ASSERT_EQ(comm->flushEnabled, 1);
+  const ncclIbGpuFlush& flush = comm->devs[0].gpuFlush;
+
+  ASSERT_EQ(exports_.size(), 1u);
+  EXPECT_EQ(exports_[0].ptr, flush.gpuFlushGpuMem);
+  EXPECT_EQ(exports_[0].size, sizeof(int));
+  EXPECT_EQ(exports_[0].type, static_cast<int>(hipMemRangeHandleTypeDmaBufFd));
+  EXPECT_EQ(exports_[0].flags, 0u);
+  EXPECT_EQ(vmm_.reserved.count(flush.gpuFlushGpuMem), 1u);
+  EXPECT_TRUE(vmm_.liveBuffers.empty());
+  ASSERT_EQ(dmabufRegs_.size(), 1u);
+  EXPECT_EQ(dmabufRegs_[0].pd, comm->devs[0].base.pd);
+  EXPECT_EQ(dmabufRegs_[0].offset, 0u);
+  EXPECT_EQ(dmabufRegs_[0].length, sizeof(int));
+  EXPECT_EQ(dmabufRegs_[0].iova, reinterpret_cast<uint64_t>(flush.gpuFlushGpuMem));
+  EXPECT_EQ(dmabufRegs_[0].fd, exports_[0].fd);
+  // Strictly ordered: no IBV_ACCESS_RELAXED_ORDERING.
+  EXPECT_EQ(dmabufRegs_[0].access, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+  EXPECT_EQ(flush.gpuMr, dmabufRegs_[0].mr);
+  EXPECT_EQ(flush.dmabuf_fd, exports_[0].fd);
+  EXPECT_FALSE(flush.gpuFlushMemIsHipAlloc);
+  EXPECT_TRUE(closed_.empty());
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_VmmAllocFails_FallsBackToTheHsaBuffer) {
+  ScopedHook alloc(g_connectMemAlloc, [](void** ptr, size_t) {
+    *ptr = nullptr;
+    return ncclSystemError;
+  });
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  ExpectHsaFallback(*comm);
+  EXPECT_EQ(alloc.calls, 1);
+  EXPECT_TRUE(exports_.empty());
+  EXPECT_TRUE(dmabufRegs_.empty());
+  EXPECT_TRUE(closed_.empty());
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_DmaBufExportFails_FreesTheVmmBufferAndFallsBack) {
+  exports_.result = hipErrorNotSupported;
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  ExpectHsaFallback(*comm);
+  EXPECT_EQ(vmm_.addressFrees.size(), 1u);
+  EXPECT_TRUE(dmabufRegs_.empty());
+  EXPECT_TRUE(closed_.empty());
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_DmaBufRegistrationFails_ClosesTheFdFreesTheVmmBufferAndFallsBack) {
+  dmabufRegResult_ = ncclSystemError;
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  ExpectHsaFallback(*comm);
+  ASSERT_EQ(exports_.size(), 1u);
+  ASSERT_EQ(dmabufRegs_.size(), 1u);
+  EXPECT_EQ(closed_, std::vector<int>{exports_[0].fd});
+  EXPECT_EQ(vmm_.addressFrees.size(), 1u);
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, Accept_DmaBufRegistrationFailsOnFdZero_ClosesFdZero) {
+  dmabufRegResult_ = ncclSystemError;
+  ScopedHook exportFdZero(g_hipMemGetHandleForAddressRange,
+                          [](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long) {
+                            *static_cast<int*>(handle) = 0;
+                            return hipSuccess;
+                          });
+  // Records fd 0 without closing the runner's stdin.
+  ScopedHook keepStdin(g_connectClose, [this](int fd) {
+    closed_.push_back(fd);
+    return 0;
+  });
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+
+  ExpectHsaFallback(*comm);
+  ASSERT_EQ(dmabufRegs_.size(), 1u);
+  EXPECT_EQ(dmabufRegs_[0].fd, 0);
+  EXPECT_EQ(closed_, std::vector<int>{0});
+  EXPECT_EQ(ncclIbCloseRecv(comm), ncclSuccess);
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, CloseRecv_VmmFlushBuffer_DeregistersItsMrClosesItsFdAndFreesIt) {
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+  ASSERT_EQ(dmabufRegs_.size(), 1u);
+  ASSERT_EQ(exports_.size(), 1u);
+
+  const std::vector<ibv_mr*> deregs = CloseRecvDeregs(comm);
+  EXPECT_EQ(std::count(deregs.begin(), deregs.end(), dmabufRegs_[0].mr), 1);
+  EXPECT_EQ(closed_, std::vector<int>{exports_[0].fd});
+  EXPECT_TRUE(vmm_.Clean()) << vmm_.Summary();
+}
+
+TEST_F(NetIbConnectCuMemFlushMicrotest, CloseRecv_HsaFlushBuffer_DeregistersItsMrAndFreesIt) {
+  ScopedHook cuMemOff(g_cuMemEnable, [] { return 0; });
+  ncclIbRecvComm* comm = nullptr;
+  ASSERT_EQ(Accept(&comm), ncclSuccess);
+  ibv_mr* const mr = comm->devs[0].gpuFlush.gpuMr;
+  ASSERT_NE(mr, nullptr);
+
+  const std::vector<ibv_mr*> deregs = CloseRecvDeregs(comm);
+  EXPECT_EQ(std::count(deregs.begin(), deregs.end(), mr), 1);
+  EXPECT_TRUE(closed_.empty());
+  EXPECT_TRUE(vmm_.Clean()) << vmm_.Summary();
+}
+#endif
 
 TEST_F(NetIbConnectMicrotest, CreateFlushQp_DisabledOrAlreadyCreatedIsNoOp) {
   ncclIbRecvComm comm{};
@@ -1252,9 +1479,9 @@ TEST_F(NetIbConnectMicrotest, FreeGpuFlushMem_HipAllocationIsReleasedAndStateCle
 }
 
 TEST_F(NetIbConnectMicrotest, CloseFunctions_NullCommunicatorsAreNoOps) {
-  EXPECT_EQ(NetIbConnectCloseSend(nullptr), ncclSuccess);
-  EXPECT_EQ(NetIbConnectCloseRecv(nullptr), ncclSuccess);
-  EXPECT_EQ(NetIbConnectCloseListen(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseSend(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseRecv(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclIbCloseListen(nullptr), ncclSuccess);
 }
 
 }  // namespace

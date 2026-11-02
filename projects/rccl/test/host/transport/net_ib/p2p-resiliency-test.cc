@@ -21,7 +21,6 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/transport_net_ib_recovery_fakes.h"
-#include "fakes/transport_net_ib_resiliency_fakes.h"
 #include "transport/net_ib/NetIbGlobals.h"
 #include "transport/net_ib/NetIbQpSeams.h"
 #include "transport/net_ib/NetIbResiliencyScene.h"
@@ -63,26 +62,6 @@ void TestResiliencyAddEvent(ncclIbRequest* request, int devIndex) {
 }
 }  // namespace
 
-#define ncclParamIbResiliencyPortFailover NetIbResiliencyParamPortFailover
-#define ncclParamIbResiliencyPortFailoverMaxAttempts NetIbResiliencyParamMaxAttempts
-#define ncclParamIbResiliencyPortFailoverProbeDelay NetIbResiliencyParamProbeDelay
-#define ncclIbResiliencyInit NetIbResiliencyInit
-#define ncclIbResiliencyDestroy NetIbResiliencyDestroy
-#define ncclIbResiliencyDevInit NetIbResiliencyDevInit
-#define ncclIbResiliencyDevDestroy NetIbResiliencyDevDestroy
-#define ncclIbResiliencyDataCqSizeGet NetIbResiliencyDataCqSizeGet
-#define ncclIbResiliencyDataRqSizeGet NetIbResiliencyDataRqSizeGet
-#define ncclIbResiliencyDeviceNumSet NetIbResiliencyDeviceNumSet
-#define ncclIbResiliencySenderCreateQps NetIbResiliencySenderCreateQps
-#define ncclIbResiliencySenderQpsToRts NetIbResiliencySenderQpsToRts
-#define ncclIbResiliencyReceiverQpsCreateToRts NetIbResiliencyReceiverQpsCreateToRts
-#define ncclIbResiliencyQpReconfigure NetIbResiliencyQpReconfigure
-#define ncclIbResiliencyQpsReconfigure NetIbResiliencyQpsReconfigure
-#define ncclIbResiliencyClose NetIbResiliencyClose
-#define ncclIbResiliencyRemoteCompletionRecordsSet NetIbResiliencyRemoteCompletionRecordsSet
-#define ncclIbResiliencyRequestIsComplete NetIbResiliencyRequestIsComplete
-#define ncclIbResiliencyHandleCompletionError NetIbResiliencyHandleCompletionError
-#define ncclIbResiliencyProgress NetIbResiliencyProgress
 #define clockNano NetIbTestClockNano
 #define ncclIbMultiSend TestResiliencyMultiSend
 #define ncclIbPostFifo TestResiliencyPostFifo
@@ -107,27 +86,6 @@ void TestResiliencyAddEvent(ncclIbRequest* request, int devIndex) {
 #undef ncclIbPostFifo
 #undef ncclIbMultiSend
 #undef clockNano
-#undef ncclIbResiliencyProgress
-#undef ncclIbResiliencyHandleCompletionError
-#undef ncclIbResiliencyRequestIsComplete
-#undef ncclIbResiliencyRemoteCompletionRecordsSet
-#undef ncclIbResiliencyClose
-#undef ncclIbResiliencyQpsReconfigure
-#undef ncclIbResiliencyQpReconfigure
-#undef ncclIbResiliencyReceiverQpsCreateToRts
-#undef ncclIbResiliencySenderQpsToRts
-#undef ncclIbResiliencySenderCreateQps
-#undef ncclIbResiliencyDeviceNumSet
-#undef ncclIbResiliencyDataRqSizeGet
-#undef ncclIbResiliencyDataCqSizeGet
-#undef ncclIbResiliencyDevDestroy
-#undef ncclIbResiliencyDevInit
-#undef ncclIbResiliencyDestroy
-#undef ncclIbResiliencyInit
-#undef ncclParamIbResiliencyPortFailoverProbeDelay
-#undef ncclParamIbResiliencyPortFailoverMaxAttempts
-#undef ncclParamIbResiliencyPortFailover
-
 namespace {
 
 class NetIbP2pResiliencyMicrotest : public ::testing::Test {
@@ -141,7 +99,6 @@ class NetIbP2pResiliencyMicrotest : public ::testing::Test {
     g_resiliencyIbMallocSizes.clear();
     g_resiliencyIbMallocPoison = false;
     ResetTransportNetIbRecoveryFakes();
-    ResetTransportNetIbResiliencyFakes();
     ResetIbvwrapFakes();
     ResetNcclFakes();
   }
@@ -270,54 +227,54 @@ TEST_F(NetIbP2pResiliencyMicrotest, RequestIsComplete_ZeroOrBalancedFailoverEven
   request.base = &scene.send.base;
   bool complete = false;
 
-  ASSERT_EQ(NetIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
   EXPECT_TRUE(complete);
   request.events[0] = 2;
   request.events[1] = -2;
-  ASSERT_EQ(NetIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
   EXPECT_TRUE(complete);
   request.events[1] = -1;
-  ASSERT_EQ(NetIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyRequestIsComplete(&request, &complete), ncclSuccess);
   EXPECT_FALSE(complete);
 }
 
 TEST_F(NetIbP2pResiliencyMicrotest, RequestIsComplete_NullRequestIsIncompleteAndNullOutputIsRejected) {
   bool complete = true;
-  EXPECT_EQ(NetIbResiliencyRequestIsComplete(nullptr, &complete), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyRequestIsComplete(nullptr, &complete), ncclSuccess);
   EXPECT_FALSE(complete);
-  EXPECT_EQ(NetIbResiliencyRequestIsComplete(nullptr, nullptr), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyRequestIsComplete(nullptr, nullptr), ncclInternalError);
 }
 
 TEST_F(NetIbP2pResiliencyMicrotest, DeviceNumSet_AssignsProbeAndRecoveryQpCounts) {
   NetIbResiliencyScene scene;
   scene.sendRes.base.recoveryEnabled = true;
-  ASSERT_EQ(NetIbResiliencyDeviceNumSet(&scene.sendRes.base, 2, 3), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDeviceNumSet(&scene.sendRes.base, 2, 3), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.ndevs, 2);
   EXPECT_EQ(scene.sendRes.base.nProbingQps, 2);
   EXPECT_EQ(scene.sendRes.base.nPortRecoveryQps, 3);
-  ASSERT_EQ(NetIbResiliencyDeviceNumSet(&scene.sendRes.base, 3, 2), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDeviceNumSet(&scene.sendRes.base, 3, 2), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.ndevs, 3);
   EXPECT_EQ(scene.sendRes.base.nProbingQps, 3);
   EXPECT_EQ(scene.sendRes.base.nPortRecoveryQps, 3);
 
   scene.recvRes.recoveryEnabled = true;
-  ASSERT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, 2, 3), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, 2, 3), ncclSuccess);
   EXPECT_EQ(scene.recvRes.ndevs, 2);
   EXPECT_EQ(scene.recvRes.nProbingQps, 3);
   EXPECT_EQ(scene.recvRes.nPortRecoveryQps, 3);
   scene.recvRes.recoveryEnabled = false;
-  ASSERT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, 2, 3), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, 2, 3), ncclSuccess);
   EXPECT_EQ(scene.recvRes.nPortRecoveryQps, 0);
 }
 
 TEST_F(NetIbP2pResiliencyMicrotest, DeviceNumSet_InvalidCountsAreRejected) {
   NetIbResiliencyScene scene;
-  EXPECT_EQ(NetIbResiliencyDeviceNumSet(nullptr, 1, 1), ncclInternalError);
-  EXPECT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, 0, 1), ncclInternalError);
-  EXPECT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, 1, 0), ncclInternalError);
-  EXPECT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, 1, NCCL_IB_MAX_DEVS_PER_NIC + 1), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyDeviceNumSet(nullptr, 1, 1), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, 0, 1), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, 1, 0), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, 1, NCCL_IB_MAX_DEVS_PER_NIC + 1), ncclInternalError);
   scene.recvRes.recoveryEnabled = true;
-  EXPECT_EQ(NetIbResiliencyDeviceNumSet(&scene.recvRes, NCCL_IB_MAX_DEVS_PER_NIC + 1, 1), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyDeviceNumSet(&scene.recvRes, NCCL_IB_MAX_DEVS_PER_NIC + 1, 1), ncclInternalError);
 }
 
 TEST_F(NetIbP2pResiliencyMicrotest, DataQueueSizing_AccountsForDirectionQpsAndFailoverDevices) {
@@ -330,13 +287,13 @@ TEST_F(NetIbP2pResiliencyMicrotest, DataQueueSizing_AccountsForDirectionQpsAndFa
   }
   scene.sendRes.base.ndevs = scene.recvRes.ndevs = ndevs;
   int cqSize = 0;
-  ASSERT_EQ(NetIbResiliencyDataCqSizeGet(&scene.sendRes.base, 0, &cqSize), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDataCqSizeGet(&scene.sendRes.base, 0, &cqSize), ncclSuccess);
   EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * nqps * ndevs);
 
-  ASSERT_EQ(NetIbResiliencyDataCqSizeGet(&scene.recvRes, 0, &cqSize), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDataCqSizeGet(&scene.recvRes, 0, &cqSize), ncclSuccess);
   EXPECT_EQ(cqSize, NET_IB_MAX_REQUESTS * 2 * nqps * ndevs);
   uint32_t rqSize = 0;
-  ASSERT_EQ(NetIbResiliencyDataRqSizeGet(&scene.recvRes, 0, &rqSize), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDataRqSizeGet(&scene.recvRes, 0, &rqSize), ncclSuccess);
   EXPECT_EQ(rqSize, static_cast<uint32_t>(NET_IB_MAX_REQUESTS * nqps));
 }
 
@@ -344,10 +301,10 @@ TEST_F(NetIbP2pResiliencyMicrotest, RemoteCompletionRecords_SendOnlyStoresPerDev
   NetIbResiliencyScene scene;
   scene.sendRes.base.nProbingQps = 2;
 
-  ASSERT_EQ(NetIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x55, 0x123400, 1), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x55, 0x123400, 1), ncclSuccess);
   EXPECT_EQ(scene.sendRes.remCmplRecordsInfo[1].rkey, 0x55u);
   EXPECT_EQ(scene.sendRes.remCmplRecordsInfo[1].addr, 0x123400u);
-  EXPECT_EQ(NetIbResiliencyRemoteCompletionRecordsSet(&scene.recvRes, 1, 2, 0), ncclInternalError);
+  EXPECT_EQ(ncclIbResiliencyRemoteCompletionRecordsSet(&scene.recvRes, 1, 2, 0), ncclInternalError);
 }
 
 // AICOMRCCL-3129: sender probing-QP count is local-device based, while remote
@@ -355,15 +312,15 @@ TEST_F(NetIbP2pResiliencyMicrotest, RemoteCompletionRecords_SendOnlyStoresPerDev
 TEST_F(NetIbP2pResiliencyMicrotest,
        DISABLED_RemoteCompletionRecords_AllRemoteDevicesSupportedWhenCountsAreAsymmetric) {
   NetIbResiliencyScene scene;
-  ASSERT_EQ(NetIbResiliencyDeviceNumSet(&scene.sendRes.base, 1, 3), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDeviceNumSet(&scene.sendRes.base, 1, 3), ncclSuccess);
   scene.send.base.nRemDevs = 3;
   ASSERT_EQ(scene.sendRes.base.nProbingQps, 1);
   ASSERT_EQ(scene.sendRes.base.nPortRecoveryQps, 0);
 
-  EXPECT_EQ(NetIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x55, 0x123400, 2), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x55, 0x123400, 2), ncclSuccess);
   EXPECT_EQ(scene.sendRes.remCmplRecordsInfo[2].rkey, 0x55u);
   EXPECT_EQ(scene.sendRes.remCmplRecordsInfo[2].addr, 0x123400u);
-  EXPECT_EQ(NetIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x66, 0x234500, 3),
+  EXPECT_EQ(ncclIbResiliencyRemoteCompletionRecordsSet(&scene.sendRes.base, 0x66, 0x234500, 3),
             ncclInternalError);
 }
 
@@ -372,7 +329,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, Init_DisabledReturnsNullAndEnabledInitialize
   sendBase.isSend = true;
   ncclIbNetCommBase recvBase{};
   ncclIbResiliency* resiliency = reinterpret_cast<ncclIbResiliency*>(0x1);
-  EXPECT_EQ(NetIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
   EXPECT_EQ(resiliency, nullptr);
   EXPECT_TRUE(g_resiliencyIbMallocSizes.empty());
 
@@ -386,7 +343,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, Init_DisabledReturnsNullAndEnabledInitialize
   // ncclIbMalloc zero-fills, so poison the allocation to observe Init's explicit resets.
   g_resiliencyIbMallocPoison = true;
 
-  ASSERT_EQ(NetIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyInit(&sendBase, &resiliency), ncclSuccess);
   ASSERT_NE(resiliency, nullptr);
   ASSERT_EQ(g_resiliencyIbMallocSizes.size(), 1u);
   EXPECT_EQ(g_resiliencyIbMallocSizes[0], sizeof(ncclIbResiliencySend));
@@ -396,17 +353,17 @@ TEST_F(NetIbP2pResiliencyMicrotest, Init_DisabledReturnsNullAndEnabledInitialize
   EXPECT_TRUE(AllBytesZero(sendResiliency->failedRequests));
   EXPECT_TRUE(AllBytesZero(sendResiliency->probingResults));
   EXPECT_TRUE(AllBytesZero(sendResiliency->remCmplRecordsInfo));
-  EXPECT_EQ(NetIbResiliencyDestroy(&resiliency), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyDestroy(&resiliency), ncclSuccess);
   EXPECT_EQ(resiliency, nullptr);
 
-  ASSERT_EQ(NetIbResiliencyInit(&recvBase, &resiliency), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyInit(&recvBase, &resiliency), ncclSuccess);
   ASSERT_NE(resiliency, nullptr);
   ASSERT_EQ(g_resiliencyIbMallocSizes.size(), 2u);
   EXPECT_EQ(g_resiliencyIbMallocSizes[1], sizeof(ncclIbResiliency));
   EXPECT_EQ(resiliency->baseComm, &recvBase);
   EXPECT_FALSE(resiliency->inProgress);
   EXPECT_EQ(resiliency->outstandingRecovery, 0);
-  EXPECT_EQ(NetIbResiliencyDestroy(&resiliency), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyDestroy(&resiliency), ncclSuccess);
   EXPECT_EQ(resiliency, nullptr);
 }
 
@@ -434,7 +391,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpReconfigure_RunsResetInitRtrRtsInOrder) {
   };
   bool success = false;
 
-  ASSERT_EQ(NetIbResiliencyQpReconfigure(&scene.sendRes.base, &scene.send.base.qps[0], &devBase, 0, &success),
+  ASSERT_EQ(ncclIbResiliencyQpReconfigure(&scene.sendRes.base, &scene.send.base.qps[0], &devBase, 0, &success),
             ncclSuccess);
   EXPECT_TRUE(success);
   EXPECT_EQ(order, (std::array<char, 4>{{'R', 'I', 'T', 'S'}}));
@@ -465,7 +422,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpReconfigure_StageFailureStopsBeforeLaterSt
     });
     bool success = true;
 
-    ASSERT_EQ(NetIbResiliencyQpReconfigure(&scene.sendRes.base, &qp, &devBase, 0, &success), ncclSuccess) << failing;
+    ASSERT_EQ(ncclIbResiliencyQpReconfigure(&scene.sendRes.base, &qp, &devBase, 0, &success), ncclSuccess) << failing;
     EXPECT_FALSE(success) << failing;
     EXPECT_EQ(order, stages.substr(0, stages.find(failing) + 1));
   }
@@ -481,7 +438,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, Progress_RecoveredDeviceRestoresOriginalQpsA
   auto* healthyQp3 = scene.recv.base.activeQps[3];
   scene.recvRes.devs[0].state.store(ncclIbResiliencyDevStateRecovered, std::memory_order_release);
 
-  ASSERT_EQ(NetIbResiliencyProgress(&scene.recvRes), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyProgress(&scene.recvRes), ncclSuccess);
   EXPECT_EQ(scene.recv.base.activeQps[0], &scene.recv.base.qps[0]);
   EXPECT_EQ(scene.recv.base.activeQps[2], &scene.recv.base.qps[2]);
   EXPECT_EQ(scene.recv.base.activeQps[1], healthyQp1);
@@ -497,7 +454,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, Progress_RecoveryFailureBecomesPermanent) {
   scene.recvRes.outstandingRecovery = 1;
   scene.recvRes.devs[1].state.store(ncclIbResiliencyDevStateRecoveryFailed, std::memory_order_release);
 
-  ASSERT_EQ(NetIbResiliencyProgress(&scene.recvRes), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyProgress(&scene.recvRes), ncclSuccess);
   EXPECT_EQ(scene.recvRes.devs[1].state.load(), ncclIbResiliencyDevStateErrorPermanent);
   EXPECT_FALSE(scene.recvRes.inProgress);
 }
@@ -517,16 +474,16 @@ TEST_F(NetIbP2pResiliencyMicrotest, Progress_SenderProbesThenFreesDeliveredReque
   ibv_wc error{};
   error.status = IBV_WC_RETRY_EXC_ERR;
   error.wr_id = 1;
-  ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.sendRes.base, &error, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyHandleCompletionError(&scene.sendRes.base, &error, 0), ncclSuccess);
 
   g_netIbNowNs += 10 * MSEC_TO_NSEC;
-  ASSERT_EQ(NetIbResiliencyProgress(&scene.sendRes.base), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyProgress(&scene.sendRes.base), ncclSuccess);
   EXPECT_TRUE(scene.verbs[0].posted.empty());
   ASSERT_EQ(scene.verbs[1].posted.size(), 1u);
   // The probe is an RDMA read of the peer's completion record: land QP 0's "delivered" flag where it points.
   *reinterpret_cast<bool*>(scene.verbs[1].posted[0].sge.addr) = true;
   scene.verbs[1].Complete(1, IBV_WC_RDMA_READ, scene.sendRes.base.probingQps[1].qp->qp_num);
-  ASSERT_EQ(NetIbResiliencyProgress(&scene.sendRes.base), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyProgress(&scene.sendRes.base), ncclSuccess);
 
   EXPECT_EQ(scene.sendRes.failedRequests[1].request, nullptr);
   EXPECT_EQ(scene.sendRes.base.outstandingRequests, 0);
@@ -557,10 +514,10 @@ TEST_F(NetIbP2pResiliencyMicrotest, DevInitAndDestroyManageProbeMrAndCq) {
   ScopedHook destroyCq(g_ibvDestroyCq, [](ibv_cq*) { return ncclSuccess; });
   ScopedHook dereg(g_ibvDeregMr, [](ibv_mr*) { return ncclSuccess; });
 
-  ASSERT_EQ(NetIbResiliencyDevInit(&scene.sendRes.base, 0, &dev), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyDevInit(&scene.sendRes.base, 0, &dev), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[0].probingResultMr, &mr);
   EXPECT_EQ(scene.sendRes.base.devs[0].probingCq, &cq);
-  EXPECT_EQ(NetIbResiliencyDevDestroy(&scene.sendRes.base, 0), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyDevDestroy(&scene.sendRes.base, 0), ncclSuccess);
   EXPECT_EQ(reg.calls, 1);
   EXPECT_EQ(create.calls, 1);
   EXPECT_EQ(destroyCq.calls, 1);
@@ -586,7 +543,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, SenderProbeQpsCreationStripesDevicesAndPubli
   };
   ncclIbResiliencyInfo info{};
 
-  ASSERT_EQ(NetIbResiliencySenderCreateQps(&scene.sendRes.base, &info), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencySenderCreateQps(&scene.sendRes.base, &info), ncclSuccess);
   for (int d = 0; d < 2; ++d) {
     const ncclIbQp& qp = scene.sendRes.base.probingQps[d];
     EXPECT_EQ(qp.devIndex, d);
@@ -628,7 +585,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, SenderProbeQpsToRtsUsesRemoteMetadata) {
     return ncclSuccess;
   };
 
-  ASSERT_EQ(NetIbResiliencySenderQpsToRts(&scene.sendRes.base, &remote), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencySenderQpsToRts(&scene.sendRes.base, &remote), ncclSuccess);
   auto& qp = scene.sendRes.base.probingQps[0];
   EXPECT_EQ(qp.remDevIdx, 0);
   EXPECT_EQ(qp.rtrAttr.remoteQpNum, 300u);
@@ -655,7 +612,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, DISABLED_SenderProbeQpsToRtsUsesLocalIbPort)
   g_netIbQpRtr = [](ncclIbQp*) { return ncclSuccess; };
   g_netIbQpRts = [](ncclIbQp*) { return ncclSuccess; };
 
-  ASSERT_EQ(NetIbResiliencySenderQpsToRts(&scene.sendRes.base, &remote), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencySenderQpsToRts(&scene.sendRes.base, &remote), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.probingQps[0].rtrAttr.localIbPort, 3);
 }
 
@@ -677,7 +634,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, DISABLED_ReceiverProbeQpsToRtsUsesLocalIbPor
   remote.devs[0].ib_port = 7;
   ncclIbResiliencyInfo local{};
 
-  ASSERT_EQ(NetIbResiliencyReceiverQpsCreateToRts(&scene.recvRes, &remote, &local), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyReceiverQpsCreateToRts(&scene.recvRes, &remote, &local), ncclSuccess);
   EXPECT_EQ(scene.recvRes.probingQps[0].rtrAttr.localIbPort, 3);
 }
 
@@ -718,7 +675,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, ReceiverProbeQpsCreationStripesAndTransition
   }
   ncclIbResiliencyInfo local{};
 
-  ASSERT_EQ(NetIbResiliencyReceiverQpsCreateToRts(&scene.recvRes, &remote, &local), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyReceiverQpsCreateToRts(&scene.recvRes, &remote, &local), ncclSuccess);
   for (int i = 0; i < 3; ++i) {
     const ncclIbQp& qp = scene.recvRes.probingQps[i];
     EXPECT_EQ(qp.devIndex, i % 2);
@@ -756,7 +713,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpsReconfigure_DelegatesRecoveryAfterProbeQp
                       });
   bool success = false;
 
-  ASSERT_EQ(NetIbResiliencyQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
   EXPECT_TRUE(success);
   EXPECT_EQ(recovery.calls, 1);
   EXPECT_EQ(reset, (std::vector<ncclIbQp*>{&scene.sendRes.base.probingQps[0]}));
@@ -774,7 +731,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, QpsReconfigure_ProbeQpFailureSkipsRecovery) 
                       });
   bool success = true;
 
-  ASSERT_EQ(NetIbResiliencyQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
   EXPECT_FALSE(success);
   EXPECT_EQ(recovery.calls, 0);
 }
@@ -795,7 +752,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, Close_DestroysProbeQpsAndRecoveryResources) 
                                return ncclSuccess;
                              });
 
-  EXPECT_EQ(NetIbResiliencyClose(&scene.sendRes.base), ncclSuccess);
+  EXPECT_EQ(ncclIbResiliencyClose(&scene.sendRes.base), ncclSuccess);
   EXPECT_EQ(destroyed, (std::vector<ibv_qp*>{scene.sendRes.base.probingQps[0].qp,
                                              scene.sendRes.base.probingQps[1].qp}));
   EXPECT_EQ(close.calls, 1);
@@ -815,7 +772,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_SenderMarksDeviceAndTr
   completion.wr_id = 1;
   g_netIbNowNs = 7000;
 
-  ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.sendRes.base, &completion, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyHandleCompletionError(&scene.sendRes.base, &completion, 0), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[0].state.load(), ncclIbResiliencyDevStateError);
   EXPECT_EQ(scene.sendRes.failedRequests[1].request, &request);
   EXPECT_EQ(scene.sendRes.base.outstandingRequests, 1);
@@ -835,7 +792,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_RecoveryHandOffTracksR
     completion.status = IBV_WC_WR_FLUSH_ERR;
     completion.wr_id = NCCL_IB_RECV_WR_ID_DUMMY;
 
-    ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.recvRes, &completion, 0), ncclSuccess) << handOff;
+    ASSERT_EQ(ncclIbResiliencyHandleCompletionError(&scene.recvRes, &completion, 0), ncclSuccess) << handOff;
     const bool queued = handOff == ncclSuccess;
     EXPECT_EQ(recovery.calls, 1);
     EXPECT_EQ(scene.recvRes.devs[0].state.load(),
@@ -862,7 +819,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, DISABLED_HandleCompletionError_StaleGenerati
   stale.status = IBV_WC_RETRY_EXC_ERR;
   stale.wr_id = slot;
 
-  ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.sendRes.base, &stale, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyHandleCompletionError(&scene.sendRes.base, &stale, 0), ncclSuccess);
   EXPECT_EQ(scene.sendRes.failedRequests[slot].request, nullptr);
   EXPECT_EQ(scene.sendRes.base.outstandingRequests, 0);
   EXPECT_EQ(scene.sendRes.base.devs[0].state.load(), ncclIbResiliencyDevStateOk);
@@ -881,7 +838,7 @@ TEST_F(NetIbP2pResiliencyMicrotest, HandleCompletionError_ReceiverFlushClearsFai
   completion.status = IBV_WC_RETRY_EXC_ERR;
   completion.wr_id = NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + 2;
 
-  ASSERT_EQ(NetIbResiliencyHandleCompletionError(&scene.recvRes, &completion, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbResiliencyHandleCompletionError(&scene.recvRes, &completion, 0), ncclSuccess);
   EXPECT_EQ(request.events[0], 0);
   EXPECT_EQ(scene.recvRes.devs[0].state.load(), ncclIbResiliencyDevStateError);
 }

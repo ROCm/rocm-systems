@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
@@ -29,6 +29,12 @@
 #include "fakes/param_redirect.h"
 
 #include NET_IB_CAST_GIN_CC_PATH
+// gin.cc brings the devices up through init.cc; compiled here so TearDown can reset its netRefCount. No test host
+// has /sys/class/infiniband/<hca>/device, so its realpath() of it finds nothing.
+static char* GinTestRealpath(const char*, char*) { return nullptr; }
+#define realpath GinTestRealpath
+#include NET_IB_CAST_INIT_CC_PATH
+#undef realpath
 
 namespace {
 
@@ -75,6 +81,7 @@ class NetIbCastGinMicrotest : public ::testing::Test {
   }
   void TearDown() override {
     NetIbCastResetGlobals();
+    netRefCount = 0;
     ResetIbvwrapFakes();
     ResetNetIbCastConnectFakes();
     ResetNetIbCastP2pFakes();

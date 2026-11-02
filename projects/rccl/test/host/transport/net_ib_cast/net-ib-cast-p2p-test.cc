@@ -16,26 +16,27 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../../common/LogCapture.hpp"
 #include "IbVerbsScene.h"
 #include "ScopedHook.h"
 #include "common_cast.h"
+#include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
-#include "fakes/net_ib_cast_common_fakes.h"
-#include "fakes/net_ib_cast_init_fakes.h"
 #include "fakes/net_ib_cast_p2p_resiliency_fakes.h"
 #include "fakes/socket_fakes.h"
-#include "ibvsymbols.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 
 #include "fakes/param_redirect.h"
 
 #include NET_IB_CAST_P2P_CC_PATH
+// p2p.cc routes shared-QP completions through qp_sharing.cc; compiled here so its params, too, read through
+// g_loadParam.
+#include NET_IB_CAST_QP_SHARING_CC_PATH
 
-extern struct ncclIbvSymbols ibvSymbols;
 extern FILE* IbCastQpSchedLogStream;  // scheduler.cc, whose IbCastLogSched the send path calls
 
 namespace {
@@ -71,14 +72,14 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
-    ResetNetIbCastCommonFakes();
-    ResetNetIbCastInitFakes();
+    ResetIbvwrapFakes();
     ResetNetIbCastP2pResiliencyFakes();
     ResetSocketFakes();
     rcclTelemetryEnabled = 0;
     rcclTelemetryCfg = {};
     memset(rcclTelemetryDevs, 0, sizeof(rcclTelemetryDevs));
     IbCastQpSharingGlobalEnable = false;
+    IbCastAinicRoce = IbCastAinicCtsInlineData = false;
     for (auto& e : g_IbCastCommTable) e = {};
     for (int d = 0; d < 2; d++) {
       IbCastDevs[d].stats.fatalErrorCount = 0;
@@ -1790,14 +1791,13 @@ class NetIbCastP2pFaultMicrotest : public NetIbCastP2pMicrotest {
  protected:
   void TearDown() override {
     for (auto& v : verbs_) ncclIbOpsFaultRemove(&v.ctx);
-    ibvSymbols.ibv_internal_modify_qp = savedModifyQp_;
     NetIbCastP2pMicrotest::TearDown();
   }
-  decltype(ibvSymbols.ibv_internal_modify_qp) savedModifyQp_ = ibvSymbols.ibv_internal_modify_qp;
 };
 
 TEST_F(NetIbCastP2pFaultMicrotest, QpKnobs_ValidateTheCommAndIndex) {
   WireSend(2);
+  WireRecv(2);
   int out = 0;
   bool fatal = false;
   EXPECT_EQ(ncclIbCastFaultSetQpDelay(nullptr, 0, 1), ncclInvalidArgument);
@@ -1813,6 +1813,7 @@ TEST_F(NetIbCastP2pFaultMicrotest, QpKnobs_ValidateTheCommAndIndex) {
     EXPECT_EQ(ncclIbCastFaultSetQpDelay(send_.get(), bad, 1), ncclInvalidArgument) << bad;
     EXPECT_EQ(ncclIbCastFaultSetQpError(send_.get(), bad, true), ncclInvalidArgument) << bad;
     EXPECT_EQ(ncclIbCastFaultDriveQpToError(send_.get(), bad), ncclInvalidArgument) << bad;
+    EXPECT_EQ(ncclIbCastFaultDriveRecvQpToError(recv_.get(), bad), ncclInvalidArgument) << bad;
   }
   EXPECT_EQ(ncclIbCastFaultSetQpDelay(send_.get(), 1, 7), ncclSuccess);
   EXPECT_EQ(send_->base.faultQpDelayUs[1], 7u);
@@ -1823,19 +1824,22 @@ TEST_F(NetIbCastP2pFaultMicrotest, QpKnobs_ValidateTheCommAndIndex) {
 TEST_F(NetIbCastP2pFaultMicrotest, DriveToError_MovesTheActiveQpToErr) {
   WireSend(2);
   WireRecv(2);
+  // Crossed, so each index has to go through activeQps.
+  std::swap(send_->base.activeQps[0], send_->base.activeQps[1]);
+  std::swap(recv_->base.activeQps[0], recv_->base.activeQps[1]);
   std::vector<ibv_qp*> modified;
-  static std::vector<ibv_qp*>* sink;
-  sink = &modified;
-  ibvSymbols.ibv_internal_modify_qp = [](ibv_qp* qp, ibv_qp_attr* attr, int mask) {
+  ScopedHook modify(g_ibvModifyQp, [&modified](ibv_qp* qp, ibv_qp_attr* attr, int mask) {
     EXPECT_EQ(attr->qp_state, IBV_QPS_ERR);
     EXPECT_EQ(mask, IBV_QP_STATE);
-    sink->push_back(qp);
-    return 0;
-  };
+    modified.push_back(qp);
+    return ncclSuccess;
+  });
+  ASSERT_EQ(ncclIbCastFaultDriveQpToError(send_.get(), 0), ncclSuccess);
   ASSERT_EQ(ncclIbCastFaultDriveQpToError(send_.get(), 1), ncclSuccess);
   ASSERT_EQ(ncclIbCastFaultDriveRecvQpToError(recv_.get(), 0), ncclSuccess);
-  EXPECT_EQ(ncclIbCastFaultDriveRecvQpToError(recv_.get(), 2), ncclInvalidArgument);
-  EXPECT_EQ(modified, (std::vector<ibv_qp*>{&verbs_[0].qps[1], &verbs_[0].qps[0]}));
+  ASSERT_EQ(ncclIbCastFaultDriveRecvQpToError(recv_.get(), 1), ncclSuccess);
+  EXPECT_EQ(modified, (std::vector<ibv_qp*>{&verbs_[0].qps[1], &verbs_[0].qps[0], &verbs_[0].qps[1],
+                                            &verbs_[0].qps[0]}));
 }
 
 TEST_F(NetIbCastP2pFaultMicrotest, CheckErrorFatal_OnlyFlushAndRetryExceededAreRecoverable) {

@@ -155,9 +155,6 @@ static ncclResult_t DefaultCollnetDeregBuffer(struct ncclComm*, struct ncclProxy
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclCollnetDeregBuffer =
   DefaultCollnetDeregBuffer;
-ncclResult_t micro_ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle) {
-  return g_ncclCollnetDeregBuffer(comm, proxyconn, handle);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle) {
   return g_ncclCollnetDeregBuffer(comm, proxyconn, handle);
@@ -204,10 +201,6 @@ static ncclResult_t DefaultCollnetLocalRegisterBuffer(struct ncclComm*, const vo
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**)>
   g_ncclCollnetLocalRegisterBuffer = DefaultCollnetLocalRegisterBuffer;
-ncclResult_t micro_ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize,
-                                                  int type, int* outRegBufUsed, void** outHandle) {
-  return g_ncclCollnetLocalRegisterBuffer(comm, userbuff, buffSize, type, outRegBufUsed, outHandle);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
                                             int* outRegBufUsed, void** outHandle) {
@@ -221,12 +214,6 @@ static ncclResult_t DefaultCollnetGraphRegisterBuffer(struct ncclComm*, const vo
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**, ncclCommCallbackQueue*, int*)>
   g_ncclCollnetGraphRegisterBuffer = DefaultCollnetGraphRegisterBuffer;
-ncclResult_t micro_ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize,
-                                                  int type, int* outRegBufFlag, void** outHandle,
-                                                  ncclCommCallbackQueue* cleanupQueue, int* nCleanupQueueElts) {
-  return g_ncclCollnetGraphRegisterBuffer(comm, userbuff, buffSize, type, outRegBufFlag, outHandle, cleanupQueue,
-                                          nCleanupQueueElts);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
                                             int* outRegBufFlag, void** outHandle, ncclCommCallbackQueue* cleanupQueue,
@@ -303,7 +290,7 @@ void ResetTransportStubs() {
   g_transportCanConnect = DefaultTransportCanConnect;
 }
 
-#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+#if !defined(RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR) && !defined(RCCL_TRANSPORT_STUBS_OMIT_COLL_NET)
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 #endif
