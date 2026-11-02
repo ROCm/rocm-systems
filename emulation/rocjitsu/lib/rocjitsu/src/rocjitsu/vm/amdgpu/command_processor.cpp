@@ -719,7 +719,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       util::FailureOr<std::shared_ptr<uint32_t>> maybe_lease =
           pkt.pm4_scratch_pool->acquire(util::DiagnosticEmitter(report));
       if (maybe_lease.failed())
-        return VmAccessOutcome::Faulted;
+        return VmAccessOutcome::Malformed;
       std::shared_ptr<uint32_t> lease = std::move(maybe_lease.value());
       scratch_slot = *lease;
       wf->set_scratch_lease(std::move(lease));

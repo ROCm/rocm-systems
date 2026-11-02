@@ -93,10 +93,11 @@ util::Result Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store,
   if (cp_) {
     if (cp_->set_gws_device(store, emit_error).failed())
       return util::Result::failure();
-  } else
+  } else {
     for (ShaderEngine *se : shader_engines_)
       for (ComputeUnitCore *cu : se->compute_units())
         (void)cu->set_gws_device(store);
+  }
   gws_device_ = std::move(store);
   return util::Result::success();
 }

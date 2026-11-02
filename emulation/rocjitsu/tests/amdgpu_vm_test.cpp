@@ -374,7 +374,7 @@ TEST(CommandProcessorTest, ScratchExhaustionReturnsFailureAndReclaimsPartialWave
   // This calls below the PM4 launch catch. Reintroducing the exhaustion throw
   // must fail this test even though the public queue would contain it.
   EXPECT_EQ(amdgpu::CommandProcessorPlacementTestAccess::place(*fixture.cp(), entry),
-            (std::pair{0u, amdgpu::VmAccessOutcome::Faulted}));
+            (std::pair{0u, amdgpu::VmAccessOutcome::Malformed}));
   ASSERT_NE(observed->lease, nullptr);
   EXPECT_EQ(entry.dispatched_wgs, 0u);
   EXPECT_EQ(observed->waves, 0u);

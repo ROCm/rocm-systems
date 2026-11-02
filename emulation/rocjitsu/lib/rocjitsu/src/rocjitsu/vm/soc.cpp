@@ -75,7 +75,7 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
   // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
   // standalone default store. The XCD's CUs are already attached by this point.
   [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
-  assert(wired.succeeded());
+  assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
   xcds_.push_back(xcd);
 }
 
@@ -83,7 +83,7 @@ void SoC::wire_gws_to_xcds() {
   // Only the full constructor calls this helper, before any CU can execute.
   for (amdgpu::Xcd *xcd : xcds_) {
     [[maybe_unused]] const util::Result wired = xcd->adopt_gws_store(gws_device_);
-    assert(wired.succeeded());
+    assert(wired.succeeded() && "XCDs must accept the SoC's GWS store before execution");
   }
 }
 
