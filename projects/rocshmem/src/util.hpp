@@ -530,7 +530,7 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 4>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave(void* dst, void* src,
                                                              size_t size) {
   if (size == 0) return;
@@ -559,7 +559,7 @@ template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 4>
   }
 }
 
-template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 4>
+template <MemcpyKind Kind = MemcpyKind::Put, int Unroll = 8>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wg(void* dst, void* src,
                                                            size_t size) {
   if (size == 0) return;
