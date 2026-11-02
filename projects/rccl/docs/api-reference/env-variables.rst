@@ -1221,6 +1221,19 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_BC``
+        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table, which has no
+          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
+          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
+          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
+          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+          ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
+      - | ``-1``: Follow the per-arch table; currently off (default).
+        | ``0``: Disable DDA Broadcast.
+        | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
+          ceilings and eligibility checks.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
