@@ -7952,11 +7952,12 @@ TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("cdna4_cvt_direct_operand", config, &gpu_mem, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+      amdgpu::ComputeUnitCore::create("cdna4_cvt_direct_operand", config, &gpu_mem, &l2);
   ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
   ASSERT_NE(wf, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);
   wf->set_exec(1);
 
@@ -7974,7 +7975,7 @@ TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
   const uint32_t base = wf->vgpr_alloc().base;
   for (const RejectionCase &test : kCases) {
     SCOPED_TRACE(testing::Message() << "opcode=" << test.opcode << " operand=" << test.operand);
-    const auto words =
+    const std::array<uint32_t, 2> words =
         encode_cdna_vop3(test.opcode, kDestination, vgpr_src(100), vgpr_src(150), vgpr_src(200));
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
     ASSERT_NE(instruction, nullptr);
@@ -7982,7 +7983,8 @@ TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
         test.operand < 0 ? instruction->dst_operand(0) : instruction->src_operand(test.operand);
     auto *operand = const_cast<cdna4::Operand *>(dynamic_cast<const cdna4::Operand *>(selected));
     ASSERT_NE(operand, nullptr);
-    // Construct an operand class the direct multi-register access cannot use.
+    // Mutating the decoded operand type exercises a defensive, decoder-unreachable
+    // guard: these operands always decode as OPR_VGPR or OPR_SRC_VGPR.
     operand->opr_type_ = cdna4::OperandType::OPR_SREG;
     operand->encoding_value_ = 0;
     for (uint32_t offset = 0; offset < 32; ++offset)

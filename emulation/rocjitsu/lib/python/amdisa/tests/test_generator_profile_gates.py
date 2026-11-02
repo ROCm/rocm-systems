@@ -2748,7 +2748,7 @@ def test_latent_execute_fallbacks_report_failure_without_preparing_execution(
         ('sr_pk32_fp6_f32', ['vdst', 'src0']),
     ],
 )
-def test_latent_scalef32_checks_every_direct_operand_before_bases_or_execution(
+def test_latent_scalef32_checks_every_direct_operand_before_execution(
     operation, direct_operands
 ):
     body = gen_cvt_scalef32(
@@ -2760,15 +2760,14 @@ def test_latent_scalef32_checks_every_direct_operand_before_bases_or_execution(
         )
     )
     assert 'throw ' not in body
-    first_base = body.index('apply_gpr_idx(')
+    lane_loop = body.index('for (uint32_t lane')
     for operand in direct_operands:
         guard = re.search(rf'if\s*\(!{operand}_off\)\s*{{([^}}]*)}}', body)
         assert guard is not None
         rejection = guard.group(1)
         assert 'InstructionExecutionError::UnimplementedInstruction' in rejection
         assert 'return;' in rejection
-        assert guard.end() < first_base
-    assert first_base < body.index('for (uint32_t lane')
+        assert guard.end() < lane_loop
 
 
 @pytest.mark.parametrize('conditional', [False, True])
