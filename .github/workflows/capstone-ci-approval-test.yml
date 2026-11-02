@@ -1,0 +1,37 @@
+# Capstone CI approval test (UofT MIE490 x AMD Linux Tools).
+# Throwaway workflow used to check how fork PRs to ROCm/rocm-systems are gated.
+# It checks out no code and changes nothing. Do not merge.
+name: Capstone CI approval test
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/capstone-ci-approval-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  github-hosted:
+    name: Hello from a GitHub-hosted runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "event=${{ github.event_name }} head_repo=${{ github.event.pull_request.head.repo.full_name }}"
+          echo "fork=${{ github.event.pull_request.head.repo.fork }}"
+
+  amd-runner:
+    name: Hello from an AMD self-hosted runner
+    # Same runner labels as amdsmi-build.yml / amdsmi-dme-ci.yml.
+    # No fork-skip condition on purpose: we want to see the run wait for approval.
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    timeout-minutes: 10
+    steps:
+      - run: |
+          echo "runner=${{ runner.name }} os=${{ runner.os }}"
+          echo "RUNNER_TYPE=${{ vars.RUNNER_TYPE }}"
+          ls /dev/kfd /dev/dri 2>/dev/null || echo "no GPU device nodes visible outside a container"
