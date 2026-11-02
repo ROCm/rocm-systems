@@ -73,8 +73,8 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // operands and writes one VGPR. src0 is the 9-bit VOP2 src field (VGPR = 256 + index, SGPR
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
-[[nodiscard]] uint32_t build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                       rj_code_arch_t arch) {
+util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
+                                          rj_code_arch_t arch) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
@@ -85,8 +85,12 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
-    throw util::UnimplementedInst("v_add_u32 for target architecture");
+    return util::Result::failure();
   }
+}
+
+TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
+  EXPECT_TRUE(build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID).failed());
 }
 
 // VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
@@ -826,16 +830,18 @@ protected:
     ASSERT_TRUE(maybe_s_mov_b32_32.succeeded());
     const uint32_t mov_s8_k = maybe_s_mov_b32_32.value();
     constexpr uint16_t kVgprSrc = 256; // VOP2 src field: VGPR = 256 + index.
-    auto vadd = [&](uint16_t d, uint16_t s0, uint16_t s1) {
-      return build_v_add_u32(d, s0, s1, a_.arch);
-    };
+    const std::array<util::FailureOr<uint32_t>, 5> adds = {
+        build_v_add_u32(1, kVgprSrc + 0, 1, a_.arch), build_v_add_u32(3, kVgprSrc + 2, 3, a_.arch),
+        build_v_add_u32(5, kVgprSrc + 4, 5, a_.arch), build_v_add_u32(7, kVgprSrc + 6, 7, a_.arch),
+        build_v_add_u32(1, kSpilledSgpr, 1, a_.arch)};
+    for (const util::FailureOr<uint32_t> &add : adds)
+      ASSERT_TRUE(add.succeeded());
     // v_mov v0,K ; s_mov s8,K2 ; then an add chain (ANCHOR at offset 8) that reads v0..v7
     // and s8 -- keeping all eight VGPRs and s8 live -- while writing only v1/v3/v5/v7, so v0
     // and s8 stay intact for readback. s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
-        {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, vadd(1, kVgprSrc + 0, 1),
-         vadd(3, kVgprSrc + 2, 3), vadd(5, kVgprSrc + 4, 5), vadd(7, kVgprSrc + 6, 7),
-         vadd(1, kSpilledSgpr, 1), endpgm},
+        {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, adds[0].value(), adds[1].value(),
+         adds[2].value(), adds[3].value(), adds[4].value(), endpgm},
         /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
