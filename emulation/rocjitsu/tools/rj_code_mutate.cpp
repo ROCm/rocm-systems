@@ -249,7 +249,7 @@ int run(int argc, char **argv) {
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selection.value(), error);
   if (mutant.failed())
     return reject(error, "mutation");
-  if (!write_new_file(output, mutant.value().edit_result.image)) {
+  if (!write_new_file(output, mutant.value().image)) {
     std::cerr << "rj_code_mutate: cannot create/write/close new output file\n";
     return 3;
   }
@@ -262,7 +262,7 @@ int run(int argc, char **argv) {
             << " exact=" << selection.value().barrier().members.front().offset
             << " logical_mutations=" << mutant.value().logical_mutation_count
             << " members=" << selection.value().barrier().members.size()
-            << " output_bytes=" << mutant.value().edit_result.image.size() << '\n';
+            << " output_bytes=" << mutant.value().image.size() << '\n';
   return finish_stdout();
 }
 } // namespace

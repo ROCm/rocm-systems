@@ -192,7 +192,7 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
     for (const std::string &assumption : library.value().assumptions)
       expected_stderr += "rj_code_mutate: assumption: " + assumption + '\n';
     EXPECT_EQ(stderr_, expected_stderr);
-    EXPECT_EQ(mutant, library.value().edit_result.image);
+    EXPECT_EQ(mutant, library.value().image);
     // Independent full-image oracle: only the selected complete members become
     // concrete-target s_nop 0 instructions. Headers, descriptors and waits stay exact.
     std::vector<uint8_t> expected = image;
@@ -515,7 +515,7 @@ TEST_F(FaultMutationCli, ExactSiblingEntryPreservesUnselectedKernel) {
   ASSERT_TRUE(selected.succeeded());
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selected.value(), error);
   ASSERT_TRUE(mutant.succeeded());
-  EXPECT_EQ(read(output_), mutant.value().edit_result.image);
+  EXPECT_EQ(read(output_), mutant.value().image);
   const FaultMutationContext fresh(read(output_));
   const FailureOr<FaultBarrierInventory> sibling =
       discover_drop_barriers(fresh, "test_kernel0", error);
