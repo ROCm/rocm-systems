@@ -1490,3 +1490,25 @@ def test_vskip_vector_encodings(profile, supported, encoding):
 @pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
 def test_vskip_does_not_suppress_scalar_encodings(encoding):
     assert not CdnaProfile().vskip_affected_encoding(encoding)
+
+
+@pytest.mark.parametrize(
+    ('profile', 'preserves_half', 'bf16_f32_carrier'),
+    [
+        (Cdna1Profile(), False, False),
+        (Cdna2Profile(), False, False),
+        (CdnaProfile(), False, False),
+        (Cdna4Profile(), False, False),
+        (Rdna1Profile(), True, False),
+        (Rdna2Profile(), True, False),
+        (Rdna3Profile(), False, False),
+        (Rdna3_5Profile(), False, False),
+        (Rdna4Profile(), False, False),
+        (Cdna5Profile(), False, True),
+    ],
+)
+def test_valu16_destination_and_bf16_inline_policies(
+    profile, preserves_half, bf16_f32_carrier
+):
+    assert profile.valu16_preserves_unwritten_half is preserves_half
+    assert profile.bf16_inline_uses_f32_carrier is bf16_f32_carrier

@@ -143,6 +143,7 @@ void Device::Reset() {
     }
   }
   flags_ = hipDeviceScheduleSpin;
+  devices()[0]->UpdateGroupMemCarveout(-1);
   destroyAllStreams();
 
   // Clear hostcall allocations to avoid ~Device() accessing freed Memory objects later.
@@ -162,11 +163,13 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   auto waitForStream = [&](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
       amd::Event& event = command->event();
-      // Check HW status of the ROCclr event.
+      // Check the HW status of the ROCclr event only when the command isn't known complete: a
+      // signal in device memory takes a read across the bus, and the last command of an idle
+      // stream stays queued, so every launch checks it again.
       // Note: not all ROCclr modes support HW status
-      bool ready = stream->device().IsHwEventReady(event);
+      bool ready = (command->status() == CL_COMPLETE);
       if (!ready) {
-        ready = (command->status() == CL_COMPLETE);
+        ready = stream->device().IsHwEventReady(event);
       }
       // Cache maintenance, not ordering: never skipped by the blocking tracker.
       submitMarker |= stream->vdev()->isFenceDirty();
@@ -785,7 +788,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Caching behavior
   deviceProps.globalL1CacheSupported = 1;
   deviceProps.localL1CacheSupported = 1;
-  deviceProps.persistingL2CacheMaxSize = info.l2CacheSize_;
+  deviceProps.persistingL2CacheMaxSize = info.persistingL2CacheMaxSize_;
   deviceProps.reservedSharedMemPerBlock = 0;
   deviceProps.sharedMemPerBlockOptin = info.localMemSizePerCU_;
 

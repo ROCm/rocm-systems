@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import shutil
 import signal
+from typing import ClassVar
+
 import pytest
 from conftest import RocprofsysTest, assert_resolved_settings
 
@@ -707,7 +709,7 @@ class TestTraceClockId(RocprofsysTest):
 class TestModeCoverage(RocprofsysTest):
     """--mode coverage turns tracing/sampling off and skips trace artifacts."""
 
-    MODE_FLAGS = ["--mode", "coverage"]
+    MODE_FLAGS: ClassVar[list[str]] = ["--mode", "coverage"]
 
     def test_disables_trace_and_sampling(self, target, cpu_workload):
         result = self.run_test(
@@ -824,7 +826,7 @@ class TestSamplingCputimeSignal(RocprofsysTest):
     """--sampling-cputime-signal moves the cputime sampler off SIGPROF."""
 
     CPUTIME_SIGNAL = str(signal.SIGVTALRM.value)
-    SIGNAL_FLAGS = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
+    SIGNAL_FLAGS: ClassVar[list[str]] = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
 
     def test_override_keeps_sampling(self, target, cpu_workload):
         result = self.run_test(
@@ -867,7 +869,13 @@ class TestSamplingCputimeSignal(RocprofsysTest):
 class TestCpuMetrics(RocprofsysTest):
     """-H --cpus --cpu-metrics selects frequency/load host counters."""
 
-    CPU_METRICS_FLAGS = ["-H", "--cpus", "0", "--cpu-metrics", "frequency,load"]
+    CPU_METRICS_FLAGS: ClassVar[list[str]] = [
+        "-H",
+        "--cpus",
+        "0",
+        "--cpu-metrics",
+        "frequency,load",
+    ]
 
     def test_frequency_and_load_counters(self, target, cpu_workload):
         result = self.run_test(

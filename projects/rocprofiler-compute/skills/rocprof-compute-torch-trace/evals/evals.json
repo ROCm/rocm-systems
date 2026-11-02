@@ -4,9 +4,10 @@
       "id": "tt-which-operator-is-slow",
       "skill_should_trigger": true,
       "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?",
+      "sample": "simple_net.py",
       "expected_behavior": [
         "collects with --experimental --torch-trace",
-        "lists the captured operators before filtering",
+        "lists the captured operators to find the slow ones",
         "checks the documented PyTorch version requirement"
       ],
       "unexpected_behavior": [
@@ -18,6 +19,7 @@
       "id": "tt-map-kernels-to-model-code",
       "skill_should_trigger": true,
       "prompt": "profile my training script and tell me which layer the GPU time belongs to",
+      "sample": "simple_net.py",
       "expected_behavior": [
         "profiles the Python script with torch tracing enabled",
         "advises profiling a few steady-state iterations rather than a full run"
@@ -29,17 +31,19 @@
       "skill_should_trigger": true,
       "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
       "expected_behavior": [
-        "uses --triton-trace, optionally combined with --torch-trace",
-        "lists the captured Triton kernels before filtering"
+        "uses --torch-trace, because --triton-trace does not capture kernels that torch.compile generates"
       ],
-      "logs_contain": ["--triton-trace"]
+      "unexpected_behavior": [
+        "relies on --triton-trace alone to capture torch.compile kernels"
+      ],
+      "logs_contain": ["--torch-trace"]
     },
     {
       "id": "tt-filter-by-operator",
       "skill_should_trigger": true,
       "prompt": "show me the counters for just the conv2d operators in this torch-trace workload",
       "expected_behavior": [
-        "lists operators first, then filters with --torch-operator",
+        "filters with --torch-operator",
         "treats the pattern as a shell-style glob rather than a regex"
       ],
       "logs_contain": ["--torch-operator"]

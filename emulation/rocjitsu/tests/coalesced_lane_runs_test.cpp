@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
+#include "rocjitsu/vm/amdgpu/strided_lane_addresses.h"
 
 #include <gtest/gtest.h>
 
@@ -9,6 +10,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <memory>
 #include <random>
 #include <span>
 #include <vector>
@@ -139,6 +141,95 @@ TEST(CoalescedLaneRunsTest, ReversedDisjointLanesStillCoalesce) {
   expect_same_runs(
       coalesced_runs(swapped, 0x3, 16),
       {{.address = kBase, .lane_mask = 0x3, .first_lane = 1, .size = 32, .lane_ordered = false}});
+}
+
+TEST(CoalescedLaneRunsTest, DenseStridePredicateHandlesEveryCountAndUnsignedLimit) {
+  for (uint32_t count = 1; count <= 64; ++count) {
+    for (const uint32_t stride : {1u, 16u, 129u, UINT32_MAX}) {
+      const uint64_t extent = uint64_t{count - 1} * stride;
+      for (const uint64_t base : {uint64_t{0}, uint64_t{1} << 63, UINT64_MAX - extent}) {
+        SCOPED_TRACE(::testing::Message() << count << ' ' << stride << ' ' << base);
+        std::vector<uint64_t> addrs(count);
+        for (uint32_t lane = 0; lane < count; ++lane)
+          addrs[lane] = base + uint64_t{lane} * stride;
+        ASSERT_TRUE(amdgpu::detail::is_strided_lane_addresses(addrs.data(), count, stride));
+        for (uint32_t lane = 1; lane < count; ++lane) {
+          for (const uint64_t difference : {uint64_t{1}, uint64_t{1} << 32, uint64_t{1} << 63}) {
+            addrs[lane] ^= difference;
+            EXPECT_FALSE(amdgpu::detail::is_strided_lane_addresses(addrs.data(), count, stride));
+            addrs[lane] ^= difference;
+          }
+        }
+        if (count > 1 && base == UINT64_MAX - extent) {
+          for (auto &address : addrs)
+            ++address;
+          EXPECT_FALSE(amdgpu::detail::is_strided_lane_addresses(addrs.data(), count, stride));
+        }
+      }
+    }
+  }
+}
+
+TEST(CoalescedLaneRunsTest, DenseStridePredicateRespectsUnalignedExactStorage) {
+  for (const uint32_t count : {7u, 33u}) {
+    // A prefix keeps only natural alignment, with no spare element at the end.
+    const auto storage = std::make_unique<uint64_t[]>(count + 1);
+    uint64_t *const addrs = storage.get() + 1;
+    for (uint32_t lane = 0; lane < count; ++lane)
+      addrs[lane] = 0xfffffff0ULL + uint64_t{lane} * 16;
+    EXPECT_TRUE(amdgpu::detail::is_strided_lane_addresses(addrs, count, 16));
+    addrs[count - 1] ^= uint64_t{1} << 32;
+    EXPECT_FALSE(amdgpu::detail::is_strided_lane_addresses(addrs, count, 16));
+  }
+}
+
+TEST(CoalescedLaneRunsTest, DenseStridedWindowsPreserveRunsAndEarlyStops) {
+  for (const uint32_t wf_size : {32u, 64u}) {
+    for (const uint32_t first : {0u, wf_size / 4, wf_size - 1}) {
+      for (const uint32_t count : {1u, std::min(32u, wf_size - first), wf_size - first}) {
+        const uint64_t mask = (count == 64 ? UINT64_MAX : (uint64_t{1} << count) - 1) << first;
+        for (const uint32_t stride : {1u, 16u, 129u}) {
+          for (const uint64_t base :
+               {uint64_t{0x1070}, UINT64_MAX - (uint64_t{wf_size} * stride - 1)}) {
+            SCOPED_TRACE(::testing::Message() << wf_size << ' ' << first << ' ' << count << ' '
+                                              << stride << ' ' << base);
+            std::vector<uint64_t> addrs(wf_size);
+            for (uint32_t lane = 0; lane < wf_size; ++lane)
+              addrs[lane] = base + uint64_t{lane} * stride;
+            const LaneRuns expected{{.address = addrs[first],
+                                     .lane_mask = mask,
+                                     .first_lane = first,
+                                     .size = count * stride,
+                                     .lane_ordered = true}};
+            for (const auto policy : {amdgpu::MemoryTransactionPolicy{},
+                                      amdgpu::MemoryTransactionPolicy::unqualified_64()}) {
+              for (const bool stop : {false, true}) {
+                LaneRuns actual;
+                const bool completed =
+                    amdgpu::for_each_coalesced_lane_run(addrs.data(), mask, wf_size, stride, policy,
+                                                        [&](const amdgpu::CoalescedLaneRun &run) {
+                                                          actual.push_back(run);
+                                                          return !stop;
+                                                        });
+                EXPECT_EQ(completed, !stop);
+                expect_same_runs(actual, expected);
+              }
+            }
+            if (count > 1) {
+              addrs[first + 1] = addrs[first];
+              expect_same_runs(coalesced_runs(addrs, mask, stride),
+                               lane_ordered_runs(addrs, mask, stride));
+            }
+          }
+        }
+      }
+    }
+    std::vector<uint64_t> wrapping(wf_size);
+    for (uint32_t lane = 0; lane < wf_size; ++lane)
+      wrapping[lane] = UINT64_MAX - 128 + uint64_t{lane} * 16;
+    const uint64_t full = wf_size == 64 ? UINT64_MAX : UINT32_MAX;
+    expect_same_runs(coalesced_runs(wrapping, full, 16), lane_ordered_runs(wrapping, full, 16));
+  }
 }
 
 TEST(CoalescedLaneRunsTest, WrappingOperandsKeepLaneOrderedRuns) {

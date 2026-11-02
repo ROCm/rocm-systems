@@ -79,6 +79,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled_;
   decltype(hsa_amd_profiling_async_copy_enable)* hsa_amd_profiling_async_copy_enable_;
   decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time_;
+  decltype(hsa_amd_profiling_convert_tick_to_system_domain)*
+      hsa_amd_profiling_convert_tick_to_system_domain_;
   decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time_;
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler_;
   decltype(hsa_amd_queue_cu_set_mask)* hsa_amd_queue_cu_set_mask_;
@@ -134,6 +136,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_import_fabric_handle)* hsa_amd_vmem_import_fabric_handle_;
   decltype(hsa_amd_vmem_retain_alloc_handle)* hsa_amd_vmem_retain_alloc_handle_;
   decltype(hsa_amd_agent_set_async_scratch_limit)* hsa_amd_agent_set_async_scratch_limit_;
+  decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_;
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
   decltype(hsa_amd_enable_logging)* hsa_amd_enable_logging_;
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
@@ -334,6 +337,12 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
                                                   hsa_amd_profiling_dispatch_time_t* time) {
     return ROCR_DYN(hsa_amd_profiling_get_dispatch_time)(agent, signal, time);
+  }
+  static hsa_status_t profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                              uint64_t agent_tick,
+                                                              uint64_t* system_tick) {
+    return ROCR_DYN(hsa_amd_profiling_convert_tick_to_system_domain)(agent, agent_tick,
+                                                                     system_tick);
   }
   static hsa_status_t profiling_get_async_copy_time(hsa_signal_t signal,
                                                     hsa_amd_profiling_async_copy_time_t* time) {
@@ -610,6 +619,10 @@ class Hsa : public amd::AllStatic {
   }
   static hsa_status_t agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
     return ROCR_DYN(hsa_amd_agent_set_async_scratch_limit)(agent, threshold);
+  }
+  static hsa_status_t agent_set_attribute(hsa_agent_t agent, hsa_amd_agent_attribute_t attribute,
+    void* value) {
+    return ROCR_DYN(hsa_amd_agent_set_attribute)(agent, attribute, value);
   }
   static hsa_status_t vmem_address_reserve_align(void** ptr, size_t size, uint64_t address,
     uint64_t alignment, uint64_t flags) {

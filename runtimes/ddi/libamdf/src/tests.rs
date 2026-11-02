@@ -67,17 +67,21 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
 
 #[test]
 fn sdma_format_features_follow_native_encoding_rules() {
-    assert_eq!(instance::sdma_format_features(11, 5, false), 0);
+    use rocddi::topology::GpuTargetProfile;
     assert_eq!(
-        instance::sdma_format_features(11, 5, true),
+        instance::sdma_format_features(GpuTargetProfile::Gfx11, false),
+        0
+    );
+    assert_eq!(
+        instance::sdma_format_features(GpuTargetProfile::Gfx11, true),
         AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
     );
     assert_eq!(
-        instance::sdma_format_features(12, 0, true),
+        instance::sdma_format_features(GpuTargetProfile::Gfx1201, true),
         AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
     );
     assert_eq!(
-        instance::sdma_format_features(12, 5, false),
+        instance::sdma_format_features(GpuTargetProfile::Gfx1250, false),
         AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM | AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE
     );
 }
@@ -129,6 +133,58 @@ fn parameters() -> amdf_instance_create_info_t {
         r#type: AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         structure_size: size_of::<amdf_instance_create_info_t>() as u32,
         ..Default::default()
+    }
+}
+
+#[test]
+fn busy_instance_does_not_affect_an_independent_instance() {
+    let mut create = parameters();
+    create.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
+    let mut first = std::ptr::null_mut();
+    let mut second = std::ptr::null_mut();
+    // SAFETY: Each input and output remains live for its call; destruction is
+    // serialized and the reservation is released before its parent instance.
+    unsafe {
+        assert_eq!(instance::create(&raw const create, &raw mut first), 0);
+        assert_eq!(instance::create(&raw const create, &raw mut second), 0);
+        assert_ne!(first, second);
+
+        let mut caps = amdf_memory_reservation_capabilities_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
+            structure_size: size_of::<amdf_memory_reservation_capabilities_t>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(reservation::host_capabilities(first, &raw mut caps), 0);
+        let access = amdf_memory_reservation_access_t {
+            address_domain_ordinal: AMDF_ADDRESS_DOMAIN_ORDINAL_NONE,
+            access: AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+            ..Default::default()
+        };
+        let reservation_create = amdf_memory_reservation_create_info_t {
+            r#type: AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
+            structure_size: size_of::<amdf_memory_reservation_create_info_t>() as u32,
+            byte_length: caps.reservation_granularity,
+            access_count: 1,
+            accesses: &raw const access,
+            ..Default::default()
+        };
+        let mut owner = std::ptr::null_mut();
+        assert_eq!(
+            reservation::create(first, &raw const reservation_create, &raw mut owner),
+            0
+        );
+        assert_eq!(instance::destroy(first), support::BUSY);
+
+        let mut scope = std::ptr::null_mut();
+        let mut count = 0;
+        assert_eq!(
+            memory::instance_scopes(second, 1, &raw mut scope, &raw mut count),
+            0
+        );
+        assert!(!scope.is_null());
+        assert_eq!(instance::destroy(second), 0);
+        assert_eq!(reservation::destroy(owner), 0);
+        assert_eq!(instance::destroy(first), 0);
     }
 }
 

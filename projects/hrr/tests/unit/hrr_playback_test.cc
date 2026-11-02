@@ -99,6 +99,32 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   CHECK(h.r.begin()->second == 0x20000);
 }
 
+// The range placement maps for an allocation is checked: a size that wraps
+// 2^64, or rounding that does, is refused rather than turned into a small range
+// inside a held one (AIRUNTIME-3069).
+HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
+  const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
+  uint64_t b = 0, e = 0;
+  REQUIRE(hrr_place_range(B + 5, 100, G, &b, &e));
+  CHECK(b == B);
+  CHECK(e == B + G);
+  REQUIRE(hrr_place_range(B, G + 1, G, &b, &e));  // spills into a second granule
+  CHECK(e == B + 2 * G);
+
+  // rec + size lands exactly on 2^64, and one past it.
+  CHECK_FALSE(hrr_place_range(B, 0 - B, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, 0 - B + 1, G, &b, &e));
+  CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
+  // Without the rec + size check this is accepted as [B, B + G).
+  CHECK_FALSE(hrr_place_range(B + 5, ~0ull, G, &b, &e));
+  // rec + size ends just below 2^64: no wrap, but rounding up to a granule does.
+  CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
+  // The same from a different start.
+  CHECK_FALSE(hrr_place_range(1ull << 63, (1ull << 63) - 1, G, &b, &e));
+  // Nothing to place.
+  CHECK_FALSE(hrr_place_range(B, 0, G, &b, &e));
+}
+
 /**
  * End doxygen group HRR.
  * @}

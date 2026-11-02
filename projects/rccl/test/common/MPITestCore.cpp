@@ -301,7 +301,15 @@ ncclResult_t MPITestCore::createTestCommunicator()
     // RAII guard: Automatically calls ncclGroupEnd() if subsequent operations fail
     auto group_guard = makeScopeGuard([]() { (void)ncclGroupEnd(); });
 
-    RCCL_TEST_CHECK(ncclCommInitRank(&test_comm_, world_size, nccl_id_, world_rank));
+    ncclConfig_t* config = communicatorConfig();
+    if(config != nullptr)
+    {
+        RCCL_TEST_CHECK(ncclCommInitRankConfig(&test_comm_, world_size, nccl_id_, world_rank, config));
+    }
+    else
+    {
+        RCCL_TEST_CHECK(ncclCommInitRank(&test_comm_, world_size, nccl_id_, world_rank));
+    }
 
     // RAII guard: Automatically destroys test_comm_ if subsequent operations fail
     auto comm_guard = makeScopeGuard(

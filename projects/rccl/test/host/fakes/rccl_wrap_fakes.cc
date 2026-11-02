@@ -9,6 +9,8 @@
 
 #include "rccl_wrap_fakes.h"
 
+#include <algorithm>
+
 #include "comm.h"
 #include "fail_loud.h"
 #include "info.h"
@@ -24,6 +26,8 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
+ASSERT_HOOK_MATCHES_PROD(g_rcclNetRegSegmentCount, rcclNetRegSegmentCount);
+ASSERT_HOOK_MATCHES_PROD(g_rcclNetGraphRegSegmentCount, rcclNetGraphRegSegmentCount);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
@@ -60,6 +64,22 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm*, size_t, struct ncclTaskColl
   ++g_rcclUpdateCollectiveAlgorithmCalls;
   // Production requires the algorithm hook to run before the protocol hook.
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = g_rcclUpdateCollectiveProtocolCalls == 0;
+}
+int g_rcclUpdateRemoteFlushAlgoProtoCalls = 0;
+extern int g_rcclUpdateRemoteFlushAlgoProtoChannels;
+bool g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = false;
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm*, size_t, struct ncclTaskColl*, float (*)[NCCL_NUM_PROTOCOLS]) {
+  ++g_rcclUpdateRemoteFlushAlgoProtoCalls;
+  // Production requires the remote flush rules to override the protocol hook's choice.
+  g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = g_rcclUpdateCollectiveProtocolCalls > 0;
+  return g_rcclUpdateRemoteFlushAlgoProtoChannels;
+}
+int g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+int g_rcclScaleCollLl128BuffSizeCalls = 0;
+int g_rcclScaleCollLl128BuffSizeFactor = 1;
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  ++g_rcclScaleCollLl128BuffSizeCalls;
+  comm->buffSizes[NCCL_PROTO_LL128] *= g_rcclScaleCollLl128BuffSizeFactor;
 }
 void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
   ++g_rcclUpdateCollectiveChannelsCalls;
@@ -172,7 +192,9 @@ int64_t g_rcclParamHierarchicalReduceScatter = 0;  // RCCL_PARAM(HierarchicalRed
 int64_t rcclParamHierarchicalReduceScatter() { return g_rcclParamHierarchicalReduceScatter; }
 int64_t g_rcclParamCeAllReduce = -1;               // rccl_wrap.cc:65 RCCL_PARAM default
 int64_t rcclParamCeAllReduce() { return g_rcclParamCeAllReduce; }
-int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:70 RCCL_PARAM default
+int64_t g_rcclParamCeReduceScatter = 0;            // rccl_wrap.cc:70 RCCL_PARAM default (opt-in)
+int64_t rcclParamCeReduceScatter() { return g_rcclParamCeReduceScatter; }
+int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:73 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
 
 static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
@@ -204,16 +226,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 }
 
 static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
-                                               ncclRedOp_t, bool, struct rcclCollDecision*) {
+                                               ncclRedOp_t, bool, struct rcclCollDecision*, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectReduceScatter");
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, bool,
-                           struct rcclCollDecision*)>
+                           struct rcclCollDecision*, bool)>
     g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision) {
-  return g_rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, query, decision);
+                                     struct rcclCollDecision* decision, bool graphCapturingHint) {
+  return g_rcclSelectReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, query, decision,
+                                   graphCapturingHint);
 }
 
 static ncclResult_t DefaultSelectAlltoAll(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, hipStream_t,
@@ -265,8 +288,52 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 int64_t g_rcclParamDdaEnable = 1;  // rccl_wrap.cc:98 RCCL_PARAM default
 int64_t rcclParamDdaEnable() { return g_rcclParamDdaEnable; }
+int64_t g_rcclParamDdaLL = 1;                     // RCCL_PARAM(DdaLL) default
+int64_t rcclParamDdaLL() { return g_rcclParamDdaLL; }
+int64_t g_rcclParamDdaLL128 = kDdaThresholdUnset;  // RCCL_PARAM(DdaLL128) default
+int64_t rcclParamDdaLL128() { return g_rcclParamDdaLL128; }
+
+static size_t DefaultDdaLLThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
+// DDA_LL128 unset with no arch table: off.
+static size_t DefaultDdaLL128Threshold(const struct ncclComm*, ncclFunc_t) { return 0; }
+static size_t DefaultDdaVmmThreshold(const struct ncclComm*, ncclFunc_t) { return kDdaVmmBaseDefault; }
+static size_t DefaultDdaScratchPayloadCap(const struct ncclComm*) {
+  return std::max({kDdaLLBaseDefault, kDdaLL128BaseDefault, kDdaVmmBaseDefault});
+}
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
+std::function<size_t(const struct ncclComm*, ncclFunc_t)> g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
+std::function<size_t(const struct ncclComm*)> g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
+size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
+size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
+size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaVmmThreshold(comm, func); }
+size_t rcclDdaScratchPayloadCap(const ncclComm* comm) { return g_rcclDdaScratchPayloadCap(comm); }
+
+static ncclResult_t DefaultNetRegSegmentCount(struct ncclComm*, struct ncclReg*, int*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetRegSegmentCount =
+    DefaultNetRegSegmentCount;
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*, int*)> g_rcclNetGraphRegSegmentCount =
+    DefaultNetRegSegmentCount;
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  return g_rcclNetRegSegmentCount(comm, regRecord, numSegments);
+}
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  return g_rcclNetGraphRegSegmentCount(comm, regRecord, numSegments);
+}
+int g_rcclNetRegCommitCalls = 0;
+int g_rcclNetRegCommitLastSegments = 0;
+void rcclNetRegCommit(struct ncclComm*, struct ncclReg*, int numSegments) {
+  ++g_rcclNetRegCommitCalls;
+  g_rcclNetRegCommitLastSegments = numSegments;
+}
 
 void ResetRcclWrapFakes() {
+  g_rcclParamDdaLL = 1;
+  g_rcclParamDdaLL128 = kDdaThresholdUnset;
+  g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
+  g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
+  g_rcclDdaVmmThreshold = DefaultDdaVmmThreshold;
+  g_rcclDdaScratchPayloadCap = DefaultDdaScratchPayloadCap;
   g_rcclUpdateCollectiveProtocol = DefaultNoOpTune;
   g_rcclSetPipelining = DefaultNoOpTune;
   g_rcclOverrideChannels = DefaultOverrideChannels;
@@ -277,10 +344,16 @@ void ResetRcclWrapFakes() {
   g_rcclParamHierarchicalAllGather = 1;
   g_rcclParamHierarchicalReduceScatter = 0;
   g_rcclParamCeAllReduce = -1;
+  g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+  g_rcclUpdateRemoteFlushAlgoProtoCalls = 0;
+  g_rcclUpdateRemoteFlushAlgoProtoAfterProtocol = false;
+  g_rcclUpdateRemoteFlushAlgoProtoChannels = 0;
+  g_rcclScaleCollLl128BuffSizeCalls = 0;
+  g_rcclScaleCollLl128BuffSizeFactor = 1;
   g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
@@ -315,6 +388,10 @@ void ResetRcclWrapFakes() {
   g_rcclUseAllGatherDirect = DefaultUseAllGatherDirect;
   g_rcclUseReduceScatterDirect = DefaultUseReduceScatterDirect;
   g_rcclParamDdaEnable = 1;
+  g_rcclNetRegSegmentCount = DefaultNetRegSegmentCount;
+  g_rcclNetGraphRegSegmentCount = DefaultNetRegSegmentCount;
+  g_rcclNetRegCommitCalls = 0;
+  g_rcclNetRegCommitLastSegments = 0;
 }
 
 bool g_validHsaScratch = true;
@@ -336,6 +413,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+bool rcclCeAllReduceEnabled(const struct ncclComm*) {
+  if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
+  return true;  // arch default: enabled
+}
+bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
 // Reaching one aborts AND names itself on stderr, which is the point: an unfaked
@@ -351,6 +434,24 @@ int64_t rcclParamHierarchicalLazyInit() {
 void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rcclSetPxn"); }
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
+}
+bool rcclForceCeScratchEnabled(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
+}
+size_t rcclCeAr2ShotMax(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
+}
+size_t rcclCeAr2ShotMin(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
+}
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
+}
+bool rcclNcclAlgoEnvIsSet() {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
+}
+bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
 }
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51

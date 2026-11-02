@@ -161,9 +161,11 @@ engine — the loader resolves the default, it does not enforce it.
 
 **A multi-partition engine needs a partition policy.** Code that builds an
 engine by hand must call `partition_topology_by_xcds()` after `set_root()` and
-before `create()`, or `create()` throws "multi-threaded SimulationEngine
-requires an explicit topology partition policy". `rj_vm_create()` already does
-this, so this only affects direct `SimulationEngine` users.
+before `create()`, or `create()` returns failure and emits "multi-threaded
+SimulationEngine requires an explicit topology partition policy" through its
+`emit_error` parameter. Omitting the emitter discards the diagnostic.
+`rj_vm_create()` already does this, so this only affects direct
+`SimulationEngine` users.
 
 For multi-GPU VMs, both the default and the clamp use the aggregate XCD count
 across all SoCs. Partition assignment follows one global XCD ordering across
