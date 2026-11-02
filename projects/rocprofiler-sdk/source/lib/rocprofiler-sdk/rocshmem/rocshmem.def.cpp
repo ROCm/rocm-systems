@@ -74,6 +74,10 @@ ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_R
 ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_putmem_on_stream, putmem_on_stream, putmem_on_stream_fn, dest, source, nelems, pe, stream)
 ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_putmem_signal_on_stream, putmem_signal_on_stream, putmem_signal_on_stream_fn, dest, source, nelems, sig_addr, signal, sig_op, pe, stream)
 ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_signal_wait_until_on_stream, signal_wait_until_on_stream, signal_wait_until_on_stream_fn, sig_addr, cmp, cmp_value, stream)
+#if ROCSHMEM_API_TRACE_VERSION_PATCH >= 8
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_signal_add_on_stream, signal_add_on_stream, signal_add_on_stream_fn, sig_addr, signal, pe, stream)
+ROCSHMEM_API_INFO_DEFINITION_V(ROCPROFILER_ROCSHMEM_TABLE_ID_CORE, ROCPROFILER_ROCSHMEM_API_ID_signal_set_on_stream, signal_set_on_stream, signal_set_on_stream_fn, sig_addr, signal, pe, stream)
+#endif
 // clang-format on
 
 #else
