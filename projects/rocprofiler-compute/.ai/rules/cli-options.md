@@ -45,7 +45,7 @@ A list of values is passed as one comma-separated argument.
 ```
 
 `--trace-ml-api`, `--list-operators`, and `--operator` take space-separated
-values after the flag, not a comma-separated list:
+values after the flag:
 
 ```console
 --trace-ml-api torch triton
