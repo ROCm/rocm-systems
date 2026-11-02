@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 
@@ -150,6 +151,25 @@ static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   }
 }
 
+// Spins until the host stores a nonzero value to `release`, or until `timeout_ticks` elapse, with
+// the same coherence requirement on `release` as WaitForHostRelease. The timeout means a host that
+// never reaches the release - because an API under test blocked, or a check threw first - fails
+// the test instead of hanging the GPU. Derive `timeout_ticks` from SpinTicksPerUs().
+[[maybe_unused]] static __global__ void WaitForHostReleaseWithTimeout(volatile int* release,
+                                                                     long long timeout_ticks) {
+#if HT_AMD
+  const long long start = wall_clock64();
+  while (*release == 0) {
+    if (wall_clock64() - start > timeout_ticks) return;
+  }
+#else
+  const long long start = clock64();
+  while (*release == 0) {
+    if (clock64() - start > timeout_ticks) return;
+  }
+#endif
+}
+
 template <typename T>
 __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
   const auto x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -160,6 +180,20 @@ __global__ void Iota(T* const out, size_t pitch, size_t w, size_t h, size_t d) {
     char* const row = slice + pitch * y;
     reinterpret_cast<T*>(row)[x] = z * w * h + y * w + x;
   }
+}
+
+// Calculate clock ticks per microsecond for device side clock. Use wall_clock64() on AMD as
+// fixed-rate and clock64() on NVIDIA as wall_clock64() unavailable.
+inline unsigned long long SpinTicksPerUs() {
+  int device = 0;
+  int clock_khz = 0;
+  HIP_CHECK(hipGetDevice(&device));
+#if HT_AMD
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeWallClockRate, device));
+#else
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeClockRate, device));
+#endif
+  return std::max(1ULL, static_cast<unsigned long long>(clock_khz) / 1000);
 }
 
 inline void LaunchDelayKernel(const std::chrono::milliseconds interval, const hipStream_t stream = nullptr) {

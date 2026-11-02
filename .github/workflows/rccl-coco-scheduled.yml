@@ -1,6 +1,6 @@
 name: RCCL coco scheduled
 
-# Nightly, weekly, and monthly coco launches on Ruby and OCI. The mode comes from
+# Nightly, weekly, and monthly coco launches on Ruby, OCI, TW, and Crusoe. The mode comes from
 # the cron that fired; the coco harness is pinned to one commit for the whole fan-out.
 on:
   schedule:
