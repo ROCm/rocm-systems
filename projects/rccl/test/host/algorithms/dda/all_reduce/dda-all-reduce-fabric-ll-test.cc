@@ -390,7 +390,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBan
   EXPECT_EQ(launch.Arg<int>(4), 5);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<size_t>(8), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<size_t>(8), 32u << 20);
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
@@ -408,7 +408,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank)
   EXPECT_EQ(launch.Arg<int>(4), 5);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<size_t>(8), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<size_t>(8), 32u << 20);
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
@@ -426,7 +426,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndB
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2u);
-  EXPECT_EQ(launch.Arg<size_t>(9), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<size_t>(9), 32u << 20);
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
@@ -445,7 +445,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices)
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2u);
-  EXPECT_EQ(launch.Arg<size_t>(9), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<size_t>(9), 32u << 20);
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
