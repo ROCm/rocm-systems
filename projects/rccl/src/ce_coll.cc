@@ -3319,8 +3319,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     WARN("CE AllReduce: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
     return ncclInvalidArgument;
   }
-  const size_t chunkBytes =
-    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  const size_t chunkBytes = ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes);
   size_t baseChunkElems = chunkBytes / eltSize;
   size_t slotChunkElems = slotChunkBytes / eltSize;
   size_t chunksPerShard = shardElems / baseChunkElems;

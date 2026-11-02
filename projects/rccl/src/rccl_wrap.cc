@@ -1229,6 +1229,22 @@ bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
   return shard >= kDdaArRegEagerMinShardBytes && shard <= kDdaArRegEagerMaxShardBytes;
 }
 
+// Block width of the CE reduce kernel (ncclCeLocalReduceLaunch_* in ce_reduce_launcher.cpp.in).
+constexpr uint32_t kCeLocalReduceThreads = 256;
+
+// Elements per CE-registered reduce launch: ncclCeAllReduce's chunk for the staging size ncclCeInit resolves.
+static size_t rcclCeArRegChunkElems(const ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  size_t stagingBytes = comm->ceColl.ceArStagingBytes;
+  if (stagingBytes == 0) {
+    const int64_t param = rcclParamCeArStagingBytes();
+    stagingBytes = param >= 0 ? (size_t)param : (size_t)NCCL_CE_AR_STAGING_BYTES;
+  }
+  const size_t eltSize = ncclTypeSize(datatype);
+  const size_t shardBytes = count / (size_t)comm->nRanks * eltSize;
+  const size_t slotChunkBytes = ncclCeAllReduceSlotChunkBytes(stagingBytes / (size_t)comm->nRanks);
+  return ncclCeAllReduceChunkBytes(shardBytes, slotChunkBytes) / eltSize;
+}
+
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.
 // RCCL_DDA_LL128 three-way logic:
 //   kDdaThresholdUnset (-1, default): auto — enabled iff arch table has non-zero
@@ -1828,6 +1844,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // symkRequested is the raw "symk would run for these operands" signal and keeps
     // gating the CE 2-shot and DDA branches below, so registered buffers still reach
     // CE-registered at (5) rather than being claimed by a staging-buffer or fabric path.
+    // The one exception is gfx1250 in (4), where a symk that symMaxR2 withdraws can hand the call to fabric DDA.
     // symMaxR2 / symMaxR2Graph from the arch table only withdraws symk as the final
     // choice once the message exceeds the CE/symk crossover size, letting
     // CE-registered win instead.  kThreshUnlimited means no suppression.
@@ -1924,7 +1941,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // rcclCandSearch arbitrates via probe order and the preferred-backend mask.
     // rcclDdaEnabled gates individual DDA sub-paths. Passes the raw symk signal
     // for the same reason as (3): symMaxR2 chooses between symk and CE-registered,
-    // it does not hand registered operands to DDA.
+    // except on gfx1250, where its withdrawal hands some registered calls to DDA (symkWithdrawn below).
     //
     // GIN AllReduce is selected first in this function and requires symmetric
     // windows. By default gfx950 claims messages >= 256 MiB. gfx1250 claims
@@ -1935,30 +1952,36 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // ddaSymEligible lets DDA LL/LL128 claim the sum. FORCE_ENABLE=1 keeps the
     // original gate because GIN already returned above for those sizes.
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
+  #if defined(ENABLE_ROCSHMEM_GIN)
+    const bool ginYield = ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op);
+  #else
+    const bool ginYield = false;
+  #endif
     const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
     const size_t arDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncAllReduce, comm->nRanks);
-    // gfx1250 exception: a registered call whose symk symMaxR2 withdrew takes DDA where DDA beats the backend that runs.
-    const bool symkWithdrawn = ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax;
+    // gfx1250: a registered call whose symk symMaxR2 withdrew takes DDA where DDA beats the backend that runs.
+    const bool symkWithdrawn =
+      ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
     // In graph capture that backend is Ring (no CE).
     const bool ddaReplacesRing = symkWithdrawn && ceCapturing && msgBytes <= rcclDdaArRegCaptureMaxBytes(comm);
-    // Eager it is CE-registered, which the DDA LL128 two-shot replaces for the shards rcclDdaArRegEagerShardFits takes.
-    const bool ceRegRuns = !hasSysmemSegment && ceAvailable && ceRegEnabled && ceRegInWindow;
+    // Eager it is CE-registered, which DDA LL128 replaces for rcclDdaArRegEagerShardFits shards.
+    // ceAvailable already rejects sysmem windows, and ceRegInWindow implies ceRegEnabled.
+    const bool ceRegRuns = ceAvailable && ceRegInWindow;
+    // Check-mode, suspended and revoked comms divert to enqueue, which runs CE only for a CE decision.
     const bool ddaReplacesCeReg = symkWithdrawn && !ceCapturing && ceRegRuns && arDdaLL128Max > 0 &&
-                                  rcclDdaArRegEagerShardFits(comm, msgBytes);
-    bool ddaSymEligible = symkRequested && !symSuppressedByMin && !ddaReplacesRing && !ddaReplacesCeReg;
-  #if defined(ENABLE_ROCSHMEM_GIN)
-    if (ncclAllReduceGinSdmaYieldToDda(comm, sendbuff, recvbuff, count, datatype, op)) {
-      ddaSymEligible = false;
-    }
-  #endif
+                                  rcclDdaArRegEagerShardFits(comm, msgBytes) &&
+                                  !rcclCollectiveMustUseEnqueuePath(comm);
+    const bool ddaSymEligible =
+      symkRequested && !symSuppressedByMin && !ginYield && !ddaReplacesRing && !ddaReplacesCeReg;
     const size_t arDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllReduce, winRegType, ceCapturing, comm->nRanks);
     const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, query);
-    // A re-routed call launches within the replaced grid: CE's reduce kernel (256-thread blocks) or Ring's kernel.
+    // A re-routed call launches within the replaced grid: CE's reduce kernel or Ring's kernel.
     rcclDdaLaunchCap ddaCap = {};
     if (arShouldTakeDda && ddaReplacesCeReg) {
-      ddaCap.blocks = (uint32_t)std::max(ncclCeLocalReduceBlocks(datatype, count / comm->nRanks), 1);
-      ddaCap.threads = RCCL_SINGLE_NODE_MAX_NTHREADS;
+      const int ceBlocks = ncclCeLocalReduceBlocks(datatype, rcclCeArRegChunkElems(comm, count, datatype));
+      ddaCap.blocks = (uint32_t)std::max(ceBlocks, 1);
+      ddaCap.threads = kCeLocalReduceThreads;
     } else if (arShouldTakeDda && ddaReplacesRing) {
       struct rcclCollDecision ringChoice;
       memset(&ringChoice, 0, sizeof(ringChoice));
@@ -1976,7 +1999,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         cand.ddaCap = ddaCap;
         cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, ddaCap);
         rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
-        if (!query) INFO(NCCL_TUNING, "AR cand DDA-LL128(registered eager): inWindow=1 preferred=%d fallback=%d", (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
+        if (!query) {
+          INFO(NCCL_TUNING, "AR cand DDA-LL128(registered eager): inWindow=1 preferred=%d fallback=%d",
+               (int)cs.bestPreferredFound, (int)cs.bestFallbackFound);
+        }
       }
     } else if (!cs.bestPreferredFound && arShouldTakeDda) {
       if (ddaFabricArch1250) {

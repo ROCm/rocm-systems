@@ -76,8 +76,8 @@ struct rcclArchThresholds {
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
   // Above this size CE is faster than symk; setting this withdraws symk as the final
   // choice in rcclSelectAllReduce so CE-registered can win. It does not unblock the
-  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all.
-  // On gfx1250 a withdrawn symk can still hand registered AllReduce to fabric DDA (see rcclSelectAllReduce).
+  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all,
+  // except on gfx1250, where a withdrawn symk hands some registered AllReduce to fabric DDA.
   // kThreshUnlimited means no suppression (symk may win at any size for that collective).
   // Unused collectives default to kThreshUnlimited.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];

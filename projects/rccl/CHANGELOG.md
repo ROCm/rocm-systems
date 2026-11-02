@@ -9,7 +9,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
-* On gfx1250, registered AllReduce whose symmetric kernel `symMaxR2` withdraws runs on DDA in graph capture up to max(32 MiB, nRanks x 2 MiB) instead of Ring, and outside capture on the DDA LL128 two-shot instead of CE-registered for per-rank shards of 512 KiB to 1 MiB; either launch stays within the blocks and threads of the backend it replaces.
+* On gfx1250, registered AllReduce above the size where the symmetric kernel gives way to CE-registered runs on DDA in graph capture up to max(32 MiB, nRanks x 2 MiB) instead of Ring, and outside capture on the DDA LL128 two-shot instead of CE-registered for per-rank shards of 512 KiB to 1 MiB, when the LL128 tier is on and CE-registered would run; either launch stays within the blocks and threads of the backend it replaces.
 
 ### Removed
 
