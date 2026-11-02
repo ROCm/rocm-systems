@@ -97,9 +97,9 @@ ncclResult_t wrap_mlx5dv_reg_dmabuf_mr(struct ibv_mr** ret, struct ibv_pd* pd, u
 struct ibv_mr* wrap_direct_mlx5dv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
                                                 int fd, int access, int mlx5_access) {
   if (mlx5dvSymbols.mlx5dv_internal_reg_dmabuf_mr == NULL) {
-    // ENOSYS, not EOPNOTSUPP. The kernel DMA-BUF probe treats EOPNOTSUPP as
-    // "ibv_reg_dmabuf_mr is unsupported" and then registers GPU memory with
-    // ibv_reg_mr_iova2. A missing mlx5 symbol is not that.
+    // ENOSYS, not EOPNOTSUPP. The kernel DMA-BUF probe uses EOPNOTSUPP for
+    // "ibv_reg_dmabuf_mr is unsupported". A missing mlx5 symbol is not that.
+    // ncclMlx5dvDmaBufCapable() reads this errno only to decide data-direct.
     errno = ENOSYS;
     return NULL;
   }
