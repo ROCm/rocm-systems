@@ -63,10 +63,12 @@ cases:
   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo: {}
   Unit_HRR_CaptureExitSummary: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
+  Unit_HRR_CaptureIgnoresConsentOfOtherUser: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureMovesEarlierArchiveAside: {}
+  Unit_HRR_CaptureNeedsConsent: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureRenamedArchive_Direct: {}
   Unit_HRR_CaptureReplayRoundtrip: {}

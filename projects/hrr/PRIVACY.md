@@ -32,8 +32,9 @@ needs no GPU.
 
 ## Capture modes
 
-Capture is disabled by default on AMD platforms at present (see the [README](README.md));
-where it is built in, it is armed by `HIP_HRR_CAPTURE_OUTPUT` alone. Today there is one
+Capture is disabled by default on AMD platforms at present (see the [README](README.md)).
+Where it is built in, it is armed by `HIP_HRR_CAPTURE_OUTPUT` and records only with the
+consent of the user who runs the process (see [Consent](#consent)). Today there is one
 mode, and it records **contents**: everything in the tables below.
 
 [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) adds a
@@ -62,7 +63,8 @@ every capture is a contents capture.
 | Marker that capture is running: on Linux the boot id and the process start time in clock ticks since boot; on Windows the process creation date and time. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
 
 The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `event_count`,
-`blob_count`, the HIP and comgr versions, and one block per device:
+`blob_count`, the HIP and comgr versions, `capture_consent` (where the consent came from,
+`"file"` or `"HIP_HRR_CAPTURE_CONSENT"`, never the file's path), and one block per device:
 
 | Device field | Kept | Removed by |
 |---|---|---|
@@ -78,8 +80,10 @@ This table covers `manifest.json` only. The copy of the device properties a
 
 ## Never recorded
 
-Capture does not read the host name, the command line, environment variables or the user
-name, and records a date and time of day only in the `active` marker on Windows. A string
+Capture does not read the host name, the command line or the user name, and records a
+date and time of day only in the `active` marker on Windows. It reads only its own
+environment variables and the ones that locate the consent file (`XDG_CONFIG_HOME` and
+`HOME`, or `APPDATA` on Windows), and records none of their values. A string
 reaches the archive only as a kernel name; as a string argument of a HIP call (the path
 given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name given to
 `hipGetProcAddress`); as the name of a device variable the program registers; as a character
@@ -99,13 +103,24 @@ address. It holds no buffer contents and no code, so it cannot reproduce a fault
 depends on values, and it cannot be replayed in full. A contents archive is as sensitive
 as the data the workload handled: where it may go has to be agreed before it is sent.
 
+## Consent
+
+Capture writes nothing until the user who runs the process has said yes
+([AIRUNTIME-2857](https://amd-hub.atlassian.net/browse/AIRUNTIME-2857)): once, with the
+line `yes` in their own file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`
+(`%APPDATA%\hrr\capture-consent` on Windows), or for one run with
+`HIP_HRR_CAPTURE_CONSENT=yes`, for CI and containers. Any other value of the variable
+withholds consent for that run, whatever the file says. On Linux a consent file owned by
+another user does not count. Without consent the process runs unrecorded, creates no
+archive and says why in one line on stderr; it never prompts. The consent covers the user
+who gave it, not the other people whose data the workload handles: an archive of a
+serving stack still holds its clients' prompts, as listed above.
+
 ## How the archive is protected on disk
 
 On Linux the archive is readable only by the user who captured it (directories 0700, files
 0600). [AIRUNTIME-2847](https://amd-hub.atlassian.net/browse/AIRUNTIME-2847) makes every
 write go through the directory descriptors capture checked.
-[AIRUNTIME-2857](https://amd-hub.atlassian.net/browse/AIRUNTIME-2857) decides whether
-capture must ask for consent before it starts.
 [AIRUNTIME-2878](https://amd-hub.atlassian.net/browse/AIRUNTIME-2878) keeps the crash-time
 flush without displacing the application's own crash handler. None of these changes what an
 archive contains.
