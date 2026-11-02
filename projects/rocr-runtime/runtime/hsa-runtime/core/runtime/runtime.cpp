@@ -1223,11 +1223,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
     info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
                                            : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
-    // SVM is host-backed, so the agent VA is the host VA when the driver has
-    // no object for this reservation. An unregistered reservation still falls
-    // through to the driver query, which replaces this when it recognizes the
-    // address. A bare reservation has no backing, so its agent base stays null.
-    info->agentBaseAddress = addressHandle->svm_attrib ? info->hostBaseAddress : nullptr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
