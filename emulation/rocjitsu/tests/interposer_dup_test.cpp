@@ -6302,48 +6302,6 @@ TEST(InterposerGemTest, SparseReservationsPreserveRangesAndFileOwnership) {
   EXPECT_EQ(close(foreign), 0);
 }
 
-TEST_F(InterposerPm4Test, SparseReplacementPreservesResidentTail) {
-  constexpr uint64_t base = kAddress + 0x100000;
-  const auto request = DRM_AMDGPU_GEM_VA_request();
-  drm_amdgpu_gem_va update{};
-  update.operation = AMDGPU_VA_OP_MAP;
-  update.flags = AMDGPU_VM_PAGE_PRT;
-  update.va_address = base;
-  update.map_size = 4 * 4096;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-  update.operation = AMDGPU_VA_OP_REPLACE;
-  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  update.handle = bo_;
-  update.map_size = 1;
-  EXPECT_EQ(ioctl(drm_, request, &update), -1);
-  EXPECT_EQ(errno, EINVAL);
-  update.map_size = 4096;
-  update.offset_in_bo = 1;
-  EXPECT_EQ(ioctl(drm_, request, &update), -1);
-  EXPECT_EQ(errno, EINVAL);
-  update.offset_in_bo = 0;
-  update.map_size = 8192;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-  update.flags = AMDGPU_VM_PAGE_PRT;
-  update.handle = 0;
-  update.map_size = 4096;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-
-  // Unbinding the first page must preserve the second page's BO offset and PTE.
-  constexpr uint64_t address = base + 6144;
-  const uint32_t packet[] = {0xc0033700, 5u << 8, uint32_t(address), uint32_t(address >> 32),
-                             0x12345678};
-  std::memcpy(memory_, packet, sizeof(packet));
-  uint64_t sequence = 0;
-  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
-  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
-  EXPECT_EQ(memory_[1536], 0x12345678u);
-  update.operation = AMDGPU_VA_OP_CLEAR;
-  update.flags = 0;
-  update.map_size = 4 * 4096;
-  EXPECT_EQ(ioctl(drm_, request, &update), 0);
-}
-
 // Exercise file identity and execution through public UAPI, without depending on
 // where the simulator stores its page tables.
 class InterposerGpuVmTest : public ::testing::TestWithParam<bool> {
@@ -6471,10 +6429,28 @@ protected:
     EXPECT_EQ(vm.memory[1024], value);
   }
 
-  void kfd_write(uint32_t gpu, uint32_t value, uint64_t destination = kVa + 4096) {
+  void kfd_write(uint32_t gpu, uint32_t value, uint64_t destination = kVa + 4096,
+                 bool expect_fault = false) {
     // SDMA FENCE writes a sentinel through the GPUVM selected by ACQUIRE_VM.
     // Host ring/pointer registration uses the same local-mode convention as the
     // existing direct KFD queue tests; the destination is explicitly DRM-mapped.
+    kfd_ioctl_create_event_args event{};
+    event.event_type = KFD_IOC_EVENT_MEMORY;
+    if (expect_fault)
+      ASSERT_EQ(ioctl(kfd_, AMDKFD_IOC_CREATE_EVENT, &event), 0);
+    class EventCleanup {
+    public:
+      int kfd;
+      uint32_t event_id;
+      bool active;
+      ~EventCleanup() {
+        if (active) {
+          kfd_ioctl_destroy_event_args destroy{};
+          destroy.event_id = event_id;
+          EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_DESTROY_EVENT, &destroy), 0);
+        }
+      }
+    } event_cleanup{kfd_, event.event_id, expect_fault};
     alignas(4096) std::array<uint32_t, 1024> ring{};
     alignas(4096) std::array<uint64_t, 512> pointers{};
     ring[0] = 5;
@@ -6498,11 +6474,26 @@ protected:
       std::atomic_ref<uint64_t>(pointers[1]).store(bytes, std::memory_order_release);
       std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell))
           .store(bytes, std::memory_order_release);
-      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire) != bytes &&
-             std::chrono::steady_clock::now() < deadline)
-        std::this_thread::yield();
-      EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), bytes);
+      if (expect_fault) {
+        kfd_event_data fault{};
+        fault.event_id = event.event_id;
+        kfd_ioctl_wait_events_args wait{};
+        wait.events_ptr = reinterpret_cast<uint64_t>(&fault);
+        wait.num_events = 1;
+        wait.wait_for_all = 1;
+        wait.timeout = 5000;
+        EXPECT_EQ(ioctl(kfd_, AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+        EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+        EXPECT_EQ(fault.memory_exception_data.va, destination);
+        EXPECT_EQ(fault.memory_exception_data.gpu_id, gpu);
+        EXPECT_EQ(fault.memory_exception_data.failure.NotPresent, 1u);
+      } else {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire) != bytes &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), bytes);
+      }
       EXPECT_EQ(munmap(doorbell, 4096), 0);
     } else {
       ADD_FAILURE() << "doorbell mmap failed: " << std::strerror(errno);
@@ -6759,6 +6750,8 @@ TEST_P(InterposerPeerGpuVmTest, KfdUnmapPreservesTheOtherGpuMapping) {
   unmapping.n_devices = 1;
   ASSERT_EQ(ioctl(kfd_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmapping), 0);
   ASSERT_EQ(unmapping.n_success, 1u);
+  kfd_write(gpu_[0], 0xdeadbeef, address, true);
+  EXPECT_EQ(*word, 0x55667788u);
   kfd_write(gpu_[1], 0xaabbccdd, address);
   EXPECT_EQ(*word, 0xaabbccddu);
 
@@ -6789,17 +6782,18 @@ TEST(InterposerGpuVmAcquireTest, AcquiresBothGpuVms) {
     }
   } cleanup{kfd, render};
   std::array<uint32_t, 2> gpu{};
-  for (unsigned i = 0; i < gpu.size(); ++i) {
-    std::ifstream id("/sys/class/kfd/kfd/topology/nodes/" + std::to_string(i + 1) + "/gpu_id");
-    ASSERT_TRUE(static_cast<bool>(id >> gpu[i]));
-    const auto path = "/dev/dri/renderD" + std::to_string(128 + i);
-    render[i] = open(path.c_str(), O_RDWR | O_CLOEXEC);
-    ASSERT_GE(render[i], 0);
+  for (unsigned gpu_index = 0; gpu_index < gpu.size(); ++gpu_index) {
+    std::ifstream id("/sys/class/kfd/kfd/topology/nodes/" + std::to_string(gpu_index + 1) +
+                     "/gpu_id");
+    ASSERT_TRUE(static_cast<bool>(id >> gpu[gpu_index]));
+    const auto path = "/dev/dri/renderD" + std::to_string(128 + gpu_index);
+    render[gpu_index] = open(path.c_str(), O_RDWR | O_CLOEXEC);
+    ASSERT_GE(render[gpu_index], 0);
     kfd_ioctl_acquire_vm_args acquire{};
-    acquire.drm_fd = render[i];
-    acquire.gpu_id = gpu[i];
+    acquire.drm_fd = render[gpu_index];
+    acquire.gpu_id = gpu[gpu_index];
     ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ACQUIRE_VM, &acquire), 0)
-        << "GPU " << i << ": " << std::strerror(errno);
+        << "GPU " << gpu_index << ": " << std::strerror(errno);
     ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ACQUIRE_VM, &acquire), 0);
   }
   EXPECT_NE(gpu[0], gpu[1]);

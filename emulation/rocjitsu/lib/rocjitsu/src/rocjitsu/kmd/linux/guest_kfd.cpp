@@ -7,6 +7,7 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/rpc.h"
+#include "rocjitsu/kmd/linux/simulated_kfd.h"
 
 #include "util/log.h"
 
@@ -1188,6 +1189,13 @@ int GuestKfd::acquire_vm_ioctl(void *arg) {
   }
   if (args->gpu_id == guest_.gpu_id)
     return 0;
+  // Simulator-backed DBT uses synthetic render descriptors and the execution
+  // driver's fallback VM; there is no interposer-owned DRM file to acquire.
+  if (auto *simulated = dynamic_cast<SimulatedKfd *>(execution_driver_)) {
+    for (uint32_t ordinal = 0; ordinal < simulated->num_gpus(); ++ordinal)
+      if (args->gpu_id == simulated->gpu_id_at(ordinal))
+        return 0;
+  }
   return forward_ioctl(AMDKFD_IOC_ACQUIRE_VM, arg);
 }
 

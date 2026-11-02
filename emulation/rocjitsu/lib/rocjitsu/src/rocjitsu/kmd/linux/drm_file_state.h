@@ -20,8 +20,9 @@ namespace rocjitsu {
 class LinuxKfd;
 class RemoteDriver;
 
-/// Backend identity for a DRM file. Simulated local files use a weak route;
-/// guest/remote files preserve their counted operational lease.
+/// @brief Backend identity for a DRM file.
+/// @details Simulated local files use a weak route; guest/remote files preserve
+/// their counted operational lease.
 class DrmBackendLease {
 public:
   DrmBackendLease() = default;

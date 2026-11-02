@@ -54,7 +54,8 @@ public:
   KfdAddressSpace legacy_address_space_;
 
   /// @brief Per-GPU state within a process.
-  struct PerGpuState {
+  class PerGpuState {
+  public:
     /// @brief One live client mapping of the canonical doorbell backing.
     struct DoorbellView {
       void *page = nullptr;

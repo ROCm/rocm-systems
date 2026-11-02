@@ -12,22 +12,23 @@
 
 namespace rocjitsu {
 
-/// One DRM file's translation state and registration on a GPU.
-/// The runtime's GpuVm and GpuMemory must outlive this object. File cleanup
+/// @brief One DRM file's translation state and registration on a GPU.
+/// @details The runtime's GpuVm and GpuMemory must outlive this object. File cleanup
 /// retires queues before releasing the VM, and runtime teardown drains files
 /// before destroying the GPU services.
 class DrmVm {
 public:
   DrmVm(amdgpu::GpuVm &gpu_vm, amdgpu::GpuMemory *backing, uint32_t ordinal, uint32_t vmid,
         bool passthrough, std::shared_ptr<amdgpu::MemoryFaultReporter> reporter = {})
-      : gpu_ordinal(ordinal), gpu_vm_(&gpu_vm), adapter_(gpu_vm, backing) {
+      : gpu_ordinal(ordinal), gpu_vm_(&gpu_vm), reporter_(std::move(reporter)),
+        adapter_(gpu_vm, backing) {
     // Snapshots retain the table and reporter without retaining this VM, which
     // would create a VM -> adapter -> binding -> VM ownership cycle.
     struct BindingLifetime {
       std::shared_ptr<KfdAddressSpace> memory;
       std::shared_ptr<amdgpu::MemoryFaultReporter> reporter;
     };
-    auto lifetime = std::make_shared<BindingLifetime>(BindingLifetime{memory, std::move(reporter)});
+    auto lifetime = std::make_shared<BindingLifetime>(BindingLifetime{memory, reporter_});
     address_space_ =
         adapter_.register_address_space(vmid,
                                         {.page_table = &memory->page_table_,
@@ -51,9 +52,11 @@ public:
     return address_space_ && gpu_vm_ == &gpu_vm;
   }
   amdgpu::LegacyGpuVmAdapter &adapter() { return adapter_; }
+  amdgpu::MemoryFaultReporter *fault_reporter() const { return reporter_.get(); }
 
 private:
   amdgpu::GpuVm *gpu_vm_;
+  const std::shared_ptr<amdgpu::MemoryFaultReporter> reporter_;
   amdgpu::LegacyGpuVmAdapter adapter_;
   amdgpu::AddressSpaceHandle address_space_;
 };

@@ -680,8 +680,7 @@ VmAccessOutcome L2Cache::flush_all(uint32_t vmid) {
 VmAccessOutcome L2Cache::flush_address_space(uint32_t vmid) {
   auto maintenance_lock = acquire_cache_maintenance();
   const VmAccessOutcome outcome = flush_dirty_locked(vmid);
-  if (outcome == VmAccessOutcome::Complete)
-    cache_.invalidate_all(vmid);
+  cache_.invalidate_clean_vmid(vmid);
   return outcome;
 }
 
@@ -694,12 +693,15 @@ VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty([this, &dirty_count, &min_addr, &max_addr, vmid,
                          &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-    if ((vmid && tag.vmid != *vmid) || outcome != VmAccessOutcome::Complete)
+    if (vmid && tag.vmid != *vmid)
       return;
-    // Each dirty line is written back under its own owning vmid.
-    outcome = publish_dirty_bytes(line_addr, data, tag.vmid);
-    if (outcome != VmAccessOutcome::Complete)
+    // A retired VMID must not prevent writeback for other address spaces.
+    const VmAccessOutcome line_outcome = publish_dirty_bytes(line_addr, data, tag.vmid);
+    if (line_outcome != VmAccessOutcome::Complete) {
+      if (outcome == VmAccessOutcome::Complete)
+        outcome = line_outcome;
       return;
+    }
     tag.dirty = false;
     ++dirty_count;
     if (line_addr < min_addr)
@@ -722,11 +724,12 @@ VmAccessOutcome L2Cache::flush_dirty_to_legacy_backing_locked() {
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   cache_.for_each_dirty(
       [this, &outcome](simdojo::CacheTag &tag, uint64_t line_addr, uint8_t *data) {
-        if (outcome != VmAccessOutcome::Complete)
-          return;
-        outcome = publish_dirty_bytes_to_legacy_backing(line_addr, data, tag.vmid);
-        if (outcome == VmAccessOutcome::Complete)
+        const VmAccessOutcome line_outcome =
+            publish_dirty_bytes_to_legacy_backing(line_addr, data, tag.vmid);
+        if (line_outcome == VmAccessOutcome::Complete)
           tag.dirty = false;
+        else if (outcome == VmAccessOutcome::Complete)
+          outcome = line_outcome;
       });
   return outcome;
 }

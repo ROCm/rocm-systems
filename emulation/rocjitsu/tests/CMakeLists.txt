@@ -2507,9 +2507,14 @@ rj_add_interposer_test_suite(
     AcquiredVmSurvivesTheLastUserspaceDrmClose/SameGpu
     AcquiredVmSurvivesTheLastUserspaceDrmClose/DifferentGpus
 )
+get_filename_component(
+    _rj_gpu_vm_config_suffix
+    "${RJ_CDNA4_KMD_2GPU_CONFIG}"
+    NAME_WE
+)
 set_tests_properties(
-    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/SameGpu.gfx950_mi355x_kmd_2gpu"
-    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/DifferentGpus.gfx950_mi355x_kmd_2gpu"
+    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/SameGpu.${_rj_gpu_vm_config_suffix}"
+    "DrmFiles/InterposerGpuVmTest.DrmAndAcquiredBindingSurviveAllApplicationKfdCloses/DifferentGpus.${_rj_gpu_vm_config_suffix}"
     PROPERTIES TIMEOUT 30
 )
 

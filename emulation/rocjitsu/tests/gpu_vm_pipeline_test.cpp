@@ -52,14 +52,19 @@ protected:
   static constexpr uint32_t kDestination = 8;
 
   void SetUp() override {
-    loaded_ = config::load_config(std::string(CONFIG_DIR) + "/" + GetParam(), kEmbeddedSchema);
+    util::StringDiagnostic diagnostic;
+    auto result = config::load_config(std::string(CONFIG_DIR) + "/" + GetParam(), kEmbeddedSchema,
+                                      diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    loaded_ = std::move(result).value();
     soc_ = loaded_.soc();
     memory_ = loaded_.memory();
     loaded_.engine_config.num_threads = 1;
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
     engine_->topology().set_root(loaded_.take_root());
-    loaded_.wire_links(engine_->topology());
-    engine_->create();
+    ASSERT_TRUE(loaded_.wire_links(engine_->topology(), diagnostic.emitter()).succeeded())
+        << diagnostic.message();
+    ASSERT_TRUE(engine_->create(diagnostic.emitter()).succeeded()) << diagnostic.message();
     cu_ = soc_->xcd(0)->shader_engine(0)->compute_unit(0);
     cu_->set_gpu_vm(&soc_->gpu_vm());
     for (uint32_t index = 0; index < 2; ++index) {

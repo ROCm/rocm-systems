@@ -2171,12 +2171,12 @@ TEST_F(KfdIoctlCdna5Test, ZeroRingSizeNormalizesAndNullBaseSuspendsAql) {
   std::memcpy(code.data() + sizeof(descriptor), &endpgm, sizeof(endpgm));
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
-  process->map_pages(kKernelAddress, code.data(), code.size());
+  process->legacy_address_space_.map_pages(kKernelAddress, code.data(), code.size());
 
   alignas(4096) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
   alignas(4096) amd_queue_v2_t queue_descriptor{};
-  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
-                     sizeof(queue_descriptor));
+  process->legacy_address_space_.map_pages(reinterpret_cast<uint64_t>(&queue_descriptor),
+                                           &queue_descriptor, sizeof(queue_descriptor));
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna5GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
@@ -2269,8 +2269,9 @@ TEST_F(KfdIoctlCdna5Test, ZeroRingSizeNormalizesAndNullBaseSuspendsAql) {
   kfd_ioctl_destroy_queue_args destroy{};
   destroy.queue_id = create.queue_id;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
-  process->unmap_pages(kKernelAddress, code.size());
-  process->unmap_pages(reinterpret_cast<uint64_t>(&queue_descriptor), sizeof(queue_descriptor));
+  process->legacy_address_space_.unmap_pages(kKernelAddress, code.size());
+  process->legacy_address_space_.unmap_pages(reinterpret_cast<uint64_t>(&queue_descriptor),
+                                             sizeof(queue_descriptor));
 }
 
 TEST_F(KfdIoctlCdna5Test, UpdateQueueValidatesRingAndRejectsMissingQueue) {
@@ -2304,14 +2305,16 @@ TEST_P(KfdGwsFailureTest, MultipleCuFailuresPublishWithoutAcknowledgment) {
   alignas(4096) std::array<uint8_t, 4096> exception_page{};
   auto process = driver_->find_process(driver_->local_process_id());
   ASSERT_NE(process, nullptr);
-  process->map_pages(reinterpret_cast<uint64_t>(cwsr.data()), cwsr.data(), cwsr.size());
-  process->map_pages(kStatusAddress, exception_page.data(), exception_page.size());
+  process->legacy_address_space_.map_pages(reinterpret_cast<uint64_t>(cwsr.data()), cwsr.data(),
+                                           cwsr.size());
+  process->legacy_address_space_.map_pages(kStatusAddress, exception_page.data(),
+                                           exception_page.size());
   std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kStatusAddress, sizeof(kStatusAddress));
   std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kEventId, sizeof(kEventId));
   alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
   alignas(4096) amd_queue_v2_t queue_descriptor{};
-  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
-                     sizeof(queue_descriptor));
+  process->legacy_address_space_.map_pages(reinterpret_cast<uint64_t>(&queue_descriptor),
+                                           &queue_descriptor, sizeof(queue_descriptor));
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = kCdna2GpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
@@ -4218,7 +4221,7 @@ TEST_P(KfdRuntimeSaveTest, PreservesQueueOwnershipAndRuntimeHeaders) {
   }
   auto process = driver_->find_process(driver_->local_process_id());
   std::vector<uint8_t> save(static_cast<size_t>(area_size) * soc_->num_xcds());
-  process->map_pages(save_address, save.data(), save.size());
+  process->legacy_address_space_.map_pages(save_address, save.data(), save.size());
   for (uint32_t xcc = 0; xcc < soc_->num_xcds(); ++xcc) {
     // libhsakmt places the shared debugger region after every XCC save area.
     const std::array<uint32_t, 6> owned = {(soc_->num_xcds() - xcc) * area_size,
@@ -4401,7 +4404,7 @@ TEST_P(KfdRuntimeSaveTest, PreservesQueueOwnershipAndRuntimeHeaders) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EFAULT);
   state.ctl_stack_address = save_address;
   // A failed image query must not undo the caller's explicit suspension.
-  process->unmap_pages(save_address, save.size());
+  process->legacy_address_space_.unmap_pages(save_address, save.size());
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EIO);
   for (uint32_t xcc = 0; xcc < soc_->num_xcds(); ++xcc)
     EXPECT_TRUE(soc_->xcd(xcc)->command_processor()->queue_runtime_suspended_for_test(
@@ -4423,7 +4426,7 @@ TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   const uint32_t pid = driver_->local_process_id();
   auto process = driver_->find_process(pid);
   std::vector<uint8_t> save(area_size * soc_->num_xcds());
-  process->map_pages(save_address, save.data(), save.size());
+  process->legacy_address_space_.map_pages(save_address, save.data(), save.size());
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
@@ -4467,14 +4470,14 @@ TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   control.suspend_queues.num_queues = 1;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 1);
   ASSERT_TRUE(wave->debug_suspended());
-  process->unmap_pages(save_address, save.size());
+  process->legacy_address_space_.unmap_pages(save_address, save.size());
   control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
   control.resume_queues.num_queues = 1;
   ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &control), 0);
   ASSERT_FALSE(wave->debug_suspended());
   ASSERT_FALSE(wave->debug_halted());
-  process->map_pages(save_address, save.data(), save.size());
+  process->legacy_address_space_.map_pages(save_address, save.data(), save.size());
   wave->pc = 0x12340100;
   kfd_ioctl_update_queue_args update{};
   update.queue_id = create.queue_id;
@@ -4504,10 +4507,11 @@ TEST_P(KfdFatalTrapSaveTest, RuntimeImageContainsTheInterruptedApplicationPc) {
   constexpr uint64_t kHandlerPc = 0x600200000ULL;
   auto process = driver_->find_process(driver_->local_process_id());
   std::vector<uint8_t> context(kAreaSize * soc_->num_xcds());
-  process->map_pages(kContext, context.data(), context.size());
+  process->legacy_address_space_.map_pages(kContext, context.data(), context.size());
   alignas(64) std::array<uint8_t, 4096> ring{};
   alignas(4096) amd_queue_v2_t descriptor{};
-  process->map_pages(reinterpret_cast<uint64_t>(&descriptor), &descriptor, sizeof(descriptor));
+  process->legacy_address_space_.map_pages(reinterpret_cast<uint64_t>(&descriptor), &descriptor,
+                                           sizeof(descriptor));
   kfd_ioctl_create_queue_args create{};
   create.gpu_id = GetParam() ? kCdna5GpuId : kGpuId;
   create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
@@ -10607,8 +10611,8 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   }
   auto process = driver_->find_process(driver_->local_process_id());
   std::vector<uint8_t> code(4096), save(area_size * soc_->num_xcds());
-  process->map_pages(kernel, code.data(), code.size());
-  process->map_pages(context, save.data(), save.size());
+  process->legacy_address_space_.map_pages(kernel, code.data(), code.size());
+  process->legacy_address_space_.map_pages(context, save.data(), save.size());
   alignas(64) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
   uint64_t read_pointer = 0, write_pointer = 0;
   kfd_ioctl_create_queue_args create{};
@@ -10660,7 +10664,7 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   std::array<uint32_t, 1024> data{};
   data[0] = 0x12345678;
   if (!replay)
-    process->map_pages(0, data.data(), sizeof(data));
+    process->legacy_address_space_.map_pages(0, data.data(), sizeof(data));
   ASSERT_FALSE(wave->wait_counters().empty());
   if (attached) {
     uint32_t queue_id = create.queue_id;
@@ -10685,7 +10689,7 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   if (replay) {
     // Resume the saved issuing PC after backing appears. The retained operation
     // was cancelled, so execution re-issues the load exactly once.
-    process->map_pages(0, data.data(), sizeof(data));
+    process->legacy_address_space_.map_pages(0, data.data(), sizeof(data));
     uint32_t queue_id = create.queue_id;
     kfd_ioctl_dbg_trap_args resume{};
     resume.pid = static_cast<uint32_t>(getpid());
@@ -10714,8 +10718,8 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   constexpr uint32_t area_size = 0x10000, expected = 0x12345678;
   auto process = driver_->find_process(driver_->local_process_id());
   std::vector<uint8_t> code(4096), save(area_size * soc_->num_xcds());
-  process->map_pages(kernel, code.data(), code.size());
-  process->map_pages(context, save.data(), save.size());
+  process->legacy_address_space_.map_pages(kernel, code.data(), code.size());
+  process->legacy_address_space_.map_pages(context, save.data(), save.size());
   alignas(64) std::array<hsa_kernel_dispatch_packet_t, 64> ring{};
   uint64_t read_pointer = 0, write_pointer = 0;
   kfd_ioctl_create_queue_args create{};
@@ -10751,7 +10755,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   // Both reads are retained at the same unavailable address. A frontend
   // retains the first terminal fault and makes backing available for the next
   // wave, without issuing any more instructions on this runtime-paused CU.
-  process->map_pages(0, reinterpret_cast<void *>(4096), 4096);
+  process->legacy_address_space_.map_pages(0, reinterpret_cast<void *>(4096), 4096);
   std::array<uint32_t, 1024> data{};
   data[0] = expected;
   uint32_t faults = 0;
@@ -10760,7 +10764,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
     ++faults;
     wave.set_fatal_exception_pending(true);
     wave.set_debug_suspended(true);
-    process->map_pages(0, data.data(), sizeof(data));
+    process->legacy_address_space_.map_pages(0, data.data(), sizeof(data));
     return true;
   });
   struct Guard {
@@ -11115,10 +11119,10 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
   std::vector<uint8_t> context(kAreaSize * soc_->num_xcds());
   std::memcpy(context.data() + 24, &kStatus, sizeof(kStatus));
   std::memcpy(context.data() + 32, &kEvent, sizeof(kEvent));
-  process->map_pages(kCode, code.data(), sizeof(code));
-  process->map_pages(kData, data.data(), sizeof(data));
-  process->map_pages(kContext, context.data(), context.size());
-  process->map_pages(kStatus, status.data(), sizeof(status));
+  process->legacy_address_space_.map_pages(kCode, code.data(), sizeof(code));
+  process->legacy_address_space_.map_pages(kData, data.data(), sizeof(data));
+  process->legacy_address_space_.map_pages(kContext, context.data(), context.size());
+  process->legacy_address_space_.map_pages(kStatus, status.data(), sizeof(status));
   alignas(64) std::array<uint8_t, 4096> ring{};
   uint64_t read_pointer = 0, write_pointer = 0;
   kfd_ioctl_create_queue_args create{};
@@ -11151,7 +11155,7 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
     rocjitsu::amdgpu::AddressSpaceHandle handle_;
   };
   auto group = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
-  auto plugin = std::make_unique<RevokeBeforeLoad>(soc_->gpu_vm(), process->gpu(0).address_space);
+  auto plugin = std::make_unique<RevokeBeforeLoad>(soc_->gpu_vm(), process->gpu(0).address_space());
   auto *revoke = plugin.get();
   ASSERT_TRUE(group->add(std::move(plugin)));
   soc_->set_plugin_group(group);
@@ -11173,7 +11177,7 @@ TEST_F(KfdIoctlTest, OtherProcessDebuggerDoesNotClaimARevokedRuntimeProbe) {
   auto *wave = cu->dispatch_wf(0, kCode, 16, 4);
   ASSERT_NE(wave, nullptr);
   wave->set_process_id(pid);
-  wave->set_address_space(process->gpu(0).address_space);
+  wave->set_address_space(process->gpu(0).address_space());
   wave->set_queue_id(create.queue_id);
   wave->set_dispatch_id(7);
   wave->debug_write_sgpr(0, static_cast<uint32_t>(kData));
@@ -11200,9 +11204,9 @@ TEST_P(KfdMemoryFaultPcTest, RuntimeReceivesEveryFaultWithoutRepeatedAcknowledgm
     SCOPED_TRACE(attached);
     auto process = driver_->find_process(driver_->local_process_id());
     std::vector<uint8_t> code(4096), context(kAreaSize * soc_->num_xcds()), status(4096);
-    process->map_pages(kKernel, code.data(), code.size());
-    process->map_pages(kContext, context.data(), context.size());
-    process->map_pages(kStatus, status.data(), status.size());
+    process->legacy_address_space_.map_pages(kKernel, code.data(), code.size());
+    process->legacy_address_space_.map_pages(kContext, context.data(), context.size());
+    process->legacy_address_space_.map_pages(kStatus, status.data(), status.size());
     std::memcpy(context.data() + 24, &kStatus, sizeof(kStatus));
     std::memcpy(context.data() + 32, &kEvent, sizeof(kEvent));
     if (attached) {
@@ -12584,7 +12588,7 @@ TEST_F(KfdIoctlTest, RuntimeQueryCoordinatesWithExternalDebuggerContextEdits) {
   ASSERT_NE(inferior, 0u);
   auto process = daemon.find_process(inferior);
   const uint64_t context = reinterpret_cast<uint64_t>(save);
-  process->map_pages(context, save, save_bytes);
+  process->legacy_address_space_.map_pages(context, save, save_bytes);
   kfd_ioctl_runtime_enable_args runtime{};
   runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
   ASSERT_EQ(daemon.ioctl(inferior, AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);

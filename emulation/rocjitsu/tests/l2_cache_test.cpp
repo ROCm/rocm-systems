@@ -504,6 +504,122 @@ TEST(L2CacheTest, FailedDirectDirtyFlushRetainsLineForRetry) {
   EXPECT_EQ(physical->load<uint32_t>(kAddress), kDirty);
 }
 
+TEST(L2CacheTest, RetiredVmidDoesNotBlockOtherDirtyWritebacks) {
+  using Outcome = rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kRetiredVmid = 76;
+  constexpr uint32_t kLiveVmid = 77;
+  constexpr uint32_t kDirty = 0x12345678;
+  auto translator = std::make_shared<IdentityAddressSpace>(256);
+  auto retired_physical = std::make_shared<ConfigurablePhysicalMemory>(256);
+  auto live_physical = std::make_shared<ConfigurablePhysicalMemory>(256);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  const rocjitsu::amdgpu::AddressSpaceHandle retired_handle =
+      gpu_vm.register_translated(kRetiredVmid, translator, retired_physical);
+  ASSERT_TRUE(retired_handle);
+  ASSERT_TRUE(gpu_vm.register_translated(kLiveVmid, translator, live_physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  std::memcpy(dirty_line.data(), &kDirty, sizeof(kDirty));
+  // Put the retired owner first in the same set's traversal order.
+  ASSERT_EQ(l2.writeback_line(0, dirty_line.data(), 0, sizeof(kDirty), Mtype::RW, kRetiredVmid),
+            Outcome::Complete);
+  ASSERT_EQ(l2.writeback_line(0, dirty_line.data(), 0, sizeof(kDirty), Mtype::RW, kLiveVmid),
+            Outcome::Complete);
+  ASSERT_TRUE(gpu_vm.unregister_address_space(retired_handle));
+
+  EXPECT_EQ(l2.flush_all(), Outcome::Faulted);
+  EXPECT_EQ(live_physical->load<uint32_t>(0), kDirty);
+  EXPECT_EQ(retired_physical->load<uint32_t>(0), 0u);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+  EXPECT_EQ(l2.flush_all(), Outcome::Faulted);
+  EXPECT_EQ(live_physical->write_calls, 1u);
+  EXPECT_EQ(l2.backing_write_transactions(), 3u);
+}
+
+TEST(L2CacheTest, FlushVmidPreservesUnrelatedDirtyLines) {
+  using Outcome = rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kTargetVmid = 78;
+  constexpr uint32_t kOtherVmid = 79;
+  constexpr uint32_t kDirty = 0x12345678;
+  constexpr uint32_t kUpdated = 0x87654321;
+  auto translator = std::make_shared<IdentityAddressSpace>(256);
+  auto target_physical = std::make_shared<ConfigurablePhysicalMemory>(256);
+  auto other_physical = std::make_shared<ConfigurablePhysicalMemory>(256);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kTargetVmid, translator, target_physical));
+  ASSERT_TRUE(gpu_vm.register_translated(kOtherVmid, translator, other_physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  std::memcpy(dirty_line.data(), &kDirty, sizeof(kDirty));
+  ASSERT_EQ(l2.writeback_line(0, dirty_line.data(), 0, sizeof(kDirty), Mtype::RW, kTargetVmid),
+            Outcome::Complete);
+  ASSERT_EQ(l2.writeback_line(0, dirty_line.data(), 0, sizeof(kDirty), Mtype::RW, kOtherVmid),
+            Outcome::Complete);
+  uint32_t observed = 0;
+  ASSERT_EQ(l2.read(128, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW,
+                    kTargetVmid),
+            Outcome::Complete);
+
+  ASSERT_EQ(l2.flush_address_space(kTargetVmid), Outcome::Complete);
+  EXPECT_EQ(target_physical->load<uint32_t>(0), kDirty);
+  EXPECT_EQ(other_physical->write_calls, 0u);
+  EXPECT_EQ(l2.backing_write_transactions(), 1u);
+  target_physical->store(0, kUpdated);
+  target_physical->store(128, kUpdated);
+  for (uint64_t address : {0u, 128u}) {
+    ASSERT_EQ(l2.read(address, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW,
+                      kTargetVmid),
+              Outcome::Complete);
+    EXPECT_EQ(observed, kUpdated);
+  }
+  ASSERT_EQ(
+      l2.read(0, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kOtherVmid),
+      Outcome::Complete);
+  EXPECT_EQ(observed, kDirty);
+  ASSERT_EQ(l2.flush_all(), Outcome::Complete);
+  EXPECT_EQ(other_physical->load<uint32_t>(0), kDirty);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+}
+
+TEST(L2CacheTest, FailedFlushVmidRetainsDirtyDataForRetry) {
+  using Outcome = rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 80;
+  constexpr uint32_t kDirty = 0x12345678;
+  auto translator = std::make_shared<IdentityAddressSpace>(256);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(256);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kVmid, translator, physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  std::memcpy(dirty_line.data(), &kDirty, sizeof(kDirty));
+  ASSERT_EQ(l2.writeback_line(0, dirty_line.data(), 0, sizeof(kDirty), Mtype::RW, kVmid),
+            Outcome::Complete);
+
+  physical->write_outcome = Outcome::Unavailable;
+  EXPECT_EQ(l2.flush_address_space(kVmid), Outcome::Unavailable);
+  EXPECT_EQ(physical->load<uint32_t>(0), 0u);
+  uint32_t observed = 0;
+  ASSERT_EQ(l2.read(0, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kVmid),
+            Outcome::Complete);
+  EXPECT_EQ(observed, kDirty);
+  EXPECT_EQ(physical->read_calls, 0u);
+  physical->write_outcome = Outcome::Complete;
+  ASSERT_EQ(l2.flush_address_space(kVmid), Outcome::Complete);
+  EXPECT_EQ(physical->load<uint32_t>(0), kDirty);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+  EXPECT_EQ(l2.flush_all(), Outcome::Complete);
+  EXPECT_EQ(l2.backing_write_transactions(), 2u);
+}
+
 TEST(L2CacheTest, FailedDirtyEvictionRestoresVictimForRetry) {
   constexpr uint32_t kVmid = 75;
   constexpr uint64_t kBase = 0x1000;

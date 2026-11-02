@@ -334,15 +334,29 @@ public:
         : driver_(driver), gpu_id_(gpu_id), process_(process),
           process_lifetime_(vmid ? nullptr : process), vmid_(vmid ? vmid : process->process_id()) {}
 
+    /// @brief Route DRM faults to the process that acquired the file.
+    void bind_process(const std::shared_ptr<KfdProcess> &process) {
+      std::lock_guard lock(process_mutex_);
+      process_ = process;
+    }
+
     void report_memory_fault(uint32_t vmid, uint64_t addr,
                              amdgpu::MemoryFaultCause cause) override {
-      if (auto process = process_.lock(); process && vmid_ == vmid)
+      if (vmid_ != vmid)
+        return;
+      std::shared_ptr<KfdProcess> process;
+      {
+        std::lock_guard lock(process_mutex_);
+        process = process_.lock();
+      }
+      if (process)
         driver_->report_memory_fault(process, addr, gpu_id_, cause);
     }
 
   private:
     SimulatedKfd *driver_ = nullptr;
     uint32_t gpu_id_ = 0;
+    std::mutex process_mutex_;
     std::weak_ptr<KfdProcess> process_;
     // Legacy snapshots reference the process-owned table. DRM snapshots retain
     // their separate translation state and must not form a process/VM cycle.

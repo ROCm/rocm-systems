@@ -12,17 +12,18 @@ namespace rocjitsu {
 struct DrmFileState;
 class LinuxKfd;
 
-/// Retires local DRM files while their runtime's GPU services are still alive.
-/// File deleters enqueue ownership; application calls drain with a runtime pin,
+/// @brief Retires local DRM files while their runtime's GPU services are still alive.
+/// @details File deleters enqueue ownership; application calls drain with a runtime pin,
 /// and the runtime deleter finishes retirement after stopping its producers.
 class DrmRetirementOwner {
 public:
-  /// Retire queues and GEM resources. Called without the owner mutex, before
-  /// deleting the file. Cleanup must not throw or retain the file.
+  /// @brief Retire queues and GEM resources.
+  /// @details Called without the owner mutex, before deleting the file. Cleanup
+  /// must not throw or retain the file.
   using Cleanup = std::function<void(DrmFileState &, LinuxKfd &)>;
 
-  /// A detached batch owns its runtime pin until cleanup and file deletion end.
-  /// It also owns its cleanup callback, so it can outlive the retirement owner.
+  /// @brief A detached batch owns its runtime pin until cleanup and file deletion end.
+  /// @details It also owns its cleanup callback, so it can outlive the retirement owner.
   class Batch {
   public:
     Batch();
@@ -47,21 +48,25 @@ public:
   DrmRetirementOwner(const DrmRetirementOwner &) = delete;
   DrmRetirementOwner &operator=(const DrmRetirementOwner &) = delete;
 
-  /// Bind once, before publishing any files. The weak pointer must share the
-  /// runtime's control block, as the interposer's simulated driver alias does.
+  /// @brief Bind once, before publishing any files.
+  /// @details The weak pointer must share the runtime's control block, as the interposer's
+  /// simulated driver alias does.
   void bind_backend(std::weak_ptr<LinuxKfd> backend);
-  /// Final release cannot allocate, including during allocation-failure unwind.
+  /// @brief Enqueue a file for retirement.
+  /// @details Final release cannot allocate, including during allocation-failure unwind.
   void enqueue(std::unique_ptr<DrmFileState> file) noexcept;
 
-  /// Leave files queued if the runtime pin cannot be acquired or teardown began.
+  /// @brief Detach files while retaining their runtime.
+  /// @details Leave files queued if the runtime pin cannot be acquired or teardown began.
   [[nodiscard]] Batch take_batch();
   void drain();
 
-  /// Runtime-deleter path only: stop application detachment before stopping and
-  /// joining the engine. No application batch can remain when that deleter runs.
+  /// @brief Stop application detachment before stopping and joining the engine.
+  /// @details Runtime-deleter path only. No application batch can remain when
+  /// that deleter runs.
   void begin_teardown();
-  /// Called after engine join and process close have released their file owners.
-  /// The caller owns the runtime's destruction sequence, keeping backend alive.
+  /// @brief Finish retirement after engine join and process close release their file owners.
+  /// @details The caller owns the runtime's destruction sequence, keeping backend alive.
   void finish_teardown(LinuxKfd &backend);
 
 private:

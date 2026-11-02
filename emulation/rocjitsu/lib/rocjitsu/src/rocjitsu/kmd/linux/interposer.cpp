@@ -2455,7 +2455,7 @@ public:
   struct GemEntry {
     std::shared_ptr<PrivateDrmFd>
         dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
-    uint64_t drm_file_id = 0; ///< Owning DRM file; the entry is reaped on its last close.
+    uint64_t drm_file_id = 0; ///< Owning DRM file; reaped after its last shared owner releases.
     uint64_t size = 0;
     size_t submission_refs = 0; ///< Jobs retaining backing after the handle closes.
     bool handle_closed = false; ///< Close invalidates the handle; jobs retain its backing.
@@ -2776,7 +2776,8 @@ public:
       int result = driver->submit_pm4(file->vm, queue_key, std::move(submission));
       {
         std::lock_guard lock(fd_mutex_);
-        // A concurrent final close may already have retired this file's queues.
+        // This ioctl retains the file, so queues survive a concurrent final
+        // descriptor close until the last shared file owner releases it.
         auto it = file->pm4_queues.find(*pending_queue);
         if (it != file->pm4_queues.end() && result) {
           it->second.fences.erase(sequence);

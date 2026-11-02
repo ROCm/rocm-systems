@@ -329,6 +329,22 @@ public:
     }
   }
 
+  /// @brief Invalidate clean lines owned by a VMID, preserving dirty lines for retry.
+  void invalidate_clean_vmid(uint32_t vmid) {
+    for (uint32_t set = 0; set < NumSets; ++set) {
+      if (!touched_sets_[set])
+        continue;
+      for (uint32_t way = 0; way < Associativity; ++way) {
+        CacheTag &tag = tag_at(set, way);
+        if (tag.valid && tag.vmid == vmid && !tag.dirty) {
+          tag.coherence_epoch = 0;
+          tag.valid = false;
+          tag.coherence = CoherenceState::INVALID;
+        }
+      }
+    }
+  }
+
   /// @brief Invalidate all cache lines, optionally restricted to one VMID.
   void invalidate_all(std::optional<uint32_t> vmid = std::nullopt) {
     for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {

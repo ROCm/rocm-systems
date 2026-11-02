@@ -8,6 +8,8 @@
 #include "rocjitsu/kmd/linux/guest_kfd.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -470,6 +472,7 @@ TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPa
   kfd_ioctl_map_memory_to_gpu_args map{};
   map.handle = alloc.handle;
   map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&alloc.gpu_id);
   EXPECT_EQ(driver->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
   EXPECT_NE(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
             rocjitsu::amdgpu::VmAccessOutcome::Complete);
@@ -482,6 +485,7 @@ TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPa
   kfd_ioctl_unmap_memory_from_gpu_args unmap{};
   unmap.handle = alloc.handle;
   unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&alloc.gpu_id);
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
   errno = 0;
   EXPECT_EQ(driver->mmap_replacing_client_doorbell_views(
@@ -887,6 +891,35 @@ protected:
     ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
   }
 
+  void expect_memory_fault() {
+    const auto proc = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(proc, nullptr);
+    proc->event_state_.adopt_page(event_slots_.data(), sizeof(event_slots_));
+    kfd_ioctl_create_event_args create{};
+    create.event_type = KFD_IOC_EVENT_MEMORY;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+    void *inaccessible = ::mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(inaccessible, MAP_FAILED);
+    const auto access = runtime_->soc->gpu_vm().snapshot(files_[0]->vm->address_space());
+    ASSERT_TRUE(access);
+    uint32_t value = 0;
+    EXPECT_EQ(access->read(reinterpret_cast<uint64_t>(inaccessible),
+                           std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+    kfd_event_data event{};
+    event.event_id = create.event_id;
+    kfd_ioctl_wait_events_args wait{};
+    wait.events_ptr = reinterpret_cast<uint64_t>(&event);
+    wait.num_events = 1;
+    wait.wait_for_all = 1;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+    EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+    EXPECT_EQ(event.memory_exception_data.gpu_id, gpu_[0]);
+    EXPECT_EQ(event.memory_exception_data.va, reinterpret_cast<uint64_t>(inaccessible));
+    EXPECT_EQ(::munmap(inaccessible, 4096), 0);
+  }
+
+  std::array<uint64_t, 64> event_slots_{};
   std::shared_ptr<rj_vm_t> runtime_;
   rocjitsu::SimulatedKfd *driver_ = nullptr;
   std::shared_ptr<rocjitsu::LinuxKfd> backend_;
@@ -978,6 +1011,117 @@ TEST_F(KfdDrmAcquisitionTest, UnmapOnUnmappedGpuPreservesPeerGem) {
   EXPECT_EQ(access->write(alloc.va_addr, std::as_bytes(std::span(&value, 1))),
             rocjitsu::amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(backing[0], value);
+  EXPECT_EQ(driver_->munmap(mapped, 4096), 0);
+}
+
+TEST_F(KfdDrmAcquisitionTest, FaultsReachProcessOpenedAfterDrmFile) {
+  driver_->close_all_processes();
+  files_[0]->vm = driver_->create_drm_vm(128);
+  ASSERT_NE(files_[0]->vm, nullptr);
+  ASSERT_GE(driver_->open(), 0);
+  ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+  expect_memory_fault();
+}
+
+TEST_F(KfdDrmAcquisitionTest, FaultsFollowFileAcquiredByNewProcess) {
+  ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+  driver_->close_all_processes();
+  ASSERT_GE(driver_->open(), 0);
+  ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+  expect_memory_fault();
+}
+
+TEST_F(KfdDrmAcquisitionTest, RetiresUnsharedFallbackMappingsBeforeFreeOrMunmap) {
+  // Keep a peer fallback registration alive across migration and both cleanup paths.
+  const auto peer = runtime_->vm->soc(1)->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(peer);
+  for (bool free_first : {true, false}) {
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    allocate(alloc);
+    ASSERT_FALSE(HasFatalFailure());
+    void *mapped = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(alloc.mmap_offset));
+    ASSERT_NE(mapped, MAP_FAILED);
+    ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+    EXPECT_EQ(peer->query_access(alloc.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Write),
+              rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+    kfd_ioctl_free_memory_of_gpu_args release{};
+    release.handle = alloc.handle;
+    if (free_first) {
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release), 0);
+    } else {
+      ASSERT_EQ(driver_->munmap(mapped, 4096), 0);
+    }
+    EXPECT_EQ(peer->query_access(alloc.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Write),
+              rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+    if (free_first)
+      EXPECT_EQ(::munmap(mapped, 4096), 0);
+    else
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release), 0);
+  }
+}
+
+TEST_F(KfdDrmAcquisitionTest, PreservesExplicitlySharedFallbackMappingUntilPeerUnmap) {
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  allocate(alloc);
+  ASSERT_FALSE(HasFatalFailure());
+  void *mapped = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                               static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_NE(mapped, MAP_FAILED);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_[1]);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+  const auto peer = runtime_->vm->soc(1)->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(peer);
+  const uint32_t value = 0x31415926;
+  EXPECT_EQ(peer->write(alloc.va_addr, std::as_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(*static_cast<uint32_t *>(mapped), value);
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = alloc.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_[1]);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(peer->query_access(alloc.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Write),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+  const auto acquired = runtime_->soc->gpu_vm().snapshot(files_[0]->vm->address_space());
+  ASSERT_TRUE(acquired);
+  EXPECT_EQ(acquired->query_access(alloc.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Write),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(driver_->munmap(mapped, 4096), 0);
+}
+
+TEST_F(KfdDrmAcquisitionTest, PublishesDirtyLegacyWritesBeforeRetiringVmid) {
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.size = 4096;
+  alloc.gpu_id = gpu_[0];
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  void *mapped = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                               static_cast<off_t>(alloc.mmap_offset));
+  ASSERT_NE(mapped, MAP_FAILED);
+  auto *cache = runtime_->soc->xcd(0)->l2_cache();
+  const uint32_t legacy_vmid = driver_->local_process_id();
+  std::array<uint8_t, rocjitsu::amdgpu::L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x11);
+  ASSERT_EQ(
+      cache->writeback_line(alloc.va_addr, dirty.data(), rocjitsu::amdgpu::Mtype::RW, legacy_vmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(*static_cast<uint8_t *>(mapped), 0);
+  ASSERT_EQ(driver_->acquire_vm(gpu_[0], files_[0]), 0);
+  EXPECT_EQ(*static_cast<uint8_t *>(mapped), 0x11);
+  EXPECT_FALSE(runtime_->soc->gpu_vm().snapshot_vmid(legacy_vmid));
+  const auto acquired = runtime_->soc->gpu_vm().snapshot(files_[0]->vm->address_space());
+  ASSERT_TRUE(acquired);
+  dirty.fill(0x22);
+  ASSERT_EQ(cache->writeback_line(alloc.va_addr + dirty.size(), dirty.data(),
+                                  rocjitsu::amdgpu::Mtype::RW, acquired->info().vmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(cache->flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(static_cast<uint8_t *>(mapped)[dirty.size()], 0x22);
   EXPECT_EQ(driver_->munmap(mapped, 4096), 0);
 }
 

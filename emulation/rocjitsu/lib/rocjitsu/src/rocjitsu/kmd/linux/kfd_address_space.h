@@ -6,8 +6,8 @@
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
-#include "util/intrusive_shared_ptr.h"
 #include "util/distributed_shared_mutex.h"
+#include "util/intrusive_shared_ptr.h"
 
 #include <algorithm>
 #include <atomic>
@@ -40,8 +40,8 @@ public:
     size_t size;
   };
 
-  /// Import existing mapped extents, retaining their backing and page policy.
-  /// Overlap with destination extents, incompatible policies within one page,
+  /// @brief Import existing mapped extents, retaining their backing and page policy.
+  /// @details Overlap with destination extents, incompatible policies within one page,
   /// and wrapping ranges fail without changing either table. Allocation failures
   /// propagate with the destination unchanged. Unmapped source bytes stay unmapped.
   bool import_mappings(const KfdAddressSpace &source, std::span<const MappingRange> ranges) {

@@ -2769,8 +2769,8 @@ TEST(GpuMemoryThreadingTest, OrdinaryLineTransfersShareAtomicExclusionAcrossMapp
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
   constexpr uint64_t kAlias = 0x50000000;
-  for (auto owner :
-       {KfdAddressSpace::HostExtentOwner::Application, KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
+  for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                     KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
     for (size_t host_offset : {0u, 4u, 64u}) {
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
       KfdAddressSpace process;
@@ -2833,8 +2833,8 @@ TEST(GpuMemoryThreadingTest, NarrowTransactionPolicyPublishesSeparateHalvesOfOne
   constexpr uint32_t kPid = 7;
   constexpr uint64_t kAddress = 0x40000000;
   for (auto policy : {Policy{}, Policy::unqualified_64()}) {
-    for (auto owner :
-         {KfdAddressSpace::HostExtentOwner::Application, KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
+    for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                       KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
       SCOPED_TRACE(policy.bytes());
       rocjitsu::test::LegacyGpuMemoryFixture memory("memory", policy);
       KfdAddressSpace process;
@@ -2892,8 +2892,8 @@ TEST(GpuMemoryThreadingTest, IndependentL2sReadWholeMappedLinePublications) {
   constexpr uint64_t kWriteAddress = 0x40000000;
   constexpr uint64_t kReadAddress = 0x50000000;
   constexpr uint32_t kRounds = 20000;
-  for (auto owner :
-       {KfdAddressSpace::HostExtentOwner::Application, KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
+  for (auto owner : {KfdAddressSpace::HostExtentOwner::Application,
+                     KfdAddressSpace::HostExtentOwner::DriverSealedRam}) {
     for (size_t host_offset : {0u, 4u}) {
       alignas(amdgpu::kMaxMemoryTransactionBytes)
           std::array<uint8_t, KfdAddressSpace::kPageSize + amdgpu::kMaxMemoryTransactionBytes>
