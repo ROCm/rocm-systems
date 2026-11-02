@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/target_provider.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -940,6 +941,59 @@ TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
 #endif
   }
 }
+
+#if RJ_HOST_ARCH_X86
+void expect_f64_simd_host_environment(uint32_t mxcsr, int rounding = FE_TONEAREST) {
+  HostFenvGuard guard;
+  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
+  ASSERT_EQ(std::fesetround(rounding), 0);
+  _mm_setcsr(mxcsr);
+  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
+  // Invalid, overflow, and inexact results exercise host state
+  // even when rounding and denormal controls otherwise match the guest.
+  constexpr std::array<std::array<uint64_t, 3>, 3> inputs = {{
+      {0u, 0x7ff0000000000000u, 0x3ff0000000000000u},
+      {0x7fefffffffffffffu, 0x4000000000000000u, 0u},
+      {0x3ff0000000000000u, 0x3ff0000000000000u, 0x3ca0000000000000u},
+  }};
+  using V = util::native<double>;
+  for (const auto &bits : inputs) {
+    const uint64_t expected = amdgpu::fp_mode::fma_f64(bits[0], bits[1], bits[2], 0, 3);
+    const V result = amdgpu::fma_f64_mode_simd(V(std::bit_cast<double>(bits[0])),
+                                               V(std::bit_cast<double>(bits[1])),
+                                               V(std::bit_cast<double>(bits[2])), 0, 3);
+    EXPECT_EQ(std::fegetround(), rounding);
+    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
+    EXPECT_EQ(_mm_getcsr(), mxcsr);
+    for (size_t lane = 0; lane < V::size(); ++lane)
+      EXPECT_EQ(std::bit_cast<uint64_t>(double(result[lane])), expected);
+  }
+}
+
+TEST(FpModePolicyTest, F64SimdPreservesHostFlagsRoundingAndFlushControls) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  for (int rounding : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO})
+    for (uint32_t mxcsr : {0x1f80u, 0x1fa0u, 0x9fe4u, 0x3f80u}) {
+      SCOPED_TRACE(rounding);
+      SCOPED_TRACE(mxcsr);
+      expect_f64_simd_host_environment(mxcsr, rounding);
+    }
+}
+
+#if GTEST_HAS_DEATH_TEST
+TEST(FpModePolicyTest, F64SimdDoesNotTrapWithHostInvalidUnmasked) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ASSERT_EXIT(
+      {
+        expect_f64_simd_host_environment(0x1f00u);
+        std::_Exit(testing::Test::HasFailure() ? 1 : 0);
+      },
+      testing::ExitedWithCode(0), "");
+}
+#endif
+#endif
 
 TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
   HostFenvGuard environment_guard;
