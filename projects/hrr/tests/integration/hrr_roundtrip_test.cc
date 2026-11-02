@@ -666,8 +666,9 @@ static int hrr_replayed_calls(const fs::path& cap_path, const std::string& api,
  *     one hipStreamCreateWithFlags event, first after the registrations, with
  *     the flag and the stream handle, and every async copy on that handle after
  *     it.  Replay must create the stream once with the recorded flag and pass
- *     its D2H checks; a dropped creation would have fallen back to the default
- *     stream, which the archive and the trace both rule out.
+ *     its D2H checks.  A replay that skips the creation has no such stream: it
+ *     either stops, which REQUIRE(ret == 0) catches, or its trace shows no
+ *     creation.
  */
 HRR_TEST_CASE(Unit_HRR_FirstStreamCreateRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_first_stream_create_recorded"};

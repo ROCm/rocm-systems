@@ -152,8 +152,8 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
 //
 // The same regression for the other state the first call can create.  The
 // stream is non-blocking and every command after its creation runs on it.  A
-// dropped creation fails Unit_HRR_FirstStreamCreateRecorded twice: the archive
-// lacks the event, and the replay trace never creates the stream.
+// dropped creation fails Unit_HRR_FirstStreamCreateRecorded: the archive lacks
+// the event.
 // ===========================================================================
 static void hrr_repro_scale_on(hipStream_t stream) {
   float *da = nullptr, *dout = nullptr;
