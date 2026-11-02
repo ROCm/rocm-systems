@@ -4,6 +4,7 @@
 /// @file gfx12_dot_test.cpp
 /// @brief GFX12 dot arithmetic and operand regression tests.
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -47,13 +48,18 @@ public:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("dot_test", cfg, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
-  ~DotMachine() { wave->halt(); }
+  ~DotMachine() {
+    if (wave)
+      wave->halt();
+  }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
   void execute(std::array<uint32_t, 2> encoding) {
@@ -67,7 +73,7 @@ public:
   amdgpu::L2Cache cache;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
 
@@ -96,6 +102,7 @@ TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool force_scalar : {false, true}) {
     util::set_force_scalar_for_testing(force_scalar);
     for (bool bf16 : {false, true}) {
@@ -140,6 +147,7 @@ TEST(Gfx12Dot, InlineSourcesMatchHardware) {
   // upper16(FP32) without rounding, including selector 248 (1 / (2*pi)).
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool bf16 : {false, true}) {
     const uint32_t packed = bf16 ? 0x40003f80 : 0x40003c00; // (1, 2)
     for (uint16_t selector : {uint16_t(129), uint16_t(242), uint16_t(248)}) {
@@ -176,6 +184,7 @@ TEST(Gfx12Dot, InlineSourcesMatchHardware) {
 TEST(Gfx12Dot, WmmaHardwareRoundingOrderAndOverlappingSources) {
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       const auto cases = bf16 ? std::span<const Gfx12WmmaCase>(kGfx12WmmaBF16Cases)
                               : std::span<const Gfx12WmmaCase>(kGfx12WmmaF16Cases);
@@ -212,6 +221,7 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(arch, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       for (uint32_t modifiers = 0; modifiers < 64; ++modifiers) {
         const uint8_t neg = modifiers & 7, neg_hi = modifiers >> 3;
@@ -281,6 +291,7 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const uint32_t c_regs = test.bf16_out ? 4 : 8;
       for (uint32_t lane = 0; lane < 32; ++lane) {
         for (uint32_t reg = 0; reg < 4; ++reg) {
@@ -305,6 +316,7 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
 TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       for (uint32_t modifiers = 0; modifiers < 4; ++modifiers) {
         for (uint32_t lane = 0; lane < width; ++lane) {
@@ -339,6 +351,7 @@ TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
   HostState restore;
   constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool scalar : {false, true}) {
     util::set_force_scalar_for_testing(scalar);
     for (bool bf16 : {false, true}) {

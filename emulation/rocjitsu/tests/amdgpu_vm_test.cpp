@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "compute_unit_test_util.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "legacy_gpu_memory_fixture.h"
@@ -424,6 +425,34 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
   }
 }
 
+TEST(ComputeUnitConfigTest, FixtureSetupStopsWithRejectedConfigurationDiagnostic) {
+  ::testing::TestPartResultArray failures;
+  bool continued_setup = false;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    [&] {
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      const amdgpu::ComputeUnitCore::Config config{
+          .arch = ROCJITSU_CODE_ARCH_CDNA3,
+          .num_wf_slots = 33,
+          .sgprs_per_wf = 104,
+          .vgprs_per_wf = 256,
+          .lds_size_kb = 64,
+      };
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          compute_unit, "rejected_fixture", config, nullptr, nullptr));
+      continued_setup = true;
+    }();
+  }
+  EXPECT_FALSE(continued_setup);
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
+
 TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   const amdgpu::ComputeUnitCore::Config config{
       .arch = ROCJITSU_CODE_ARCH_CDNA3,
@@ -442,17 +471,26 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
-  for (bool invalid_execution_mode : {false, true}) {
-    SCOPED_TRACE(invalid_execution_mode);
+  const struct {
+    const char *name;
+    uint32_t wave_slots;
+    simdojo::ExecMode mode;
+    const char *message;
+  } cases[] = {
+      {"invalid wave slots", 33, simdojo::ExecMode::FUNCTIONAL,
+       "num_wf_slots exceeds the ISA maximum of 32"},
+      {"unsupported execution mode", 8, static_cast<simdojo::ExecMode>(255),
+       "Unsupported execution mode for ComputeUnit"},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
     const amdgpu::ComputeUnitCore::Config config{
         .arch = ROCJITSU_CODE_ARCH_CDNA3,
-        .num_wf_slots = invalid_execution_mode ? 8u : 33u,
+        .num_wf_slots = test_case.wave_slots,
         .sgprs_per_wf = 104,
         .vgprs_per_wf = 256,
         .lds_size_kb = 64,
     };
-    const auto mode = invalid_execution_mode ? static_cast<simdojo::ExecMode>(255)
-                                             : simdojo::ExecMode::FUNCTIONAL;
     std::string diagnostic;
     uint32_t deliveries = 0;
     auto sink = [&](std::string_view message) {
@@ -460,12 +498,12 @@ TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
       ++deliveries;
       throw std::runtime_error("diagnostic delivery failed");
     };
-    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr, mode,
+    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
+                                                       test_case.mode,
                                                        util::DiagnosticEmitter(sink)),
                  std::runtime_error);
     EXPECT_EQ(deliveries, 1u);
-    EXPECT_EQ(diagnostic, invalid_execution_mode ? "Unsupported execution mode for ComputeUnit"
-                                                 : "num_wf_slots exceeds the ISA maximum of 32");
+    EXPECT_EQ(diagnostic, test_case.message);
   }
 }
 

@@ -14,6 +14,7 @@
 /// CDNA5 integer minmax instructions also have scalar and SIMD golden-result
 /// coverage for signed and unsigned inputs.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -131,7 +132,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -174,6 +177,8 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -244,6 +249,7 @@ TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
     util::set_force_scalar_for_testing(force_scalar);
     for (const auto &test_case : cases) {
       Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const auto words = cdna5::build_vop3(
           test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
       std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));

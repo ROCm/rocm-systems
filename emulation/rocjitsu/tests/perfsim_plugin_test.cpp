@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/vm/plugins/perfsim/plugin.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -126,7 +127,9 @@ struct WaveFixture {
     config.sgprs_per_wf = 128;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("perfsim_test_cu", config, memory.get(), l2.get());
+    rocjitsu::test::initialize_compute_unit(cu, "perfsim_test_cu", config, memory.get(), l2.get());
+    if (!cu)
+      return;
   }
 
   Wavefront &wave(uint32_t dispatch_id, uint32_t rocjitsu_workgroup_id,
@@ -385,6 +388,7 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
 
 TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
 
   PerfsimPlugin plugin(plugin_config().c_str());
@@ -417,6 +421,7 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
 
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   testing::internal::CaptureStderr();
   {
     PerfsimPlugin plugin(plugin_config().c_str());
@@ -465,6 +470,7 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
 
 TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
   WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   testing::internal::CaptureStderr();
   {
     PerfsimPlugin plugin(plugin_config().c_str());
@@ -501,6 +507,7 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
 
 TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatches) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_dispatch_name("target_kernel");
   testing::internal::CaptureStderr();
   {
@@ -548,6 +555,7 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
 
 TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
   WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_dispatch_name("target_kernel");
   testing::internal::CaptureStderr();
   {
@@ -624,6 +632,7 @@ TEST_F(PerfsimPluginTest, ReportsConfiguredDispatchNameWhenEveryDispatchMisses) 
 
 TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingReplay) {
   WaveFixture fixture(3);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_observed_workgroup_cap(1);
   testing::internal::CaptureStderr();
   {
@@ -730,6 +739,7 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
 
 TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   {
     PerfsimPlugin plugin(config.c_str());
@@ -851,6 +861,7 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
 TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v8_only", 1);
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   {
     PerfsimPlugin plugin(config.c_str());
@@ -979,6 +990,7 @@ TEST_F(PerfsimPluginTest, FallsBackToV11WithDispatchNameAndNoHostLogger) {
 TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction) {
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v8_only", 1);
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
   {
@@ -1025,6 +1037,8 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
     const MalformedCase &test_case = cases[index];
     SCOPED_TRACE(test_case.name);
     WaveFixture fixture;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     testing::internal::CaptureStderr();
     {
       PerfsimPlugin plugin(config.c_str());
@@ -1081,6 +1095,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
 
 TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1271,6 +1286,7 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
 
 TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1365,6 +1381,7 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
 
 TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1437,6 +1454,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
   testing::internal::CaptureStderr();
   for (const auto &test : cases) {
     WaveFixture fixture;
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::string config = plugin_config();
     PerfsimPlugin plugin(config.c_str());
     plugin.onInit();
@@ -1503,6 +1521,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
 
 TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1583,6 +1602,7 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
 
 TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1669,6 +1689,7 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
 
 TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
@@ -1730,6 +1751,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
 
 TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
@@ -1778,6 +1800,7 @@ TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch)
 
 TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1818,6 +1841,7 @@ TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
 
 TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_staging_budget(8 * 1024 * 1024);
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1889,6 +1913,7 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
 
 TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_staging_budget(4096);
   testing::internal::CaptureStderr();
   {
@@ -1937,6 +1962,7 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
 
 TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispatch) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_staging_budget(4096);
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -1987,6 +2013,7 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
 
 TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_staging_budget(4096);
   testing::internal::CaptureStderr();
   {
@@ -2038,6 +2065,7 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
 
 TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config_with_staging_budget(4096);
   bool addresses_materialized = false;
   struct AddressSource {
@@ -2098,6 +2126,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
 
 TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -2130,6 +2159,7 @@ TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
 
 TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   testing::internal::CaptureStderr();
   {
@@ -2160,6 +2190,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks
 
 TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -2206,6 +2237,7 @@ TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
 
 TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
   WaveFixture fixture;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const std::string config = plugin_config();
   PerfsimPlugin plugin(config.c_str());
   plugin.onInit();
@@ -2534,6 +2566,7 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   ASSERT_EQ(setenv("GPUCSIM_REPORT_PATH", bridge_report.path().c_str(), 1), 0);
 
   WaveFixture fixture(3);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   {
     const std::string config = plugin_config(backend_path);
     PerfsimPlugin plugin(config.c_str());

@@ -5,6 +5,7 @@
 /// @brief Shared wait-retirement and register-readiness tests for the core
 /// scoreboard and race plugin.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -104,7 +105,9 @@ public:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
-    cu_ = ComputeUnitCore::create("shared_wait_cu", config, &memory_, &l2_);
+    rocjitsu::test::initialize_compute_unit(cu_, "shared_wait_cu", config, &memory_, &l2_);
+    if (!cu_)
+      return;
     if (!cu_)
       return;
     PluginSinkConfig sinks;

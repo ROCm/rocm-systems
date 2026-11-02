@@ -9,6 +9,7 @@
 /// constrain modified storage. End-to-end decoded instruction callbacks live
 /// in execution_plugin_test.cpp.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand.h"
@@ -158,7 +159,9 @@ struct Fixture {
     cfg.sgprs_per_wf = kSgprsPerWave;
     cfg.vgprs_per_wf = vgprs_per_wave;
     cfg.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("register_access_cu", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "register_access_cu", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
 
     plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto recorder = std::make_unique<RecordingPlugin>();

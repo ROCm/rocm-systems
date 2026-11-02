@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
@@ -51,7 +52,8 @@ protected:
     config.lds_size_kb = 64;
     config.functional_quantum = 1;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-    cu = ComputeUnitCore::create("vskip_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
     ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);

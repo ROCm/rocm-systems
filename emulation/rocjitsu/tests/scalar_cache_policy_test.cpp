@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/isa/decoder.h"
@@ -34,7 +35,8 @@ protected:
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("scalar_cache", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_cache", cfg, &memory, &l2));
     wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
     decoder = Decoder::create(cfg.arch);

@@ -292,26 +292,20 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
                                                          util::DiagnosticEmitter emit_error) {
   if (validate(config, emit_error).failed())
     return nullptr;
-  if (exec_mode != simdojo::ExecMode::FUNCTIONAL && exec_mode != simdojo::ExecMode::CLOCKED) {
-    // Emit explicitly: the diagnostic destructor suppresses sink exceptions.
-    (void)(emit_error.emit() << "Unsupported execution mode for ComputeUnit").emit();
-    return nullptr;
-  }
-
   std::unique_ptr<ComputeUnitCore> compute_unit;
   const util::Result result = with_compute_unit_isa(
       config.arch,
-      [&]<GpuIsa Isa>() {
+      [&]<GpuIsa Isa>() -> util::Result {
         switch (exec_mode) {
         case simdojo::ExecMode::FUNCTIONAL:
           compute_unit = create_functional_cu<Isa>(std::move(name), config, memory, l2);
-          break;
+          return util::Result::success();
         case simdojo::ExecMode::CLOCKED:
           compute_unit = std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
               std::move(name), config, memory, l2);
-          break;
+          return util::Result::success();
         }
-        return util::Result::success();
+        return emit_error.emit() << "Unsupported execution mode for ComputeUnit";
       },
       emit_error);
   if (result.failed())

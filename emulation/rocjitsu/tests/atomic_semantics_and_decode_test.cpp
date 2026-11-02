@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
@@ -65,13 +66,18 @@ public:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache.set_backing_memory(&memory);
-    cu = amdgpu::ComputeUnitCore::create("instruction_policy", config, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "instruction_policy", config, &memory, &cache);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256);
     wave->set_exec(1);
     base = wave->vgpr_alloc().base;
   }
-  ~InstructionPolicyMachine() { wave->halt(); }
+  ~InstructionPolicyMachine() {
+    if (wave)
+      wave->halt();
+  }
   template <size_t N>
   uint32_t run(const std::array<uint32_t, N> &words, uint32_t a, uint32_t b = 0, uint32_t c = 0,
                uint32_t mode = 0xf0, bool memory_op = false, bool buffer = false) {
@@ -136,6 +142,7 @@ TEST(AtomicSemanticsAndDecode, IntegerEvaluatorRejectsUnsupportedOperations) {
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedMemorySubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {uint16_t{55}, uint16_t{80}}) {
       const char *name = opcode == 55 ? "sub_clamp" : "cond_sub";
       for (uint32_t old : {2u, 5u, 7u}) {
@@ -155,6 +162,7 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedLegacyCsub) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     std::array<uint32_t, 2> buffer{}, global{};
     if (arch == ROCJITSU_CODE_ARCH_RDNA2) {
       buffer =
@@ -185,6 +193,7 @@ TEST(AtomicSemanticsAndDecode, LegacyCsubLegalizesToClampedSubtract) {
     ASSERT_NE(entry, nullptr);
     ASSERT_EQ(entry->target_opcode, rdna4::kGlobalAtomicSubClampU32Vglobal);
     InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 3> target = rdna4::build_vglobal(
         entry->target_opcode, {.saddr = 4, .vdst = 6, .scope = 2, .th = 1, .vsrc = 0, .vaddr = 4});
     EXPECT_EQ(machine.global(target, 2, 5, false), 0u);
@@ -202,6 +211,7 @@ TEST(AtomicSemanticsAndDecode, TranslatedCompareStorePreservesOperandOrder) {
     ASSERT_EQ(translated.word_count, 2);
     for (bool equal : {false, true}) {
       InstructionPolicyMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       machine.wave->lds().write32(0x100, equal ? 2 : 3);
       machine.wave->lds().write32(0x104, 0);
       machine.cu->write_vgpr(machine.base, 0, 2);
@@ -227,6 +237,7 @@ TEST(AtomicSemanticsAndDecode, TranslatedCompareStorePreservesOperandOrder) {
 TEST(AtomicSemanticsAndDecode, ConditionalAndClampedDsSubtract) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint16_t opcode : {uint16_t{152}, uint16_t{153}, uint16_t{168}, uint16_t{169}}) {
       machine.wave->lds().write32(0x100, 2);
       machine.cu->write_vgpr(machine.base + 4, 0, 0x100);
@@ -251,6 +262,7 @@ TEST(AtomicSemanticsAndDecode, ConditionalAndClampedDsSubtract) {
 TEST(AtomicSemanticsAndDecode, GlobalOnlyPackedHalfAndScalarFloatAtomics) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     // Both opcodes are GLOBAL-only on these targets; FLAT and SCRATCH must reject them.
     for (uint16_t opcode : {uint16_t{77}, uint16_t{78}}) {
       for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
@@ -275,6 +287,7 @@ TEST(AtomicSemanticsAndDecode, GlobalOnlyCsubRejectsOtherSegments) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (uint8_t segment : {uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
       const std::array<uint32_t, 2> words =
           arch == ROCJITSU_CODE_ARCH_RDNA2
@@ -291,6 +304,7 @@ TEST(AtomicSemanticsAndDecode, LegacyGlobalAddtidUsesScalarAddressAndSignedOffse
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const uint32_t scalar = machine.wave->sgpr_alloc().base;
     machine.cu->write_sgpr(scalar + 4, 0x1004);
     machine.cu->write_sgpr(scalar + 5, 0);
@@ -321,6 +335,7 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                               ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     const std::array<uint32_t, 2> buffer =
         cdna1::build_mubuf(78, {.glc = 1, .vaddr = 4, .vdata = 0, .srsrc = 1, .soffset = 128});
     EXPECT_EQ(machine.global(buffer, 0x3c004000, 0x42004400, true), 0x44004600u);
@@ -344,6 +359,7 @@ TEST(AtomicSemanticsAndDecode, PackedAtomicsAcrossOlderTargets) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       const std::array<uint32_t, 2> words =
           arch == ROCJITSU_CODE_ARCH_RDNA4
@@ -379,7 +395,8 @@ protected:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     cache_.set_backing_memory(&memory_);
-    compute_unit_ = amdgpu::ComputeUnitCore::create("atomic_policy", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(compute_unit_, "atomic_policy",
+                                                                    config, &memory_, &cache_));
     decoder_ = Decoder::create(GetParam());
     wave_ = compute_unit_->dispatch_wf(0, 0, 106, 256);
     wave_->set_exec(1);

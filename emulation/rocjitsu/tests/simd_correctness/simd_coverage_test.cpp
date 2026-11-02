@@ -4,6 +4,7 @@
 /// @file simd_coverage_test.cpp
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
@@ -55,7 +56,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("simd_coverage_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "simd_coverage_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 256, 32);
     wf->set_mode_raw(3u << 6);
     wf->set_exec(0xffffffffu);

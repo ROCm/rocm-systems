@@ -4,6 +4,7 @@
 /// @file scalar_f16_constant_test.cpp
 /// @brief Decoded scalar F16 source formatting and full-word destination controls.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -87,7 +88,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("scalar_f16_constants", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu_, "scalar_f16_constants",
+                                                                    config, &memory_, &cache_));
     decoder_ = Decoder::create(GetParam().arch);
     ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);

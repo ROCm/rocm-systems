@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
@@ -87,7 +88,8 @@ protected:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("image_cu", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "image_cu", cfg, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 32);
     ASSERT_NE(wf, nullptr);
     sb = wf->sgpr_alloc().base;

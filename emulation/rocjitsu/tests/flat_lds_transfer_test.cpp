@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -34,7 +35,8 @@ protected:
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("flat_lds", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "flat_lds", cfg, &memory, &l2));
     wave = cu->dispatch_wf(0, 0, 102, 16, GetParam().second);
     ASSERT_NE(wave, nullptr);
     wave->set_lds_base(128);
