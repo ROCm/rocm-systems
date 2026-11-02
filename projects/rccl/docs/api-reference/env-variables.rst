@@ -1418,6 +1418,28 @@ threshold table introduced for gfx1250.
         | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
           ceilings and eligibility checks.
 
+    * - | ``RCCL_DDA_BC_MAX_BLOCKS``
+        | Lowers the per-rank block budget of the DDA Broadcast kernels. The
+          budget is otherwise the DDA fabric block cap (``RCCL_DDA_FABRIC_MAXBLOCKS``)
+          or the CU count; this variable cannot raise it. The root still launches
+          at least one block per peer.
+      - | ``0``: Keep the CU-derived budget (default).
+        | ``N``: Use at most ``N`` blocks per rank when ``N`` is below the budget.
+
+    * - | ``RCCL_DDA_LL_BC_THREADS``
+        | Block size (threads per block) of the DDA LL one-shot Broadcast kernel.
+          A value that is not a multiple of the GPU wave size, or is larger than
+          512, is ignored and the default is used.
+      - | ``256``: Default.
+        | ``N``: A multiple of the wave size, at most ``512``.
+
+    * - | ``RCCL_DDA_BC_ALLOW_IPC``
+        | Development only; not intended for production use. Lets the Broadcast
+          selector also consider the DDA LL tier on the non-fabric (IPC) path.
+          Requires ``RCCL_DDA_BC`` to be enabled.
+      - | ``0``: Fabric path only (default).
+        | ``1``: Also consider DDA LL on the IPC path.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
