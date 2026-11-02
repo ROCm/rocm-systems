@@ -26,12 +26,15 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+.. _rocprofiler-process-creation:
+
 Process creation and profiling output
 -------------------------------------
 
-``rocprofv3`` disables the inherited profiling session in a child created by ``fork()``. The
-parent continues profiling normally, but the child emits no profiler output before replacing its
-process image.
+When a process with an active ROCprofiler-SDK session calls ``fork()``, ROCprofiler-SDK disables
+the inherited profiling session in the child. The parent continues profiling normally, but a
+``rocprofv3`` child emits no profiler output before replacing its process image. The inherited
+child session cannot be reinitialized or attached.
 
 After ``fork()``, the child must use only the usual async-signal-safe operations needed to call
 ``exec()`` or ``_exit()``. If ``exec()`` fails, terminate the child with ``_exit()``. Continuing
