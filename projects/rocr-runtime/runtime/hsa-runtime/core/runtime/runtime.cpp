@@ -1223,9 +1223,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
     info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
                                            : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
-    // SVM is host-backed, so the agent VA is the host VA. The early return in
-    // PtrInfo skips the driver query that would have filled this in. A bare
-    // reservation has no backing, so its agent base stays null.
+    // SVM is host-backed, so the agent VA is the host VA when the driver has
+    // no object for this reservation. An unregistered reservation still falls
+    // through to the driver query, which replaces this when it recognizes the
+    // address. A bare reservation has no backing, so its agent base stays null.
     info->agentBaseAddress = addressHandle->svm_attrib ? info->hostBaseAddress : nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
@@ -1297,11 +1298,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * Reservations registered with hsa_amd_svm_attributes_set are already reported as
-       * HSA_EXT_POINTER_TYPE_SVM. Unregistered NO_REGISTER reservations fall through so
-       * QueryPointerInfo can still describe the address when the driver knows it.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1336,11 +1341,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
