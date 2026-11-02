@@ -319,7 +319,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 // lsaBarrier (blockIdx.x - 1). DevComm barrierCount == deviceCtaCount also
 // provisions per-CTA hybrid world barriers for HybridAlltoAllTimedKernel joins.
 template <typename T>
-__device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+__device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, ncclGinResourceSharingMode mode) {
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int startLsa = world.rank - lsa.rank;
@@ -332,8 +332,11 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
     int ginContext = 0;
     unsigned int signalIndex = 0;
     // Only CTA 0 communicates, one thread per peer QP (single-owner), so THREAD
-    // mode drops the SQ lock.
-    ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
+    // mode drops the SQ lock. The caller picks the mode: the production kernel
+    // passes the CLI selection; the timed kernel forces GPU so CTA 0's rail posts
+    // are locked against the multi-CTA join that overlaps it (no grid barrier
+    // separates body and join -- see HybridAlltoAllTimedKernel).
+    ncclGin gin { devComm, ginContext, mode };
     uint64_t signalValue = gin.readSignal(signalIndex);
 
     ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, 0 };
@@ -383,7 +386,7 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
 // device-timed kernel and the production path share identical code.
 template <typename T>
 __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+  hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, ginResourceSharingModeDev());
 }
 
 // Join all CTAs (GIN CTA 0 + LSA CTAs 1..N) in the timed-kernel loop. The
@@ -440,7 +443,9 @@ __global__ void HybridAlltoAllTimedKernel(ncclWindow_t sendwin, size_t sendoffse
       __syncthreads();
       if (threadIdx.x == 0) start_time[blockIdx.x] = wall_clock64();
     }
-    hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm);
+    // GPU-locked (not the CLI mode): the join overlaps CTA 0's body on the same
+    // rail QP with no grid barrier between them, so CTA 0 must also lock its posts.
+    hybridAlltoAllBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, NCCL_GIN_RESOURCE_SHARING_GPU);
   }
   hybridTimedGridJoin(devComm);
   __syncthreads();
