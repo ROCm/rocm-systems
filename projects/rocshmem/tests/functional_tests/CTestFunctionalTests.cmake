@@ -1410,8 +1410,8 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_get_wave_4d RANKS 2 WORKGROUPS 1 NUM_WF 4)
     end_test_group()
 
-    # 3D and 4D strided tile RMA tests: 3D pads each row (contiguous runs),
-    # 4D uses an innermost stride of 2 (element-wise transfers)
+    # 3D and 4D strided tile RMA tests: 3D pads rows and planes (contiguous
+    # runs), 4D uses an innermost stride of 2 (element-wise transfers)
     begin_test_group(CATEGORY "TILE;RMA;ND" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_put_3d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_3d_strided      RANKS 2 WORKGROUPS 1 THREADS 1)

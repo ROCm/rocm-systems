@@ -28,8 +28,8 @@ class TileNDRMATester : public Tester {
   // Both 3D and 4D tiles have the same total element count.
   static constexpr int TILE_ELEMS = 512;
 
-  // Strided layouts double the footprint of the innermost dimension.
-  static constexpr int SLOT_ELEMS_STRIDED = 2 * TILE_ELEMS;
+  // Strided layouts pad two dimensions to twice their packed stride.
+  static constexpr int SLOT_ELEMS_STRIDED = 4 * TILE_ELEMS;
 
   explicit TileNDRMATester(TesterArguments args);
   ~TileNDRMATester() override;

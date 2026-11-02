@@ -18,8 +18,10 @@
  *
  * Layouts:
  *   Contiguous: densely packed tensor, tile covers the whole tensor.
- *   Strided 3D: innermost dimension packed, rows padded to 2 * D2 elements.
- *   Strided 4D: innermost stride of 2 elements (no contiguous runs).
+ *   Strided 3D: innermost dimension packed, rows padded to 2 * D2 elements
+ *               and planes padded to 2 * D1 rows.
+ *   Strided 4D: innermost stride of 2 elements (no contiguous runs) and
+ *               dimension 1 padded to twice its packed stride.
  *
  * Verification: the source is filled with value = flat_index % 256 and the
  * destination is zeroed. Since source and destination share the same layout,
@@ -100,6 +102,7 @@ __host__ __device__ inline void tile_nd_shape(int ndim, bool strided,
     dims[2] = TileNDRMATester::D2_3D;
     strides[2] = 1;
     strides[1] = strided ? 2 * dims[2] : dims[2];
+    strides[0] = (strided ? 2 : 1) * dims[1] * strides[1];
   } else {
     dims[0] = TileNDRMATester::D0_4D;
     dims[1] = TileNDRMATester::D1_4D;
@@ -107,9 +110,9 @@ __host__ __device__ inline void tile_nd_shape(int ndim, bool strided,
     dims[3] = TileNDRMATester::D3_4D;
     strides[3] = strided ? 2 : 1;
     strides[2] = dims[3] * strides[3];
-    strides[1] = dims[2] * strides[2];
+    strides[1] = (strided ? 2 : 1) * dims[2] * strides[2];
+    strides[0] = dims[1] * strides[1];
   }
-  strides[0] = dims[1] * strides[1];
 }
 
 __host__ __device__ constexpr int tile_nd_slot_elems(bool strided) {
