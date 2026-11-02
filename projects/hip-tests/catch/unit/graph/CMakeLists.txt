@@ -57,6 +57,7 @@ set(TEST_SRC
   hipStreamBeginCapture.cc
   hipGraphAddMemcpyNode1D_old.cc
   hipStreamBeginCapture_old.cc
+  hipStreamCaptureAPIRestrictions.cc
   hipStreamIsCapturing.cc
   hipStreamIsCapturing_old.cc
   hipGraphMemFreeNodeGetParams.cc
