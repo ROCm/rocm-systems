@@ -30,17 +30,12 @@ rocrUsesDxg() noexcept
         return false;
     }
 
-    int fd;
     try {
-        fd = Context<Sys>::get()->open("/dev/dxg", O_RDWR | O_CLOEXEC);
+        Context<Sys>::get()->statx(AT_FDCWD, "/dev/dxg", 0, 0);
     }
-    catch (const std::system_error &) {
-        return false;
-    }
-    try {
-        Context<Sys>::get()->close(fd);
-    }
-    catch (const std::system_error &) {
+    catch (const std::system_error &e) {
+        // We only conclude the user is using KFD if /dev/dxg/ does not exist.
+        return e.code() != std::errc::no_such_file_or_directory && e.code() != std::errc::not_a_directory;
     }
     return true;
 }

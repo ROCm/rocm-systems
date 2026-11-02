@@ -11,6 +11,7 @@
 #include "msys.h"
 
 #include <cerrno>
+#include <fcntl.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <optional>
@@ -26,8 +27,6 @@ HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 struct HipFileConfiguration : public Test {
     StrictMock<MSys> msys;
     StrictMock<MHip> mhip;
-
-    static constexpr int dxg_fd{42};
 
     void expect_configuration_fastpath(const char *hipfile_force_compat_mode,
                                        void       *hipAmdFileRead  = reinterpret_cast<void *>(0xDEADBEEF),
@@ -48,18 +47,23 @@ struct HipFileConfiguration : public Test {
             .WillOnce(Return(const_cast<char *>(hsa_enable_dxg_detection)));
     }
 
-    void expect_configuration_not_wsl(int dxg_open_errno = ENOENT)
+    void expect_configuration_dxg_statx_fails(int dxg_statx_errno)
     {
         expect_configuration_dxg_detection(nullptr);
-        EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _))
-            .WillOnce(Throw(std::system_error(dxg_open_errno, std::generic_category())));
+        EXPECT_CALL(msys, statx(AT_FDCWD, StrEq("/dev/dxg"), _, _))
+            .WillOnce(Throw(std::system_error(dxg_statx_errno, std::generic_category())));
+    }
+
+    void expect_configuration_not_wsl()
+    {
+        expect_configuration_dxg_statx_fails(ENOENT);
     }
 
     void expect_configuration_wsl(const char *hsa_enable_dxg_detection = nullptr)
     {
+        const struct statx dxg_statx {};
         expect_configuration_dxg_detection(hsa_enable_dxg_detection);
-        EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _)).WillOnce(Return(dxg_fd));
-        EXPECT_CALL(msys, close(dxg_fd));
+        EXPECT_CALL(msys, statx(AT_FDCWD, StrEq("/dev/dxg"), _, _)).WillOnce(Return(dxg_statx));
     }
 
     void expect_configuration_fallback(const char *hipfile_force_compat_mode,
@@ -194,18 +198,16 @@ TEST_F(HipFileConfiguration, CantOverrideDisabledFastpathBackendOnWsl)
     ASSERT_FALSE(config.fastpath());
 }
 
-TEST_F(HipFileConfiguration, FastpathEnabledIfDxgCanNotBeOpened)
+TEST_F(HipFileConfiguration, FastpathEnabledIfDxgPathHasNonDirectoryComponent)
 {
-    expect_configuration_not_wsl(EACCES);
+    expect_configuration_dxg_statx_fails(ENOTDIR);
     expect_configuration_fastpath(nullptr);
     ASSERT_TRUE(Configuration().fastpath());
 }
 
-TEST_F(HipFileConfiguration, FastpathDisabledOnWslIfDxgCloseFails)
+TEST_F(HipFileConfiguration, FastpathDisabledIfDxgProbeIsInconclusive)
 {
-    expect_configuration_dxg_detection(nullptr);
-    EXPECT_CALL(msys, open(StrEq("/dev/dxg"), _, _)).WillOnce(Return(dxg_fd));
-    EXPECT_CALL(msys, close(dxg_fd)).WillOnce(Throw(std::system_error(EIO, std::generic_category())));
+    expect_configuration_dxg_statx_fails(ENOMEM);
     expect_configuration_fastpath(nullptr);
     ASSERT_FALSE(Configuration().fastpath());
 }
