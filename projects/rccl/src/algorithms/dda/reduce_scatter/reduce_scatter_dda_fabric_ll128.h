@@ -145,6 +145,13 @@ __launch_bounds__(512)
   const int nwarps = blockDim.x / kDdaLL128Warp;
   const bool flagLane = ddaLL128IsFlagLane(lane);
 
+  const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
+  const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
+  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
+  // number of 8B words and the slot stride below is a whole number of slices.
+  const size_t slotWords = ddaLL128RsSlotWords(bankSize, nRanks);
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
+
   // Slices stride by warp across the whole grid. The bound has to be the slice
   // count, not the warp count: the grid is capped at ddaFabricMaxBlocks, so a
   // large shard has more slices than warps and each warp must take several.
@@ -153,14 +160,6 @@ __launch_bounds__(512)
 
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff);
-
-  const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  // ddaBankSize() floors the bank to a multiple of 128B, so it is always a whole
-  // number of 8B words and the slot stride below is a whole number of slices.
-  const size_t slotWords = ddaLL128RsSlotWords(bankSize, nRanks);
-  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
-
   const uint64_t* gatherBase = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords;
 
   // Phase 1: send each peer the shard that peer owns.
