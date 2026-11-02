@@ -1259,9 +1259,13 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     REQUIRE(close(fd[0]) == 0);
     REQUIRE(close(fdSig[1]) == 0);
     CTX_CREATE();
+    // CTX_CREATE() does not select a device on AMD and an earlier test may have left another one
+    // current; the allocation, its mapping and the fill below have to be on device 0.
+    HIP_CHECK(hipSetDevice(0));
 
     // Check the configuration before anything is handed to the child; on any problem tell the
-    // child to exit (size 0) instead of leaving it blocked, then skip.
+    // child to exit (size 0) instead of leaving it blocked, then skip. SKIP() ends the test case
+    // by throwing, so nothing after the call runs.
     auto skip_and_release_child = [&](const char* reason) {
       const size_t no_work = 0;
       REQUIRE(write(fd[1], &no_work, sizeof(size_t)) == static_cast<ssize_t>(sizeof(size_t)));
@@ -1293,6 +1297,14 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
       granularity = std::max(granularity, device_granularity);
     }
     REQUIRE(granularity > 0);
+    // The child maps the allocation of device 0 on its own device and sets access for it.
+    if (child_dev != 0) {
+      int can_access_peer = 0;
+      HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, child_dev, 0));
+      if (can_access_peer == 0) {
+        skip_and_release_child(HipTest::SkipReason::kPeerAccessUnavailable);
+      }
+    }
 
     hipDevice_t device;
     HIP_CHECK(hipDeviceGet(&device, 0));
@@ -1330,11 +1342,12 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_CloseFdBeforeMapAndBa
     checkSysCallErrors(sockObj.sendShareableHdl(shareable_handle, pid));
     // The child has its own copy of the fd now.
     REQUIRE(close(shareable_handle) == 0);
+    // Wait for the child process to exit.
     int status = 0;
     REQUIRE(wait(&status) >= 0);
-    REQUIRE(WIFEXITED(status));
-    REQUIRE(WEXITSTATUS(status) == 0);
+    REQUIRE(status == 0);
 
+    // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
     HIP_CHECK(hipMemUnmap(owner_ptr, size_mem));
     HIP_CHECK(hipMemRelease(handle));
