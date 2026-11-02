@@ -12,6 +12,8 @@
 
 namespace util {
 
+class IntrusiveSharedPtrTestAccess;
+
 /// @brief Strong-only shared ownership using object-provided ownership hooks.
 /// @details T must provide noexcept add_ref() and release_ref() hooks accessible
 /// to this class. make() adopts the initial reference of the newly constructed
@@ -62,7 +64,7 @@ public:
 
   void reset() noexcept { IntrusiveSharedPtr{}.swap(*this); }
   void swap(IntrusiveSharedPtr &other) noexcept { std::swap(ptr_, other.ptr_); }
-  friend void swap(IntrusiveSharedPtr &a, IntrusiveSharedPtr &b) noexcept { a.swap(b); }
+  friend void swap(IntrusiveSharedPtr &lhs, IntrusiveSharedPtr &rhs) noexcept { lhs.swap(rhs); }
 
 private:
   explicit IntrusiveSharedPtr(T *ptr) noexcept : ptr_(ptr) {}
@@ -79,14 +81,16 @@ namespace detail {
 
 template <typename Derived> class ReferenceCount {
 public:
+  /// @brief Return a diagnostic count snapshot without establishing exclusive value access.
+  /// @details A relaxed observation of one does not synchronize with prior releases
+  /// or authorize mutation of value while other threads can access the object.
   [[nodiscard]] uint32_t ref_count() const noexcept {
     return refs_.load(std::memory_order_relaxed);
   }
-  // Read-only storage access allows callers to inspect counter/value placement.
-  [[nodiscard]] const std::atomic<uint32_t> &ref_count_storage() const noexcept { return refs_; }
 
 private:
   template <typename> friend class util::IntrusiveSharedPtr;
+  friend class util::IntrusiveSharedPtrTestAccess;
 
   void add_ref() const noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }
   void release_ref() const noexcept {
@@ -122,6 +126,9 @@ inline constexpr std::size_t kDestructiveInterferenceSize = 128;
 template <typename T> class RefCounted final : public detail::ReferenceCount<RefCounted<T>> {
 public:
   template <typename... Args>
+    requires(std::is_constructible_v<T, Args...> &&
+             !(sizeof...(Args) == 1 &&
+               (std::is_same_v<RefCounted, std::remove_cvref_t<Args>> || ...)))
   explicit RefCounted(Args &&...args) : value(std::forward<Args>(args)...) {}
 
   RefCounted(const RefCounted &) = delete;
@@ -139,6 +146,9 @@ public:
 template <typename T> class RefCountedNonAtomic final {
 public:
   template <typename... Args>
+    requires(std::is_constructible_v<T, Args...> &&
+             !(sizeof...(Args) == 1 &&
+               (std::is_same_v<RefCountedNonAtomic, std::remove_cvref_t<Args>> || ...)))
   explicit RefCountedNonAtomic(Args &&...args) : value(std::forward<Args>(args)...) {}
 
   RefCountedNonAtomic(const RefCountedNonAtomic &) = delete;
@@ -171,6 +181,9 @@ template <typename T>
 class RefCountedCacheAligned final : public detail::ReferenceCount<RefCountedCacheAligned<T>> {
 public:
   template <typename... Args>
+    requires(std::is_constructible_v<T, Args...> &&
+             !(sizeof...(Args) == 1 &&
+               (std::is_same_v<RefCountedCacheAligned, std::remove_cvref_t<Args>> || ...)))
   explicit RefCountedCacheAligned(Args &&...args) : value(std::forward<Args>(args)...) {}
 
   RefCountedCacheAligned(const RefCountedCacheAligned &) = delete;

@@ -15,9 +15,22 @@
 #include <utility>
 #include <vector>
 
+namespace util {
+
+class IntrusiveSharedPtrTestAccess {
+public:
+  template <typename T>
+  static const std::atomic<uint32_t> &ref_count_storage(const RefCountedCacheAligned<T> &object) {
+    return object.refs_;
+  }
+};
+
+} // namespace util
+
 namespace {
 
-struct Tracked {
+class Tracked {
+public:
   explicit Tracked(std::atomic<int> &destroyed) : destroyed(destroyed) {}
   ~Tracked() { destroyed.fetch_add(1, std::memory_order_relaxed); }
   std::atomic<int> &destroyed;
@@ -43,12 +56,35 @@ template <typename T> constexpr bool has_read_only_ownership() {
 static_assert(has_read_only_ownership<util::RefCounted<int>>());
 static_assert(has_read_only_ownership<util::RefCountedCacheAligned<int>>());
 static_assert(has_read_only_ownership<util::RefCountedNonAtomic<int>>());
-static_assert(
-    std::is_same_v<decltype(std::declval<const util::RefCounted<int> &>().ref_count_storage()),
-                   const std::atomic<uint32_t> &>);
-static_assert(std::is_same_v<
-              decltype(std::declval<util::RefCountedCacheAligned<int> &>().ref_count_storage()),
-              const std::atomic<uint32_t> &>);
+template <typename T>
+concept HasPublicCounterStorage = requires(const T &object) { object.ref_count_storage(); };
+
+static_assert(!HasPublicCounterStorage<util::RefCounted<int>>);
+static_assert(!HasPublicCounterStorage<util::RefCountedCacheAligned<int>>);
+static_assert(!HasPublicCounterStorage<util::RefCountedNonAtomic<int>>);
+
+class CatchAllValue {
+public:
+  template <typename T> explicit CatchAllValue(T &&) {}
+};
+
+template <template <typename> typename Storage>
+constexpr bool has_constrained_forwarding_constructor() {
+  using IntStorage = Storage<int>;
+  using GenericStorage = Storage<CatchAllValue>;
+  static_assert(std::is_constructible_v<IntStorage, int>);
+  static_assert(!std::is_constructible_v<IntStorage, const char *>);
+  static_assert(!std::is_constructible_v<IntStorage, IntStorage &>);
+  static_assert(!std::is_constructible_v<IntStorage, const IntStorage &&>);
+  static_assert(std::is_constructible_v<GenericStorage, int>);
+  static_assert(!std::is_constructible_v<GenericStorage, GenericStorage &>);
+  static_assert(!std::is_constructible_v<GenericStorage, const GenericStorage &&>);
+  return true;
+}
+
+static_assert(has_constrained_forwarding_constructor<util::RefCounted>());
+static_assert(has_constrained_forwarding_constructor<util::RefCountedNonAtomic>());
+static_assert(has_constrained_forwarding_constructor<util::RefCountedCacheAligned>());
 
 static_assert(sizeof(IntPtr) == sizeof(void *));
 static_assert(std::is_nothrow_copy_constructible_v<IntPtr>);
@@ -172,7 +208,8 @@ TEST(IntrusiveSharedPtr, ConstConversionRetainsOrTransfersOwnership) {
   EXPECT_EQ(assigned->ref_count(), 1u);
 }
 
-struct CustomCounted final {
+class CustomCounted final {
+public:
   explicit CustomCounted(std::atomic<int> &destroyed) : destroyed_(destroyed) {}
 
 private:
@@ -204,10 +241,10 @@ TEST(IntrusiveSharedPtr, IndependentHandlesCanCopyAndReleaseConcurrently) {
   std::barrier start(kThreads + 1);
   std::vector<std::jthread> workers;
   auto owner = TrackedPtr::make(destroyed);
-  for (int i = 0; i < kThreads; ++i) {
+  for (int thread_index = 0; thread_index < kThreads; ++thread_index) {
     workers.emplace_back([local = owner, &start]() mutable {
       start.arrive_and_wait();
-      for (int j = 0; j < 2000; ++j) {
+      for (int iteration = 0; iteration < 2000; ++iteration) {
         auto copy = local;
         auto moved = std::move(copy);
         copy = moved;
@@ -222,7 +259,8 @@ TEST(IntrusiveSharedPtr, IndependentHandlesCanCopyAndReleaseConcurrently) {
   EXPECT_EQ(destroyed.load(), 1);
 }
 
-struct Throws {
+class Throws {
+public:
   explicit Throws(std::atomic<int> &destroyed) : member(destroyed) {
     throw std::runtime_error("construction failed");
   }
@@ -319,10 +357,12 @@ TEST(RefCountedNonAtomic, DetachedVectorPreservesOtherOwners) {
 
 template <typename T> void expect_isolated(const util::RefCountedCacheAligned<T> &object) {
   constexpr auto size = util::detail::kDestructiveInterferenceSize;
-  const auto counter = reinterpret_cast<std::uintptr_t>(&object.ref_count_storage());
+  const std::atomic<uint32_t> &counter_storage =
+      util::IntrusiveSharedPtrTestAccess::ref_count_storage(object);
+  const auto counter = reinterpret_cast<std::uintptr_t>(&counter_storage);
   const auto value = reinterpret_cast<std::uintptr_t>(&object.value);
   EXPECT_EQ(value % size, 0u);
-  EXPECT_GE(value, counter + sizeof(object.ref_count_storage()));
+  EXPECT_GE(value, counter + sizeof(counter_storage));
   EXPECT_NE(counter / size, value / size);
 }
 

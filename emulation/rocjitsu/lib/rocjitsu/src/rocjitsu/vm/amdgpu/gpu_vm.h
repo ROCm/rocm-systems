@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/intrusive_shared_ptr.h"
 
@@ -355,9 +356,6 @@ public:
     return {0, 0};
   }
 };
-
-/// @brief Retained page-policy epoch with its value isolated from the ownership counter.
-using VmMutationEpoch = util::RefCountedCacheAligned<std::atomic<uint64_t>>;
 
 /// @brief Copied page policy with an optional retained mutation token.
 /// @details A translator may cache a range only when it invalidates the token
