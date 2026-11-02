@@ -9,7 +9,7 @@ instructions: V_CMP_*, V_CMPX_*, V_CMP_CLASS_*, and V_ADD_CO_U32.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare
+from amdisa.codegen.execute import float_compare, input_policy
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
 )
@@ -318,7 +318,7 @@ def gen_vector_cmp(
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     if float_compare.is_float_relation(dtype, op):
-        L.append(float_compare.policy_decl(dtype))
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
@@ -362,7 +362,7 @@ def gen_vector_cmpx(
     if _uses_vop3_true16_opsel(op, dtype, is_vop3):
         L.append('  uint32_t opsel = amdgpu::vop3_opsel(inst_);')
     if float_compare.is_float_relation(dtype, op):
-        L.append(float_compare.policy_decl(dtype))
+        L.append(input_policy.policy_decl(dtype))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 

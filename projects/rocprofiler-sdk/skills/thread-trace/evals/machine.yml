@@ -1,0 +1,2 @@
+os: [Linux]
+labels: [mi300x, gpu, rocm]

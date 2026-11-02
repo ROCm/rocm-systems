@@ -14,6 +14,7 @@ class Configuration {
 
     std::optional<bool> m_fastpath_override;
     std::optional<bool> m_fallback_override;
+    std::optional<bool> m_host_override;
     std::atomic<bool>   m_ais_unsupported{false};
 
 public:
@@ -55,6 +56,13 @@ public:
     /// @brief Gets the size of the async buffer used for I/O operations
     /// @return the size of the async buffer in bytes
     virtual size_t asyncBufferSize() const noexcept;
+
+    /// @brief Checks if the host backend is enabled
+    /// @return true if the host backend is enabled, false otherwise
+    virtual bool host() const noexcept;
+
+    /// @brief Override host backend enablement
+    virtual void host(bool enabled) noexcept;
 };
 
 }

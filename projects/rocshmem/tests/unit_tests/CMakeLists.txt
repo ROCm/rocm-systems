@@ -64,6 +64,7 @@ target_sources(
     atomic_wf_queue_gtest.cpp
     envvar_gtest.cpp
     backend_bc_buffer_register_gtest.cpp
+    anvil_engine_map_gtest.cpp
 )
 
 if (USE_IPC)
@@ -73,6 +74,16 @@ if (USE_IPC)
       ipc_impl_simple_coarse_gtest.cpp
       ipc_impl_simple_fine_gtest.cpp
       ipc_impl_tiled_fine_gtest.cpp
+  )
+endif()
+
+if (USE_IPC AND USE_TDM)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      tdm_raw_put_gtest.cpp
+      tdm_struct_put_gtest.cpp
+      tdm_wave_put_gtest.cpp
   )
 endif()
 

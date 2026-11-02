@@ -6,9 +6,11 @@ Tests for RCCL
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
 
 pytestmark = [
     pytest.mark.rccl,
@@ -65,52 +67,6 @@ RCCL_TARGETS = [
 
 
 class TestRCCL(RocprofsysTest):
-    BINARY_REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "-i",
-        "8",
-        "--label",
-        "file",
-        "line",
-        "return",
-        "args",
-    ]
-    RUNTIME_INSTRUMENT_ARGS = [
-        "-e",
-        "-v",
-        "1",
-        "-i",
-        "8",
-        "--label",
-        "file",
-        "line",
-        "return",
-        "args",
-        "-ME",
-        "sysdeps",
-        "--log-file",
-        "rccl-test.log",
-    ]
-    RUN_ARGS = [
-        "-t",
-        "1",
-        "-g",
-        "1",
-        "-i",
-        "10",
-        "-w",
-        "2",
-        "-m",
-        "2",
-        "-p",
-        "-c",
-        "1",
-        "-z",
-        "-s",
-        "1",
-    ]
 
     @pytest.mark.parametrize(
         "mode",
@@ -127,13 +83,59 @@ class TestRCCL(RocprofsysTest):
         ids=[t.replace("_", "-") for t in RCCL_TARGETS],
     )
     def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
+        binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "-i",
+            "8",
+            "--label",
+            "file",
+            "line",
+            "return",
+            "args",
+        ]
+        runtime_instrument_args = [
+            "-e",
+            "-v",
+            "1",
+            "-i",
+            "8",
+            "--label",
+            "file",
+            "line",
+            "return",
+            "args",
+            "-ME",
+            "sysdeps",
+            "--log-file",
+            "rccl-test.log",
+        ]
+        run_args = [
+            "-t",
+            "1",
+            "-g",
+            "1",
+            "-i",
+            "10",
+            "-w",
+            "2",
+            "-m",
+            "2",
+            "-p",
+            "-c",
+            "1",
+            "-z",
+            "-s",
+            "1",
+        ]
         result = self.run_test(
             mode,
             rccl_target,
             env=rccl_env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
-            run_args=self.RUN_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            runtime_instrument_args=runtime_instrument_args,
+            run_args=run_args,
             launcher="mpi",
             num_procs=1,
         )

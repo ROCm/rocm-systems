@@ -12,8 +12,6 @@ what limits it. Hand off to a focused skill once the limit is clear.
 Run `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 before choosing flags. Options change between releases; do not guess one.
 
-Never use the GUI or TUI. This is a command-line workflow.
-
 ## Two sources of performance data
 
 rocprof-compute collects from two independent sources, and they answer
@@ -122,6 +120,8 @@ contain that file, look one level down for the GPU model or rank directory.
 `--list-stats` prints `Detected Kernels (sorted descending by duration)` and a
 `Dispatch list`. The kernel index is what `-k` takes. Dispatch ids are 1-based
 and go to `-d`.
+
+`--list-stats` cannot be used with `--output-format csv` or `db`.
 
 Work on one kernel at a time:
 

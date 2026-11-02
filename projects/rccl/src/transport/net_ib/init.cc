@@ -777,7 +777,7 @@ ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
-         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
+         ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline, sizeof(addrline)));
   }
 exit:
   return ret;
@@ -791,12 +791,12 @@ fail:
 ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
                         ncclProfilerCallback_t profFunction) {
   ncclResult_t ret = ncclSuccess;
-  ncclNetCommConfig_t* netCommConfig = nullptr;
+  struct ncclIbNetCtx* netCtx = nullptr;
   NCCLCHECK(ncclIbInitDevices(logFunction, profFunction));
   NCCLCHECK(ncclIbPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
-  netCommConfig->trafficClass = config->trafficClass;
-  *ctx = (void*)netCommConfig;
+  NCCLCHECK(ncclCalloc(&netCtx, 1));
+  netCtx->config.trafficClass = config->trafficClass;
+  *ctx = (void*)netCtx;
   return ret;
 }
 

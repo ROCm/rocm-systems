@@ -2,8 +2,6 @@
 dynamicLoading:
   Unit_dynamic_loading_device_kernels_from_library:
     <<: *level_default
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux, amd_wsl]
     tags: [module]
   Unit_hipApiDynamicLoad_hipGetProcAddress:
     <<: *level_default
@@ -14,24 +12,18 @@ dynamicLoading:
   Unit_hipGetProcAddress_Positive:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_Negative:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Positive:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_spt_Negative:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_hipGetProcAddress_spt_CheckAddress:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]
   Unit_hipGetProcAddress_With_spt_CompilerOption:
     <<: *level_default
     tags: [module]
-    disabled: [amd_wsl]

@@ -189,6 +189,8 @@ function(ROCPROFILER_SYSTEMS_LOOKUP_GFX _TARGET _OUTPUT_LIST)
         "gfx1151"
         "gfx1152"
         "gfx1153"
+        "gfx1170"
+        "gfx1171"
     )
 
     set(_CATEGORIES "")

@@ -35,14 +35,15 @@ Profiling
 
 Add ``--membw-analysis`` to the ``profile`` command to collect
 Block 30, which contains the stall and pressure metrics used by the
-analysis.
+analysis. Use the block filter ``-b 3`` to collect the memory chart
+without unrelated blocks:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile --experimental --membw-analysis -n my_workload -- ./my_app
+   $ rocprof-compute profile --experimental --membw-analysis -b 3 -n my_workload -- ./my_app
 
-Block 30 counters are collected alongside the standard profiling
-counters. No other profiling options are needed.
+In this command, ``-b 3`` selects the memory chart and ``--membw-analysis``
+adds Block 30 to the block filter.
 
 Analysis
 ========
@@ -54,17 +55,10 @@ collected and runs bottleneck detection automatically:
 
    $ rocprof-compute analyze -p workloads/my_workload/MI350/
 
-To view only the memory chart and its guidance panel, use the block
-filter with both block 3 and block 30:
-
-.. code-block:: shell
-
-   $ rocprof-compute analyze -p workloads/my_workload/MI350/ -b 3 30
-
-In this command, ``-b 3`` selects the memory chart and ``-b 30`` selects
-the memory bandwidth analysis panel. When block 30 data was collected
-during profiling, the guidance annotations appear on the memory chart
-and a guidance panel is rendered below it.
+Analyze mode applies the block filter used at ``profile`` time, so this
+command shows the memory chart and the memory bandwidth analysis panel.
+When bottlenecks are detected, the guidance annotations appear on the
+memory chart and a guidance panel is rendered below it.
 
 .. code-block:: text
 

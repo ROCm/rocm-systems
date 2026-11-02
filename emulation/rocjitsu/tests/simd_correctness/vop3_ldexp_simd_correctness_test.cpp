@@ -4,12 +4,11 @@
 /// @file vop3_ldexp_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the
 /// mixed-width VOP3 ldexp ops on CDNA4: v_ldexp_f32 (f32 src0 + int32 src1
-/// exp) and v_ldexp_f64 (f64 src0 + int32 src1 exp). stdx::ldexp is bit-exact
-/// to std::ldexp for every input incl. NaN (proven in the VOP2 v_ldexp_f16
-/// path), so no carve-out needed. Each (case, mods, rot) runs TWICE in the same
-/// process -- once forcing the scalar body, once the SIMD fast path, with
-/// identical inputs/EXEC -- and the result arrays are asserted equal with
-/// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
+/// exp) and v_ldexp_f64 (f64 src0 + int32 src1 exp). Both paths evaluate
+/// shared/ldexp.h on raw encodings, so no carve-out is needed. Each (case, mods, rot) runs TWICE in
+/// the same process -- once forcing the scalar body, once the SIMD fast path, with identical
+/// inputs/EXEC -- and the result arrays are asserted equal with EXPECT_EQ
+/// (util::set_force_scalar_for_testing flips the gate in-process).
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"

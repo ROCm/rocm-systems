@@ -1,0 +1,82 @@
+{
+  "evaluations": [
+    {
+      "id": "rocprofv3-doctor-readiness-check",
+      "skill_should_trigger": true,
+      "note": "Runs on a ROCm machine that may or may not be healthy; the grade is about running the check and reporting it honestly, not about any particular finding.",
+      "prompt": "I'm about to start profiling on this machine with rocprofv3. Check whether the ROCm installation and GPU access are ready for it, and write what needs fixing, if anything, to setup_report.md.",
+      "expected_behavior": [
+        "Run the ROCm profiler's self-diagnostic tool with JSON output instead of probing the system by hand",
+        "Summarize its JSON report with the skill's summarize_report.py script",
+        "State which ROCm installation was inspected, and list any failed checks as ordered root causes with the fix commands from the report"
+      ],
+      "unexpected_behavior": [
+        "Run sudo, usermod, modprobe, sysctl, setcap, a package manager, or pip install itself",
+        "Recommend changing kernel.perf_event_paranoid or running setcap on rocprofv3",
+        "Report checks that were skipped because of another failure as separate problems",
+        "Run the check with sudo or as root on the user's behalf"
+      ],
+      "logs_contain": [
+        "--doctor",
+        "--format json",
+        "summarize_report.py"
+      ],
+      "files_exist": [
+        "setup_report.md"
+      ]
+    },
+    {
+      "id": "rocprofv3-doctor-out-of-resources-error",
+      "skill_should_trigger": true,
+      "note": "ROCr returns OUT_OF_RESOURCES both when /dev/kfd cannot be opened and for genuine allocation failures; the skill must corroborate before naming a cause.",
+      "prompt": "Running `rocprofv3 --kernel-trace -- ./my_app` fails with \"HSA_STATUS_ERROR_OUT_OF_RESOURCES: The runtime failed to allocate the necessary resources.\" Why, and how do I fix it? Write the answer to diagnosis.md.",
+      "expected_behavior": [
+        "Run the ROCm profiler's self-diagnostic tool before concluding what caused the error",
+        "Use the report's findings about /dev/kfd access to decide between a GPU access problem and a genuine resource limit",
+        "Give fixes only for the cause the report supports, and say when the cause remains uncertain"
+      ],
+      "unexpected_behavior": [
+        "Conclude the GPU ran out of memory, or that it is a permissions problem, without checking the system first",
+        "Run sudo or usermod itself"
+      ],
+      "logs_contain": [
+        "--doctor",
+        "--format json"
+      ],
+      "files_exist": [
+        "diagnosis.md"
+      ]
+    },
+    {
+      "id": "rocprofv3-doctor-container-no-gpu",
+      "skill_should_trigger": true,
+      "prompt": "rocprofv3 inside my Docker container says it can't find any GPU. What's wrong with my setup?"
+    },
+    {
+      "id": "rocprofv3-doctor-undefined-symbol",
+      "skill_should_trigger": true,
+      "prompt": "Since I installed a second ROCm version, rocprofv3 dies at startup with 'librocprofiler-sdk.so.1: undefined symbol'. Can you figure out what is broken?"
+    },
+    {
+      "id": "rocprofv3-doctor-therock-venv",
+      "skill_should_trigger": true,
+      "prompt": "I installed ROCm with pip (the TheRock wheels) into a virtualenv. Is it set up correctly for profiling with rocprofv3?"
+    },
+    {
+      "id": "rocprofv3-doctor-not-profile-hot-kernels",
+      "skill_should_trigger": false,
+      "note": "A working setup and a profiling question: this belongs to the rocprofv3 skill.",
+      "prompt": "Profile my HIP application with rocprofv3 and tell me which kernels take the most time."
+    },
+    {
+      "id": "rocprofv3-doctor-not-choose-counters",
+      "skill_should_trigger": false,
+      "prompt": "Which hardware counters should I collect with rocprofv3 to tell whether my kernel is memory-bound?"
+    },
+    {
+      "id": "rocprofv3-doctor-not-torch-profiler",
+      "skill_should_trigger": false,
+      "prompt": "My PyTorch training step is slow on an MI300X. Analyze this torch.profiler trace JSON and tell me where the time goes."
+    }
+  ]
+}

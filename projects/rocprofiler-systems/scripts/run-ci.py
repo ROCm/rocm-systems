@@ -3,18 +3,18 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import argparse
+import base64
+import glob
+import multiprocessing
 import os
 import re
-import sys
-import glob
-import zlib
-import base64
-import socket
 import shutil
-import argparse
+import socket
+import sys
 import urllib.parse
-import multiprocessing
 import xml.etree.ElementTree as ET
+import zlib
 
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -126,7 +126,7 @@ def generate_custom(args, cmake_args, ctest_args):
     GIT_CMD = which("git", require=True)
     GCOV_CMD = which("gcov", require=False)
     CMAKE_CMD = which("cmake", require=True)
-    CTEST_CMD = which("ctest", require=True)
+    which("ctest", require=True)
 
     NAME = _cdash_build_name(NAME)
 
@@ -552,10 +552,10 @@ def parse_args(args=None):
 # ---------------------------------------------------------------------------
 
 
-def run(*args, **kwargs):
+def run(*args, check=False, **kwargs):
     import subprocess
 
-    return subprocess.run(*args, **kwargs)
+    return subprocess.run(*args, check=check, **kwargs)
 
 
 def set_python_hints_from_cmake_args(cmake_args):

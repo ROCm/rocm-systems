@@ -20,4 +20,6 @@ pub(crate) mod linux;
 use linux as platform;
 
 #[cfg(target_os = "linux")]
-pub(crate) use platform::{HostAllocation, host_page_size, native_error};
+pub(crate) use platform::{
+    HostAllocation, HostReservation, host_clock, host_page_size, native_error,
+};

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "embedded_schema.h"
+#include "config_test_util.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -125,14 +125,15 @@ protected:
     address_space = gpu_vm.register_translated(1, memory, memory);
     ASSERT_TRUE(address_space);
     memory->store<uint32_t>(kReadPointer, 0);
-    auto loaded = config::load_config_from_string(R"({"max_ticks":100000,"num_threads":1,
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(R"({"max_ticks":100000,"num_threads":1,
       "vm":{"arch":"cdna3"},"topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[
       {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
       {"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit"}]}]}]},
       "links":[{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}]}})",
-                                                  kEmbeddedSchema);
+                                                    loaded));
     cp = loaded.soc()->xcd(0)->command_processor();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
@@ -165,6 +166,55 @@ protected:
   CommandProcessor *cp = nullptr;
   uint32_t next_queue_id = 1;
 };
+
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForUnknownQueueOrProcess) {
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = address_space, .process_id = 7, .queue_id = 1}));
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  for (const auto &[queue_id, process_id] : {std::pair{2u, 7u}, std::pair{1u, 8u}}) {
+    Pm4Submission submission;
+    submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+    submission.complete = [&](bool) { ++completions; };
+    EXPECT_FALSE(cp->submit_pm4(queue_id, process_id, std::move(submission)));
+  }
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+}
+
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForNativeRingQueue) {
+  const auto registration = cp->register_queue({.address_space = address_space,
+                                                .process_id = 7,
+                                                .queue_id = 1,
+                                                .ring_base_va = kRing,
+                                                .ring_size = kRingBytes,
+                                                .read_ptr_va = kReadPointer,
+                                                .packet_format = QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+  submission.complete = [&](bool) { ++completions; };
+  EXPECT_FALSE(cp->submit_pm4(1, 7, std::move(submission)));
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+}
 
 TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   memory->store<uint32_t>(kRing, 0xc0017900);

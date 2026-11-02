@@ -28,7 +28,8 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 namespace amd {
 namespace rdc {
-RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem() : topology_ops_(TOPOLOGY_UNKNOWN) {}
+RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem()
+    : topology_ops_(TOPOLOGY_UNKNOWN), group_index_(0), is_group_index_set(false) {}
 
 void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
@@ -97,8 +98,8 @@ void RdciTopologyLinkSubSystem::process() {
     throw RdcException(result, "Error to find devices on the system.");
   }
   if (group_index_ >= count) {
-    throw RdcException(
-        result, "Fail to get " + std::to_string(group_index_) + " to the topology gpu index");
+    throw RdcException(RDC_ST_BAD_PARAMETER, "Fail to get " + std::to_string(group_index_) +
+                                                 " to the topology gpu index");
   }
   switch (topology_ops_) {
     case TOPOLOGY_INDEX: {
@@ -125,6 +126,9 @@ void RdciTopologyLinkSubSystem::process() {
         std::cout << "+-----------------------+"
                   << "-----------------------------"
                   << "------------------+\n";
+      } else {
+        throw RdcException(result,
+                           "Fail to get the topology of GPU " + std::to_string(group_index_));
       }
       break;
     }

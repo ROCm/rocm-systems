@@ -32,7 +32,7 @@ Building CLR requires the ROCm stack to be installed on the system. In addition,
 
 ```bash
 sudo apt install rocm-llvm-dev
-pip3 install CppHeaderParser
+pip3 install cxxheaderparser
 ```
 
 For OpenCL, you need to install the ICD loader package provided by the distribution:

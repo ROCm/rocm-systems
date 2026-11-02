@@ -34,7 +34,7 @@ flowchart TD
 
     %% ---- Review column ----
     Rev --> V1[build + style<br/>always-on]
-    V1 --> V2[tests · docs · arch<br/>security · perf · spec]
+    V1 --> V2[tests · docs · arch<br/>security · perf · spec<br/>maintainer]
     V2 --> V3[skeptic + rebuttal]
     V3 --> V4[findings + status]
 

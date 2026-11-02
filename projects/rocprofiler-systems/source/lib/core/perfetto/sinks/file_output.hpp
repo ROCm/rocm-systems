@@ -9,8 +9,6 @@
 
 namespace rocprofsys
 {
-class output_file_registry;
-
 namespace core
 {
 enum class locked_append_status
@@ -35,8 +33,7 @@ status_name(locked_append_status status) noexcept
 }
 
 [[nodiscard]] bool
-write_proto_to(const std::string& filename, const char* data, std::size_t size,
-               output_file_registry& registry);
+write_proto_to(const std::string& filename, const char* data, std::size_t size);
 
 [[nodiscard]] locked_append_status
 append_with_file_lock(const std::string& filename, const char* data, std::size_t size);

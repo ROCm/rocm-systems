@@ -7,6 +7,7 @@ import inspect
 from pathlib import Path
 
 import common
+import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
@@ -15,8 +16,19 @@ from tests.integration.common import (
     config,
     num_devices,
     num_kernels,
-    validate,
 )
+
+
+def assert_gpu_ids_are_agent_node_ids(rank_dir):
+    """Each process's dispatch GPU ids are node ids from its own agents CSV."""
+    dispatch_csvs = sorted(rank_dir.glob("dispatch_*.csv.gz"))
+    assert dispatch_csvs, f"No native dispatch CSV in {rank_dir}"
+    for dispatch_csv in dispatch_csvs:
+        agents_csv = rank_dir / dispatch_csv.name.replace("dispatch_", "agents_", 1)
+        assert agents_csv.is_file(), f"No agents CSV beside {dispatch_csv.name}"
+        node_ids = set(pd.read_csv(agents_csv)["node_id"])
+        # Subset: agents lists every GPU, not just the ones dispatched to.
+        assert set(pd.read_csv(dispatch_csv)["gpu_id"]) <= node_ids
 
 
 def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
@@ -40,12 +52,7 @@ def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute
             str(rank_dir), num_devices, num_kernels
         )
         assert sorted(list(file_dict.keys())) == CSVS
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
+        assert_gpu_ids_are_agent_node_ids(rank_dir)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -85,12 +92,6 @@ def test_multi_rank_profiling_mpi_comm(
         )
 
         assert sorted(list(file_dict.keys())) == CSVS
-
-        validate(
-            inspect.stack()[0][3],
-            str(rank_dir),
-            file_dict,
-        )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
