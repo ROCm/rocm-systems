@@ -145,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared -j
+          cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared rocjitsu_memory -j
 
       - name: Package rocJitsu
         shell: bash
@@ -153,8 +153,19 @@ jobs:
           set -euo pipefail
           # The glob must expand inside build/rocjitsu, so cd there. tar keeps
           # symlinks, so a versioned librocjitsu.so chain survives.
-          ls -l build/rocjitsu/tools/rocjitsu/rocjitsu build/rocjitsu/librocjitsu.so*
-          (cd build/rocjitsu && tar -cf "${GITHUB_WORKSPACE}/rocjitsu.tar" tools/rocjitsu/rocjitsu librocjitsu.so*)
+          #
+          # librocjitsu.so execs the private rocjitsu-memory keeper. The path
+          # baked in for a build tree is this runner's, which the simulator
+          # containers do not have, so the keeper goes where the installed
+          # layout looks for it: ../libexec/rocjitsu/ beside the library's
+          # directory (build/libexec/rocjitsu/ next to build/rocjitsu/).
+          ls -l build/rocjitsu/tools/rocjitsu/rocjitsu build/rocjitsu/librocjitsu.so* \
+            build/rocjitsu/tools/rocjitsu-memory
+          mkdir -p build/libexec/rocjitsu
+          cp build/rocjitsu/tools/rocjitsu-memory build/libexec/rocjitsu/rocjitsu-memory
+          (cd build && tar -cf "${GITHUB_WORKSPACE}/rocjitsu.tar" \
+            rocjitsu/tools/rocjitsu/rocjitsu rocjitsu/librocjitsu.so* \
+            libexec/rocjitsu/rocjitsu-memory)
           tar -tvf rocjitsu.tar
 
       - name: Upload rocJitsu
@@ -236,9 +247,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/rocjitsu
-          tar -C build/rocjitsu -xf rocjitsu-artifact/rocjitsu.tar
-          ls -l build/rocjitsu/tools/rocjitsu build/rocjitsu/librocjitsu.so*
+          mkdir -p build
+          tar -C build -xf rocjitsu-artifact/rocjitsu.tar
+          ls -l build/rocjitsu/tools/rocjitsu build/rocjitsu/librocjitsu.so* \
+            build/libexec/rocjitsu/rocjitsu-memory
           echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
 
       - name: Download build
