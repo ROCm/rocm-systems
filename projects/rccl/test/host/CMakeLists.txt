@@ -3071,5 +3071,8 @@ endif()
 rccl_standalone_coverage()
 
 # run_host_tests.sh runs every binary listed here, so a new binary needs no runner edit.
-string(REPLACE ";" "\n" _host_test_binaries "${HOST_TEST_BINARIES}")
+# rccl-UnitTestsHostAll is left out: it reruns every rccl-UnitTestsMicro* binary itself.
+set(_host_test_binaries ${HOST_TEST_BINARIES})
+list(REMOVE_ITEM _host_test_binaries rccl-UnitTestsHostAll)
+string(REPLACE ";" "\n" _host_test_binaries "${_host_test_binaries}")
 file(WRITE "${CMAKE_BINARY_DIR}/host_test_binaries.txt" "${_host_test_binaries}\n")
