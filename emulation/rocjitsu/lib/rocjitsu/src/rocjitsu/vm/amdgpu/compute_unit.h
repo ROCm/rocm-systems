@@ -201,6 +201,9 @@ public:
   static util::Result validate(const Config &config, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Create a compute unit for the given architecture and execution mode.
+  /// @details Validation finishes before allocating execution state. Allocation failures may still
+  /// throw; already constructed resources are owned by RAII members and are cleaned during
+  /// unwinding.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).
@@ -208,8 +211,6 @@ public:
   /// @param exec_mode Execution mode for the CU.
   /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Owning pointer, or nullptr after diagnosing invalid configuration or execution mode.
-  /// Validation finishes before allocating execution state. Allocation failures may still throw;
-  /// already constructed resources are owned by RAII members and are cleaned during unwinding.
   static std::unique_ptr<ComputeUnitCore>
   create(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
          simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,

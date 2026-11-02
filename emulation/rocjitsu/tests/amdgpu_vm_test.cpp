@@ -33,6 +33,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
+#include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -438,6 +439,55 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
                       diagnostic.emitter()));
   EXPECT_EQ(compute_unit, nullptr);
   EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
+  for (bool invalid_execution_mode : {false, true}) {
+    SCOPED_TRACE(invalid_execution_mode);
+    const amdgpu::ComputeUnitCore::Config config{
+        .arch = ROCJITSU_CODE_ARCH_CDNA3,
+        .num_wf_slots = invalid_execution_mode ? 8u : 33u,
+        .sgprs_per_wf = 104,
+        .vgprs_per_wf = 256,
+        .lds_size_kb = 64,
+    };
+    const auto mode = invalid_execution_mode ? static_cast<simdojo::ExecMode>(255)
+                                             : simdojo::ExecMode::FUNCTIONAL;
+    std::string diagnostic;
+    uint32_t deliveries = 0;
+    auto sink = [&](std::string_view message) {
+      diagnostic = message;
+      ++deliveries;
+      throw std::runtime_error("diagnostic delivery failed");
+    };
+    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr, mode,
+                                                       util::DiagnosticEmitter(sink)),
+                 std::runtime_error);
+    EXPECT_EQ(deliveries, 1u);
+    EXPECT_EQ(diagnostic, invalid_execution_mode ? "Unsupported execution mode for ComputeUnit"
+                                                 : "num_wf_slots exceeds the ISA maximum of 32");
+  }
+}
+
+TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
+  const amdgpu::ShaderEngine::Config config{
+      .num_compute_units = 1,
+      .compute_unit =
+          {
+              .arch = ROCJITSU_CODE_ARCH_CDNA3,
+              .num_wf_slots = 33,
+              .sgprs_per_wf = 104,
+              .vgprs_per_wf = 256,
+              .lds_size_kb = 64,
+          },
+  };
+  try {
+    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
+                                       nullptr);
+    FAIL() << "Expected rejected CU configuration to throw ConfigError";
+  } catch (const util::ConfigError &error) {
+    EXPECT_STREQ(error.what(), "Config error: num_wf_slots exceeds the ISA maximum of 32");
+  }
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
