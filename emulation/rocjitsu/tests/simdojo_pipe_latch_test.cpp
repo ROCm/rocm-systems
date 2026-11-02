@@ -59,6 +59,7 @@ TEST(PipeLatchTest, CarriesMoveOnlyValues) {
   PipeLatch<std::unique_ptr<int>> latch;
   latch.write(std::make_unique<int>(3));
   latch.clock();
+  ASSERT_TRUE(latch.valid());
   auto value = latch.take();
   ASSERT_NE(value, nullptr);
   EXPECT_EQ(*value, 3);
@@ -113,13 +114,21 @@ private:
 };
 
 std::vector<std::pair<uint64_t, int>> run_pipeline(int count, bool back_to_front) {
-  ClockDomain domain("clk", 1'000'000'000);
+  util::StringDiagnostic diagnostic;
+  auto maybe_domain = ClockDomain::create("clk", 1'000'000'000, 0, diagnostic.emitter());
+  EXPECT_TRUE(maybe_domain.succeeded()) << diagnostic.message();
+  if (maybe_domain.failed())
+    return {};
+  const auto &domain = maybe_domain.value();
   SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<CompositeComponent>("root");
   auto *pipeline = static_cast<ThreeStagePipeline *>(
       root->add_child(std::make_unique<ThreeStagePipeline>(domain, count, back_to_front)));
   engine.topology().set_root(std::move(root));
-  engine.create();
+  const auto created = engine.create(diagnostic.emitter());
+  EXPECT_TRUE(created.succeeded()) << diagnostic.message();
+  if (created.failed())
+    return {};
   const ExitStatus exit = engine.run();
   EXPECT_EQ(exit.reason, ExitReason::COMPLETED);
   return pipeline->arrivals;

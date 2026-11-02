@@ -99,7 +99,7 @@ bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> so
   if (xcd_partitions.empty())
     return false;
 
-  topology.partition_manual(num_partitions, [&](simdojo::Component *component) {
+  auto partitioned = topology.partition_manual(num_partitions, [&](simdojo::Component *component) {
     for (auto *candidate = component; candidate != nullptr;) {
       auto it = xcd_partitions.find(candidate);
       if (it != xcd_partitions.end())
@@ -112,7 +112,7 @@ bool partition_topology_by_xcds(simdojo::Topology &topology, std::span<SoC *> so
     }
     return simdojo::PartitionID{0};
   });
-  return true;
+  return partitioned.succeeded();
 }
 
 bool partition_topology_by_xcds(simdojo::Topology &topology, SoC *soc, uint32_t num_partitions) {

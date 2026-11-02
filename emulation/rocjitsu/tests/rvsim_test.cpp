@@ -17,20 +17,25 @@ namespace {
 class RvSimTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    util::StringDiagnostic admission_diagnostic;
     simdojo::SimulationEngine::Config config{};
     config.max_ticks = 1000;
     config.num_threads = 1;
     engine_ = std::make_unique<simdojo::SimulationEngine>(config);
 
-    auto *clk = engine_->topology().add_clock_domain("core_clk",
-                                                     /*frequency_hz=*/simdojo::TICKS_PER_SECOND);
+    auto maybe_clk = engine_->topology().add_clock_domain(
+        "core_clk",
+        /*frequency_hz=*/simdojo::TICKS_PER_SECOND, 0, admission_diagnostic.emitter());
+    ASSERT_TRUE(maybe_clk.succeeded()) << admission_diagnostic.message();
+    auto *clk = maybe_clk.value();
 
     auto root_ptr = std::make_unique<simdojo::CompositeComponent>("soc");
     auto hart_ptr = std::make_unique<rocjitsu::risc_v::Hart>("hart0", *clk);
     hart_ = static_cast<rocjitsu::risc_v::Hart *>(root_ptr->add_child(std::move(hart_ptr)));
 
     engine_->topology().set_root(std::move(root_ptr));
-    engine_->create();
+    ASSERT_TRUE(engine_->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
   }
 
   void load_and_run(const uint32_t *program, size_t num_words, uint64_t base_addr = 0) {
