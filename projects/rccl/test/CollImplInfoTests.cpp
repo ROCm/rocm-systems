@@ -44,7 +44,7 @@
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "common/SymmetricKernelLog.hpp"
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
-#include "sym_kernels.h"  // ncclSymkMaxBlocks
+#include "sym_kernels.h"  // ncclSymkMaxBlocks, ncclSymkAgHierMaxBlocks
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -73,6 +73,7 @@ namespace RcclUnitTesting
       std::string protoName;             // e.g. "LL", "LL128", "SIMPLE"
       bool        hasChannels = false;
       int         channels = 0;
+      std::string symKernel;
     };
 
     std::string ReadFile(const std::string& path)
@@ -138,7 +139,7 @@ namespace RcclUnitTesting
           {
             proto = "LL";
           }
-          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0};
+          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0, symKernel};
         }
 
         if (func == "AllGather")
@@ -415,13 +416,16 @@ namespace RcclUnitTesting
             << "symk did not report " << sel.algoName << " though dispatch ran it\nLOG:\n" << log;
 
           // Symmetric block count: at least 1 because the model rejects a zero count, at most
-          // ncclSymkMaxBlocks. Device independent, since the model clamps to that constant and to
-          // maxCTAs and never to the CU count. Was -1 before the model set maxChannels, which is
-          // the regression this guards.
+          // ncclSymkMaxBlocks, or ncclSymkAgHierMaxBlocks where AllGather may take its hierarchical
+          // kernel. Device independent, since the model clamps to those constants and to maxCTAs and
+          // never to the CU count. Was -1 before the model set maxChannels, which is the regression
+          // this guards.
+          const int maxSymkBlocks =
+            sel.symKernel == "AllGather_HierLsaST" ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
           EXPECT_GE(symk.channels, 1)
             << "symk reported SYM without a channel count\nLOG:\n" << log;
-          EXPECT_LE(symk.channels, ncclSymkMaxBlocks)
-            << "symk channel count above ncclSymkMaxBlocks\nLOG:\n" << log;
+          EXPECT_LE(symk.channels, maxSymkBlocks)
+            << "symk channel count above the symmetric kernel block cap\nLOG:\n" << log;
         }
       }
 
