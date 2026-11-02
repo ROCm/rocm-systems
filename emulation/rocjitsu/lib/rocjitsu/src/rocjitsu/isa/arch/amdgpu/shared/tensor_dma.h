@@ -383,7 +383,7 @@ public:
   std::array<uint8_t, 8> bytes{};
   std::size_t completed_bytes = 0;
   /// Trailing bytes outside the wave's LDS allocation. Loads drop them; stores
-  /// read zero.
+  /// read zero. Both are simulator modeling choices; see append_copy.
   uint8_t lds_dropped_bytes = 0;
   bool in_bounds = false;
 };
@@ -504,9 +504,10 @@ inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
 
 /// @brief Prove that global and LDS address formation is safe before materialization.
 /// @details The proof includes load padding, allowing the element walker and append_copy to use
-/// unchecked 64-bit arithmetic. LDS addresses outside the wave's allocation do not abort the
-/// operation (CDNA5 ISA 4.10.7); append_copy drops those bytes. The atomic-barrier cell must still
-/// lie within the allocation.
+/// unchecked 64-bit arithmetic. An out-of-range LDS address does not abort the transfer (CDNA5 ISA
+/// 10.11.6, "Xnack, Memviol and Out-of-Bounds Behavior"); append_copy drops the out-of-range
+/// bytes. Requiring the atomic-barrier cell to lie within the allocation is simulator validation,
+/// not a rule of that section.
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
                                                     const Wavefront &wf, bool store_from_lds) {
@@ -574,8 +575,11 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
     lds_byte += (lds_byte / padding.interval_bytes) * padding.amount_bytes;
   }
 
-  // Bytes past the wave's LDS allocation are dropped rather than aborting the operation
-  // (CDNA5 ISA 4.10.7). Like other LDS loads, a store reads them as zero.
+  // An out-of-range LDS address does not abort the transfer (CDNA5 ISA 10.11.6). The ISA
+  // does not say how an element that straddles the end of the allocation is handled, nor what a
+  // store reads from out-of-range LDS. As modeling choices, the simulator keeps the element's
+  // in-range leading bytes and drops the rest, and a store reads the dropped bytes as zero, like
+  // other out-of-range LDS loads.
   const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
   const uint64_t lds_bytes =
       lds_address < state.lds_allocation_end

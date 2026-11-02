@@ -708,7 +708,7 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedGlobalTransferAddresses) {
 
 // LDS addresses are formed in 64 bits, so a large descriptor LDS base lies past
 // the wave's allocation rather than wrapping back into LDS. That does not abort
-// a tensor operation (CDNA5 ISA 4.10.7): the element is kept, all its bytes are
+// a tensor operation (CDNA5 ISA 10.11.6): the element is kept, all its bytes are
 // dropped, and it touches no LDS. 0xffffff00 would wrap in 32 bits onto the
 // first byte of the allocation just below the wave's; UINT32_MAX onto its last.
 TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
@@ -750,7 +750,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
       EXPECT_EQ(resume_tensor_dma_state(state, *wf), amdgpu::VmAccessOutcome::Complete);
       for (uint32_t byte = 0; byte < 512; ++byte)
         EXPECT_EQ(cu->lds().read8(below + byte), kLdsSentinel) << byte;
-      // A load's data is discarded; a store reads its dropped LDS bytes as zero.
+      // A load's data is discarded. A store reads its dropped LDS bytes as zero,
+      // which is the simulator's modeling choice rather than an ISA rule.
       EXPECT_EQ(sim.memory->read64(kGlobal), store ? 0u : kGlobalValue);
     }
   }
