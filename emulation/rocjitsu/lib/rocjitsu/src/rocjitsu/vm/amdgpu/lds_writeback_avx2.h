@@ -52,7 +52,7 @@ template <DstFormat F>
 /// saves on full b32 waves. Other formats are a full wave almost always, where
 /// plain stores are clearly faster than masked ones.
 template <DstFormat F, uint32_t Wave> [[gnu::always_inline]] inline Stores choose(uint64_t exec) {
-  if (kStride<F> != 4 && exec == kAll<Wave>)
+  if (kStride<F> != 4 && exec == lds_shapes::prefix(Wave))
     return Stores::Plain;
   return Stores::Masked;
 }

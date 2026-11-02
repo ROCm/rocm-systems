@@ -37,6 +37,7 @@
 #define ROCJITSU_VM_AMDGPU_LDS_WRITEBACK_H_
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/vm/amdgpu/lds_lane_shapes.h"
 #include "util/host_target.h"
 
 #include <bit>
@@ -65,8 +66,6 @@ template <DstFormat F> constexpr uint32_t kStride = F.elem_size * F.num_elems;
 /// @brief Destination VGPRs a load of format @p F writes.
 template <DstFormat F> constexpr uint32_t kRegs = (kStride<F> + 3) / 4;
 template <DstFormat F> constexpr bool kD16 = F.d16_hi || F.d16_lo;
-template <uint32_t Wave>
-constexpr uint64_t kAll = Wave == 64 ? ~uint64_t{0} : (uint64_t{1} << Wave) - 1;
 
 /// One writeback, as every level sees it. It never crosses an out-of-line call:
 /// everything that takes it is inlined, so its fields live in registers. Its
@@ -162,7 +161,7 @@ RJ_NOINLINE void for_wave(uint8_t *const *dst, bool sram_ecc, uint64_t exec,
 }
 
 template <uint32_t Wave> [[gnu::always_inline]] inline Coverage choose(uint64_t exec) {
-  if (exec == kAll<Wave>)
+  if (exec == lds_shapes::prefix(Wave))
     return Coverage::Wave;
   // Walking all 8-lane chunks for these instead is measurably slower.
   if (std::popcount(exec) <= 4)
