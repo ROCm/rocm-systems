@@ -30,12 +30,14 @@ set(attachment-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
+# cmake-format: off
 # add_attach_detach_test(<mode>)
 #
 # Registers the execute/validate pair for one interactive detach mechanism. Both
 # omit --attach-duration-msec, which is what selects the interactive path:
 #   enter  - a newline on rocprofv3's stdin answers the "Press Enter to detach" prompt
 #   sigint - SIGINT is delivered to rocprofv3 itself, not to the profiled application
+# cmake-format: on
 function(add_attach_detach_test MODE)
     set(_name rocprofv3-test-attachment-attach-detach-${MODE})
     set(_outdir ${CMAKE_CURRENT_BINARY_DIR}/attachment-detach-${MODE}-output)
