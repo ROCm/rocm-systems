@@ -7,12 +7,13 @@
 
 #pragma once
 
+#include "common/bits.h"
 #include "common/internal.h"
 #include "rj_arith/rj_arith.h"
 
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // gfx11 disables OMOD under IEEE mode or when output denormals are preserved.
 inline uint64_t rdna3_output_modifiers(uint64_t flags, uint64_t instruction_flags) {
@@ -108,4 +109,4 @@ inline float scale_omod_f32(float value, uint32_t modifiers) {
   return scale_omod(value, modifiers);
 }
 
-} // namespace rocjitsu::arith
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

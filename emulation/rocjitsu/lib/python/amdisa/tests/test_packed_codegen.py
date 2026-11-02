@@ -417,6 +417,20 @@ def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
         assert 'fp8_e4m3_to_f32' not in cpp
 
 
+def test_fp8_dot4_rejects_missing_or_invalid_formats():
+    import pytest
+
+    for operation in (None, '', 'fp8', 'fp8_fp8_fp8', 'f16_fp8', 'fp8_unknown'):
+        with pytest.raises(ValueError, match='unhandled FP8 dot4 operation'):
+            gen_dot4(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                'dot4_f32_fp8',
+                operation=operation,
+                dot_accumulation=FloatDotAccumulation.GFX12,
+            )
+
+
 def test_fp8_dot4_rejects_other_accumulation_models():
     import pytest
 
