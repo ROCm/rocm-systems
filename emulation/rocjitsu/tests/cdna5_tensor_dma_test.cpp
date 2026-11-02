@@ -1266,7 +1266,8 @@ TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
     uint32_t tile_dim0;
     uint32_t valid_indices;
   };
-  for (const EmptyGather gather : {EmptyGather{2, 0}, EmptyGather{0, 2}}) {
+  for (const EmptyGather gather : {EmptyGather{.tile_dim0 = 2, .valid_indices = 0},
+                                   EmptyGather{.tile_dim0 = 0, .valid_indices = 2}}) {
     SCOPED_TRACE(gather.tile_dim0);
     write_wave_sgpr(*cu, *wf, 15, gather.tile_dim0 << 16);
     write_wave_sgpr(*cu, *wf, 16, gather.valid_indices);
