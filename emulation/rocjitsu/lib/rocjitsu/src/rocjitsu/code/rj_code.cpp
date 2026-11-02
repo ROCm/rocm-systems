@@ -8,6 +8,7 @@
 
 #include <cstring>
 #include <new>
+#include <string>
 #include <unordered_map>
 
 using namespace rocjitsu;
@@ -338,7 +339,7 @@ rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf, uint
   if (!inst || !buf || buf_size == 0)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
+  const std::string dis = reinterpret_cast<const Instruction *>(inst)->disassemble();
   std::strncpy(buf, dis.c_str(), buf_size - 1);
   buf[buf_size - 1] = '\0';
   return ROCJITSU_STATUS_SUCCESS;

@@ -45,6 +45,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_hsa_loader.hpp"
+#include "core/inc/hsa_internal.h"
 
 namespace rocr {
 
@@ -299,6 +300,66 @@ hsa_ven_amd_loader_iterate_executables(
 
     return GetLoader()->IterateExecutables(callback, data);
   } catch(...) { return AMD::handleException(); }
+}
+
+hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
+    hsa_code_object_reader_t code_object_reader, size_t* load_size) {
+  try {
+    if (!Runtime::runtime_singleton_->IsOpen()) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (nullptr == load_size) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    CodeObjectReaderImpl* reader = CodeObjectReaderImpl::Object(code_object_reader);
+    if (!reader) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+    }
+
+    return Loader::CodeObjectLoadSize(reader->GetCodeObjectMemory(), reader->GetCodeObjectSize(),
+                                      load_size);
+  } catch (...) {
+    return AMD::handleException();
+  }
+}
+
+hsa_status_t hsa_ven_amd_loader_executable_load_agent_code_object_at_address(
+    hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
+    const char* options, void* address, size_t size, hsa_loaded_code_object_t* loaded_code_object) {
+  try {
+    if (!Runtime::runtime_singleton_->IsOpen()) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    Executable* exec = Executable::Object(executable);
+    if (!exec) {
+      return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
+    }
+
+    hsa_device_type_t device_type;
+    hsa_status_t status = HSA::hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+    if (device_type != HSA_DEVICE_TYPE_GPU) {
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    }
+
+    CodeObjectReaderImpl* reader = CodeObjectReaderImpl::Object(code_object_reader);
+    if (!reader) {
+      return HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER;
+    }
+
+    if (!address) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+    hsa_code_object_t code_object = {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
+    return exec->LoadCodeObject(agent, code_object, reader->GetCodeObjectSize(), options,
+                                reader->GetUri(), loaded_code_object, address, size);
+  } catch (...) {
+    return AMD::handleException();
+  }
 }
 
 } // namespace rocr

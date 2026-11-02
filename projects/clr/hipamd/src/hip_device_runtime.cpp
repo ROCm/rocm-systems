@@ -554,7 +554,12 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *cacheConfig = hipFuncCache_t();
+  amd::Device* device = hip::getCurrentDevice()->devices()[0];
+  // Devices without a configurable carveout report no preference.
+  *cacheConfig = device->settings().groupMemCarveout_
+                     ? static_cast<hipFuncCache_t>(
+                           amd::carveoutPercentToFuncCache(device->GetGroupMemCarveout()))
+                     : hipFuncCachePreferNone;
 
   HIP_RETURN(hipSuccess);
 }
@@ -646,8 +651,6 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
   if (!hip::tls.capture_streams_.empty() || !g_captureStreams.empty()) {
     HIP_RETURN(hipErrorStreamCaptureUnsupported);
   }
-
-  // No way to set cache config yet.
 
   hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
       amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
