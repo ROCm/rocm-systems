@@ -72,13 +72,13 @@ namespace RcclUnitTesting
     }
 
     // EnvVars reports 0 GPUs in a re-exec'd child, and a skipped child scores as a pass, so gate in the parent.
-    bool TooFewGpus()
+    bool TooFewGpus(int minGpus = 2)
     {
       if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr)
       {
         return false;
       }
-      return EnvVars().GetNumDetectedGpus() < 2;
+      return EnvVars().GetNumDetectedGpus() < minGpus;
     }
 
     bool IsGfx1250()
@@ -520,7 +520,7 @@ namespace RcclUnitTesting
 
   TEST(AllGather, SymmetricTmaStSkewedHead)
   {
-    if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr && EnvVars().GetNumDetectedGpus() < 3)
+    if (TooFewGpus(3))
     {
       GTEST_SKIP() << "This test requires at least 3 GPUs.";
     }
