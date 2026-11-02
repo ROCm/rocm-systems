@@ -553,6 +553,8 @@ bool call_through(HipDispatchTable* t, HipCompilerDispatchTable* c, void* dev) {
 }
 
 TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
+  if (!std::getenv("ROCPROFILER_REGISTER_LIBRARY"))
+    HRR_SKIP("started by Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable");
   HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the capture shims
   if (runtime_has_no_table()) return;
   HipDispatchTable* t = tool_hip_table();
