@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
+#include <utils.hh>
 #include <condition_variable>
 #include "user_object_common.hh"
 bool setVar = false;
@@ -26,10 +27,17 @@ std::condition_variable cv;
 template <typename T> __global__ void KernelFn(T* Ad, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * WaitMs;
+#if HT_AMD
+  uint64_t start = wall_clock64(), cycles = 0;
+  while (cycles < num_cycles) {
+    cycles = wall_clock64() - start;
+  }
+#else
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
   }
+#endif
   if ((std::is_same<float, T>::value) == true) {
     *Ad = 9999.0f;
   } else if ((std::is_same<int, T>::value) == true) {
@@ -54,8 +62,7 @@ void destroyPinnedObj(void* ptr) {
 }
 template <typename T>
 void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyObj(void*)) {
-  int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   hipGraph_t graph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -155,8 +162,7 @@ void destroyHostRegObj(void* ptr) {
  * - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
-  int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   int* A_h = new int();
   int* A_d = nullptr;
   HIP_CHECK(hipHostRegister(A_h, sizeof(int), 0));
@@ -190,15 +196,21 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
 template <typename T> __global__ void StructClassKernelFn(T* Obj, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * WaitMs;
+#if HT_AMD
+  uint64_t start = wall_clock64(), cycles = 0;
+  while (cycles < num_cycles) {
+    cycles = wall_clock64() - start;
+  }
+#else
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
   }
+#endif
   Obj->count = 9999;
 }
 template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T* Obj_d) {
-  int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   hipGraph_t graph = nullptr;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -286,8 +298,7 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
  * - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
-  int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   std::thread t1(threadFunc_dltMemory);
   int* hostArr = nullptr;
   HIP_CHECK(hipHostMalloc(&hostArr, sizeof(int)));
@@ -335,10 +346,17 @@ HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
 __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitMs) {
   uint64_t num_cycles = (uint64_t)clockrate;
   num_cycles = num_cycles * WaitMs;
+#if HT_AMD
+  uint64_t start = wall_clock64(), cycles = 0;
+  while (cycles < num_cycles) {
+    cycles = wall_clock64() - start;
+  }
+#else
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
   }
+#endif
   *Ad = 9999;
 }
 /**
@@ -358,8 +376,7 @@ __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitMs) {
  * - HIP_VERSION >= 6.3
  */
 HIP_TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
-  int clockrate = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
+  int clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   std::thread t1(threadFunc_dltMemory);
   hipGraph_t graph;
   hipGraphNode_t memcpyNode, kNode;

@@ -15,10 +15,6 @@
 #include <chrono>
 #include <thread>
 
-namespace {
-constexpr auto wait_ms = 500;
-}  // anonymous namespace
-
 #define checkMempoolSupported(device) {                                                            \
   int deviceSupportsMemoryPools = 0;                                                               \
   HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,                                      \
@@ -32,42 +28,6 @@ constexpr auto wait_ms = 500;
   if (numOfDev < 2) {                                                                              \
     HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);                                         \
   }                                                                                                \
-}
-
-template <typename T> __global__ void kernel_500ms(T* host_res, int clk_rate) {
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  host_res[tid] = tid + 1;
-  __threadfence_system();
-  // expecting that the data is getting flushed to host here!
-  uint64_t start = clock64() / clk_rate, cur;
-  if (clk_rate > 1) {
-    do {
-      cur = clock64() / clk_rate - start;
-    } while (cur < wait_ms);
-  } else {
-    do {
-      cur = clock64() / start;
-    } while (cur < wait_ms);
-  }
-}
-
-template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_rate) {
-#if HT_AMD
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  host_res[tid] = tid + 1;
-  __threadfence_system();
-  // expecting that the data is getting flushed to host here!
-  uint64_t start = clock_function() / clk_rate, cur;
-  if (clk_rate > 1) {
-    do {
-      cur = clock_function() / clk_rate - start;
-    } while (cur < wait_ms);
-  } else {
-    do {
-      cur = clock_function() / start;
-    } while (cur < wait_ms);
-  }
-#endif
 }
 
 template <typename T> __global__ void notifiedKernel(T* host_res, volatile unsigned int* notified) {

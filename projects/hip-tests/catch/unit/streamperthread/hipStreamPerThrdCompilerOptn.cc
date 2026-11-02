@@ -45,10 +45,17 @@ __global__ void DefltStrmPT_Square(int64_t* C_d, int64_t N) {
 
 __global__ void Wait_Kernel3(int clockrate, uint64_t WaitSecs, int PassSignal = 0) {
   uint64_t num_cycles = WaitSecs * clockrate * 1000;
+#if HT_AMD
+  uint64_t start = wall_clock64(), cycles = 0;
+  while (cycles < num_cycles) {
+    cycles = wall_clock64() - start;
+  }
+#else
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
     cycles = clock64() - start;
   }
+#endif
   if (PassSignal) {
     SigComplte = 1;
   }
@@ -97,7 +104,7 @@ float DefaultPT2_Memcpy_MemSet(int CpyAsync, int MemSetAsync) {
   bool IfTstPassed = true;
   DefltStrmPT::HstA = reinterpret_cast<int64_t*>(malloc(DefltStrmPT::Sz));
   DefltStrmPT::HstRes = reinterpret_cast<int64_t*>(malloc(DefltStrmPT::Sz));
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
+  DefltStrmPT::clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   HIP_CHECK(hipMalloc(&(DefltStrmPT::DevA), DefltStrmPT::Sz));
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
     DefltStrmPT::HstA[i] = DefltStrmPT::CONST;
@@ -258,7 +265,7 @@ void DefaultPT2_StrmQuery() {
 
 
 void DefaultPT2_StreamSync() {
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
+  DefltStrmPT::clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   // Calling hipStreamSync on user created stream object
   Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 1);
@@ -603,7 +610,7 @@ float DefaultPT2_hipMemcpy2DFromArray() {
   DefltStrmPT::numH = 1024;
   DefltStrmPT::numW = 1024;
   DefltStrmPT::width = DefltStrmPT::numW * sizeof(float);
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
+  DefltStrmPT::clockrate = static_cast<int>(SpinTicksPerUs() * 1000);
   HIP_CHECK(hipHostMalloc(&(Hptr_A), (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
   HIP_CHECK(hipHostMalloc(&(Hptr_B), (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
   for (size_t i = 0; i < (DefltStrmPT::width * DefltStrmPT::numH); ++i) {
