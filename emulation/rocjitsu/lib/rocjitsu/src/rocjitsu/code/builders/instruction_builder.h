@@ -954,7 +954,8 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 ///        literal slot -- so a builder that must stay visible to a later translation pass has to
 ///        be emitted in that form. Costs one extra word, so callers with a fixed-size window ask
 ///        for it only when the window can hold it.
-/// @param error Optional borrowed diagnostic emitter, used only on failure.
+/// @param error Optional borrowed diagnostic emitter, receiving at most one failure diagnostic.
+/// @returns True after appending the sequence, or false without changing @p words.
 [[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, int64_t delta,
                                            bool prefer_literal64 = false,

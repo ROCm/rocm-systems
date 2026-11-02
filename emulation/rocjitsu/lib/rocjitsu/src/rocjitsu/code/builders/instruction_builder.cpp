@@ -74,6 +74,11 @@ enum class ScalarSop2Op {
   return std::nullopt;
 }
 
+void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
+  if (error != nullptr)
+    error->emit() << "Unimplemented instruction: scalar PC delta builder for target architecture";
+}
+
 /// @brief Build an encoded scalar `s_add_u32` instruction.
 ///
 /// @details Used only for final static-PC recovery fixup emission, after the
@@ -84,8 +89,7 @@ enum class ScalarSop2Op {
                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
   if (!opcode) {
-    if (error != nullptr)
-      error->emit() << "scalar PC delta arithmetic for target architecture";
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
@@ -101,8 +105,7 @@ enum class ScalarSop2Op {
                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
   if (!opcode) {
-    if (error != nullptr)
-      error->emit() << "scalar PC delta arithmetic for target architecture";
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
@@ -118,8 +121,7 @@ enum class ScalarSop2Op {
                                                        const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
   if (!opcode) {
-    if (error != nullptr)
-      error->emit() << "scalar PC delta arithmetic for target architecture";
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
@@ -135,8 +137,7 @@ enum class ScalarSop2Op {
                                                        const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
   if (!opcode) {
-    if (error != nullptr)
-      error->emit() << "scalar PC delta arithmetic for target architecture";
+    report_unsupported_pc_delta_builder(error);
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
@@ -187,8 +188,7 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
         !prefer_literal64 && delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
     auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
     if (!opcode) {
-      if (error != nullptr)
-        error->emit() << "scalar PC delta arithmetic for target architecture";
+      report_unsupported_pc_delta_builder(error);
       return false;
     }
     util::FailureOr<uint32_t> word =
