@@ -358,6 +358,11 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
       return util::Result::failure();
     return tensor_element_count(desc, layout) ? util::Result::success() : util::Result::failure();
   }
+  // A dense tile with no elements is a NOP (see tensor_element_count). It
+  // visits no iteration origins, so its iteration fields need not describe a
+  // valid walk; pipelines drain an iterating prefetch this way.
+  if (rank == 0 || desc.tile_dims[0] == 0)
+    return util::Result::success();
   if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
     return util::Result::failure();
   if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0) {
@@ -595,6 +600,9 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
   uint64_t element_count = 1;
   for (uint32_t dim = 0; dim < rank; ++dim)
     element_count *= desc.tile_dims[dim];
+  // Without elements there is nothing to visit, so reconstruct no origins.
+  if (element_count == 0)
+    return;
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {

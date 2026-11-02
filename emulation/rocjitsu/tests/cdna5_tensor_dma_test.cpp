@@ -1159,6 +1159,79 @@ TEST(Gfx1250ExecutionTest, TensorDmaZeroTileDim0IsANopWhateverTheHigherTileDims)
   EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), kSentinel);
 }
 
+// Pipelines drain an iterating prefetch with a zero-width tile. Such a tile
+// visits no elements, so its iteration need not describe valid origins: it
+// passes with an overlapping stride, which no transfer could invert, and with
+// every tile dimension zero, which leaves no rank to iterate over. A tile with
+// elements and the same overlapping stride is still rejected.
+TEST(Gfx1250ExecutionTest, TensorDmaIteratingNopTileSkipsIterationValidation) {
+  constexpr uint64_t kGlobal = 0x18c000;
+  constexpr uint32_t kSentinel = 0x5e5e5e5eu;
+  struct Case {
+    const char *name;
+    uint32_t tile_dim0;
+    uint32_t tile_dim1;
+    uint32_t tensor_dim0_stride;
+    bool succeeds;
+  };
+  constexpr Case kCases[] = {
+      {"zero-width tile, overlapping stride", 0, 4, 1, true},
+      {"zero-width tile, disjoint stride", 0, 4, 4, true},
+      {"all-zero tile", 0, 0, 4, true},
+      {"one-element-wide tile, overlapping stride", 1, 4, 1, false},
+  };
+  for (const Case &c : kCases) {
+    for (const bool store : {false, true}) {
+      SCOPED_TRACE(testing::Message() << c.name << (store ? ", store" : ", load"));
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto &observer = install_tensor_dma_observer(sim);
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_lds_base(cu->allocate_lds(256));
+      wf->set_lds_size(256);
+      for (uint32_t i = 0; i < 16; ++i) {
+        cu->lds().write32(wf->lds_base() + i * 4, kSentinel);
+        write_global_u32(*sim.memory, kGlobal + i * 4, kSentinel);
+      }
+
+      write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+      write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 19)); // i32, iterate enabled.
+      write_wave_sgpr(*cu, *wf, 13, 4u << 16);                // tensor dim0.
+      write_wave_sgpr(*cu, *wf, 14, 4u << 16);                // tensor dim1.
+      write_wave_sgpr(*cu, *wf, 15, c.tile_dim0 << 16);
+      write_wave_sgpr(*cu, *wf, 16, c.tile_dim1);
+      write_wave_sgpr(*cu, *wf, 17, c.tensor_dim0_stride);
+      write_wave_sgpr(*cu, *wf, 18, 0);
+      write_wave_sgpr(*cu, *wf, 19, 0);
+      write_wave_sgpr(*cu, *wf, 20, 0);
+      write_wave_sgpr(*cu, *wf, 21, 0);        // LDS increment.
+      write_wave_sgpr(*cu, *wf, 22, 1);        // Global increment in elements.
+      write_wave_sgpr(*cu, *wf, 23, 1u << 16); // iteration_count - 1: two iterations.
+
+      const std::array<uint32_t, 3> words = {store ? 0xd0714001u : 0xd0710001u, 0x7c000000u,
+                                             0x7c140c00u};
+      auto inst = decode_gfx1250(words, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+      ASSERT_NE(inst, nullptr);
+      EXPECT_EQ(cu->execute_instruction(inst.get(), *wf).succeeded(), c.succeeds);
+      if (c.succeeds) {
+        EXPECT_EQ(observer.accesses.size(), 1u);
+        for (const auto &access : observer.accesses) {
+          EXPECT_TRUE(access.addresses.empty());
+          EXPECT_TRUE(access.lds_ranges.empty());
+        }
+      } else {
+        EXPECT_TRUE(observer.accesses.empty());
+      }
+      for (uint32_t i = 0; i < 16; ++i) {
+        EXPECT_EQ(cu->lds().read32(wf->lds_base() + i * 4), kSentinel) << i;
+        EXPECT_EQ(read_global_u32(*sim.memory, kGlobal + i * 4), kSentinel) << i;
+      }
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaGatherWithoutRowsIsANop) {
   // A gather may have zero valid indices (CDNA5 ISA, Table 80), and a zero
   // tile_dim0 makes it a NOP like any other tile.
