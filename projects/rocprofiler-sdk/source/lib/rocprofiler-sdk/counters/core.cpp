@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -183,6 +184,17 @@ start_context(const context::context* ctx)
         controller->disable_serialization(service.agents);
         note_counting_stopped();
         return;
+    }
+
+    // Request the dispatch-mode perfmon enable (no-op on older Linux kernels that don't support
+    // it); stop_context() doesn't need a release to match: there is no unprivileged "off" ioctl,
+    // and the KFD only clears this when this process's KFD device context is torn down.
+    for(const auto& agent : agent::get_agents())
+    {
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            counters::counter_collection_dispatch_perfmon_enable(agent);
+        }
     }
 
     // Counter collection no longer registers a per-queue callback with the queue
