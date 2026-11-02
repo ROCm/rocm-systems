@@ -265,6 +265,22 @@ constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, siz
   return y;
 }
 
+// Every capped DDA block width is a whole number of these threads.
+constexpr uint32_t kDdaThreadGranule = 64;
+
+// Blocks under a grid cap: `capBlocks` when set and lower, else `blocks`.
+inline size_t ddaCapBlocks(size_t blocks, uint32_t capBlocks) {
+  return (capBlocks > 0 && capBlocks < blocks) ? capBlocks : blocks;
+}
+
+// Block width under a grid cap: within `capThreads` when set, in whole granules, at least one; kernels stride the grid.
+inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
+  if (capThreads == 0 || threads <= capThreads) {
+    return threads;
+  }
+  return std::max(capThreads / kDdaThreadGranule * kDdaThreadGranule, kDdaThreadGranule);
+}
+
 inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
   constexpr uint32_t kThreadsPerWarp = 64;
   constexpr uint32_t kThreadsPerBlock = 512;

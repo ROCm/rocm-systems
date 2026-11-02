@@ -33,15 +33,9 @@ constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 // `typeSize` bytes, capped at rcclDdaFabricVmmBlocks() (at most the init-time block count) and at `cap`.
 static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_t count, int typeSize,
                                                            rcclDdaLaunchCap cap) {
-  size_t blocks = (size_t)rcclDdaFabricVmmBlocks(comm);
-  if (cap.blocks > 0 && cap.blocks < blocks) {
-    blocks = cap.blocks;
-  }
+  const size_t blocks = dda::common::ddaCapBlocks((size_t)rcclDdaFabricVmmBlocks(comm), cap.blocks);
   auto geom = dda::common::getGridAndBlockDims(count, typeSize, blocks);
-  // Both kernels stride over the grid, so a narrower block only adds passes; blocks stay whole 64-thread granules.
-  if (cap.threads > 0 && geom.second.x > cap.threads) {
-    geom.second.x = std::max(cap.threads / 64 * 64, 64u);
-  }
+  geom.second.x = dda::common::ddaCapThreads(geom.second.x, cap.threads);
   return geom;
 }
 

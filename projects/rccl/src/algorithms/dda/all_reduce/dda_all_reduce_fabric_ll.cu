@@ -52,21 +52,43 @@ using dda::common::ddaLL128Slices;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
 
+// Block width of each tier when uncapped.
+constexpr unsigned kDdaArLLOneShotThreads = 512;
+constexpr unsigned kDdaArLLTwoShotThreads = 1024;
+constexpr unsigned kDdaArLL128Threads = 512;
+
 // Single source of the LL and LL128 launch geometry: a 1-D grid over `units` of work, `unitThreads` threads each,
 // in blocks of `threads`, capped low (LL serves small messages where latency, not occupancy, dominates). `cap` lowers
-// the blocks and the threads (whole 64-thread granules; every kernel strides over the grid); {0, 0} keeps the tier's.
+// the blocks and the threads (dda::common::ddaCapThreads); {0, 0} keeps the tier's.
 static inline std::pair<dim3, dim3> ddaArFabricLLGrid(const ncclComm* comm, size_t units, unsigned threads,
                                                       unsigned unitThreads, rcclDdaLaunchCap cap) {
-  if (cap.threads > 0 && threads > cap.threads) {
-    threads = std::max(cap.threads / 64 * 64, 64u);
-  }
-  size_t nBlocksMax = (size_t)std::max(comm->ddaFabricMaxBlocks, 1);
-  if (cap.blocks > 0 && cap.blocks < nBlocksMax) {
-    nBlocksMax = cap.blocks;
-  }
+  threads = dda::common::ddaCapThreads(threads, cap.threads);
+  const size_t nBlocksMax = dda::common::ddaCapBlocks((size_t)std::max(comm->ddaFabricMaxBlocks, 1), cap.blocks);
   const size_t unitsPerBlock = threads / unitThreads;
   const size_t blocks = std::min((units + unitsPerBlock - 1) / unitsPerBlock, nBlocksMax);
   return std::make_pair(dim3((unsigned)std::max<size_t>(blocks, 1)), dim3(threads));
+}
+
+// Per-tier geometry for `bytes` of message, shared by each launcher and the *Blocks reporters.
+// LL one-shot: 8-byte packets of the whole message, one thread each.
+static inline std::pair<dim3, dim3> ddaArLLOneShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
+  return ddaArFabricLLGrid(comm, bytes >> 3, kDdaArLLOneShotThreads, 1, cap);
+}
+
+// LL two-shot: 8-byte packets of one shard, one thread each.
+static inline std::pair<dim3, dim3> ddaArLLTwoShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
+  return ddaArFabricLLGrid(comm, (bytes >> 3) / (size_t)std::max(comm->nRanks, 1), kDdaArLLTwoShotThreads, 1, cap);
+}
+
+// LL128 one-shot: slices of the whole message, one warp each.
+static inline std::pair<dim3, dim3> ddaArLL128OneShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
+  return ddaArFabricLLGrid(comm, ddaLL128Slices(bytes), kDdaArLL128Threads, kDdaLL128Warp, cap);
+}
+
+// LL128 two-shot: slices of one shard, one warp each.
+static inline std::pair<dim3, dim3> ddaArLL128TwoShotGeom(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap cap) {
+  const size_t shardBytes = bytes / (size_t)std::max(comm->nRanks, 1);
+  return ddaArFabricLLGrid(comm, ddaLL128Slices(shardBytes), kDdaArLL128Threads, kDdaLL128Warp, cap);
 }
 
 template <typename T>
@@ -74,9 +96,9 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
                                                   cudaStream_t stream, rcclDdaLaunchCap cap) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
-  const size_t nPk = bytes >> 3; // 8 payload bytes per packet
+  const size_t nPk = bytes >> 3; // 8 payload bytes per packet (for logging)
 
-  const auto geom = ddaArFabricLLGrid(comm, nPk, 512, 1, cap);
+  const auto geom = ddaArLLOneShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
@@ -129,7 +151,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
   const size_t slices = ddaLL128Slices(bytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const auto geom = ddaArFabricLLGrid(comm, slices, 512, kDdaLL128Warp, cap);
+  const auto geom = ddaArLL128OneShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
@@ -181,7 +203,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t slices = ddaLL128Slices(shardBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const auto geom = ddaArFabricLLGrid(comm, slices, 512, kDdaLL128Warp, cap);
+  const auto geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
@@ -235,7 +257,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
   const size_t bytes = count * sizeof(T);
   const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
 
-  const auto geom = ddaArFabricLLGrid(comm, nPk, 1024, 1, cap);
+  const auto geom = ddaArLLTwoShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
 
@@ -599,14 +621,14 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 }
 
 uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap) {
-  const size_t nPk = (count * ncclTypeSize(datatype)) >> 3;
+  const size_t bytes = count * ncclTypeSize(datatype);
   // Uncapped reports the one-shot grid, a bound on the two-shot's; a capped call reports the tier that launches.
   if ((cap.blocks > 0 || cap.threads > 0) &&
       !ddaLLArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum)) {
-    const dim3 grid = ddaArFabricLLGrid(comm, nPk / (size_t)std::max(comm->nRanks, 1), 1024, 1, cap).first;
+    const dim3 grid = ddaArLLTwoShotGeom(comm, bytes, cap).first;
     return grid.x * grid.y;
   }
-  const dim3 grid = ddaArFabricLLGrid(comm, nPk, 512, 1, cap).first;
+  const dim3 grid = ddaArLLOneShotGeom(comm, bytes, cap).first;
   return grid.x * grid.y;
 }
 
@@ -618,10 +640,9 @@ uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDat
   const size_t bytes = count * ncclTypeSize(datatype);
   if ((cap.blocks > 0 || cap.threads > 0) &&
       !ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum)) {
-    const size_t shardBytes = bytes / (size_t)std::max(comm->nRanks, 1);
-    const dim3 grid = ddaArFabricLLGrid(comm, ddaLL128Slices(shardBytes), 512, kDdaLL128Warp, cap).first;
+    const dim3 grid = ddaArLL128TwoShotGeom(comm, bytes, cap).first;
     return grid.x * grid.y;
   }
-  const dim3 grid = ddaArFabricLLGrid(comm, ddaLL128Slices(bytes), 512, kDdaLL128Warp, cap).first;
+  const dim3 grid = ddaArLL128OneShotGeom(comm, bytes, cap).first;
   return grid.x * grid.y;
 }
