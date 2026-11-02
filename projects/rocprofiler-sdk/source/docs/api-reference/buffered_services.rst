@@ -14,7 +14,7 @@ a buffered tracing service requires buffer creation. Flushing the buffer implici
 To flush a buffer explicitly, use ``rocprofiler_flush_buffer`` function.
 
 Kernel-dispatch delivery at the end of a collection window
---------------------------------------------------------
+----------------------------------------------------------
 
 A successful explicit flush of a kernel-dispatch buffer delivers the records for
 dispatches that the application synchronized before the flush began. This applies
