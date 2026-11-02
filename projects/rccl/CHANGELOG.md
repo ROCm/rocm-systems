@@ -32,6 +32,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_BC_MAX_BLOCKS` (default `0`): lowers the per-rank block budget of the DDA `ncclBroadcast` kernels below the CU-derived cap (`RCCL_DDA_FABRIC_MAXBLOCKS` or the CU count); it cannot raise it. `0` keeps the cap.
 * `RCCL_DDA_LL_BC_THREADS` (default `256`): block size of the DDA LL one-shot `ncclBroadcast` kernel. Values that are not a multiple of the wave size or exceed 512 fall back to the default.
 * `RCCL_DDA_BC_ALLOW_IPC` (default `0`): development only. Lets the `ncclBroadcast` selector also consider the DDA LL tier on the non-fabric (IPC) path. Not intended for production use.
+* `RCCL_DDA_LL128_BC_THREADS` (default `512`): block size of the DDA LL128 one-shot `ncclBroadcast` kernel. Values that are not a multiple of the LL128 warp (32 on gfx1250) or exceed 512 fall back to the default.
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.

@@ -1440,6 +1440,13 @@ threshold table introduced for gfx1250.
       - | ``0``: Fabric path only (default).
         | ``1``: Also consider DDA LL on the IPC path.
 
+    * - | ``RCCL_DDA_LL128_BC_THREADS``
+        | Block size (threads per block) of the DDA LL128 one-shot Broadcast
+          kernel. A value that is not a multiple of the LL128 warp (32 on gfx1250),
+          or is larger than 512, is ignored and the default is used.
+      - | ``512``: Default.
+        | ``N``: A multiple of the LL128 warp, at most ``512``.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
