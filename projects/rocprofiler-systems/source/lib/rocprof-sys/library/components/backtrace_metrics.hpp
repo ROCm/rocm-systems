@@ -155,11 +155,11 @@ hardware_counter_track_name(const std::string& label, std::int64_t tid)
     std::string descr = tim::papi::get_event_info(label).short_descr;
     if(descr.empty())
     {
+        if(label.empty())
+        {
+            throw std::runtime_error("Empty description for tid: " + std::to_string(tid));
+        }
         descr = label;
-    }
-    if(descr.empty())
-    {
-        throw std::runtime_error("Empty description for " + label);
     }
 
     return fmt::format("Thread {} [{}] (S)", descr, tid);
