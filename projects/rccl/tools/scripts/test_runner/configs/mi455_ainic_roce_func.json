@@ -4874,6 +4874,21 @@
           "name": "Gin_BackToBackTimeouts",
           "description": "GIN rail device barrier over IB: 4 sequential stuck barriers each yield ncclTimeout",
           "test_filter": "GinBarrierTimeoutMPITest.BackToBackTimeouts"
+        },
+        {
+          "name": "Hybrid_HealthyBarrierReturnsSuccess",
+          "description": "Hybrid LSA+rail GIN barrier timeout overload: all peers arrive -> ncclSuccess",
+          "test_filter": "HybridBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess"
+        },
+        {
+          "name": "Hybrid_AbsentLsaPeerStillSignalsRail",
+          "description": "Hybrid barrier: LSA peer absent -> LSA stage times out but rail stage still signals its peer",
+          "test_filter": "HybridBarrierTimeoutMPITest.AbsentLsaPeerStillSignalsRail"
+        },
+        {
+          "name": "Hybrid_AbsentLsaAndRailPeersShareOneBudget",
+          "description": "Hybrid barrier: LSA and rail peers absent -> both stages time out within one budget",
+          "test_filter": "HybridBarrierTimeoutMPITest.AbsentLsaAndRailPeersShareOneBudget"
         }
       ]
     },
