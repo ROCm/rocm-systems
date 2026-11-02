@@ -130,9 +130,10 @@ enum class ScalarPairMode { Preserve, Replicate32 };
 /// to one live wave before any callback or storage view is produced. Physical
 /// SGPR writes require a mutable Wavefront; raw VM/runtime writes belong on
 /// ComputeUnitCore and deliberately bypass this instruction-facing facade.
-/// SGPR writes also serve guest operand destinations: a range outside the
-/// acquiring wave allocation is architecturally ignored and returns success,
-/// without touching storage or reporting an instruction error.
+/// SGPR writes also serve guest operand destinations: a range not wholly contained
+/// in the acquiring wave's fixed physical SGPR storage block returns success without
+/// changing storage, notifying plugins, or reporting an instruction error.
+/// Success therefore does not guarantee that a store occurred.
 class RegisterAccess {
   static uint32_t byte_bit_mask(uint8_t byte_mask) {
     uint32_t bit_mask = 0;
@@ -1515,8 +1516,8 @@ public:
   // that resolves one owner for the complete range. Writes require an explicit
   // mutable wavefront so instruction code cannot silently reach raw SGPR
   // storage; VM/runtime code uses ComputeUnitCore's raw write API directly.
-  // Guest SGPR destinations also reach these writes, so out-of-allocation
-  // ranges follow the architectural ignored-write policy in ComputeUnitCore.
+  // Guest SGPR destinations also reach these writes. ComputeUnitCore ignores
+  // ranges not wholly contained in the wave's fixed physical SGPR storage block.
   [[nodiscard]] bool owns_sgpr_range(uint32_t physical_base, uint32_t physical_count) const {
     if (wf_)
       return cu_->owns_sgpr_range(*wf_, physical_base, physical_count);

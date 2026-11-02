@@ -1960,14 +1960,15 @@ TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
 }
 
 TEST(RegisterAccessTest, DecodedOutOfRangeSgprDestinationIsIgnored) {
-  Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/2);
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, kVgprsPerWave,
+             /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
   Wavefront *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, kVgprsPerWave);
   ASSERT_NE(neighbor, nullptr);
   ASSERT_EQ(neighbor->sgpr_alloc().base, fx.sgpr_base() + 104);
   const uint32_t neighbor_base = neighbor->sgpr_alloc().base;
   fx.cu->write_sgpr(neighbor_base, 0xAABBCCDDu);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_NE(decoder, nullptr);
   constexpr std::array<uint32_t, 2> encoding{0xBEE80081u, 0}; // s_mov_b32 s104, 1
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, encoding.data()));
@@ -1990,20 +1991,20 @@ TEST(RegisterAccessTest, OperandStorePreservesPendingErrorAndRecoversNextInstruc
   class Store : public Instruction {
   public:
     explicit Store(bool report_error)
-        : Instruction("operand_store",
-                      [](Instruction &inst, void *ctx) {
-                        auto &self = static_cast<Store &>(inst);
-                        auto &wf = *static_cast<Wavefront *>(ctx);
-                        cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
-                        auto write = RegisterAccess(wf).write_operand(dst, 1);
-                        if (self.report_error_)
-                          wf.report_instruction_execution_error(
-                              InstructionExecutionError::UnsupportedOperandValue,
-                              "original operand error");
-                        self.failed =
-                            write.store_native<uint32_t>(0, util::native<uint32_t>(0x55667788u), 1)
-                                .failed();
-                      }),
+        : Instruction(
+              "operand_store",
+              [](Instruction &inst, void *ctx) {
+                auto &self = static_cast<Store &>(inst);
+                auto &wf = *static_cast<Wavefront *>(ctx);
+                cdna4::Operand dst(32, cdna4::OperandType::OPR_VGPR, 4);
+                RegisterAccess::OperandWriteView write = RegisterAccess(wf).write_operand(dst, 1);
+                if (self.report_error_)
+                  wf.report_instruction_execution_error(
+                      InstructionExecutionError::UnsupportedOperandValue, "original operand error");
+                self.failed =
+                    write.store_native<uint32_t>(0, util::native<uint32_t>(0x55667788u), 1)
+                        .failed();
+              }),
           report_error_(report_error) {}
     bool failed = false;
 
