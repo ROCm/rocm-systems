@@ -44,20 +44,29 @@
 namespace gfx12::quick_scan
 {
 using ::quick_scan::QuickToken;
+using ::quick_scan::ScanState;
 
 namespace
 {
 
+// `info` drives the scalar walks. `jump` and `len` are the vector LUTs:
+// jump[key] is 0 for rare keys and the token length in nibbles otherwise, so
+// that index + jump[key] is the jump function g described below; len[key] is
+// the token length for every key. Keys >= 128 alias key & 0x7F except 0xE1,
+// which is patched separately.
+//
+// WAVE_START_EXT is an ordinary fixed-length (40-bit) token here; it is not
+// followed by extension nibbles.
 struct Tables
 {
     uint8_t info[256];
     uint8_t rare_type[256];
+    alignas(64) uint8_t jump[128];
+    alignas(64) uint8_t len[128];
 };
 
 constexpr uint8_t INFO_LEN = 0x1F;
 constexpr uint8_t INFO_RARE = 0x20;
-constexpr uint8_t INFO_EXT = 0x40;
-constexpr uint8_t INFO_NOP = 0x80;
 
 constexpr uint8_t MAX_TOKEN_NIBBLES = 18;
 constexpr unsigned RARE_END = 5;
@@ -67,6 +76,8 @@ static_assert(
         RdnaType::REG_INIT == 4,
     "Rare-token cluster must occupy positions 0..4"
 );
+
+uint8_t jump_of(uint8_t info) { return (info & INFO_RARE) ? 0 : (info & INFO_LEN); }
 
 const Tables& tables()
 {
@@ -87,13 +98,16 @@ const Tables& tables()
                 v |= INFO_RARE;
                 out.rare_type[key] = static_cast<uint8_t>(type);
             }
-            if (type == RdnaType::WAVE_START_EXT) v |= INFO_EXT;
-            if (type == RdnaType::NOP) v |= INFO_NOP;
             out.info[key] = v;
         }
         for (int key = 128; key < 256; ++key)
         {
             if (key != 0xE1 && out.info[key] != out.info[key & 0x7F]) __builtin_trap();
+        }
+        for (int key = 0; key < 128; ++key)
+        {
+            out.jump[key] = jump_of(out.info[key]);
+            out.len[key] = out.info[key] & INFO_LEN;
         }
         return out;
     }();
@@ -127,187 +141,186 @@ uint64_t load_contents64(const uint8_t* buf, size_t size, size_t nibble_pos)
     return (contents >> 4) | carry;
 }
 
-__attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx12_avx512vbmi(
-    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
+#    define GFX12_SCAN_TARGET __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2")))
+
+// Key (8 bits starting at in-chunk nibble `pos`). The caller guarantees two
+// readable bytes at chunk + (pos >> 1).
+inline uint8_t load_key_unchecked(const uint8_t* chunk, unsigned pos)
+{
+    uint16_t window;
+    std::memcpy(&window, chunk + (pos >> 1), sizeof(window));
+    return static_cast<uint8_t>(window >> ((pos & 1u) * 4u));
+}
+
+// 64-bit contents starting at in-chunk nibble `pos`. The caller guarantees
+// nine readable bytes at chunk + (pos >> 1).
+inline uint64_t load_contents64_unchecked(const uint8_t* chunk, unsigned pos)
+{
+    const uint8_t* p = chunk + (pos >> 1);
+    uint64_t lo;
+    std::memcpy(&lo, p, sizeof(lo));
+    const uint64_t odd = 0 - static_cast<uint64_t>(pos & 1u);
+    return (lo >> (pos & 1u) * 4u) | ((static_cast<uint64_t>(p[sizeof(lo)]) << 60) & odd);
+}
+
+GFX12_SCAN_TARGET inline unsigned lane0(__m512i v)
+{ return static_cast<uint8_t>(_mm_cvtsi128_si32(_mm512_castsi512_si128(v))); }
+
+// AVX-512_VBMI path. Per 64-nibble (32-byte) chunk:
+//   1. Build the 64 overlapping 8-bit keys (one per nibble) with vpermb +
+//      vpmultishiftqb.
+//   2. Look up jump[key] and form g[i] = i if a rare token starts at nibble i,
+//      else i + len(i). Exit lanes (>= 64) are fixed points through
+//      exit_table_v.
+//   3. Square g six times. Tokens are at least one nibble long, so g^64[i] is
+//      the first rare token on the token-start orbit from i, or
+//      64 + the next chunk's entry if there is none.
+//   4. Fast path: g^64[entry] leaves the chunk.
+//   5. Slow path: capture the rare token, then jump straight to the next one
+//      through g^64 sampled just past it.
+//
+// With `state`, the scan starts at state->pos and, when `out` fills, stops
+// right after the last captured token so a later call can resume.
+GFX12_SCAN_TARGET size_t scan_gfx12_avx512vbmi(
+    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state
 )
 {
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
+    if (!buf || !out || out_cap == 0 || size == 0)
+    {
+        if (state && (!buf || size == 0)) state->done = true;
+        return 0;
+    }
 
     const Tables& T = tables();
 
-    const __m512i lut0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info));
-    const __m512i lut1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(T.info + 64));
-    const __m512i event_sync_info_v = _mm512_set1_epi8(static_cast<char>(T.info[0xE1]));
-
     constexpr size_t CHUNK_NIBBLES = 64;
     constexpr size_t CHUNK_BYTES = CHUNK_NIBBLES / 2;
-    constexpr size_t TAIL_GUARD = 1;
+    // Full-zmm load per chunk; also covers the slow path's unchecked reads
+    // (key: 2 bytes, contents: 9 bytes, from any in-chunk nibble).
+    constexpr size_t LOAD_BYTES = 64;
     static_assert((CHUNK_NIBBLES - 1) + MAX_TOKEN_NIBBLES <= 127, "vpermi2b successor indices must not wrap");
+    static_assert(CHUNK_BYTES + 9 <= LOAD_BYTES, "slow-path reads must stay within the loaded window");
 
     alignas(64) static constexpr uint8_t index_bytes[CHUNK_NIBBLES] = {
         0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
         22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
         44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+    // Qword q of the gathered vector holds bytes 4q..4q+7; vpmultishiftqb then
+    // extracts the 8 bits at bit offset 4j of that qword into byte j, which is
+    // the key at nibble 8q + j.
+    alignas(64) static constexpr uint8_t gather_bytes[CHUNK_NIBBLES] = {
+        0,  1,  2,  3,  4,  5,  6,  7,  4,  5,  6,  7,  8,  9,  10, 11, 8,  9,  10, 11, 12, 13,
+        14, 15, 12, 13, 14, 15, 16, 17, 18, 19, 16, 17, 18, 19, 20, 21, 22, 23, 20, 21, 22, 23,
+        24, 25, 26, 27, 24, 25, 26, 27, 28, 29, 30, 31, 28, 29, 30, 31, 32, 33, 34, 35};
+    alignas(64) static constexpr uint8_t shift_bytes[CHUNK_NIBBLES] = {
+        0,  4,  8,  12, 16, 20, 24, 28, 0,  4,  8,  12, 16, 20, 24, 28, 0,  4,  8,  12, 16, 20,
+        24, 28, 0,  4,  8,  12, 16, 20, 24, 28, 0,  4,  8,  12, 16, 20, 24, 28, 0,  4,  8,  12,
+        16, 20, 24, 28, 0,  4,  8,  12, 16, 20, 24, 28, 0,  4,  8,  12, 16, 20, 24, 28};
 
-    const __m512i index_v = _mm512_load_si512(index_bytes);
-    const __m512i exit_table_v = _mm512_add_epi8(index_v, _mm512_set1_epi8(64));
-    const __m512i len_mask_v = _mm512_set1_epi8(static_cast<char>(INFO_LEN));
-    const __m512i attention_v = _mm512_set1_epi8(static_cast<char>(INFO_RARE | INFO_EXT));
+    const __m512i jump_lo_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.jump));
+    const __m512i jump_hi_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.jump + 64));
+    const __m512i event_sync_jump_v = _mm512_set1_epi8(static_cast<char>(jump_of(T.info[0xE1])));
     const __m512i event_sync_key_v = _mm512_set1_epi8(static_cast<char>(0xE1));
-    const __m256i low_nibble_y = _mm256_set1_epi8(0x0F);
-    const __m256i high_nibble_y = _mm256_set1_epi8(static_cast<char>(0xF0));
-    const __m512i zero_v = _mm512_setzero_si512();
+    const __m512i len_lo_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.len));
+    const __m512i len_hi_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(T.len + 64));
+    const __m512i event_sync_len_v = _mm512_set1_epi8(static_cast<char>(T.info[0xE1] & INFO_LEN));
+    const __m512i index_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(index_bytes));
+    const __m512i chunk_nibbles_v = _mm512_set1_epi8(static_cast<char>(CHUNK_NIBBLES));
+    const __m512i exit_table_v = _mm512_add_epi8(index_v, chunk_nibbles_v);
+    const __m512i gather_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(gather_bytes));
+    const __m512i shift_v = _mm512_load_si512(reinterpret_cast<const __m512i*>(shift_bytes));
 
-#    define GFX12_EXTRACT_SUCCESSOR(pos_, has_attention_, succ_, attention_mask_)                                      \
-        do {                                                                                                           \
-            const __m128i succ_0_15_ = _mm512_castsi512_si128((succ_));                                                \
-            uint64_t succ_word_;                                                                                       \
-            if (__builtin_expect(entry < 8, 1))                                                                        \
-                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_0_15_));                                     \
-            else if (__builtin_expect(entry < 16, 1))                                                                  \
-                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_0_15_, 8)));                  \
-            else                                                                                                       \
-                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm512_extracti32x4_epi32((succ_), 1)));          \
-            (pos_) = static_cast<unsigned>((succ_word_ >> ((entry & 7u) * 8)) & 0xFFu);                                \
-            (has_attention_) = (((attention_mask_) >> entry) & 1u) != 0;                                               \
-        }                                                                                                              \
-        while (false)
-
-    size_t bp = 0;
-    unsigned entry = 0;
+    const size_t start = state ? state->pos : 0;
+    size_t bp = start >> 1;
+    __m512i entry_v = _mm512_set1_epi8(static_cast<char>(start & 1u));
     size_t n_out = 0;
-    bool ext = false;
 
-    while (bp + CHUNK_BYTES + TAIL_GUARD <= size && n_out < out_cap)
+    // `out` is full: record the resume point just past the captured token.
+    const auto stop_after = [&](size_t next_nibble)
     {
-        const __m256i bytes_y = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + bp));
-        const __m256i next_y = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(buf + bp + 1));
+        if (state) *state = ScanState{next_nibble, false};
+        return n_out;
+    };
 
-        const __m256i high = _mm256_and_si256(_mm256_srli_epi16(bytes_y, 4), low_nibble_y);
-        const __m256i low_next = _mm256_and_si256(_mm256_slli_epi16(next_y, 4), high_nibble_y);
-        const __m256i odd_lo = _mm256_or_si256(high, low_next);
+    while (bp + LOAD_BYTES <= size)
+    {
+        const uint8_t* chunk = buf + bp;
+        const __m512i bytes_v = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(chunk));
+        const __m512i keys_v = _mm512_multishift_epi64_epi8(shift_v, _mm512_permutexvar_epi8(gather_v, bytes_v));
 
-        const __m256i even_lo = bytes_y;
-        const __m256i keys_lo = _mm256_unpacklo_epi8(even_lo, odd_lo);
-        const __m256i keys_hi = _mm256_unpackhi_epi8(even_lo, odd_lo);
-        const __m256i keys_0_31 = _mm256_permute2x128_si256(keys_lo, keys_hi, 0x20);
-        const __m256i keys_32_63 = _mm256_permute2x128_si256(keys_lo, keys_hi, 0x31);
-        const __m512i keys_v = _mm512_inserti64x4(_mm512_castsi256_si512(keys_0_31), keys_32_63, 1);
-
-        __m512i info_v = _mm512_permutex2var_epi8(lut0, keys_v, lut1);
+        __m512i jump_v = _mm512_permutex2var_epi8(jump_lo_v, keys_v, jump_hi_v);
         const __mmask64 event_sync_mask = _mm512_cmpeq_epi8_mask(keys_v, event_sync_key_v);
-        info_v = _mm512_mask_mov_epi8(info_v, event_sync_mask, event_sync_info_v);
+        jump_v = _mm512_mask_mov_epi8(jump_v, event_sync_mask, event_sync_jump_v);
 
-        const __m512i len_v = _mm512_and_si512(info_v, len_mask_v);
+        __m512i g = _mm512_add_epi8(index_v, jump_v);
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^2
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^4
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^8
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^16
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^32
+        g = _mm512_permutex2var_epi8(g, g, exit_table_v); // g^64
 
-        __m512i succ = _mm512_add_epi8(index_v, len_v);
+        // The entry is carried as a broadcast vector so that the loop-carried
+        // chain is a single vpermb + vpsubb. The scalar copy only feeds the
+        // (predicted) fast-path branch, off the critical path.
+        const __m512i pos_v = _mm512_permutexvar_epi8(entry_v, g);
+        unsigned pos = lane0(pos_v);
 
-        __m512i attention_path = _mm512_and_si512(info_v, attention_v);
-
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-        attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-        succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-
-        const __mmask64 attention_entry_mask = _mm512_test_epi8_mask(attention_path, attention_v);
-        unsigned pos;
-        bool has_attention;
-        GFX12_EXTRACT_SUCCESSOR(pos, has_attention, succ, attention_entry_mask);
-
-        if (__builtin_expect(!ext && !has_attention, 1))
+        if (__builtin_expect(pos >= CHUNK_NIBBLES, 1))
         {
-            if (__builtin_expect(pos >= CHUNK_NIBBLES, 1))
-            {
-                entry = pos - CHUNK_NIBBLES;
-                bp += CHUNK_BYTES;
-                continue;
-            }
-
-            attention_path = _mm512_or_si512(attention_path, _mm512_permutex2var_epi8(attention_path, succ, zero_v));
-            succ = _mm512_permutex2var_epi8(succ, succ, exit_table_v);
-
-            const __mmask64 attention64_entry_mask = _mm512_test_epi8_mask(attention_path, attention_v);
-            bool has_attention64;
-            GFX12_EXTRACT_SUCCESSOR(pos, has_attention64, succ, attention64_entry_mask);
-
-            if (!has_attention64)
-            {
-                entry = pos - CHUNK_NIBBLES;
-                bp += CHUNK_BYTES;
-                continue;
-            }
-        }
-
-        alignas(64) uint8_t info_buf[CHUNK_NIBBLES];
-        _mm512_store_si512(reinterpret_cast<__m512i*>(info_buf), info_v);
-
-        pos = entry;
-        while (pos < CHUNK_NIBBLES)
-        {
-            const size_t global_nibble = bp * 2 + pos;
-            const uint8_t key = load_key(buf, size, global_nibble);
-
-            if (ext && (key & 1u))
-            {
-                pos += 2;
-                continue;
-            }
-
-            const uint8_t v = info_buf[pos];
-            const unsigned nibbles = v & INFO_LEN;
-
-            if (__builtin_expect(v & INFO_RARE, 0))
-            {
-                if (__builtin_expect(n_out < out_cap, 1))
-                    out[n_out++] =
-                        QuickToken{load_contents64(buf, size, global_nibble), T.rare_type[key], global_nibble >> 1};
-            }
-
-            if ((v & INFO_NOP) == 0) ext = (v & INFO_EXT) != 0;
-            pos += nibbles;
-        }
-
-        entry = pos - CHUNK_NIBBLES;
-        bp += CHUNK_BYTES;
-    }
-
-    size_t tail_pos = bp * 2 + entry;
-    const size_t size_nibbles = size * 2;
-    while (tail_pos < size_nibbles && n_out < out_cap)
-    {
-        const uint8_t key = load_key(buf, size, tail_pos);
-
-        if (ext && (key & 1u))
-        {
-            tail_pos += 2;
+            entry_v = _mm512_sub_epi8(pos_v, chunk_nibbles_v);
+            bp += CHUNK_BYTES;
             continue;
         }
 
+        // after_rare[r] is the next rare token (or exit) following the rare
+        // token at r: g^64 sampled just past that token.
+        __m512i len_v = _mm512_permutex2var_epi8(len_lo_v, keys_v, len_hi_v);
+        len_v = _mm512_mask_mov_epi8(len_v, event_sync_mask, event_sync_len_v);
+        const __m512i after = _mm512_permutex2var_epi8(g, _mm512_add_epi8(index_v, len_v), exit_table_v);
+
+        alignas(64) uint8_t key_buf[CHUNK_NIBBLES];
+        alignas(64) uint8_t after_rare[CHUNK_NIBBLES];
+        _mm512_store_si512(reinterpret_cast<__m512i*>(key_buf), keys_v);
+        _mm512_store_si512(reinterpret_cast<__m512i*>(after_rare), after);
+
+        // pos is always a rare token start here.
+        while (pos < CHUNK_NIBBLES)
+        {
+            const uint8_t key = key_buf[pos];
+            out[n_out++] = QuickToken{load_contents64_unchecked(chunk, pos), T.rare_type[key], bp + (pos >> 1)};
+            if (n_out == out_cap) return stop_after(bp * 2 + pos + (T.info[key] & INFO_LEN));
+            pos = after_rare[pos];
+        }
+
+        entry_v = _mm512_set1_epi8(static_cast<char>(pos - CHUNK_NIBBLES));
+        bp += CHUNK_BYTES;
+    }
+
+    size_t tail_pos = bp * 2 + lane0(entry_v);
+    const size_t size_nibbles = size * 2;
+    while (tail_pos < size_nibbles)
+    {
+        const uint8_t key = load_key(buf, size, tail_pos);
         const uint8_t v = T.info[key];
         const unsigned nibbles = v & INFO_LEN;
 
         if (__builtin_expect(v & INFO_RARE, 0))
         {
             out[n_out++] = QuickToken{load_contents64(buf, size, tail_pos), T.rare_type[key], tail_pos >> 1};
-            if (n_out >= out_cap) break;
+            if (n_out == out_cap) return stop_after(tail_pos + nibbles);
         }
 
-        if ((v & INFO_NOP) == 0) ext = (v & INFO_EXT) != 0;
         tail_pos += nibbles;
     }
 
-#    undef GFX12_EXTRACT_SUCCESSOR
-
+    if (state) *state = ScanState{tail_pos, true};
     return n_out;
 }
 
-using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
+#    undef GFX12_SCAN_TARGET
+
+using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t, ScanState*);
 
 // Returns nullptr if the x86 CPU lacks AVX-512.
 ScanFn select_scanner()
@@ -327,12 +340,12 @@ ScanFn select_scanner()
 namespace quick_scan
 {
 #if GFX12_RARE_SCAN_HAS_X86
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap, ScanState* state)
 {
     static const gfx12::quick_scan::ScanFn fn = gfx12::quick_scan::select_scanner();
     if (!fn) throw std::exception();
 
-    return fn(buf, size, out, out_cap);
+    return fn(buf, size, out, out_cap, state);
 }
 #endif
 }; // namespace quick_scan
