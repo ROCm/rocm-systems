@@ -173,6 +173,12 @@ TEST(InstructionBuilder, ScalarLayoutsRejectEveryOversizedFieldBeforeNarrowing) 
     EXPECT_TRUE(build_sopp_encoding(arch, 0x80, 0).failed());
     EXPECT_TRUE(build_sopp_encoding(arch, 0x80, 0, &error).failed());
     EXPECT_EQ(message, "SOPP encoding field out of range");
+    message.clear();
+    EXPECT_TRUE(build_sop2_encoding(arch, 0x60, 0, 0, 0, &error).failed());
+    EXPECT_EQ(message, "SOP2 encoding field out of range");
+    message.clear();
+    EXPECT_TRUE(build_sopk_encoding(arch, 0x1d, 0, 0, &error).failed());
+    EXPECT_EQ(message, "SOPK encoding field out of range");
     EXPECT_TRUE(build_sop1_encoding(arch, 256, 0, 0).failed());
     EXPECT_TRUE(build_sop1_encoding(arch, 0, 128, 0).failed());
     EXPECT_TRUE(build_sop1_encoding(arch, 0, 0, 256).failed());
@@ -189,16 +195,82 @@ TEST(InstructionBuilder, ScalarLayoutsRejectEveryOversizedFieldBeforeNarrowing) 
     util::FailureOr<uint32_t> sop1 = build_sop1_encoding(arch, 255, 127, 255);
     ASSERT_TRUE(sop1.succeeded());
     EXPECT_EQ(sop1.value(), pack_sop1(255, 127, 255));
-    util::FailureOr<uint32_t> sop2 = build_sop2_encoding(arch, 127, 127, 255, 255);
+    util::FailureOr<uint32_t> sop2 = build_sop2_encoding(arch, 0x5f, 127, 255, 255);
     ASSERT_TRUE(sop2.succeeded());
-    EXPECT_EQ(sop2.value(), pack_sop2(127, 127, 255, 255));
-    util::FailureOr<uint32_t> sopk = build_sopk_encoding(arch, 31, 127, 65535);
+    EXPECT_EQ(sop2.value(), pack_sop2(0x5f, 127, 255, 255));
+    util::FailureOr<uint32_t> sopk = build_sopk_encoding(arch, 0x1c, 127, 65535);
     ASSERT_TRUE(sopk.succeeded());
-    EXPECT_EQ(sopk.value(), pack_sopk(31, 127, 65535));
+    EXPECT_EQ(sopk.value(), pack_sopk(0x1c, 127, 65535));
     util::FailureOr<uint32_t> sopc = build_sopc_encoding(arch, 127, 255, 255);
     ASSERT_TRUE(sopc.succeeded());
     EXPECT_EQ(sopc.value(), pack_sopc(127, 255, 255));
   }
+}
+
+TEST(InstructionBuilder, PcDeltaBuilderForwardsFieldFailuresWithoutAppendingWords) {
+  const std::vector<uint32_t> original{0x12345678};
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (int64_t delta : {int64_t{1}, int64_t{-1}, int64_t{1} << 33, -(int64_t{1} << 33)}) {
+      SCOPED_TRACE(static_cast<int>(arch));
+      SCOPED_TRACE(delta);
+      // The legacy path's high-half destination fails after its low half succeeds.
+      const uint16_t pc_sreg = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 128 : 127;
+      std::vector<uint32_t> words = original;
+      std::string message;
+      auto record = [&](std::string_view text) { message = text; };
+      const util::DiagnosticEmitter error(record);
+      EXPECT_FALSE(append_pc_delta_builder(words, arch, pc_sreg, delta, false, &error));
+      EXPECT_EQ(message, "SOP2 encoding field out of range");
+      EXPECT_EQ(words, original);
+      message.clear();
+      EXPECT_TRUE(append_pc_delta_builder(words, arch, 0, delta, false, &error));
+      EXPECT_TRUE(message.empty());
+    }
+  }
+}
+
+TEST(InstructionBuilder, PcDeltaBuilderStopsAfterItsFirstDiagnostic) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_CDNA3}) {
+    for (int64_t delta : {int64_t{1}, int64_t{-1}}) {
+      std::vector<uint32_t> words;
+      unsigned messages = 0;
+      std::string message;
+      auto record = [&](std::string_view text) {
+        ++messages;
+        message = text;
+      };
+      const util::DiagnosticEmitter error(record);
+      EXPECT_FALSE(append_pc_delta_builder(words, arch, 128, delta, false, &error));
+      EXPECT_EQ(messages, 1u);
+      EXPECT_FALSE(message.empty());
+      EXPECT_TRUE(words.empty());
+    }
+  }
+}
+
+TEST(InstructionBuilder, RecoveredPcDeltaFieldFailureRetainsRelocationContext) {
+  std::vector<uint8_t> text(32, 0);
+  const std::vector<uint8_t> original = text;
+  KernelTextLayout layout;
+  layout.body_end = text.size();
+  layout.blocks.push_back(
+      {.source_start = 0, .source_end = 16, .target_start = 0, .target_end = 16});
+  layout.blocks.push_back(
+      {.source_start = 16, .source_end = 32, .target_start = 16, .target_end = 32});
+  layout.recovered_builder_fixups.push_back({.source_call_offset = 24,
+                                             .source_target_offset = 16,
+                                             .source_builder_sreg = 128,
+                                             .target_getpc_offset = 0,
+                                             .target_recovery_begin_offset = 4,
+                                             .target_recovery_end_offset = 16});
+  const TextRelocationResult result =
+      patch_recovered_builder_fixups(text, layout, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_FALSE(result.ok);
+  EXPECT_EQ(result.failure, TextLayoutFailureCategory::ResourceLimit);
+  EXPECT_EQ(result.source_offset, 24u);
+  EXPECT_EQ(result.message,
+            "canonical recovered indirect branch builder: SOP2 encoding field out of range");
+  EXPECT_EQ(text, original);
 }
 
 TEST(InstructionBuilder, ScalarFrontendFieldFailureEmitsOneInstructionSpecificDiagnostic) {

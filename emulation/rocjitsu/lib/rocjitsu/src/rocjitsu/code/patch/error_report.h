@@ -10,6 +10,7 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace rocjitsu {
 
@@ -29,15 +30,17 @@ inline void report(std::string *out, const char *msg) {
 /// @details Keep this callable alive as long as a DiagnosticEmitter borrows it.
 class OptionalStringDiagnosticSink {
 public:
-  explicit OptionalStringDiagnosticSink(std::string *out) : out_(out) {}
+  explicit OptionalStringDiagnosticSink(std::string *out, std::string prefix = {})
+      : out_(out), prefix_(std::move(prefix)) {}
 
   void operator()(std::string_view message) const {
     if (out_ != nullptr)
-      out_->assign(message);
+      *out_ = prefix_ + std::string(message);
   }
 
 private:
   std::string *out_;
+  std::string prefix_;
 };
 
 } // namespace rocjitsu

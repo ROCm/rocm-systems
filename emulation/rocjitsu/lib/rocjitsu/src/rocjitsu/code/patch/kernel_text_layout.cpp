@@ -1205,11 +1205,10 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     // into a different pair between the two.
     const size_t replacement_begin = replacement_words.size();
     if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta,
-                                 /*prefer_literal64=*/true)) {
-      return relocation_error(
-          fixup.source_call_offset,
-          "target ISA cannot encode canonical recovered indirect branch builder",
-          TextLayoutFailureCategory::ResourceLimit);
+                                 /*prefer_literal64=*/true, &error)) {
+      return relocation_error(fixup.source_call_offset,
+                              "canonical recovered indirect branch builder: " + builder_message,
+                              TextLayoutFailureCategory::ResourceLimit);
     }
     // The wide form does not always fit a range sized for the compact one. Falling back keeps the
     // builder correct and keeps objects that translate today translating; what it gives up is
@@ -1218,11 +1217,11 @@ TextRelocationResult patch_recovered_builder_fixups(std::vector<uint8_t> &text,
     // something wrong. Widening the range is not available here: the patcher writes in place.
     if ((replacement_words.size() * sizeof(uint32_t)) > recovery_size) {
       replacement_words.resize(replacement_begin);
-      if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta)) {
-        return relocation_error(
-            fixup.source_call_offset,
-            "target ISA cannot encode canonical recovered indirect branch builder",
-            TextLayoutFailureCategory::ResourceLimit);
+      if (!append_pc_delta_builder(replacement_words, arch, fixup.source_builder_sreg, delta,
+                                   /*prefer_literal64=*/false, &error)) {
+        return relocation_error(fixup.source_call_offset,
+                                "canonical recovered indirect branch builder: " + builder_message,
+                                TextLayoutFailureCategory::ResourceLimit);
       }
       compact_builder_fallbacks.push_back(fixup.source_call_offset);
     }

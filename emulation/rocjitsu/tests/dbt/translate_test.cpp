@@ -747,6 +747,33 @@ std::vector<uint8_t> make_amdgpu_elf_with_relative_relocation(uint32_t reloc_typ
   return image;
 }
 
+TEST(BinaryTranslatorE2E, InvalidGuestRetainsUnsupportedArchitectureDiagnostic) {
+  const std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_CDNA3);
+  const TranslatedCodeObject result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_EQ(result.diagnostics.size(), 1u);
+  EXPECT_EQ(result.diagnostics.front().kind, DiagnosticKind::UnsupportedGuestArch);
+  EXPECT_EQ(result.diagnostics.front().message, "unsupported guest_arch: no decoder available");
+  EXPECT_EQ(result.elf_bytes, image);
+}
+
+TEST(BinaryTranslatorE2E, InvalidHostBuilderDiagnosticRetainsTargetContext) {
+  const std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_text_and_rodata();
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_INVALID);
+  const TranslatedCodeObject result = translator.translate(source);
+  EXPECT_FALSE(result.ok());
+  ASSERT_EQ(result.diagnostics.size(), 1u);
+  EXPECT_EQ(result.diagnostics.front().kind, DiagnosticKind::Legalization);
+  EXPECT_EQ(result.diagnostics.front().message,
+            "unsupported host_arch: Unimplemented instruction: s_endpgm for target architecture");
+  EXPECT_EQ(result.elf_bytes, image);
+}
+
 TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
   const auto image = make_minimal_gfx1250_elf_with_empty_text_and_rodata();
   AmdGpuCodeObject source(image.data(), image.size());

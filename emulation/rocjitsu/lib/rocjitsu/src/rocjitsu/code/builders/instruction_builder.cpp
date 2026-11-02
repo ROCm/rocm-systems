@@ -80,11 +80,15 @@ enum class ScalarSop2Op {
 /// recovery pass has proven that the old address-recovery region can be
 /// overwritten. The operands are already scalar operand encoding values.
 [[nodiscard]] std::optional<uint32_t> build_s_add_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                      uint16_t ssrc0, uint16_t ssrc1) {
+                                                      uint16_t ssrc0, uint16_t ssrc1,
+                                                      const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
-  if (!opcode)
+  if (!opcode) {
+    if (error != nullptr)
+      error->emit() << "scalar PC delta arithmetic for target architecture";
     return std::nullopt;
-  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
   if (word.failed())
     return std::nullopt;
   return word.value();
@@ -93,11 +97,15 @@ enum class ScalarSop2Op {
 /// @brief Build an encoded scalar `s_sub_u32` instruction.
 /// @copydetails build_s_add_u32
 [[nodiscard]] std::optional<uint32_t> build_s_sub_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                      uint16_t ssrc0, uint16_t ssrc1) {
+                                                      uint16_t ssrc0, uint16_t ssrc1,
+                                                      const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
-  if (!opcode)
+  if (!opcode) {
+    if (error != nullptr)
+      error->emit() << "scalar PC delta arithmetic for target architecture";
     return std::nullopt;
-  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
   if (word.failed())
     return std::nullopt;
   return word.value();
@@ -106,11 +114,15 @@ enum class ScalarSop2Op {
 /// @brief Build an encoded scalar `s_addc_u32` instruction.
 /// @copydetails build_s_add_u32
 [[nodiscard]] std::optional<uint32_t> build_s_addc_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                       uint16_t ssrc0, uint16_t ssrc1) {
+                                                       uint16_t ssrc0, uint16_t ssrc1,
+                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddcU32);
-  if (!opcode)
+  if (!opcode) {
+    if (error != nullptr)
+      error->emit() << "scalar PC delta arithmetic for target architecture";
     return std::nullopt;
-  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
   if (word.failed())
     return std::nullopt;
   return word.value();
@@ -119,11 +131,15 @@ enum class ScalarSop2Op {
 /// @brief Build an encoded scalar `s_subb_u32` instruction.
 /// @copydetails build_s_add_u32
 [[nodiscard]] std::optional<uint32_t> build_s_subb_u32(rj_code_arch_t arch, uint16_t sdst,
-                                                       uint16_t ssrc0, uint16_t ssrc1) {
+                                                       uint16_t ssrc0, uint16_t ssrc1,
+                                                       const util::DiagnosticEmitter *error) {
   auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubbU32);
-  if (!opcode)
+  if (!opcode) {
+    if (error != nullptr)
+      error->emit() << "scalar PC delta arithmetic for target architecture";
     return std::nullopt;
-  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1);
+  }
+  util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
   if (word.failed())
     return std::nullopt;
   return word.value();
@@ -155,7 +171,8 @@ bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> word
 }
 
 bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t pc_sreg,
-                             int64_t delta, bool prefer_literal64) {
+                             int64_t delta, bool prefer_literal64,
+                             const util::DiagnosticEmitter *error) {
   constexpr uint16_t kLiteralOperand = 255;
   constexpr uint16_t kLiteral64Operand = 254;
   constexpr uint16_t kInlineInt0 = 128;
@@ -169,10 +186,14 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
     const bool use_literal32 =
         !prefer_literal64 && delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
     auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
-    if (!opcode)
+    if (!opcode) {
+      if (error != nullptr)
+        error->emit() << "scalar PC delta arithmetic for target architecture";
       return false;
-    util::FailureOr<uint32_t> word = build_sop2_encoding(
-        arch, *opcode, pc_sreg, pc_sreg, use_literal32 ? kLiteralOperand : kLiteral64Operand);
+    }
+    util::FailureOr<uint32_t> word =
+        build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
+                            use_literal32 ? kLiteralOperand : kLiteral64Operand, error);
     if (word.failed())
       return false;
     words.push_back(word.value());
@@ -194,17 +215,25 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, 
   // uses a literal; the high half uses inline zero when possible to keep the
   // replacement smaller than the original builder sequence.
   if (negative) {
-    auto sub = build_s_sub_u32(arch, pc_sreg, pc_sreg, kLiteralOperand);
-    auto subb = build_s_subb_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand);
-    if (!sub || !subb)
+    const std::optional<uint32_t> sub =
+        build_s_sub_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
+    if (!sub)
+      return false;
+    const std::optional<uint32_t> subb =
+        build_s_subb_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
+    if (!subb)
       return false;
     words.push_back(*sub);
     words.push_back(lo);
     words.push_back(*subb);
   } else {
-    auto add = build_s_add_u32(arch, pc_sreg, pc_sreg, kLiteralOperand);
-    auto addc = build_s_addc_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand);
-    if (!add || !addc)
+    const std::optional<uint32_t> add =
+        build_s_add_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
+    if (!add)
+      return false;
+    const std::optional<uint32_t> addc =
+        build_s_addc_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
+    if (!addc)
       return false;
     words.push_back(*add);
     words.push_back(lo);

@@ -389,9 +389,10 @@ TEST(BuildDbiEntryPrologue, EmitsLoadsThenWaitThenRestore) {
   const auto original = original_result.value();
   const auto wait = build_wait_scalar_loads_complete(kArch);
   ASSERT_TRUE(wait.succeeded());
-  constexpr auto restore_low = build_s_mov_b32(0, kStorage.entry_temp_base, kArch);
+  constexpr util::FailureOr<uint32_t> restore_low =
+      build_s_mov_b32(0, kStorage.entry_temp_base, kArch);
   static_assert(restore_low.succeeded());
-  constexpr auto restore_high =
+  constexpr util::FailureOr<uint32_t> restore_high =
       build_s_mov_b32(1, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch);
   static_assert(restore_high.succeeded());
   const std::vector<uint32_t> expected{
@@ -424,9 +425,10 @@ TEST(BuildDbiEntryPrologue, AddressesThroughTheKernargPairWhereverTheAbiPutsIt) 
   const auto original = original_result.value();
   const auto wait = build_wait_scalar_loads_complete(kArch);
   ASSERT_TRUE(wait.succeeded());
-  constexpr auto restore_low = build_s_mov_b32(2, kStorage.entry_temp_base, kArch);
+  constexpr util::FailureOr<uint32_t> restore_low =
+      build_s_mov_b32(2, kStorage.entry_temp_base, kArch);
   static_assert(restore_low.succeeded());
-  constexpr auto restore_high =
+  constexpr util::FailureOr<uint32_t> restore_high =
       build_s_mov_b32(3, static_cast<uint16_t>(kStorage.entry_temp_base + 1), kArch);
   static_assert(restore_high.succeeded());
   const std::vector<uint32_t> expected{

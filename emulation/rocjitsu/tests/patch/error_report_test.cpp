@@ -47,5 +47,21 @@ TEST(ErrorReport, OptionalStringSinkReceivesBorrowedEmitterDiagnostics) {
   ignored.emit() << "ignored";
 }
 
+TEST(ErrorReport, OptionalStringSinkOwnsPrefixAndReplacesPriorContents) {
+  std::string message = "previous";
+  std::string prefix = "planning: ";
+  OptionalStringDiagnosticSink record(&message, prefix);
+  prefix = "changed: ";
+  const util::DiagnosticEmitter error(record);
+  error.emit() << "first";
+  EXPECT_EQ(message, "planning: first");
+  error.emit() << "second";
+  EXPECT_EQ(message, "planning: second");
+
+  OptionalStringDiagnosticSink discard(nullptr, "ignored: ");
+  const util::DiagnosticEmitter ignored(discard);
+  ignored.emit() << "ignored";
+}
+
 } // namespace
 } // namespace rocjitsu

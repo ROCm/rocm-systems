@@ -208,7 +208,7 @@ build_sop1_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ss
 inline constexpr util::FailureOr<uint32_t>
 build_sop2_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t ssrc0, uint16_t ssrc1,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x7Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
+  if (op > 0x5Fu || sdst > 0x7Fu || ssrc0 > 0xFFu || ssrc1 > 0xFFu)
     return error != nullptr ? error->emit() << "SOP2 encoding field out of range"
                             : util::Result::failure();
   switch (arch) {
@@ -327,7 +327,7 @@ build_sopc_encoding(rj_code_arch_t arch, uint16_t op, uint16_t ssrc0, uint16_t s
 inline constexpr util::FailureOr<uint32_t>
 build_sopk_encoding(rj_code_arch_t arch, uint16_t op, uint16_t sdst, uint16_t simm16,
                     const util::DiagnosticEmitter *error = nullptr) {
-  if (op > 0x1Fu || sdst > 0x7Fu)
+  if (op > 0x1Cu || sdst > 0x7Fu)
     return error != nullptr ? error->emit() << "SOPK encoding field out of range"
                             : util::Result::failure();
 #define ROCJITSU_BUILD_SOPK(isa)                                                                   \
@@ -954,9 +954,11 @@ build_s_call_b64(uint16_t sdst, int16_t offset_dwords, rj_code_arch_t arch,
 ///        literal slot -- so a builder that must stay visible to a later translation pass has to
 ///        be emitted in that form. Costs one extra word, so callers with a fixed-size window ask
 ///        for it only when the window can hold it.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
 [[nodiscard]] bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch,
                                            uint16_t pc_sreg, int64_t delta,
-                                           bool prefer_literal64 = false);
+                                           bool prefer_literal64 = false,
+                                           const util::DiagnosticEmitter *error = nullptr);
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///

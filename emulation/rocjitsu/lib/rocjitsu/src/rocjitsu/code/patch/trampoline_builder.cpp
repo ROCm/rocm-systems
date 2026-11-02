@@ -364,10 +364,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call resource planning: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call resource planning: ");
   const util::DiagnosticEmitter error(record_error);
 
   // The link pair is whatever the probe's calling convention returns through,
@@ -668,10 +665,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
 std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
                                                                   std::string *error_out) {
-  auto record_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call emission: ");
   const util::DiagnosticEmitter error(record_error);
 
   if (!plan.is_probe_call) {
@@ -704,10 +698,8 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // likewise return with an outstanding load that would escape the call boundary.
   // Emitted at the very top of the envelope (before any special-state/target/link
   // write) and again immediately after the call returns (before any restoration).
-  auto report_boundary_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: boundary drain: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_boundary_error(error_out,
+                                                     "probe-call emission: boundary drain: ");
   const util::DiagnosticEmitter boundary_error(report_boundary_error);
   util::FailureOr<std::vector<uint32_t>> maybe_boundary_drain =
       build_wait_all_loads_complete(plan.arch, &boundary_error);

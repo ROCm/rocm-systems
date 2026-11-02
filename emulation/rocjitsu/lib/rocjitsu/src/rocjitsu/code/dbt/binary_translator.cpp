@@ -2357,26 +2357,6 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     return leave_unchanged();
   }
 
-  auto record_builder_error = [&](std::string_view message) {
-    append_error(result.diagnostics, DiagnosticKind::Legalization, std::string(message));
-  };
-  const util::DiagnosticEmitter builder_error(record_builder_error);
-  util::FailureOr<uint32_t> guest_pool_marker =
-      build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_, &builder_error);
-  if (guest_pool_marker.failed())
-    return leave_unchanged();
-  util::FailureOr<uint32_t> guest_pool_skip = build_s_branch(
-      static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_, &builder_error);
-  if (guest_pool_skip.failed())
-    return leave_unchanged();
-  util::FailureOr<uint32_t> guest_long_marker =
-      build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_, &builder_error);
-  if (guest_long_marker.failed())
-    return leave_unchanged();
-  util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &builder_error);
-  if (host_endpgm.failed())
-    return leave_unchanged();
-
   CodeObjectPatcher patcher(obj);
 
   // Reject relocation-section metadata ROCr cannot materialize before examining
@@ -2431,6 +2411,31 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  "unsupported guest_arch: no decoder available");
     return leave_unchanged();
   }
+  auto record_builder_error = [&](std::string_view message) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization, std::string(message));
+  };
+  const util::DiagnosticEmitter builder_error(record_builder_error);
+  util::FailureOr<uint32_t> guest_pool_marker =
+      build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_pool_marker.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_pool_skip = build_s_branch(
+      static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_, &builder_error);
+  if (guest_pool_skip.failed())
+    return leave_unchanged();
+  util::FailureOr<uint32_t> guest_long_marker =
+      build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_, &builder_error);
+  if (guest_long_marker.failed())
+    return leave_unchanged();
+  auto record_host_builder_error = [&](std::string_view message) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "unsupported host_arch: " + std::string(message));
+  };
+  const util::DiagnosticEmitter host_builder_error(record_host_builder_error);
+  util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &host_builder_error);
+  if (host_endpgm.failed())
+    return leave_unchanged();
+
   if (is_gfx1250_b0_to_a0())
     decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
 
