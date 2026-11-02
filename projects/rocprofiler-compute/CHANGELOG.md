@@ -56,6 +56,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Analyze mode no longer needs the `tabulate` Python package. rocprofiler-compute now ships it.
 
+* `--specs` prints its table in the same style as the analyze tables.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
