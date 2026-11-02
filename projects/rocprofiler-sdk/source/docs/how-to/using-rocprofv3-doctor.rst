@@ -8,29 +8,29 @@
 Checking your setup with rocprofv3 --doctor
 ===========================================
 
-``rocprofv3 --doctor`` inspects your machine and your ROCprofiler-SDK installation, and
+``rocprofv3 --doctor`` inspects your machine and ROCprofiler-SDK installation, and
 reports what would prevent ``rocprofv3`` from working.
 
-When ``rocprofv3`` fails with a message that does not obviously point at a cause, run
+When ``rocprofv3`` fails with a message that doesn't clearly point to a cause, run
 ``rocprofv3 --doctor`` first. It checks the installation, the driver and device nodes, the
 runtime library stack, counter-collection permissions, the environment, container device
 passthrough, the Python environment, the output filesystem, and the companion tools --
 then prints a copy-pasteable remediation for anything it finds.
 
-It goes beyond checking that files exist: it loads the ROCm libraries rocprofv3 depends
-on, and when a command it runs fails, it reads the error output and explains the cause.
+It goes beyond checking that the ROCm libraries exist: it loads them, and when a command it
+runs fails, it reads the error output and explains the cause.
 
-The tool makes no persistent changes to your system and has no ``--fix`` mode. It does
-more than read files, though: see :ref:`what-a-run-does` for the temporary files,
-child processes, and GPU initialization a run involves.
+The tool makes no persistent changes to your system and has no ``--fix`` mode — but it's not
+purely read-only either: see :ref:`what-a-run-does` for the temporary files, child processes,
+and GPU initialization a run involves.
 
-Run it as the user who runs ``rocprofv3``, without ``sudo``. It needs no elevated
+Run it as the same user who runs ``rocprofv3``, without ``sudo``. It needs no elevated
 privileges, and a root process sees a different system: root opens ``/dev/kfd``
 regardless of group membership, holds every capability, and ``sudo`` resets variables
 such as ``LD_LIBRARY_PATH``. The ``environ.run-as-user`` check warns when the tool runs
 as root on behalf of another account. Running as root is expected inside a container
-whose processes run as root; there, the group-membership checks pass because they do
-not apply.
+whose processes run as root; there, the group-membership checks don't apply, so they
+raise no warning.
 
 .. _what-a-run-does:
 
@@ -56,8 +56,8 @@ Every check declares a probe category, shown by ``--list-checks`` and in JSON ou
      - Runs code in a child process: loads the ROCm libraries
        (``runtime.libraries-load``), imports Python modules and opens an in-memory
        ``sqlite3`` database (the ``python.*`` checks), and runs
-       ``rocprofv3-avail --help``. A crash or hang in the child costs one check, never
-       the report.
+       ``rocprofv3-avail --help``. A crash or hang in the child fails only that one
+       check, never the whole report.
      - Every run
    * - ``gpu``
      - Initializes the GPU runtime: ``counters.avail-enumeration`` runs
@@ -73,28 +73,29 @@ killed. A default run takes about a second on a healthy machine.
 Installation
 ------------
 
-``--doctor`` is an option of ``rocprofv3``, so there is nothing separate to install or
-put on your ``PATH``: wherever ``rocprofv3`` runs, ``rocprofv3 --doctor`` does. (The
-checks themselves are installed under ``<prefix>/libexec/rocprofiler-sdk/``, which is
-not meant to be run directly.) ``rocprofv3`` is in the ``bin`` directory of your ROCm
-installation, which depends on how ROCm was installed:
+``--doctor`` is built into ``rocprofv3``, so there's nothing separate to install or
+put on your ``PATH``: wherever ``rocprofv3`` runs, ``rocprofv3 --doctor`` does. The
+checks themselves are installed under ``<prefix>/libexec/rocprofiler-sdk/`` and aren't
+meant to be run directly. ``rocprofv3`` is in the ``bin`` directory of your ROCm
+installation. The following table maps each installation method to where that directory
+lives:
 
 .. list-table::
    :header-rows: 1
    :widths: 40 60
 
    * - Installation method
-     - ``bin`` directory
+     - ``bin`` directory location
    * - ROCm system packages (``apt``/``dnf``)
      - ``/opt/rocm/bin`` (a link to ``/opt/rocm-X.Y.Z/bin``)
    * - TheRock system packages (``amdrocm-*``)
      - ``/opt/rocm/core-X.Y/bin``, also reachable as ``/opt/rocm/bin``
    * - TheRock Python packages (``pip install rocm[...]``)
-     - the virtual environment's ``bin``; ``rocm-sdk path --bin`` prints it
+     - The virtual environment's ``bin``; ``rocm-sdk path --bin`` prints it
    * - TheRock tarball, source build, or custom prefix
      - ``<prefix>/bin``
 
-If ``rocprofv3`` is not already on your ``PATH``, add that directory, for example:
+If ``rocprofv3`` isn't already on your ``PATH``, add that directory as shown here:
 
 .. code-block:: bash
 
@@ -110,15 +111,16 @@ Run it with no further options to check everything:
    rocprofv3 --doctor
 
 Options after ``--doctor`` configure the check rather than profiling, for example
-``rocprofv3 --doctor --format json``. ``rocprofv3 --doctor --help`` lists them. Do not
-combine ``--doctor`` with profiling options: it checks the setup and exits, and runs no
-application.
+``rocprofv3 --doctor --format json``. ``rocprofv3 --doctor --help`` lists them. Don't
+combine ``--doctor`` with profiling options: it checks the setup and exits without
+running the application.
 
 Understanding the output
 ------------------------
 
-The report is grouped by subsystem. Each line shows a status tag, the check id, and a
-short title:
+The report is grouped by subsystem. Each line shows a status tag, the check ID, and a
+short title; failing or warning checks add an indented detail line underneath with more
+specifics:
 
 .. code-block:: shell
 
@@ -135,10 +137,20 @@ short title:
      ===============
      [ PASS ]  driver.kfd-device                   GPU device node exists (/dev/kfd, or /dev/dxg on WSL2)
      [ FAIL ]  driver.kfd-readable                 GPU device node readable and writable by the current user
+                /dev/kfd is not readable by the current user
 
      Summary: 41 passed, 6 warning(s), 2 failed, 3 skipped (52 total)
 
-The status tags mean:
+     How to Fix
+     ==========
+
+     [FAIL] driver.kfd-readable - GPU device node readable and writable by the current user
+         /dev/kfd is not readable by the current user
+
+           Add your account to the render and video groups, then re-login:
+             sudo usermod -a -G render,video $USER
+
+Each check reports one of five status tags, shown in brackets in the preceding example:
 
 .. list-table::
    :header-rows: 1
@@ -148,27 +160,31 @@ The status tags mean:
    * - ``PASS``
      - The condition is satisfied.
    * - ``WARN``
-     - The condition may be intentional or may only affect an optional feature. Warnings
-       do not change the exit code.
+     - The condition might be intentional or might only affect an optional feature. Warnings
+       don't change the exit code.
    * - ``FAIL``
-     - The condition definitively prevents some form of profiling. Fix these first.
+     - The condition definitely prevents some form of profiling. Fix these first.
    * - ``SKIP``
-     - The check did not run because a check it depends on did not pass, or was excluded
-       with ``--skip``. The detail line names the dependency, so a single root cause
-       produces one failure rather than a cascade.
+     - The check didn't run because a check it depends on didn't pass, or because you
+       excluded it with ``--skip``. When a dependency failed, the detail line names it,
+       so a single root cause produces one failure rather than a cascade.
    * - ``ERR``
-     - The check itself broke (a ``rocprofv3 --doctor`` bug). This says nothing about your
-       system; the detail asks you to report it with the traceback from ``--verbose``.
+     - The check itself broke — a ``rocprofv3 --doctor`` bug, not a problem with your
+       system. `Open an issue <https://github.com/ROCm/rocm-systems/issues>`_ with the
+       traceback from ``--verbose``.
 
-Below the summary, a **How to Fix** section repeats every failure and actionable warning
-together with its remediation command.
+After the summary, as shown in the preceding example, a **How to Fix** section repeats
+every failure and actionable warning together with its remediation command.
 
-Colors are used when the output is a terminal. They are disabled automatically when
-stdout is redirected, when ``--no-color`` is passed, or when the ``NO_COLOR`` environment
-variable is set.
+The tool colors its output when stdout is a terminal, and disables color automatically
+when stdout is redirected, when you pass ``--no-color``, or when the ``NO_COLOR``
+environment variable is set.
 
 Exit codes
 ----------
+
+``rocprofv3 --doctor``'s exit code reflects the overall result, which scripts and CI can
+check:
 
 .. list-table::
    :header-rows: 1
@@ -176,25 +192,25 @@ Exit codes
    * - Code
      - Meaning
    * - ``0``
-     - No check failed. Warnings alone do not produce a non-zero exit.
+     - No check failed. Warnings alone don't produce a non-zero exit.
    * - ``1``
      - At least one check produced ``FAIL``.
    * - ``2``
-     - ``rocprofv3 --doctor`` itself could not run (for example, the ``rocprofv3`` Python
-       package could not be imported), an ``--only`` pattern matched no check, or a check
-       broke (``ERR``) and none failed. A ``FAIL`` outranks an ``ERR``: findings about the
-       system come first.
+     - ``rocprofv3 --doctor`` itself couldn't run (for example, the ``rocprofv3`` Python
+       package couldn't be imported), an ``--only`` pattern matched no check, or a check
+       broke (``ERR``) and none failed. A ``FAIL`` outranks an ``ERR``: a real problem
+       with your system matters more than a bug in the tool itself.
 
 Exit code ``0`` on a warning-only run is intentional: many healthy environments
 legitimately set ``ROCR_VISIBLE_DEVICES`` or omit the optional ATT libraries, and failing
-CI on those would make the tool useless. If your CI needs to be strict about warnings,
+CI in those cases would make the tool useless. If your CI needs to be strict about warnings,
 parse the JSON output instead.
 
 Machine-readable output
 -----------------------
 
-``--format json`` emits a versioned JSON document suitable for CI assertions and for
-attaching to bug reports:
+To emit a versioned JSON document suitable for CI assertions and for
+attaching to bug reports, use ``--format json``. The output is a single JSON object with the following fields:
 
 .. code-block:: bash
 
@@ -243,19 +259,23 @@ change. CI scripts should assert on it:
 Filtering checks
 ----------------
 
-List every available check id and group:
+To list every available check ID and group, use ``--list-checks``. The output is sorted by group, then by check ID:
 
 .. code-block:: bash
 
    rocprofv3 --doctor --list-checks
 
 Run only part of the catalog with ``--only``, or exclude part of it with ``--skip``. Both
-flags are repeatable, match against either the check id or the group name, and accept
-glob patterns. ``--only`` also runs the prerequisites of the checks it selects, so a
-selected check never reports on a foundation nobody verified; ``--skip`` takes
-precedence, and a check whose prerequisite was skipped reports ``SKIP``. An ``--only``
-pattern that matches nothing is an error (exit code ``2``), so a typo cannot pass as a
-clean run:
+flags are repeatable, match against either the check ID or the group name, and accept
+glob patterns.
+
+* ``--only`` also runs the prerequisites of the checks it selects, so a selected check
+  never reports on a foundation nobody verified. A pattern that matches nothing is an
+  error (exit code ``2``), so a typo can't pass as a clean run.
+* ``--skip`` takes precedence over ``--only``, and a check whose prerequisite was
+  skipped reports ``SKIP``.
+
+For example:
 
 .. code-block:: bash
 
@@ -264,15 +284,14 @@ clean run:
    rocprofv3 --doctor --only driver --only python
    rocprofv3 --doctor --skip counters.avail-enumeration
 
-Skipping a specific check is the right response when you know a check does not apply to
+Skipping a specific check is the right response when you know a check doesn't apply to
 your environment -- for example ``counters.avail-enumeration`` on a deliberately
 restricted system where enumerating counters is expected to fail.
 
 Verbose and quiet modes
 -----------------------
 
-``--verbose`` shows the detail line and the structured data for every check, including
-passing ones. This is the most useful form to attach to a bug report:
+To show the detail line and the structured data for every check including passing ones, use ``--verbose``. This is the most useful form to attach to a bug report:
 
 .. code-block:: bash
 
@@ -294,21 +313,21 @@ always written without color codes:
 Smoke testing
 -------------
 
-By default the tool does not run ``rocprofv3`` itself. Pass ``--run-smoke-test``, or name
-the checks with ``--only``, to also run the ``smoke`` checks:
+By default, the checks don't launch an actual profiling run. Pass ``--run-smoke-test``,
+or select the ``smoke`` checks by name with ``--only``, to include them:
 
 .. code-block:: bash
 
    rocprofv3 --doctor --run-smoke-test
    rocprofv3 --doctor --only smoke
 
-They can take 30 seconds or more, which is why they are opt-in. What they establish is
-deliberately narrow:
+The smoke checks can take 30 seconds or more, which is why they are opt-in. What they
+establish is deliberately narrow:
 
-* ``smoke.avail-info`` shows that the HSA runtime initializes and that rocprofiler-sdk
-  enumerates at least one GPU agent.
-* ``smoke.rocprofv3-launcher`` shows that ``rocprofv3`` starts, injects its tool library,
-  and runs a program (``/bin/true``) to completion. That program launches no GPU work,
+* ``smoke.avail-info`` shows whether the HSA runtime initializes and whether
+  rocprofiler-sdk enumerates at least one GPU agent.
+* ``smoke.rocprofv3-launcher`` shows whether ``rocprofv3`` starts, injects its tool
+  library, and runs a program (``/bin/true``) to completion. That program launches no GPU work,
   so a pass does **not** verify kernel execution, callback delivery, or trace output.
   Its output goes to a private temporary directory that is removed on success and kept
   (and reported) on failure.
@@ -316,26 +335,26 @@ deliberately narrow:
 How failures are diagnosed
 --------------------------
 
-A library being present on disk does not mean it works. ``runtime.libraries-load`` loads
+A library being present on disk doesn't mean it works. ``runtime.libraries-load`` loads
 ``librocprofiler-sdk.so``, the rocprofv3 tool library, the HSA runtime, AQLProfile, HIP,
 and ROCTx, each in a separate child process with every symbol resolved immediately. This
 catches the failures that otherwise appear only when ``rocprofv3`` starts: a missing
 dependency, libraries mixed from two ROCm versions, an old ``libstdc++`` from a conda
-environment, or a corrupt file. When a dependency is missing, every missing dependency is
-listed (via ``ldd``), not only the first. The child loads the libraries with the library
-search path ``rocprofv3`` gives a profiled application (``LD_LIBRARY_PATH`` plus
+environment, or a corrupt file. When a dependency is missing, ``ldd`` lists every missing
+dependency, not only the first. The child loads the libraries with the library
+search path that ``rocprofv3`` gives to a profiled application (``LD_LIBRARY_PATH`` plus
 ``<rocm-root>/lib``), and with ``LD_PRELOAD`` cleared and the SDK's load-time
-initialization disabled, so loading has no side effects.
+initialization and teardown disabled, so loading has no side effects.
 
 When a check runs a command -- ``rocprofv3-avail``, or ``rocprofv3`` in the smoke tests --
-and it fails or crashes, its output is matched against known error messages, and the
-report says what the output shows and what most likely caused it. A matched message is
+and it fails or crashes, the tool matches its output against known error messages, and
+the report explains what the output shows and what most likely caused it. A matched message is
 treated as evidence, not as a conclusion: where one message has several possible causes,
 the tool checks facts on the machine before naming one, and labels the cause ``likely``
 only when those facts support it, ``possible`` otherwise. For example, ROCr reports
-``HSA_STATUS_ERROR_OUT_OF_RESOURCES`` both when ``/dev/kfd`` cannot be opened and for
-genuine allocation failures, so the tool looks at ``/dev/kfd`` (``/dev/dxg`` under WSL2)
-first:
+``HSA_STATUS_ERROR_OUT_OF_RESOURCES`` both when ``/dev/kfd`` can't be opened and when a
+genuine allocation failure occurs, so the tool looks at ``/dev/kfd`` (``/dev/dxg`` under
+WSL2) first:
 
 .. code-block:: shell
 
@@ -344,14 +363,15 @@ first:
               HSA_STATUS_ERROR_OUT_OF_RESOURCES (likely cause: the current user cannot
               open /dev/kfd read-write)
 
-A fix is suggested only for the mechanism actually implicated. When the output matches
-nothing known, the report keeps the last line of output as evidence and suggests
-re-running with ``ROCPROFILER_LOG_LEVEL=info``.
+The tool suggests a fix only for the mechanism actually implicated. When the output
+doesn't match any known message, the report keeps the last line of output as evidence
+and suggests re-running with ``ROCPROFILER_LOG_LEVEL=info``.
 
 In JSON output, each diagnosis is under ``data.diagnoses`` with its ``id``, the
 ``observation``, the candidate ``cause`` and its ``confidence`` (``high`` or
 ``possible``), the ``evidence`` line that matched, and the ``related_checks`` worth
-reading alongside it. The recognised messages are:
+reading alongside it. The following table maps each recognised message substring to its
+diagnosis:
 
 .. list-table::
    :header-rows: 1
@@ -371,18 +391,18 @@ reading alongside it. The recognised messages are:
      - A 32-bit library shadows a 64-bit one, or a library file is corrupt.
    * - ``HSA_STATUS_ERROR_OUT_OF_RESOURCES``
      - If ``/dev/kfd`` (``/dev/dxg`` under WSL2) is missing or not accessible, the GPU
-       could not be opened. Otherwise, possibly a genuine resource limit such as
-       exhausted GPU memory, or under WSL2 a runtime that does not take the DXG path.
+       couldn't be opened. Otherwise, possibly a genuine resource limit such as
+       exhausted GPU memory, or under WSL2 a runtime that doesn't take the DXG path.
    * - ``no ROCm-capable device is detected``
      - No GPU is visible to HIP. ``likely`` caused by a ``*_VISIBLE_DEVICES`` mask that
        hides every GPU (see ``environ.gpu-visibility``); any other mask is only a
        ``possible`` cause, since it may select a GPU that exists.
    * - ``could not be locked for profiling due to lack of permissions``,
        ``Required permission (CAP_PERFMON) is not set``
-     - The GPU could not be locked for exclusive profiling without ``CAP_PERFMON``.
+     - The GPU couldn't be locked for exclusive profiling without ``CAP_PERFMON``.
        Dispatch counters still work but may be inaccurate if another process profiles
        the same GPU; device-wide counter collection is degraded. Running as root grants
-       the capability. ``perf_event_paranoid`` does not govern this, and file
+       the capability. ``perf_event_paranoid`` doesn't govern this, and file
        capabilities on the ``rocprofv3`` script have no effect.
    * - ``has a profiler attached to it``
      - Another process holds the GPU's profiler lock.
@@ -401,13 +421,14 @@ process and a ``possible`` cause.
 ROCm installation layouts
 -------------------------
 
-ROCm is not always under ``/opt/rocm``. ``rocprofv3 --doctor`` inspects the first of these
+ROCm isn't always under ``/opt/rocm``. ``rocprofv3 --doctor`` inspects the first of these
 that contains a ROCm installation:
 
 #. The prefix ``rocprofv3`` itself is installed under (symlinks resolved).
 #. ``ROCM_PATH``, ``ROCM_HOME``, or ``ROCM_DIR``.
 #. The prefix of the ``rocprofv3`` found on ``PATH``.
-#. A TheRock Python package (``_rocm_sdk_core``) importable by the current interpreter.
+#. The prefix containing TheRock Python package (``_rocm_sdk_core``) importable by
+   the current interpreter.
 #. ``/opt/rocm``, then the newest ``/opt/rocm/core-X.Y``.
 
 A virtual-environment prefix is searched for TheRock Python packages too, so running the
@@ -435,6 +456,8 @@ Override the root explicitly when several installations exist side by side:
 Common findings
 ---------------
 
+The following table explains some of the most common findings in more detail:
+
 .. list-table::
    :header-rows: 1
    :widths: 30 70
@@ -442,42 +465,43 @@ Common findings
    * - Check
      - What it means
    * - ``driver.kfd-device``
-     - Neither ``/dev/kfd`` nor, under WSL2, ``/dev/dxg`` exists, so the amdgpu/KFD
-       driver is not loaded or no AMD GPU is present. Every GPU-dependent check
-       downstream reports ``SKIP``.
+     - Neither ``/dev/kfd`` nor ``/dev/dxg`` (its WSL2 equivalent) exists, so the
+       amdgpu/KFD driver isn't loaded, no AMD GPU is present, or (in a container) the
+       device wasn't passed through. Every GPU-dependent check downstream reports
+       ``SKIP``.
    * - ``driver.kfd-readable``
-     - The device node exists but your account cannot open it. Add yourself to the
+     - The device node exists but your account can't open it. Add yourself to the
        ``render`` and ``video`` groups and start a new login session. Under WSL2,
        ``/dev/dxg`` is normally world-accessible; check its mode instead.
    * - ``driver.render-group``
-     - When your account is already listed in the group but the session is not, the
+     - When your account is already listed in the group but the session isn't, the
        remediation is to re-login or run ``newgrp render`` -- not to run ``usermod``
        again.
    * - ``runtime.libraries-load``
-     - A ROCm library is present but cannot be loaded. The detail names the cause --
+     - A ROCm library is present but can't be loaded. The detail names the cause --
        usually a missing dependency or libraries mixed from two ROCm installations.
    * - ``install.kokkosp-library``
      - ``librocprofiler-sdk-tool-kokkosp.so`` is missing. ``rocprofv3`` resolves it on
        every launch, not only with ``--kokkos-trace``, so every run fails.
    * - ``install.metrics-path``
-     - The counter database ``config.yaml`` is not where the SDK looks. Each
+     - The counter database ``config.yaml`` isn't where the SDK looks. Each
        ``:``-separated entry of ``ROCPROFILER_METRICS_PATH`` is searched first, then the
        installed copy; when the variable names no usable entry, the SDK falls back to
        the installed copy and the check warns.
    * - ``counters.cap-perfmon``
      - Informational. Without ``CAP_PERFMON``, dispatch counter collection works, but the
-       GPU cannot be locked for exclusive profiling and device-wide counter collection is
+       GPU can't be locked for exclusive profiling and device-wide counter collection is
        degraded. ``kernel.perf_event_paranoid`` is deliberately not checked:
-       rocprofiler-sdk does not use perf events.
+       rocprofiler-sdk doesn't use perf events.
    * - ``driver.amdgpu-module``
-     - Passes whenever ``/sys/module/amdgpu`` exists. The driver version is shown only
-       when the driver publishes one -- the DKMS driver does, the in-tree driver of a
-       distribution kernel does not.
+     - Passes whenever ``/sys/module/amdgpu`` exists. The check shows the driver version
+       only when the driver publishes one -- the DKMS driver does, the in-tree driver of
+       a distribution kernel doesn't.
    * - ``driver.gpu-topology`` (WSL2)
-     - Under WSL2 there is no KFD topology. The check instead locates ``libdxcore.so``
+     - Under WSL2 there's no KFD topology. The check instead locates ``libdxcore.so``
        (provided by WSL under ``/usr/lib/wsl/lib``) and ``librocdxg.so``, and fails when
        ``HSA_ENABLE_DXG_DETECTION=0``. ``driver.dri-devices``, ``driver.amdgpu-module``,
-       and the group checks report ``SKIP``: they do not apply there.
+       and the group checks report ``SKIP``: they don't apply there.
    * - ``environ.gpu-visibility``
      - A ``*_VISIBLE_DEVICES`` variable restricts the GPUs ``rocprofv3`` sees. ``-1``
        hides all of them, as does an empty ``ROCR_VISIBLE_DEVICES``; an empty
@@ -498,9 +522,9 @@ Common findings
        ROCm runtime at a time; ``unset LD_PRELOAD``.
    * - ``install.no-mixed-rocm``
      - ``LD_LIBRARY_PATH``, ``ROCM_PATH``, or ``ROCM_HOME`` points at a different ROCm
-       installation than the one being inspected, which risks an ABI mismatch. Paths that
-       are links into the same installation, such as ``/opt/rocm`` and
-       ``/opt/rocm/core-X.Y``, are not reported.
+       installation than the one being inspected, which risks an ABI mismatch. The check
+       doesn't report paths that are links into the same installation, such as
+       ``/opt/rocm`` and ``/opt/rocm/core-X.Y``.
    * - ``container.device-passthrough``
-     - You are in a container and the GPU device nodes were not mounted into it. The
+     - You are in a container and the GPU device nodes weren't mounted into it. The
        remediation prints the required ``docker run`` flags.
