@@ -630,8 +630,14 @@ way.
 
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
-   must be constructible from `const char *config_json`.
+1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class can
+   provide a `const char *config_json` constructor, or a default constructor and
+   `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+   The export macro uses the `const char *` constructor when available; it uses
+   the checked initializer only when that constructor is absent. A constructor
+   taking `const char * = nullptr` still takes precedence, so remove it when
+   migrating to the checked form. If initialization fails, the factory logs
+   `create failed: <diagnostic>`, destroys the candidate, and returns a null handle.
 2. Add a `plugin_export.cpp` that calls
    `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)`.
 3. In `CMakeLists.txt`, add the object library and a

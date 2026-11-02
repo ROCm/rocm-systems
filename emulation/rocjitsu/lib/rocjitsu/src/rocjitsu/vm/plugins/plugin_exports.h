@@ -95,9 +95,12 @@ inline constexpr const char *kPluginCreateSymbol = "rocjitsu_plugin_create";
 inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 
 /// @brief Construct a plugin using its constructor or checked initializer.
-/// Exceptions remain contained by the exported factory while allocation and foreign
-/// plugin code can still throw. The exported C signatures and null failure handle
-/// are unchanged for both construction forms.
+/// @details A `const char *` constructor takes precedence. Only when that constructor
+/// is absent does this use default construction followed by
+/// `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+/// Initializer failure logs `create failed: <diagnostic>`, destroys the candidate,
+/// and returns null. Allocation and foreign plugin code may throw; the exported
+/// factory contains those exceptions.
 template <typename PluginClass> ExecutionPlugin *create_plugin_instance(const char *config_json) {
   if constexpr (std::is_constructible_v<PluginClass, const char *>) {
     return new PluginClass(config_json);
@@ -122,7 +125,11 @@ template <typename PluginClass> ExecutionPlugin *create_plugin_instance(const ch
 ///
 /// @param PluginClass Concrete ::rocjitsu::ExecutionPlugin subclass. It must
 ///        be constructible from a single `const char *config_json` argument, or
-///        default constructible with a checked initialize(config_json, diagnostic).
+///        default constructible with
+///        `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+///        The `const char *` constructor takes precedence when both forms exist.
+///        Checked initializer failure logs `create failed: <diagnostic>`, destroys
+///        the candidate, and returns a null handle.
 /// @param NAME        Plugin name string literal (matches the `.so` suffix).
 /// @param CONFIG_SCHEMA JSON schema string literal ("{}" if none).
 ///

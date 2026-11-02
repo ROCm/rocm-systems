@@ -830,6 +830,8 @@ struct PerfsimPlugin::Impl {
   }
 
   bool record_event(OrderedEvent event) {
+    if (!initialized)
+      return false;
     const size_t dynamic_bytes = staged_dynamic_size(event);
     if (!can_stage_event(event.dispatch_id, dynamic_bytes))
       return false;
@@ -908,6 +910,8 @@ struct PerfsimPlugin::Impl {
   }
 
   void drain_epoch(bool shutdown) {
+    if (!initialized)
+      return;
     if (!replay_blockers.empty())
       return;
 
@@ -1302,7 +1306,10 @@ util::Result PerfsimPlugin::initialize(const char *config_json,
 
 PerfsimPlugin::~PerfsimPlugin() = default;
 
-void PerfsimPlugin::onInit() { impl_->init(); }
+void PerfsimPlugin::onInit() {
+  assert(impl_ && "initialize() must succeed before onInit()");
+  impl_->init();
+}
 
 void PerfsimPlugin::onShutdown() {
   if (impl_)

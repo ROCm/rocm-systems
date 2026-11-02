@@ -487,7 +487,7 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidStagingBudgets) {
     PerfsimPlugin plugin;
     util::StringDiagnostic diagnostic;
     EXPECT_TRUE(plugin.initialize(config.c_str(), diagnostic.emitter()).failed());
-    EXPECT_FALSE(diagnostic.message().empty());
+    EXPECT_NE(diagnostic.message().find("'max_staged_bytes'"), std::string::npos);
   }
 }
 
@@ -500,7 +500,7 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidDispatchNames) {
     PerfsimPlugin plugin;
     util::StringDiagnostic diagnostic;
     EXPECT_TRUE(plugin.initialize(config.c_str(), diagnostic.emitter()).failed());
-    EXPECT_FALSE(diagnostic.message().empty());
+    EXPECT_NE(diagnostic.message().find("'dispatch_name'"), std::string::npos);
   }
 }
 
@@ -514,7 +514,7 @@ TEST(PerfsimPluginConfigTest, RejectsInvalidObservedWorkgroupCaps) {
     PerfsimPlugin plugin;
     util::StringDiagnostic diagnostic;
     EXPECT_TRUE(plugin.initialize(config.c_str(), diagnostic.emitter()).failed());
-    EXPECT_FALSE(diagnostic.message().empty());
+    EXPECT_NE(diagnostic.message().find("'max_observed_workgroups'"), std::string::npos);
   }
 }
 
@@ -2551,6 +2551,19 @@ TEST_F(PerfsimPluginTest, FailedActivationReleasesClaimWithoutClobberingNextInst
   auto active = std::make_unique<PerfsimPlugin>();
   ASSERT_TRUE(active->initialize(plugin_config().c_str()).succeeded());
   active->onInit();
+  const std::string before_failed_hooks = read_file(trace_.path());
+  WaveFixture fixture;
+  const KernelDispatchInfo info = dispatch_info(71);
+  failed->onAmdgpuDispatchPacketProcessed(info);
+  failed->onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  failed->onAmdgpuWavefrontDispatched(wave);
+  const std::array<uint32_t, 1> end_words{0xBF810000};
+  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
+  failed->onAmdgpuBeforeExecuteInstruction(0x4000, end, wave);
+  failed->onAmdgpuWavefrontHalted(wave);
+  failed->onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  EXPECT_EQ(read_file(trace_.path()), before_failed_hooks);
   failed.reset();
   // A failed instance must not clear the new instance's singleton claim.
   PerfsimPlugin extra;
