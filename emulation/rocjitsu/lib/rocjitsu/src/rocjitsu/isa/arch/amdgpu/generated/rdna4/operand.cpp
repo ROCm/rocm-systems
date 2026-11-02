@@ -1055,7 +1055,8 @@ bool Operand::has_register_selector() const {
 bool Operand::execution_backend_available() const {
   // Captured tables are the immutable full table or null; no
   // independently populated/partial tables are supported.
-  return execution_backend_ != nullptr && rocjitsu::Operand::execution_backend_available();
+  return execution_backend_ != nullptr &&
+         (!delegate() || delegate()->execution_backend_available());
 }
 
 bool Operand::simd_capable() const {

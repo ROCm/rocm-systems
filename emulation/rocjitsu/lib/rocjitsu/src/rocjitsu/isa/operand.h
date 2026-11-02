@@ -415,10 +415,10 @@ public:
   /// @details Generated execution callbacks check this when delegates are active,
   /// before reading any values. Decoded operands otherwise retain the backend
   /// captured alongside their instruction callback and must not be replaced.
-  /// Model-only operands remain usable for decoding and analysis.
-  virtual bool execution_backend_available() const {
-    return !delegate_ || delegate_->execution_backend_available();
-  }
+  /// Model-only operands remain usable for decoding and analysis. The base
+  /// descriptor has no value access; subclasses with value storage or callbacks
+  /// must opt in and check their delegate chain.
+  virtual bool execution_backend_available() const { return false; }
 
   /// @brief Whether `read_lane_chunk` / `write_lane_chunk` produce correct,
   /// SIMD-friendly results for this operand.
@@ -785,7 +785,7 @@ public:
   ~ScopedOperandDelegate() noexcept { restore(); }
 
   /// @brief Whether this thread has bindings requiring execution preflight.
-  static bool active() noexcept { return active_count_ != 0; }
+  [[nodiscard]] static bool active() noexcept { return active_count_ != 0; }
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;

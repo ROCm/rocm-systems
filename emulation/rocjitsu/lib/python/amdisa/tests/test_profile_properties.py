@@ -1588,7 +1588,7 @@ def test_operand_errors_are_retained_and_execution_checks_backends(
     execution = (tmp_path / arch / 'operand_exec.cpp').read_text()
     assert 'throw ' not in model
     assert 'throw ' not in execution
-    assert 'rocjitsu::Operand::execution_backend_available()' in model
+    assert '!delegate() || delegate()->execution_backend_available()' in model
     assert 'execution_backend_ != nullptr' in model
     for method in (
         'read_lane_chunk',

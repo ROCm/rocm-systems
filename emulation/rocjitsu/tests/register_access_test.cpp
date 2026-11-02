@@ -304,46 +304,53 @@ TEST(RegisterAccessTest, DerivedOperandRejectionsRetainFailureWithoutAccessOrObs
 }
 
 TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBeforeEffects) {
-  for (bool destination : {false, true}) {
-    SCOPED_TRACE(destination ? "destination" : "source");
-    Fixture fx;
-    ASSERT_NE(fx.wf, nullptr);
-    constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
-    DecodeResult result = cdna4::Decoder::decode(&word, {});
-    ASSERT_TRUE(result.succeeded());
-    std::unique_ptr<Instruction> instruction = std::move(result).value();
-    ASSERT_NE(instruction->execute, nullptr);
-    auto *operand = const_cast<Operand *>(destination ? instruction->dst_operand(0)
-                                                      : instruction->src_operand(0));
-    ASSERT_NE(operand, nullptr);
-    std::optional<cdna4::Operand> missing;
-    {
-      ScopedIsaExecutionBackend model_scope(nullptr);
-      missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
-    }
-    cdna4::Operand intermediate(32, cdna4::OperandType::OPR_VGPR, 1);
-    fx.cu->write_vgpr(fx.vgpr_base(), 0, 0xA5A5A5A5u);
-    {
-      ScopedOperandDelegate inner(intermediate, &*missing);
-      ScopedOperandDelegate outer(*operand, &intermediate);
+  for (bool descriptor_only : {false, true}) {
+    for (bool destination : {false, true}) {
+      SCOPED_TRACE(destination ? "destination" : "source");
+      SCOPED_TRACE(descriptor_only ? "descriptor-only" : "missing backend");
+      Fixture fx;
+      ASSERT_NE(fx.wf, nullptr);
+      constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
+      DecodeResult result = cdna4::Decoder::decode(&word, {});
+      ASSERT_TRUE(result.succeeded());
+      std::unique_ptr<Instruction> instruction = std::move(result).value();
+      ASSERT_NE(instruction->execute, nullptr);
+      auto *operand = const_cast<Operand *>(destination ? instruction->dst_operand(0)
+                                                        : instruction->src_operand(0));
+      ASSERT_NE(operand, nullptr);
+      std::optional<cdna4::Operand> missing;
+      {
+        ScopedIsaExecutionBackend model_scope(nullptr);
+        missing.emplace(32, cdna4::OperandType::OPR_VGPR, 1);
+      }
+      Operand descriptor(32, 1);
+      Operand *delegate = descriptor_only ? &descriptor : &*missing;
+      cdna4::Operand intermediate(32, cdna4::OperandType::OPR_VGPR, 1);
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        fx.cu->write_vgpr(fx.vgpr_base(), lane, 0xA5A5A5A5u);
+      {
+        ScopedOperandDelegate inner(intermediate, delegate);
+        ScopedOperandDelegate outer(*operand, &intermediate);
+        EXPECT_NO_THROW(instruction->execute(*instruction, fx.wf));
+        EXPECT_EQ(fx.wf->instruction_execution_error(),
+                  InstructionExecutionError::MissingExecutionBackend);
+        EXPECT_TRUE(fx.plugin->reads.empty());
+        EXPECT_TRUE(fx.plugin->writes.empty());
+        for (uint32_t lane = 0; lane < 64; ++lane)
+          EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), lane), 0xA5A5A5A5u);
+      }
+      EXPECT_EQ(operand->delegate(), nullptr);
+      EXPECT_EQ(intermediate.delegate(), nullptr);
+      EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
+      EXPECT_FALSE(ScopedOperandDelegate::active());
+      fx.wf->clear_instruction_execution_error();
+      fx.cu->write_vgpr(fx.vgpr_base() + 1, 0, 0x12345678u);
       instruction->execute(*instruction, fx.wf);
-      EXPECT_EQ(fx.wf->instruction_execution_error(),
-                InstructionExecutionError::MissingExecutionBackend);
-      EXPECT_TRUE(fx.plugin->reads.empty());
-      EXPECT_TRUE(fx.plugin->writes.empty());
-      EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0xA5A5A5A5u);
+      EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+      EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0x12345678u);
+      EXPECT_FALSE(fx.plugin->reads.empty());
+      EXPECT_FALSE(fx.plugin->writes.empty());
     }
-    EXPECT_EQ(operand->delegate(), nullptr);
-    EXPECT_EQ(intermediate.delegate(), nullptr);
-    EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
-    EXPECT_FALSE(ScopedOperandDelegate::active());
-    fx.wf->clear_instruction_execution_error();
-    fx.cu->write_vgpr(fx.vgpr_base() + 1, 0, 0x12345678u);
-    instruction->execute(*instruction, fx.wf);
-    EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
-    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0x12345678u);
-    EXPECT_FALSE(fx.plugin->reads.empty());
-    EXPECT_FALSE(fx.plugin->writes.empty());
   }
 }
 
@@ -400,6 +407,7 @@ TEST(RegisterAccessTest, SdwaStageSourceObservesAndSelectsActiveBytes) {
                      /*absolute=*/false, sdwa::SourceModifierFormat::NONE, storage, *fx.wf);
 
   ASSERT_TRUE(storage.has_value());
+  EXPECT_TRUE(storage->execution_backend_available());
   ASSERT_EQ(fx.plugin->reads.size(), 1u);
   EXPECT_EQ(fx.plugin->reads[0].physical_reg, physical_vgpr);
   EXPECT_EQ(fx.plugin->reads[0].lane_mask, 0b0101u);

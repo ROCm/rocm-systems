@@ -16767,7 +16767,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                       // Captured tables are the immutable full table or null; no
                       // independently populated/partial tables are supported.
                       return execution_backend_ != nullptr &&
-                             rocjitsu::Operand::execution_backend_available();
+                             (!delegate() || delegate()->execution_backend_available());
                     }
 
                     bool Operand::simd_capable() const {
