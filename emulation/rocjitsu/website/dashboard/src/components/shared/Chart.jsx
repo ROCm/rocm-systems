@@ -1,12 +1,12 @@
+import { useCallback, useLayoutEffect, useRef } from 'react';
+import { bindChartNativeInput } from './chartNativeInput';
+import { positionChartTooltip } from './chartTooltip';
 import ReactEChartsCore from 'echarts-for-react/esm/core';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart, ScatterChart } from 'echarts/charts';
 import {
-  DataZoomComponent,
   GridComponent,
-  LegendComponent,
   MarkLineComponent,
-  MarkPointComponent,
   TooltipComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -16,16 +16,20 @@ echarts.use([
   BarChart,
   LineChart,
   ScatterChart,
-  DataZoomComponent,
   GridComponent,
-  LegendComponent,
   MarkLineComponent,
-  MarkPointComponent,
   TooltipComponent,
   CanvasRenderer,
 ]);
 
-export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy, onEvents }) {
+export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy, onEvents, onReady, lazyUpdate = true }) {
+  const cleanupInput = useRef(null);
+  useLayoutEffect(() => () => cleanupInput.current?.(), []);
+  const handleReady = useCallback((chart) => {
+    cleanupInput.current?.();
+    cleanupInput.current = bindChartNativeInput(chart);
+    onReady?.(chart);
+  }, [onReady]);
   const theme = useTheme();
   const tooltip = option.tooltip ? {
     backgroundColor: theme.palette.background.paper,
@@ -34,9 +38,11 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
     borderRadius: 10,
     padding: [10, 12],
     confine: true,
-    transitionDuration: 0.18,
-    extraCssText: `box-shadow: ${theme.shadows[5]}; backdrop-filter: blur(10px);`,
+    transitionDuration: 0,
+    extraCssText: `box-shadow: ${theme.shadows[5]};`,
+    position: positionChartTooltip,
     ...option.tooltip,
+    className: ['dashboard-chart-tooltip', option.tooltip.className].filter(Boolean).join(' '),
     textStyle: {
       color: theme.palette.text.primary,
       fontFamily: theme.typography.fontFamily,
@@ -58,8 +64,9 @@ export default function Chart({ option, height = 280, ariaLabel, ariaDescribedBy
       echarts={echarts}
       option={themedOption}
       notMerge
-      lazyUpdate
+      lazyUpdate={lazyUpdate}
       onEvents={onEvents}
+      onChartReady={handleReady}
       opts={{ renderer: 'canvas' }}
       style={{ width: '100%', height }}
       aria-label={ariaLabel}

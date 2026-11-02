@@ -30,7 +30,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather
+    64ULL*1024,          // [2] AllGather         // [2] AllGather
     1ULL*1024*1024,      // [3] ReduceScatter -- LL ends here; LL128 starts on the next byte
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
@@ -153,7 +153,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -167,7 +167,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                    // [0] Broadcast      -- not used on gfx1250
     0,                    // [1] Reduce          -- not used on gfx1250
     2ULL*1024*1024,       // [2] AllGather
-    kThreshUnlimited,     // [3] ReduceScatter
+    0,                    // [3] ReduceScatter   -- symk loses 2-5x to DDA / Ring from 2M up (4 ranks)
     0,                    // [4] AllReduce
     0,                    // [5] SendRecv        -- not used on gfx1250
     0,                    // [6] Send            -- not used on gfx1250
@@ -480,7 +480,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .forceCeScratch = false,
 };
 
-// gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
+// gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
 static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   // ddaLLMax: no fabric LL on gfx950.
   .ddaLLMax = {
@@ -510,7 +510,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaVmmMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    128ULL*1024*1024,     // [2] AllGather
+    64ULL*1024*1024,      // [2] AllGather
     128ULL*1024*1024,     // [3] ReduceScatter
     128ULL*1024*1024,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used

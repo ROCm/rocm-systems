@@ -55,7 +55,7 @@ enum InstFlags : uint64_t {
   PREDICATED_DEF = (1ULL << 11),
   /// @brief Executes regardless of the EXEC mask (e.g. branches).
   IGNORES_EXEC = (1ULL << 12),
-  /// @brief Writes the EXEC mask regardless of DST operands.
+  /// @brief May write the EXEC mask regardless of DST operands.
   WRITES_EXEC = (1ULL << 13),
   /// @brief The destination value is a scalar plain copy of a single source operand
   /// (e.g. s_mov). Lets EXEC-state analysis prove an all-ones EXEC write from an
@@ -78,6 +78,13 @@ enum InstFlags : uint64_t {
   DIRECT_REGISTER_ACCESSES = (1ULL << 21),
   /// @brief Unconditional full-dword memory results described by the decoded destinations.
   SIMPLE_MEMORY_RESULT = (1ULL << 22),
+  /// @brief Uses the CDNA1-4 conditional branch stack (S_CBRANCH_{G,I}_FORK,
+  /// S_CBRANCH_JOIN). Its entries live in SGPRs selected by MODE.CSP at run time;
+  /// uniform forks and joins that fall through leave the stack unchanged.
+  /// @details implicit_uses() and implicit_defs() report the static s[0:31] superset
+  /// for analysis. fork_stack_access() and join_stack_access() in shared/branch_stack.h
+  /// report the entry touched by one execution for the memory-wait scoreboard.
+  BRANCH_STACK = (1ULL << 23),
   /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
   CONDITIONAL_MEMORY_LANES = (1ULL << 24),
   /// @brief Matrix execution accesses register lanes independently of EXEC.
@@ -352,6 +359,13 @@ public:
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
+  /// @brief Whether an explicit source operand contributes its ordinary register dependency.
+  /// @details Encodings with non-contiguous source tuples can suppress the
+  /// placeholder tuple and report the actual registers through implicit_uses().
+  [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
+    return true;
+  }
+
   /// @brief Add registers implicitly read by this instruction.
   ///
   /// @details Used for encoded fields that affect execution but are not part of
@@ -370,6 +384,15 @@ public:
   /// remain exclusive to implicit_uses(). The pointed-to Operands share this
   /// instruction's lifetime.
   virtual void implicit_use_operands(std::vector<const Operand *> & /*operands*/) const {}
+
+  /// @brief Add implicit uses that only preserve an unwritten destination portion.
+  ///
+  /// @details These uses matter to liveness but do not consume a pending memory
+  /// result. Keeping them separate lets memory-wait checking retain genuine
+  /// implicit reads, such as image coordinate registers.
+  /// @returns True when the instruction distinguishes preservation-only uses
+  /// from genuine implicit reads, even if this encoding has no preservation use.
+  virtual bool implicit_preservation_uses(RegisterSet & /*uses*/) const { return false; }
 
   /// @brief Query already-decoded modifiers only when a register may be pending.
   virtual void amdgpu_register_modifiers(amdgpu::RegisterModifiers & /*modifiers*/) const {}
@@ -410,8 +433,7 @@ public:
       first = false;
     }
     for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-      if (src_operands_[operand_index]->size_bits() == 0 ||
-          src_operands_[operand_index]->is_fieldless())
+      if (!should_print_src_operand(operand_index))
         continue;
       if (omit_repeated_destination_sources_) {
         bool repeats_dst = false;
@@ -484,6 +506,12 @@ protected:
   /// @brief Append one destination operand to textual disassembly.
   virtual void append_dst_operand(std::string &out, uint8_t operand_index) const {
     out += dst_operands_[operand_index]->name();
+  }
+  /// @brief Whether a source has its own textual operand.
+  /// Encoding-specific overrides may expose a decoded view of a fieldless source.
+  virtual bool should_print_src_operand(uint8_t operand_index) const {
+    return src_operands_[operand_index]->size_bits() != 0 &&
+           !src_operands_[operand_index]->is_fieldless();
   }
   /// @brief Append one source operand to textual disassembly.
   virtual void append_src_operand(std::string &out, uint8_t operand_index) const {

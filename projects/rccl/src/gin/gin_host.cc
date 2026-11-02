@@ -286,7 +286,7 @@ static ncclResult_t ginDevCommSetupWithBackend(struct ncclComm* comm, struct ncc
     // TODO: check if a shared devComm in the list could match our requirements.
   }
 
-  nContextsTotal = ROUNDUP(nContextsTotal, backend->ginCommCount);
+  nContextsTotal = ncclGinContextCount(nContextsTotal, backend->ginCommCount);
   devComm->ginContextCount = nContextsTotal;
   int nContextsPerComm = nContextsTotal / backend->ginCommCount;
   INFO(NCCL_INIT,

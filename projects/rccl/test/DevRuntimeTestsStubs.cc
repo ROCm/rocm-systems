@@ -131,6 +131,10 @@ int64_t ncclParamDmaBufEnable() { return 1; }
 // Emitted by transport/generic.cc; NCCL_PARAM default, so multi-segment GIN windows register.
 int64_t ncclParamMultiSegmentRegister() { return 1; }
 
+// Defined in rocmwrap.cc in the real build; referenced by common/EnvVars.cpp's
+// GPU probe. This binary never needs cuMem, so report it unsupported.
+int ncclCuMemRuntimeSupported() { return 0; }
+
 // ---------------------------------------------------------------------------
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------

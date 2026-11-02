@@ -56,6 +56,7 @@ enum class InstructionExecutionError : uint8_t {
   InvalidInstructionEncoding,
   UnsupportedOperandValue,
   UnimplementedInstruction,
+  DecodeFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -83,9 +84,12 @@ struct RegAllocation {
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
 ///
-/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
-/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
-/// fires before the wavefront's first instruction.
+/// Plugin state (plugin_states_) is not cleared by reset(). Plugins initialize
+/// it in onAmdgpuWorkgroupDispatched or onAmdgpuWavefrontDispatched, before the
+/// first instruction of each wave incarnation. onAmdgpuWavefrontHalted or
+/// onAmdgpuWavefrontCancelled ends that incarnation, including a cluster
+/// placement rolled back before retry in the same slot. See the cancellation
+/// contract in execution_plugin.h for terminal-hook and retry semantics.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -233,14 +237,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
-  /// @brief Return the AQL ring packet id (dispatch's ring index) for this wave.
-  /// @details This is the queue read index at which the dispatch packet was
-  /// fetched. rocm-dbgapi correlates a trapped wave to its dispatch by matching
-  /// this against the queue's read/write dispatch ids (TTMP11[6:30]).
-  uint32_t aql_packet_id() const { return aql_packet_id_; }
+  /// @brief Return the wrapped AQL ring slot associated with this wave.
+  /// @details ROCdbgapi reconstructs its monotonic dispatch index from the
+  /// consumer cursor and this slot (TTMP11[6:30] on gfx9.4).
+  uint32_t queue_packet_id() const { return queue_packet_id_; }
 
-  /// @brief Set the AQL ring packet id (called at dispatch).
-  void set_aql_packet_id(uint32_t id) { aql_packet_id_ = id; }
+  /// @brief Set the wrapped AQL ring slot (called at dispatch).
+  void set_queue_packet_id(uint32_t id) { queue_packet_id_ = id; }
 
   /// @brief GPU load bias for code-object-relative function addresses.
   uint64_t code_load_bias() const { return code_load_bias_; }
@@ -364,9 +367,13 @@ public:
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
 
-  /// Decode captured diagnostic bytes with this CU's target on its execution thread.
-  /// Virtual dispatch keeps the target decoder accessible to standalone plugins.
-  /// Keep out-of-line virtuals off this interface so plugins can emit its type information.
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// Standalone plugin modules do not link the simulator, so they reach the CU's
+  /// decoder through this virtual call. It is pure virtual because an out-of-line
+  /// definition would become Wavefront's key function, and plugins could then no
+  /// longer emit Wavefront's type information themselves.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
   virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
                                               uint64_t pc) const = 0;
 
@@ -476,6 +483,9 @@ public:
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
+  /// Short for conditional stack pointer, used by fork/join instructions
+  static constexpr uint32_t CSP_SHIFT = 29;
+  static constexpr uint32_t CSP_MASK = 7u << CSP_SHIFT;
 
   /// STATUS.HALT. Bit 13 on every modelled architecture -- see StatusReg::HALT
   /// in each arch's isa.h, which all spell it member<13, 13>.
@@ -485,6 +495,16 @@ public:
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }
+
+  /// @brief Return MODE.CSP, the number of pending fork stack entries.
+  uint32_t cond_stack_ptr() const { return (mode_raw_ & CSP_MASK) >> CSP_SHIFT; }
+
+  /// @brief Set MODE.CSP, leaving every other MODE bit unchanged.
+  /// @param csp New stack depth; only the lowest 3 bits are used.
+  void set_cond_stack_ptr(uint32_t csp) {
+    set_mode_raw((mode_raw_ & ~CSP_MASK) | (csp << CSP_SHIFT));
+  }
+
   uint32_t fp_round_mode_f32() const { return mode_raw_ & 0x3u; }
   uint32_t fp_round_mode_f16_f64() const { return (mode_raw_ >> 2) & 0x3u; }
   uint32_t fp_denorm_mode_f32() const { return (mode_raw_ >> 4) & 0x3u; }
@@ -901,10 +921,15 @@ public:
   uint64_t debug_wave_id() const { return debug_wave_id_; }
   void set_debug_wave_id(uint64_t id) { debug_wave_id_ = id; }
 
-  /// @brief Read one allocated SGPR for debugger state capture.
+  /// @brief Read an SGPR relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// when the resulting index is outside the physical register file.
   uint32_t debug_read_sgpr(uint32_t reg) const;
 
-  /// @brief Read one allocated VGPR lane for debugger state capture.
+  /// @brief Read a VGPR lane relative to this wave's physical register base.
+  /// @details Reads storage without notifying execution plugins. Returns zero
+  /// for an index outside the physical register file or a lane outside the
+  /// stored lane range.
   uint32_t debug_read_vgpr(uint32_t reg, uint32_t lane) const;
 
   /// @brief Write one allocated SGPR from debugger state restore.
@@ -1007,7 +1032,7 @@ public:
     wg_id_ = 0;
     wg_coord_ = {};
     dispatch_id_ = 0;
-    aql_packet_id_ = 0;
+    queue_packet_id_ = 0;
     code_load_bias_ = 0;
     wave_in_group_ = 0;
     address_space_ = {};
@@ -1103,11 +1128,11 @@ protected:
   uint64_t dispatch_generation_ = 0; ///< Incremented whenever this slot is dispatched.
   uint32_t wg_id_ = 0;               ///< Workgroup ID (set per dispatch).
   std::array<uint32_t, 3> wg_coord_{};
-  uint32_t dispatch_id_ = 0;         ///< Dispatch ID (set per dispatch, unique per dispatch).
-  uint32_t aql_packet_id_ = 0;       ///< AQL ring packet id of the dispatch (debugger correlation).
-  uint64_t code_load_bias_ = 0;      ///< GPU load bias for code-object-relative call targets.
-  uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
-  AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
+  uint32_t dispatch_id_ = 0;     ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t queue_packet_id_ = 0; ///< Wrapped AQL ring slot of the dispatch (debugger correlation).
+  uint64_t code_load_bias_ = 0;  ///< GPU load bias for code-object-relative call targets.
+  uint32_t wave_in_group_ = 0;   ///< Position of this wave within its workgroup (debugger).
+  AddressSpaceHandle address_space_;             ///< Generation-safe GPU address-space identity.
   std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
   uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
 

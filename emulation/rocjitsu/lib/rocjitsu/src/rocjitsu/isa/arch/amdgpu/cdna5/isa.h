@@ -84,7 +84,6 @@ struct Isa : amdgpu::RdnaIsaBase {
                                                       OperandType opr_type, int ev,
                                                       amdgpu::VgprMsbRole role);
   static bool simd_capable_value(OperandType opr_type, int ev);
-  static uint32_t simd_broadcast_value(const amdgpu::Wavefront &wf, OperandType opr_type, int ev);
 };
 
 } // namespace rocjitsu::cdna5

@@ -27,6 +27,7 @@
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <array>
@@ -259,26 +260,26 @@ struct ForceScalarGuard {
 // Hostile host state must survive both the scalar reference and SIMD execution.
 struct SubtractionHostEnvironment {
   std::fenv_t saved{};
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
   uint32_t saved_mxcsr = _mm_getcsr();
 #endif
   SubtractionHostEnvironment() {
     EXPECT_EQ(std::feholdexcept(&saved), 0);
     EXPECT_EQ(std::fesetround(FE_UPWARD), 0);
     EXPECT_EQ(std::feraiseexcept(FE_DIVBYZERO), 0);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(_mm_getcsr() | (1u << 6) | (1u << 15));
 #endif
   }
   ~SubtractionHostEnvironment() {
     std::fesetenv(&saved);
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     _mm_setcsr(saved_mxcsr);
 #endif
   }
   static std::array<int, 3> snapshot() {
     int control = 0;
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+#if RJ_HOST_ARCH_X86
     control = static_cast<int>(_mm_getcsr());
 #endif
     return {std::fegetround(), std::fetestexcept(FE_ALL_EXCEPT), control};

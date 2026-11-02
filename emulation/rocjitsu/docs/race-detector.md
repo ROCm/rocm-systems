@@ -11,7 +11,8 @@ instructions.
 ## Target scope
 
 The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
 and address-dependent FLAT counter participation. This partial
@@ -154,6 +155,12 @@ For an event completed by its owning wave, the report identifies
 the other wave with which it has not been synchronized. Completion and
 inter-wave synchronization are separate conditions; one wait instruction is not
 a universal fix for every reported hazard.
+
+Each trace row is disassembled from its own captured bytes, so code rewrites or
+unmapping do not change the reported instructions. Within the reporting wave,
+the displayed span starts at the first matching producer PC and encoding and
+ends at the last matching current access. Repeated producer executions with
+identical PCs and encodings are not distinguished.
 
 The instruction table follows the reporting wave's execution order. A separate
 `--- jump forward ---` or `--- jump backward ---` line highlights a

@@ -215,9 +215,10 @@ static ncclResult_t ginRocshmemGdaRegMrSym(void* collComm, void* data, size_t si
     return ncclSystemError;
   }
 
-  // Register buffer with QP set's PD
+  // Register buffer with QP set's PD. Remote atomics are required because a VA
+  // signal is an RDMA atomic into a cell of this window.
   uint32_t lkey, rkey;
-  if (rocshmem_gin_reg_mr_vmm(cctx->qpSet, data, size, /*atomic=*/0, &mh->mr, &lkey, &rkey) != 0) {
+  if (rocshmem_gin_reg_mr_vmm(cctx->qpSet, data, size, /*atomic=*/1, &mh->mr, &lkey, &rkey) != 0) {
     WARN("GIN rocshmem-gda: MR registration failed for buffer %p size %zu", data, size);
     (void)hipFree(mh->devHandle);
     free(mh);

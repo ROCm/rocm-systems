@@ -356,7 +356,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
         };
         let _traversal = match EXECUTABLE_TRAVERSAL.read() {
             Ok(guard) => guard,
-            Err(_) => return ERROR,
+            Err(()) => return ERROR,
         };
         let mut handles = {
             let guard = match lock() {

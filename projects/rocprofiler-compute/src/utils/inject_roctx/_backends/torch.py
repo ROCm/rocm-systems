@@ -9,6 +9,7 @@ Python tier without terminating the workload.
 """
 
 import importlib.util
+import inspect
 import os
 import sys
 import threading
@@ -17,38 +18,16 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from utils.inject_roctx import core
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    CollectorUnavailableError,
-)
-from utils.inject_roctx._backends.torch_cpp_loader import (
-    load as load_torch_trace_collector,
-)
+from utils.inject_roctx._backends import torch_trace_collector
+from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
 
 
-class _RecordFnHook:
-    def active(self) -> bool:
-        return _STATE.using_c_tier and _STATE.torch_trace_collector is not None
-
-    def push(self, marker: str, context: str, backend: str) -> bool:
-        try:
-            _STATE.torch_trace_collector.push_user_scope(marker, context, backend)
-            return True
-        except Exception:
-            return False
-
-    def pop(self) -> None:
-        try:
-            _STATE.torch_trace_collector.pop_user_scope()
-        except Exception:
-            pass
-
-
 class _TorchState:
-    """Resolved torch modules, collector, and active tracing tier."""
+    """Resolved torch modules."""
 
     def __init__(self) -> None:
         self.torch: Any = None
@@ -61,12 +40,6 @@ class _TorchState:
         self.function: Any = None
         self.nn: Any = None
         self.torch_root: str = ""
-
-        self.load_torch_trace_collector: Optional[Callable[..., Any]] = None
-        self.torch_trace_collector: Any = None
-        self.using_c_tier: bool = False
-        self.c_tier_initialized: bool = False
-        self.native_hook: Optional[_RecordFnHook] = None
 
         self.active_dispatch_mode: Any = None
 
@@ -130,65 +103,51 @@ PROCESS_GROUP_METHODS = (
 )
 
 
-# The native C++ RecordFunction tier is installed by _initialize_c_tier().
+def _render_tensor(obj: object) -> Optional[str]:
+    try:
+        shape = getattr(obj, "shape", None)
+        dtype = getattr(obj, "dtype", None)
+        if shape is None or dtype is None:
+            return None
+        dims = "x".join(str(int(d)) for d in shape)
+        dt = str(dtype).replace("torch.", "")
+        return f"{dt}[{dims}]"
+    except Exception:
+        return None
 
 
-def _get_tier_stack() -> list[bool]:
-    # Per-frame record of the tier that handled each push: True for the native
-    # C++ RecordFunction tier, False for the Python tier.
-    if not hasattr(_thread_local, "tier_stack"):
-        _thread_local.tier_stack = []
-    return _thread_local.tier_stack
+def format_wrap_args(args: tuple[object, ...], kwargs: dict[str, object]) -> str:
+    items: list[str] = []
+    for value in args:
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(rendered)
+    for name, value in kwargs.items():
+        if len(items) >= 32:
+            break
+        rendered = _render_tensor(value)
+        if rendered is None:
+            continue
+        items.append(f"{name}={rendered}")
+    if not items:
+        return "n/a"
+    return encode_args(cap_args("(" + ", ".join(items) + ")"))
 
 
-def _push_scope(marker: str, context: str, backend: str = "") -> None:
-    """Push a scope, routing through the native C++ RecordFunction tier when
-    active and otherwise emitting on the Python tier.
-    """
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    used_native = False
-    hook = _STATE.native_hook
-    if hook is not None and hook.active():
-        try:
-            used_native = bool(hook.push(marker, context, backend))
-        except Exception:
-            used_native = False
-
-    if not used_native:
-        full = core.compose_marker(marker, context, backend)
-        range_push, _ = core.get_python_tier_io()
-        range_push(full)
-
-    tier_stack.append(used_native)
-    marker_stack.append(marker)
-    context_stack.append(context)
+def _push_scope(
+    marker: str,
+    context: str,
+    backend: str = "",
+    args: str = "n/a",
+) -> None:
+    core._push_scope(marker, context, backend, args)
 
 
 def _pop_scope() -> None:
-    """Pop a scope, routing to the tier that handled its push."""
-    marker_stack = core.get_marker_stack()
-    context_stack = core.get_context_stack()
-    tier_stack = _get_tier_stack()
-
-    # Unmatched pop: no-op.
-    if not tier_stack:
-        return
-
-    used_native = tier_stack.pop()
-    try:
-        if used_native and _STATE.native_hook is not None:
-            _STATE.native_hook.pop()
-        else:
-            _, range_pop = core.get_python_tier_io()
-            range_pop()
-    finally:
-        if marker_stack:
-            marker_stack.pop()
-        if context_stack:
-            context_stack.pop()
+    core._pop_scope()
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.
@@ -198,23 +157,37 @@ def roctx_wrapper(
     func: Callable[..., Any],
     name: Optional[str] = None,
     backend: str = "",
+    *,
+    publish_launcher_tid: bool = False,
 ) -> Callable[..., Any]:
     """Wrap func so each call emits a ROCTX range. Idempotent.
 
-    A non-empty backend attributes the scope to that backend.
+    A non-empty backend attributes the range to that backend.
+    When publish_launcher_tid is true, the launcher OS thread id is published
+    for the range.
     """
     if getattr(func, "_roctx_wrapped", False):
         return func
     func_name = name or func.__name__
-    call_counter = {"count": 0}
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> object:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(func_name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(
+            func_name,
+            location,
+            backend=backend,
+            args=format_wrap_args(args, kwargs),
+        )
         try:
-            return func(*args, **kwargs)
+            launcher_pushed = (
+                publish_launcher_tid and torch_trace_collector.push_launcher_tid()
+            )
+            try:
+                return func(*args, **kwargs)
+            finally:
+                if launcher_pushed:
+                    torch_trace_collector.pop_launcher_tid()
         finally:
             _pop_scope()
 
@@ -223,17 +196,11 @@ def roctx_wrapper(
 
 
 def _marker_only_init_wrapper(name: str, backend: str = "") -> Callable[..., Any]:
-    """Build an __init__ that emits a ROCTX range, then calls object.__init__.
-
-    Used for classes whose construction occurs in __new__ (e.g. cuda.Event,
-    cuda.Stream).
-    """
-    call_counter = {"count": 0}
+    """Build an __init__ that emits a ROCTX range, then calls object.__init__."""
 
     def marker_only_init(self: object, *args: Any, **kwargs: Any) -> None:
-        call_counter["count"] += 1
         location = core.resolve_user_caller_location()
-        _push_scope(name, f"#{call_counter['count']}@{location}", backend=backend)
+        _push_scope(name, location, backend=backend)
         try:
             return object.__init__(self)
         finally:
@@ -250,70 +217,12 @@ def _walk_subclasses(cls: type, fn: Callable[[type], None]) -> None:
         _walk_subclasses(sub, fn)
 
 
-def _initialize_c_tier() -> bool:
-    """Load and install torch_trace_collector.so once per process."""
-    if _STATE.c_tier_initialized:
-        return _STATE.using_c_tier
-
-    _STATE.c_tier_initialized = True
-
-    if _STATE.load_torch_trace_collector is None:
-        _STATE.torch_trace_collector = None
-        _STATE.using_c_tier = False
-        return False
-
-    try:
-        module = _STATE.load_torch_trace_collector()
-    except CollectorUnavailableError as exc:
-        console_warning(
-            "ml api trace",
-            f"{exc} Falling back to the Python tier.",
-        )
-        module = None
-    except Exception as exc:
-        console_warning(
-            "ml api trace",
-            "C++ RecordFunction tier unavailable "
-            f"({type(exc).__name__}: {exc}); falling back to Python tier",
-        )
-        module = None
-
-    _STATE.torch_trace_collector = module
-
-    if _STATE.torch_trace_collector is not None:
-        try:
-            _STATE.torch_trace_collector.install()
-            console_log(
-                "ml api trace",
-                (
-                    "Coverage tier: C++ RecordFunction "
-                    "(global callback; covers every thread)."
-                ),
-            )
-            _STATE.using_c_tier = True
-            _STATE.native_hook = _RecordFnHook()
-            return True
-        except Exception as exc:
-            console_warning(
-                "ml api trace",
-                "C++ RecordFunction tier install failed "
-                f"({type(exc).__name__}: {exc}); falling back to Python tier",
-            )
-            _STATE.torch_trace_collector = None
-
-    _STATE.using_c_tier = False
-    return False
-
-
 def _emit_python_tier_fallback_warning() -> None:
-    """Emit one warning when the C++ tier is unavailable."""
-    if _STATE.using_c_tier:
-        return
+    """Warn when torch_trace_collector is unavailable."""
     console_warning(
         "ml api trace",
-        "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
-        "unavailable). Operator coverage on autograd backward threads is "
-        "reduced; backward markers may lack their full context chain.",
+        "torch_trace_collector is unavailable. Using TorchDispatchMode. "
+        "ATen operators on autograd worker threads are not recorded.",
     )
 
 
@@ -526,7 +435,12 @@ def patch_compile_callable() -> None:
         **kwargs: Any,
     ) -> object:
         location = core.resolve_user_caller_location()
-        _push_scope("torch.compile", f"#1@{location}", backend=_BACKEND_NAME)
+        _push_scope(
+            "torch.compile",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args((model_or_fn, *args), kwargs),
+        )
         try:
             compiled = original_compile(model_or_fn, *args, **kwargs)
         finally:
@@ -540,7 +454,12 @@ def patch_compile_callable() -> None:
         @wraps(compiled)
         def invocation_wrapper(*c_args: Any, **c_kwargs: Any) -> object:
             loc = core.resolve_user_caller_location()
-            _push_scope(f"torch.compile.{fn_label}", f"#1@{loc}", backend=_BACKEND_NAME)
+            _push_scope(
+                f"torch.compile.{fn_label}",
+                loc,
+                backend=_BACKEND_NAME,
+                args=format_wrap_args(c_args, c_kwargs),
+            )
             try:
                 return compiled(*c_args, **c_kwargs)
             finally:
@@ -564,16 +483,6 @@ def patch_compile_callable() -> None:
 
 
 # Dispatcher: C++ tier covers fwd+bwd; Python tier covers forward only.
-
-
-def next_dispatcher_index(op_name: str) -> int:
-    """Per-thread occurrence count for op_name."""
-    counters = getattr(_thread_local, "dispatcher_counters", None)
-    if counters is None:
-        counters = {}
-        _thread_local.dispatcher_counters = counters
-    counters[op_name] = counters.get(op_name, 0) + 1
-    return counters[op_name]
 
 
 def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
@@ -619,15 +528,7 @@ def dispatcher_marker_name_for(func: Callable[..., Any]) -> str:
 
 
 def install_dispatcher_hook() -> str:
-    """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
-    if _STATE.using_c_tier:
-        console_log(
-            "ml api trace",
-            "Operator coverage: C++ RecordFunction callback "
-            "(FUNCTION + BACKWARD_FUNCTION).",
-        )
-        return "c_tier"
-
+    """Enter TorchDispatchMode on this thread."""
     torch_dispatch_mode = _STATE.torch_dispatch_mode
     if torch_dispatch_mode is None:
         console_warning(
@@ -637,26 +538,21 @@ def install_dispatcher_hook() -> str:
         )
         return "none"
 
-    def start_disp(op_name: str) -> None:
-        idx = next_dispatcher_index(op_name)
+    def start_disp(
+        op_name: str,
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
+    ) -> None:
         location = core.resolve_user_caller_location()
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        context = f"#{idx}@{location}"
-        rangePush(core.compose_marker(op_name, context, _BACKEND_NAME))
-        marker_stack.append(op_name)
-        context_stack.append(context)
+        _push_scope(
+            op_name,
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs or {}),
+        )
 
     def end_disp() -> None:
-        marker_stack = core.get_marker_stack()
-        context_stack = core.get_context_stack()
-        try:
-            rangePop()
-        finally:
-            if marker_stack:
-                marker_stack.pop()
-            if context_stack:
-                context_stack.pop()
+        _pop_scope()
 
     class RoctxDispatchMode(torch_dispatch_mode):
         def __torch_dispatch__(
@@ -670,7 +566,7 @@ def install_dispatcher_hook() -> str:
             op_name = dispatcher_marker_name_for(func)
             pushed = False
             try:
-                start_disp(op_name)
+                start_disp(op_name, args, kwargs)
                 pushed = True
             except Exception as exc:
                 warn_dispatcher_failure_once("start", exc)
@@ -703,29 +599,12 @@ def install_tensor_backward_wrapper() -> None:
     torch = _STATE.torch
     if getattr(torch.Tensor.backward, "_roctx_wrapped", False):
         return
-
-    original_backward = torch.Tensor.backward
-    backward_counter = {"count": 0}
-
-    def backward_with_roctx(
-        self: object,
-        *args: Any,
-        **kwargs: Any,
-    ) -> object:
-        backward_counter["count"] += 1
-        location = core.resolve_user_caller_location()
-        _push_scope(
-            "torch.Tensor.backward",
-            f"#{backward_counter['count']}@{location}",
-            backend=_BACKEND_NAME,
-        )
-        try:
-            return original_backward(self, *args, **kwargs)
-        finally:
-            _pop_scope()
-
-    backward_with_roctx._roctx_wrapped = True
-    torch.Tensor.backward = backward_with_roctx
+    torch.Tensor.backward = roctx_wrapper(
+        torch.Tensor.backward,
+        "torch.Tensor.backward",
+        backend=_BACKEND_NAME,
+        publish_launcher_tid=True,
+    )
     console_log("ml api trace", "Wrapped torch.Tensor.backward with ROCTX markers")
 
 
@@ -793,12 +672,9 @@ def inject_roctx_into_optimizer() -> None:
             **kwargs: Any,
         ) -> object:
             location = core.resolve_user_caller_location()
-            if not hasattr(self, "_roctx_step_call_count"):
-                self._roctx_step_call_count = 0
-            self._roctx_step_call_count += 1
             _push_scope(
                 f"optimizer.{type(self).__name__}.step",
-                f"#{self._roctx_step_call_count}@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
@@ -821,6 +697,8 @@ def wrap_module_function(
     module: object,
     attr_name: str,
     marker_name: str,
+    *,
+    publish_launcher_tid: bool = False,
 ) -> bool:
     """Replace module.attr_name with a ROCTX-wrapped version. Never raises."""
     fn = getattr(module, attr_name, None)
@@ -832,6 +710,7 @@ def wrap_module_function(
         fn,
         marker_name,
         backend=_BACKEND_NAME,
+        publish_launcher_tid=publish_launcher_tid,
     )
     try:
         setattr(module, attr_name, wrapped)
@@ -845,6 +724,7 @@ def wrap_module_function(
 
 
 EXTRA_STRUCTURAL_WRAPS = (
+    ("torch.autograd", "backward", "torch.autograd.backward"),
     ("torch.autograd", "grad", "torch.autograd.grad"),
     ("torch.autograd.functional", "hessian", "torch.autograd.functional.hessian"),
     ("torch.autograd.functional", "jacobian", "torch.autograd.functional.jacobian"),
@@ -875,7 +755,18 @@ EXTRA_STRUCTURAL_WRAPS = (
     ("torch.nn.functional", "log_softmax", "torch.nn.functional.log_softmax"),
     ("torch.nn.functional", "softmax", "torch.nn.functional.softmax"),
     ("torch.nn.functional", "relu", "torch.nn.functional.relu"),
+    ("torch", "randn", "torch.randn"),
+    ("torch", "rand", "torch.rand"),
+    ("torch", "zeros", "torch.zeros"),
+    ("torch", "ones", "torch.ones"),
+    ("torch", "empty", "torch.empty"),
+    ("torch", "tensor", "torch.tensor"),
 )
+
+_LAUNCHER_TID_STRUCTURAL_WRAPS = frozenset({
+    ("torch.autograd", "backward"),
+    ("torch.autograd", "grad"),
+})
 
 
 # Tensor methods often used as entry points (e.g. output.argmax(dim=1)).
@@ -897,6 +788,8 @@ DEEP_TENSOR_METHOD_WRAPS = (
     "contiguous",
 )
 
+_TENSOR_METHODS_ALLOWING_UNINITIALIZED = frozenset(("to", "cpu", "cuda"))
+
 DEEP_TENSOR_METHOD_WRAPS_ENV = "ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"
 
 
@@ -909,6 +802,70 @@ def _selected_tensor_method_wraps() -> tuple[str, ...]:
     if _deep_tensor_method_wraps_enabled():
         return TENSOR_METHOD_WRAPS + DEEP_TENSOR_METHOD_WRAPS
     return TENSOR_METHOD_WRAPS
+
+
+def _uninitialized_tensor_mixin_cls() -> Optional[type]:
+    """Return UninitializedTensorMixin, or None if torch.nn is unavailable."""
+    nn = _STATE.nn
+    if nn is None:
+        return None
+    parameter = getattr(nn, "parameter", None)
+    return getattr(parameter, "UninitializedTensorMixin", None)
+
+
+def _restore_uninitialized_tensor(source: object, result: object) -> object:
+    """Return result as the same uninitialized Parameter or Buffer class as source."""
+    if type(result) is type(source):
+        return result
+    cls = type(source)
+    init_kwargs: dict[str, object] = {
+        "requires_grad": bool(getattr(source, "requires_grad", False)),
+        "device": getattr(result, "device", None),
+        "dtype": getattr(result, "dtype", None),
+    }
+    persistent = getattr(source, "persistent", None)
+    if persistent is not None:
+        try:
+            return cls(**init_kwargs, persistent=persistent)
+        except TypeError:
+            pass
+    return cls(**init_kwargs)
+
+
+def _call_tensor_method_allowing_uninitialized(
+    original: Callable[..., Any], *args: Any, **kwargs: Any
+) -> object:
+    """Call original without subclass __torch_function__ for uninitialized tensors.
+
+    When device or dtype changes, rebuild the same UninitializedParameter or
+    UninitializedBuffer class as args[0].
+    """
+    uninitialized_tensor_cls = _uninitialized_tensor_mixin_cls()
+    disable_torch_function_subclass = getattr(
+        getattr(_STATE.torch, "_C", None), "DisableTorchFunctionSubclass", None
+    )
+    if (
+        uninitialized_tensor_cls is None
+        or disable_torch_function_subclass is None
+        or not args
+        or not isinstance(args[0], uninitialized_tensor_cls)
+    ):
+        return original(*args, **kwargs)
+    with disable_torch_function_subclass():
+        result = original(*args, **kwargs)
+    return _restore_uninitialized_tensor(args[0], result)
+
+
+def _wrap_tensor_method_allowing_uninitialized(
+    original: Callable[..., Any],
+) -> Callable[..., Any]:
+    """Wrap original so uninitialized parameters can still call to/cpu/cuda."""
+
+    @wraps(original)
+    def wrapper(*args: Any, **kwargs: Any) -> object:
+        return _call_tensor_method_allowing_uninitialized(original, *args, **kwargs)
+
+    return wrapper
 
 
 def install_function_apply_wrappers() -> bool:
@@ -933,24 +890,32 @@ def install_function_apply_wrappers() -> bool:
             return
         try:
             base_apply = cls.apply
+            base_apply_get = (
+                inspect.getattr_static(cls, "apply").__get__
+                if getattr(base_apply, "__self__", None) is cls
+                else None
+            )
         except Exception:
             return
 
-        def wrapped_apply(*args: Any, **kwargs: Any) -> object:
+        def wrapped_apply(apply_cls: type, *args: Any, **kwargs: Any) -> object:
             location = core.resolve_user_caller_location()
             _push_scope(
                 "torch.autograd.Function.apply",
-                f"#1@{location}",
+                location,
                 backend=_BACKEND_NAME,
             )
             try:
+                # Rebind Python and built-in classmethods to the calling subclass.
+                if base_apply_get is not None:
+                    return base_apply_get(None, apply_cls)(*args, **kwargs)
                 return base_apply(*args, **kwargs)
             finally:
                 _pop_scope()
 
         wrapped_apply._roctx_wrapped = True
         try:
-            cls.apply = staticmethod(wrapped_apply)
+            cls.apply = classmethod(wrapped_apply)
         except Exception:
             return
 
@@ -1008,8 +973,13 @@ def install_tensor_method_wrappers() -> None:
         if getattr(fn, "_roctx_wrapped", False):
             continue
         try:
+            tensor_method = (
+                _wrap_tensor_method_allowing_uninitialized(fn)
+                if method_name in _TENSOR_METHODS_ALLOWING_UNINITIALIZED
+                else fn
+            )
             wrapped_fn = roctx_wrapper(
-                fn,
+                tensor_method,
                 f"torch.Tensor.{method_name}",
                 backend=_BACKEND_NAME,
             )
@@ -1030,6 +1000,44 @@ def install_tensor_method_wrappers() -> None:
         )
 
 
+def _cuda_init_wrapper(
+    init: Callable[..., Any], marker_name: str
+) -> Callable[..., Any]:
+    if init is object.__init__:
+        return _marker_only_init_wrapper(marker_name, backend=_BACKEND_NAME)
+    return roctx_wrapper(init, marker_name, backend=_BACKEND_NAME)
+
+
+def _wrap_one_cuda_class_init(cuda_mod: object, cls_name: str) -> Optional[str]:
+    cls = getattr(cuda_mod, cls_name, None)
+    if cls is None:
+        return None
+    init = getattr(cls, "__init__", None)
+    if init is None or getattr(init, "_roctx_wrapped", False):
+        return None
+    marker_name = f"torch.cuda.{cls_name}"
+    try:
+        cls.__init__ = _cuda_init_wrapper(init, marker_name)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
+        )
+        return None
+    return marker_name
+
+
+def _wrap_cuda_event_stream_inits(cuda_mod: Optional[object]) -> list:
+    if cuda_mod is None:
+        return []
+    wrapped_names = []
+    for cls_name in ("Event", "Stream"):
+        marker_name = _wrap_one_cuda_class_init(cuda_mod, cls_name)
+        if marker_name is not None:
+            wrapped_names.append(marker_name)
+    return wrapped_names
+
+
 def install_extra_structural_wrappers() -> None:
     """Wrap EXTRA_STRUCTURAL_WRAPS, tensor methods, cuda.{Event,Stream}."""
     wrapped = []
@@ -1038,41 +1046,18 @@ def install_extra_structural_wrappers() -> None:
             module = importlib.import_module(module_path)
         except Exception:
             continue
-        if wrap_module_function(module, attr_name, marker_name):
+        if wrap_module_function(
+            module,
+            attr_name,
+            marker_name,
+            publish_launcher_tid=(
+                (module_path, attr_name) in _LAUNCHER_TID_STRUCTURAL_WRAPS
+            ),
+        ):
             wrapped.append(marker_name)
 
     install_tensor_method_wrappers()
-
-    cuda_mod = _STATE.cuda_mod
-    if cuda_mod is not None:
-        for cls_name in ("Event", "Stream"):
-            cls = getattr(cuda_mod, cls_name, None)
-            if cls is None:
-                continue
-            init = getattr(cls, "__init__", None)
-            if init is None or getattr(init, "_roctx_wrapped", False):
-                continue
-            try:
-                # cuda.{Event,Stream} construct in __new__; __init__ is
-                # inherited from object.
-                if init is object.__init__:
-                    cls.__init__ = _marker_only_init_wrapper(
-                        f"torch.cuda.{cls_name}",
-                        backend=_BACKEND_NAME,
-                    )
-                else:
-                    wrapped_init = roctx_wrapper(
-                        init,
-                        f"torch.cuda.{cls_name}",
-                        backend=_BACKEND_NAME,
-                    )
-                    cls.__init__ = wrapped_init
-                wrapped.append(f"torch.cuda.{cls_name}")
-            except Exception as exc:
-                console_warning(
-                    "ml api trace",
-                    f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
-                )
+    wrapped.extend(_wrap_cuda_event_stream_inits(_STATE.cuda_mod))
 
     try:
         if install_function_apply_wrappers():
@@ -1091,6 +1076,55 @@ def install_extra_structural_wrappers() -> None:
         )
 
 
+def _wrap_nn_module_method(method_name: str) -> bool:
+    nn = _STATE.nn
+    if nn is None:
+        return False
+    original = getattr(nn.Module, method_name, None)
+    if original is None or not callable(original):
+        return False
+    if getattr(original, "_roctx_wrapped", False):
+        return True
+
+    def wrapped(self: object, *args: Any, **kwargs: Any) -> object:
+        class_name = self.__class__.__name__
+        location = core.resolve_user_caller_location()
+        _push_scope(
+            f"nn.Module.{class_name}.{method_name}",
+            location,
+            backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
+        )
+        try:
+            return original(self, *args, **kwargs)
+        finally:
+            _pop_scope()
+
+    wrapped._roctx_wrapped = True
+    try:
+        setattr(nn.Module, method_name, wrapped)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch nn.Module.{method_name}: {exc}",
+        )
+        return False
+    return getattr(nn.Module, method_name) is wrapped
+
+
+def inject_roctx_into_module_methods() -> None:
+    wrapped_methods = []
+    for method_name in ("__init__", "cuda", "to", "cpu"):
+        if _wrap_nn_module_method(method_name):
+            wrapped_methods.append(method_name)
+    if wrapped_methods:
+        console_log(
+            "ml api trace",
+            "Wrapped nn.Module methods with ROCTX markers: "
+            + ", ".join(wrapped_methods),
+        )
+
+
 def inject_roctx_into_model() -> None:
     """Wrap nn.Module.__call__ (not forward(), so hooks are covered)."""
     nn = _STATE.nn
@@ -1103,14 +1137,12 @@ def inject_roctx_into_model() -> None:
 
     def call_with_roctx(self: object, *args: Any, **kwargs: Any) -> object:
         class_name = self.__class__.__name__
-        if not hasattr(self, "_roctx_call_count"):
-            self._roctx_call_count = 0
-        self._roctx_call_count += 1
         location = core.resolve_user_caller_location()
         _push_scope(
             f"nn.Module.{class_name}.forward",
-            f"#{self._roctx_call_count}@{location}",
+            location,
             backend=_BACKEND_NAME,
+            args=format_wrap_args(args, kwargs),
         )
         try:
             return original_call(self, *args, **kwargs)
@@ -1126,21 +1158,6 @@ def inject_roctx_into_model() -> None:
         console_warning("ml api trace", f"Could not patch nn.Module.__call__: {exc}")
     if did_wrap:
         console_log("ml api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
-
-
-def using_c_tier() -> bool:
-    """Return True if the C++ RecordFunction tier is active."""
-    return _STATE.using_c_tier
-
-
-def dump_torch_trace_stats() -> Optional[dict[str, object]]:
-    """Return the collector counters, or None when the C++ module is not loaded."""
-    if _STATE.torch_trace_collector is None:
-        return None
-    try:
-        return _STATE.torch_trace_collector.dump_stats()
-    except Exception:
-        return None
 
 
 def _resolve_torch() -> bool:
@@ -1218,8 +1235,6 @@ def _resolve_torch() -> bool:
         _STATE.nn = _nn_mod
     except Exception:
         _STATE.nn = None
-    _STATE.load_torch_trace_collector = load_torch_trace_collector
-
     return True
 
 
@@ -1247,19 +1262,20 @@ class TorchBackend:
         if not _resolve_torch():
             return
 
-        _initialize_c_tier()
-        _emit_python_tier_fallback_warning()
+        if not torch_trace_collector.install():
+            _emit_python_tier_fallback_warning()
+            install_dispatcher_hook()
         patch_distributed_collectives()
         patch_process_group_methods()
         patch_cuda_graph()
         patch_compile_callable()
-        install_dispatcher_hook()
         install_tensor_backward_wrapper()
         inject_roctx_into_optimizer()
         install_function_apply_wrappers()
         install_tensor_method_wrappers()
         install_extra_structural_wrappers()
         inject_roctx_into_model()
+        inject_roctx_into_module_methods()
 
 
 register(TorchBackend())
