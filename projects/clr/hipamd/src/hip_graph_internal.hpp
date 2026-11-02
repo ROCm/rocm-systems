@@ -1027,8 +1027,7 @@ class Graph {
     // Hierarchical child graph information
     Graph* child_graph_ptr = nullptr;           // Direct pointer to child graph for quick access
 
-    //! First node is an uncaptured memcpy that runs on the SDMA engine, and BuildSyncPlan
-    //! placed a leading barrier to carry its signal.
+    //! First node is an uncaptured SDMA memcpy behind a leading barrier.
     bool leads_with_uncaptured_sdma = false;
     bool needs_completion_signal = false;        // True if any downstream segment is on a different stream/device, or this is a leaf
 
