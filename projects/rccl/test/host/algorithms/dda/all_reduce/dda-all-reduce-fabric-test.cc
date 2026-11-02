@@ -302,6 +302,29 @@ TEST_F(DdaAllReduceFabricMicrotest, Launch_GridMatchesBlocksAndCapsAtVmmBlocks) 
   }
 }
 
+// A call's cap lowers that launch's VMM blocks and threads; a cap above the grid and the next call change nothing.
+TEST_F(DdaAllReduceFabricMicrotest, Launch_CapBoundsThatLaunchOnly) {
+  g_rcclDdaFabricVmmBlocks = [](const ncclComm*) { return 256; };
+  constexpr size_t kCount = 1u << 18;
+  auto run = [&](rcclDdaLaunchCap cap) {
+    g_ddaLaunches.clear();
+    EXPECT_EQ(ncclAllReduceDdaFabric(kSendbuff, kRecvbuff, kCount, ncclFloat32, ncclSum, mock_.get(), kStream, cap),
+              ncclSuccess);
+    EXPECT_EQ(g_ddaLaunches.size(), 1u);
+    return g_ddaLaunches.at(0);
+  };
+  const DdaLaunch uncapped = run({});
+  const DdaLaunch capped = run({46, 256});
+  EXPECT_EQ(capped.grid.x, 46u);
+  EXPECT_EQ(capped.block.x, 256u);
+  EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mock_.get(), kCount, ncclFloat32, {46, 256}), 46u);
+  const DdaLaunch wide = run({1000, 4096});
+  EXPECT_EQ(wide.grid.x, uncapped.grid.x);
+  EXPECT_EQ(wide.block.x, uncapped.block.x);
+  EXPECT_EQ(RunOne(kCount).grid.x, uncapped.grid.x) << "the next launch is uncapped";
+  EXPECT_EQ(RunOne(kCount).block.x, uncapped.block.x);
+}
+
 TEST_F(DdaAllReduceFabricMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);

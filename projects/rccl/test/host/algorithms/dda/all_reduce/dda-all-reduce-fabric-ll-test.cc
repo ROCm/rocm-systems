@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -78,12 +79,12 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     return fn(mock_.get(), sendbuff, recvbuff, count, datatype, op);
   }
 
-  ncclResult_t RunLL(size_t count, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllReduceDdaFabricLL(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t RunLL(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
+    return ncclAllReduceDdaFabricLL(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, cap);
   }
 
-  ncclResult_t RunLL128(size_t count, ncclDataType_t datatype = ncclFloat32) {
-    return ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
+  ncclResult_t RunLL128(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
+    return ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, cap);
   }
 
   const DdaLaunch& Only() {
@@ -91,15 +92,15 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     return g_ddaLaunches.at(0);
   }
 
-  const DdaLaunch& RunOneLL(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOneLL(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(RunLL(count, datatype), ncclSuccess);
+    EXPECT_EQ(RunLL(count, datatype, cap), ncclSuccess);
     return Only();
   }
 
-  const DdaLaunch& RunOneLL128(size_t count, ncclDataType_t datatype = ncclFloat32) {
+  const DdaLaunch& RunOneLL128(size_t count, ncclDataType_t datatype = ncclFloat32, rcclDdaLaunchCap cap = {}) {
     g_ddaLaunches.clear();
-    EXPECT_EQ(RunLL128(count, datatype), ncclSuccess);
+    EXPECT_EQ(RunLL128(count, datatype, cap), ncclSuccess);
     return Only();
   }
 
@@ -107,6 +108,14 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
   void OnlyTwoShot() {
     params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 512;
     params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 512;
+  }
+
+  // Whether `tier` is the one that launches `count` elements: one-shot first, else two-shot.
+  template <typename Tier>
+  bool TierRuns(const Tier& tier, size_t count, ncclDataType_t datatype) {
+    const bool oneShot = Eligible(tier.ll128 ? ddaLL128ArOneShotEligible : ddaLLArOneShotEligible, count, datatype);
+    const bool twoShot = Eligible(tier.ll128 ? ddaLL128ArTwoShotEligible : ddaLLArTwoShotEligible, count, datatype);
+    return tier.twoShot ? !oneShot && twoShot : oneShot;
   }
 
   // Common to all four tiers: everything the shape checks look at but the size.
@@ -501,6 +510,146 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotGridFollowsShardSlices) {
   EXPECT_EQ(RunOneLL128(8 * 17 * kSliceData / 4).grid.x, 1u);
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOneLL128(8 * 17 * kSliceData / 4).grid.x, 1u);
+}
+
+// Grid sweep inputs: every LL datatype, odd and even per-rank sizes (16B multiples), and 2 to 16 ranks.
+constexpr ncclDataType_t kLLTypes[] = {ncclFloat32, ncclFloat16, ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+constexpr size_t kShardBytes[] = {16, 48, 1040, 17 * kSliceData, 3 * 8192 + 16, 65536 + 112, 262144};
+constexpr int kSweepRanks[] = {2, 3, 4, 8, 16};
+
+// The fixed shape of each tier before caps existed: threads per block and threads per unit of work.
+struct FixedTier {
+  bool ll128;
+  bool twoShot;
+  unsigned threads;
+  unsigned unitThreads;
+};
+constexpr FixedTier kTiers[] = {
+    {false, false, 512, 1}, {false, true, 1024, 1}, {true, false, 512, 32}, {true, true, 512, 32}};
+
+// Units of work a tier covers: LL packets (8B) or LL128 slices, of the message (one-shot) or one shard (two-shot).
+size_t TierUnits(const FixedTier& tier, size_t bytes, int nRanks) {
+  const size_t span = tier.twoShot ? bytes / (size_t)nRanks : bytes;
+  return tier.ll128 ? dda::common::ddaLL128Slices(span) : span >> 3;
+}
+
+// Blocks of the fixed shape: ceil(units / units per block), at most ddaFabricMaxBlocks, at least one.
+unsigned FixedBlocks(size_t units, unsigned threads, unsigned unitThreads, int maxBlocks) {
+  const size_t perBlock = threads / unitThreads;
+  size_t blocks = (units + perBlock - 1) / perBlock;
+  blocks = std::min(blocks, (size_t)std::max(maxBlocks, 1));
+  return (unsigned)std::max<size_t>(blocks, 1);
+}
+
+// Without a cap every tier launches its fixed shape, and each reporter reports its one-shot tier's fixed grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
+  for (int maxBlocks : {256, 5}) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    for (const FixedTier& tier : kTiers) {
+      params_.clear();
+      if (tier.twoShot) {
+        OnlyTwoShot();
+      }
+      int cases = 0;
+      for (int nRanks : kSweepRanks) {
+        comm().nRanks = nRanks;
+        for (ncclDataType_t type : kLLTypes) {
+          for (size_t shard : kShardBytes) {
+            const size_t bytes = shard * (size_t)nRanks;
+            const size_t count = bytes / ncclTypeSize(type);
+            if (!TierRuns(tier, count, type)) {
+              continue;
+            }
+            ++cases;
+            SCOPED_TRACE(testing::Message() << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot
+                                            << " maxBlocks=" << maxBlocks << " nRanks=" << nRanks << " type=" << type
+                                            << " bytes=" << bytes);
+            const DdaLaunch launch = tier.ll128 ? RunOneLL128(count, type) : RunOneLL(count, type);
+            EXPECT_EQ(launch.block.x, tier.threads);
+            EXPECT_EQ(launch.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), tier.threads, tier.unitThreads,
+                                                 maxBlocks));
+            const DdaLaunch defaulted = tier.ll128 ? RunOneLL128(count, type) : RunOneLL(count, type);
+            const DdaLaunch zero = tier.ll128 ? RunOneLL128(count, type, {0, 0}) : RunOneLL(count, type, {0, 0});
+            EXPECT_EQ(zero.grid.x, defaulted.grid.x);
+            EXPECT_EQ(zero.block.x, defaulted.block.x);
+            const FixedTier oneShot = {tier.ll128, false, 512, tier.unitThreads};
+            const unsigned reported = FixedBlocks(TierUnits(oneShot, bytes, nRanks), 512, tier.unitThreads, maxBlocks);
+            EXPECT_EQ(tier.ll128 ? ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, type, {0, 0})
+                                 : ncclAllReduceDdaFabricLLBlocks(mock_.get(), count, type, {0, 0}),
+                      reported);
+          }
+        }
+      }
+      EXPECT_GE(cases, 20) << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot;
+    }
+  }
+}
+
+// A capped launch stays within the cap's blocks and its threads (whole 64-thread granules) in every tier, keeps its
+// kernel, and its reporter reports the grid it launches; the next uncapped call is the fixed shape again.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryTier) {
+  const rcclDdaLaunchCap caps[] = {{1, 64},  {3, 192}, {17, 256}, {3, 0},     {0, 192},
+                                   {17, 96}, {2, 1024}, {1, 0},  {1000, 4096}, {0, 64}};
+  for (const FixedTier& tier : kTiers) {
+    params_.clear();
+    if (tier.twoShot) {
+      OnlyTwoShot();
+    }
+    int cases = 0;
+    for (int nRanks : kSweepRanks) {
+      comm().nRanks = nRanks;
+      for (ncclDataType_t type : kLLTypes) {
+        for (size_t shard : kShardBytes) {
+          const size_t bytes = shard * (size_t)nRanks;
+          const size_t count = bytes / ncclTypeSize(type);
+          if (!TierRuns(tier, count, type)) {
+            continue;
+          }
+          ++cases;
+          const DdaLaunch fixed = tier.ll128 ? RunOneLL128(count, type) : RunOneLL(count, type);
+          for (const rcclDdaLaunchCap& cap : caps) {
+            SCOPED_TRACE(testing::Message() << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot << " nRanks="
+                                            << nRanks << " type=" << type << " bytes=" << bytes << " cap={"
+                                            << cap.blocks << "," << cap.threads << "}");
+            const DdaLaunch capped = tier.ll128 ? RunOneLL128(count, type, cap) : RunOneLL(count, type, cap);
+            EXPECT_EQ(capped.kernel, fixed.kernel);
+            EXPECT_GE(capped.grid.x, 1u);
+            EXPECT_LE(capped.grid.x, (unsigned)comm().ddaFabricMaxBlocks);
+            if (cap.blocks > 0) {
+              EXPECT_LE(capped.grid.x, cap.blocks);
+            }
+            EXPECT_LE(capped.block.x, tier.threads);
+            if (cap.threads > 0) {
+              EXPECT_LE(capped.block.x, cap.threads);
+            }
+            EXPECT_EQ(capped.block.x % 64, 0u);
+            const unsigned threads = capped.block.x;
+            EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? cap.threads / 64 * 64 : tier.threads);
+            const int maxBlocks = cap.blocks > 0 ? std::min<int>(cap.blocks, comm().ddaFabricMaxBlocks)
+                                                 : comm().ddaFabricMaxBlocks;
+            EXPECT_EQ(capped.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), threads, tier.unitThreads, maxBlocks))
+                << "the capped width sizes the grid";
+            EXPECT_EQ(tier.ll128 ? ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, type, cap)
+                                 : ncclAllReduceDdaFabricLLBlocks(mock_.get(), count, type, cap),
+                      capped.grid.x * capped.grid.y)
+                << "the reporter reports the capped grid";
+          }
+          const DdaLaunch next = tier.ll128 ? RunOneLL128(count, type) : RunOneLL(count, type);
+          EXPECT_EQ(next.grid.x, fixed.grid.x);
+          EXPECT_EQ(next.block.x, fixed.block.x);
+        }
+      }
+    }
+    EXPECT_GE(cases, 20) << "ll128=" << tier.ll128 << " twoShot=" << tier.twoShot;
+  }
+}
+
+// A thread cap under one 64-thread granule still launches one granule, whole warps for LL128.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_ThreadCapBelowOneGranuleLaunchesOneGranule) {
+  EXPECT_EQ(RunOneLL(1u << 16, ncclFloat32, {0, 32}).block.x, 64u);
+  EXPECT_EQ(RunOneLL128(1u << 16, ncclFloat32, {0, 1}).block.x, 64u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), 1u << 16, ncclFloat32, {0, 1}),
+            RunOneLL128(1u << 16, ncclFloat32, {0, 1}).grid.x);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, Blocks_EmptyMessageStillReportsOneBlock) {
