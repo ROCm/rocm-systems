@@ -350,8 +350,6 @@ TEST_CASE("Unit_HRR_CaptureCrashChainResetHand_Direct", "[.][hrr-direct]") {
   install_segv_handler(reset_segv_handler, SA_RESETHAND | SA_ONSTACK);
 
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
   struct sigaction cur;
   REQUIRE(sigaction(SIGSEGV, nullptr, &cur) == 0);
 
@@ -396,8 +394,6 @@ TEST_CASE("Unit_HRR_CaptureCrashChainErrno_Direct", "[.][hrr-direct]") {
   install_segv_handler(errno_segv_handler, 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
   char manifest[4096];
   snprintf(manifest, sizeof(manifest), "%s/pid-%d/manifest.json", root,
            static_cast<int>(getpid()));
@@ -419,8 +415,6 @@ TEST_CASE("Unit_HRR_CaptureCrashChainFault_Direct", "[.][hrr-direct]") {
 
   REQUIRE(signal(SIGSEGV, SIG_DFL) != SIG_ERR);
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
   void* page = mmap(nullptr, 4096, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   REQUIRE(page != MAP_FAILED);
   std::thread([page] { *static_cast<volatile int*>(page) = 1; }).join();
@@ -512,8 +506,6 @@ TEST_CASE("Unit_HRR_CaptureCrashChainTrap_Direct", "[.][hrr-direct]") {
 #if defined(__x86_64__)
   REQUIRE(signal(SIGSEGV, SIG_DFL) != SIG_ERR);
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
   __asm__ volatile("int $4");
   printf("%s survived\n", kTrapMarker);
   fflush(stdout);
@@ -540,8 +532,6 @@ TEST_CASE("Unit_HRR_CaptureCrashChainUninstall_Direct", "[.][hrr-direct]") {
   REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 64));
   static std::atomic<bool> locked{false};
   std::thread([] {
     sigset_t usr2;

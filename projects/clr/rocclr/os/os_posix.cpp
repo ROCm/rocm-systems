@@ -219,14 +219,12 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
 bool Os::installExceptionHandlers(CrashCallback callback) {
   std::lock_guard<std::mutex> lock(crashHandlersLock_);
 
-  if (callback != nullptr) {
-    auto slot = std::find_if(std::begin(crashCallbacks_), std::end(crashCallbacks_),
-                             [](const auto& s) { return s.load() == nullptr; });
-    if (slot == std::end(crashCallbacks_)) {
-      return false;
-    }
-    slot->store(callback);
+  auto slot = std::find_if(std::begin(crashCallbacks_), std::end(crashCallbacks_),
+                           [](const auto& s) { return s.load() == nullptr; });
+  if (slot == std::end(crashCallbacks_)) {
+    return false;
   }
+  slot->store(callback);
 
   if (crashHandlersInstalled_) {
     return true;
