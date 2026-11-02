@@ -1747,14 +1747,14 @@ rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 4 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
   t.ddaLL128Max[ncclFuncReduceScatter] = 224 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
-  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
+  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
   t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 8 * kMiB;
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
@@ -6887,22 +6887,25 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
       []() {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 4;
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(4 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(224 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(2 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
         EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         comm->nRanks = 16;
+        EXPECT_EQ(16 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(112 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
         comm->nRanks = 32;
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "clipped";
@@ -6910,6 +6913,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         // The entry gate admits the widest tier, so it scales too.
         EXPECT_EQ(112 * kMiB, rcclDdaEntryThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 64;
+        EXPECT_EQ(64 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter)) << "below the LL128 clip";
         EXPECT_EQ(112 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter)) << "ReduceScatter clip";
         EXPECT_EQ(128 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter)) << "VMM keeps rankScaledMaxBytes";
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather)) << "rankScaledMaxBytes";

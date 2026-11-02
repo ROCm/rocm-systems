@@ -2980,7 +2980,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 4 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 224 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
@@ -2989,7 +2989,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 const size_t n = static_cast<size_t>(nRanks);
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), std::min(n * 8 * MiB, 112 * MiB))
