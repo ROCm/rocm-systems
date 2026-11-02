@@ -694,6 +694,7 @@ void VirtualGPU::MemoryDependency::clear(bool all) {
 VirtualGPU::HwQueueTracker::~HwQueueTracker() {
   for (auto& signal : signal_list_) {
     CpuWaitForSignal(signal);
+    signal->ReleaseHeldWaits();
     signal->release();
   }
   // Destroy all extra signals. Note: these signals must be idle already
@@ -857,6 +858,7 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
       abce_ring != kInvalidAbceRing && abce_ring == abce_ring_;
   // Reset all current waiting signals
   waiting_signals_.clear();
+  waiting_profiling_signals_.clear();
 
   // Does runtime switch the active engine?
   if (engine != engine_) {
@@ -906,6 +908,7 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
       } else {
         // Add HSA signal for tracking on GPU
         waiting_signals_.push_back(external_signals_[i]->signal_);
+        waiting_profiling_signals_.push_back(external_signals_[i]);
       }
     }
   }
@@ -919,6 +922,18 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 
   // Return the array of waiting HSA signals
   return waiting_signals_;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::HoldWaitSignals(ProfilingSignal* consumer,
+                                                 const std::vector<ProfilingSignal*>& waits) {
+  for (auto* wait : waits) {
+    if (wait != consumer) {
+      // AcquireSlot replaces a signal with extra references instead of re-arming it
+      wait->retain();
+      consumer->held_waits_.push_back(wait);
+    }
+  }
 }
 
 // ================================================================================================
@@ -984,6 +999,8 @@ void VirtualGPU::LegacySignalTracker::AcquireSlot() {
     ++current_id_ %= signal_list_.size();
     // Make sure the previous operation on the current signal is done
     WaitCurrent();
+    // Its polls are over, so the wait signals it held can be recycled
+    signal_list_[current_id_]->ReleaseHeldWaits();
 
     // Have to wait the next signal in the queue to avoid a race condition between
     // a GPU waiter(which may be not triggered yet) and CPU signal reset below
@@ -1039,6 +1056,7 @@ void VirtualGPU::LegacySignalTracker::WaitNext() {
 void VirtualGPU::LegacySignalTracker::ResetCurrentSignal() {
   // Reset the signal and return
   Hsa::signal_silent_store_relaxed(signal_list_[current_id_]->signal_, 0);
+  signal_list_[current_id_]->ReleaseHeldWaits();
   // Fallback to the previous signal
   current_id_ = (current_id_ == 0) ? (signal_list_.size() - 1) : (current_id_ - 1);
 }

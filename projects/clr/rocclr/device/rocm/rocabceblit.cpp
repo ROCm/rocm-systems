@@ -355,9 +355,11 @@ bool AbceBlitManager::describeCopy(const amd::BatchCopyOp& op, abce_copy_op_t& c
   return true;
 }
 
-bool AbceBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                                      const std::vector<hsa_signal_t>* externalWaitEvents,
-                                      std::vector<ProfilingSignal*>* outBatchSignals) const {
+bool AbceBlitManager::submitCopyBatch(
+    const std::vector<amd::BatchCopyOp>& copyOps,
+    const std::vector<hsa_signal_t>* externalWaitEvents,
+    std::vector<ProfilingSignal*>* outBatchSignals,
+    const std::vector<ProfilingSignal*>* externalWaitSignals) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -370,7 +372,8 @@ bool AbceBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyO
   for (const amd::BatchCopyOp& op : copyOps) {
     abce::CopyOp copy;
     if (!describeCopy(op, copy)) {
-      return DmaBlitManager::submitCopyBatch(copyOps, externalWaitEvents, outBatchSignals);
+      return DmaBlitManager::submitCopyBatch(copyOps, externalWaitEvents, outBatchSignals,
+                                             externalWaitSignals);
     }
     copies.push_back(copy);
   }
@@ -380,6 +383,14 @@ bool AbceBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyO
           ? *externalWaitEvents
           : gpu().Barriers().WaitingSignal(HwQueueEngine::SdmaAbce,
                                            VirtualGPU::HwQueueTracker::kInvalidAbceRing);
+  // One plan signals completion once every frame passed its polls, so it is the
+  // sole consumer of the waits. Keep them for a ROCr fallback with several ops.
+  std::vector<ProfilingSignal*> wait_signals;
+  if (externalWaitEvents == nullptr) {
+    wait_signals = gpu().Barriers().WaitingProfilingSignals();
+  } else if (externalWaitSignals != nullptr) {
+    wait_signals = *externalWaitSignals;
+  }
 
   // Each waiting signal counts down to zero on completion. ABCE omits a poll
   // whose observed value is already zero.
@@ -424,7 +435,8 @@ bool AbceBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyO
             "ABCE batch map failed: status=%s failed_op=%u copies=%zu",
             abce_status_name(map_status), plan.failed_op, copies.size());
     gpu().Barriers().ResetCurrentSignal();
-    return DmaBlitManager::submitCopyBatch(copyOps, &wait_events, outBatchSignals);
+    return DmaBlitManager::submitCopyBatch(copyOps, &wait_events, outBatchSignals,
+                                           &wait_signals);
   }
 
   if (AMD_LOG_LEVEL >= amd::LOG_DETAIL_DEBUG) {

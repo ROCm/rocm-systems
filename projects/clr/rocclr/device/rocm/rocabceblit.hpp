@@ -39,9 +39,11 @@ class AbceBlitManager : public KernelBlitManager {
                    amd::CopyMetadata copyMetadata = amd::CopyMetadata()) const override;
 
   //! Maps and submits the complete SDMA batch as one ABCE plan.
-  bool submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                       const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
-                       std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const override;
+  bool submitCopyBatch(
+      const std::vector<amd::BatchCopyOp>& copyOps,
+      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr,
+      const std::vector<ProfilingSignal*>* externalWaitSignals = nullptr) const override;
 
  private:
   enum class CopyResult { kNotSubmitted, kSubmitted, kFailed };

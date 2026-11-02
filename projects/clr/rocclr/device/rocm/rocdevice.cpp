@@ -4654,6 +4654,7 @@ void Device::RemoveKernel(Kernel& gpuKernel) const {
 
 // ================================================================================================
 ProfilingSignal::~ProfilingSignal() {
+  ReleaseHeldWaits();
   if (signal_.handle != 0) {
     if (Hsa::signal_load_relaxed(signal_) > 0
         && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {

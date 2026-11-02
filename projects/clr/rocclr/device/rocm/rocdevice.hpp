@@ -92,6 +92,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
+  //! Wait signals this signal's operation polls, retained until the operation is known complete
+  //! so the owning tracker can't re-arm them under a pending GPU waiter
+  std::vector<ProfilingSignal*> held_waits_;
+
   ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
@@ -112,6 +116,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
     dispatch_slot_ = kNoDispatchSlot;
+  }
+
+  //! Drops the references taken on the wait signals. Requires a completed operation
+  void ReleaseHeldWaits() {
+    for (auto* wait : held_waits_) {
+      wait->release();
+    }
+    held_waits_.clear();
   }
 
   //! Check if timing is already cached

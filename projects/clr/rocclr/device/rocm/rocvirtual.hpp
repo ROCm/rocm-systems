@@ -305,6 +305,15 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
                                              uint32_t abce_ring = kInvalidAbceRing);
 
+    //! ProfilingSignal-backed subset of the last WaitingSignal() result
+    const std::vector<ProfilingSignal*>& WaitingProfilingSignals() const {
+      return waiting_profiling_signals_;
+    }
+
+    //! Retains waits on consumer until consumer's slot is recycled. Needed when several
+    //! operations poll the same wait signals, since slot reuse only proves the next one done
+    void HoldWaitSignals(ProfilingSignal* consumer, const std::vector<ProfilingSignal*>& waits);
+
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     virtual void ResetCurrentSignal() = 0;
 
@@ -353,6 +362,7 @@ class VirtualGPU : public device::VirtualDevice {
     std::vector<ProfilingSignal*> external_signals_;  //!< External signals for a wait in this queue
     std::vector<hsa_signal_t> dynamic_queue_waits_;   //!< Extra raw signals for a wait in this queue
     std::vector<hsa_signal_t> waiting_signals_;       //!< Current waiting signals in this queue
+    std::vector<ProfilingSignal*> waiting_profiling_signals_;  //!< Tracked subset of the above
   };
 
   //! Reads and resets each signal when it is handed out

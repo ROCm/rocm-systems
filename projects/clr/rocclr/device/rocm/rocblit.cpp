@@ -424,6 +424,7 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
   }
 
   std::vector<hsa_signal_t> wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  const std::vector<ProfilingSignal*> wait_signals = gpu().Barriers().WaitingProfilingSignals();
   std::vector<ProfilingSignal*> group_signals;
   std::vector<hsa_amd_memory_copy_op_t> final_ops;
   final_ops.reserve(rect_groups.size());
@@ -457,6 +458,13 @@ bool DmaBlitManager::CopyBufferRectBatch(const std::vector<amd::BatchCopyRectOp>
     }
     LogPrintfError("HSA batch rect copy failed with code %d", status);
     return false;
+  }
+
+  // Every rect op polls wait_events; keep them alive past the first op's completion
+  if (group_signals.size() > 1) {
+    for (ProfilingSignal* signal : group_signals) {
+      gpu().Barriers().HoldWaitSignals(signal, wait_signals);
+    }
   }
 
   for (size_t signal_index = 0; signal_index + 1 < group_signals.size(); ++signal_index) {
@@ -743,9 +751,11 @@ bool DmaBlitManager::hsaCopy(const Memory& srcMemory, const Memory& dstMemory,
 }
 
 // ================================================================================================
-bool DmaBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                                     const std::vector<hsa_signal_t>* externalWaitEvents,
-                                     std::vector<ProfilingSignal*>* outBatchSignals) const {
+bool DmaBlitManager::submitCopyBatch(
+    const std::vector<amd::BatchCopyOp>& copyOps,
+    const std::vector<hsa_signal_t>* externalWaitEvents,
+    std::vector<ProfilingSignal*>* outBatchSignals,
+    const std::vector<ProfilingSignal*>* externalWaitSignals) const {
   if (copyOps.empty()) {
     return true;
   }
@@ -812,13 +822,16 @@ bool DmaBlitManager::submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOp
     hsaCopyOps.push_back(hsaOp);
   }
 
-  return rocrCopyBufferBatch(hsaCopyOps, externalWaitEvents, outBatchSignals);
+  return rocrCopyBufferBatch(hsaCopyOps, externalWaitEvents, outBatchSignals,
+                             externalWaitSignals);
 }
 
 // ================================================================================================
-bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
-                                         const std::vector<hsa_signal_t>* externalWaitEvents,
-                                         std::vector<ProfilingSignal*>* outBatchSignals) const {
+bool DmaBlitManager::rocrCopyBufferBatch(
+    const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
+    const std::vector<hsa_signal_t>* externalWaitEvents,
+    std::vector<ProfilingSignal*>* outBatchSignals,
+    const std::vector<ProfilingSignal*>* externalWaitSignals) const {
 
   if (copyOps.empty()) {
     return true;
@@ -845,10 +858,19 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
   // Capture wait events once before dispatching any groups.
   std::vector<hsa_signal_t> wait_events;
+  std::vector<ProfilingSignal*> wait_signals;
   if (externalWaitEvents) {
     wait_events = *externalWaitEvents;
+    if (externalWaitSignals != nullptr) {
+      wait_signals = *externalWaitSignals;
+    }
   } else {
     wait_events = gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
+    wait_signals = gpu().Barriers().WaitingProfilingSignals();
+  }
+  size_t num_engine_groups = 0;
+  for (const auto& ops : engineOps) {
+    num_engine_groups += ops.empty() ? 0 : 1;
   }
 
   // Submit each non-empty engine group as a separate batch with its own signal.
@@ -1070,6 +1092,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
     }
 
     // Assign one completion signal per op in a single place.
+    const size_t first_group_signal = groupSignals.size();
     for (auto& op : finalOps) {
       op.completion_signal = gpu().Barriers().ActiveSignal(1, gpu().timestamp());
       groupSignals.push_back(gpu().Barriers().GetLastSignal());
@@ -1142,6 +1165,14 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       }
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
+    }
+
+    // Every op polls wait_events, so slot reuse of a wait signal after the first op completes
+    // could re-arm it under a later op still queued on its ring. Ops may finish out of order.
+    if (!wait_signals.empty() && (finalOps.size() > 1 || num_engine_groups > 1)) {
+      for (size_t s = first_group_signal; s < groupSignals.size(); ++s) {
+        gpu().Barriers().HoldWaitSignals(groupSignals[s], wait_signals);
+      }
     }
 
   }
@@ -3331,6 +3362,8 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   // Capture prior wait events and signal before any work.
   std::vector<hsa_signal_t> priorWaitEvents =
       gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
+  const std::vector<ProfilingSignal*> priorWaitSignals =
+      gpu().Barriers().WaitingProfilingSignals();
   ProfilingSignal* priorSignal = gpu().Barriers().GetLastSignal();
 
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
@@ -3368,7 +3401,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   ProfilingSignal* lastBatchSignal = nullptr;
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
-    if (!submitCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
+    if (!submitCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals, &priorWaitSignals)) {
       // Shader copy is linear only; fail the batch if it has swap/indirect ops.
       bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {

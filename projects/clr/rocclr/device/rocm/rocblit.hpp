@@ -249,15 +249,19 @@ class DmaBlitManager : public device::HostBlitManager {
   //! SDMA batch submission hook behind copyBufferBatch/WriteBufferBatch/ReadBufferBatch.
   //! Virtual so AbceBlitManager can reroute it through the ABCE orchestrator
   //! while inheriting the partitioning and staging done by its callers.
-  virtual bool submitCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
-                               const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
-                               std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+  //! externalWaitSignals is the ProfilingSignal-backed subset of externalWaitEvents.
+  virtual bool submitCopyBatch(
+      const std::vector<amd::BatchCopyOp>& copyOps,
+      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr,
+      const std::vector<ProfilingSignal*>* externalWaitSignals = nullptr) const;
 
   //! Batch version of rocrCopyBuffer
   bool rocrCopyBufferBatch(
       const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
       const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
-      std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr,
+      const std::vector<ProfilingSignal*>* externalWaitSignals = nullptr) const;
 
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
