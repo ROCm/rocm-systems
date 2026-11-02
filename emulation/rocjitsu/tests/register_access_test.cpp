@@ -6,8 +6,9 @@
 ///
 /// @details These tests enforce the boundary beneath generated instructions:
 /// observed read masks constrain returned data and observed write masks
-/// constrain modified storage. End-to-end decoded instruction callbacks live
-/// in execution_plugin_test.cpp.
+/// constrain modified storage. They also cover decoded execution-callback
+/// backend preflight; end-to-end callback observation lives in
+/// execution_plugin_test.cpp.
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
@@ -54,6 +55,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -301,39 +303,10 @@ TEST(RegisterAccessTest, DerivedOperandRejectionsRetainFailureWithoutAccessOrObs
   }
 }
 
-TEST(RegisterAccessTest, ExecutionCallbackRejectsMissingCapturedBackendBeforeReadingOrWriting) {
-  Fixture fx;
-  ASSERT_NE(fx.wf, nullptr);
-  constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
-  fx.cu->write_vgpr(fx.vgpr_base(), 0, 0xA5A5A5A5u);
-  for (bool destination : {false, true}) {
-    DecodeResult result = cdna4::Decoder::decode(&word, {});
-    ASSERT_TRUE(result.succeeded());
-    auto instruction = std::move(result).value();
-    ASSERT_NE(instruction->execute, nullptr);
-    auto *operand = const_cast<cdna4::Operand *>(static_cast<const cdna4::Operand *>(
-        destination ? instruction->dst_operand(0) : instruction->src_operand(0)));
-    ASSERT_NE(operand, nullptr);
-    {
-      ScopedIsaExecutionBackend model_scope(nullptr);
-      *operand = cdna4::Operand(32, cdna4::OperandType::OPR_VGPR, destination ? 0 : 1);
-    }
-    fx.wf->clear_instruction_execution_error();
-    const std::size_t reads_before = fx.plugin->reads.size();
-    instruction->execute(*instruction, fx.wf);
-    EXPECT_EQ(fx.wf->instruction_execution_error(),
-              InstructionExecutionError::MissingExecutionBackend);
-    EXPECT_EQ(fx.plugin->reads.size(), reads_before);
-    EXPECT_TRUE(fx.plugin->writes.empty());
-    EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0xA5A5A5A5u);
-    EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
-  }
-}
-
 TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBeforeEffects) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
-  constexpr uint32_t word = 0x7E000301u;
+  constexpr uint32_t word = 0x7E000301u; // v_mov_b32 v0, v1
   DecodeResult result = cdna4::Decoder::decode(&word, {});
   ASSERT_TRUE(result.succeeded());
   auto instruction = std::move(result).value();
@@ -360,9 +333,18 @@ TEST(RegisterAccessTest, ExecutionCallbackRejectsLateMissingBackendDelegateBefor
   EXPECT_EQ(source->delegate(), nullptr);
   EXPECT_EQ(intermediate.delegate(), nullptr);
   EXPECT_EQ(current_isa_operand_backend(), cdna4::execution_backend().operand_backend);
+  EXPECT_FALSE(ScopedOperandDelegate::active());
+  fx.wf->clear_instruction_execution_error();
+  fx.cu->write_vgpr(fx.vgpr_base() + 1, 0, 0x12345678u);
+  instruction->execute(*instruction, fx.wf);
+  EXPECT_EQ(fx.wf->instruction_execution_error(), InstructionExecutionError::None);
+  EXPECT_EQ(fx.cu->read_vgpr(fx.vgpr_base(), 0), 0x12345678u);
+  EXPECT_FALSE(fx.plugin->reads.empty());
+  EXPECT_FALSE(fx.plugin->writes.empty());
 }
 
 TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
+  EXPECT_FALSE(ScopedOperandDelegate::active());
   Operand source(32, 1);
   Operand previous(32, 2);
   Operand staged(32, 3);
@@ -370,6 +352,11 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
   {
     ScopedOperandDelegate previous_binding(source, &previous);
     EXPECT_EQ(source.delegate(), &previous);
+    EXPECT_TRUE(ScopedOperandDelegate::active());
+    bool helper_has_binding = true;
+    std::thread helper([&] { helper_has_binding = ScopedOperandDelegate::active(); });
+    helper.join();
+    EXPECT_FALSE(helper_has_binding);
 
     EXPECT_THROW(
         {
@@ -379,12 +366,15 @@ TEST(RegisterAccessTest, ScopedOperandDelegateRestoresAfterException) {
         },
         std::runtime_error);
     EXPECT_EQ(source.delegate(), &previous);
+    EXPECT_TRUE(ScopedOperandDelegate::active());
   }
   EXPECT_EQ(source.delegate(), nullptr);
+  EXPECT_FALSE(ScopedOperandDelegate::active());
 
   {
     ScopedOperandDelegate no_binding(source, nullptr);
     EXPECT_EQ(source.delegate(), nullptr);
+    EXPECT_FALSE(ScopedOperandDelegate::active());
   }
 }
 

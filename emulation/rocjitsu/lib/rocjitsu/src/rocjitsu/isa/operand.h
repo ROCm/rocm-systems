@@ -345,9 +345,6 @@ public:
     return static_cast<uint16_t>(std::max(1, (size_bits_ + 31) / 32));
   }
 
-protected:
-  static void report_missing_execution_backend(const amdgpu::Wavefront &wf);
-
 private:
   Result emit_encoding_error(const util::DiagnosticEmitter &emit_error) const;
 
@@ -415,7 +412,9 @@ public:
   Operand *delegate() const { return delegate_; }
 
   /// @brief Whether this operand and its read delegate have execution callbacks.
-  /// @details Generated execution callbacks check this before reading any values.
+  /// @details Generated execution callbacks check this when delegates are active,
+  /// before reading any values. Decoded operands otherwise retain the backend
+  /// captured alongside their instruction callback and must not be replaced.
   /// Model-only operands remain usable for decoding and analysis.
   virtual bool execution_backend_available() const {
     return !delegate_ || delegate_->execution_backend_available();
@@ -474,6 +473,9 @@ public:
   uint8_t register_byte_mask_ = 0xf;
 
 protected:
+  /// @brief Record MissingExecutionBackend on the wavefront without throwing.
+  static void report_missing_execution_backend(const amdgpu::Wavefront &wf);
+
   enum class EncodingError : uint8_t {
     None,
     InvalidSelector,
@@ -766,6 +768,9 @@ private:
 ///
 /// Restores the previous delegate on scope exit, including exception and early
 /// return paths. A null delegate leaves the operand unchanged.
+/// @details Delegates may be installed before a decoded execution callback or
+/// temporarily inside execute_impl. Bindings and execution must stay on the same
+/// thread; the decoded instruction must not be used concurrently while bound.
 class ScopedOperandDelegate {
 public:
   ScopedOperandDelegate(Operand &operand, Operand *delegate) noexcept {
@@ -774,9 +779,13 @@ public:
     operand_ = &operand;
     previous_ = operand.delegate();
     operand.set_delegate(delegate);
+    ++active_count_;
   }
 
   ~ScopedOperandDelegate() noexcept { restore(); }
+
+  /// @brief Whether this thread has bindings requiring execution preflight.
+  static bool active() noexcept { return active_count_ != 0; }
 
   ScopedOperandDelegate(const ScopedOperandDelegate &) = delete;
   ScopedOperandDelegate &operator=(const ScopedOperandDelegate &) = delete;
@@ -788,9 +797,11 @@ private:
     if (!operand_)
       return;
     operand_->set_delegate(previous_);
+    --active_count_;
     operand_ = nullptr;
   }
 
+  inline static thread_local size_t active_count_ = 0;
   Operand *operand_ = nullptr;
   Operand *previous_ = nullptr;
 };

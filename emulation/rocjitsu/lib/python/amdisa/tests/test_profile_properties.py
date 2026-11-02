@@ -1569,7 +1569,7 @@ def test_execution_operands_override_all_base_value_accessors(
         ('rdna4', Rdna4Profile()),
     ],
 )
-def test_operand_execution_rejections_are_retained_and_admitted(
+def test_operand_errors_are_retained_and_execution_checks_backends(
     tmp_path, arch, profile
 ):
     generator = CodeGenerator(
@@ -1620,7 +1620,11 @@ def test_operand_execution_rejections_are_retained_and_admitted(
     body = backend.split('void execute_with_backend(', 1)[1].split(
         'constexpr size_t', 1
     )[0]
-    assert body.index('execution_backend_available()') < body.index('.execute_impl(')
+    assert (
+        body.index('ScopedOperandDelegate::active()')
+        < body.index('execution_backend_available()')
+        < body.index('.execute_impl(')
+    )
     assert 'instruction.src_operand(i)->execution_backend_available()' in body
     assert 'instruction.dst_operand(i)->execution_backend_available()' in body
     assert 'InstructionExecutionError::MissingExecutionBackend' in body
@@ -1646,6 +1650,7 @@ def test_unsplit_operand_write_rejections_retain_failure(tmp_path, profile_type)
     )
     generator.gen_operand()
     source = (tmp_path / 'test' / 'operand.cpp').read_text()
+    assert 'util/except.h' not in source
     for method in ('write_lane', 'write_lane64'):
         body = source.split(f'Operand::{method}(', 1)[1].split(
             '\nuint64_t Operand::', 1

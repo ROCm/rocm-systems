@@ -17,18 +17,23 @@ namespace {
 
 template <typename Derived> void execute_with_backend(Instruction &instruction, void *context) {
   auto &wf = *static_cast<Isa::Context *>(context);
-  for (int i = 0; i < instruction.num_src_operands(); ++i) {
-    if (!instruction.src_operand(i)->execution_backend_available()) {
-      wf.report_instruction_execution_error(
-          amdgpu::InstructionExecutionError::MissingExecutionBackend);
-      return;
+  // Decode captures immutable operands and this callback under the
+  // same backend scope. Only scoped delegates installed on this
+  // execution thread can introduce a different operand backend.
+  if (ScopedOperandDelegate::active()) {
+    for (int i = 0; i < instruction.num_src_operands(); ++i) {
+      if (!instruction.src_operand(i)->execution_backend_available()) {
+        wf.report_instruction_execution_error(
+            amdgpu::InstructionExecutionError::MissingExecutionBackend);
+        return;
+      }
     }
-  }
-  for (int i = 0; i < instruction.num_dst_operands(); ++i) {
-    if (!instruction.dst_operand(i)->execution_backend_available()) {
-      wf.report_instruction_execution_error(
-          amdgpu::InstructionExecutionError::MissingExecutionBackend);
-      return;
+    for (int i = 0; i < instruction.num_dst_operands(); ++i) {
+      if (!instruction.dst_operand(i)->execution_backend_available()) {
+        wf.report_instruction_execution_error(
+            amdgpu::InstructionExecutionError::MissingExecutionBackend);
+        return;
+      }
     }
   }
   // execute_impl may construct temporary operands (for example,
