@@ -6497,6 +6497,46 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                  unsigned long long flags, hipStream_t stream __dparm(0));
 
 /**
+ * @brief Performs asynchronous memory copy operation with the specified attributes.
+ *
+ * Performs asynchronous memory copy operation where @p dst and @p src are the destination
+ * and source pointers respectively. @p size specifies the number of bytes to copy. @p attr
+ * specifies the attributes for the copy and @p stream specifies the stream to enqueue the
+ * operation in.
+ *
+ * @param [out] dst   - Destination memory address
+ * @param [in] src    - Source memory address
+ * @param [in] size   - Number of bytes to copy
+ * @param [in] attr   - Pointer to hipMemcpyAttributes structure. Must not be NULL.
+ * @param [in] stream - Stream for the asynchronous operation
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipMemcpy, hipMemcpyAsync, hipMemcpyBatchAsync, hipMemcpy3DWithAttributesAsync
+ */
+hipError_t hipMemcpyWithAttributesAsync(void* dst, const void* src, size_t size,
+                                        hipMemcpyAttributes* attr,
+                                        hipStream_t stream __dparm(0));
+
+/**
+ * @brief Performs 3D memory copy with attributes asynchronously.
+ *
+ * Performs the copy operation specified in @p op. @p flags specifies the flags for the copy
+ * and @p stream specifies the stream to enqueue the operation in.
+ *
+ * @param [in] op     - Pointer to hipMemcpy3DBatchOp structure containing copy parameters.
+ *                      Must not be NULL.
+ * @param [in] flags  - Operation flags. Reserved for future use, must be zero now.
+ * @param [in] stream - Stream for asynchronous execution
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipMemcpy3DBatchAsync, hipMemcpyWithAttributesAsync
+ */
+hipError_t hipMemcpy3DWithAttributesAsync(struct hipMemcpy3DBatchOp* op, unsigned long long flags,
+                                          hipStream_t stream __dparm(0));
+
+/**
  * @brief Performs 3D memory copies between devices
  * This API is asynchronous with respect to host
  *

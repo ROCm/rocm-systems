@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 39
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 40
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1103,6 +1103,12 @@ typedef hipError_t (*t_hipExtMemcpyBatchAsync)(void** dsts, void** srcs,
 typedef hipError_t (*t_hipMemcpy3DBatchAsync)(size_t numOps, struct hipMemcpy3DBatchOp* opList,
                                               size_t* failIdx, unsigned long long flags,
                                               hipStream_t stream);
+typedef hipError_t (*t_hipMemcpyWithAttributesAsync)(void* dst, const void* src, size_t size,
+                                                     hipMemcpyAttributes* attr,
+                                                     hipStream_t stream);
+typedef hipError_t (*t_hipMemcpy3DWithAttributesAsync)(struct hipMemcpy3DBatchOp* op,
+                                                       unsigned long long flags,
+                                                       hipStream_t stream);
 typedef hipError_t (*t_hipMemcpy3DPeer)(hipMemcpy3DPeerParms* p);
 typedef hipError_t (*t_hipMemcpy3DPeerAsync)(hipMemcpy3DPeerParms* p, hipStream_t stream);
 
@@ -1874,8 +1880,12 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
   t_hipExtMemcpyBatchAsync hipExtMemcpyBatchAsync_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 40
+  t_hipMemcpyWithAttributesAsync hipMemcpyWithAttributesAsync_fn;
+  t_hipMemcpy3DWithAttributesAsync hipMemcpy3DWithAttributesAsync_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
 
   // ******************************************************************************************* //
   //

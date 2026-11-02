@@ -813,6 +813,18 @@ memory:
   Unit_hipMemcpy2DArrayToArray_BasicPositive:
     <<: *level_default
     tags: [transfer, image]
+  Unit_hipMemcpyWithAttributesAsync_Positive_Basic:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyWithAttributesAsync_Negative_Parameters:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DWithAttributesAsync_Positive_Basic:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpy3DWithAttributesAsync_Negative_Parameters:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync:
     <<: *level_default
     tags: [transfer]

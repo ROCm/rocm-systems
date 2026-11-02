@@ -73,6 +73,7 @@ set(TEST_SRC
     hipMemcpy3DBatchAsync.cc
     hipMemcpyBatchAsync.cc
     hipMemcpyBatchAsync_p2p.cc
+    hipMemcpyWithAttributesAsync.cc
     hipMemDiscardBatchAsync.cc
     hipMemsetD2D8.cc
     hipMemsetD2D8Async.cc
