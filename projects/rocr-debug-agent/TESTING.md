@@ -66,16 +66,25 @@ OUTPUT_ARTIFACTS_DIR=<rocm-tree> <rocm-tree>/tests/rocm-debug-agent/test_rocr-de
 tests/rocm-debug-agent/test_rocr-debug-agent.py --try-rocm-path
 ```
 
-By default the wrapper runs only the integration tests, so existing callers
-are unaffected.  Use `--cpu-tests` to run only the unit tests (CPU-only
-workers), or `--gpu-tests --cpu-tests` to run both.  `--gpu-tests` alone is
-equivalent to the default and lets callers state the intent explicitly.  The
-wrapper fails if `--cpu-tests` is given and the unit test binary is missing.
+Which tests run, and which binaries the wrapper requires, depend on the flags:
 
-The wrapper also handles `HSA_TOOLS_LIB` and `LD_LIBRARY_PATH`, and retries
-the integration tests (up to 3x with backoff).  Unit tests are deterministic
-and run once, without retries.  Prefer the wrapper over invoking the test
-binaries directly.
+| Flags                      | Runs                | Required binaries                          |
+|----------------------------|---------------------|--------------------------------------------|
+| none                       | integration + unit  | integration; unit is optional (skipped with a warning if missing, for compatibility) |
+| `--gpu-tests`              | integration only    | integration                                |
+| `--cpu-tests`              | unit only (no GPU)  | unit                                       |
+| `--gpu-tests --cpu-tests`  | both                | integration and unit                       |
+
+The wrapper fails before running anything if a required binary is missing.
+The unit test binary is only built with `ENABLE_UNIT_TESTS=ON`.
+
+The wrapper prepends the ROCm tree's `bin` and `lib` directories to `PATH` and
+`LD_LIBRARY_PATH`, drops `ROCM_PATH` from the environment unless
+`--try-rocm-path` is given, and retries the integration tests (up to 3x with
+backoff).  Both test tiers run in this modified environment.  `HSA_TOOLS_LIB`
+is set by `run-test.py` for the integration tests, not by the wrapper; the
+unit tests do not load the agent.  Unit tests are deterministic and run once,
+without retries.  Prefer the wrapper over invoking the test binaries directly.
 
 rocr-debug-agent requires amd-dbgapi, the ROCr runtime, and a HIP compiler.
 Build it as part of a full ROCm stack via TheRock; an isolated build will not
