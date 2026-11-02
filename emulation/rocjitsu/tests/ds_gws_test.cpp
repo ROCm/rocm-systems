@@ -1858,6 +1858,7 @@ TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
   standalone.add_shader_engine(xcd.shader_engine(0));
   const auto standalone_store = standalone.gws_device();
   EXPECT_TRUE(standalone.adopt_gws_store(replacement, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot replace XCD GWS store with active waves or workgroups");
   EXPECT_EQ(standalone.gws_device(), standalone_store);
   EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
   cu1->gws_sema_v(*wave, 0);
