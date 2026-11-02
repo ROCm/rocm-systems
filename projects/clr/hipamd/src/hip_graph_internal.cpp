@@ -2579,6 +2579,13 @@ hipError_t GraphExecSegmented::UpdateAQLPacket(hip::GraphNode* node) {
       return hipSuccess;
     }
   }
+  // Rebuild if the update moved a leading uncaptured copy across the blit/SDMA threshold.
+  const auto& segment = segments_[segmentId];
+  if (!segment.nodes.empty() && segment.nodes[0] == node && !node->GraphCaptureEnabled() &&
+      IsUncapturedSdmaMemcpy(segBatch.node_capture_status, segment.nodes, 0) !=
+          segment.leads_with_uncaptured_sdma) {
+    return rebuildPackets();
+  }
   return hipSuccess;
 }
 

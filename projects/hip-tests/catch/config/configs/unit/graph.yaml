@@ -468,6 +468,15 @@ graph:
   Unit_hipGraphExecMemcpyNodeSetParams1D_CaptureTransitions:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer_Child:
+    <<: *level_2
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer, never run standalone."
+    tags: [exec]
   Unit_hipGraphGetEdges_Positive_Functional:
     <<: *level_default
     tags: [query]

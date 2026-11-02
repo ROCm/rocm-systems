@@ -34,7 +34,8 @@ __global__ void FillKernel(unsigned* p, size_t n, unsigned v) {
 // One fan-out step: kernels on the root stream feed a memcpy per side stream.
 void CaptureStep(hipStream_t root, const std::vector<hipStream_t>& side, hipEvent_t fork,
                  const std::vector<hipEvent_t>& join, const std::vector<unsigned*>& src,
-                 const std::vector<unsigned*>& dst, hipMemcpyKind kind, size_t bytes) {
+                 const std::vector<unsigned*>& dst, hipMemcpyKind kind, size_t bytes,
+                 std::vector<hipGraphNode_t>* copies = nullptr) {
   for (int i = 0; i < kBranches; ++i) {
     FillKernel<<<kGrid, kBlock, 0, root>>>(src[i], kElems, kProduced);
   }
@@ -42,6 +43,14 @@ void CaptureStep(hipStream_t root, const std::vector<hipStream_t>& side, hipEven
   for (int i = 0; i < kBranches; ++i) {
     HIP_CHECK(hipStreamWaitEvent(side[i], fork, 0));
     HIP_CHECK(hipMemcpyAsync(dst[i], src[i], bytes, kind, side[i]));
+    if (copies != nullptr) {
+      hipStreamCaptureStatus status;
+      const hipGraphNode_t* deps = nullptr;
+      size_t num_deps = 0;
+      HIP_CHECK(hipStreamGetCaptureInfo_v2(side[i], &status, nullptr, nullptr, &deps, &num_deps));
+      REQUIRE(num_deps == 1);
+      copies->push_back(deps[0]);
+    }
     HIP_CHECK(hipEventRecord(join[i], side[i]));
     HIP_CHECK(hipStreamWaitEvent(root, join[i], 0));
   }
@@ -133,6 +142,99 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child) {
     HIP_CHECK(hipFree(dst_a[i]));
     HIP_CHECK(hipFree(src_b[i]));
     HIP_CHECK(hipFree(dst_b[i]));
+    HIP_CHECK(hipEventDestroy(join_a[i]));
+    HIP_CHECK(hipEventDestroy(join_b[i]));
+    HIP_CHECK(hipStreamDestroy(side[i]));
+  }
+  HIP_CHECK(hipEventDestroy(fork_a));
+  HIP_CHECK(hipEventDestroy(fork_b));
+  HIP_CHECK(hipStreamDestroy(root));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Same two-step graph, but the second step's copies are device-to-host into pageable memory
+ *    and captured below the blit size threshold. After instantiation they are resized past it
+ *    with hipGraphExecMemcpyNodeSetParams1D, which moves them onto the SDMA engine. They must
+ *    still observe their producer on every replay.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphSdmaMemcpyOrdering.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.0
+ */
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer) {
+  hip::SpawnProc child(getSelfExePath());
+  child.setEnv("DEBUG_HIP_GRAPH_MIN_OVERLAP", "0");
+  REQUIRE(child.spawn(
+              "Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer_Child") == 0);
+  REQUIRE(child.wait() == 0);
+}
+
+HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer_Child) {
+  const size_t bytes = kElems * sizeof(unsigned);
+  const size_t small_bytes = 4096;  // below the default 16 KiB blit threshold
+
+  hipStream_t root = nullptr;
+  HIP_CHECK(hipStreamCreate(&root));
+  hipEvent_t fork_a = nullptr, fork_b = nullptr;
+  HIP_CHECK(hipEventCreateWithFlags(&fork_a, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&fork_b, hipEventDisableTiming));
+
+  std::vector<hipStream_t> side(kBranches, nullptr);
+  std::vector<hipEvent_t> join_a(kBranches, nullptr), join_b(kBranches, nullptr);
+  std::vector<unsigned*> src_a(kBranches, nullptr), dst_a(kBranches, nullptr);
+  std::vector<unsigned*> src_b(kBranches, nullptr), dst_b(kBranches, nullptr);
+  std::vector<std::vector<unsigned>> host_b(kBranches, std::vector<unsigned>(kElems));
+  for (int i = 0; i < kBranches; ++i) {
+    HIP_CHECK(hipStreamCreateWithFlags(&side[i], hipStreamNonBlocking));
+    HIP_CHECK(hipEventCreateWithFlags(&join_a[i], hipEventDisableTiming));
+    HIP_CHECK(hipEventCreateWithFlags(&join_b[i], hipEventDisableTiming));
+    HIP_CHECK(hipMalloc(&src_a[i], bytes));
+    HIP_CHECK(hipMalloc(&dst_a[i], bytes));
+    HIP_CHECK(hipMalloc(&src_b[i], bytes));
+    dst_b[i] = host_b[i].data();
+  }
+
+  hipGraph_t graph = nullptr;
+  std::vector<hipGraphNode_t> copies_b;
+  HIP_CHECK(hipStreamBeginCapture(root, hipStreamCaptureModeGlobal));
+  CaptureStep(root, side, fork_a, join_a, src_a, dst_a, hipMemcpyDeviceToDeviceNoCU, bytes);
+  CaptureStep(root, side, fork_b, join_b, src_b, dst_b, hipMemcpyDeviceToHost, small_bytes,
+              &copies_b);
+  HIP_CHECK(hipStreamEndCapture(root, &graph));
+
+  hipGraphExec_t graph_exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  for (int i = 0; i < kBranches; ++i) {
+    HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(graph_exec, copies_b[i], dst_b[i], src_b[i], bytes,
+                                                hipMemcpyDeviceToHost));
+  }
+
+  for (int iter = 0; iter < 5; ++iter) {
+    for (int i = 0; i < kBranches; ++i) {
+      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(src_a[i]), kPoison, kElems));
+      HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(src_b[i]), kPoison, kElems));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    HIP_CHECK(hipGraphLaunch(graph_exec, 0));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (int i = 0; i < kBranches; ++i) {
+      REQUIRE(host_b[i][0] == kProduced);
+      REQUIRE(host_b[i][kElems - 1] == kProduced);
+    }
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  for (int i = 0; i < kBranches; ++i) {
+    HIP_CHECK(hipFree(src_a[i]));
+    HIP_CHECK(hipFree(dst_a[i]));
+    HIP_CHECK(hipFree(src_b[i]));
     HIP_CHECK(hipEventDestroy(join_a[i]));
     HIP_CHECK(hipEventDestroy(join_b[i]));
     HIP_CHECK(hipStreamDestroy(side[i]));
