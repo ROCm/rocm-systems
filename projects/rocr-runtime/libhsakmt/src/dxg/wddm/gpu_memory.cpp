@@ -934,6 +934,9 @@ ErrorCode GpuMemory::MapFromPeer(GpuMemory* owner) {
 
   owner_ = owner;
   desc_ = owner->desc_;
+  // The owner holds the share and the Lock2 pin; the peer only wraps the same pages.
+  desc_.flags.is_shared = 0;
+  desc_.flags.is_locked = 0;
   num_allocations_ = owner->NumChunks();
   if (num_allocations_ > 1)
     alloc_handles_ptr_ = new WinAllocationHandle[num_allocations_];
