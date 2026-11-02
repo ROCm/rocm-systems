@@ -5152,10 +5152,12 @@ def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
         'IMAGE_BVH_INTERSECT_RAY': 4,
         'IMAGE_BVH64_INTERSECT_RAY': 4,
     }
-    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == {
+    fixed_bvh_vaddr_words = {
         'IMAGE_BVH_INTERSECT_RAY': (11, 8),
         'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
     }
+    assert rdna3.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
+    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
     assert rdna3_5.gfx11_mimg_nsa_group_words == {
         'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
         'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
@@ -5217,6 +5219,114 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
         and 'true, true);' in v_swap_ctor
         and '& 0x7fu' not in v_swap_ctor
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5'])
+def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
+    amdgpu_generated_root: Path, arch: str
+):
+    mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
+    assert 'amdgpu::image_coordinate_count(dim)' in mimg
+    assert 'static constexpr uint8_t coords[]' not in mimg
+    for class_name in ('ImageLoadMimg', 'ImageStoreMimg'):
+        constructor = _generated_constructor_body(mimg, class_name)
+        assert (
+            'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in constructor
+        )
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in constructor
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
+            constructor
+        )
+    image_sample = _generated_constructor_body(mimg, 'ImageSampleMimg')
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+        _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+        _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
+    )
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_load_tracks_d16_destination_preservation(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    source = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.cpp'
+    ).read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"' in source
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"' not in source
+    image_load_uses = _generated_function_body(
+        source, f'void ImageLoad{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' in image_load_uses
+    preservation_uses = _generated_function_body(
+        source, f'bool ImageLoad{suffix}::implicit_preservation_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' in preservation_uses
+    assert 'inst_.d16 && (components & 1u)' in preservation_uses
+    assert 'r->index + components / 2' in preservation_uses
+    assert 'image_coordinate_register_count' in preservation_uses
+    assert 'registers[index] == preserved.index' in preservation_uses
+    assert 'return true' in preservation_uses
+    image_store_uses = _generated_function_body(
+        source, f'void ImageStore{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' not in image_store_uses
+
+    header = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.h'
+    ).read_text()
+    modifiers = _generated_inline_method_body(
+        header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask}) & 1u' in modifiers
+    assert 'modifiers.memory_result_last_bytes = 0x3' in modifiers
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_execution_passes_dim_and_tfe(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    execution = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}_exec.cpp'
+    ).read_text()
+    image_load = _generated_function_body(
+        execution, f'void ImageLoad{suffix}::execute_impl'
+    )
+    assert '.dim = inst_.dim' in image_load
+    assert '.tfe = bool(inst_.tfe)' in image_load
+
+
+def test_gfx11_image_metadata_does_not_leak_when_derived_semantics_are_missing(
+    tmp_path: Path,
+) -> None:
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna3.xml'), Rdna3Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    semantics.instructions.pop('IMAGE_STORE_MIP')
+
+    CodeGenerator(spec, str(tmp_path), semantics).gen_insts()
+
+    mimg = (tmp_path / 'rdna3' / 'mimg.cpp').read_text()
+    assert 'void ImageStoreMimg::implicit_uses' in mimg
+    assert 'bool ImageStoreMimg::tracks_explicit_source' in mimg
+    assert 'void ImageStoreMipMimg::implicit_uses' not in mimg
+    assert 'bool ImageStoreMipMimg::tracks_explicit_source' not in mimg
 
 
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
@@ -8289,26 +8399,86 @@ def test_vmem_store_issue_metadata_follows_arch_profile(
     assert completion in issue
 
 
-def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
-    codegen = object.__new__(CodeGenerator)
-    store = InstructionSemantics(
-        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
-    )
-    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
-
-    for arch_name, profile in (
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
+        ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_supported_vmem_writes_do_not_use_expcnt(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    for name, semantic_class, fields in (
+        ('BUFFER_STORE_DWORD', 'buffer_store', set()),
+        ('TBUFFER_STORE_FORMAT_X', 'tbuffer_store', set()),
+        ('IMAGE_STORE', 'image_store', set()),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set()),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set()),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set()),
     ):
-        codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
-        store_info = codegen._memory_issue_initializer(store, set())
-        assert 'amdgpu::WaitCounterType::EXPCNT' in store_info
+        sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+        issue = codegen._memory_issue_initializer(sem, fields)
+        assert 'amdgpu::WaitCounterType::EXPCNT' not in issue, name
 
-        ds_info = codegen._memory_issue_initializer(ds, {'gds'})
-        assert 'inst_.gds != 0' in ds_info
-        assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
-        assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+    ],
+)
+def test_legacy_gds_preserves_expcnt_obligations(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
+
+    ds_info = codegen._memory_issue_initializer(ds, {'gds'})
+    assert 'inst_.gds != 0' in ds_info
+    assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
+    assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+
+@pytest.mark.parametrize(
+    'name,semantic_class,fields,counter',
+    [
+        ('BUFFER_STORE_DWORD', 'buffer_store', set(), 'VMCNT'),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set(), 'VMCNT'),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}, 'VMCNT'),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}, 'VMCNT'),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set(), 'VMCNT'),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set(), 'VMCNT'),
+        ('DS_READ_B32', 'ds_read', {'gds'}, 'LGKMCNT'),
+        ('DS_WRITE_B32', 'ds_write', {'gds'}, 'LGKMCNT'),
+    ],
+)
+def test_cdna4_memory_issue_omits_unused_expcnt(name, semantic_class, fields, counter):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+
+    issue = codegen._memory_issue_initializer(sem, fields)
+
+    assert f'amdgpu::WaitCounterType::{counter}' in issue
+    assert 'amdgpu::WaitCounterType::EXPCNT' not in issue
+    if 'seg' in fields:
+        assert 'amdgpu::WaitCounterType::LGKMCNT' in issue
 
 
 def test_cdna5_async_completion_domains_are_explicit():
@@ -8462,6 +8632,20 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
         issue_descriptors += source.count('set_memory_issue_info(')
         assert 'flags_ |= MEMORY_OP;' not in source, path
         assert 'MemoryCompletionClass::UNCLASSIFIED' not in source, path
+        # Check every VMEM model, including instructions without an execution
+        # body, so partial regeneration cannot leave stale EXP obligations.
+        # DS and LDS-direct models have separate EXP policies.
+        if path.stem in {
+            'mubuf',
+            'mtbuf',
+            'flat',
+            'mimg',
+            'vbuffer',
+            'vflat',
+            'vglobal',
+            'vscratch',
+        }:
+            assert 'WaitCounterType::EXPCNT' not in source, path
     assert issue_descriptors > 0
 
 
