@@ -329,6 +329,39 @@ class DeviceCompileCmdTest(unittest.TestCase):
         self.assertNotIn("-g0", cmd)
 
 
+class IrCodegenTest(unittest.TestCase):
+    FORWARDED = ["-DFOO", "-Iinc", "-std=c++17", "-O3",
+                 "-mllvm", "--amdgpu-kernarg-preload-count=16",
+                 "--include=poison.h", "-fvisibility=hidden"]
+
+    def test_codegen_keeps_only_opt_level_and_mllvm(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942:xnack+", self.FORWARDED,
+                                    "k.o", "k.bc")
+
+        self.assertEqual(cmd[:6], ["clang", "-target", "amdgcn-amd-amdhsa",
+                                   "-mcpu=gfx942:xnack+", "-x", "ir"])
+        self.assertIn("-O3", cmd)
+        self.assertEqual(cmd[cmd.index("-mllvm") + 1],
+                         "--amdgpu-kernarg-preload-count=16")
+        for dropped in ("-DFOO", "-Iinc", "-std=c++17",
+                        "--include=poison.h", "-fvisibility=hidden"):
+            self.assertNotIn(dropped, cmd)
+
+    def test_codegen_does_not_reoptimize(self):
+        cmd = driver.ir_codegen_cmd("clang", "gfx942", ["-O3"], "k.o", "k.bc")
+
+        self.assertEqual(cmd[-6:], ["-Xclang", "-disable-llvm-passes",
+                                    "-c", "-o", "k.o", "k.bc"])
+
+    def test_ir_codegen_is_our_arg(self):
+        our, forwarded, sources = driver.parse_compiler_flags(
+            ["--ir-codegen", "-O3", "k.bc"])
+
+        self.assertEqual(our, ["--ir-codegen"])
+        self.assertEqual(forwarded, ["-O3"])
+        self.assertEqual(sources, ["k.bc"])
+
+
 class PatchDispatcherNoDeadStripTest(unittest.TestCase):
     def test_patch_dispatcher_drops_local_no_dead_strip(self):
         lines = [
