@@ -55,18 +55,53 @@ Per-collective JSONL records with timing decomposition:
 (`NCCL_MAX_NCHANNELS=256`) reports `0`. The plugin promotes a reported `0` to 256,
 so the two fields differ only in that wrapped case.
 
+Each `proxy_*` field is a mean over the proxy ops that can produce it, not over
+`n_proxy_ops`. A send op only passes through the send-side states and a recv op
+only through the recv-side ones, so `proxy_gpu_wait_us` and `proxy_peer_wait_us`
+are averaged over `n_send_ops`, and `proxy_flush_us` and `proxy_gpu_recv_wait_us`
+over `n_recv_ops`. `proxy_network_us` covers both directions and is the sum of
+the per-send-op and per-recv-op means. A ring collective posts one send and one
+recv op per channel, so all five are per-channel costs on the same scale as
+`gpu_kernel_avg_us`. A class with no ops contributes 0, since its total is 0 too.
+
 The last line of every file is a summary, written on every clean finalize:
 
 ```json
 {"summary": {"dropped_collectives": 0, "leaked_collectives": 0,
-             "pool_size": 256, "complete": true}}
+             "inflight_collectives": 0,
+             "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
+             "overflow_proxy_ops": 0, "stale_proxy_steps": 0,
+             "outstanding_proxy_ops": 0, "outstanding_proxy_steps": 0,
+             "write_error": false, "coll_pool_size": 256,
+             "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
+             "max_proxy_ops_per_coll": 256, "complete": true}}
 ```
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown
   drain skipped some of their kernel-channel events; reclaimed at finalize.
-- `complete` — false if either counter is non-zero. **A file with no summary line
-  at all means the process did not reach finalize**, so its data is also suspect.
+- `inflight_collectives` — an owner was writing the record when finalize closed
+  the file, so that record may be missing from the output.
+- `dropped_proxy_ops` / `dropped_proxy_steps` — no free slot in the proxy op or
+  proxy step pool; the affected records understate the proxy decomposition.
+- `overflow_proxy_ops` — the op completed, but its collective already held
+  `max_proxy_ops_per_coll` ops, so its timings were discarded.
+- `stale_proxy_steps` — the step stopped after its parent op's pool slot had
+  been reissued, so its timings were dropped rather than charged to the new
+  tenant.
+- `outstanding_proxy_ops` / `outstanding_proxy_steps` — still held at finalize
+  because their stop had not arrived. Their slots are deliberately *not*
+  reclaimed: proxy events are delivered straight from the proxy progress thread,
+  which is shared across communicators and can outlive one comm's teardown, so
+  releasing them could free the context under a live caller. The context is
+  freed by whichever stop arrives last; if none ever does, one fixed-size
+  context per affected communicator is retained until the process exits. The
+  output file is always closed at finalize, so no descriptor is held.
+- `write_error` — `ferror()` on the output file at finalize: the records on disk
+  are truncated, and every counter above may still read 0.
+- `complete` — false if any of the nine counters is non-zero, or if
+  `write_error` is true. **A file with no summary line at all means the process
+  did not reach finalize**, so its data is also suspect.
   `accl_report.py` warns on stderr in both cases; do not compare an incomplete run
   against a full one.
 
@@ -76,9 +111,17 @@ The last line of every file is a summary, written on every clean finalize:
 # CMake (standalone)
 cmake -S . -B build && cmake --build build
 
-# CMake (as part of RCCL build — automatic when BUILD_PLUGIN_EXAMPLES=ON)
-cmake -DBUILD_PLUGIN_EXAMPLES=ON ...
+# CMake (as part of a Linux RCCL build — enabled by default)
+cmake ...
+
+# Optional: omit the plugin from an RCCL build/package
+cmake -DBUILD_PROFILER_ACCL=OFF ...
 ```
+
+An installed RCCL build places the plugin at `lib/librccl-profiler-accl.so`
+and the report utility at `share/rccl/accl/accl_report.py`. The plugin is a
+separate host-only shared library and is not linked into `librccl.so`; it is
+loaded only when selected with `NCCL_PROFILER_PLUGIN`.
 
 ## Usage
 
@@ -117,3 +160,50 @@ The report classifies bottlenecks per message size (evaluated in this order):
 
 - RCCL v2.30+ (profiler v5 API)
 - `LD_LIBRARY_PATH` must include the RCCL build with v5 support
+
+## CI validation
+
+From the repository root, run the host-only regression tests:
+
+```bash
+python3 -m pytest -q projects/rccl/test/test_accl_profiler_ci.py \
+  projects/rccl/test/test_plan_rccl_ci.py
+```
+
+These exercise the planner, artifact discovery, rendered Bash preflight checks,
+JSONL validation, and report/summary integration. They also run as a separate
+CPU-only job in `rccl-host-unit-tests.yml`. They do not replace GPU qualification
+or establish the numerical correctness of the profiler's output.
+
+[PR #11784](https://github.com/ROCm/rocm-systems/pull/11784) owns the GitHub Actions
+integration: package/build, suite selection, Ruby execution, and diagnostic
+artifacts. [PR #11881](https://github.com/ROCm/rocm-systems/pull/11881) owns the
+profiler/report correctness changes, including warmup filtering. The CI runs
+the reporter shipped with its fetched artifact; report calculations are not
+reimplemented here. That correctness PR also identifies remaining KernelCh
+issues, so it must not be assumed to fix every AllGather coverage failure.
+
+To qualify a PR branch with a fresh gfx950 build and the two-node Ruby sweep:
+
+```bash
+gh workflow run therock-rccl-ci.yml --ref YOUR_PR_BRANCH \
+  -f test_suites=accl-profiler -f accl_profiler_nodes=2
+```
+
+`test_suites` accepts any comma-separated subset of `single-node`, `rocprof`,
+`pytorch`, `jax`, `madengine`, and `accl-profiler`. The default `auto` preserves
+the normal event-based policy. Explicit selections build only their GPU families.
+After the fresh build finishes, repeat with `-f artifact_run_id=BUILD_RUN_ID`
+to test the skipped-build/reuse path without rebuilding. Use artifacts from the
+same commit when claiming runtime qualification of that commit.
+
+The CI sweep uses five iterations and two initial warmups per size, with a
+1K–256M factor-two sweep, to bound profiler pool pressure. It still rejects any
+dropped/leaked records, incomplete summaries, missing ranks or requested sizes,
+and report failures. AllGather/ReduceScatter descriptor bytes are per-rank
+contributions, not rccl-tests' aggregate buffer bytes. A successful process exit
+alone is not a passing output-validation run. Missing coverage remains a visible
+failure to hand off to profiler work, not a reason to duplicate fixes in the CI
+driver. Keep `manifest.json`, the reports, preflight log, and raw JSONL artifacts
+as the execution and output-validation evidence. Report timings remain subject
+to the correctness work above.

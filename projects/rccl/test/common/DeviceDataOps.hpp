@@ -20,6 +20,7 @@
 // host `long double` bytes. Host mode is unchanged.
 
 #include <hip/hip_runtime.h>
+#include <type_traits>
 #include "PtrUnion.hpp"   // dtype enum + typedefs (hip_bfloat16, rccl_float8, rccl_bfloat8, __half)
 
 namespace RcclUnitTesting
@@ -57,16 +58,19 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline bool Matches<uint32_t>(uint32_t a,uint32_t b){ return a == b; }
   template <> __host__ __device__ inline bool Matches<int64_t> (int64_t a, int64_t b) { return a == b; }
   template <> __host__ __device__ inline bool Matches<uint64_t>(uint64_t a,uint64_t b){ return a == b; }
-  // Tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp), not
-  // float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
+  // FP8 compares exactly: its reductions are validated against exactly-reducible data
+  // (VerifiableFp8.hpp). Do not use a magnitude-scaled tolerance here: at eight ranks
+  // it can accept results with several missing contributions.
+  // Non-FP8 tolerances use the SAME double literals as the host IsEqual (PtrUnion.cpp),
+  // not float literals: 9e-2/1e-5 aren't exactly representable, so a float-literal bound
   // differs from the host's double bound by ~1e-9 and could flip a verdict at the
   // tolerance boundary. Keeping them identical guarantees host==device verdicts.
   template <> __host__ __device__ inline bool Matches<float>   (float a,  float b)  { return fabs((double)(a - b)) < 1e-5; }
   template <> __host__ __device__ inline bool Matches<double>  (double a, double b)  { return fabs(a - b) < 1e-12; }
   template <> __host__ __device__ inline bool Matches<__half>       (__half a, __half b)             { return fabs((double)(__half2float(a) - __half2float(b))) < 9e-2; }
   template <> __host__ __device__ inline bool Matches<hip_bfloat16> (hip_bfloat16 a, hip_bfloat16 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return fabs((double)((float)a - (float)b)) < 9e-2; }
-  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return fabs((double)((float)a - (float)b)) < 9e-2; }
+  template <> __host__ __device__ inline bool Matches<rccl_float8>  (rccl_float8 a, rccl_float8 b)   { return (float)a == (float)b; }
+  template <> __host__ __device__ inline bool Matches<rccl_bfloat8> (rccl_bfloat8 a, rccl_bfloat8 b) { return (float)a == (float)b; }
 
   // ---- per-type -> double (for the first-mismatch diagnostic) -----------------
   // Test-pattern values are small (mod 256, reduced over a handful of ranks), so a
@@ -101,6 +105,34 @@ namespace RcclUnitTesting
   template <> __host__ __device__ inline hip_bfloat16 DivStep<hip_bfloat16>(hip_bfloat16 a, int n) { return hip_bfloat16((float)a / n); }
   template <> __host__ __device__ inline rccl_float8  DivStep<rccl_float8> (rccl_float8 a, int n)  { return rccl_float8((float)a / n); }
   template <> __host__ __device__ inline rccl_bfloat8 DivStep<rccl_bfloat8>(rccl_bfloat8 a, int n) { return rccl_bfloat8((float)a / n); }
+
+  // ---- FP8 kernel element type ------------------------------------------------
+  // rccl_float8 / rccl_bfloat8 name different types in the host and device compile passes
+  // (OCP on host, fnuz on gfx942 device), so a kernel templated on them gets a different
+  // mangled name in each pass and fails to launch ("Cannot find Symbol"). Fp8Bits holds the
+  // raw byte and mangles identically in both passes; its operations go through the native
+  // type, so they give the collective's encoding only in device code.
+  template <bool IsE5m2>
+  struct Fp8Bits
+  {
+    using Native = typename std::conditional<IsE5m2, rccl_bfloat8, rccl_float8>::type;
+    uint8_t bits;
+
+    __host__ __device__ static Fp8Bits From(Native v) { return Fp8Bits{*reinterpret_cast<uint8_t const*>(&v)}; }
+    __host__ __device__ Native Get() const { return *reinterpret_cast<Native const*>(&bits); }
+  };
+  using Fp8E4m3Bits = Fp8Bits<false>;
+  using Fp8E5m2Bits = Fp8Bits<true>;
+
+#define RCCL_UT_FP8_BITS_OPS(B)                                                                                     \
+  template <> __host__ __device__ inline B      MakeVal<B>    (int vi, double vf) { return B::From(MakeVal<B::Native>(vi, vf)); }             \
+  template <> __host__ __device__ inline bool   Matches<B>    (B a, B b)          { return Matches<B::Native>(a.Get(), b.Get()); }             \
+  template <> __host__ __device__ inline double ToDoubleVal<B>(B v)               { return ToDoubleVal<B::Native>(v.Get()); }                  \
+  template <> __host__ __device__ inline B      AccStep<B>    (int op, B a, B b)  { return B::From(AccStep<B::Native>(op, a.Get(), b.Get())); } \
+  template <> __host__ __device__ inline B      DivStep<B>    (B a, int n)        { return B::From(DivStep<B::Native>(a.Get(), n)); }
+  RCCL_UT_FP8_BITS_OPS(Fp8E4m3Bits)
+  RCCL_UT_FP8_BITS_OPS(Fp8E5m2Bits)
+#undef RCCL_UT_FP8_BITS_OPS
 
   // ---- kernels ---------------------------------------------------------------
   template <typename T>
@@ -168,79 +200,6 @@ namespace RcclUnitTesting
     }
     if (isAvg) acc = DivStep<T>(acc, totalRanks);
     out[idx] = acc;
-  }
-
-  // ---- fp8 kernels (byte-based, pass-invariant signature) --------------------
-  // rccl_float8 / rccl_bfloat8 alias different underlying types in the host vs device
-  // compile pass (fnuz on gfx942 device, non-fnuz on host), so a templated __global__
-  // parameterized on them gets mismatched mangled names -> "Cannot find Symbol" at
-  // launch. These kernels take raw uint8_t storage (identical mangling in both passes)
-  // and touch the fp8 type only inside the device-only body, where it resolves to the
-  // same fnuz type the collective uses.
-  __global__ void FillKernelFp8(uint8_t* p, size_t n, int globalRank, size_t startIdx, bool isE5m2)
-  {
-    size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (j >= n) return;
-    int vi = PatternValueI(true, globalRank, startIdx + j);
-    double vf = PatternValueF(vi);
-    if (isE5m2) { rccl_bfloat8 v = MakeVal<rccl_bfloat8>(vi, vf); p[j] = *reinterpret_cast<uint8_t*>(&v); }
-    else        { rccl_float8  v = MakeVal<rccl_float8> (vi, vf); p[j] = *reinterpret_cast<uint8_t*>(&v); }
-  }
-
-  __global__ void MismatchReduceFp8(const uint8_t* a, const uint8_t* b, size_t n,
-                                    unsigned long long* mismatches, unsigned long long* firstIdx,
-                                    bool isE5m2)
-  {
-    size_t j = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (j >= n) return;
-    bool m;
-    if (isE5m2) { rccl_bfloat8 av = *reinterpret_cast<const rccl_bfloat8*>(a + j), bv = *reinterpret_cast<const rccl_bfloat8*>(b + j); m = Matches<rccl_bfloat8>(av, bv); }
-    else        { rccl_float8  av = *reinterpret_cast<const rccl_float8*> (a + j), bv = *reinterpret_cast<const rccl_float8*> (b + j); m = Matches<rccl_float8>(av, bv); }
-    if (!m)
-    {
-      atomicAdd(mismatches, 1ULL);
-      atomicMin(firstIdx, (unsigned long long)j);
-    }
-  }
-
-  __global__ void CaptureElemFp8(const uint8_t* actual, const uint8_t* expected, size_t idx,
-                                 double* out, bool isE5m2)
-  {
-    if (blockIdx.x == 0 && threadIdx.x == 0)
-    {
-      if (isE5m2)
-      {
-        out[0] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(expected + idx));
-        out[1] = ToDoubleVal<rccl_bfloat8>(*reinterpret_cast<const rccl_bfloat8*>(actual   + idx));
-      }
-      else
-      {
-        out[0] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(expected + idx));
-        out[1] = ToDoubleVal<rccl_float8>(*reinterpret_cast<const rccl_float8*>(actual   + idx));
-      }
-    }
-  }
-
-  __global__ void ExpectedReduceFp8(uint8_t* out, size_t n, int totalRanks, int op, bool isAvg, bool isE5m2, size_t startIdx)
-  {
-    size_t idx = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
-    size_t gidx = startIdx + idx;
-    int vi = PatternValueI(true, 0, gidx);
-    if (isE5m2)
-    {
-      rccl_bfloat8 acc = MakeVal<rccl_bfloat8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_bfloat8>(op, acc, MakeVal<rccl_bfloat8>(v, PatternValueF(v))); }
-      if (isAvg) acc = DivStep<rccl_bfloat8>(acc, totalRanks);
-      out[idx] = *reinterpret_cast<uint8_t*>(&acc);
-    }
-    else
-    {
-      rccl_float8 acc = MakeVal<rccl_float8>(vi, PatternValueF(vi));
-      for (int r = 1; r < totalRanks; ++r) { int v = PatternValueI(true, r, gidx); acc = AccStep<rccl_float8>(op, acc, MakeVal<rccl_float8>(v, PatternValueF(v))); }
-      if (isAvg) acc = DivStep<rccl_float8>(acc, totalRanks);
-      out[idx] = *reinterpret_cast<uint8_t*>(&acc);
-    }
   }
 }
 #endif  // RCCL_UT_DEVICE_DATA_OPS_HPP_

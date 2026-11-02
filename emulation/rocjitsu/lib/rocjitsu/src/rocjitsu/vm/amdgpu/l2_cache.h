@@ -80,7 +80,7 @@ namespace amdgpu {
 /// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t LINE_SIZE_BITS = 7;
   static constexpr uint32_t NUM_SETS = 2048;
   static constexpr uint32_t ASSOCIATIVITY = 16;
 
@@ -266,6 +266,70 @@ public:
     }
   }
 
+  /// @brief Perform one backing atomic per active lane within an existing device boundary.
+  /// @details Same contract as atomic_rmw() per lane, in lane order from @p next_lane.
+  /// Locally backed VM accesses share one revocation lease and translation span across
+  /// lanes, and the diagnostic counters are bumped once per call. @p next_lane is the first
+  /// unapplied lane on return (the failing lane, or the lane count when complete).
+  /// @param lane_addresses At most 64 per-lane addresses.
+  /// @param fn Callback: fn(lane, data_ptr, offset).
+  template <typename F>
+  [[nodiscard]] VmAccessOutcome
+  atomic_rmw_lanes(const DeviceCacheCoherence::AtomicBoundary &boundary,
+                   std::span<const uint64_t> lane_addresses, uint64_t lane_mask, uint32_t size,
+                   F &&fn, uint32_t vmid, const std::optional<GpuVmAccess> &vm_access,
+                   uint32_t &next_lane) {
+    if (lane_addresses.size() > 64)
+      return VmAccessOutcome::Malformed;
+    const uint32_t lane_count = static_cast<uint32_t>(lane_addresses.size());
+    if (backing_memory_ && vmid != 0 && gpu_vm_ != nullptr && vm_access &&
+        boundary.outcome() == VmAccessOutcome::Complete && boundary.belongs_to(coherence_.get())) {
+      uint32_t first = lane_count, active = 0;
+      for (uint32_t lane = next_lane; lane < lane_count; ++lane) {
+        if (lane_mask & (1ULL << lane)) {
+          first = std::min(first, lane);
+          ++active;
+        }
+      }
+      if (active == 0) {
+        next_lane = lane_count;
+        return VmAccessOutcome::Complete;
+      }
+      next_lane = first;
+      const VmAccessOutcome outcome = vm_access->atomic_modify_lanes(
+          lane_addresses, lane_mask, size,
+          [&](uint32_t lane, std::span<std::byte> target) {
+            fn(lane, reinterpret_cast<uint8_t *>(target.data()), 0);
+          },
+          next_lane);
+      // Count attempted lanes, including the failing one, just as atomic_rmw()
+      // does. Later lanes were never attempted and must not count again on retry.
+      if (outcome != VmAccessOutcome::Complete) {
+        active = 0;
+        for (uint32_t lane = first; lane < lane_count && lane <= next_lane; ++lane)
+          active += (lane_mask & (1ULL << lane)) != 0;
+      }
+      // Only totals are reported; attribute the batch to its first lane's shard.
+      auto &counters = diagnostics(lane_addresses[first]);
+      counters.backing_reads.fetch_add(active, std::memory_order_relaxed);
+      counters.backing_writes.fetch_add(active, std::memory_order_relaxed);
+      return outcome;
+    }
+    for (uint32_t lane = next_lane; lane < lane_count; ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      const VmAccessOutcome outcome = atomic_rmw(
+          boundary, lane_addresses[lane], size,
+          [&](uint8_t *data, uint32_t offset) { fn(lane, data, offset); }, vmid, vm_access);
+      if (outcome != VmAccessOutcome::Complete) {
+        next_lane = lane;
+        return outcome;
+      }
+    }
+    next_lane = lane_count;
+    return VmAccessOutcome::Complete;
+  }
+
   /// @brief Flush a single L2 line (writeback if dirty, then invalidate).
   ///
   /// Used by CC reads to ensure cross-XCD coherence: dirty data is
@@ -319,12 +383,19 @@ private:
 
   static constexpr uint64_t MAX_INVALIDATE_RANGE_SET_LOCKS = 64;
 
-  std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
+  // Different sets can be accessed concurrently without sharing a host cache line.
+  struct alignas(64) SetMutex {
+    std::mutex mutex;
+  };
+  using SetMutexes = std::array<SetMutex, NUM_SETS>;
+
+  std::mutex &set_mutex(uint64_t addr) const {
+    return set_mutexes_[CacheStore::set_index(addr)].mutex;
+  }
 
   class SetRangeLocks {
   public:
-    SetRangeLocks(std::array<std::mutex, NUM_SETS> &mutexes, uint64_t line_start,
-                  uint64_t line_count)
+    SetRangeLocks(SetMutexes &mutexes, uint64_t line_start, uint64_t line_count)
         : mutexes_(mutexes) {
       std::array<bool, NUM_SETS> seen{};
       for (uint64_t i = 0; i < line_count; ++i) {
@@ -339,7 +410,7 @@ private:
       std::ranges::sort(sets_.begin(), sets_.begin() + count_);
       try {
         for (size_t i = 0; i < count_; ++i) {
-          mutexes_[sets_[i]].lock();
+          mutexes_[sets_[i]].mutex.lock();
           ++locked_;
         }
       } catch (...) {
@@ -357,11 +428,11 @@ private:
     void unlock_all() {
       while (locked_ > 0) {
         --locked_;
-        mutexes_[sets_[locked_]].unlock();
+        mutexes_[sets_[locked_]].mutex.unlock();
       }
     }
 
-    std::array<std::mutex, NUM_SETS> &mutexes_;
+    SetMutexes &mutexes_;
     std::array<uint32_t, NUM_SETS> sets_{};
     size_t count_ = 0;
     size_t locked_ = 0;
@@ -405,7 +476,7 @@ private:
   CacheStore cache_;
   mutable MaintenanceMutex maintenance_mutex_;
   std::mutex epoch_reconcile_mutex_;
-  mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
+  mutable SetMutexes set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   GpuMemory *legacy_maintenance_memory_ = nullptr;

@@ -97,7 +97,13 @@ class TestNativeToolFinder:
     def sources_dir(self, tmp_path: Path) -> tuple[Path, Path]:
         sources_path = tmp_path / "src"
         sources_path.mkdir(parents=True, exist_ok=True)
-        lib_path = sources_path / Path(NativeToolFinder.lib_relative_path)
+        lib_path = (
+            sources_path
+            / NativeToolFinder.sources_dir_name
+            / NativeToolFinder.sources_build_subdir_name
+            / NativeToolFinder.sources_bin_subdir_name
+            / NativeToolFinder.lib_name
+        )
         self.__create_file(lib_path)
         return sources_path, lib_path
 

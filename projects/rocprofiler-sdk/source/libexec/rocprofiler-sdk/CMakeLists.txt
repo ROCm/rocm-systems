@@ -21,3 +21,4 @@
 # SOFTWARE.
 
 add_subdirectory(rocprofiler-sdk-launch-compiler)
+add_subdirectory(rocprofv3-doctor)

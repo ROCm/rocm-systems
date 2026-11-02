@@ -1303,13 +1303,13 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerOutsideTheCommunicator_R
   for (int peer : {-1, kRanks}) {
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_FALSE(needPreconnect) << "peer " << peer;
     needPreconnect = true;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_TRUE(needPreconnect) << "peer " << peer;
@@ -1320,14 +1320,14 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerIsThisRank_SucceedsWitho
   TaskPostTuning_P2pScene p2p;
   bool needPreconnect = false;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_FALSE(needPreconnect);
   EXPECT_FALSE(p2p.comm()->planner.peers[kP2pRank].sendSeen);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
   needPreconnect = true;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
 }
@@ -1337,7 +1337,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshSendPeer_ClaimsItsSendC
   const std::vector<int> sendChannels = p2p.Channels(kIsSend);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
@@ -1359,7 +1359,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   const std::vector<int> recvChannels = p2p.Channels(kIsRecv);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].recvSeen);
@@ -1376,6 +1376,37 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pRank), {}));
 }
 
+// Scatter with fewer parts than p2pnChannelsPerPeer claims only its own channels and leaves the side
+// unseen, so a later task to the same peer that uses every part still claims the rest.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
+      return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
+    });
+    const std::vector<int> channels = p2p.Channels(isSendNotRecv);
+    ASSERT_EQ(2u, channels.size());
+    bool needPreconnect = false;
+
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncScatter, &needPreconnect));
+
+    EXPECT_TRUE(needPreconnect);
+    EXPECT_FALSE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[0], kP2pPeer)->hasSeen);
+    EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {channels[0]}));
+
+    // The full-part task adds only the channel the Scatter left out.
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect));
+
+    EXPECT_TRUE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), channels));
+  }
+}
+
 // Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSide_ClaimsNoChannel) {
   for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
@@ -1383,7 +1414,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     p2p.Seen(isSendNotRecv, kP2pPeer) = true;
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1394,7 +1425,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     }
     needPreconnect = true;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1406,7 +1437,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerRecordedOnTheOtherSideOn
   p2p.comm()->planner.peers[kP2pPeer].recvSeen = true;
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer),
@@ -1420,7 +1451,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_SomeChannelsAlreadyConnected
     p2p.Conn(isSendNotRecv, channels.front(), kP2pPeer)->hasSeen = kConnected;
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1439,7 +1470,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_EveryChannelAlreadyConnected
     }
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1457,7 +1488,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CallerAlreadyNeedsSetup_Keep
     }
     bool needPreconnect = true;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1470,7 +1501,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelsBeyondTheFirstMaskWo
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_LE(CHANNELS_PER_MASK_WORD, channels.front()) << "isSendNotRecv " << isSendNotRecv;
@@ -1486,7 +1517,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelRangeStraddlingAMaskW
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_NE(0, channels.front() % CHANNELS_PER_MASK_WORD) << "isSendNotRecv " << isSendNotRecv;
@@ -2349,28 +2380,14 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupported_RejectsEveryRma
   }
 }
 
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverBelowTheRmaMinimum_IsIgnoredOnHip) {
+  // The CUDA 12.5 driver gate is HIP-elided in postTuneRmaTaskAppend, and this
+  // binary always defines __HIP_PLATFORM_AMD__, so a too-old cache must not reject.
   TaskPostTuning_RmaScene rma;
   ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidUsage, rma.Run(rma.PutSignal()));
-  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_DriverAtTheRmaMinimum_IsAccepted) {
-  TaskPostTuning_RmaScene rma;
-  ncclCudaDriverVersionCache = kSupportedDriverVersion;
 
   EXPECT_EQ(ncclSuccess, rma.Run(rma.PutSignal()));
   EXPECT_EQ(1, rma.AppendedTaskCount());
-}
-
-TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_HostRmaUnsupportedAndDriverTooOld_ReportsTheUnsupportedCommFirst) {
-  TaskPostTuning_RmaScene rma;
-  rma.comm()->hostRmaSupport = false;
-  ncclCudaDriverVersionCache = kUnsupportedDriverVersion;
-
-  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.PutSignal()));
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexBelowZero_RejectsTheTaskAndAppendsNothing) {
@@ -2400,14 +2417,35 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_SignalIndexAtTheTopOfTheRange_IsAc
   EXPECT_EQ(1, rma.AppendedTaskCount());
 }
 
-// postTuneRmaTaskAppend never range-checks ctx, unlike sigIdx above; fixing that turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = -1;
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   struct ncclRawTaskRma raw = rma.Signal();
   raw.rmaOp.signal.ctx = kNumRmaCtx;
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(raw));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+// Signal() and PutSignal() otherwise always use kRmaCtx, so a predicate narrowed to
+// ctx >= numRmaCtx - 1 would still leave the reject tests above green.
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_ContextAtTheTopOfTheRange_IsAccepted) {
+  TaskPostTuning_RmaScene rma;
+  struct ncclRawTaskRma raw = rma.Signal();
+  raw.rmaOp.signal.ctx = kRmaLastCtx;
+
+  EXPECT_EQ(ncclSuccess, rma.Run(raw));
+  EXPECT_EQ(1, rma.AppendedTaskCount());
+  ASSERT_EQ(1u, rma.Tasks(kRmaLastCtx).size());
+  EXPECT_EQ(kRmaLastCtx, rma.Tasks(kRmaLastCtx)[0]->ctx);
 }
 
 TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_NoSignalsConfigured_RejectsWaitSignalOnItsImplicitIndex) {
@@ -2819,12 +2857,33 @@ TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorsWaitForOneOpe
   EXPECT_EQ(2, rma.AppendedTaskCount());
 }
 
-// The descriptor loop only checks opCnt and sigIdx, never ctx; the grouping scan then silently drops any
-// descriptor whose ctx falls outside [0, numRmaCtx), so the wait vanishes instead of being rejected.
-// Adding a ctx range check to the descriptor loop turns this green.
-TEST_F(TaskPostTuningMicrotest, DISABLED_RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, -1)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorContextAtTheConfiguredCount_RejectsTheTaskAndAppendsNothing) {
   TaskPostTuning_RmaScene rma;
   std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(kRmaPeer, kRmaSigIdx, kNumRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerBelowZero_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(-1, kRmaSigIdx, kRmaCtx)};
+
+  EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
+  EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));
+}
+
+TEST_F(TaskPostTuningMicrotest, RmaTaskAppend_WaitSignalDescriptorPeerAtTheRankCount_RejectsTheTaskAndAppendsNothing) {
+  TaskPostTuning_RmaScene rma;
+  std::vector<ncclWaitSignalDesc_t> descs = {TaskPostTuning_WaitDesc(rma.comm()->nRanks, kRmaSigIdx, kRmaCtx)};
 
   EXPECT_EQ(ncclInvalidArgument, rma.Run(rma.WaitSignal(&descs)));
   EXPECT_TRUE(TaskPostTuning_NoRmaTasksAppended(&rma));

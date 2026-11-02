@@ -227,6 +227,11 @@ class TestGpuBenchmark(unittest.TestCase):
     def test_performance_clean_gpu_local_data(self):
         self.common.print_func_name("")
 
+        if self.common.cleaner_shader_resets_gpu():
+            msg = "\tSkipping test_performance_clean_gpu_local_data as it resets the GPU (gfx906)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
         for i, processor in enumerate(self.processors):
             self._log_test_start("amdsmi_clean_gpu_local_data", "Processor", i)
 

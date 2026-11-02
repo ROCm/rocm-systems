@@ -55,7 +55,7 @@ env:
   PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
   CMAKE_VERSION_DEB: "4.4.3"
   CMAKE_VERSION_RPM: "3.28.4"
-  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201"
   PATH: "/usr/bin:$PATH"
 
   ## Submodule paths required by the rocprofiler-sdk build.
@@ -104,6 +104,7 @@ jobs:
     outputs:
       gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
       gfx94x_sandbox_runner: ${{ steps.runner.outputs.gfx94x_sandbox_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
     steps:
       - name: Checkout workflow actions
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -147,6 +148,13 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
+      - name: Prepare writable Git configuration
+        shell: bash
+        run: |
+          # Keep Git's global config writable even when /github/home is absent.
+          git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+          echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
@@ -376,10 +384,10 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-          - { os: 'sles-15.6', gpu: 'mi325', gpu-target: 'gfx94X', build-type: 'RelWithDebInfo', ci-flags: '' }
-    runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
+          - { os: 'rhel-8.8', gpu: 'mi325', gpu-target: 'gfx94X', runner: '${{ needs.ci_config.outputs.gfx94x_runner }}', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'rhel-9.5', gpu: 'mi325', gpu-target: 'gfx94X', runner: '${{ needs.ci_config.outputs.gfx94x_runner }}', build-type: 'RelWithDebInfo', ci-flags: '' }
+          - { os: 'sles-15.6', gpu: 'navi4', gpu-target: 'gfx120X', runner: '${{ needs.ci_config.outputs.gfx120x_runner }}', build-type: 'RelWithDebInfo', ci-flags: '' }
+    runs-on: ${{ matrix.system.runner }}
     container:
       image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
@@ -394,6 +402,13 @@ jobs:
       OS_TYPE: ${{ matrix.system.os }}
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
+      - name: Prepare writable Git configuration
+        shell: bash
+        run: |
+          # Keep Git's global config writable even when /github/home is absent.
+          git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+          echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
@@ -472,8 +487,54 @@ jobs:
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-hipfile-build: ${{ env.ENABLE_HIPFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
+          ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
+
+      - name: Select Navi 4 GPU
+        if: ${{ matrix.system.gpu == 'navi4' }}
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          # Some Navi 4 runners also expose a gfx1036 GPU. Select by UUID so GPU
+          # ordering does not determine which device the tests use.
+          navi4_uuid=$("${ROCM_PATH}/bin/rocminfo" | awk '
+            /^[[:space:]]+Name:/ { arch = $2 }
+            /^[[:space:]]+(Uuid|UUID):/ && arch ~ /^gfx120[0-9](-strict)?$/ && !selected {
+              if ($2 !~ /^GPU-[[:xdigit:]]+$/) {
+                print "::error::Navi 4 GPU has no usable UUID" > "/dev/stderr"
+                exit 1
+              }
+              print $2
+              selected = 1
+            }')
+          if [[ -z "$navi4_uuid" ]]; then
+            echo "::error::No visible gfx120x GPU found on this Navi 4 runner"
+            exit 1
+          fi
+
+          export ROCR_VISIBLE_DEVICES="$navi4_uuid"
+          # HIP indices are relative to the filtered ROCr device list.
+          export HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 GPU_DEVICE_ORDINAL=0
+          echo "Selected Navi 4 GPU: ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES"
+          "${ROCM_PATH}/bin/rocminfo" | awk -v expected="$navi4_uuid" '
+            /^[[:space:]]+Name:/ && $2 ~ /^gfx/ {
+              print "Visible GPU: " $2
+              ++gpu_count
+              if ($2 !~ /^gfx120[0-9](-strict)?$/) invalid = 1
+            }
+            /^[[:space:]]+(Uuid|UUID):/ && $2 == expected { matched = 1 }
+            END {
+              if (gpu_count != 1 || invalid || !matched) {
+                print "::error::ROCr did not isolate the selected Navi 4 GPU" > "/dev/stderr"
+                exit 1
+              }
+            }'
+          {
+            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES"
+            echo "HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES"
+            echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+            echo "GPU_DEVICE_ORDINAL=$GPU_DEVICE_ORDINAL"
+          } >> "$GITHUB_ENV"
 
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -493,7 +554,7 @@ jobs:
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
             --build-jobs 16 \
-            --site ${{ needs.ci_config.outputs.gfx94x_runner }} \
+            --site ${{ matrix.system.runner }} \
             --gpu-targets ${{ env.GPU_TARGETS }} \
             --run-attempt ${{ github.run_attempt }} \
             ${{ matrix.system.ci-flags }} \
@@ -544,6 +605,13 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
+    - name: Prepare writable Git configuration
+      shell: bash
+      run: |
+        # Keep Git's global config writable even when /github/home is absent.
+        git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+        echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
       uses: actions/checkout@v6
       with:

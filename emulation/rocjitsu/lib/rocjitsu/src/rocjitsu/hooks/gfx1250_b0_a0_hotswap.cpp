@@ -24,7 +24,7 @@
 /// `HSA_HOTSWAP_ENABLE` belongs to ROCr rather than this hook: the runtime only
 /// calls Runtime::LoadHotswapTool() for this library when the flag is enabled.
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"

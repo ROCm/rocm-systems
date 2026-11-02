@@ -9,7 +9,6 @@
 #include "library/thread_info.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/backends.hpp>
 
 namespace rocprofsys
 {

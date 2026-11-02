@@ -34,6 +34,7 @@
 #include "palAssert.h"
 #include "palInlineFuncs.h"
 #include "palMemTracker.h"
+#include "palSpan.h"
 #include <type_traits>
 #include <cstddef>
 
@@ -43,53 +44,68 @@ namespace Util { struct FreeInfo;  }
 namespace Util { enum SystemAllocType : uint32; }
 
 #if !defined(__GNUC__) || (__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ > 8))
-/// Default malloc alignment. Usually equal to 16 bytes for x64 targets.
+/// Default malloc alignment. Usually equal to 8 bytes for x64 targets.
 #define PAL_DEFAULT_MEM_ALIGN alignof(std::max_align_t)
 #else
 // GCC versions prior to 4.9 break C++11 compatibility by putting max_align_t in the global namespace.
-/// Default malloc alignment. Usually equal to 16 bytes for x64 targets.
+/// Default malloc alignment. Usually equal to 8 bytes for x64 targets.
 #define PAL_DEFAULT_MEM_ALIGN alignof(::max_align_t)
 #endif
-
-namespace Util
-{
-
-/// Informs that @p p is aligned to at least @p Alignment.
-template<size_t Alignment, typename T>
-constexpr T* AssumeAligned(T* p)
-{
-    return static_cast<T*>(__builtin_assume_aligned(p, Alignment));
-}
-
-} // Util
 
 #if PAL_MEMTRACK
 
 /// @internal Malloc allocation method with extra memory leak tracking arguments.
-#define PAL_MALLOC_BASE(_size, _align, _allocator, _allocType, _memBlkType) \
-    _allocator->Alloc(::Util::AllocInfo(_size, _align, false, _allocType, _memBlkType, __FILE__, __LINE__))
+#define PAL_MALLOC_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    (_pAllocator)->Alloc(::Util::AllocInfo((_size), (_align), false, (_allocType), (_memBlkType), __FILE__, __LINE__))
 
 /// @internal Calloc allocation method with extra memory leak tracking arguments.
-#define PAL_CALLOC_BASE(_size, _align, _allocator, _allocType, _memBlkType) \
-    _allocator->Alloc(::Util::AllocInfo(_size, _align, true, _allocType, _memBlkType, __FILE__, __LINE__))
+#define PAL_CALLOC_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    (_pAllocator)->Alloc(::Util::AllocInfo((_size), (_align), true, (_allocType), (_memBlkType), __FILE__, __LINE__))
 
 /// @internal Free method with extra memory leak tracking arguments.
-#define PAL_FREE_BASE(_ptr, _allocator, _memBlkType) \
- _allocator->Free(::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>(_ptr)), _memBlkType))
+#define PAL_FREE_BASE(_ptr, _pAllocator, _memBlkType) \
+    (_pAllocator)->Free(::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>(_ptr)), (_memBlkType)))
 
-#else
+/// @internal Span-based malloc allocation method with extra memory leak tracking arguments.
+#define PAL_MALLOC_SPAN_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    ::Util::AllocSpan((_pAllocator),                                              \
+                      ::Util::AllocInfo((_size), (_align), false, (_allocType), (_memBlkType), __FILE__, __LINE__))
+
+/// @internal Span-based calloc allocation method with extra memory leak tracking arguments.
+#define PAL_CALLOC_SPAN_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    ::Util::AllocSpan((_pAllocator),                                              \
+                      ::Util::AllocInfo((_size), (_align), true, (_allocType), (_memBlkType), __FILE__, __LINE__))
+
+/// @internal Span-based free method with extra memory leak tracking arguments. Note that _span is not a pointer.
+#define PAL_FREE_SPAN_BASE(_span, _pAllocator, _memBlkType) \
+    (_pAllocator)->Free(                                    \
+        ::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>((_span).Data())), (_memBlkType)))
+
+#else // PAL_MEMTRACK
 
 /// @internal Malloc method not wrapped with memory leak tracking.
-#define PAL_MALLOC_BASE(_size, _align, _allocator, _allocType, _memBlkType) \
-    _allocator->Alloc(::Util::AllocInfo(_size, _align, false, _allocType))
+#define PAL_MALLOC_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    (_pAllocator)->Alloc(::Util::AllocInfo((_size), (_align), false, (_allocType)))
 
 /// @internal Calloc method not wrapped with memory leak tracking.
-#define PAL_CALLOC_BASE(_size, _align, _allocator, _allocType, _memBlkType) \
-    _allocator->Alloc(::Util::AllocInfo(_size, _align, true, _allocType))
+#define PAL_CALLOC_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    (_pAllocator)->Alloc(::Util::AllocInfo((_size), (_align), true, (_allocType)))
 
 /// @internal Free method not wrapped with memory leak tracking.
-#define PAL_FREE_BASE(_ptr, _allocator, _memBlkType) \
-    _allocator->Free(::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>(_ptr))))
+#define PAL_FREE_BASE(_ptr, _pAllocator, _memBlkType) \
+    (_pAllocator)->Free(::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>(_ptr))))
+
+/// @internal Span-based malloc method not wrapped with memory leak tracking.
+#define PAL_MALLOC_SPAN_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    ::Util::AllocSpan((_pAllocator), ::Util::AllocInfo((_size), (_align), false, (_allocType)))
+
+/// @internal Span-based calloc method not wrapped with memory leak tracking.
+#define PAL_CALLOC_SPAN_BASE(_size, _align, _pAllocator, _allocType, _memBlkType) \
+    ::Util::AllocSpan((_pAllocator), ::Util::AllocInfo((_size), (_align), true, (_allocType)))
+
+/// @internal Span-based free method not wrapped with memory leak tracking. Note that _span is not a pointer.
+#define PAL_FREE_SPAN_BASE(_span, _pAllocator, _memBlkType) \
+    (_pAllocator)->Free(::Util::FreeInfo(const_cast<void*>(static_cast<const volatile void*>((_span).Data()))))
 
 #endif
 
@@ -97,26 +113,50 @@ constexpr T* AssumeAligned(T* p)
 ///
 /// This macro is used internally by PAL, and will potentially result in a callback to the client for actual allocation.
 /// The client is also free to use this macro in order to take advantage of PAL's memory leak tracking.
-#define PAL_MALLOC_ALIGNED(_size, _align, _allocator, _allocType) \
-    PAL_MALLOC_BASE((_size), (_align), (_allocator), (_allocType), ::Util::MemBlkType::Malloc)
+#define PAL_MALLOC_ALIGNED(_size, _align, _pAllocator, _allocType) \
+    PAL_MALLOC_BASE((_size), (_align), (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
 
 /// Same as @ref PAL_MALLOC_ALIGNED with alignment set to the alignment of the largest native scalar type.
-#define PAL_MALLOC(_size, _allocator, _allocType) \
-    PAL_MALLOC_ALIGNED(_size, PAL_DEFAULT_MEM_ALIGN, _allocator, _allocType)
+#define PAL_MALLOC(_size, _pAllocator, _allocType) \
+    PAL_MALLOC_ALIGNED((_size), PAL_DEFAULT_MEM_ALIGN, (_pAllocator), (_allocType))
 
 /// Allocates zero-initialized heap memory in place of calloc().  See @ref PAL_MALLOC_ALIGNED.
-#define PAL_CALLOC_ALIGNED(_size, _align, _allocator, _allocType) \
-    PAL_CALLOC_BASE((_size), (_align), (_allocator), (_allocType), ::Util::MemBlkType::Malloc)
+#define PAL_CALLOC_ALIGNED(_size, _align, _pAllocator, _allocType) \
+    PAL_CALLOC_BASE((_size), (_align), (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
 
 /// Same as @ref PAL_CALLOC_ALIGNED with alignment set to the alignment of the largest native scalar type.
-#define PAL_CALLOC(_size, _allocator, _allocType) \
-    PAL_CALLOC_ALIGNED(_size, PAL_DEFAULT_MEM_ALIGN, _allocator, _allocType)
+#define PAL_CALLOC(_size, _pAllocator, _allocType) \
+    PAL_CALLOC_ALIGNED((_size), PAL_DEFAULT_MEM_ALIGN, (_pAllocator), (_allocType))
 
 /// Frees heap memory allocated with the @ref PAL_MALLOC* or @ref PAL_CALLOC* macros.
-#define PAL_FREE(_ptr, _allocator) PAL_FREE_BASE((_ptr), (_allocator), ::Util::MemBlkType::Malloc)
+#define PAL_FREE(_ptr, _pAllocator) PAL_FREE_BASE((_ptr), (_pAllocator), ::Util::MemBlkType::Malloc)
 
 /// Safe free macro.  Pointer is set to null after the free.
-#define PAL_SAFE_FREE(_ptr, _allocator) { PAL_FREE((_ptr), (_allocator)); (_ptr) = nullptr; }
+#define PAL_SAFE_FREE(_ptr, _pAllocator) { PAL_FREE((_ptr), (_pAllocator)); (_ptr) = nullptr; }
+
+/// Same as @ref PAL_MALLOC_ALIGNED but it returns a ByteSpan.
+#define PAL_MALLOC_ALIGNED_SPAN(_size, _align, _pAllocator, _allocType) \
+    PAL_MALLOC_SPAN_BASE((_size), (_align), (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
+
+/// Same as @ref PAL_MALLOC but it returns a ByteSpan.
+#define PAL_MALLOC_SPAN(_size, _pAllocator, _allocType) \
+    PAL_MALLOC_SPAN_BASE((_size), PAL_DEFAULT_MEM_ALIGN, (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
+
+/// Same as @ref PAL_CALLOC_ALIGNED but it returns a ByteSpan.
+#define PAL_CALLOC_ALIGNED_SPAN(_size, _align, _pAllocator, _allocType) \
+    PAL_CALLOC_SPAN_BASE((_size), (_align), (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
+
+/// Same as @ref PAL_CALLOC but it returns a ByteSpan.
+#define PAL_CALLOC_SPAN(_size, _pAllocator, _allocType) \
+    PAL_CALLOC_SPAN_BASE((_size), PAL_DEFAULT_MEM_ALIGN, (_pAllocator), (_allocType), ::Util::MemBlkType::Malloc)
+
+/// Frees ByteSpan heap memory allocated with the @ref PAL_MALLOC* or @ref PAL_CALLOC* macros. Note that _span is not a
+/// pointer, it must be a value type or reference to a possibly const ByteSpan or ConstByteSpan.
+#define PAL_FREE_SPAN(_span, _pAllocator) PAL_FREE_SPAN_BASE((_span), (_pAllocator), ::Util::MemBlkType::Malloc)
+
+/// Safe ByteSpan free macro, _span is cleared after its memory is freed. Note that _span is not a pointer, it must be
+/// a value type or reference to a ByteSpan or ConstByteSpan.
+#define PAL_SAFE_FREE_SPAN(_span, _pAllocator) { PAL_FREE_SPAN((_span), (_pAllocator)); (_span).Clear(); }
 
 /// @internal
 ///
@@ -168,56 +208,85 @@ extern void PAL_CDECL operator delete(
 ///
 /// Instead of calling "MyClass* pMyClass = new MyClass(arg1, arg2)", call
 /// "MyClass* pMyClass = PAL_NEW(MyClass, AllocInternal)(arg1, arg2)".
-#define PAL_NEW(_className, _allocator, _allocType) \
-    PAL_PLACEMENT_NEW( \
-        PAL_MALLOC_BASE(sizeof(_className), alignof(_className), (_allocator), (_allocType), ::Util::MemBlkType::New)) \
-        _className
+#define PAL_NEW(_className, _pAllocator, _allocType)                                                        \
+    PAL_PLACEMENT_NEW(PAL_MALLOC_BASE(sizeof(_className), alignof(_className), (_pAllocator), (_allocType), \
+                                      ::Util::MemBlkType::New)) _className
 
 /// Calls destructor and frees heap memory for the object allocated with PAL_NEW*.
-#define PAL_DELETE(_ptr, _allocator)                                    \
-{                                                                       \
-    /* we want to evaluate the expression (_allocator) before calling
-       the destructor because the destructor might have side effects */ \
-    auto _allocator_ = (_allocator);                                    \
-    ::Util::Destructor(_ptr);                                           \
-    PAL_FREE_BASE((_ptr), _allocator_, ::Util::MemBlkType::New);        \
+#define PAL_DELETE(_ptr, _pAllocator)                            \
+{                                                                \
+    /* we want to evaluate these expressions before calling
+       the destructor because they might have side effects */    \
+    auto _ptr_        = (_ptr);                                  \
+    auto _pAllocator_ = (_pAllocator);                           \
+    ::Util::Destructor(_ptr_);                                   \
+    PAL_FREE_BASE(_ptr_, _pAllocator_, ::Util::MemBlkType::New); \
 }
 
 /// Calls destructor and frees heap memory for "this".  Use this macro to delete an object without a public destructor.
-#define PAL_DELETE_THIS(_className, _allocator)                         \
+#define PAL_DELETE_THIS(_className, _pAllocator)                        \
 {                                                                       \
-    /* we want to evaluate the expression (_allocator) before calling
+    /* we want to evaluate the expression (_pAllocator) before calling
        the destructor because the destructor might have side effects */ \
-    auto _allocator_ = (_allocator);                                    \
+    auto _pAllocator_ = (_pAllocator);                                  \
     this->~_className();                                                \
-    PAL_FREE_BASE(this, _allocator_, ::Util::MemBlkType::New);          \
+    PAL_FREE_BASE(this, _pAllocator_, ::Util::MemBlkType::New);         \
 }
 
 /// Safe delete macro.  Pointer is set to null after the delete.
-#define PAL_SAFE_DELETE(_ptr, _allocator) { PAL_DELETE(_ptr, _allocator); (_ptr) = nullptr; }
+#define PAL_SAFE_DELETE(_ptr, _pAllocator) { PAL_DELETE((_ptr), (_pAllocator)); (_ptr) = nullptr; }
 
 /// Allocates an array of the specified object type.
 ///
 /// For non-POD types, the default constructor will be called.  Default constructor is not available for POD types
-/// (i.e., PAL_NEW_ARRAY(int, 3, AllocInternal)() won't work.
+/// (i.e. "PAL_NEW_ARRAY(int, 3, AllocInternal)()" won't work but "PAL_NEW_ARRAY(int, 3, AllocInternal)" will work.
 #if PAL_MEMTRACK
-#define PAL_NEW_ARRAY(_className, _arrayCnt, _allocator, _allocType) \
-    ::Util::NewArray<_className>((_arrayCnt), (_allocator), (_allocType), __FILE__, __LINE__)
+#define PAL_NEW_ARRAY(_className, _arrayCnt, _pAllocator, _allocType) \
+    ::Util::NewArray<_className>((_arrayCnt), (_pAllocator), (_allocType), __FILE__, __LINE__)
 #else
-#define PAL_NEW_ARRAY(_className, _arrayCnt, _allocator, _allocType) \
-    ::Util::NewArray<_className>((_arrayCnt), (_allocator), (_allocType))
+#define PAL_NEW_ARRAY(_className, _arrayCnt, _pAllocator, _allocType) \
+    ::Util::NewArray<_className>((_arrayCnt), (_pAllocator), (_allocType))
 #endif
 
 /// Destroys an array of the specified object type.
 ///
 /// For non-POD types, the destructor will be called.
-#define PAL_DELETE_ARRAY(_ptr, _allocator) ::Util::DeleteArray(_ptr, _allocator)
+#define PAL_DELETE_ARRAY(_ptr, _pAllocator) ::Util::DeleteArray((_ptr), (_pAllocator))
 
 /// Safe delete array macro.  Pointer is set to null after the delete.
-#define PAL_SAFE_DELETE_ARRAY(_ptr, _allocator) { PAL_DELETE_ARRAY(_ptr, _allocator); (_ptr) = nullptr; }
+#define PAL_SAFE_DELETE_ARRAY(_ptr, _pAllocator) { PAL_DELETE_ARRAY((_ptr), (_pAllocator)); (_ptr) = nullptr; }
+
+/// Allocates a Span<T> of the specified object type.
+///
+/// For non-POD types, the default constructor will be called.  Default constructor is not available for POD types
+/// (i.e. "PAL_NEW_SPAN(int, 3, AllocInternal)()" won't work but "PAL_NEW_SPAN(int, 3, AllocInternal)" will work.
+#if PAL_MEMTRACK
+#define PAL_NEW_SPAN(_className, _count, _pAllocator, _allocType) \
+    ::Util::NewSpan<_className>((_count), (_pAllocator), (_allocType), __FILE__, __LINE__)
+#else
+#define PAL_NEW_SPAN(_className, _count, _pAllocator, _allocType) \
+    ::Util::NewSpan<_className>((_count), (_pAllocator), (_allocType))
+#endif
+
+/// Destroys a Span<T> of the specified object type.
+///
+/// For non-POD types, the destructor will be called.
+#define PAL_DELETE_SPAN(_span, _pAllocator) ::Util::DeleteArray((_span).Data(), (_pAllocator))
+
+/// Safe Span<T> delete macro, _span is cleared after its memory is freed. Note that _span is not a pointer, it must be
+/// a non-const Span<T> value or a non-const reference to a Span<T>.
+#define PAL_SAFE_DELETE_SPAN(_span, _pAllocator) { PAL_DELETE_SPAN((_span), (_pAllocator)); (_span).Clear(); }
 
 namespace Util
 {
+
+/// Informs that @p p is aligned to at least @p Alignment.
+template<size_t Alignment, typename T>
+constexpr T* AssumeAligned(T* p)
+{
+    return static_cast<T*>(__builtin_assume_aligned(p, Alignment));
+}
+
 /// Specifies the usage of a system memory allocation made via a client allocation callback.
 ///
 /// The selected type gives the client an idea of the expected lifetime of the allocation, perhaps allowing intelligent
@@ -779,6 +848,57 @@ void DeleteArray(T* p, Allocator* pAllocator)
 #endif
 
     pAllocator->Free(info);
+}
+
+/// @internal
+///
+/// Internal template implementation of PAL_NEW_SPAN. It exists so that the PAL_NEW_SPAN macro can still be a single
+/// expression that evaluates to a Span<T> while also evaluating "_scount" exactly once. This is just a wrapper over
+/// NewArray, as far as the PAL internals are concerned Span allocations and array allocations are treated identically.
+///
+/// @param [in] count      Number of entries in the Span.
+/// @param [in] pAllocator The allocator that will allocate the memory for the Span.
+/// @param [in] allocType  Hint to client on the lifetime/type of allocation.
+/// @param [in] pFilename  Source filename that requested the new Span.
+/// @param [in] lineNumber Line number in the source file that requested the new Span.
+///
+/// @returns The allocated Span or an empty Span if memory allocation failed.
+template<typename T, typename Allocator>
+Span<T> NewSpan(
+    size_t          count,
+    Allocator*      pAllocator,
+    SystemAllocType allocType
+#if PAL_MEMTRACK
+    ,
+    const char*     pFilename,
+    uint32          lineNumber
+#endif
+    )
+{
+#if PAL_MEMTRACK
+    T*const pArray = NewArray<T, Allocator>(count, pAllocator, allocType, pFilename, lineNumber);
+#else
+    T*const pArray = NewArray<T, Allocator>(count, pAllocator, allocType);
+#endif
+    return Span<T>(pArray, count);
+}
+
+/// @internal
+///
+/// This is a helper function for PAL_MALLOC_SPAN_BASE and PAL_CALLOC_SPAN_BASE. It exists so that the macros can still
+/// be a single expression that evaluates to a ByteSpan while also evaluating "_size" exactly once and not adding a new
+/// function to the Allocator pattern.
+///
+/// @param [in] pAllocator  Call this Allocator's Alloc function to actually allocate the memory.
+/// @param [in] allocInfo   Pass this to Alloc and copy its size into the returned Span.
+///
+/// @returns Returns a ByteSpan that wraps the caller's allocation. It will be an empty Span if the allocation fails.
+template<typename Allocator>
+ByteSpan AllocSpan(
+    Allocator*       pAllocator,
+    const AllocInfo& allocInfo)
+{
+    return ByteSpan::FromBytes(pAllocator->Alloc(allocInfo), allocInfo.bytes);
 }
 
 constexpr size_t FastMemCpyMaxSmallSize = 64;

@@ -25,6 +25,12 @@
 #ifndef OAM_INCLUDE_OAM_OAM_MAPI_H_
 #define OAM_INCLUDE_OAM_OAM_MAPI_H_
 
+// NOTICE: ROCm-SMI is in maintenance mode as of ROCm 7.0; only critical bug
+// fixes will be applied. Please switch to AMD-SMI
+// (https://github.com/ROCm/amdsmi) for continued support.
+#pragma message( \
+    "ROCm-SMI is deprecated. Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).")
+
 /**
  * \file    oam_mapi.h
  * \brief   OAM management and monitoring library API definitions

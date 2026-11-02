@@ -11,6 +11,18 @@ OLD_HEADER = "amdsmi_old.h"
 NEW_HEADER = "amdsmi_new.h"
 REPORT_FILE = "abi_report.html"
 
+# abi-compliance-checker 2.3 prints each count as "&nbsp;N&nbsp;" in the section heading.
+REMOVED_SYMBOLS = re.compile(r"<h2>Removed Symbols <span class='\w+'>&nbsp;(\d+)&nbsp;")
+PROBLEMS = re.compile(
+    r"<h2>Problems with ([\w ]+?), (High|Medium|Low) Severity <span class='\w+'>&nbsp;(\d+)&nbsp;"
+)
+# The checker rates struct growth Low (it assumes the library allocates the struct), but
+# amd-smi callers allocate their output structs, so any size change breaks old binaries.
+TYPE_OR_SIZE_CHANGE = re.compile(
+    r"<span class='ttype'>\w+</span> ([\w:]+)"
+    r"|Size of this type has been changed from <b>(\d+)</b> bytes to <b>(\d+)</b> bytes"
+)
+
 
 def run_command(cmd, shell=False, stdout=None, stderr=None):
     try:
@@ -20,6 +32,15 @@ def run_command(cmd, shell=False, stdout=None, stderr=None):
         print(f"Error running command: {e}")
         return False
     return True
+
+
+def merge_base(base_ref):
+    """Where HEAD forked from base_ref, so later changes on base_ref are not blamed on HEAD."""
+    try:
+        return subprocess.check_output(["git", "merge-base", base_ref, "HEAD"], text=True).strip()
+    except subprocess.CalledProcessError:
+        print(f"Warning: no merge base between {base_ref} and HEAD; comparing against {base_ref}.")
+        return base_ref
 
 
 def prepare_headers(base_ref, project_path):
@@ -80,33 +101,34 @@ def check_report_content(report_path):
     with open(report_path, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
-    found_failure = False
+    # Binary and source compatibility are reported separately, so most findings appear twice.
+    failures = set()
+    for count in REMOVED_SYMBOLS.findall(content):
+        if int(count) > 0:
+            failures.add(f"Removed Symbols: {count}")
+    for kind, severity, count in PROBLEMS.findall(content):
+        if severity in ("High", "Medium") and int(count) > 0:
+            failures.add(f"Problems with {kind}, {severity} Severity: {count}")
+    type_name = "unknown type"
+    for match in TYPE_OR_SIZE_CHANGE.finditer(content):
+        if match.group(1):
+            type_name = match.group(1)
+        else:
+            failures.add(
+                f"Size of {type_name} changed from {match.group(2)} to {match.group(3)} bytes"
+            )
 
-    removed_symbols_pattern = re.search(r"Removed Symbols.*?\((\d+)\)", content)
-    if removed_symbols_pattern:
-        count = int(removed_symbols_pattern.group(1))
-        if count > 0:
-            print(f"  [FAIL] Removed Symbols detected: {count}")
-            found_failure = True
-
-    data_type_problems_pattern = re.search(r"Problems with Data Types.*?\((\d+)\)", content)
-    if data_type_problems_pattern:
-        count = int(data_type_problems_pattern.group(1))
-        if count > 0:
-            print(f"  [FAIL] Data Type Problems detected: {count}")
-            found_failure = True
-
-    if "Verdict" in content and "Incompatible" in content:
-        print("  [FAIL] Overall Verdict: Incompatible")
-        found_failure = True
-
-    return not found_failure
+    for failure in sorted(failures):
+        print(f"  [FAIL] {failure}")
+    return not failures
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run ABI Compliance Checker for AMDSMI")
     parser.add_argument(
-        "--base-ref", required=True, help="Git reference to compare against (e.g. origin/develop)"
+        "--base-ref",
+        required=True,
+        help="Branch or commit to compare against; its merge base with HEAD is used",
     )
     parser.add_argument("--head-ref", default="current local workspace", help="Feature branch name")
     parser.add_argument(
@@ -121,7 +143,8 @@ def main():
     print(f"Comparing: {args.base_ref}  ->  {args.head_ref}")
     print("=" * 60)
 
-    if not prepare_headers(args.base_ref, args.project_path):
+    base = merge_base(args.base_ref)
+    if not prepare_headers(base, args.project_path):
         print("Failed to prepare headers.")
         sys.exit(1)
 
@@ -129,15 +152,13 @@ def main():
     tool_success = run_abi_checker(strict=is_strict)
     report_clean = check_report_content(REPORT_FILE)
 
-    if not tool_success and not report_clean:
-        print(f"\nABI Check FAILED. See {REPORT_FILE} for details.")
-        sys.exit(1)
-    elif not tool_success and report_clean:
-        print(f"\nABI Check finished with warnings. See {REPORT_FILE}.")
-        if is_strict:
-            sys.exit(1)
-    else:
+    if tool_success and report_clean:
         print("\nABI Check PASSED.")
+        return
+    if not tool_success:
+        print("  [FAIL] abi-compliance-checker reported incompatible changes or could not run")
+    print(f"\nABI Check FAILED. See {REPORT_FILE} for details.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

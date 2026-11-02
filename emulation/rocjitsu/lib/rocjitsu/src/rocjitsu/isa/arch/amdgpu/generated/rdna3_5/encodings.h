@@ -903,9 +903,23 @@ public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   bool omits_gfx11_mimg_dim_dmask() const;
   uint32_t gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const;
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
   void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
-    const Operand *operand = src_operands_[operand_index];
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+      // VDATA is the first source. Assembly includes the status slot;
+      // the source dependency includes only the atomic payload.
+      const auto first = operand->encoding_value();
+      const auto last = first + operand->size_bits() / 32;
+      out += first == last ? "v" + std::to_string(first)
+                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+      return;
+    }
     if (!inst_.nsa || operand != nsa_vaddr_operand_) {
       Instruction::append_src_operand(out, operand_index);
       return;

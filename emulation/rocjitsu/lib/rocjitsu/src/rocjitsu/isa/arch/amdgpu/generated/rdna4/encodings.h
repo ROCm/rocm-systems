@@ -919,6 +919,24 @@ public:
 class Vimage : public IsaInstruction<Isa> {
 public:
   Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn);
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
+  void append_src_operand(std::string &out, uint8_t operand_index) const override {
+    const ::rocjitsu::Operand *operand = src_operands_[operand_index];
+    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+      // VDATA is the first source. Assembly includes the status slot;
+      // the source dependency includes only the atomic payload.
+      const auto first = operand->encoding_value();
+      const auto last = first + operand->size_bits() / 32;
+      out += first == last ? "v" + std::to_string(first)
+                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+      return;
+    }
+    Instruction::append_src_operand(out, operand_index);
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

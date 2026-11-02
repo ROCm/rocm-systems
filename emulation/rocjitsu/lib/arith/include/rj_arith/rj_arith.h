@@ -1,0 +1,13 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#ifndef RJ_ARITH_H_
+#define RJ_ARITH_H_
+
+// IWYU pragma: begin_exports
+#include "detail/rj_arith_common.h"
+#include "detail/rj_arith_fp.h"
+#include "detail/rj_arith_wmma.h"
+// IWYU pragma: end_exports
+
+#endif

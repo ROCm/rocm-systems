@@ -50,8 +50,8 @@ is about the range over which it has been exercised.
 ## Why the current tests cannot catch a production regression
 
 The four kernel-replay perf tests run at 16 to 64 MB of ballast and 4 to 16 dispatches. The largest,
-`test-kernel-replay-perf-scaling`, is 64 MB with 8 dispatches at 5 passes, so it moves about
-**2.5 GB** in total.
+`tests.integration.execute.test-kernel-replay-perf-scaling`, is 64 MB with 8 dispatches at 5 passes,
+so it moves about **2.5 GB** in total.
 
 A deliberately modest real workload -- 1 GB resident, 10,000 dispatches, 5 counter groups -- moves
 about **50 TB**. That is roughly four orders of magnitude more traffic, and it is four orders of

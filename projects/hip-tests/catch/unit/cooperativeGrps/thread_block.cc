@@ -8,12 +8,11 @@
 #include "cg_common_kernels.hh"
 
 #include <cpu_grid.h>
+#include <hip_test_params.hh>
 #include <optional>
 #include <resource_guards.hh>
 #include <utils.hh>
 #include <random>
-
-#include <cmd_options.hh>
 
 /**
  * @addtogroup thread_block thread_block
@@ -296,7 +295,9 @@ template <typename T> static inline T GenerateRandomInteger(const T min, const T
 }
 
 template <bool global_memory, typename T> void ThreadBlockSyncTest() {
-  const auto randomized_run_count = GENERATE(range(0, cmd_options.cg_iterations));
+  const auto cg_iterations = TestParameterStore::instance().getCgIterationsForCurrentLevel();
+
+  const auto randomized_run_count = GENERATE_COPY(range(0, cg_iterations));
   INFO("Run number: " << randomized_run_count + 1);
   const auto blocks = dim3(1, 1, 1);
   const auto threads = GenerateThreadDimensions();

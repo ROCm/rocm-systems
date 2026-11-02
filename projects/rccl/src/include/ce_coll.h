@@ -22,12 +22,11 @@
 // scale-out MPI tests assert on this exact text.
 #define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
-// Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined; sizing each slot to ceArStagingBytes per-rank
-// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
-#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
+// Total payload capacity of one reusable CE AllReduce/ReduceScatter staging slot.
+// Messages larger than this are pipelined.
+#define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
-// Fallback 2-shot max cap for rcclCeAr2ShotMax() when no arch table is present.
+// Fallback 2-shot max cap for rcclCeNonRegMaxTab(table, ncclFuncAllReduce) when no arch table is present.
 // Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
 #ifndef NCCL_CE_AR_TMPBUF_DEFAULT_BYTES
 #define NCCL_CE_AR_TMPBUF_DEFAULT_BYTES (256ULL * 1024 * 1024)
@@ -41,9 +40,9 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
-inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
-  return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
+// Per-rank staging capacity in ceARTmpBuf.
+inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks, size_t stagingBytes) {
+  return nRanks > 0 ? stagingBytes / (size_t)nRanks : 0;
 }
 
 // Per-rank slot size in ceARTmpBuf. The host scatter addresses slots in bytes
@@ -67,6 +66,29 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
   if (targetChunkBytes > slotChunkBytes) targetChunkBytes = slotChunkBytes;
   return alignDown(targetChunkBytes, (size_t)16);
+}
+
+// CE ReduceScatter staging offsets, split out of ncclCeReduceScatter() for host testability;
+// ncclCeAllReduce() still open-codes these same three formulas.
+
+// Offset is keyed by senderRank, not dstRank: every peer reduces the same slot layout.
+inline size_t ncclCeReduceScatterDstSlotOffsetBytes(int slot, int senderRank, int nRanks, size_t slotChunkBytes) {
+  return ((size_t)slot * (size_t)nRanks + (size_t)senderRank) * slotChunkBytes;
+}
+
+// Offset of chunk `chunk` within dstRank's shard in sendbuff (shardBytes = recvcount * eltSize).
+inline size_t ncclCeReduceScatterSrcOffsetBytes(int dstRank, size_t shardBytes, int chunk, size_t chunkBytes) {
+  return (size_t)dstRank * shardBytes + (size_t)chunk * chunkBytes;
+}
+
+// [slot][rank] doorbell index; must match between the local array-index view and the peer byte-offset view.
+inline size_t ncclCeReduceScatterSignalIndex(int slot, int rank, int nRanks) {
+  return (size_t)slot * (size_t)nRanks + (size_t)rank;
+}
+
+// CE collectives that stage through ceARTmpBuf. Its setup is collective, so it runs in the group job, never at launch.
+inline bool ncclCeCollNeedsStaging(ncclFunc_t func) {
+  return func == ncclFuncAllReduce || func == ncclFuncReduceScatter;
 }
 
 enum ncclCeMethodId {
@@ -104,7 +126,8 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
-  size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
+  bool stagingPending;     // set at task append, consumed by the group's SymRegister job
+  size_t ceArMaxBytes;     // RCCL: 2-shot cap from RCCL_CE_AR_2SHOT_MAX_BYTES, else the arch table.
   size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
@@ -143,6 +166,7 @@ struct alignas(16) ncclCeCollArgs {
   void* ceCollProfHandle;    // CE collective profiler event handle
   uint64_t userTag;          // Per-call profiler annotation (0 == untagged)
   bool useDda;
+  bool allReduceFastPath;    // set during launch preparation, before comm launch
   void** ddaPeerBases;      // host-side table of every rank's DDA scratch base pointer
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
@@ -183,6 +207,9 @@ bool ncclHierCeDispatch(struct ncclComm* comm);
 
 ncclResult_t ncclCeInit(struct ncclComm* comm);
 
+// Collective (window registration): call from every rank's group job, never from a single-thread launch loop.
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm);
+
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);
 
 // Intra-LSA-rank barrier.
@@ -217,6 +244,11 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Multi-node hierarchical CE AlltoAllv (RMA rail + intra-node CE).
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing);
+
 // Same gates as AlltoAllv, then ncclCeAvailable (single-node CE; not hier).
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                             bool hasSysmemSegment, bool capturing);
@@ -225,12 +257,29 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
+ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+// True when [recvbuff, recvbuff + totalBytes) lies inside every LSA peer's
+// registration. Pointer-in-window and the local window size are not sufficient:
+// Phase 3 writes the full receive range through peer mappings.
+int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
+
+// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity.
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes);
+
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
 ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                              ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
                              struct ncclDevrWindow* recvWin = nullptr,
                              struct ncclCeCollArgs* profilerArgs = nullptr);
+
+// CE ReduceScatter: scatter → local-reduce into recvbuff (recvcount elements per rank).
+// Uses the same staging buffer as CE AllReduce (ncclCeEnsureAllReduceStaging).
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
+                                 ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                                 struct ncclDevrWindow* recvWin = nullptr,
+                                 struct ncclCeCollArgs* profilerArgs = nullptr);
 
 // Reduce-kernel block count for a per-rank chunk of `chunkElems` elements
 // (chunkElems = count / nRanks). Mirrors the geometry ncclCeLaunchLocalReduce

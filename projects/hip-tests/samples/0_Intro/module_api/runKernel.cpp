@@ -80,6 +80,7 @@ int main() {
   hipFree(Bd);
   delete[] A;
   delete[] B;
+  checkHipErrors(hipModuleUnload(Module));
   checkHipErrors(hipCtxDestroy(context));
   return 0;
 }

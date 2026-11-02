@@ -133,6 +133,40 @@ ncclResult_t ncclCuStreamBatchMemOp(hipStream_t stream, unsigned int numOps,
   return g_cuStreamBatchMemOp(stream, numOps, batchParams);
 }
 
+// Floors for the rest of rma_proxy_launch.cc, reached by ce_coll.cc; omitted where the target compiles the real file.
+#ifndef RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
+ncclResult_t ncclRmaProxyPutBuildOp(struct ncclComm*, struct ncclRmaProxyCtx*, int, bool, struct ncclDevrWindow*,
+                                    size_t, struct ncclDevrWindow*, size_t, size_t, int, int, ncclSignalMode_t,
+                                    struct ncclRmaPutSignalOp*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutBuildOp");
+}
+ncclResult_t ncclRmaProxyPutGroupBuildDesc(struct ncclComm*, struct ncclRmaProxyCtx*, struct ncclKernelPlan*, int,
+                                           struct ncclRmaPutSignalOp**, int, struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupBuildDesc");
+}
+ncclResult_t ncclRmaProxyWaitBuildDesc(struct ncclComm*, struct ncclRmaProxyCtx*, struct ncclKernelPlan*, int, int**,
+                                       int**, int**, struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitBuildDesc");
+}
+int ncclRmaProxyPutGroupStartNumOps(bool) { FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupStartNumOps"); }
+ncclResult_t ncclRmaProxyPutGroupStartParams(struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupStartParams");
+}
+int ncclRmaProxyPutGroupDoneNumOps(bool) { FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupDoneNumOps"); }
+ncclResult_t ncclRmaProxyPutGroupDoneParams(struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyPutGroupDoneParams");
+}
+int ncclRmaProxyWaitNumStreamOps(const struct ncclRmaProxyDesc*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitNumStreamOps");
+}
+ncclResult_t ncclRmaProxyWaitParams(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc*, hipStreamBatchMemOpParams*) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyWaitParams");
+}
+ncclResult_t ncclRmaProxyEnqueueDesc(struct ncclRmaProxyCtx*, struct ncclRmaProxyDesc**) {
+  FailLoudUnfaked("rma_fakes", "ncclRmaProxyEnqueueDesc");
+}
+#endif
+
 void ResetRmaFakes() {
   g_rmaCircularBufEmpty = DefaultRmaCircularBufEmpty;
   g_rmaDestroyDesc      = DefaultRmaDestroyDesc;

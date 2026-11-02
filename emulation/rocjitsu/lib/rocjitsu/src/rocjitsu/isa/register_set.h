@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "util/host_target.h"
 
 #include <algorithm>
 #include <bit>
@@ -23,7 +24,7 @@
 #include <cstring>
 #include <limits>
 
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 #include <immintrin.h>
 #endif
 
@@ -152,7 +153,7 @@ template <> struct WordOps<RegisterSetWordType::StandardUint64> {
   }
 };
 
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 template <> struct WordOps<RegisterSetWordType::Avx2M256> {
   using Word = __m256i;
   static constexpr size_t kWordBits = 256;
@@ -537,7 +538,7 @@ private:
   // Keep the class constant even when this helper is not inlined.
   template <RegClass cls, size_t Words, typename F>
   static void for_each_bits(const Word (&words)[Words], F &f) {
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
     if constexpr (wordType == RegisterSetWordType::Avx2M256) {
       for (size_t word = 0; word < Words; ++word) {
         unsigned lanes = Ops::nonempty_lanes(words[word]);
@@ -780,7 +781,7 @@ RegisterSetT<wordType> &RegisterSetT<wordType>::operator-=(const RegisterSetT &r
   return *this;
 }
 
-#if defined(__AVX2__)
+#if RJ_HOST_HAS_AVX2
 using RegisterSet = RegisterSetT<RegisterSetWordType::Avx2M256>;
 #else
 using RegisterSet = RegisterSetT<RegisterSetWordType::StandardUint64>;
