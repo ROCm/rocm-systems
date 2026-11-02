@@ -17,6 +17,11 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Added
 * New HIP APIs
+    - Graph Management: added graph and graph-node identifier queries.
+      * `hipGraphNodeGetLocalId` returns a node's graph-local ID.
+      * `hipGraphNodeGetToolsId` returns the node ID used by profiling tools.
+      * `hipGraphGetId` returns a graph ID.
+      * `hipGraphExecGetId` returns an executable graph ID.
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
     - Library Management: support for API parity with corresponding CUDA API.

@@ -3401,3 +3401,23 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
   return hip::GetHipDispatchTable()->hipKernelSetCacheConfig_fn(kernel, config, dev);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetLocalId_fn(node, nodeId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphNodeGetToolsId_fn(node, toolsId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphGetId_fn(graph, graphId);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipGraphExecGetId_fn(graphExec, graphId);
+  CATCH;
+}

@@ -8034,6 +8034,58 @@ static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_
 }
 
 // Generated shim
+static hipError_t capture_hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+  hipError_t r = g_real_table.hipGraphNodeGetLocalId_fn(node, nodeId);
+  if (r == hipSuccess) {
+    hrr_args_hipGraphNodeGetLocalId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.node = reinterpret_cast<uint64_t>(node);
+    a.nodeId = reinterpret_cast<uint64_t>(nodeId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHNODEGETLOCALID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+  hipError_t r = g_real_table.hipGraphNodeGetToolsId_fn(node, toolsId);
+  if (r == hipSuccess) {
+    hrr_args_hipGraphNodeGetToolsId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.node = reinterpret_cast<uint64_t>(node);
+    a.toolsId = reinterpret_cast<uint64_t>(toolsId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHNODEGETTOOLSID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+  hipError_t r = g_real_table.hipGraphGetId_fn(graph, graphId);
+  if (r == hipSuccess) {
+    hrr_args_hipGraphGetId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.graph = reinterpret_cast<uint64_t>(graph);
+    a.graphId = reinterpret_cast<uint64_t>(graphId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHGETID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+  hipError_t r = g_real_table.hipGraphExecGetId_fn(graphExec, graphId);
+  if (r == hipSuccess) {
+    hrr_args_hipGraphExecGetId a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.graphExec = reinterpret_cast<uint64_t>(graphExec);
+    a.graphId = reinterpret_cast<uint64_t>(graphId);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPGRAPHEXECGETID, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8773,6 +8825,10 @@ void hip_capture_build_table() {
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
   g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
   g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
+  g_cap_table.hipGraphNodeGetLocalId_fn = capture_hipGraphNodeGetLocalId;
+  g_cap_table.hipGraphNodeGetToolsId_fn = capture_hipGraphNodeGetToolsId;
+  g_cap_table.hipGraphGetId_fn = capture_hipGraphGetId;
+  g_cap_table.hipGraphExecGetId_fn = capture_hipGraphExecGetId;
 }
 
 void hip_capture_build_compiler_table() {

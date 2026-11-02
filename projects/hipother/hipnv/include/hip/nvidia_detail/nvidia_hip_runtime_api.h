@@ -30,6 +30,7 @@
 #define CUDA_12030 12030
 #define CUDA_12080 12080
 #define CUDA_13000 13000
+#define CUDA_13010 13010
 
 #ifdef __cplusplus
 extern "C" {
@@ -5115,6 +5116,38 @@ inline static hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
 
 inline static hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
   return hipCUDAErrorTohipError(cudaGraphNodeGetType(node, pType));
+}
+
+inline static hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetLocalId(node, nodeId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetToolsId(node, toolsId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphGetId(graph, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphExecGetId(graphExec, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
 }
 
 inline static hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
