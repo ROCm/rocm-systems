@@ -56,7 +56,7 @@ endif()
 
 # rocjpeg Version
 # NOTE: package version and rocjpeg_version.h is generated with this version
-set(VERSION "1.11.0")
+set(VERSION "1.13.0")
 
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
@@ -112,7 +112,7 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     endif()
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
-    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250;gfx1250-strict")
+    set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250;gfx1250-strict")
     if(HAS_ROCM_CHECK_TARGET_IDS)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
@@ -158,17 +158,11 @@ endif()
 if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # HIP
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
-  # LibVA - headers always needed for VA-API type definitions.
-  # On Linux TheRock builds, libva is loaded at runtime via dlopen with
-  # RTLD_LOCAL | RTLD_DEEPBIND (see rocjpeg_vaapi_loader.cpp) to prevent symbol
-  # collision with any system libva.so.2 in the same process; no direct
-  # link-time dependency is needed in that case.
-  # On non-TheRock builds, link directly as before.
+  # LibVA - headers only, needed for VA-API type definitions.
+  # libva is loaded at runtime via dlopen with RTLD_LOCAL | RTLD_DEEPBIND
+  # (see rocjpeg_vaapi_loader.cpp) to prevent symbol collision with any system
+  # libva.so.2 in the same process; no direct link-time dependency is needed.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT (USING_THE_ROCK AND UNIX))
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
-  endif()
   # DRM_AMDGPU
   include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
   set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
@@ -209,15 +203,10 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
   set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
-  if(USING_THE_ROCK)
-    set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
-    if(UNIX)
-      # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
-      # dlopen is Linux-only.
-      target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
-      target_link_libraries(${PROJECT_NAME} dl)
-    endif()
-  endif()
+  set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
+  # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
+  target_link_libraries(${PROJECT_NAME} dl)
 
   # rocprofiler
   if(rocprofiler-register_FOUND)
@@ -281,6 +270,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   install(FILES samples/jpegDecodeBatched/CMakeLists.txt samples/jpegDecodeBatched/jpegdecodebatched.cpp samples/jpegDecodeBatched/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeBatched)
   install(FILES samples/jpegDecodeAsync/CMakeLists.txt samples/jpegDecodeAsync/jpegdecodeasync.cpp samples/jpegDecodeAsync/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeAsync)
   install(FILES samples/jpegDecodeBatchedAsync/CMakeLists.txt samples/jpegDecodeBatchedAsync/jpegdecodebatchedasync.cpp samples/jpegDecodeBatchedAsync/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeBatchedAsync)
+  install(FILES samples/jpegDecodeCaps/CMakeLists.txt samples/jpegDecodeCaps/jpegdecodecaps.cpp samples/jpegDecodeCaps/README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples/jpegDecodeCaps)
   install(FILES samples/rocjpeg_samples_utils.h DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples)
   install(DIRECTORY data/images DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
   # install license information - {ROCM_PATH}/share/doc/rocjpeg
@@ -440,6 +430,7 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     rocjpeg_add_test_ext(jpegdecodeperf          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodePerf)
     rocjpeg_add_test_ext(jpegdecodeasync         ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeAsync)
     rocjpeg_add_test_ext(jpegdecodebatchedasync  ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatchedAsync)
+    rocjpeg_add_test_ext(jpegdecodecaps          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeCaps)
   endif()
 
   # make test with CTest

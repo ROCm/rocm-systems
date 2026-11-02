@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import re
+
+import yaml
 
 from common import iter_group_configs, load_definitions, parse_size_string
 
@@ -44,6 +47,13 @@ def parse_args():
         help="Target is an Address Sanitizer (ASAN) build. Test cases that "
         "list 'asan' in their 'disabled' or 'unsupported' field are skipped.",
     )
+    parser.add_argument(
+        "--categories",
+        default=None,
+        help="Path to test_categories.yaml. When given, each test case gets a "
+        "tag for every category whose levels it belongs to, and the category "
+        "definitions are written into the parameter header.",
+    )
     return parser.parse_args()
 
 
@@ -60,10 +70,28 @@ def _skip_targets(field):
     return field
 
 
+def load_categories(categories_path):
+    """Load test_categories.yaml as an ordered {category: set(levels)} map."""
+    if not categories_path:
+        return {}
+
+    with open(categories_path) as file:
+        config = yaml.safe_load(file) or {}
+
+    categories = {}
+    for name, entry in (config.get("test_categories") or {}).items():
+        levels = (entry or {}).get("test_levels")
+        if levels:
+            categories[name] = set(levels)
+    return categories
+
+
 def create_test_definition(
-    group, case_name, case_config, platform, os_name, arch, asan=False
+    group, case_name, case_config, platform, os_name, arch, categories, asan=False
 ):
-    level = case_config.get("level", 2)
+    levels = case_config.get("level", [0, 1, 2])
+    if not isinstance(levels, list):
+        levels = [levels]
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
     unsupported = case_config.get("unsupported", [])
@@ -76,19 +104,34 @@ def create_test_definition(
     # depend on.
     skip_targets = _skip_targets(disabled) + _skip_targets(unsupported)
 
+    # Targets in 'disabled' or 'unsupported' that apply to this build:
+    #   {platform}_{os_name}    amd_linux, nvidia_windows, ...
+    #   {arch}                  any platform and OS
+    #   {os_name}_{arch}        linux_<arch>, windows_<arch>
+    #   asan                    ASAN builds only
+    disable_keys = {f"{platform}_{os_name}", arch, f"{os_name}_{arch}"}
+    if asan:
+        disable_keys.add("asan")
+
     tags_str = ""
 
     for tag in tags:
         tags_str += f"[{tag}]"
-    tags_str += f"[level_{level}]"
+    for level in levels:
+        tags_str += f"[level_{level}]"
+
+    # A category covers a test case when it covers any of its levels, so the
+    # categories nest the way TheRock expects.
+    level_set = set(levels)
+    for category, category_levels in categories.items():
+        if category_levels & level_set:
+            tags_str += f"[{category}]"
+
     tags_str += f"[{group}]"
 
-    if (
-        f"{platform}_{os_name}" in skip_targets
-        or arch in skip_targets
-        or (asan and "asan" in skip_targets)
-    ):
-        # Disabled on this platform (e.g. amd_linux) or arch (e.g. gfx1260).
+    if any(entry in disable_keys for entry in skip_targets):
+        # Disabled for this build - see disable_keys above for the spellings
+        # a 'disabled'/'unsupported' target may use.
         # Use the [disabled] tag (no leading dot) so it is visible in --list-tests
         # and included in a bare ./exe run.
         # CTest registers these as DISABLED TRUE (skipped by default).
@@ -106,11 +149,12 @@ def create_test_definition(
     return f'#define {case_name} "{case_name}", "{tags_str}"'
 
 
-def generate_parameter_header(cmd_options, output_path):
-    """Generate C++ header with compile-time parameter constants.
-    
+def generate_parameter_header(cmd_options, categories, output_path):
+    """Generate C++ header with compile-time parameter constants and test categories.
+
     Args:
         cmd_options: Dict of level_name -> parameters from definitions.yaml
+        categories: Dict of category name -> set of levels from test_categories.yaml
         output_path: Path to write hip_test_parameters.hh
     """
     with open(output_path, 'w') as f:
@@ -121,6 +165,7 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("#include <array>\n")
         f.write("#include <vector>\n")
         f.write("#include <cstddef>\n")
+        f.write("#include <cstdint>\n")
         f.write("#include <string>\n")
         f.write("#include <map>\n\n")
         
@@ -156,14 +201,26 @@ def generate_parameter_header(cmd_options, output_path):
             if "warmups" in options:
                 f.write(f"inline constexpr int {level_name}_warmups = {options['warmups']};\n\n")
             
-            # Max memory
-            if "max_memory" in options:
-                max_mem = parse_size_string(str(options["max_memory"]))
-                f.write(f"inline constexpr size_t {level_name}_max_memory = {max_mem};\n\n")
-            
-            # Reduction factor
-            if "reduction_factor" in options:
-                f.write(f"inline constexpr double {level_name}_reduction_factor = {options['reduction_factor']};\n\n")
+            # CG iterations
+            if "cg_iterations" in options:
+                f.write(f"inline constexpr int {level_name}_cg_iterations = {options['cg_iterations']};\n\n")
+
+            # Math accuracy iterations
+            if "math_accuracy_iterations" in options:
+                f.write(f"inline constexpr uint64_t {level_name}_math_accuracy_iterations = {options['math_accuracy_iterations']}ULL;\n\n")
+
+            # Math accuracy max memory percentage
+            if "math_accuracy_max_memory_percentage" in options:
+                f.write(f"inline constexpr int {level_name}_math_accuracy_max_memory_percentage = {options['math_accuracy_max_memory_percentage']};\n\n")
+
+            # Math max memory
+            if "math_max_memory" in options:
+                math_max_mem = parse_size_string(str(options["math_max_memory"]))
+                f.write(f"inline constexpr size_t {level_name}_math_max_memory = {math_max_mem};\n\n")
+
+            # Math reduction factor
+            if "math_reduction_factor" in options:
+                f.write(f"inline constexpr double {level_name}_math_reduction_factor = {options['math_reduction_factor']};\n\n")
         
         # Generate LevelParameters struct and initialization function
         f.write(f"// {'=' * 76}\n")
@@ -175,8 +232,11 @@ def generate_parameter_header(cmd_options, output_path):
         f.write("    std::vector<int> block_sizes;\n")
         f.write("    int iterations = 0;\n")
         f.write("    int warmups = 0;\n")
-        f.write("    size_t max_memory = 0;\n")
-        f.write("    double reduction_factor = 0.0;\n")
+        f.write("    int cg_iterations = 0;\n")
+        f.write("    uint64_t math_accuracy_iterations = 0;\n")
+        f.write("    int math_accuracy_max_memory_percentage = 0;\n")
+        f.write("    size_t math_max_memory = 0;\n")
+        f.write("    double math_reduction_factor = 0.0;\n")
         f.write("};\n\n")
         
         f.write("inline std::map<std::string, LevelParameters> initializeLevelParameters() {\n")
@@ -191,17 +251,46 @@ def generate_parameter_header(cmd_options, output_path):
                     f"{level_name}_block_sizes.end()),\n")
             f.write(f"        {level_name}_iterations,\n")
             f.write(f"        {level_name}_warmups,\n")
-            f.write(f"        {level_name}_max_memory,\n")
-            f.write(f"        {level_name}_reduction_factor\n")
+            f.write(f"        {level_name}_cg_iterations,\n")
+            f.write(f"        {level_name}_math_accuracy_iterations,\n")
+            f.write(f"        {level_name}_math_accuracy_max_memory_percentage,\n")
+            f.write(f"        {level_name}_math_max_memory,\n")
+            f.write(f"        {level_name}_math_reduction_factor\n")
             f.write(f"    }};\n\n")
         
         f.write("    return params;\n")
         f.write("}\n\n")
-        
-        f.write("} // namespace TestParameters\n")
-    
+
+        f.write("} // namespace TestParameters\n\n")
+
+        # Test categories
+        def category_identifier(name):
+            return re.sub(r"[^0-9a-zA-Z_]", "_", name) + "_levels"
+
+        f.write(f"// {'=' * 76}\n")
+        f.write("// TEST CATEGORIES - from test_categories.yaml\n")
+        f.write(f"// {'=' * 76}\n\n")
+        f.write("namespace TestCategories {\n\n")
+
+        for name, levels in categories.items():
+            values = ", ".join(str(level) for level in sorted(levels))
+            f.write(f"inline constexpr std::array<int, {len(levels)}> "
+                    f"{category_identifier(name)} = {{{values}}};\n")
+        f.write("\n")
+
+        f.write("inline std::map<std::string, std::vector<int>> initializeTestCategories() {\n")
+        f.write("    std::map<std::string, std::vector<int>> categories;\n\n")
+        for name in categories:
+            f.write(f'    categories["{name}"] = std::vector<int>('
+                    f"{category_identifier(name)}.begin(), "
+                    f"{category_identifier(name)}.end());\n")
+        f.write("\n    return categories;\n")
+        f.write("}\n\n")
+        f.write("} // namespace TestCategories\n")
+
     print(f"[parse_config] Generated parameter header: {output_path}")
     print(f"[parse_config]   Levels defined: {', '.join(levels_found)}")
+    print(f"[parse_config]   Categories defined: {', '.join(categories) or 'none'}")
 
 
 def main():
@@ -213,6 +302,9 @@ def main():
     arch = args.arch
     header_path = args.header_path
     param_header_path = args.param_header_path
+    asan = args.asan
+
+    categories = load_categories(args.categories)
 
     test_macros = []
 
@@ -220,7 +312,8 @@ def main():
         for case_name, case_config in cases.items():
             test_macros.append(
                 create_test_definition(
-                    group, case_name, case_config, platform, os_name, arch, args.asan
+                    group, case_name, case_config, platform, os_name, arch,
+                    categories, asan
                 )
             )
 
@@ -239,7 +332,7 @@ def main():
         definitions = load_definitions(configs_path)
         cmd_options = definitions.get("cmd_options", {})
         if cmd_options:
-            generate_parameter_header(cmd_options, param_header_path)
+            generate_parameter_header(cmd_options, categories, param_header_path)
         else:
             print("[parse_config] Warning: No cmd_options found in definitions.yaml")
 

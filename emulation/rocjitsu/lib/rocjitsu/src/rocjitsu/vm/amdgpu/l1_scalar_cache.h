@@ -21,7 +21,8 @@ class L2Cache;
 /// scalar loads and stores. Cacheable scalar stores allocate in K$, update the
 /// resident bytes, and write those bytes through to L2. K$ lines remain clean,
 /// so eviction and `s_dcache_wb` never publish a cached full line.
-/// `s_dcache_inv` invalidates all resident lines.
+/// `s_dcache_inv` invalidates all resident lines; `s_dcache_discard`
+/// invalidates only the addressed line(s) for one VMID.
 ///
 /// CDNA3 K$ geometry: 64B lines, 64 sets, 4-way = 16KB.
 class L1ScalarCache {
@@ -30,7 +31,9 @@ public:
   static constexpr uint32_t NUM_SETS = 64;
   static constexpr uint32_t ASSOCIATIVITY = 4;
 
-  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  using CacheStore =
+      simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY,
+                     simdojo::LRUPolicy<NUM_SETS, ASSOCIATIVITY>, /*LazyStorage=*/true>;
 
   explicit L1ScalarCache(L2Cache *l2 = nullptr);
   ~L1ScalarCache();
@@ -74,6 +77,10 @@ public:
 
   /// @brief Invalidate all clean K$ lines (s_dcache_inv).
   void invalidate_all();
+
+  /// @brief Handle s_dcache_discard[_x2] without fetching or writing data.
+  /// @param num_lines Number of consecutive 64-byte lines to invalidate (one or two).
+  void discard(uint64_t addr, uint32_t num_lines, uint32_t vmid = 0);
 
 private:
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);

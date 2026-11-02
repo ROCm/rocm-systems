@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 //
-// Minimal declarations for the c10 ThreadLocalDebugInfo ABI used to publish
-// Python user-scope stacks to autograd workers.
+// Minimal declarations for the c10 thread-local debug-info API used to carry
+// the Python autograd launcher thread ID into RecordFunction worker callbacks.
 
 #pragma once
 
@@ -15,18 +15,18 @@
 namespace c10
 {
 
-struct DebugInfoKind
+class DebugInfoKind
 {
+public:
     explicit constexpr DebugInfoKind(const std::string_view* value) noexcept
         : value_{value}
     {
     }
 
+private:
     const std::string_view* value_ = nullptr;
 };
 
-// These assertions validate the replacement declaration, not PyTorch itself.
-// test_torch_trace_collector.cpp checks the constants against the real headers.
 static_assert(sizeof(DebugInfoKind) == torch_abi::kDebugInfoKindSize);
 static_assert(alignof(DebugInfoKind) == torch_abi::kDebugInfoKindAlignment);
 static_assert(std::is_trivially_copyable_v<DebugInfoKind>);
@@ -48,25 +48,8 @@ class ThreadLocalDebugInfo
 {
 public:
     static DebugInfoBase* get(DebugInfoKind kind);
+    static void           _push(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+    static std::shared_ptr<DebugInfoBase> _pop(DebugInfoKind kind);
 };
-
-class DebugInfoGuard
-{
-public:
-    DebugInfoGuard(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
-    ~DebugInfoGuard();
-
-    DebugInfoGuard(const DebugInfoGuard&)            = delete;
-    DebugInfoGuard(DebugInfoGuard&&)                 = delete;
-    DebugInfoGuard& operator=(const DebugInfoGuard&) = delete;
-    DebugInfoGuard& operator=(DebugInfoGuard&&)      = delete;
-
-private:
-    bool                                  active_    = false;
-    std::shared_ptr<ThreadLocalDebugInfo> prev_info_ = nullptr;
-};
-
-static_assert(sizeof(DebugInfoGuard) == torch_abi::kDebugInfoGuardSize);
-static_assert(alignof(DebugInfoGuard) == torch_abi::kDebugInfoGuardAlignment);
 
 }  // namespace c10

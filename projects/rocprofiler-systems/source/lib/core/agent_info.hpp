@@ -200,19 +200,7 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
                             ? agent_data.logical_node_type_id
                             : -1;
 
-    // Normalize JSON string by escaping quotes to prepare for SQL insertion
-    auto const normalize_json_string = [](nlohmann::json& json_data) {
-        auto   json_str = json_data.dump();
-        size_t pos      = 0;
-        while((pos = json_str.find('"', pos)) != std::string::npos)
-        {
-            json_str.replace(pos, 1, "\"\"");
-            pos += 2;
-        }
-        return json_str;
-    };
-
-    return normalize_json_string(data);
+    return data.dump();
 }
 
 }  // namespace rocprofsys::agent_info

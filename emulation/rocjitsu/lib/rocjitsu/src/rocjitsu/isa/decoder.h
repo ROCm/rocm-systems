@@ -30,9 +30,9 @@ struct IsaExecutionBackend;
 /// By default, decoded instructions are heap-allocated.  Call
 /// ``enable_pool()`` to route Instruction::operator new/delete through
 /// the decoder's O(1) free-list pool.  Only enable the pool when all
-/// decoded instructions will be deleted on the bound thread before the decoder
-/// is destroyed. CU execution uses heap storage because decoded instructions
-/// can survive issue quanta and move between workers.
+/// decoded instructions will be deleted on the bound thread with this pool
+/// active, before the decoder is destroyed. CU execution uses heap storage
+/// because decoded instructions can survive issue quanta and move between workers.
 class Decoder {
 public:
   using Pool = util::ArenaAlloc<512, 128>;
@@ -96,16 +96,22 @@ public:
 
   /// @brief Enable pool allocation for decoded instructions.
   ///
-  /// When active, Instruction::operator new/delete route through the
-  /// decoder's pool for O(1) alloc/free.  Only enable when the caller
-  /// guarantees all instructions will be deleted on the bound thread
-  /// before the decoder is destroyed. CU execution uses heap storage.
+  /// @details Allocate the pool on first use and retain it across disable/enable
+  /// cycles. Production decoders use heap storage and never enable pooling.
+  /// Instruction::operator new/delete route through the active pool for O(1)
+  /// alloc/free. Pooled instructions must be deleted on the bound thread while
+  /// this pool is active, before the decoder is destroyed.
+  /// @throws std::bad_alloc if the initial pool allocation fails.
   void enable_pool() {
+    if (!pool_)
+      pool_ = std::make_unique<Pool>();
     activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
-                  [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, &pool_);
+                  [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, pool_.get());
   }
 
-  /// @brief Disable pool allocation; future allocations use the heap.
+  /// @brief Disable this pool's allocator hooks without releasing its storage.
+  /// @details Re-enable this pool before deleting any outstanding pooled
+  /// instructions. Later enable_pool() calls reuse the retained pool.
   void disable_pool();
 
 protected:
@@ -116,7 +122,10 @@ protected:
   static Result validate_instruction_operands(const Instruction &inst,
                                               const DecodeErrorEmitter &emit_error);
 
-  Pool pool_;
+private:
+  friend class DecoderPoolTestAccess;
+
+  std::unique_ptr<Pool> pool_;
 };
 
 /// @brief ISA-parameterized decoder.

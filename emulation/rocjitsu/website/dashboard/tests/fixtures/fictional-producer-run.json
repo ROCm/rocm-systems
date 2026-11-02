@@ -1,0 +1,113 @@
+{
+  "benchmark_results": [
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.rmsnorm_bf16",
+      "name": "BF16 RMSNorm",
+      "operation": "RMSNorm",
+      "problem": {
+        "columns": 4096,
+        "dtype": "bf16",
+        "epsilon": 1e-05,
+        "rows": 128
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1e-09
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.gemm_bf16_aligned",
+      "name": "Aligned BF16 GEMM",
+      "operation": "GEMM",
+      "problem": {
+        "dtype": "bf16",
+        "k": 512,
+        "m": 256,
+        "n": 256
+      },
+      "status": "completed",
+      "suite": "Triton",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1e-09
+      ]
+    },
+    {
+      "error": null,
+      "exit_code": 0,
+      "id": "triton.gpt_oss_attention_bf16",
+      "name": "GPT-OSS BF16 attention",
+      "operation": "Attention",
+      "problem": {
+        "batch": 1,
+        "dtype": "bf16",
+        "head_dimension": 64,
+        "key_value_heads": 8,
+        "query_heads": 64,
+        "sequence": 128,
+        "window": 128
+      },
+      "status": "completed",
+      "suite": "GPT-OSS",
+      "target": "gfx950",
+      "thread_policy": "default",
+      "timing_results_s": [
+        1e-09
+      ]
+    }
+  ],
+  "execution_summary": {
+    "benchmark_suite": "nightly",
+    "finished_at": "2026-10-21T18:18:59.920298Z",
+    "samples": 1,
+    "timeout_seconds": 300,
+    "timestamp": "2026-10-21T18:18:59.916698Z",
+    "wall_time_s": 0.003604473080486059,
+    "warmups": 0
+  },
+  "provenance": {
+    "auxiliary": {
+      "python": "3.12.0",
+      "rocm-sdk-devel": "7.2.0",
+      "torch": "2.10.0",
+      "triton": "3.6.0"
+    },
+    "corpus": {
+      "corpus_commit_sha": "8172b0ad3099e1836923a62d51abe65e106b5382",
+      "corpus_commit_timestamp": "2026-10-21T16:58:06Z"
+    },
+    "machine": {
+      "cpu": "test-cpu",
+      "hostname": "benchmark-host",
+      "kernel": "6.14.0",
+      "platform": "Linux-test"
+    },
+    "rocjitsu": {
+      "rocjitsu_commit_sha": "2a8402921a63744fa137a21963bfab8a8cc2d3cc",
+      "rocjitsu_commit_timestamp": "2026-10-21T18:18:59Z",
+      "rocm_sdk_version": "7.2.0"
+    }
+  },
+  "publication": {
+    "id": null,
+    "machine_label": null,
+    "source": {
+      "base": null,
+      "branch": null,
+      "message": null,
+      "pull_request": null
+    },
+    "tensile_commit_sha": null,
+    "trigger": null,
+    "workflow_commit_sha": null
+  },
+  "schema_version": 1
+}

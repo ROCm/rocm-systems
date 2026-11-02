@@ -39,11 +39,11 @@ TEST(domain_registry_test, find_descriptor_finds_buffered_domain_case_insensitiv
 
 TEST(domain_registry_test, find_descriptor_finds_callback_domain_case_insensitively)
 {
-    const domain_descriptor* descriptor = sut_t::find_descriptor("CODE_OBJECT");
+    const domain_descriptor* descriptor = sut_t::find_descriptor("HIP_RUNTIME_API");
 
     ASSERT_NE(descriptor, nullptr);
-    EXPECT_EQ(descriptor->name, "code_object");
-    EXPECT_EQ(descriptor->id, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
+    EXPECT_EQ(descriptor->name, "hip_runtime_api");
+    EXPECT_EQ(descriptor->id, mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API);
     EXPECT_EQ(descriptor->mode, collection_mode::callback);
 }
 
@@ -70,10 +70,11 @@ TEST(domain_registry_test, get_buffered_throws_runtime_error_for_unknown_domain_
 
 TEST(domain_registry_test, get_callback_returns_definition_matching_domain_id)
 {
-    const auto& definition = sut_t::get_callback(mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
+    const auto& definition =
+        sut_t::get_callback(mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API);
 
-    EXPECT_EQ(definition.meta.name, "code_object");
-    EXPECT_EQ(definition.meta.id, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
+    EXPECT_EQ(definition.meta.name, "hip_runtime_api");
+    EXPECT_EQ(definition.meta.id, mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API);
 }
 
 TEST(domain_registry_test, get_callback_throws_runtime_error_for_unknown_domain_id)

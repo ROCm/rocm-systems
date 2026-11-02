@@ -8,21 +8,24 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-import plotext as plt
 import plotly.colors as pcolors
 import plotly.graph_objects as go
-from dash import dcc, html
 
 from roofline.roofline_frame import canonical_frame
 from roofline.roofline_hover import (
+    KernelDispatchStats,
+    KernelDurationStats,
     build_compute_peak_hover,
     build_kernel_hover_template,
     build_roof_hover,
+    format_bandwidth_pair,
     format_hover_number,
+    truncate_kernel_name,
     wrap_hover_name,
 )
 from roofline.roofline_html import (
     ALL_PEAKS_VALUE,
+    LIMITING_PEAK_VALUE,
     ROOF_EXTRAP_MAX_AI,
     ROOF_EXTRAP_MIN_AI,
     RooflineViewModel,
@@ -34,7 +37,6 @@ from roofline.run_benchmark import (
 from utils.logger import (
     console_debug,
     console_error,
-    console_log,
     console_warning,
     demarcate,
 )
@@ -46,23 +48,22 @@ from utils.roofline_calc import (
     OpsSupport,
     construct_roof,
     machine_ceilings,
-    sanitize_mem_level,
+    roofline_mem_levels,
 )
 from utils.specs import MachineSpecs
 from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
-DEFAULT_PEAK = "HBM"
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
-TRACE_COLORS: dict[str, dict[str, str]] = {
-    "l0": {"html": "#F0E442", "cli": "brown+"},
-    "l1": {"html": "#0072B2", "cli": "red+"},
-    "l2": {"html": "#009E73", "cli": "green+"},
-    "hbm": {"html": "#D55E00", "cli": "blue+"},
-    "lds": {"html": "#E69F00", "cli": "orange+"},
-    "valu": {"html": "#CC79A7", "cli": "white"},
-    "matrix_ops": {"html": "#56B4E9", "cli": "magenta+"},
+TRACE_COLORS: dict[str, str] = {
+    "l0": "#F0E442",
+    "l1": "#0072B2",
+    "l2": "#009E73",
+    "hbm": "#D55E00",
+    "lds": "#E69F00",
+    "valu": "#CC79A7",
+    "matrix_ops": "#56B4E9",
 }
 
 # Dense roof sampling so hover hits a vertex anywhere on the line.
@@ -70,8 +71,8 @@ _ROOF_SAMPLES_PER_DECADE = 48
 _ROOF_SAMPLES_MIN = 64
 _ROOF_SAMPLES_MAX = 800
 
-# The precision the standalone page opens with when the run benchmarked it.
-_PREFERRED_DEFAULT_PRECISION = "FP32"
+# The precisions the standalone page opens with when the run benchmarked them.
+_PREFERRED_DEFAULT_PRECISIONS = ["FP32", "FP16", "FP8"]
 
 
 def _figure_class(dtype: str) -> str:
@@ -80,11 +81,10 @@ def _figure_class(dtype: str) -> str:
 
 
 def _default_precisions(precisions: list[str]) -> list[str]:
-    """The precisions the page opens with: FP32 when the run has it, else the
-    first datatype plotted."""
-    if _PREFERRED_DEFAULT_PRECISION in precisions:
-        return [_PREFERRED_DEFAULT_PRECISION]
-    return precisions[:1]
+    """The precisions the page opens with: FP32/FP16/FP8 when the run has
+    them, else the first datatype plotted."""
+    defaults = [p for p in _PREFERRED_DEFAULT_PRECISIONS if p in precisions]
+    return defaults if defaults else precisions[:1]
 
 
 def _roof_clipped_to_peak(
@@ -114,15 +114,13 @@ def _roof_clipped_to_peak(
     return xs, ys
 
 
-def get_color(category: str, backend: str = "html") -> str:
+def get_color(category: str) -> str:
     key = category.removeprefix("ai_").lower()
 
     if key not in TRACE_COLORS:
         raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-    if backend not in TRACE_COLORS[key]:
-        raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
-    return TRACE_COLORS[key][backend]
+    return TRACE_COLORS[key]
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:
@@ -339,7 +337,7 @@ class Roofline:
     def _collect_compute_peaks(self, ops_flops: str) -> list[tuple[str, float]]:
         """Read every stacked datatype's ceilings and label each peak with it."""
         peaks: list[tuple[str, float]] = []
-        for dt in self.__run_parameters.get("roofline_data_type", []):
+        for dt in SUPPORTED_DATATYPES.get(self.__mspec.gpu_arch, {}):
             dt = str(dt)
             if _figure_class(dt) != ops_flops or not self._datatype_supported(dt):
                 continue
@@ -350,47 +348,31 @@ class Roofline:
                     peaks.append((f"{dt} {label}", peak))
         return peaks
 
-    def _roof_value_at(
-        self,
-        ai_value: float,
-        cache_key: str,
-        ceiling_data: dict[str, Any],
-        cap: float,
-    ) -> Optional[float]:
-        """Roofline throughput (peak) at this AI for the point's memory level:
-        min(bandwidth * AI, active compute cap); None when unavailable."""
-        bandwidth = self._peak_value(ceiling_data, cache_key)
-        if not bandwidth or ai_value <= 0:
-            return None
-        roof = bandwidth * ai_value
-        if cap != float("inf"):
-            roof = min(roof, cap)
-        return roof if roof > 0 else None
-
     def _determine_kernel_limiter(
         self,
         level_ai: dict[str, float],
         ceiling_data: dict[str, Any],
-        compute_cap: float,
-        compute_cap_label: str,
-    ) -> str:
-        """Name the specific binding roof for a kernel: the roof with the lowest
-        achievable performance at the kernel's operating point. The compute
-        candidate is the envelope cap the diagonals are actually drawn to, so
-        the limiter agrees with the drawn roof and with the percent of roofline
-        the tooltip reports."""
-        candidates: list[tuple[float, str]] = []
+        performance: float,
+        compute_peaks: list[tuple[str, float]],
+    ) -> tuple[str, str, Optional[float]]:
+        candidates: list[tuple[float, str, str]] = []
         for level_name, ai_value in level_ai.items():
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
             if bandwidth and ai_value > 0:
-                candidates.append((bandwidth * ai_value, level_name))
+                roof = bandwidth * ai_value
+                if roof >= performance:
+                    candidates.append((roof, level_name, "Memory"))
 
-        if compute_cap != float("inf"):
-            candidates.append((compute_cap, compute_cap_label))
+        for label, peak in compute_peaks:
+            if peak >= performance:
+                candidates.append((peak, label, "Compute"))
 
         if not candidates:
-            return "Unknown"
-        return min(candidates, key=lambda candidate: candidate[0])[1]
+            return "Unknown", "Unknown", None
+        roof_value, label, category = min(
+            candidates, key=lambda candidate: candidate[0]
+        )
+        return label, category, roof_value
 
     def _build_kernel_traces(
         self,
@@ -406,28 +388,32 @@ class Roofline:
         kernels_model: list[dict[str, Any]] = []
 
         counts = self.__ai_data.get("counts", [])
-        total_time = self.__ai_data.get("totalTime", [])
-        pct_runtime = self.__ai_data.get("pctRuntime", [])
+        kernel_time = self.__ai_data.get("kernelTime", [])
+        kernel_pct_runtime = self.__ai_data.get("kernelPctRuntime", [])
+        total_app_time = self.__ai_data.get("totalAppTime")
+        total_dispatches = self.__ai_data.get("totalAppDispatches")
         time_unit = self.__ai_data.get("timeUnit", "")
-        compute_cap, compute_cap_label = self._envelope_compute_cap(compute_peaks)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
-            points, level_ai = self._build_kernel_points(
+            points, level_ai, bandwidth_html = self._build_kernel_points(
                 kernel_index=kernel_index,
                 sanitized_cache_hierarchy=sanitized_cache_hierarchy,
                 ceiling_data=ceiling_data,
-                compute_cap=compute_cap,
             )
             if not points:
                 continue
 
             color, count_val, time_val, pct_val = (
                 values[kernel_index] if kernel_index < len(values) else None
-                for values in (kernel_colors, counts, total_time, pct_runtime)
+                for values in (kernel_colors, counts, kernel_time, kernel_pct_runtime)
             )
-            limiter = self._determine_kernel_limiter(
-                level_ai, ceiling_data, compute_cap, compute_cap_label
+            limiter, limiter_category, roof_value = self._determine_kernel_limiter(
+                level_ai, ceiling_data, points[0]["perf"], compute_peaks
             )
+            limiting_peak = self._resolve_limiting_peak(
+                limiter, limiter_category, points
+            )
+            self._attach_kernel_hover_cells(points, roof_value, bandwidth_html)
 
             traces.append(
                 go.Scatter(
@@ -443,37 +429,66 @@ class Roofline:
                     ),
                     customdata=[point["hoverCells"] for point in points],
                     hovertemplate=build_kernel_hover_template(
-                        name_html=wrap_hover_name(kernel_name),
+                        name_html=wrap_hover_name(truncate_kernel_name(kernel_name)),
                         limiter=limiter,
-                        count=count_val,
-                        total_time=time_val,
-                        time_unit=time_unit,
-                        pct_runtime=pct_val,
+                        limiter_category=limiter_category,
+                        dispatches=KernelDispatchStats(
+                            kernel=count_val, total=total_dispatches
+                        ),
+                        duration=KernelDurationStats(
+                            kernel=time_val, total=total_app_time, unit=time_unit
+                        ),
                         ops_flops=ops_flops,
                     ),
                 )
             )
             kernels_model.append({
                 "name": kernel_name,
+                "label": truncate_kernel_name(kernel_name),
                 "color": color,
                 "points": points,
                 "pctRuntime": pct_val,
+                "limitingPeak": limiting_peak,
             })
 
         return traces, kernels_model
+
+    @staticmethod
+    def _resolve_limiting_peak(
+        limiter: str, limiter_category: str, points: list[dict[str, Any]]
+    ) -> str:
+        if limiter_category == "Memory":
+            return limiter
+        return min(points, key=lambda point: point["ai"])["peak"]
+
+    @staticmethod
+    def _attach_kernel_hover_cells(
+        points: list[dict[str, Any]],
+        roof_value: Optional[float],
+        bandwidth_html: str,
+    ) -> None:
+        pct_roof = 100.0 * points[0]["perf"] / roof_value if roof_value else None
+        hover_cells = [
+            format_hover_number(roof_value, ",.0f"),
+            format_hover_number(pct_roof, ",.2f"),
+            bandwidth_html,
+        ]
+        for point in points:
+            point["hoverCells"] = hover_cells
 
     def _build_kernel_points(
         self,
         kernel_index: int,
         sanitized_cache_hierarchy: list[str],
         ceiling_data: dict[str, Any],
-        compute_cap: float,
-    ) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, float], str]:
         """One kernel's plotted points, one per memory level it has data for.
 
-        Also returns the level -> AI map the limiter is chosen from.
+        Also returns the level -> AI map the limiter is chosen from, and the
+        'Bandwidth:' hover block shared by every one of this kernel's points.
         """
         points: list[dict[str, Any]] = []
+        bandwidth_entries: list[dict[str, Any]] = []
         level_ai: dict[str, float] = {}
 
         for cache_level in CACHE_LEVELS:
@@ -487,28 +502,64 @@ class Roofline:
                 continue
             ai_value = level_points[0][kernel_index]
             performance = level_points[1][kernel_index]
-            if not (ai_value > 0 and performance > 0):
+            cache_key = cache_level.removeprefix("ai_")
+            peak_bandwidth = self._peak_value(ceiling_data, cache_key)
+            has_traffic = ai_value > 0 and performance > 0
+
+            # This kernel's own achieved bandwidth at this level (not the
+            # hardware ceiling): performance (FLOP/s) / AI (FLOP/Byte) = Byte/s.
+            # A level with no traffic still gets a 0-valued bandwidth line
+            # instead of silently disappearing from the tooltip.
+            achieved_bandwidth = performance / ai_value if has_traffic else 0.0
+            bandwidth_entries.append(
+                self._build_bandwidth_entry(
+                    level_name, achieved_bandwidth, peak_bandwidth
+                )
+            )
+            if not has_traffic:
                 continue
 
-            roof_perf = self._roof_value_at(
-                ai_value=ai_value,
-                cache_key=cache_level.removeprefix("ai_"),
-                ceiling_data=ceiling_data,
-                cap=compute_cap,
-            )
-            pct_roof = 100.0 * performance / roof_perf if roof_perf else None
             points.append({
                 "peak": level_name,
                 "ai": ai_value,
                 "perf": performance,
-                "hoverCells": [
-                    format_hover_number(roof_perf, ",.3f"),
-                    format_hover_number(pct_roof, ".4f"),
-                ],
             })
             level_ai[level_name] = ai_value
 
-        return points, level_ai
+        bandwidth_html = self._build_bandwidth_hover_html(bandwidth_entries)
+        return points, level_ai, bandwidth_html
+
+    @staticmethod
+    def _build_bandwidth_entry(
+        level_name: str, achieved_bandwidth: float, peak_bandwidth: Optional[float]
+    ) -> dict[str, Any]:
+        return {
+            "level_name": level_name,
+            "achieved_bandwidth": achieved_bandwidth,
+            "peak_bandwidth": peak_bandwidth,
+        }
+
+    @staticmethod
+    def _build_bandwidth_hover_html(bandwidth_entries: list[dict[str, Any]]) -> str:
+        """One 'Bandwidth:' block listing every cache level this kernel has
+        data for, each formatted like the Performance field: percent
+        (achieved/peak). A level with no traffic still shows up at 0,
+        rather than vanishing from the tooltip."""
+        if not bandwidth_entries:
+            return "Bandwidth: N/A"
+        lines = ["Bandwidth:"]
+        for entry in bandwidth_entries:
+            peak_bandwidth = entry["peak_bandwidth"]
+            achieved_bandwidth = entry["achieved_bandwidth"]
+            pct_bandwidth = (
+                100.0 * achieved_bandwidth / peak_bandwidth if peak_bandwidth else None
+            )
+            lines.append(
+                f"\u2003{entry['level_name']}: "
+                f"{format_hover_number(pct_bandwidth, ',.2f')}% "
+                f"({format_bandwidth_pair(achieved_bandwidth, peak_bandwidth)})"
+            )
+        return "<br>".join(lines)
 
     @demarcate
     def construct_plotly_figures(
@@ -583,8 +634,9 @@ class Roofline:
         flops_figure: Optional[go.Figure],
         ops_dt_list: str,
         flops_dt_list: str,
-    ) -> None:
-        """Write one precision-selectable Plotly HTML document to disk."""
+    ) -> Optional[str]:
+        """Write one precision-selectable Plotly HTML document to disk and
+        return its path, or None when there is nothing to plot."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
         if self.__run_parameters.get("kernel_filter", False):
@@ -608,7 +660,8 @@ class Roofline:
             )
             path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
-            console_log("roofline", "Roofline HTML files saved.")
+            return path
+        return None
 
     def _combined_html_figure(
         self,
@@ -677,9 +730,6 @@ class Roofline:
         """Ship the standalone figure already narrowed to the precisions the page
         opens with, so the first paint matches the controller's initial state
         instead of flashing every ceiling before the client hides them.
-
-        Only the standalone document is touched; the Dash figures keep every
-        ceiling because the WebUI has no precision selector to restore them.
         """
         selected = set(view_model.default_precisions)
         if not selected:
@@ -714,36 +764,6 @@ class Roofline:
             roof["kneeAi"] = roof_trace.x[-1]
             roof["kneePerf"] = roof_trace.y[-1]
 
-    @staticmethod
-    def generate_html_section(
-        ops_figure: Optional[go.Figure],
-        flops_figure: Optional[go.Figure],
-    ) -> Optional[html.Section]:
-        """Wrap Plotly figures in Dash HTML components for WebUI embedding."""
-        graphs = [
-            html.Div(
-                className="float-child",
-                children=[
-                    html.H3(
-                        children=(
-                            f"Empirical Roofline Analysis "
-                            f"({'Ops' if ops_flops == 'OP' else 'Flops'})"
-                        )
-                    ),
-                    dcc.Graph(figure=figure),
-                ],
-            )
-            for ops_flops, figure in (("OP", ops_figure), ("FLOP", flops_figure))
-            if figure is not None
-        ]
-        if not graphs:
-            return None
-
-        return html.Section(
-            id="roofline",
-            children=[html.Div(className="float-container", children=graphs)],
-        )
-
     @demarcate
     def generate_plot(
         self,
@@ -761,9 +781,7 @@ class Roofline:
         """
         is_new_figure = fig is None
 
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
+        sanitized_cache_hierarchy = roofline_mem_levels(self.__mspec.gpu_model)
 
         self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -861,11 +879,7 @@ class Roofline:
 
         present_peaks = self._present_peaks(kernels_model, sanitized_cache_hierarchy)
         view_model.peaks = present_peaks
-        view_model.default_peak = (
-            DEFAULT_PEAK
-            if DEFAULT_PEAK in present_peaks
-            else (present_peaks[0] if present_peaks else ALL_PEAKS_VALUE)
-        )
+        view_model.default_peak = LIMITING_PEAK_VALUE
         view_model.kernels = kernels_model
         view_model.kernel_trace_indices = list(
             range(first_index, first_index + len(kernel_traces))
@@ -1066,185 +1080,3 @@ class Roofline:
                 font=dict(size=13, color="#1b1f24"),
             ),
         )
-
-    def cli_generate_plot(
-        self,
-        dtype: str,
-        ai_data: dict[str, Any],
-    ) -> Optional[str]:
-        """
-        Plot CLI mode roofline analysis in terminal using plotext
-
-        :param dtype: The datatype to be profiled
-        :param ai_data: Pre-computed arithmetic intensity data from calc_ai_analyze
-        :return: Build the current figure using plot.build(),
-        or None if datatype is not valid for the architecture
-        :rtype: str or None
-        """
-        console_debug("roofline", "Generating roofline plot for CLI")
-
-        if not self._datatype_supported(dtype):
-            console_error(
-                f"{dtype} is not a supported datatype for roofline profiling on "
-                f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: "
-                f"{self.__mspec.gpu_arch})- cannot construct CLI plot",
-                exit=False,
-            )
-            return
-
-        if not ai_data:
-            console_warning(
-                "roofline",
-                "Skipping roofline charting due to invalid arithmetic intensity data",
-            )
-            return
-
-        self.__ai_data = ai_data
-
-        workload_dir = self.__run_parameters.get("workload_dir", "")
-        if not (Path(workload_dir) / "roofline.csv").is_file():
-            console_log(
-                "roofline",
-                f"{workload_dir}/roofline.csv does not exist",
-            )
-            return None
-
-        self.__ceiling_data = construct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-            mspec=self.__mspec,
-        )
-
-        self.roof_setup()
-
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
-
-        kernel_markers = {
-            0: "star",
-            1: "cross",
-            2: "sd",
-            3: "shamrock",
-            4: "at",
-            5: "atom",
-        }
-
-        plt.clf()
-        plt.plotsize(plt.tw(), plt.th())
-
-        ops_flops = _figure_class(dtype)
-
-        for cache_level in sanitized_cache_hierarchy:
-            cache_key = cache_level.lower()
-
-            # cache_data layout:
-            #   [0] list[float] — x-axis coords for AI: [start_AI, ridge_point_AI]
-            #   [1] list[float] — y-axis coords for performance: [start_perf, peak_perf]
-            #   [2] float       — scalar peak bandwidth (GB/s)
-            cache_data = self.__ceiling_data.get(cache_key)
-
-            if not cache_data or cache_data[0] is None:
-                continue
-            plt.plot(
-                cache_data[0],
-                cache_data[1],
-                label=f"{cache_level}-{dtype}",
-                marker="braille",
-                color=get_color(cache_level, backend="cli"),
-            )
-            plt.text(
-                f"{round(cache_data[2])} GB/s",
-                x=cache_data[0][0],
-                y=cache_data[1][0],
-                background="black",
-                color="white",
-                alignment="left",
-            )
-            console_debug(
-                "roofline",
-                f"{cache_level}: [{cache_data[0][0]},"
-                f"{cache_data[0][1]}], "
-                f"[{cache_data[1][0]},"
-                f"{cache_data[1][1]}], "
-                f"{cache_data[2]}",
-            )
-
-        # Plot the compute peaks this datatype reaches, each drawn a shade below
-        # its measured value so the line reads as a ceiling rather than a bound.
-        for key, label in self._compute_paths(dtype):
-            ceiling = self.__ceiling_data.get(key)
-            if not ceiling or ceiling[0] is None:
-                console_warning(f"No {label} measurement available for {dtype}")
-                continue
-            plt.plot(
-                ceiling[0],
-                [max(perf - 0.1, 1e-9) for perf in ceiling[1]],
-                label=f"Peak {label}-{dtype}",
-                marker="braille",
-                color=get_color(key, backend="cli"),
-            )
-            plt.text(
-                f"{round(ceiling[2])} G{ops_flops}/s",
-                x=ceiling[0][1] - 800,
-                y=ceiling[1][1],
-                background="black",
-                color="white",
-                alignment="right",
-            )
-            console_debug(
-                "roofline",
-                f"{label}: [{ceiling[0][0]},{ceiling[0][1]}], "
-                f"[{ceiling[1][0]},{ceiling[1][1]}], {ceiling[2]}",
-            )
-
-        # Plot Application AI
-        for cache_level in sanitized_cache_hierarchy:
-            key = f"ai_{cache_level.lower()}"
-            if key not in self.__ai_data:
-                continue
-
-            kernel_names = self.__ai_data.get("kernelNames", [])
-            for i in range(len(self.__ai_data.get("kernelNames", []))):
-                # Zero intensity level means no data reported for this cache level
-                if i >= len(self.__ai_data[key][0]) or i >= len(self.__ai_data[key][1]):
-                    console_debug(
-                        "roofline",
-                        f"AI_{kernel_names[i]}: array too short, skipped",
-                    )
-                    continue
-
-                if self.__ai_data[key][0][i] > 0 and self.__ai_data[key][1][i] > 0:
-                    plt.plot(
-                        [self.__ai_data[key][0][i]],
-                        [self.__ai_data[key][1][i]],
-                        label=f"AI_{cache_level}_{kernel_names[i][:40]}",
-                        color=get_color(cache_level, backend="cli"),
-                        marker=kernel_markers[i % len(kernel_markers)],
-                    )
-
-                console_debug(
-                    "roofline",
-                    f"AI_{kernel_names[i]}: {self.__ai_data[key][0][i]}, "
-                    f"{self.__ai_data[key][1][i]}",
-                )
-        plt.xlabel(f"Arithmetic Intensity ({ops_flops}s/Byte)")
-        plt.ylabel("Performance (GFLOP/sec)")
-        wdir = self.__run_parameters.get("workload_dir", "")
-        plt.title(f"Roofline ({dtype}) - {wdir}")
-
-        # Canvas config
-        plt.theme("pro")
-        plt.xscale("log")
-        plt.yscale("log")
-
-        # Build figure
-        # Print plot using `plt._utility.write(self.cli_generate_plot(dtype))`
-        return plt.build()
-
-    def get_dtype(self) -> list[str]:
-        """
-        Return the data types requested by the user (else the default data type)
-        for the roofline plot.
-        """
-        return self.__run_parameters["roofline_data_type"]

@@ -449,7 +449,7 @@ def _stdlib_top_level_names() -> frozenset:
     """Top-level stdlib module names, computed without sys.stdlib_module_names.
 
     That attribute is 3.10+, but pyproject declares ``requires-python >=3.6``
-    and CI runs a 3.6-3.14 matrix, so deriving the set from ``sysconfig`` keeps
+    and CI runs a 3.6-3.15 matrix, so deriving the set from ``sysconfig`` keeps
     the guard test running on every leg instead of skipping the older half.
     """
     names = set(sys.builtin_module_names)

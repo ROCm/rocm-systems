@@ -49,10 +49,10 @@ compute_sleep_for_overhead()
     auto         _stats   = tim::statistics<double>{};
     for(size_t i = 0; i < _ntot; ++i)
     {
-        auto               _val = _dist(_engine);
-        const std::int64_t _beg = tracing::now();
+        auto       _val = _dist(_engine);
+        const auto _beg = static_cast<std::int64_t>(tracing::now());
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _val });
-        const std::int64_t _end = tracing::now();
+        const auto _end = static_cast<std::int64_t>(tracing::now());
         if(i < _nwarm)
         {
             continue;
@@ -112,7 +112,7 @@ delay::process()
             auto const _beg = tracing::now();
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ get_global() - get_local() });
-            get_local() += (tracing::now() - _beg);
+            get_local() += static_cast<std::int64_t>(tracing::now() - _beg);
             ::rocprofsys::causal::sampling::resume();
         }
     }

@@ -68,6 +68,8 @@ def _build_fake_modules():
         "amdsmi.amdsmi_interface",
         amdsmi_wrapper=wrapper,
         amdsmi_get_npm_info=lambda _h: dict(_DEFAULT_NPM_INFO),
+        amdsmi_get_npm_balancing_mode=lambda _h: "PB",
+        amdsmi_get_npm_supported_balancing_modes=lambda _h: ["PB", "FB"],
     )
     exception = fake_module("amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException)
     amdsmi_pkg = fake_module(
@@ -112,6 +114,8 @@ class _FakeLogger:
 
 
 class _FakeHelpers:
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+
     def check_required_groups(self):
         pass
 

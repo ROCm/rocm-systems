@@ -804,6 +804,8 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
 }
 
 namespace detail {
@@ -890,6 +892,8 @@ VDot8I32Iu4Vop3p::VDot8I32Iu4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
 }
 
 namespace detail {
@@ -1379,6 +1383,8 @@ VWmmaI3216x16x16Iu8Vop3p::VWmmaI3216x16x16Iu8Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -1413,6 +1419,8 @@ VWmmaI3216x16x16Iu4Vop3p::VWmmaI3216x16x16Iu4Vop3p(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }

@@ -112,35 +112,6 @@ struct gpu_traits
     }
 
     /**
-     * @brief Initialize Perfetto storage for devices.
-     */
-    template <typename Perfetto, typename DeviceVector>
-    static void init_perfetto_storage(const DeviceVector& devices)
-    {
-        Perfetto::init_storage(devices);
-    }
-
-    /**
-     * @brief Setup Perfetto counter tracks for a device.
-     */
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t&      device,
-                                     const enabled_metrics_t& enabled)
-    {
-        Perfetto::setup_counter_tracks(device->get_index(), enabled);
-    }
-
-    /**
-     * @brief Post-process Perfetto data.
-     */
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries& /*device_entries*/,
-                                      const enabled_metrics_t& enabled)
-    {
-        Perfetto::post_process(enabled);
-    }
-
-    /**
      * @brief Get metrics from a device.
      */
     [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,

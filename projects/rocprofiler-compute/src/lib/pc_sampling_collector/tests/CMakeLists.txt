@@ -10,6 +10,8 @@ add_executable(
     test_pc_sampling_collector.cpp
     test_code_object_writer.h
     test_code_object_writer.cpp
+    test_code_object_translator.h
+    test_code_object_translator.cpp
     test_source_snapshotter.h
     test_source_snapshotter.cpp
     mocks.h

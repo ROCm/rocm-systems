@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD Research"
 __copyright__ = "Copyright 2023-2024, Advanced Micro Devices, Inc."
@@ -10,16 +8,17 @@ __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
 
-import sys
-import json
-import jsondiff
-import re
-import pandas as pd
-import numpy as np
-import math
-from collections import OrderedDict
-import os
 import glob
+import json
+import math
+import os
+import re
+import sys
+from collections import OrderedDict
+
+import jsondiff
+import numpy as np
+import pandas as pd
 
 num_stddev = 1.0
 
@@ -42,7 +41,7 @@ def stddev(_data):
     return float(num_stddev) * math.sqrt(_variance)
 
 
-class validation(object):
+class validation:
     def __init__(self, _exp_re, _pp_re, _virt, _expected, _tolerance):
         self.experiment_filter = re.compile(_exp_re)
         self.progress_pt_filter = re.compile(_pp_re)
@@ -81,7 +80,7 @@ class validation(object):
         )
 
 
-class throughput_point(object):
+class throughput_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.delta = []
@@ -98,7 +97,7 @@ class throughput_point(object):
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -110,7 +109,7 @@ class throughput_point(object):
         return sum(self.duration) / sum(self.delta)
 
 
-class latency_point(object):
+class latency_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.arrivals = []
@@ -129,7 +128,7 @@ class latency_point(object):
         return self.speedup == rhs.speedup
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
@@ -146,7 +145,7 @@ class latency_point(object):
         return sum(self.get_difference()) / rate
 
 
-class line_speedup(object):
+class line_speedup:
     def __init__(self, _name="", _prog="", _exp_data=None, _exp_base=None):
         self.name = _name
         self.prog = _prog
@@ -197,7 +196,7 @@ class line_speedup(object):
         )
 
     def __neq__(self, rhs):
-        return not self == rhs
+        return self != rhs
 
     def __lt__(self, rhs):
         if self.name != rhs.name:
@@ -211,7 +210,7 @@ class line_speedup(object):
         return False
 
 
-class experiment_progress(object):
+class experiment_progress:
     def __init__(self, _data):
         self.data = _data
 
@@ -321,7 +320,11 @@ def process_data(data, _data, experiments, progress_points):
     return data
 
 
-def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
+def compute_speedups(runs, speedups=None, num_points=0, validate=None, debug=False):
+    if validate is None:
+        validate = []
+    if speedups is None:
+        speedups = []
     out = pd.DataFrame()
     data = {}
     for workload in runs:
@@ -335,7 +338,7 @@ def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
         ret = []
         for selected, pitr in _data.items():
             for progpt, ditr in pitr.items():
-                if 0 not in ditr.keys():
+                if 0 not in ditr:
                     print(f"missing baseline data for {progpt} in {selected}...")
                     continue
                 for speedup, itr in ditr.items():
@@ -391,7 +394,7 @@ def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
             for itr in _data:
                 if len(itr) < num_points:
                     continue
-                print("")
+                print()
                 print(f"{itr}")
         sys.stdout.flush()
         validations = get_validations(validate)
@@ -558,12 +561,16 @@ def parse_files(
     files,
     experiments=".*",
     progress_points=".*",
-    speedups=[],
+    speedups=None,
     num_points=0,
-    validate=[],
+    validate=None,
     verbose=0,
     cli=False,
 ):
+    if validate is None:
+        validate = []
+    if speedups is None:
+        speedups = []
     result_df = pd.DataFrame()
     sample_df = pd.DataFrame()
 
@@ -628,12 +635,12 @@ def parse_files(
 
         elif file.endswith(".coz"):
             try:
-                f = open(file, "r")
-            except IOError as e:
+                with open(file, "r") as f:
+                    lines = f.readlines()
+            except OSError as e:
                 sys.stderr.write(f"{e}\n")
                 continue
 
-            lines = f.readlines()
             # Parse lines
             experiment = None
             samps = {}
@@ -812,12 +819,11 @@ def find_causal_files(workload_path, verbose, recursive):
                 with open(itr, "r") as f:
                     inp_data = json.load(f)
                     if (
-                        "rocprofsys" not in inp_data.keys()
-                        or "causal" not in inp_data["rocprofsys"].keys()
-                    ):
-                        if verbose >= 2:
-                            print(f"{itr} is not a causal profile")
-                            continue
+                        "rocprofsys" not in inp_data
+                        or "causal" not in inp_data["rocprofsys"]
+                    ) and verbose >= 2:
+                        print(f"{itr} is not a causal profile")
+                        continue
                 _input_files_tmp += [itr]
             elif os.path.isfile(itr) and itr.endswith(".coz"):
                 _input_files_tmp += [itr]

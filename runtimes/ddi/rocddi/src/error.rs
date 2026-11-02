@@ -12,6 +12,11 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
+/// Constructs a DDI validation or state error without a native I/O source.
+pub(crate) fn error(kind: ErrorKind, detail: &'static str) -> Error {
+    Error::Operation { kind, detail }
+}
+
 /// Stable, coarse error classification for programmatic recovery decisions.
 ///
 /// This enum deliberately omits paths and driver text. It is suitable for
@@ -26,6 +31,8 @@ pub enum ErrorKind {
     Unsupported,
     /// The process lacks permission for a required operation.
     PermissionDenied,
+    /// The requested endpoint or native object no longer exists.
+    NotFound,
     /// A kernel driver or operating-system operation failed.
     Driver,
     /// A driver violated its advertised interface contract.

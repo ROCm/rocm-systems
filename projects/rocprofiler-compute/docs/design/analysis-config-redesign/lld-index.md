@@ -54,8 +54,8 @@ flowchart LR
 `load_panel_configs()` globs `*.yaml` from the arch directory, loads each via
 `yaml.safe_load`, and produces an `OrderedDict` keyed by panel ID. `build_dfs()`
 iterates the panel configs, builds a DataFrame per `metric_table` with formula strings
-as cell values, and populates `ArchConfig.dfs`, `dfs_type`, `dfs_expressions`, and
-`metric_counters`. `eval_metric()` evaluates each formula cell against the raw PMC
+as cell values, and populates `ArchConfig.dfs`, `dfs_type`, and `dfs_expressions`.
+`eval_metric()` evaluates each formula cell against the raw PMC
 DataFrame and variable dicts. `show_all()` renders the evaluated DataFrames by panel
 order.
 

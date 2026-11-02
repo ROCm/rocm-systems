@@ -19,11 +19,15 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-asan.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-asan.yml'
   workflow_dispatch:
 
@@ -72,6 +76,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Install build dependencies
@@ -89,6 +95,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DADDRESS_SANITIZER=ON \
             -DBUILD_TESTS=ON \
+            -DBUILD_CUID=ON \
             -DENABLE_ESMI_LIB=ON
 
       - name: Build
@@ -142,6 +149,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Install build dependencies
@@ -159,6 +168,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DADDRESS_SANITIZER=ON \
             -DBUILD_TESTS=ON \
+            -DBUILD_CUID=ON \
             -DENABLE_ESMI_LIB=ON
 
       - name: Build

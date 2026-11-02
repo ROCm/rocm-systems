@@ -59,6 +59,19 @@ TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
        WaitEventKind::GlobalWb, false},
       {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::GlobalWb, false},
+      // Static FLAT may use only LDS, so it cannot prove partial Store progress.
+      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::FlatStore,
+       WaitEventKind::VmemStore, true},
+      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::FlatStore,
+       WaitEventKind::VmemStore, true},
+      {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::FlatStore,
+       WaitEventKind::VmemStore, true},
+      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::VmemStore,
+       WaitEventKind::FlatStore, true},
+      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
+       WaitEventKind::FlatStore, true},
+      {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::VmemStore,
+       WaitEventKind::FlatStore, true},
       // Generic FLAT stores prevent partial DS retirement on CDNA3/4, but
       // normalize to the same event as native DS accesses on RDNA.
       {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
@@ -676,6 +689,69 @@ TEST(WaitcheckState, PrimaryKindCompletionDoesNotRequireMaterializedEvents) {
   EXPECT_EQ(state.pending_event_ages[vm], PendingEventAges{});
   EXPECT_EQ(state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::GlobalInv)],
             0u);
+}
+
+TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5})
+    for (bool store : {false, true})
+      for (bool ds_first : {false, true}) {
+        SCOPED_TRACE(arch);
+        SCOPED_TRACE(store);
+        SCOPED_TRACE(ds_first);
+        PendingState state;
+        const auto kind = store ? WaitEventKind::FlatStore : WaitEventKind::FlatLoad;
+        const auto vmem = store ? WaitCounterKind::Store : WaitCounterKind::Load;
+        const auto first = ds_first ? WaitCounterKind::Ds : vmem;
+        const auto second = ds_first ? vmem : WaitCounterKind::Ds;
+        const auto vm = Ops::counter_index(WaitCounterKind::VmVsrc);
+        auto source = load(8, 1);
+        source.counter = WaitCounterKind::VmVsrc;
+        source.kind = kind;
+        source.produces_regs = false;
+        state.pending[vm] = {source};
+        state.pending_event_ages[vm].values[static_cast<size_t>(kind)] = 1;
+        // A younger counter-only request allows a partial wait to prove the
+        // first route complete, but the second route can still use the source.
+        state.pending_event_ages[Ops::counter_index(first)].values[static_cast<size_t>(kind)] = 1;
+        state.pending_event_ages[Ops::counter_index(second)].values[static_cast<size_t>(kind)] = 0;
+        // Unknown FLAT store routing makes nonzero Store waits conservative.
+        const uint32_t count = first == WaitCounterKind::Store ? 0 : 1;
+        ASSERT_TRUE(Ops::apply_memory_wait(state, first, count, arch).succeeded());
+        EXPECT_EQ(state.pending[vm], (std::vector<PendingEvent>{source}));
+        EXPECT_EQ(state.pending_event_ages[vm].values[static_cast<size_t>(kind)], 1u);
+        ASSERT_TRUE(Ops::apply_memory_wait(state, second, 0, arch).succeeded());
+        EXPECT_TRUE(state.pending[vm].empty());
+        EXPECT_EQ(state.pending_event_ages[vm], PendingEventAges{});
+      }
+}
+
+TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
+  for (bool store : {false, true}) {
+    SCOPED_TRACE(store);
+    const auto kind = store ? WaitEventKind::FlatStore : WaitEventKind::FlatLoad;
+    const auto vmem = store ? WaitCounterKind::Store : WaitCounterKind::Load;
+    const auto vm = Ops::counter_index(WaitCounterKind::VmVsrc);
+    PendingState left;
+    auto source = load(8, 0);
+    source.counter = WaitCounterKind::VmVsrc;
+    source.kind = kind;
+    source.produces_regs = false;
+    left.pending[vm] = {source};
+    for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc})
+      left.pending_event_ages[Ops::counter_index(counter)].values[static_cast<size_t>(kind)] = 0;
+    auto right = left;
+    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+    ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Ds, 0, ROCJITSU_CODE_ARCH_RDNA4)
+                    .succeeded());
+    Ops::merge_into(left, right);
+    EXPECT_EQ(left.pending[vm], (std::vector<PendingEvent>{source}));
+    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+    EXPECT_EQ(left.pending[vm], (std::vector<PendingEvent>{source}));
+    ASSERT_TRUE(
+        Ops::apply_memory_wait(left, WaitCounterKind::Ds, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+    EXPECT_TRUE(left.pending[vm].empty());
+  }
 }
 
 TEST(WaitcheckState, IndividualOperationCompletionDoesNotClearTheKindsSummary) {

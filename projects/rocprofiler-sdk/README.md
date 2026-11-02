@@ -81,7 +81,37 @@ To install ROCprofiler, run:
 
 ```cmake --build rocprofiler-sdk-build --target install```
 
-Please see the detailed section on build and installation here: [Click Here](source/docs/install/installation.rst)
+Please see the detailed section on [build](source/docs/install/build.rst) and [installation](source/docs/install/install.rst).
+
+## Installing Python Dependencies
+
+### For Development
+
+From the `rocm-systems` directory created above, `projects/rocprofiler-sdk/requirements.txt` installs every Python package used for development. It references three files:
+
+- `requirements-runtime.txt` lists the packages required to run `rocpd`.
+- `requirements-test.txt` adds the packages used to run tests.
+- `requirements-dev.txt` adds the packages used for formatting and linting.
+
+```bash
+python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
+```
+
+To keep these packages separate from the system Python, install them in a virtual environment:
+
+```bash
+python3 -m venv rocprof-venv
+source rocprof-venv/bin/activate
+python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
+```
+
+### For Runtime
+
+To run `rocpd`, install the Python packages shipped with ROCm. That list is `<ROCM_PATH>/share/rocprofiler-sdk/requirements.txt`, where `<ROCM_PATH>` is the ROCm installation directory (for example, `/opt/rocm`):
+
+```bash
+python3 -m pip install -r /opt/rocm/share/rocprofiler-sdk/requirements.txt
+```
 
 ## Support
 

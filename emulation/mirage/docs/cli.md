@@ -53,6 +53,7 @@ mirage run [--profile NAME] [--emulator NAME]
            [--container-provider PROV] [--hack HACK]...
            [--exec-mode functional|clocked] [-o|--option KEY=VALUE]...
            [--plugin NAME]... [--config PATH] [--cpu-thread-budget N]
+           [--wait-checking on|off|all]
            [--daemon | --in-process] [--clear-env-vars]
            -- <cmd> [args...]
 ```
@@ -223,6 +224,24 @@ which is the better of the two failures for a checkpoint request.
   the backend loads. A supplied config that is not plain JSON, or that
   names a `dbt_guest.simulator_config`, cannot be copied this way and is
   refused — set `cpu_thread_budget` in the file instead.
+* `--wait-checking on|off|all` overrides memory wait checking on every CU
+  and GPU for this run. `on` enables ordinary checks and disables XCNT;
+  `off` disables both; `all` also enables gfx1250 XCNT checks. Ordinary
+  checks warn about reads or overwrites of pending memory results without
+  a sufficient wait. Execution continues with eagerly computed values.
+  Ordinary checks default to on and XCNT to off; omitting the flag
+  preserves config settings and defaults.
+
+  If warnings appear incorrect or checking slows a workload, use
+  `mirage run --wait-checking=off -- <command>`. Both flag spellings work.
+  The dedicated flag beats `-o wait_checking=MODE` and the profile's
+  `wait_checking` option. With `--config`, it overrides the top-level
+  `wait_checking` setting in a session copy, leaving your file untouched.
+  It composes with `--cpu-thread-budget` in either order: both settings
+  go into the same copy. Both flags work in daemon and in-process modes.
+  A supplied config must be plain JSON; an enabled DBT guest with an external
+  `dbt_guest.simulator_config` refuses both flags. For a persistent override, set
+  `"wait_checking": "off"` (or `"on"` / `"all"`) in the simulator config.
 * `--daemon` runs the emulator out-of-process. This is the default; the
   flag exists for explicitness and for the rocjitsu drop-in alias.
   `--in-process` selects the opposite. In-process mode cannot share GPU

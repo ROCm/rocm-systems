@@ -32,7 +32,7 @@ To build and run samples on Windows:
 
   set ROCM_PATH=<path-to-rocm-installation>
   set FFMPEG_ROOT=<path-to-ffmpeg>
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode"
   cmake --build . --config Release
@@ -40,9 +40,10 @@ To build and run samples on Windows:
 
 .. note::
 
-  ``PATH`` must include the rocDecode, VA-API, and FFmpeg DLL directories so the executable can load
-  them at run time. ``ROCM_PATH`` must stay set at run time as well: libva uses it to locate the VA-API
-  driver in ``%ROCM_PATH%\lib\rocm_sysdeps\bin``.
+  ``PATH`` must include the rocDecode and FFmpeg DLL directories so the executable can load them at
+  run time. rocDecode loads the VA-API DLLs from ``%ROCM_PATH%\lib\rocm_sysdeps\bin`` itself, so that
+  directory does not need to be on ``PATH``. ``ROCM_PATH`` must stay set at run time as well: libva
+  uses it to locate the VA-API driver in ``%ROCM_PATH%\lib\rocm_sysdeps\bin``.
 
   ``videoDecode`` demultiplexes the container with FFmpeg, so FFmpeg must be present when CMake
   configures the sample. ``FFMPEG_ROOT`` is only needed if FFmpeg is not in one of the locations

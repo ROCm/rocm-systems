@@ -33,8 +33,11 @@ void TestParameterStore::initialize() {
         levelBlockSizes[levelName] = params.block_sizes;
         levelIterations[levelName] = params.iterations;
         levelWarmups[levelName] = params.warmups;
-        levelMaxMemory[levelName] = params.max_memory;
-        
+        levelCgIterations[levelName] = params.cg_iterations;
+        levelMathAccuracyIterations[levelName] = params.math_accuracy_iterations;
+        levelMathAccuracyMaxMemoryPercentage[levelName] = params.math_accuracy_max_memory_percentage;
+        levelMathMaxMemory[levelName] = params.math_max_memory;
+        levelMathReductionFactor[levelName] = params.math_reduction_factor;
         LogPrintf("[TestParameterStore] %s: %zu memory sizes, %zu block sizes, %d iterations\n",
                   levelName.c_str(), params.memory_sizes.size(), 
                   params.block_sizes.size(), params.iterations);
@@ -76,48 +79,15 @@ void TestParameterStore::loadLevelConfig(const std::string& level) {
     }
 }
 
-const std::vector<size_t>& TestParameterStore::getMemorySizesForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelMemorySizes.count(currentTestLevel)) {
-        return levelMemorySizes.at(currentTestLevel);
-    }
-    static const std::vector<size_t> fallback(defaultMemorySizes.begin(), defaultMemorySizes.end());
-    return fallback;
-}
-
-const std::vector<int>& TestParameterStore::getBlockSizesForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelBlockSizes.count(currentTestLevel)) {
-        return levelBlockSizes.at(currentTestLevel);
-    }
-    static const std::vector<int> fallback(defaultBlockSizes.begin(), defaultBlockSizes.end());
-    return fallback;
-}
-
-int TestParameterStore::getIterationsForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelIterations.count(currentTestLevel)) {
-        return levelIterations.at(currentTestLevel);
-    }
-    return defaultIterations;
-}
-
-int TestParameterStore::getWarmupsForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelWarmups.count(currentTestLevel)) {
-        return levelWarmups.at(currentTestLevel);
-    }
-    return defaultWarmups;
-}
-
-size_t TestParameterStore::getMaxMemoryForCurrentLevel() const {
-    if (!currentTestLevel.empty() && levelMaxMemory.count(currentTestLevel)) {
-        return levelMaxMemory.at(currentTestLevel);
-    }
-    return defaultMaxMemory;
-}
-
 void TestParameterStore::clear() {
     currentTestLevel.clear();
     levelMemorySizes.clear();
     levelBlockSizes.clear();
     levelIterations.clear();
     levelWarmups.clear();
-    levelMaxMemory.clear();
+    levelCgIterations.clear();
+    levelMathAccuracyIterations.clear();
+    levelMathAccuracyMaxMemoryPercentage.clear();
+    levelMathMaxMemory.clear();
+    levelMathReductionFactor.clear();
 }

@@ -980,6 +980,8 @@ VDot4I32Iu8Vop3p::VDot4I32Iu8Vop3p(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
 }
 
 namespace detail {
@@ -3504,6 +3506,8 @@ VWmmaI3216x16x64Iu8Vop3p::VWmmaI3216x16x64Iu8Vop3p(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  if ((inst_.neg & 4u) || inst_.neg_hi)
+    flags_ |= INVALID_IU_MODIFIERS;
   flags_ |= MATRIX_REGISTER_ACCESSES;
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }

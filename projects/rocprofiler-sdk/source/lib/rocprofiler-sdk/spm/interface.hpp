@@ -38,6 +38,7 @@ struct spm_interface
     using spm_stop_fn_t                       = decltype(aqlprofile_spm_stop);
     using spm_decode_stream_v1_fn_t           = decltype(aqlprofile_spm_decode_stream_v1);
     using spm_decode_query_fn_t               = decltype(aqlprofile_spm_decode_query);
+    using spm_decode_shader_engine_fn_t       = decltype(aqlprofile_spm_decode_shader_engine);
     using spm_is_event_supported_fn_t         = decltype(aqlprofile_spm_is_event_supported);
     using spm_query_agent_configurations_fn_t = decltype(aqlprofile_spm_query_agent_configurations);
 
@@ -47,6 +48,7 @@ struct spm_interface
     spm_stop_fn_t*                       spm_stop                       = nullptr;
     spm_decode_stream_v1_fn_t*           spm_decode_stream_v1           = nullptr;
     spm_decode_query_fn_t*               spm_decode_query               = nullptr;
+    spm_decode_shader_engine_fn_t*       spm_decode_shader_engine       = nullptr;
     spm_is_event_supported_fn_t*         spm_is_event_supported         = nullptr;
     spm_query_agent_configurations_fn_t* spm_query_agent_configurations = nullptr;
 

@@ -4,6 +4,7 @@
 add_subdirectory(concepts)
 add_subdirectory(amd_smi)
 add_subdirectory(procfs)
+add_subdirectory(posix)
 
 if(ROCPROFSYS_HIPFILE_SUPPORT)
     add_subdirectory(hipfile)

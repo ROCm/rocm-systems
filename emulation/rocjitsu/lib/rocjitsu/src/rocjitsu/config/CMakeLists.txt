@@ -12,6 +12,7 @@ add_dependencies(rocjitsu_dbt_config flatbuffers_schemas)
 rj_add_object_library(
     rocjitsu_config
     config_loader.cpp
+    system_graph.cpp
     checkpoint.cpp
     effective_config.cpp
 )

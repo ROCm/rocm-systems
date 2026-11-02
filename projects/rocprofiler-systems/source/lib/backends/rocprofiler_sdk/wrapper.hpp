@@ -132,7 +132,7 @@ struct wrapper
     using scratch_memory_record   = rocprofiler_buffer_tracing_scratch_memory_record_t;
     using callback_tracing_record = rocprofiler_callback_tracing_record_t;
     using code_object_load_data   = rocprofiler_callback_tracing_code_object_load_data_t;
-    using kernel_symbol_data =
+    using code_object_kernel_symbol_register_data =
         rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
     using marker_payload_t = rocprofiler_callback_tracing_marker_api_data_t;
 

@@ -262,7 +262,7 @@ TEST_F(NetIbMPITest, ConnectAndTransfer_VNic) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 500;
@@ -339,7 +339,7 @@ TEST_F(NetIbMPITest, AsymmetricMerge_VNic) {
     // Inline connection setup: each rank uses a different device ID.
     // Rank 0 (receiver): listen on vdev (ndevs=2, 2 PDs, doubled QPs)
     // Rank 1 (sender):   connect on physical dev 0 (ndevs=1, 1 PD)
-    // ncclIbCalculateNqps uses max(local, remote) so both sides get the same QP count.
+    // rcclIbMaxNqps uses max(local, remote) so both sides get the same QP count.
     ConnectionPair pair;
 
     if (rank == 0) {
@@ -532,7 +532,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(vdev, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
         // Guard triggers closeSend/closeRecv/closeListen on a connection that
         // never had regMr, isend, or irecv called.
     }
@@ -542,7 +542,7 @@ TEST_F(NetIbMPITest, CloseWithoutTransfer_VNic) {
     // Phase 2: reconnect on the same vdev and do a transfer to verify no corruption.
     ConnectionPair pair2;
     NetConnectionGuard connGuard2(net_);
-    SetupConnectionWithGuard(vdev, pair2, connGuard2);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair2, connGuard2));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 520;
@@ -676,7 +676,7 @@ TEST_F(NetIbMPITest, RegDeregCycling_VNic) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -773,7 +773,7 @@ TEST_F(NetIbMPITest, LargeTransfer_VNic) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     // 64MB buffer — ncclIbMultiSend stripes this across the doubled QPs.
     const size_t bufferSize = 64 * 1024 * 1024;
@@ -860,7 +860,7 @@ TEST_F(NetIbMPITest, MixedSizes_VNic) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -945,7 +945,7 @@ TEST_F(NetIbMPITest, UnalignedSizeTransfer_VNic) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     for (size_t idx = 0; idx < testSizes.size(); idx++) {
         size_t size = testSizes[idx];
@@ -1274,7 +1274,7 @@ TEST_F(NetIbMPITest, FlushRepeated_VNic) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 600;
@@ -1388,7 +1388,7 @@ TEST_F(NetIbMPITest, SequentialTransfers_VNic) {
     // Single connection through the vNIC, reused across all 100 iterations.
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(vdev, pair, connGuard));
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 700;

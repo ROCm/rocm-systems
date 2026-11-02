@@ -66,12 +66,19 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!base)
     return std::nullopt;
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  const int64_t immediate = off;
   auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
   *base &= ~align_mask;
   off = (off & ~static_cast<int64_t>(align_mask)) + (*soffset & ~align_mask);
-  if (amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op)) {
+  // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
+  const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
+  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
+    wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
+                                             : "negative combined scalar-memory offset");
+  if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
   }
@@ -149,14 +156,14 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
   // GFX12 VSCRATCH: scratch_base + lane scratch slice + optional VGPR
-  // (32-bit) + optional saddr + signed 24-bit offset.
+  // (signed 32-bit) + optional signed saddr + signed 24-bit offset.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
-  uint32_t saddr_val = 0;
+  int64_t saddr_val = 0;
   amdgpu::RegisterAccess regs(cu);
   if (has_saddr(inst.saddr)) {
     const uint32_t sb_sel = inst.saddr;
@@ -165,7 +172,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
       amdgpu::reject_vector_memory_access(d);
       return;
     }
-    saddr_val = *saddr;
+    saddr_val = static_cast<int32_t>(*saddr);
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
@@ -174,9 +181,12 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vaddr = inst.sve ? vaddr_region->lane(0, lane) : 0;
+    const int64_t vaddr =
+        inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), /*signed_offset=*/true)
+                 : 0;
+    const uint64_t private_offset = static_cast<uint64_t>(vaddr + saddr_val + offset);
     d.per_lane_addr[lane] =
-        scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
+        scratch_base + static_cast<uint64_t>(lane) * lane_stride + private_offset;
   }
 }
 

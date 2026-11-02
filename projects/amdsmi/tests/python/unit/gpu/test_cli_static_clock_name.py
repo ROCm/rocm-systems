@@ -117,6 +117,7 @@ class TestCliStaticClockName(unittest.TestCase):
             clock=["notaclock"],
             mem_carveout=False,
             partition=False,
+            numa=False,
         )
 
         with self.assertRaises(_InvalidParameter) as raised:

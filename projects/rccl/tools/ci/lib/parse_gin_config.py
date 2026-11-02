@@ -9,12 +9,15 @@ Column layout:
 
   mca<SEP><flags>
   debug_env<SEP><-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
-  test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args>
-    kind: rocshmem | rccl-tests | fixtures | pytest
+  test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args><SEP><np>
+    kind: rocshmem | rccl-tests | fixtures | mpi-fixtures | pytest
       rocshmem/rccl-tests: mpirun benchmark; bin is the executable name
       fixtures: single-process gtest; bin is the executable name
+      mpi-fixtures: mpirun gtest from the RCCL build tree (e.g.
+        rccl-UnitTestsMPI); bin is the executable name
       pytest: rccl-tests opt-in pytest; bin is a file under test/ (e.g.
         test_Broadcast.py); args are forwarded to pytest (e.g. -k gin_sdma -v)
+    np: optional rank-count override for mpirun kinds; empty means $NP
 """
 
 # ASCII unit separator: distinct from whitespace and unlikely in flags/args.
@@ -35,6 +38,7 @@ class GinTest(NamedTuple):
     bin: str
     env: list[str]
     args: str
+    np: str
 
 
 class GinConfig(NamedTuple):
@@ -64,6 +68,7 @@ def parse_config(path: Path) -> GinConfig:
                 bin=entry.get("bin", ""),
                 env=list(entry.get("env", []) or []),
                 args=entry.get("args", "") or "",
+                np=str(entry.get("np", "") or ""),
             )
         )
 
@@ -81,7 +86,7 @@ def format_rows(config: GinConfig) -> list[str]:
     rows.append(f"debug_env{sep}{' '.join('-x ' + e for e in config.debug_env)}")
     for test in config.tests:
         env_flags = " ".join("-x " + e for e in test.env)
-        rows.append(sep.join(["test", test.name, test.kind, test.bin, env_flags, test.args]))
+        rows.append(sep.join(["test", test.name, test.kind, test.bin, env_flags, test.args, test.np]))
     return rows
 
 
