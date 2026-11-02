@@ -3454,6 +3454,78 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
                          ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
 
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsTrackPayloadAndSynchronization) {
+  for (unsigned count : {3u, 4u})
+    for (bool other_wave : {false, true})
+      for (unsigned wait : {0u, 1u, 2u, 3u, 4u})
+        for (unsigned address : {75u, 79u, 80u, 107u, 108u, 144u}) {
+          SCOPED_TRACE(testing::Message()
+                       << count << ',' << other_wave << ',' << wait << ',' << address);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(2));
+          PluginSinkConfig config;
+          auto &sink = config.emplace<StringSink>();
+          f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+          ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+          f.soc->set_plugin_group(f.plugin_group_);
+          f.plugin_group_->onInit();
+          auto *cu = f.cu();
+          auto *producer = cu->dispatch_wf(0, 0x1000, 104, 256);
+          auto *peer = cu->dispatch_wf(0, 0x2000, 104, 256);
+          ASSERT_NE(producer, nullptr);
+          ASSERT_NE(peer, nullptr);
+          producer->set_exec(0x25);
+          peer->set_exec(1);
+          producer->set_lds_base(128);
+          peer->set_lds_base(128);
+          producer->set_lds_size(108);
+          peer->set_lds_size(108);
+          producer->set_m0(0xfffc0043);
+          for (unsigned lane : {0u, 2u, 5u}) {
+            cu->write_vgpr(producer->vgpr_alloc().base + 2, lane, 0x20000 + lane * 32);
+            cu->write_vgpr(producer->vgpr_alloc().base + 3, lane, 0);
+          }
+          std::array<Wavefront *, 2> waves{producer, peer};
+          f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves);
+          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+          const std::array<uint32_t, 2> words{0xdc008000u | ((count == 3 ? 126u : 125u) << 18),
+                                              0xff7f0002u};
+          auto load = decoder->decode_window(words);
+          ASSERT_TRUE(load.succeeded());
+          f.plugin_group_->onAmdgpuBeforeExecuteInstruction(producer->pc, *load.value(), *producer);
+          ASSERT_TRUE(cu->execute_instruction(load.value().get(), *producer).succeeded());
+          f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *load.value(), *producer);
+          EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+          if (wait == 1)
+            execute_wait(*f.plugin_group_, *producer,
+                         legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 1, 15));
+          else if (wait == 2)
+            execute_wait(*f.plugin_group_, *producer,
+                         legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0));
+          else if (wait >= 3)
+            execute_wait(*f.plugin_group_, *producer,
+                         legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 0, 15));
+          if (wait == 4)
+            f.plugin_group_->onAmdgpuBarrierResolved(waves);
+
+          auto *consumer = other_wave ? peer : producer;
+          consumer->set_exec(1);
+          consumer->pc = 0x3000;
+          cu->write_vgpr(consumer->vgpr_alloc().base, 0, address);
+          const auto read_words = cdna4::build_ds(cdna4::kDsReadU8Ds, {.addr = 0, .vdst = 8});
+          auto read = decoder->decode_window(read_words);
+          ASSERT_TRUE(read.succeeded());
+          f.plugin_group_->onAmdgpuBeforeExecuteInstruction(consumer->pc, *read.value(), *consumer);
+          ASSERT_TRUE(cu->execute_instruction(read.value().get(), *consumer).succeeded());
+          f.plugin_group_->onAmdgpuMemoryAccessRouted({}, *read.value(), *consumer);
+          const bool overlaps =
+              address == 75 || (address == 79 && count == 4) || (address == 107 && count == 3);
+          const bool synchronized = wait == 4 || (!other_wave && wait == 3);
+          EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, overlaps && !synchronized)
+              << sink.str();
+        }
+}
+
 TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
