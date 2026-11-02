@@ -262,6 +262,15 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_CUMEM_ENABLE=1"
       - "RCCL_DDA_ENABLE=0"
+  quick_env_p2p_reg_cumem:
+    description: "P2P IPC registration of hipMalloc buffers with cuMem on, where registration probes each buffer for a cuMem handle and the probe fails. NCCL_CUMEM_ENABLE is cached for the process lifetime, so it is set before launch; gfx1250 enables cuMem by default and is covered by quick as well."
+    test_patterns:
+      - "P2pMPITest.P2pRegistrationBasicBuffersTest"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_CUMEM_ENABLE=1"
   # The QP-sharing functional gate. The same five tests run at three values of
   # RCCL_IB_COMM_NGROUPS: expectations are derived from ngroups by the reference
   # model (test/transport/NetIbMPI/QpShareRefModel.hpp), so no test is pinned to
