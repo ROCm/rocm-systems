@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -324,6 +325,8 @@ void on_init(const FfmHostApi *host) {
     return;
   }
   host_log = host->log;
+  if (mode_is("throw_on_init"))
+    throw std::runtime_error("injected backend on_init failure");
   if (mode_is("v12_only") || mode_is("v11_only"))
     trace(host_log ? "host_log present" : "host_log absent");
   if ((mode_is("host_log") || mode_is("v12_only")) && host_log)

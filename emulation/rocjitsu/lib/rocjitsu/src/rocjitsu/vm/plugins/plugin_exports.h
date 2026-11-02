@@ -38,9 +38,12 @@
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
+#include "util/diagnostic.h"
 #include "util/log.h"
 
 #include <exception>
+#include <memory>
+#include <type_traits>
 
 namespace rocjitsu {
 
@@ -91,6 +94,24 @@ inline constexpr const char *kPluginCreateSymbol = "rocjitsu_plugin_create";
 /// @brief Exported symbol name of the plugin destructor.
 inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 
+/// @brief Construct a plugin using its constructor or checked initializer.
+/// Exceptions remain contained by the exported factory while allocation and foreign
+/// plugin code can still throw. The exported C signatures and null failure handle
+/// are unchanged for both construction forms.
+template <typename PluginClass> ExecutionPlugin *create_plugin_instance(const char *config_json) {
+  if constexpr (std::is_constructible_v<PluginClass, const char *>) {
+    return new PluginClass(config_json);
+  } else {
+    auto plugin = std::make_unique<PluginClass>();
+    util::StringDiagnostic diagnostic;
+    if (plugin->initialize(config_json, diagnostic.emitter()).failed()) {
+      util::Logger::warn("plugin '", plugin->name(), "': create failed: ", diagnostic.message());
+      return nullptr;
+    }
+    return plugin.release();
+  }
+}
+
 } // namespace rocjitsu
 
 /// @brief Ensure the plugin's exported symbols stay visible even under
@@ -100,7 +121,8 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 /// @brief Emit the required plugin loader exports.
 ///
 /// @param PluginClass Concrete ::rocjitsu::ExecutionPlugin subclass. It must
-///        be constructible from a single `const char *config_json` argument.
+///        be constructible from a single `const char *config_json` argument, or
+///        default constructible with a checked initialize(config_json, diagnostic).
 /// @param NAME        Plugin name string literal (matches the `.so` suffix).
 /// @param CONFIG_SCHEMA JSON schema string literal ("{}" if none).
 ///
@@ -116,7 +138,7 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
   extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(               \
       const char *config_json) {                                                                   \
     try {                                                                                          \
-      return static_cast<::rocjitsu::ExecutionPlugin *>(new PluginClass(config_json));             \
+      return ::rocjitsu::create_plugin_instance<PluginClass>(config_json);                         \
     } catch (const std::exception &e) {                                                            \
       ::util::Logger::warn("plugin '", NAME, "': create failed: ", e.what());                      \
       return nullptr;                                                                              \

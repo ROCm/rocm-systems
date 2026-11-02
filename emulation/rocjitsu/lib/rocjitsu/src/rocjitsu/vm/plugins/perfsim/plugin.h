@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "util/diagnostic.h"
 
 #include <memory>
 
@@ -14,12 +15,18 @@ namespace rocjitsu::plugins::perfsim {
 /// configuration and report output.
 class PerfsimPlugin final : public ExecutionPlugin {
 public:
+  PerfsimPlugin();
+  ~PerfsimPlugin() override;
+
+  /// @brief Configure the adapter before adding it to a plugin group.
+  /// Expected admission/configuration/backend failures return failure with a diagnostic.
+  /// Allocation and foreign backend exceptions still propagate. A failed call releases
+  /// its singleton claim and may be retried.
   /// @param config_json Resolved plugin configuration containing the required
   ///        non-empty string `library_path`; optional positive integers
   ///        `max_staged_bytes` and `max_observed_workgroups`; and the optional
   ///        non-empty string `dispatch_name`.
-  explicit PerfsimPlugin(const char *config_json);
-  ~PerfsimPlugin() override;
+  util::Result initialize(const char *config_json, util::DiagnosticEmitter diagnostic = {});
 
   PerfsimPlugin(const PerfsimPlugin &) = delete;
   PerfsimPlugin &operator=(const PerfsimPlugin &) = delete;
@@ -36,6 +43,8 @@ public:
   bool observes_tensor_dma_memory_access() const override { return true; }
   bool observes_sgpr_reads() const override { return false; }
 
+  /// @brief Activate the configured backend. Foreign callback exceptions propagate
+  /// after releasing the singleton claim; discard the failed instance.
   void onInit() override;
   void onShutdown() override;
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
