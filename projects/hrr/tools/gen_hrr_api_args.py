@@ -303,10 +303,12 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipGetSymbolAddress",
     "hipGetSymbolSize",
     # Pinned host allocation — charged to the host budget (--max-host-bytes), a
-    # replaced entry is freed first, and hipFreeHost gives the allocation back
+    # replaced entry is freed first, and hipFreeHost / hipHostFree give the
+    # allocation back
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",
+    "hipHostFree",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
@@ -3010,7 +3012,6 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':              'ptr',
     'hipFreeAsync':         'dev_ptr',
-    'hipHostFree':          'ptr',
     'hipIpcCloseMemHandle': 'devPtr',
 }
 
