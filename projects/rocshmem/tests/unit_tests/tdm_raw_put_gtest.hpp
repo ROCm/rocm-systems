@@ -45,6 +45,9 @@ static constexpr uint32_t TDM_RAW_SIGNAL_OFFSET = 67108864u;  // 64 MB
 
 // Fixed TDM tile size for these tests
 static constexpr uint32_t TEST_TDM_TILE_BYTES = 16384;
+// Fixed put threshold: sizes below this must take the memcpy_wg fallback,
+// sizes at/above it are eligible for the TDM path.
+static constexpr size_t TEST_TDM_PUT_THRESHOLD = 16384;
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -113,6 +116,11 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
+    // Force a known put threshold so the parameterized byte counts below
+    // actually land on either side of it, as their comments claim.
+    size_t put_threshold = TEST_TDM_PUT_THRESHOLD;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &put_threshold, sizeof(put_threshold),
+                                offsetof(constmem_t, tdm_put_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));
@@ -134,9 +142,13 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     assert(bytes + TDM_RAW_SIGNAL_OFFSET + sizeof(uint32_t) <=
            heap_mem_->get_size());
 
-    // Build iota pattern on host, upload to a device buffer.
+    // Build a per-byte pattern that varies across tiles (plain i & 0xFF
+    // would repeat every 256 bytes -- a multiple of TEST_TDM_TILE_BYTES --
+    // so every tile would be bit-identical and a reordered/duplicated tile
+    // would go undetected), upload to a device buffer.
     std::vector<uint8_t> host_gold(bytes);
-    for (size_t i = 0; i < bytes; i++) host_gold[i] = static_cast<uint8_t>(i & 0xFF);
+    for (size_t i = 0; i < bytes; i++)
+      host_gold[i] = static_cast<uint8_t>((i ^ (i >> 8) ^ (i >> 16)) & 0xFF);
     hip_allocator_->allocate((void**)&golden_dptr_, bytes);
     CHECK_HIP(hipMemcpy(golden_dptr_, host_gold.data(), bytes, hipMemcpyHostToDevice));
 
