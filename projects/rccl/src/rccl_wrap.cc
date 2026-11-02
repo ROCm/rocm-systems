@@ -213,6 +213,14 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
   return t;
 }
 
+// gfx1250 DPX broadcast ceilings are total message bytes and apply at every node
+// count. A zero LL128 ceiling keeps the tuning model's per-rank ranges.
+static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = extAlgoArchTable(comm);
+  if (t == nullptr || t->bcRingLL128MaxBytes == 0) return nullptr;
+  return t;
+}
+
 // Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
@@ -258,6 +266,24 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   // Honor user input for protocol choice
   const bool userProtocolInput = rcclNcclProtoEnvIsSet();
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+
+  // Broadcast on a table that publishes total-byte ceilings (gfx1250 DPX). The
+  // same 16 KiB / 512 MiB cutoffs apply at every node count; Simple covers
+  // everything above 512 MiB. NCCL_PROTO still wins.
+  if (!userProtocolInput && info->func == ncclFuncBroadcast) {
+    if (const rcclArchThresholds* t = rcclBroadcastTotalByteTable(comm)) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+      if (nBytes > 0 && nBytes <= t->bcRingLLMaxBytes) {
+        info->protocol = NCCL_PROTO_LL;
+      }
+#if defined(ENABLE_LL128)
+      if (comm->topo->ll128Enabled && nBytes > t->bcRingLLMaxBytes && nBytes <= t->bcRingLL128MaxBytes) {
+        info->protocol = NCCL_PROTO_LL128;
+      }
+#endif
+      return;
+    }
+  }
 
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
       (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {

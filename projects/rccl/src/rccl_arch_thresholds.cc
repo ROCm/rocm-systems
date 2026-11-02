@@ -247,6 +247,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Broadcast stays on tuning_model_11's per-rank ranges. DPX replaces them below.
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -478,6 +481,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Total message bytes, the same at 1/2/4/8 nodes (8/16/32/64 GPUs). Ring LL
+  // through 16 KiB, Ring LL128 through 512 MiB, Ring Simple above that (through
+  // 16 GiB and beyond). Not per rank, unlike tuning_model_11.
+  .bcRingLLMaxBytes = 16ULL*1024,
+  .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -628,6 +636,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -778,6 +788,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

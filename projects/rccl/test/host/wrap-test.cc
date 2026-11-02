@@ -355,11 +355,10 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }  // namespace
 
 // ENABLE_LL128's state depends on the build configuration; both arms are
-// written so whichever compiles in is exercised. The OCI cluster build has
-// ENABLE_LL128 defined, so *_LL128_AccGatesOutGfx90a and its siblings are the
-// ones that compile and run there; a local ROCm-7.0.0 build does not define
-// it, which is what compiles and runs *_LL128_DisabledAtCompileTime instead --
-// both arms are now verified, one per build.
+// written so whichever compiles in is exercised. rccl-UnitTestsMicro compiles
+// this file with ENABLE_LL128, matching production librccl, so
+// *_LL128_AccGatesOutGfx90a and its siblings run there. A build that omits the
+// define compiles *_LL128_DisabledAtCompileTime instead.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -1999,6 +1998,128 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_Disab
       });
 }
 #endif  // ENABLE_LL128
+
+namespace {
+// Mirrors rcclArchThresholds_gfx1250_dpx broadcast ceilings: total message bytes.
+rcclArchThresholds MakeDpxBroadcastTable() {
+  rcclArchThresholds t{};
+  t.bcRingLLMaxBytes = 16 * kKiB;
+  t.bcRingLL128MaxBytes = 512 * kMiB;
+  return t;
+}
+
+void SetModelBroadcastRanges(ncclComm* comm) {
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
+}
+
+int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_UNDEF;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+}  // namespace
+
+// gfx1250 DPX broadcast uses total message bytes, the same ceilings at 1, 2, 4
+// and 8 nodes: Ring LL through 16 KiB, Ring LL128 through 512 MiB, Ring Simple
+// above that (16 GiB included). SPX keeps tuning_model_11's per-rank ranges.
+// The LL128 window is Simple when this binary is built without ENABLE_LL128.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+#if defined(ENABLE_LL128)
+        const int midProto = NCCL_PROTO_LL128;
+#else
+        const int midProto = NCCL_PROTO_SIMPLE;
+#endif
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        const size_t llMax = 16 * kKiB;
+        const size_t ll128Max = 512 * kMiB;
+        const struct {
+          int nNodes;
+          int nRanks;
+        } scales[] = {{1, 8}, {2, 16}, {4, 32}, {8, 64}};
+        for (const auto& scale : scales) {
+          ncclComm* comm = MakeCommWithArch("gfx1250");
+          comm->nNodes = scale.nNodes;
+          comm->nRanks = scale.nRanks;
+          comm->archThresholds = &dpx;
+          comm->topo->ll128Enabled = true;
+          SetModelBroadcastRanges(comm);
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 0)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax)) << scale.nNodes;
+          EXPECT_EQ(midProto, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1)) << scale.nNodes;
+          EXPECT_EQ(midProto, ProtocolOf(comm, ncclFuncBroadcast, ll128Max)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, ll128Max + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, (size_t)16 << 30)) << scale.nNodes;
+          // The broadcast ceilings must not move AllReduce off its per-rank model.
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncAllReduce, 100 * kKiB)) << scale.nNodes;
+          DeleteCommWithArch(comm);
+        }
+
+        // SPX: no total-byte ceilings, so 16 KiB + 1 on 8 ranks is still 2048 B/rank (LL),
+        // and 256 MiB is 32 MiB/rank, past the model's 16 MiB LL128 ceiling (Simple).
+        ncclComm* spx = MakeCommWithArch("gfx1250");
+        spx->nNodes = 1;
+        spx->nRanks = 8;
+        spx->topo->ll128Enabled = true;
+        SetModelBroadcastRanges(spx);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(spx, ncclFuncBroadcast, llMax + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(spx, ncclFuncBroadcast, 256 * kMiB));
+        DeleteCommWithArch(spx);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL128");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->archThresholds = &dpx;
+        comm->topo->ll128Enabled = true;
+        ncclTaskColl info{};
+        info.func = ncclFuncBroadcast;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, 1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 64;
+        comm->nNodes = 8;
+        comm->archThresholds = &dpx;
+        comm->topo->ll128Enabled = false;
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 512 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
 
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
