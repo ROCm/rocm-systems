@@ -350,7 +350,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     useSubAlloc &= m_region.fragment_alloc_supported(size, alloc_flags);
     // Keep the existing DXG executable-buffer allocation contract.
     if ((alloc_flags & core::MemoryRegion::AllocateExecutable) &&
-        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg()) {
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
       useSubAlloc = false;
     }
 
