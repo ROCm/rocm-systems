@@ -573,8 +573,12 @@ embedded device pointers, and replay translates them without the device-address 
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
 otherwise; then it queues a host function that copies the blobs in on the launch stream,
-ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
-wait for every stream, so the allocation outlives a queued copy. The summary prints
+ahead of the kernel, without waiting for the stream. Replay does not rely on the runtime's
+wait inside a free, which covers only the allocating device's streams. A kernel launch
+takes `host_free_mu` shared before it hands the global turn on and holds it until its
+launch call returns; `hipHostFree`, `hipFreeHost` and `hipHostUnregister` (and `hipFree`) take it
+exclusive across the map removal and the free. A free on the next sequence number therefore
+waits until the launch has resolved the destination and queued its copy. The summary prints
 restored, refused and skipped counts.
 
 Kept deliberately simple:
