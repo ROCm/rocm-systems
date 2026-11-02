@@ -1365,6 +1365,34 @@ several invocations of that binary, because the kernel caps one argv entry at
 `MAX_ARG_STRLEN` (128 KiB) and rejects a longer `exec` outright with `E2BIG`,
 which the biggest binary's 2,199 case names would exceed.
 
+### How many run at once
+
+The binaries run **in parallel**, as many at a time as the machine has
+processors. They are independent of one another — no GPU, no network, and no
+shared file but each one's own log and its own profile directory — so the only
+thing a strictly sequential run bought was a console that read in order, which
+the per-binary logs below give instead. On a 32-core machine the whole tree goes
+from ~35 s to ~13 s.
+
+```bash
+NUM_PARALLEL_HOST_TEST_BINARIES=1   # one binary at a time, as it used to be
+NUM_PARALLEL_HOST_TEST_BINARIES=8   # eight
+```
+
+Unset, empty, `0`, a negative number or anything that is not a number all mean
+the default; a number above the processor count is honoured rather than clamped,
+since the children do spend part of their time on `exec` and on writing their
+logs. The unit is the **binary**: a binary whose selection was split across
+several invocations still runs those parts one after another, because they all
+append to one log.
+
+Two things are deliberately unaffected by the parallelism. The merged report is
+assembled in selection order however the completions interleaved, so two runs
+produce the same report and a diff between them means a test changed. And the
+`----- Qualifier -----` console lines are printed when a binary *starts*, so a
+run that hangs names the binaries it is waiting on — with several in flight they
+are starts, not a record of what has finished.
+
 ### Where the children's output goes
 
 The children do **not** print to the dispatcher's console. Each one's stdout and
@@ -1377,10 +1405,10 @@ naming the log:
 ----- MicroCrypt (34 cases) -> /b/host_tests_micro.logs/MicroCrypt.log -----
 ```
 
-One file per binary rather than one shared transcript: the binaries run one
-after another but each prints thousands of lines, and the question asked of
-this output is always "what did *this* binary print", which a merged log
-answers only by scrolling. A binary whose selection was split across several
+One file per binary rather than one shared transcript: each prints thousands of
+lines, the question asked of this output is always "what did *this* binary
+print", which a merged log answers only by scrolling, and with several binaries
+in flight a shared transcript would interleave them line by line. A binary whose selection was split across several
 invocations still writes one log — the parts append. A binary that writes no
 report has its log named in the merged report's failure text too, since that is
 the case where its own output is the only evidence left.

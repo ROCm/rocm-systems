@@ -906,6 +906,48 @@ TEST(HostDispatchLogMicrotest, TheEnvironmentCanMoveTheLogsOrTurnThemOff)
     EXPECT_EQ(resolveLogDirectory("/p/report.xml", "-"), "");
 }
 
+// ── resolveParallelism ──────────────────────────────────────────────
+
+TEST(HostDispatchParallelismMicrotest, ThePerBinaryDefaultIsOneJobPerProcessor)
+{
+    // The binaries are single-threaded and independent, so an unconfigured run should use the
+    // machine it is on rather than one core of it.
+    EXPECT_EQ(resolveParallelism(nullptr, 32), 32u);
+    EXPECT_EQ(resolveParallelism("", 32), 32u);
+}
+
+TEST(HostDispatchParallelismMicrotest, TheEnvironmentSetsTheNumberOfBinariesInFlight)
+{
+    EXPECT_EQ(resolveParallelism("1", 32), 1u);
+    EXPECT_EQ(resolveParallelism("4", 32), 4u);
+}
+
+TEST(HostDispatchParallelismMicrotest, OversubscriptionIsHonouredNotClamped)
+{
+    // The children spend part of their time on exec and on writing their logs, so asking for
+    // more jobs than processors is a reasonable thing to want; nothing here knows better.
+    EXPECT_EQ(resolveParallelism("64", 8), 64u);
+}
+
+TEST(HostDispatchParallelismMicrotest, ARequestThatIsNotAPositiveCountMeansTheDefault)
+{
+    // Zero, negative and unparseable all say the caller did not mean to constrain the run; none
+    // of them may yield 0, which would be a loop that starts nothing and never finishes.
+    EXPECT_EQ(resolveParallelism("0", 8), 8u);
+    EXPECT_EQ(resolveParallelism("-4", 8), 8u);
+    EXPECT_EQ(resolveParallelism("all", 8), 8u);
+}
+
+TEST(HostDispatchParallelismMicrotest, AMachineThatReportsNoProcessorsStillRunsOneBinary)
+{
+    EXPECT_EQ(resolveParallelism(nullptr, 0), 1u);
+}
+
+TEST(HostDispatchParallelismMicrotest, ThisMachineIsReportedAsAtLeastOneProcessor)
+{
+    EXPECT_GE(detectedParallelism(), 1u);
+}
+
 // ── coverageDirectory ───────────────────────────────────────────────
 
 TEST(HostDispatchCoverageMicrotest, ProfileDirectoryIsTakenFromThePattern)

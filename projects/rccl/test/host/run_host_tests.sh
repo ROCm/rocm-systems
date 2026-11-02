@@ -49,6 +49,10 @@
 #   GTEST_FILTER  gtest test filter (run phase)    (default: *  = all)
 #   LOG_FILE      timestamped console log (run)    (default: <script dir>/host_tests.log)
 #   XML_FILE      JUnit XML output (run)           (default: <script dir>/host_tests.xml)
+#   NUM_PARALLEL_HOST_TEST_BINARIES  how many of the microtest binaries rccl-UnitTestsHostAll
+#                                                   runs at once (default: one per processor;
+#                                                   1 = sequential, which is what bisecting an
+#                                                   order-dependent failure wants)
 #   HOST_TEST_SHUFFLE  gtest ordering flag (run)   (default: --gtest_shuffle; set empty to disable
 #                                                   when bisecting a failure. Deliberately NOT named
 #                                                   GTEST_SHUFFLE: gtest owns that name and reads an

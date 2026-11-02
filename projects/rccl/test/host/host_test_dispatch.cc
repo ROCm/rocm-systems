@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -80,6 +81,14 @@ constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
 // process's stdout and stderr, which is what a developer running one binary's cases by hand
 // wants and what the dispatcher did before the logs existed.
 constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
+
+// How many fronted binaries may run at once. Defaults to the machine's processor count: the
+// binaries are single-threaded, CPU-bound and independent of one another -- they touch no GPU,
+// no network and no shared file but their own log and their own profile directory -- so the
+// whole tree's wall time is otherwise one core's worth of work on a machine that has dozens.
+// Set it to 1 to get the old strictly-sequential run back, which is what a developer bisecting
+// an order-dependent failure or reading the console live wants.
+constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
 
 // Source files kept out of the exported coverage. The tests' own code is not the thing under
 // test, and nvtx is vendored. Overridable for a consumer that wants a different view.
@@ -1086,13 +1095,46 @@ std::string resolveLogDirectory(std::string_view outputPath, const char *overrid
     return std::string_view(override_) == "-" ? std::string() : std::string(override_);
 }
 
-// Run *path* with *args* and return its exit status (128+signal if killed).
+// ── how many binaries run at once ───────────────────────────────────
+
+// How many binaries may be in flight together, given the caller's *request* and the number of
+// processors *detected*.
+//
+// Anything that is not a positive number -- unset, empty, "0", "all", "-4" -- means the default,
+// because the only honest reading of "I asked for n jobs" at n <= 0 is that the caller did not
+// mean to constrain it. A request above the processor count is honoured rather than clamped: the
+// children spend a little of their time on exec and on writing their logs, so oversubscribing
+// deliberately is a reasonable thing for a caller to want, and nothing here knows better than
+// they do. The floor is 1, so the result is always a count a loop can run with.
+size_t resolveParallelism(const char *request, size_t detected)
+{
+    const size_t fallback = detected < 1 ? 1 : detected;
+    if (request == nullptr || *request == '\0') {
+        return fallback;
+    }
+    const long requested = toLong(std::string_view(request), 0);
+    return requested >= 1 ? static_cast<size_t>(requested) : fallback;
+}
+
+// The number of processors available to this process, or 1 when that cannot be determined.
+size_t detectedParallelism()
+{
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    return online > 0 ? static_cast<size_t>(online) : 1;
+}
+
+// Start *path* with *args* and return its pid, or -1 when it could not be forked.
 //
 // *logPath*, when set, is the file the child's stdout and stderr are redirected to; it is opened
 // in the CHILD, after the fork, so a file this process could not open costs that one binary its
-// transcript rather than the run. Empty means inherit this process's stdio.
-int runChild(const std::string &path, const std::vector<std::string> &args,
-             const std::string &logPath = "")
+// transcript rather than the run. Empty means inherit this process's stdio. With several
+// binaries in flight at once that redirection is also what keeps the output readable: the logs
+// are per binary, so parallel children do not interleave their lines into one transcript.
+//
+// Starting and reaping are separate so the caller can hold several children at once; reapChild()
+// below turns one of these pids back into an exit status.
+pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
+                 const std::string &logPath = "")
 {
     std::vector<char *> argv;
     argv.push_back(const_cast<char *>(path.c_str()));
@@ -1109,7 +1151,7 @@ int runChild(const std::string &path, const std::vector<std::string> &args,
     const pid_t pid = fork();
     if (pid < 0) {
         fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
-        return 1;
+        return -1;
     }
     if (pid == 0) {
         // In the child, on its own copy of the environment: what the dispatcher has already
@@ -1143,13 +1185,30 @@ int runChild(const std::string &path, const std::vector<std::string> &args,
                    std::strerror(errno));
         _exit(127);
     }
+    return pid;
+}
+
+// Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
+// if killed) and returning its pid; -1 when there is nothing left to wait for.
+//
+// Any child and not a named one, because the caller holds several at once and must react to them
+// in the order they finish rather than in the order they were started -- waiting on a named pid
+// would leave a slot idle behind a slow binary while a finished one went unreaped. Safe to take
+// any: by the time this is called the only children this process has are the ones it spawned
+// here, the listing children having been popen'd and pclose'd before the run began.
+pid_t reapAnyChild(int &exitStatus)
+{
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    pid_t pid = 0;
+    while ((pid = waitpid(-1, &status, 0)) < 0 && errno == EINTR) {
     }
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
+    if (pid < 0) {
+        exitStatus = 1;
+        return -1;
     }
-    return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;
+    exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
+                                   : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+    return pid;
 }
 
 // Read *path* whole, or return an empty string.
@@ -1667,24 +1726,62 @@ int main(int argc, char **argv)
                                           "to start"));
         ++failures;
     }
+    // Several binaries at once. They are independent of one another -- no GPU, no network, and
+    // no shared file but each one's own log and its own profile directory -- so the only thing
+    // the strictly-sequential run bought was a console that read in order, which the per-binary
+    // logs give instead. NUM_PARALLEL_HOST_TEST_BINARIES=1 restores it for a caller wanting it.
+    const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
+                                           detectedParallelism());
+
+    // Each selection's parts form a queue of its own: a selection split across several
+    // invocations writes them all to ONE log, by appending, so two parts of the same binary must
+    // never be in flight together. Parts of different binaries may be, which is the whole of the
+    // parallelism here -- a binary is the unit, as it is everywhere else in this file.
+    std::vector<std::vector<std::string>> filters;
+    filters.reserve(selections.size());
     for (const Selection &selection : selections) {
-        const std::vector<std::string> filters = childFilters(selection);
+        filters.push_back(childFilters(selection));
         ran.push_back(selection.path);
-        for (size_t part = 0; part < filters.size(); ++part) {
+    }
+    std::vector<size_t> nextPart(selections.size(), 0);
+    // Gathered per selection and flattened once the run is over, so the merged report is in
+    // selection order however the completions happened to interleave. A report whose contents
+    // depended on which binary finished first would be undiffable between two runs.
+    std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
+
+    struct RunningChild {
+        pid_t pid;
+        size_t selection;
+        std::string reportPath;
+        std::string logPath;
+    };
+    std::deque<size_t> ready;   // selections with a part still to start
+    for (size_t index = 0; index < selections.size(); ++index) {
+        ready.push_back(index);
+    }
+    std::vector<RunningChild> running;
+
+    while (!ready.empty() || !running.empty()) {
+        while (!ready.empty() && running.size() < jobs) {
+            const size_t index = ready.front();
+            ready.pop_front();
+            const Selection &selection = selections[index];
+            const size_t part = nextPart[index]++;
             const std::string reportPath =
                 reportDir.reportPath(selection.qualifier, part, options.outputFormat);
             // The child is asked for the format the caller wants, so the merge is always of
             // like with like and no report is ever transcoded between the two.
             std::vector<std::string> childArgs = {
-                fmt::format("--gtest_filter={}", filters[part]),
+                fmt::format("--gtest_filter={}", filters[index][part]),
                 fmt::format("--gtest_output={}:{}", formatName(options.outputFormat), reportPath),
             };
             childArgs.insert(childArgs.end(), options.passthrough.begin(),
                              options.passthrough.end());
 
             const std::string part_note =
-                filters.size() > 1 ? fmt::format(", part {}/{}", part + 1, filters.size())
-                                   : std::string();
+                filters[index].size() > 1
+                    ? fmt::format(", part {}/{}", part + 1, filters[index].size())
+                    : std::string();
             const std::string logPath =
                 logDir.empty() ? std::string() : childLogPath(logDir, selection.qualifier);
             if (part == 0 && !logPath.empty()) {
@@ -1692,42 +1789,88 @@ int main(int argc, char **argv)
                 std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
             }
             // The log is named on the console whether or not the binary fails, so the transcript
-            // of a run that passed is as findable as the one of a run that did not.
+            // of a run that passed is as findable as the one of a run that did not. Printed when
+            // the binary STARTS, so a run that hangs says which binaries it is waiting on; with
+            // several in flight these lines are starts, not a record of what has completed.
             fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
                        selection.cases.size(), part_note,
                        logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
             std::fflush(stdout);
-            const int status = runChild(selection.path, childArgs, logPath);
 
-            bool cleanReport = false;
-            if (std::optional<SuiteFragment> fragment =
-                    parseChildReport(readFile(reportPath), selection.qualifier,
-                                     options.outputFormat)) {
-                cleanReport = fragment->failures == 0 && fragment->errors == 0;
-                fragments.push_back(std::move(*fragment));
-            } else {
-                // No report: the binary died or never started. Its cases are unaccounted for, so
-                // the run has to fail even if the exit status somehow did not say so.
-                // The log is named in the failure itself: a results consumer showing only the
-                // merged report is where this is usually read, and "no report" is exactly the
-                // case where the binary's own output is the only evidence left.
-                fragments.push_back(crashFragment(
+            const pid_t pid = spawnChild(selection.path, childArgs, logPath);
+            if (pid < 0) {
+                // Its cases are unaccounted for, exactly as for a binary that wrote no report,
+                // and its remaining parts are abandoned: nothing about the next fork is more
+                // likely to succeed, and reporting the same binary once is enough to fail on.
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier, "binary could not be started -- fork failed"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+                continue;
+            }
+            running.push_back({pid, index, reportPath, logPath});
+        }
+
+        int status = 0;
+        const pid_t finished = reapAnyChild(status);
+        const auto slot = std::find_if(running.begin(), running.end(),
+                                       [finished](const RunningChild &child) {
+                                           return child.pid == finished;
+                                       });
+        if (slot == running.end()) {
+            // Nothing left to wait for although slots are still marked busy: the children were
+            // reaped by something outside this loop, so their reports will never be read and
+            // waiting again would spin forever. Fail them by name and stop.
+            for (const RunningChild &child : running) {
+                perSelection[child.selection].push_back(
+                    crashFragment(selections[child.selection].qualifier,
+                                  "binary disappeared before its result could be collected"));
+                ++failures;
+            }
+            running.clear();
+            break;
+        }
+
+        const size_t index = slot->selection;
+        const Selection &selection = selections[index];
+        bool cleanReport = false;
+        if (std::optional<SuiteFragment> fragment =
+                parseChildReport(readFile(slot->reportPath), selection.qualifier,
+                                 options.outputFormat)) {
+            cleanReport = fragment->failures == 0 && fragment->errors == 0;
+            perSelection[index].push_back(std::move(*fragment));
+        } else {
+            // No report: the binary died or never started. Its cases are unaccounted for, so
+            // the run has to fail even if the exit status somehow did not say so.
+            // The log is named in the failure itself: a results consumer showing only the
+            // merged report is where this is usually read, and "no report" is exactly the
+            // case where the binary's own output is the only evidence left.
+            perSelection[index].push_back(crashFragment(
+                selection.qualifier,
+                fmt::format("binary wrote no gtest report (exit status {}){}", status,
+                            slot->logPath.empty() ? std::string()
+                                                  : fmt::format("; output in {}", slot->logPath))));
+            ++failures;
+        }
+        if (status != 0) {
+            if (cleanReport) {
+                perSelection[index].push_back(crashFragment(
                     selection.qualifier,
-                    fmt::format("binary wrote no gtest report (exit status {}){}", status,
-                                logPath.empty() ? std::string()
-                                                : fmt::format("; output in {}", logPath))));
-                ++failures;
+                    fmt::format("binary exited {} after writing a passing report", status)));
             }
-            if (status != 0) {
-                if (cleanReport) {
-                    fragments.push_back(crashFragment(
-                        selection.qualifier,
-                        fmt::format("binary exited {} after writing a passing report", status)));
-                }
-                ++failures;
-            }
-            std::error_code ec;
-            fs::remove(reportPath, ec);
+            ++failures;
+        }
+        std::error_code ec;
+        fs::remove(slot->reportPath, ec);
+        running.erase(slot);
+        if (nextPart[index] < filters[index].size()) {
+            ready.push_back(index);   // this binary's next part, now that its log is free again
+        }
+    }
+
+    for (std::vector<SuiteFragment> &selectionFragments : perSelection) {
+        for (SuiteFragment &fragment : selectionFragments) {
+            fragments.push_back(std::move(fragment));
         }
     }
 
