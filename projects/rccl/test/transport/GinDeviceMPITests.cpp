@@ -7618,6 +7618,21 @@ std::string intraNodeSymReason() {
   return "";
 }
 
+// RailRing_LsaST AllGather gates; the placement check is collective so every rank gets the same verdict.
+std::string railRingAllGatherSkipReason() {
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    return "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
+  // anvil-sdma is single-node. Symmetric AllGather is a multi-node test.
+  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "Symmetric AllGather not supported for anvil-sdma: single-node backend";
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
+  if (auto reason = crossNodeReason(); !reason.empty()) return reason;
+  int ranksPerNode = 0;
+  if (!uniformNodeLocalRanks(&ranksPerNode) || ranksPerNode < kMinLsaRanksPerNode)
+    return "Requires a uniform placement with >=" + std::to_string(kMinLsaRanksPerNode) + " ranks per node";
+  return "";
+}
+
 // End-to-end ReduceScatter through the public collective API on symmetric
 // (NCCL_WIN_COLL_SYMMETRIC) buffers. Registering the buffers makes the
 // symmetric-memory RS kernel (RailA2A_LsaLD) eligible, so this drives the
@@ -7966,18 +7981,7 @@ TEST_F(GinMPIDeviceTests, AllGather_Symmetric_InPlace) {
 
 // uint8 RailRing AllGather whose LSA broadcast ends in a ragged byte tail (nBytes % 4 == 1).
 TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
-    GTEST_SKIP() << "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
-  // anvil-sdma is single-node. Symmetric AllGather is a multi-node test.
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
-    GTEST_SKIP() << "Symmetric AllGather not supported for anvil-sdma: single-node backend";
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = crossNodeReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = intraNodeSymReason(); !reason.empty())
+  if (auto reason = railRingAllGatherSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
@@ -7999,6 +8003,8 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
   const std::vector<size_t> counts = {17, 1021, 4101, 12301};
   // Never 0xFF, the prefill, so an unwritten byte cannot match.
   auto pattern = [](size_t src, size_t i) { return static_cast<uint8_t>((i + 37 * src) % 251); };
+  // Trailing bytes past each buffer; catches a tail written or read one past the block.
+  constexpr size_t kGuard = 64;
 
   for (size_t count : counts) {
     for (bool inPlace : {false, true}) {
@@ -8009,19 +8015,20 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
 
       void* dSendBuf = nullptr;
       void* dRecv = nullptr;
-      if (!inPlace) ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSendBuf, count));
-      ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes));
+      if (!inPlace) ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSendBuf, count + kGuard));
+      ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, recvBytes + kGuard));
       auto memCleanup = makeScopeGuard([&]() {
         if (dSendBuf) (void)ncclMemFree(dSendBuf);
         if (dRecv) (void)ncclMemFree(dRecv);
       });
 
       ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-      if (!inPlace)
+      if (!inPlace) {
         ASSERT_MPI_EQ(ncclSuccess,
-            ncclCommWindowRegister(comm, dSendBuf, count, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+            ncclCommWindowRegister(comm, dSendBuf, count + kGuard, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+      }
       ASSERT_MPI_EQ(ncclSuccess,
-          ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+          ncclCommWindowRegister(comm, dRecv, recvBytes + kGuard, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
       auto winCleanup = makeScopeGuard([&]() {
         if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
         if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
@@ -8030,13 +8037,14 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
 
       uint8_t* dSend = inPlace ? static_cast<uint8_t*>(dRecv) + ownOffset : static_cast<uint8_t*>(dSendBuf);
 
-      std::vector<uint8_t> hostSend(count);
+      // Send padding is 0xFE (never a pattern byte), so an over-read tail shows up in the recv guard.
+      std::vector<uint8_t> hostSend(count + kGuard, 0xFE);
       for (size_t i = 0; i < count; i++) hostSend[i] = pattern(static_cast<size_t>(rank), i);
-      std::vector<uint8_t> hostRecv(recvBytes, 0xFF);
-      if (inPlace) std::copy(hostSend.begin(), hostSend.end(), hostRecv.begin() + ownOffset);
-      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
+      std::vector<uint8_t> hostRecv(recvBytes + kGuard, 0xFF);
+      if (inPlace) std::copy(hostSend.begin(), hostSend.begin() + count, hostRecv.begin() + ownOffset);
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, hostRecv.data(), hostRecv.size(), hipMemcpyHostToDevice));
       if (!inPlace)
-        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), count, hipMemcpyHostToDevice));
+        ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), hostSend.size(), hipMemcpyHostToDevice));
 
       int algo = -1, proto = -1, nChannels = 0;
       ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, count, ncclUint8, ncclSum, dSend,
@@ -8050,34 +8058,29 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_ByteTail) {
 
       MPI_Barrier(MPI_COMM_WORLD);
 
-      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
-      size_t firstBad = recvBytes;
-      for (size_t j = 0; j < recvBytes && firstBad == recvBytes; j++)
-        if (hostRecv[j] != pattern(j / count, j % count)) firstBad = j;
-      if (firstBad != recvBytes)
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, hostRecv.size(), hipMemcpyDeviceToHost));
+      // Bytes past recvBytes are the guard band and must stay 0xFF.
+      auto expectedAt = [&](size_t j) { return j < recvBytes ? pattern(j / count, j % count) : uint8_t{0xFF}; };
+      size_t firstBad = hostRecv.size();
+      for (size_t j = 0; j < hostRecv.size(); j++) {
+        if (hostRecv[j] != expectedAt(j)) {
+          firstBad = j;
+          break;
+        }
+      }
+      if (firstBad != hostRecv.size()) {
         ADD_FAILURE() << "rank=" << rank << " j=" << firstBad << " (src=" << firstBad / count
-                      << " i=" << firstBad % count << ") expected="
-                      << static_cast<int>(pattern(firstBad / count, firstBad % count))
+                      << " i=" << firstBad % count << ") expected=" << static_cast<int>(expectedAt(firstBad))
                       << " got=" << static_cast<int>(hostRecv[firstBad]);
-      ASSERT_MPI_EQ(recvBytes, firstBad);
+      }
+      ASSERT_MPI_EQ(hostRecv.size(), firstBad);
     }
   }
 }
 
 // One CTA carries the whole per-rank count, so lsaRank 1 starts 1 MiB in, wraps, and ends on a ragged chunk.
 TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
-    GTEST_SKIP() << "Skipping symmetric AllGather (RailRing_LsaST) for rocSHMEM-GDA";
-  // anvil-sdma is single-node. Symmetric AllGather is a multi-node test.
-  if (requestedGinType() == NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
-    GTEST_SKIP() << "Symmetric AllGather not supported for anvil-sdma: single-node backend";
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = crossNodeReason(); !reason.empty())
-    GTEST_SKIP() << reason;
-
-  if (auto reason = intraNodeSymReason(); !reason.empty())
+  if (auto reason = railRingAllGatherSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
@@ -8085,9 +8088,7 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
 
   // NCCL_SYM_CTAS is cached on first read, so it must come from the launch environment.
   const char* ctasEnv = std::getenv("NCCL_SYM_CTAS");
-  int oneCta = (ctasEnv != nullptr && std::strcmp(ctasEnv, "1") == 0) ? 1 : 0;
-  MPI_Allreduce(MPI_IN_PLACE, &oneCta, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-  if (!oneCta)
+  if (!MPIHelpers::allRanksTrue(ctasEnv != nullptr && std::strcmp(ctasEnv, "1") == 0))
     GTEST_SKIP() << "Requires NCCL_SYM_CTAS=1 in the launch environment on every rank";
 
   // Read at communicator init; a forced kernel that cannot run fails the call instead of falling back.
@@ -8126,9 +8127,10 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
     });
 
     ncclWindow_t sendWin = nullptr, recvWin = nullptr;
-    if (!inPlace)
+    if (!inPlace) {
       ASSERT_MPI_EQ(ncclSuccess,
           ncclCommWindowRegister(comm, dSendBuf, sendBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    }
     ASSERT_MPI_EQ(ncclSuccess,
         ncclCommWindowRegister(comm, dRecv, recvBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
     auto winCleanup = makeScopeGuard([&]() {
@@ -8154,8 +8156,9 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
       std::vector<float> hostRecv(recvElems, -1.0f);
       if (inPlace) std::copy(hostSend.begin(), hostSend.end(), hostRecv.begin() + ownOffset);
       ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, hostRecv.data(), recvBytes, hipMemcpyHostToDevice));
-      if (!inPlace)
+      if (!inPlace) {
         ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), sendBytes, hipMemcpyHostToDevice));
+      }
 
       MPI_Barrier(MPI_COMM_WORLD);
 
@@ -8166,12 +8169,17 @@ TEST_F(GinMPIDeviceTests, AllGather_RailRing_MultiChunk) {
 
       ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, recvBytes, hipMemcpyDeviceToHost));
       size_t firstBad = recvElems;
-      for (size_t j = 0; j < recvElems && firstBad == recvElems; j++)
-        if (hostRecv[j] != expected(run, j)) firstBad = j;
-      if (firstBad != recvElems)
+      for (size_t j = 0; j < recvElems; j++) {
+        if (hostRecv[j] != expected(run, j)) {
+          firstBad = j;
+          break;
+        }
+      }
+      if (firstBad != recvElems) {
         ADD_FAILURE() << "rank=" << rank << " j=" << firstBad << " (src=" << firstBad / count
                       << " byte=" << (firstBad % count) * sizeof(float) << ") expected="
                       << expected(run, firstBad) << " got=" << hostRecv[firstBad];
+      }
       ASSERT_MPI_EQ(recvElems, firstBad);
     }
   }
