@@ -6443,10 +6443,11 @@ static void merge_proc_into_pid_map(std::map<uint32_t, amdsmi_proc_info_by_pid_t
   auto& entry = pid_map[proc_info.pid];
   if (entry.num_gpus == 0) {
     entry.pid = proc_info.pid;
-    std::strncpy(entry.name, proc_info.name, AMDSMI_MAX_STRING_LENGTH - 1);
-    entry.name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-    std::strncpy(entry.container_name, proc_info.container_name, AMDSMI_MAX_STRING_LENGTH - 1);
-    entry.container_name[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+    std::memset(entry.name, 0, sizeof(entry.name));
+    std::memcpy(entry.name, proc_info.name, strnlen(proc_info.name, sizeof(entry.name) - 1));
+    std::memset(entry.container_name, 0, sizeof(entry.container_name));
+    std::memcpy(entry.container_name, proc_info.container_name,
+                strnlen(proc_info.container_name, sizeof(entry.container_name) - 1));
   }
   if (entry.num_gpus >= AMDSMI_MAX_DEVICES) return;
   auto& gpu_entry = entry.gpus[entry.num_gpus++];
@@ -6792,7 +6793,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/max_link_speed";
   fp = fopen(path_max_link_speed.c_str(), "r");
   if (fp) {
-    if (fscanf(fp, "%lf %*s", &pcie_speed) != 1) {
+    if (fscanf(fp, "%lf", &pcie_speed) != 1) {
       fclose(fp);
       std::ostringstream ss;
       ss << __PRETTY_FUNCTION__ << " | Failed to parse: " << path_max_link_speed;
@@ -9491,8 +9492,9 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(amd::smi::AMDSmiGPUDev
                 index, description_len, AMDSMI_MAX_STRING_LENGTH - 1);
       }
 
-      strncpy(info->options[index].description, description.c_str(), AMDSMI_MAX_STRING_LENGTH - 1);
-      info->options[index].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+      std::memset(info->options[index].description, 0, sizeof(info->options[index].description));
+      std::memcpy(info->options[index].description, description.c_str(),
+                  strnlen(description.c_str(), sizeof(info->options[index].description) - 1));
 
       if (index >= info->num_options) {
         info->num_options = index + 1;
