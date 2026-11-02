@@ -1322,6 +1322,13 @@ threshold table introduced for gfx1250.
         | ``SPX``: Use the SPX table.
         | ``DPX``: Use the DPX table.
 
+    * - | ``RCCL_DDA_ENABLE``
+        | Master switch for the DDA paths of every collective. When off, every
+          collective skips DDA and takes its non-DDA path, regardless of the
+          threshold variables below.
+      - | ``1``: DDA allowed, subject to the per-collective thresholds (default).
+        | ``0``: Disable DDA for all collectives.
+
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.
           Messages above this size exit DDA and fall through to Ring, CE, or the
@@ -1397,6 +1404,19 @@ threshold table introduced for gfx1250.
           ``RCCL_DDA_A2A_PUSH=0``.
       - | ``1``: Use the TDM (default).
         | ``0``: Use vector loads and stores.
+
+    * - | ``RCCL_DDA_BC``
+        | Opt-in for DDA ``ncclBroadcast`` on the gfx1250 fabric path. When ``-1``
+          (default), Broadcast follows the per-architecture table, which has no
+          Broadcast DDA tier, so Broadcast keeps its previous path. When enabled, the
+          DDA LL and LL128 tier ceilings still apply; the table sets both to ``0`` for
+          Broadcast, so also set ``RCCL_DDA_LL_THRESHOLD`` or
+          ``RCCL_DDA_LL128_THRESHOLD``, which apply to every collective. Ignored when
+          ``NCCL_ALGO`` is set or ``RCCL_DDA_ENABLE=0``.
+      - | ``-1``: Follow the per-arch table; currently off (default).
+        | ``0``: Disable DDA Broadcast.
+        | ``1`` (or any positive value): Enable DDA Broadcast, subject to the tier
+          ceilings and eligibility checks.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
