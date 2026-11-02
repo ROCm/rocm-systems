@@ -161,8 +161,11 @@ protected:
     amdgpu::GpuMemory *memory = loaded.memory();
     simdojo::SimulationEngine engine(loaded.engine_config);
     engine.topology().set_root(loaded.take_root());
-    loaded.wire_links(engine.topology());
-    engine.create();
+    util::StringDiagnostic admission_diagnostic;
+    ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     ::rocjitsu::test::HaltSnapshotPlugin *snapshots = nullptr;
     const std::shared_ptr<ExecutionPluginGroup> plugins =
         ::rocjitsu::test::make_halt_snapshot_group(&snapshots);
@@ -252,6 +255,7 @@ protected:
 TEST_F(ConSanBootstrapSim, ActualWave32DescriptorRunsBothDefinedDisjointWaves) {
   RunResult original;
   run("disjoint", Bootstrap::None, original);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(original.waves.size(), 2u);
   EXPECT_EQ(original.output, (std::array<uint32_t, 2>{7, 8}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : original.waves) {
@@ -265,7 +269,9 @@ TEST_F(ConSanBootstrapSim, ContextDeliveryAndOriginalArgumentViewSurviveInBothWa
   RunResult original;
   RunResult wrapped;
   run("disjoint", Bootstrap::None, original);
+  ASSERT_FALSE(HasFatalFailure());
   run("disjoint", Bootstrap::Enabled, wrapped);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(original.waves.size(), 2u);
   ASSERT_EQ(wrapped.waves.size(), 2u);
   EXPECT_EQ(wrapped.output, original.output);
@@ -290,6 +296,7 @@ TEST_F(ConSanBootstrapSim, ContextDeliveryAndOriginalArgumentViewSurviveInBothWa
 TEST_F(ConSanBootstrapSim, RemovingPointerRestoreChangesTheIndependentNumericOracle) {
   RunResult control;
   run("disjoint", Bootstrap::OmitPointerRestore, control);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{13, 14}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
@@ -299,6 +306,7 @@ TEST_F(ConSanBootstrapSim, RemovingPointerRestoreChangesTheIndependentNumericOra
 TEST_F(ConSanBootstrapSim, RemovingPayloadLoadStopsContextDelivery) {
   RunResult control;
   run("disjoint", Bootstrap::OmitPayloadLoad, control);
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_EQ(control.waves.size(), 2u);
   EXPECT_EQ(control.output, (std::array<uint32_t, 2>{7, 8}));
   for (const ::rocjitsu::test::WavefrontSnapshot &wave : control.waves)
@@ -311,7 +319,9 @@ TEST_F(ConSanBootstrapSim,
     RunResult original;
     RunResult instrumented;
     run(fixture, Bootstrap::None, original);
+    ASSERT_FALSE(HasFatalFailure());
     run(fixture, Bootstrap::Instrumented, instrumented);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(original.waves.size(), 2u);
     ASSERT_EQ(instrumented.waves.size(), 2u);
     EXPECT_EQ(instrumented.output, (std::array<uint32_t, 2>{7, 8}));
@@ -350,6 +360,7 @@ TEST_F(ConSanBootstrapSim, ProductionRaceReadReadAndCollisionMasksComeFromGuestP
   for (const std::string_view fixture : {"race", "read_read", "collision", "single_lane"}) {
     RunResult result;
     run(fixture, Bootstrap::Instrumented, result);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(result.waves.size(), 2u);
     const uint32_t sites = static_cast<uint32_t>(result.manifest.sites.size());
     const uint32_t stride = kRowHeaderBytes + sites * 4 * kAccessRecordBytes;
@@ -389,6 +400,7 @@ TEST_F(ConSanBootstrapSim,
        {"four_ranges", "exhausted", "empty", "branched", "immediate"}) {
     RunResult result;
     run(fixture, Bootstrap::Instrumented, result);
+    ASSERT_FALSE(HasFatalFailure());
     ASSERT_EQ(result.waves.size(), 2u);
     const uint32_t stride = kRowHeaderBytes + static_cast<uint32_t>(result.manifest.sites.size()) *
                                                   4 * kAccessRecordBytes;

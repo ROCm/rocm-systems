@@ -44,7 +44,9 @@ void shutdown_plugin_group(rj_vm_t *vm) {
     vm->soc->plugin_group().onShutdown();
 }
 
-rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
+rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle,
+                               util::DiagnosticEmitter emit_error,
+                               rj_status_t admission_failure_status) {
   if (!loaded.soc())
     return ROCJITSU_STATUS_ERROR;
 
@@ -80,12 +82,18 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine_config = loaded.engine_config;
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
-  s->vm = assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon);
+  auto machine =
+      assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon, emit_error);
+  if (machine.failed())
+    return admission_failure_status;
+  s->vm = machine.value();
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
-    throw std::invalid_argument("multi-threaded VM requires at least one XCD");
+    emit_error.emit() << "multi-threaded VM requires at least one XCD";
+    return admission_failure_status;
   }
-  s->engine->create();
+  if (s->engine->create(emit_error).failed())
+    return admission_failure_status;
 
   // dispatch_wf() cannot enqueue work while a restored component tree is
   // detached from an engine. Once create() has assigned partitions and event
@@ -231,7 +239,11 @@ rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj
       util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
     }
-    return create_from_loaded(loaded.value(), mode, vm);
+    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                           ROCJITSU_STATUS_INVALID_FILE);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
+    return status;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
@@ -254,7 +266,11 @@ rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node
       util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
-    return create_from_loaded(loaded.value(), mode, vm);
+    const auto status = create_from_loaded(loaded.value(), mode, vm, diagnostic.emitter(),
+                                           ROCJITSU_STATUS_INVALID_ARGUMENT);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
+    return status;
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -353,11 +369,19 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
     auto engine_config = vm->engine_config;
     if (engine_config.num_threads == vm->loaded.execution_threads.engines)
       engine_config.num_threads = vm->loaded.requested_engine_threads;
-    config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
-                            vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
-                            vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads);
+    util::StringDiagnostic diagnostic;
+    if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
+                                vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
+                                vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                                vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
+            .failed()) {
+      util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_ERROR;
+    }
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &) {
+  } catch (const std::exception &error) {
+    // Serialization still allocates and calls library code that may throw.
+    util::Logger::warn("rj_vm_save_checkpoint failed: ", error.what());
     return ROCJITSU_STATUS_ERROR;
   }
 }
@@ -366,9 +390,20 @@ rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
   if (!path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::restore_checkpoint(path);
-    return create_from_loaded(loaded, RJ_VM_MODE_DEFAULT, vm);
-  } catch (const std::exception &) {
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<config::LoadedConfig> loaded =
+        config::restore_checkpoint(path, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_FILE;
+    }
+    const auto status = create_from_loaded(loaded.value(), RJ_VM_MODE_DEFAULT, vm,
+                                           diagnostic.emitter(), ROCJITSU_STATUS_INVALID_FILE);
+    if (status != ROCJITSU_STATUS_SUCCESS && !diagnostic.message().empty())
+      util::Logger::warn("rj_vm_restore_checkpoint failed: ", diagnostic.message());
+    return status;
+  } catch (const std::exception &e) {
+    util::Logger::warn("rj_vm_restore_checkpoint failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }

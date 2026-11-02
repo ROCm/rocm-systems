@@ -29,6 +29,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+- Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.

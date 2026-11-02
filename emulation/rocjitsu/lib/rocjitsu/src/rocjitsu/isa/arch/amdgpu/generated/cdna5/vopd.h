@@ -23,6 +23,8 @@ public:
                                   const util::DiagnosticEmitter &emit_error);
   void execute_impl(amdgpu::Wavefront &wf);
 
+  std::string disassemble() const override;
+
 private:
   enum class Format : uint8_t { VopdXy, Vopd3 };
 
