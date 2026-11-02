@@ -218,6 +218,12 @@ struct PlaybackContext {
     // ---- Handle translation maps (recorded raw ptr -> live handle) ----
     // Protected by map_mutex: shared_lock for reads, unique_lock for writes.
     mutable std::shared_mutex map_mutex;
+    // Orders a pinned-host snapshot copy against the free of its destination.
+    // A kernel launch holds it shared from before it hands on the turn until
+    // its launch call returns (hrr_launch_hold); every host free holds it
+    // exclusive across map removal and the HIP free. Take this before
+    // map_mutex, never the other way round.
+    std::shared_mutex host_free_mu;
     std::unordered_map<uint64_t, hipStream_t>    stream_map;
     std::unordered_map<uint64_t, hipEvent_t>     event_map;
     std::unordered_map<uint64_t, hipModule_t>    module_map;
@@ -1115,6 +1121,44 @@ bool hrr_translate_memcpy3d_arrays(const PlaybackContext& ctx, const char* api,
 // Kernel-launch handlers read this to wait for their submission turn at the
 // exact point of the HIP call, allowing preparation work to run in parallel.
 extern thread_local uint64_t hrr_dispatch_seq;
+
+// Kernel-launch handoff, for dispatch_event. A launch gives up the global turn
+// before its handler runs, so it holds host_free_mu shared from before that
+// (hrr_launch_hold) until the launch call returns: the handler calls
+// hrr_launch_release then, and dispatch_event again on the way out. A free of
+// pinned host memory takes the lock exclusive, so it cannot drop a destination
+// a snapshot is about to be queued for. Both are per thread.
+void hrr_launch_hold(PlaybackContext& ctx);
+void hrr_launch_release();
+// True for the handlers that replay a kernel launch.
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*));
+
+// Hands the global turn on for one event, which dispatch_event does through
+// this guard. An unordered event hands the turn on at construction, an ordered
+// one on destruction. A kernel launch takes the host_free_mu hold first, before
+// it hands the turn on, and gives it up on destruction if its handler has not.
+class HrrTurnGuard {
+ public:
+  HrrTurnGuard(PlaybackContext& ctx, uint64_t next, bool ordered, bool launch)
+      : ctx_(ctx), next_(next), ordered_(ordered), launch_(launch) {
+    if (!ordered_) {
+      if (launch_) hrr_launch_hold(ctx_);
+      ctx_.next_seq.store(next_, std::memory_order_release);
+    }
+  }
+  ~HrrTurnGuard() {
+    if (ordered_) ctx_.next_seq.store(next_, std::memory_order_release);
+    if (launch_) hrr_launch_release();
+  }
+  HrrTurnGuard(const HrrTurnGuard&) = delete;
+  HrrTurnGuard& operator=(const HrrTurnGuard&) = delete;
+
+ private:
+  PlaybackContext& ctx_;
+  uint64_t next_;
+  bool ordered_;
+  bool launch_;
+};
 
 // Device synchronize with an optional watchdog. When ctx.sync_watchdog_ms == 0
 // this is a plain hipDeviceSynchronize(). Otherwise the (potentially blocking)
