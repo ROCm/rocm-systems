@@ -2774,7 +2774,7 @@
       "tests": [
         {
           "name": "DirectReduceScatter_NonGridMultipleCounts",
-          "description": "ReduceScatter with prime recvcounts in the 128 KiB-2 MiB direct window (sum int32, min float32) takes RCCL_DIRECT_REDUCESCATTER and matches a host reference; a guard region past recvcount stays untouched.",
+          "description": "ReduceScatter with non-grid-multiple recvcounts in the 128 KiB-2 MiB direct window (sum int32, min float32) takes RCCL_DIRECT_REDUCESCATTER and matches a host reference; a guard region past recvcount stays untouched.",
           "test_filter": "DirectReduceScatterMPITest.NonGridMultipleCountsMatchHostReference",
           "timeout": 300
         }
@@ -2784,7 +2784,7 @@
       "extends": "direct_reduce_scatter_multinode",
       "num_ranks": 8,
       "num_gpus": 4,
-      "description": "The same row at 8 ranks on 2 nodes, so the smallest count (4099) sits at the other end of the window."
+      "description": "The same row at 8 ranks on 2 nodes (4 GPUs each), so the sweep starts at 4096 elements, the same 128 KiB edge."
     },
     "gin_traffic_class": {
       "extends": "default",
