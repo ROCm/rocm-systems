@@ -234,6 +234,10 @@ Queue::lock_queue(FuncT&& func)
 void
 queue_init();
 
+// Forward directly to the HSA signal-destroy function saved before SDK wrappers were installed.
+hsa_status_t
+destroy_signal_next(hsa_signal_t signal);
+
 /**
  * @brief Wraps hsa_amd_profiling_get_dispatch_time and hsa_signal_destroy so that a caller's
  * completion signal reports the dispatch time of a kernel that completed on a rocprofiler-owned

@@ -238,8 +238,8 @@ hsa_status_t
 signal_destroy_impl(hsa_signal_t _signal)
 {
     forget_dispatch_time(_signal);
-    return get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
-                             ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>()(_signal);
+    if(queue_interposition::defer_pending_signal_destruction(_signal)) return HSA_STATUS_SUCCESS;
+    return destroy_signal_next(_signal);
 }
 
 template <size_t TableIdx, size_t OpIdx, typename TableT, typename FuncT>
@@ -1803,6 +1803,13 @@ void
 Queue::set_state(queue_state state)
 {
     _state = state;
+}
+
+hsa_status_t
+destroy_signal_next(hsa_signal_t signal)
+{
+    return get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
+                             ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>()(signal);
 }
 
 void

@@ -32,17 +32,18 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 project(
     rocprofiler-sdk-tests-hip-graph-forkjoin-deadlock
     LANGUAGES CXX
-    VERSION 0.0.0)
+    VERSION 0.0.0
+)
 
 find_package(rocprofiler-sdk REQUIRED)
 
 # Workload geometry. Both steps read it from here: the execute step runs with it and the
-# validate step derives the minimum dispatch count it expects from it, so the two cannot
+# validate step derives the exact dispatch count it expects from it, so the two cannot
 # drift. The values are sized to keep enough completions outstanding at once for the
 # concurrency this test is about. A healthy run finishes in a few seconds.
-set(FORKJOIN_WIDTH 8)
-set(FORKJOIN_DEPTH 8)
-set(FORKJOIN_REPLAYS 30)
+set(FORKJOIN_WIDTH 76)
+set(FORKJOIN_DEPTH 1)
+set(FORKJOIN_REPLAYS 200)
 
 rocprofiler_add_integration_execute_test(
     hip-graph-forkjoin-deadlock
@@ -58,7 +59,10 @@ rocprofiler_add_integration_execute_test(
         # inline path is active. It would default on for these contexts, but set it
         # explicitly so a future default-logic change cannot silently no-op the test.
         "ROCPROFILER_QUEUE_INTERPOSITION=1"
-    FIXTURES_SETUP hip-graph-forkjoin-deadlock)
+    FAIL_REGULAR_EXPRESSION
+        "SIGSEGV|Segmentation fault|HSA_STATUS_ERROR_INVALID_SIGNAL|Completion monitor (retired|declined)|hsa_amd_profiling_get_dispatch_time.*returned status"
+    FIXTURES_SETUP hip-graph-forkjoin-deadlock
+)
 
 rocprofiler_add_integration_validate_test(
     hip-graph-forkjoin-deadlock
@@ -75,4 +79,5 @@ rocprofiler_add_integration_validate_test(
                    ${FORKJOIN_REPLAYS}
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hip-graph-forkjoin-deadlock-test.json
          --width ${FORKJOIN_WIDTH} --depth ${FORKJOIN_DEPTH} --replays
-         ${FORKJOIN_REPLAYS})
+         ${FORKJOIN_REPLAYS}
+)
