@@ -22,10 +22,10 @@ It also validates outputs including:
 from __future__ import annotations
 
 from pathlib import Path
-from conftest import RocprofsysTest, assert_resolved_settings
 from typing import ClassVar
 
 import pytest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [
     pytest.mark.transpose,
