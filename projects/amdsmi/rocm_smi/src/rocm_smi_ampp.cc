@@ -376,6 +376,17 @@ rsmi_status_t resolve_ampp_profile_dir(const std::shared_ptr<amd::smi::Device>& 
   return RSMI_STATUS_SUCCESS;
 }
 
+// node_-scoped fields (see amd::smi::is_node_scoped_field below) are only
+// meaningful on the primary GPU (oam_id == 0), the same primary check
+// amdsmi_get_node_handle() uses for the NPM API family -- a non-primary GPU
+// showing/writing these would look like an independent per-GPU value when it
+// is really one shared one.
+bool is_primary_gpu(uint32_t dv_ind) {
+  uint16_t physical_id = std::numeric_limits<uint16_t>::max();
+  rsmi_status_t status = rsmi_dev_xgmi_physical_id_get(dv_ind, &physical_id);
+  return status == RSMI_STATUS_SUCCESS && physical_id == 0;
+}
+
 }  // namespace
 
 namespace amd::smi {
@@ -408,6 +419,16 @@ rsmi_status_t parse_ampp_writable_slot_mask(const std::string& trimmed_line,
     }
   }
   return RSMI_STATUS_SUCCESS;
+}
+
+// A "node_"-prefixed field is node-wide (shared across every GPU on the
+// board) rather than per-GPU; the driver marks these with this prefix in
+// app_modes/. See is_primary_gpu() in the anonymous namespace above for the
+// primary-GPU check that gates visibility/writability of these fields.
+constexpr char kNodeScopedFieldPrefix[] = "node_";
+
+bool is_node_scoped_field(const std::string& name) {
+  return name.rfind(kNodeScopedFieldPrefix, 0) == 0;
 }
 
 }  // namespace amd::smi
@@ -513,6 +534,12 @@ rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name
   rsmi_status_t enumerate_status = RSMI_STATUS_SUCCESS;
   std::vector<std::string> field_names = enumerate_field_names(profile_dir, &enumerate_status);
   if (enumerate_status != RSMI_STATUS_SUCCESS) return enumerate_status;
+
+  if (!is_primary_gpu(dv_ind)) {
+    field_names.erase(
+        std::remove_if(field_names.begin(), field_names.end(), amd::smi::is_node_scoped_field),
+        field_names.end());
+  }
 
   if (field_names.empty()) {
     // Distinguish "writable but unconfigured" (NO_DATA) from a profile
@@ -672,8 +699,13 @@ rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profi
     return name == "profile" || name == "writable_slot_mask" || name == "commit";
   };
 
+  // node_-scoped fields only belong to the primary GPU (see
+  // amd::smi::is_node_scoped_field); on any other GPU they are not a
+  // recognized field for this profile, same as an unknown name.
+  const bool primary = is_primary_gpu(dv_ind);
   auto field_is_stageable = [&](const std::string& name) {
     if (is_control_file(name)) return false;
+    if (!primary && amd::smi::is_node_scoped_field(name)) return false;
     for (const auto& f : stageable_fields) {
       if (!is_control_file(f) && f == name) return true;
     }
