@@ -70,6 +70,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -576,6 +577,7 @@ class completion_monitor
 
 public:
     common::Synchronized<std::vector<pending_completion>> incoming    = {};
+    common::Synchronized<std::vector<std::shared_ptr<std::promise<uint64_t>>>> fences      = {};
     hsa_signal_t                                          wake_signal = {};
     std::atomic<monitor_state>                            state       = {monitor_state::stopped};
 
@@ -1026,7 +1028,20 @@ completion_monitor_loop(completion_monitor& mon)
         get_core_table()->hsa_signal_store_screlease_fn(mon.wake_signal, 0);
 
         // One more drain closes the window between the pre-wait drain and the reset.
+        auto fences = mon.fences.wlock([](auto& pending) {
+            auto requests = std::decay_t<decltype(pending)>{};
+            requests.swap(pending);
+            return requests;
+        });
         move_incoming_to_active(mon);
+
+        if(!fences.empty())
+        {
+            retire_completed(mon, scratch);
+            const auto ticket = mon.record_emitter->get_async_fence();
+            for(auto& request : fences)
+                request->set_value(ticket);
+        }
 
         // Break only when stop is requested. stop_completion_monitor moves the state to `stopped`
         // and bumps `wake_signal`, so the wait always returns even if no completion signal
@@ -2127,16 +2142,31 @@ interposition_sync()
 }
 
 bool
-interposition_fence_records(uint64_t timeout_ns)
+interposition_fence_records()
 {
     if(internal_threading::is_task_group_thread() || internal_threading::fork_stale() ||
        registration::get_fini_status() != 0)
         return false;
     if(!s_intercept_installed.load(std::memory_order_acquire)) return true;
 
+    auto  request = std::make_shared<std::promise<uint64_t>>();
+    auto  ready   = request->get_future();
     auto& monitor = get_completion_monitor();
-    auto emitter = monitor.thread.rlock([&monitor](const auto&) { return monitor.record_emitter; });
-    return !emitter || emitter->wait_async_for(timeout_ns);
+    auto  emitter = monitor.thread.rlock([&monitor, &request](const auto&) {
+        if(monitor.state.load(std::memory_order_acquire) != monitor_state::active)
+        {
+            request->set_value(monitor.record_emitter ? monitor.record_emitter->get_async_fence()
+                                                       : 0);
+        }
+        else
+        {
+            monitor.fences.wlock([&request](auto& pending) { pending.emplace_back(request); });
+            get_core_table()->hsa_signal_store_screlease_fn(monitor.wake_signal, 1);
+        }
+        return monitor.record_emitter;
+    });
+    if(!emitter) return true;
+    return emitter->wait_async(ready.get());
 }
 
 // Create the wake signal and launch the monitor thread. A second call while it is already
@@ -2361,10 +2391,5 @@ join_signal_less_tasks()
     hsa::queue_interposition::interposition_sync();
 }
 
-bool
-fence_signal_less_tasks(uint64_t timeout_ns)
-{
-    return hsa::queue_interposition::interposition_fence_records(timeout_ns);
-}
 }  // namespace kfd
 }  // namespace rocprofiler

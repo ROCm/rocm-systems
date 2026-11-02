@@ -99,14 +99,24 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 /**
  * @brief Flush buffer.
  *
- * For signal-less kernel-dispatch tracing, this also waits for available dispatch-log records
- * and their completion tasks before delivering the buffer. This call does not synchronize GPU
- * execution; synchronize the required application work before flushing its completed records.
+ * For buffered kernel-dispatch tracing, a successful call delivers records for dispatches that
+ * the application synchronized before entering this function. This applies to both signal and
+ * signal-less completion, including records from a context that has subsequently been stopped.
+ * Records already discarded by the configured buffer policy cannot be recovered by flushing.
  *
- * A signal-less kernel-dispatch flush returns ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY if the
- * completion pipeline cannot quiesce within its configured budget, or if called from an SDK
- * task-group worker where waiting could deadlock. Retry from an application thread. A busy
- * result does not stop or disable signal-less tracing.
+ * This call does not synchronize GPU execution or wait for unfinished dispatches. It waits for
+ * a finite snapshot of SDK completion work and invokes the buffer callback before returning.
+ * Work submitted concurrently need not be included. There is no wall-clock timeout for this
+ * synchronous delivery; a blocked tool callback can block the caller.
+ *
+ * Synchronize the application work, then flush before consuming its records. Stopping the
+ * context may precede or follow the flush if no new work is submitted in between; stopping
+ * alone does not deliver buffered kernel records.
+ *
+ * Calls from SDK completion or buffer-callback threads return
+ * ::ROCPROFILER_STATUS_ERROR_BUFFER_BUSY when waiting could deadlock. Retry from an application
+ * thread. If the completion pipeline is unavailable, available buffered records are delivered
+ * and the call returns an error instead of promising complete delivery. Always check the status.
  *
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t

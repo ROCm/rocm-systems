@@ -29,6 +29,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <future>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -60,12 +62,21 @@ struct record_batch
     // Which GPU's ring these came from. Pairing and correlation are keyed by it,
     // so records from different GPUs can never be matched to each other.
     uint32_t gpu_id = 0;
+    std::shared_ptr<std::promise<void>> completion = {};
+
+    bool complete_fence() const
+    {
+        if(!completion) return false;
+        completion->set_value();
+        return true;
+    }
 
     void clear()
     {
         records.clear();  // keeps capacity: steady state does not allocate
         now_ns = 0;
         gpu_id = 0;
+        completion.reset();
     }
 };
 

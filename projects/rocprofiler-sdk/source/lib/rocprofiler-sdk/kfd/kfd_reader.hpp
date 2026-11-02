@@ -90,5 +90,8 @@ nudge_reader();
 // immediate success when the reader never started.
 bool
 wait_for_reader_quiesce(uint64_t timeout_ns = 100'000'000);
+
+bool
+flush_reader_records();
 }  // namespace kfd
 }  // namespace rocprofiler

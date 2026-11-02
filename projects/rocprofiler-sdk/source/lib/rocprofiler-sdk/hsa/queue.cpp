@@ -38,6 +38,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
@@ -65,6 +66,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -231,6 +233,25 @@ full_packet_instrumentation_context_filter(const context::context* ctx)
             context_filter(ctx, ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH));
 }
 
+struct async_completion_state
+{
+    hsa_signal_t             signal     = {};
+    std::promise<void>       completion = {};
+    std::shared_future<void> ready      = completion.get_future().share();
+};
+
+using async_completions_t =
+    common::Synchronized<std::unordered_map<void*, std::shared_ptr<async_completion_state>>>;
+
+thread_local bool inside_async_signal_handler = false;
+
+async_completions_t&
+get_async_completions()
+{
+    static auto*& value = common::static_object<async_completions_t>::construct();
+    return *value;
+}
+
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
@@ -247,13 +268,27 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // if we have fully finalized, delete the data and return
     if(registration::get_fini_status() > 0)
     {
+        if(auto* pending = common::static_object<async_completions_t>::get())
+            pending->wlock([data](auto& entries) { entries.erase(data); });
         _session_ptr->reset();
         delete _session_ptr;
         return false;
     }
 
+    const auto previous_handler = inside_async_signal_handler;
+    inside_async_signal_handler = true;
+    auto handler_scope          = common::scope_destructor{
+        [previous_handler]() { inside_async_signal_handler = previous_handler; }};
+    auto completion = get_async_completions().wlock([data](auto& pending) {
+        auto current    = pending.at(data);
+        current->signal = null_hsa_signal;
+        return current;
+    });
+
     // cleanup the pooled signal data and release the signal back to the pool for reuse
-    auto _cleanup = common::scope_destructor{[&_session_ptr]() {
+    auto _cleanup = common::scope_destructor{[&_session_ptr, data, completion]() {
+        get_async_completions().wlock([data](auto& pending) { pending.erase(data); });
+        completion->completion.set_value();
         _session_ptr->reset();
         delete _session_ptr;
         _session_ptr = nullptr;
@@ -1508,6 +1543,42 @@ Queue::~Queue()
     }
 }
 
+bool
+is_async_signal_handler_thread()
+{
+    return inside_async_signal_handler;
+}
+
+bool
+flush_async_signal_records()
+{
+    if(is_async_signal_handler_thread() || internal_threading::is_task_group_thread() ||
+       internal_threading::fork_stale())
+        return false;
+    auto* pending = common::static_object<async_completions_t>::get();
+    if(!pending) return true;
+    auto completions = pending->rlock([](const auto& entries) {
+        auto ready = std::vector<std::shared_future<void>>{};
+        for(const auto& entry : entries)
+        {
+            const auto& completion = entry.second;
+            if(completion->signal == null_hsa_signal ||
+               get_core_table()->hsa_signal_load_scacquire_fn(completion->signal) == -1)
+                ready.emplace_back(completion->ready);
+        }
+        return ready;
+    });
+    try
+    {
+        for(const auto& completion : completions)
+            completion.get();
+    } catch(const std::future_error&)
+    {
+        return false;
+    }
+    return true;
+}
+
 void
 Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, void* data) const
 {
@@ -1521,8 +1592,16 @@ Queue::signal_async_handler(pooled_signal_t* signal, hsa_signal_t raw_signal, vo
         << fmt::format("pooled signal has not been acquired: hsa_signal_t(.handle={})",
                        signal->get().value.handle);
 
+    auto completion    = std::make_shared<async_completion_state>();
+    completion->signal = raw_signal;
+    get_async_completions().wlock(
+        [data, &completion](auto& pending) { pending.emplace(data, completion); });
+
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         raw_signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
+
+    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        get_async_completions().wlock([data](auto& pending) { pending.erase(data); });
 
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << fmt::format("Error: hsa_amd_signal_async_handler (signal={{.handle={}}}) failed with "

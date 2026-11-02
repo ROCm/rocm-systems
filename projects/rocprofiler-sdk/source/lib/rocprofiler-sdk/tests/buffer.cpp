@@ -227,3 +227,37 @@ TEST(rocprofiler_lib, completion_fence_waits_for_another_producer)
     EXPECT_TRUE(fence.get());
     worker.join();
 }
+
+TEST(rocprofiler_lib, completion_fence_excludes_later_submissions)
+{
+    auto worker         = rocprofiler::internal_threading::task_group_t{2};
+    auto first_release  = std::promise<void>{};
+    auto first_released = first_release.get_future();
+    auto later_release  = std::promise<void>{};
+    auto later_released = later_release.get_future();
+    worker.async([&]() { first_released.wait(); });
+    auto fence = worker.get_async_fence();
+    worker.async([&]() { later_released.wait(); });
+    first_release.set_value();
+    EXPECT_TRUE(worker.wait_async_for(fence, 2'000'000'000));
+    EXPECT_FALSE(worker.wait_async_for(0));
+    later_release.set_value();
+    worker.join();
+}
+
+TEST(rocprofiler_lib, completion_fence_waits_for_out_of_order_prefix)
+{
+    auto worker         = rocprofiler::internal_threading::task_group_t{2};
+    auto first_release  = std::promise<void>{};
+    auto first_released = first_release.get_future();
+    auto later_finished = std::promise<void>{};
+    auto later_ready    = later_finished.get_future();
+    worker.async([&]() { first_released.wait(); });
+    worker.async([&]() { later_finished.set_value(); });
+    auto fence = worker.get_async_fence();
+    EXPECT_EQ(later_ready.wait_for(std::chrono::seconds{2}), std::future_status::ready);
+    EXPECT_FALSE(worker.wait_async_for(fence, 1'000'000));
+    first_release.set_value();
+    EXPECT_TRUE(worker.wait_async_for(fence, 2'000'000'000));
+    worker.join();
+}
