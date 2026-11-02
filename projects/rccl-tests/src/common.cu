@@ -1946,7 +1946,8 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
   }
   // Zero payloads run faster on some hardware, so no timed buffer may stay zero:
   // recvbuff is the in-place source and initData fills only the first rotation slot.
-  // Distinct bytes tell sendbuff and recvbuff apart in dumps and failed checks.
+  // Zero data runs faster, so fill every rotation slot: recvbuff is the
+  // in-place source and initData fills only the first slot.
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
   CUDACHECK(hipMemset(*recvbuff, 2, nbytes));
   if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
