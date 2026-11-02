@@ -1083,6 +1083,7 @@ declares:
 | `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
 | `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
 | `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
+| `ScopedDir.h` | A private temporary directory, removed with everything under it on scope exit. Takes a prefix so a leftover names the suite that made it, uses `temp_directory_path()` rather than a hardcoded `/tmp`, and aborts with the errno if `mkdtemp` fails — a test that cannot get a directory has nothing left to prove. |
 
 When a test grows a helper that is not specific to its unit under test, promote
 it here rather than leaving it in the TU — a per-TU copy is how four tests end

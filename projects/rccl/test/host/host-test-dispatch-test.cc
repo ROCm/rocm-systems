@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 
+#include "ScopedDir.h"
+
 #define RCCL_HOST_DISPATCH_NO_MAIN
 #include "host_test_dispatch.cc"
 
@@ -808,40 +810,20 @@ TEST(HostDispatchEnvironmentMicrotest, ShardingVariablesSurviveInTheDispatcherIt
 
 namespace {
 
-// A directory tree that removes itself.
-class ScopedDir {
-public:
-    ScopedDir()
-    {
-        std::string buffer =
-            (std::filesystem::temp_directory_path() / "rccl-dispatch-test-XXXXXX").string();
-        path_ = mkdtemp(buffer.data()) == nullptr ? "" : buffer;
-    }
-    ~ScopedDir()
-    {
-        std::error_code ec;
-        std::filesystem::remove_all(path_, ec);
-    }
-    ScopedDir(const ScopedDir &) = delete;
-    ScopedDir &operator=(const ScopedDir &) = delete;
-
-    const std::string &path() const { return path_; }
-
-    // An executable file named *name* under this directory, parents created as needed.
-    std::string addExecutable(const std::string &name) const
-    {
-        const std::filesystem::path file = std::filesystem::path(path_) / name;
-        std::error_code ec;
-        std::filesystem::create_directories(file.parent_path(), ec);
-        std::ofstream(file) << "#!/bin/sh\n";
-        std::filesystem::permissions(file, std::filesystem::perms::owner_all,
-                                     std::filesystem::perm_options::add, ec);
-        return file.string();
-    }
-
-private:
-    std::string path_;
-};
+// An executable file named *name* under *dir*, parents created as needed. Executability is the
+// whole point: discoverBinaries() filters on isExecutableFile(), so a plain file would be
+// skipped for that reason rather than the one a test here means to demonstrate. Nothing runs
+// these, so the shebang body is only there to make them look like what they stand in for.
+std::string addExecutable(const ScopedDir &dir, const std::string &name)
+{
+    const std::filesystem::path file = std::filesystem::path(dir.path()) / name;
+    std::error_code ec;
+    std::filesystem::create_directories(file.parent_path(), ec);
+    std::ofstream(file) << "#!/bin/sh\n";
+    std::filesystem::permissions(file, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::add, ec);
+    return file.string();
+}
 
 }  // namespace
 
@@ -857,11 +839,10 @@ TEST(HostDispatchLayoutMicrotest, ABinaryBesideTheFrontDoorIsNotFronted)
 {
     // A stale copy left beside the front door by an earlier build is not in micro/, so it is not
     // what runs -- the directory is where the binaries are put, never where they happen to be.
-    const ScopedDir tree;
-    ASSERT_FALSE(tree.path().empty());
-    const std::string self = tree.addExecutable("rccl-UnitTestsHostAll");
-    tree.addExecutable("rccl-UnitTestsMicroInit");
-    tree.addExecutable("micro/rccl-UnitTestsMicroCrypt");
+    const ScopedDir tree("rccl-dispatch-test");
+    const std::string self = addExecutable(tree, "rccl-UnitTestsHostAll");
+    addExecutable(tree, "rccl-UnitTestsMicroInit");
+    addExecutable(tree, "micro/rccl-UnitTestsMicroCrypt");
 
     EXPECT_EQ(discoverBinaries(binaryDirectory(tree.path()), self),
               std::vector<std::string>{"rccl-UnitTestsMicroCrypt"});
