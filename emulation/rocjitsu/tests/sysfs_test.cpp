@@ -825,8 +825,9 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
 // MI350X is harvested too: its captured KFD topology has 32 shader arrays of
 // 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
-// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
-// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
+// CUs at four SIMDs per CU. Keep the canonical full-device MI350X configs
+// pinned to that capture so local, KMD, and multi-GPU launch paths cannot drift
+// apart. DeprecatedGfx950Mi355xConfigsMatchMi350x covers the legacy aliases.
 TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
   const std::string config_dir = CONFIG_DIR;
   constexpr const char *kMi350xConfigs[] = {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json",
