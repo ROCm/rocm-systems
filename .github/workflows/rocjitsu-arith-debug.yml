@@ -1,0 +1,50 @@
+# Unoptimized builds retain weak inline definitions that Release may hide.
+name: rocjitsu-arith-debug
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - "runtimes/api-headers/**"
+      - ".github/workflows/rocjitsu-arith-debug.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  symbol-isolation:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          sparse-checkout: |
+            emulation/rocjitsu
+            emulation/mirage
+            runtimes/api-headers
+            shared/machine-readable-isa/isa
+      - name: Configure Debug arithmetic
+        run: |
+          cmake -S emulation/rocjitsu -B build-arith-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DBUILD_TESTING=ON -DROCM_PATH= \
+            -DFETCHCONTENT_BASE_DIR="${RUNNER_TEMP}/arith-deps"
+      - name: Build arithmetic and check callable symbols
+        run: |
+          cmake --build build-arith-debug --target rj_arith --parallel 2
+          ctest --test-dir build-arith-debug/lib/arith/tests \
+            -R '^rj_arith\.baseline_linkage$' --no-tests=error --output-on-failure

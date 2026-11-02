@@ -66,6 +66,19 @@ extern std::function<hipError_t(void* /*data*/,
                                 hipDeviceptr_t /*ptr*/)>
     g_hipPointerGetAttribute;
 
+// g_hipPointerGetAttribute recipes. The pointer is `type` memory and, where HIP asks, legacy-IPC capable or not;
+// other attributes succeed untouched.
+inline auto ForceMemoryType(hipMemoryType type, bool legacyIpcCapable = false) {
+    return [=](void* data, hipPointer_attribute attribute, hipDeviceptr_t) -> hipError_t {
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = type;
+        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
+            *static_cast<int*>(data) = legacyIpcCapable ? 1 : 0;
+        return hipSuccess;
+    };
+}
+// Legacy-IPC-capable device memory.
+inline auto ForceLegacyIpcCapable() { return ForceMemoryType(hipMemoryTypeDevice, /*legacyIpcCapable=*/true); }
+
 // Device model + inventory seams. Defaults succeed with plausible values.
 extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
 extern std::function<hipError_t(int* /*version*/)> g_hipDriverGetVersion;

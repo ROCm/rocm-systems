@@ -216,6 +216,8 @@
   X(SignalAdd,                      171)  \
   X(SignalSet,                      172)  \
   X(SignalWaitUntil,                173)  \
+  X(QpPutNbiPoll,                   174)  \
+  X(SdmaPutNbiPoll,                 175)  \
   X(TilePutRowMajorStartCoord,      177)  \
   X(TileGetRowMajorStartCoord,      178)  \
   X(TilePutWaveRowMajorStartCoord,  179)  \

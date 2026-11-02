@@ -11,26 +11,22 @@ process, holding that kernel's instruction lines in offset order with the
 counts collected on them.
 """
 
-import csv
-import re
 from collections.abc import Iterable, Iterator
+from functools import partial
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
-from utils.analysis_orm import PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+from pc_sampling.pc_sampling_csv_export import (
+    IsaLineLocation,
+    Row,
+    build_header,
+    resolve_isa_relative_path,
+    write_grouped_csv_files,
+)
+from utils.analysis_orm import per_kernel_isa_file_key_columns
 from utils.logger import console_debug, console_warning
 
 PER_KERNEL_DIRECTORY_NAME = "per_kernel_pc_sampling"
-STALL_COLUMN_PREFIX = "Stall "
-
-# Characters a short name can hold that a path component should not. `_` is
-# not in the safe set, so consecutive underscores are collapsed into one.
-UNSAFE_PATH_CHARACTERS = re.compile(r"[^A-Za-z0-9.-]+")
-KERNEL_DESCRIPTOR_SUFFIX = ".kd"
-# Generous for a truncated name, and keeps the whole path inside PATH_MAX.
-MAX_SHORT_NAME_LENGTH = 64
-# Names the folder of a kernel with no short name
-UNNAMED_KERNEL_FOLDER_PREFIX = "kernel"
 
 BASE_COLUMNS = (
     "Instruction line number",
@@ -66,22 +62,29 @@ class WorkloadIsaExport(NamedTuple):
     isa_rows: Iterator[Tuple[Any, ...]]
 
 
+class PerKernelIsaFiles(NamedTuple):
+    """The per-kernel ISA files that were written, and where each instruction is."""
+
+    # The folder of the files, which is also where their source is exported
+    directory: Path
+    # The location of each instruction line, keyed by its instruction uuid
+    isa_line_locations: Dict[int, IsaLineLocation]
+
+
 def export_per_kernel_isa_files(
     csv_result_directory: Path,
     workload_isa_exports: Iterable[WorkloadIsaExport],
-) -> Path:
-    """Export every workload's per-kernel ISA beneath a CSV result folder.
-
-    Returns the folder the files were written to, which is also where the
-    source they point at is exported.
-    """
+) -> PerKernelIsaFiles:
+    """Export every workload's per-kernel ISA beneath a CSV result folder."""
     per_kernel_directory = csv_result_directory / PER_KERNEL_DIRECTORY_NAME
+    isa_line_locations: Dict[int, IsaLineLocation] = {}
 
     for workload_isa_export in workload_isa_exports:
         file_count = _write_per_kernel_isa_files(
             per_kernel_directory,
             workload_isa_export.isa_rows,
             workload_isa_export.stall_reasons,
+            isa_line_locations,
         )
         console_debug(
             f"Exported {file_count} per-kernel ISA files for workload "
@@ -90,107 +93,53 @@ def export_per_kernel_isa_files(
 
     if per_kernel_directory.is_dir():
         console_warning(f"Created directory: {per_kernel_directory}")
-    return per_kernel_directory
-
-
-def _build_isa_header(stall_reasons: Iterable[str]) -> List[str]:
-    """Return the column names of one workload's ISA files.
-
-    A workload's stall reasons vary with how it was sampled, so the columns
-    are the ones its samples carry. The prefix keeps a reason such as NONE
-    from reading as an unrelated column next to the counts.
-    """
-    return [
-        *BASE_COLUMNS,
-        *(f"{STALL_COLUMN_PREFIX}{stall_reason}" for stall_reason in stall_reasons),
-        *TRAILING_COLUMNS,
-    ]
+    return PerKernelIsaFiles(per_kernel_directory, isa_line_locations)
 
 
 def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> Path:
-    """Return the file one kernel's ISA is written to.
-
-    The folder leads with the kernel's short name so it reads as the kernel it
-    holds. Two kernels can share a short name, so the kernel uuid follows it to
-    keep the folder unique and to map it back to its kernel.csv row.
-    """
-    (
-        workload_name,
-        workload_sub_name,
-        kernel_uuid,
-        short_name,
-        code_object_id,
-        pid,
-    ) = file_key
-    folder_prefix = _sanitize_short_name(short_name) or UNNAMED_KERNEL_FOLDER_PREFIX
+    """Return the file one kernel's ISA is written to."""
+    workload_name, workload_sub_name, *kernel_key = file_key
     return (
         per_kernel_directory
         / workload_name
         / workload_sub_name
-        / f"{folder_prefix}_uuid_{kernel_uuid}"
-        / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+        / resolve_isa_relative_path(*kernel_key)
     )
-
-
-def _sanitize_short_name(short_name: Optional[str]) -> Optional[str]:
-    """Reduce a kernel's short name to a path component.
-
-    A short name is the identifier a C++ signature demangles down to, which can
-    still hold characters a path cannot, such as the / of operator/.
-    """
-    if short_name is None:
-        return None
-
-    identifier = short_name
-    if identifier.endswith(KERNEL_DESCRIPTOR_SUFFIX):
-        identifier = identifier[: -len(KERNEL_DESCRIPTOR_SUFFIX)]
-    identifier = UNSAFE_PATH_CHARACTERS.sub("_", identifier)
-    return identifier.strip("_.")[:MAX_SHORT_NAME_LENGTH].strip("_.")
 
 
 def _write_per_kernel_isa_files(
     per_kernel_directory: Path,
-    isa_rows: Iterator[Tuple[Any, ...]],
+    isa_rows: Iterator[Row],
     stall_reasons: List[str],
+    isa_line_locations: Dict[int, IsaLineLocation],
 ) -> int:
-    """Write one workload's grouped ISA rows, returning the file count.
+    """Write one workload's grouped ISA rows, and return the number of files."""
+    return write_grouped_csv_files(
+        isa_rows,
+        len(per_kernel_isa_file_key_columns()),
+        build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
+        partial(_resolve_isa_export_path, per_kernel_directory),
+        partial(_number_and_locate_instruction_lines, isa_line_locations),
+    )
 
-    The rows arrive grouped and ordered, so a file is opened when the key
-    changes and closed when the next one starts.
+
+def _number_and_locate_instruction_lines(
+    isa_line_locations: Dict[int, IsaLineLocation],
+    file_key: FileKey,
+    file_rows: List[Row],
+) -> Iterator[List[Any]]:
+    """Prefix each instruction row of one ISA file with its instruction line number.
+
+    The instruction line numbers count from 1. Records the location of each
+    instruction in isa_line_locations. Each row starts with its instruction
+    uuid, which is not written.
     """
-    header = _build_isa_header(stall_reasons)
-    file_count = 0
-    for file_key, file_rows in _group_rows_by_file(isa_rows):
-        export_path = _resolve_isa_export_path(per_kernel_directory, file_key)
-        export_path.parent.mkdir(parents=True, exist_ok=True)
-        with export_path.open("w", newline="", encoding="utf-8") as export_file:
-            writer = csv.writer(export_file)
-            writer.writerow(header)
-            writer.writerows(
-                [line_number, *row]
-                for line_number, row in enumerate(file_rows, start=1)
-            )
-        file_count += 1
-    return file_count
-
-
-def _group_rows_by_file(
-    isa_rows: Iterator[Tuple[Any, ...]],
-) -> Iterator[Tuple[FileKey, List[Tuple[Any, ...]]]]:
-    """Split the ordered row stream into the rows of one file at a time.
-
-    Only the file being written is held, so the whole result set never is.
-    """
-    current_key = None
-    current_rows: List[Tuple[Any, ...]] = []
-    for row in isa_rows:
-        file_key: FileKey = row[:PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT]
-        if file_key != current_key:
-            if current_key is not None:
-                yield current_key, current_rows
-            current_key = file_key
-            current_rows = []
-        current_rows.append(row[PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT:])
-
-    if current_key is not None:
-        yield current_key, current_rows
+    _, _, *kernel_key = file_key
+    isa_file = resolve_isa_relative_path(*kernel_key)
+    for instruction_line_number, (instruction_uuid, *cells) in enumerate(
+        file_rows, start=1
+    ):
+        isa_line_locations[instruction_uuid] = IsaLineLocation(
+            isa_file, instruction_line_number
+        )
+        yield [instruction_line_number, *cells]

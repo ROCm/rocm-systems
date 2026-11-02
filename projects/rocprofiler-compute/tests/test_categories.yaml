@@ -26,6 +26,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_rocpd_data
       - test_roofline_calc
       - test_roofline_main
@@ -118,6 +120,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -158,8 +162,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "standard"
       - "pr"
@@ -220,6 +226,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -260,8 +268,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "comprehensive"
       - "nightly"
@@ -322,6 +332,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -362,8 +374,10 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_torch_trace_coverage
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_torch_trace_coverage
     labels:
       - "full"
       - "weekly"

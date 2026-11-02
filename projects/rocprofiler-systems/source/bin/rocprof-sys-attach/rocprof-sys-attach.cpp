@@ -3,6 +3,7 @@
 
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
+#include "common/string_utility.hpp"
 #include "logger/debug.hpp"
 
 #include <fmt/format.h>
@@ -182,37 +183,35 @@ consume_arg(int& i, int argc, char* argv[], const char* opt_name)
 void
 parse_pid(attach_options& opts, const char* arg)
 {
-    try
-    {
-        opts.pid = std::stoi(arg);
-        if(opts.pid <= 0)
-        {
-            LOG_ERROR("PID must be a positive integer.");
-            std::exit(EXIT_FAILURE);
-        }
-    } catch(const std::exception&)
+    auto const pid = rocprofsys::utility::string::safe_stoi(arg);
+    if(!pid)
     {
         LOG_ERROR("Invalid PID '{}'.", arg);
         std::exit(EXIT_FAILURE);
     }
+    if(*pid <= 0)
+    {
+        LOG_ERROR("PID must be a positive integer.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.pid = *pid;
 }
 
 void
 parse_detach_after(attach_options& opts, const char* arg)
 {
-    try
-    {
-        opts.detach_after = std::stoi(arg);
-        if(opts.detach_after < 0)
-        {
-            LOG_ERROR("--detach-after must be non-negative.");
-            std::exit(EXIT_FAILURE);
-        }
-    } catch(const std::exception&)
+    auto const detach_after = rocprofsys::utility::string::safe_stoi(arg);
+    if(!detach_after)
     {
         LOG_ERROR("Invalid --detach-after value '{}'.", arg);
         std::exit(EXIT_FAILURE);
     }
+    if(*detach_after < 0)
+    {
+        LOG_ERROR("--detach-after must be non-negative.");
+        std::exit(EXIT_FAILURE);
+    }
+    opts.detach_after = *detach_after;
 }
 
 void

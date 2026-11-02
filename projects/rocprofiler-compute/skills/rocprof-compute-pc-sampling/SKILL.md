@@ -106,6 +106,10 @@ CSV output writes per-kernel annotated disassembly into a
 each instruction. `--output-format db` stores the same content in the analysis
 database. Both disable terminal output.
 
+CSV output also writes `<file>_pc_sampling.csv` beside each captured source
+file, with the sample counts of every source line and the ISA rows each line
+compiled to. Start there to find the hottest source line.
+
 ## 6. When there are too few samples
 
 A short kernel may not accumulate enough samples to be meaningful. Increase the

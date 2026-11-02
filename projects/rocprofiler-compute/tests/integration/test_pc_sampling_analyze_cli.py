@@ -143,9 +143,15 @@ def test_pc_sampling_analyze_database_output(
                 )
             }
             line_count = counts["compute_instruction_line"]
-            state_count = counts["compute_pc_sample_state"]
+            # The state table also holds source line states; count instruction
+            # states only.
+            state_count = conn.execute(
+                "SELECT COUNT(*) FROM compute_pc_sample_state "
+                "WHERE instruction_uuid IS NOT NULL"
+            ).fetchone()[0]
             state_total = conn.execute(
-                "SELECT SUM(total_count) FROM compute_pc_sample_state"
+                "SELECT SUM(total_count) FROM compute_pc_sample_state "
+                "WHERE instruction_uuid IS NOT NULL"
             ).fetchone()[0]
             inst_sample_total = conn.execute(
                 "SELECT SUM(count) FROM compute_instruction_sample"
@@ -170,7 +176,7 @@ def test_pc_sampling_analyze_database_output(
             # does not carry them.
             db_wave_metrics = pd.read_sql_query(
                 "SELECT active_thread_percent, wave_occupancy_percent "
-                "FROM compute_pc_sample_state",
+                "FROM compute_pc_sample_state WHERE instruction_uuid IS NOT NULL",
                 conn,
             )
             pc_sampling_views = conn.execute(

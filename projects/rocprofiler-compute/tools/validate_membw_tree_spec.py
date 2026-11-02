@@ -18,14 +18,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from membw_analysis.guidance import _METRIC_THRESHOLD_RE  # noqa: E402
-from membw_analysis.models import MEMBW_TABLE_IDS  # noqa: E402
-from membw_analysis.tree_spec import (  # noqa: E402
+from membw_analysis.guidance import _METRIC_THRESHOLD_RE
+from membw_analysis.models import MEMBW_TABLE_IDS
+from membw_analysis.tree_spec import (
     collect_metric_keys,
     load_tree_spec,
     membw_analysis_dir,
 )
-from utils.utils_common import canonical_config_arch  # noqa: E402
+from utils.utils_common import canonical_config_arch
 
 
 def load_analysis_metrics(arch: str) -> dict[str, str]:

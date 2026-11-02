@@ -21,16 +21,14 @@ import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
+from roofline import run_benchmark
+from utils.mi_gpu_spec import mi_gpu_specs
 
 try:
-    from roofline.benchmark.gfx9.benchmark_gfx90a import Bench_gfx90a
-    from roofline.benchmark.gfx9.benchmark_gfx942 import Bench_gfx942
-    from roofline.benchmark.gfx9.benchmark_gfx950 import Bench_gfx950
-    from roofline.benchmark.gfx11.benchmark_gfx1150 import Bench_gfx1150
-    from roofline.benchmark.gfx11.benchmark_gfx1151 import Bench_gfx1151
-    from roofline.benchmark.gfx11.benchmark_gfx1152 import Bench_gfx1152
-    from roofline.benchmark.gfx11.benchmark_gfx1153 import Bench_gfx1153
-    from roofline.benchmark.gfx12.benchmark_gfx1250 import Bench_gfx1250
+    # The class of every arch the roofline benchmark runs on, imported as load_bench()
+    # imports it. gfx940 and gfx941 share the gfx942 class.
+    ROOFLINE_ARCHS = mi_gpu_specs.get_roofline_archs()
+    BENCH_CLASSES = {arch: run_benchmark.bench_class(arch) for arch in ROOFLINE_ARCHS}
 except OSError as hip_load_error:
     # hip_interface and hiprtc_interface dlopen the ROCm libraries at import.
     pytest.skip(
@@ -41,17 +39,6 @@ except OSError as hip_load_error:
 # =============================================================================
 # Test data
 # =============================================================================
-
-BENCH_CLASSES = [
-    Bench_gfx90a,
-    Bench_gfx942,
-    Bench_gfx950,
-    Bench_gfx1150,
-    Bench_gfx1151,
-    Bench_gfx1152,
-    Bench_gfx1153,
-    Bench_gfx1250,
-]
 
 # set_cache_kernel_selector() derives a kernel name per level present here, so
 # every level is populated to exercise the whole selector.
@@ -132,10 +119,22 @@ def runs_benchmark(bench, test_key):
 # =============================================================================
 
 
-@pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
-def test_literal_kernel_sources_define_their_symbol(bench_class):
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_spec_matches_the_benchmark_class(gpu_arch):
+    """Every ceiling mi_gpu_spec.yaml lists is a column the class writes, and the
+    class's matrix tests use the spec's matrix type; otherwise a ceiling is never
+    measured."""
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
+    columns = mi_gpu_specs.get_roofline_columns(gpu_arch)
+    assert columns <= set(bench.csv_cols_map.values())
+    matrix_types = {test.split("-")[0] for test in bench.tests if "-" in test}
+    assert matrix_types == {mi_gpu_specs.get_roofline_matrix_type(gpu_arch)}
+
+
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_literal_kernel_sources_define_their_symbol(gpu_arch):
     """HBM and LDS sources must define the names their launchers hard-code."""
-    bench = bench_class(0, dict(CACHE_SIZES))
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
 
     for test_key, source_attr, kernel_name in LITERAL_KERNEL_NAMES:
         if not runs_benchmark(bench, test_key):
@@ -143,28 +142,28 @@ def test_literal_kernel_sources_define_their_symbol(bench_class):
         assert_source_defines(
             getattr(bench, source_attr),
             kernel_name,
-            f"{bench_class.__name__} {test_key}",
+            f"{gpu_arch} {test_key}",
         )
 
 
-@pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
-def test_cache_kernel_sources_define_selected_symbol(bench_class):
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_cache_kernel_sources_define_selected_symbol(gpu_arch):
     """Every cache level selects a Cache_bw instantiation from one source."""
-    bench = bench_class(0, dict(CACHE_SIZES))
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
     assert bench.cache_kernel_selector, "no cache kernels selected"
 
     for cache_type, kernel_name in bench.cache_kernel_selector.items():
         if not runs_benchmark(bench, cache_type):
             continue
         assert_source_defines(
-            bench.cache_bw_src, kernel_name, f"{bench_class.__name__} {cache_type}"
+            bench.cache_bw_src, kernel_name, f"{gpu_arch} {cache_type}"
         )
 
 
-@pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
-def test_flops_kernel_sources_define_selected_symbol(bench_class):
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_flops_kernel_sources_define_selected_symbol(gpu_arch):
     """VALU benchmarks read their kernel name from flops_kernel_selector."""
-    bench = bench_class(0, dict(CACHE_SIZES))
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
 
     for flops_type, selection in bench.flops_kernel_selector.items():
         test_key = FLOPS_TEST_KEYS[flops_type]
@@ -178,14 +177,14 @@ def test_flops_kernel_sources_define_selected_symbol(bench_class):
         assert_source_defines(
             getattr(bench, source_attr),
             selection[0],
-            f"{bench_class.__name__} {test_key}",
+            f"{gpu_arch} {test_key}",
         )
 
 
-@pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
-def test_matrix_kernel_sources_define_selected_symbol(bench_class):
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_matrix_kernel_sources_define_selected_symbol(gpu_arch):
     """Matrix benchmarks read their kernel name from matrix_kernel_selector."""
-    bench = bench_class(0, dict(CACHE_SIZES))
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
 
     for matrix_type, kernel_name in bench.matrix_kernel_selector.items():
         test_key = f"{bench.MATRIX_OPS_TYPE}-{matrix_type}"
@@ -195,7 +194,7 @@ def test_matrix_kernel_sources_define_selected_symbol(bench_class):
         assert_source_defines(
             getattr(bench, source_attr),
             kernel_name,
-            f"{bench_class.__name__} {test_key}",
+            f"{gpu_arch} {test_key}",
         )
 
 

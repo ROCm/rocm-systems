@@ -1,5 +1,22 @@
 # Changelog for hipFile
 
+## (Unreleased) hipFile 0.7.0 
+
+### Added
+
+* Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Known issues
+
+* The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
+* Asynchronous fastpath I/O, added in hipFile 0.5.0 for ROCm 10.1.0, performs poorly. The ROCm runtime serializes all stream host functions onto a single thread, so asynchronous fastpath operations cannot run concurrently.
+
 ## hipFile 0.6.0 for ROCm 10.2.0
 
 ### Added
@@ -8,6 +25,7 @@
 * `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
 * Added a batch API example, `batch-roundtrip`.
 * Added reference documentation for the Stats API.
+* Added a documentation page listing frameworks and applications that use hipFile, including LMCache, fastsafetensors, rocAL, PyTorch, fio, and IOR.
 
 ### Changed
 
