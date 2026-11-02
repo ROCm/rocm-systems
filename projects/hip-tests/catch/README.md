@@ -24,6 +24,36 @@ Every test name passed to ```HIP_TEST_CASE``` must have a corresponding entry in
 
 [Catch2 Detailed Reference](https://github.com/catchorg/Catch2/blob/v3.8.1/docs/Readme.md#top)
 
+### Compressed code-object regression tests
+
+On AMD, `ModuleTest` includes `Unit_hipModuleLoad_Compressed_Lifetime` and
+`Unit_hipModuleLoad_Compressed_StaticRegistration`. To run them from an existing
+configured build:
+
+```bash
+cmake --build build --target ModuleTest
+ctest --test-dir build -R 'Unit_hipModuleLoad_Compressed_' --output-on-failure
+```
+
+With `-DSTANDALONE_TESTS=ON`, the smaller `hipModuleLoadCompressed_test` target
+builds both tests and their compressed fixtures. Run that executable from
+`build/catch_tests/unit/module`, where the fixtures are generated.
+
+The lifetime test covers 288 dynamic loads across file, memory, and extended
+memory APIs, with three live modules, both unload orders, kernel and global-only
+images, independent writable globals, symbol lookup/counts, and kernel launches.
+Memory inputs are overwritten and freed after loading. The static test launches
+a kernel from a compressed, statically registered bundle.
+
+Run these tests with a CLR build containing code-object reuse and each supported
+COMGR configuration: a library exposing `amd_comgr_get_data_pointer` exercises
+borrowed output, while a library without that optional API exercises copying.
+On Linux, select the intended COMGR through `LD_LIBRARY_PATH` before starting the
+process; ensure it is the library actually loaded. Passing with one COMGR version
+does not cover the other path. The pointer API is currently proposed in
+[LLVM PR 5023](https://github.com/ROCm/llvm-project/pull/5023), so ordinary CI using
+released COMGR covers the copying path until that API is available.
+
 ## Taking care of existing features
 - Don’t build on platform: EXCLUDE_HIP_PLATFORM, can be done via CMAKE. Adding source in if(HIP_PLATFORM == amd/nvidia).
 - HIPCC_OPTIONS/CLANG Options: Can be done via: set_source_files_properties(src.cc PROPERTIES COMPILE_FLAGS “…”).
