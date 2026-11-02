@@ -9877,7 +9877,13 @@ def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
         instructions = [inst for inst in flat.insts if inst.opcode == opcode]
         assert {inst.required_flat_segment for inst in instructions} == {1, 2}
         scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        global_lds = next(
+            inst for inst in instructions if inst.required_flat_segment == 2
+        )
         assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert (
+            semantics.instructions[global_lds.name].semantic_class == 'global_load_lds'
+        )
         assert any(
             entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
             for entry in spec.primary_decode_table

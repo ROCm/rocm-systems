@@ -2166,6 +2166,18 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 num_elems=1,
                 sign_extend=signed,
             )
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
+        info = _FLAT_DATA_MAP.get(suffix)
+        if info is not None and info[1] == 1:
+            size, count, signed = info
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=size,
+                num_elems=1,
+                sign_extend=signed,
+            )
     if upper == 'GLOBAL_INV':
         return InstructionSemantics(name, 'gl1_inv')
     if upper == 'GLOBAL_WB':

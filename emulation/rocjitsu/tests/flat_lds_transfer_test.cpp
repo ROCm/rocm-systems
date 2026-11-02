@@ -154,6 +154,51 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
     }
 }
 
+TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
+  if (!modern())
+    GTEST_SKIP() << "Tests specific to modern architectures.";
+  const std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
+  const int base_offset = 64;
+  const uint64_t exec_mask = 0x25;
+  for (unsigned kind = 0; kind < 5; ++kind) {
+    for (bool scalar_base : {false, true}) {
+      for (int offset : {-4, 0, 4}) {
+        SCOPED_TRACE(testing::Message()
+                     << "kind=" << kind << " scalar_base=" << scalar_base << " offset=" << offset);
+        clear();
+        wave->set_exec(exec_mask);
+        wave->set_m0(base_offset);
+        scalar(4, 0x20000);
+        scalar(5, 0);
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const int source_slot = base_offset + static_cast<int>(lane) * 4;
+          const int address_before_offset = source_slot - offset;
+
+          vector(2, lane,
+                 scalar_base ? static_cast<uint32_t>(address_before_offset)
+                             : 0x20000u + static_cast<uint32_t>(address_before_offset));
+          vector(3, lane, 0);
+          memory.write32(0x20000u + static_cast<uint32_t>(source_slot), 0x76548081u + lane);
+        }
+
+        ASSERT_NO_FATAL_FAILURE(
+            issue(encoding(kind, 2, false, scalar_base ? 4 : vector_saddr(), offset)));
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const unsigned destination =
+              static_cast<unsigned>(128 + 64 + offset + static_cast<int>(lane) * 4);
+          const bool active = (exec_mask & (uint64_t{1} << lane)) != 0;
+
+          EXPECT_EQ(wave->lds().read32(destination), active ? expected[kind] + lane : 0xccccccccu)
+              << "lane=" << lane;
+
+          EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeefu)
+              << "lane=" << lane;
+        }
+      }
+    }
+  }
+}
+
 TEST_P(FlatLdsTransfer, LegacyGlobalWidthsAndScalarOrVectorBase) {
   if (modern())
     GTEST_SKIP() << "Modern GLOBAL LDS transfers use separate opcodes.";
