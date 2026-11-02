@@ -49,6 +49,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -311,9 +312,11 @@ public:
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
 
-  /// @brief Cancel all replicas of a failed queue before reporting VM failure.
+  /// @brief Cancel all replicas of a failed queue, then request engine exit.
   /// @details Thread-safe publication; callbacks and cancellation execute on
   /// each CP's engine partition after its current worker batch rejoins.
+  /// Used by GWS failures. Exit is requested only after every replica
+  /// acknowledges cancellation, so callers must not request it themselves.
   void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
@@ -322,6 +325,16 @@ public:
   /// and normal dispatch completion is suppressed.
   void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                                 VmAccessOutcome outcome);
+
+  /// @brief Fault a dispatch's queue without publishing successful completion.
+  /// @details Called outside the CU wave-state lock. Cancels all outstanding
+  /// dispatches, including earlier admitted work, and every fan-out replica.
+  /// This method does not request engine exit or wait for peer cancellation.
+  /// A fatal instruction caller requests exit before this notification;
+  /// shutdown() then drains any peer cancellations still pending. Failure
+  /// sources that require engine termination must request it themselves, or
+  /// use notify_execution_failure() to wait for all replica acknowledgements.
+  void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
@@ -552,6 +565,7 @@ public:
 private:
   friend class CommandProcessorCloseTestAccess;
   friend class CommandProcessorPlacementTestAccess;
+  friend class CommandProcessorCacheTestAccess;
 
   class QueueRegistrationTransaction {
   public:
@@ -617,9 +631,12 @@ private:
   /// @brief Fetch AQL packets from a single AQL queue.
   void fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now);
 
-  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID.
+  /// invalidation. Dirty L2 data is published under the owning VMID. Requires
+  /// hw_queue_mutex_ and joined CU workers. CU maintenance takes each CU's
+  /// mutex to serialize with runtime snapshots, without delivering notifications
+  /// that could re-enter the CP and invalidate queue or dispatch references.
   void flush_gpu_caches();
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
@@ -665,7 +682,10 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
+  void cancel_queue_dispatches(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void complete_failed_queue(ComputeQueueRecord &queue);
+  void drain_pending_queue_failures();
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
                             const std::array<uint32_t, 4> &dimensions,
@@ -715,7 +735,6 @@ private:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
-    VmAccessOutcome outcome;
     std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
@@ -781,8 +800,13 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
-  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
-                            VmAccessOutcome outcome);
+  /// @brief Cancel all outstanding work on the identified queue.
+  /// @details A supplied failed_dispatch_id must be admitted or still in transit;
+  /// otherwise a delayed fault is ignored so it cannot cancel a reused queue.
+  /// std::nullopt skips this identity check. The ID does not limit cancellation
+  /// to one dispatch: either accepted form cancels the queue's outstanding work.
+  bool fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                         std::optional<uint32_t> failed_dispatch_id = std::nullopt);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -911,6 +935,16 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Protected by hw_queue_mutex_; true only while the CU batch owns its workers.
+  bool dispatch_workers_active_ = false;
+  /// Queue registration IDs whose waves are cancelled but whose cache maintenance
+  /// and submission callbacks must wait for the CU worker join. Protected by
+  /// hw_queue_mutex_; queue_structure_mutex_ keeps their registrations alive.
+  /// The normal batch drains these IDs before releasing the shared structure lock.
+  /// If CpuDispatchPool::run() rethrows a host exception after joining, the handler
+  /// unwinds before that drain. Close, a later queue failure, or shutdown must then
+  /// finish the deferred work before releasing the queue's submission backing.
+  std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;

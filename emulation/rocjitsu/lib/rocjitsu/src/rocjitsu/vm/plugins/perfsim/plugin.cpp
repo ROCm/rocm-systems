@@ -1324,9 +1324,8 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
 
   // Wavefront slots are reused and plugin state deliberately survives the
-  // generic Wavefront::reset(). A terminal dispatch fault resets the wave
-  // without a halt callback, so retire that incarnation while its state still
-  // owns the raw pointer recorded in physical_waves.
+  // generic Wavefront::reset(). If an incarnation missed both terminal hooks,
+  // retire it while its state still owns the raw pointer in physical_waves.
   if (wf.has_plugin_state(slot_index())) {
     auto *previous = static_cast<PerfsimWavefrontState *>(wf.plugin_state(slot_index()));
     const uint32_t previous_dispatch = static_cast<uint32_t>(
@@ -1344,7 +1343,7 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
         dispatch != impl_->dispatches.end()) {
       if (dispatch->second.live_waves != 0)
         --dispatch->second.live_waves;
-      impl_->reject(previous_dispatch, "wavefront slot was reset without a halt callback");
+      impl_->reject(previous_dispatch, "wavefront slot was reset without a terminal callback");
     }
     wf.clear_plugin_state(slot_index());
   } else if (const auto existing = impl_->physical_waves.find(physical_key);
@@ -1386,6 +1385,14 @@ void PerfsimPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
 }
 
 void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
+  retire_wavefront(wf, /*cancelled=*/false);
+}
+
+void PerfsimPlugin::onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) {
+  retire_wavefront(wf, /*cancelled=*/true);
+}
+
+void PerfsimPlugin::retire_wavefront(amdgpu::Wavefront &wf, bool cancelled) {
   if (impl_->intentionally_unselected(wf.dispatch_id()))
     return;
   if (impl_->intentionally_unobserved(wf.dispatch_id(), wf.wg_id()))
@@ -1394,7 +1401,8 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   const uint64_t physical_key = physical_wave_key(compute_unit_id, wf.wf_id());
   const auto wave_iter = impl_->physical_waves.find(physical_key);
   if (wave_iter == impl_->physical_waves.end()) {
-    impl_->reject(wf.dispatch_id(), "halted wavefront has no Perfsim identity");
+    impl_->reject(wf.dispatch_id(), cancelled ? "cancelled wavefront has no Perfsim identity"
+                                              : "halted wavefront has no Perfsim identity");
     return;
   }
 
@@ -1406,8 +1414,14 @@ void PerfsimPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   if (dispatch_iter != impl_->dispatches.end()) {
     DispatchState &dispatch = dispatch_iter->second;
     if (wf.instruction_execution_failed())
-      impl_->reject(dispatch_id, "wavefront halted after an instruction execution failure");
-    if (!wave.saw_instruction || !wave.last_instruction_terminates)
+      impl_->reject(dispatch_id, cancelled
+                                     ? "wavefront cancelled after an instruction failure"
+                                     : "wavefront halted after an instruction execution failure");
+    // A committed setup rollback has no recorded instructions to discard.
+    // Retire its physical identity so a retry can observe the same logical wave.
+    if (cancelled && wave.saw_instruction)
+      impl_->reject(dispatch_id, "wavefront cancelled before dispatch completion");
+    else if (!cancelled && (!wave.saw_instruction || !wave.last_instruction_terminates))
       impl_->reject(dispatch_id, "wavefront halted without a terminating instruction");
     if (dispatch.live_waves != 0)
       --dispatch.live_waves;
