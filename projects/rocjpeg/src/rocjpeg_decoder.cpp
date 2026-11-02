@@ -925,6 +925,8 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
         bp.src_y_image_row_pair_stride_in_bytes = mem.pitch[0] * 2;
         bp.dst_width_in_8px_blocks              = dst_width_in_8px_blocks;
         bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
+        bp.dst_width                            = picture_width;
+        bp.dst_height                           = picture_height;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1011,6 +1013,8 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
         bp.src_y_image_row_pair_stride_in_bytes = mem.pitch[0] * 2;
         bp.dst_width_in_8px_blocks              = dst_width_in_8px_blocks;
         bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
+        bp.dst_width                            = picture_width;
+        bp.dst_height                           = picture_height;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1082,6 +1086,7 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         bp.src_image                   = mem.hip_mapped_device_mem + roi_offset;
         bp.src_image_stride_in_bytes   = mem.pitch[0];
         bp.dst_width_in_8px_blocks     = (picture_width + 7) / 8;
+        bp.dst_width                   = picture_width;
         b_yuyv_yuvp_.Add(bp, (picture_width + 7) >> 3, picture_height);
     } else {
         // Copy Luma
@@ -1129,6 +1134,7 @@ RocJpegStatus RocJpegDecoder::AccumulateYOutputFormat(HipInteropDeviceMem& mem, 
         bp.src_image                 = mem.hip_mapped_device_mem + roi_offset;
         bp.src_image_stride_in_bytes = mem.pitch[0];
         bp.dst_width_in_8px_blocks   = (picture_width + 7) / 8;
+        bp.dst_width                 = picture_width;
         b_yuyv_y_.Add(bp, (picture_width + 7) >> 3, picture_height);
     } else {
         // Copy Luma
