@@ -16,9 +16,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
-#include <bit>
 #include <cassert>
-#include <cstring>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -30,8 +28,9 @@ inline const uint32_t *vgpr_lanes(const ComputeUnitCore &cu, uint32_t reg) {
   return reinterpret_cast<const uint32_t *>(cu.raw_vgpr_data(reg));
 }
 
-/// Destination VGPRs a load writes.
-constexpr uint32_t dst_vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3u) / 4u); }
+/// VGPRs one lane's @p stride bytes span: a load's destinations, a store's
+/// payload rows.
+constexpr uint32_t vgpr_count(uint32_t stride) { return std::max(1u, (stride + 3u) / 4u); }
 
 /// 1. Gate: whether @p req may complete here. Nothing has been read or built
 ///    yet, so declining costs a few loads and branches, and the handler falls
@@ -59,13 +58,12 @@ template <bool IsLoad, bool Dual = false>
     //     two consecutive ranges). Unowned, the VectorMemState path still
     //     performs the LDS reads and skips the writeback, as the routed path
     //     does.
-    return cu.owns_vgpr_range(wf, req.dst_vgpr, dst_vgpr_count(stride) * (Dual ? 2 : 1));
+    return cu.owns_vgpr_range(wf, req.dst_vgpr, vgpr_count(stride) * (Dual ? 2 : 1));
   } else {
     // 1d. Stores also read their payload registers (a two-address store, two
     //     independent ranges).
-    const uint32_t regs = std::max(1u, stride / 4u);
-    return cu.owns_vgpr_range(wf, req.data_vgpr, regs) &&
-           (!Dual || cu.owns_vgpr_range(wf, req.data2_vgpr, regs));
+    return cu.owns_vgpr_range(wf, req.data_vgpr, vgpr_count(stride)) &&
+           (!Dual || cu.owns_vgpr_range(wf, req.data2_vgpr, vgpr_count(stride)));
   }
 }
 
@@ -122,7 +120,7 @@ template <bool Dual>
 
   // 2-4, specialized by wave size; a second access reads into the registers
   // right after the first's.
-  const uint32_t dst_vgprs = lds_inline::dst_vgpr_count(stride);
+  const uint32_t dst_vgprs = lds_inline::vgpr_count(stride);
   const auto steps = [&]<uint32_t Wave>() __attribute__((always_inline)) {
     lds_inline::read_steps<Wave>(req, wf, cu, req.offset, req.dst_vgpr, dst_vgprs, staging,
                                  load[0]);
@@ -180,7 +178,7 @@ template <lds_store::StoreFormat F, bool Dual>
 LdsInlineAccess::write(const Instruction &inst, const LdsAccessRequest &req, Wavefront &wf) {
   ComputeUnitCore &cu = wf.raw_cu();
   constexpr uint32_t stride = lds_store::kWidth<F>;
-  constexpr uint32_t regs = std::max(1u, stride / 4);
+  constexpr uint32_t regs = lds_inline::vgpr_count(stride);
   assert(req.elem_size * req.num_elems == stride);
 
   // 1. Gate.

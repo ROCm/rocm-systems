@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 // A DS instruction may complete its LDS access inside execute_impl() instead of
-// being routed to the local memory pipeline. Both paths run the same access
-// code, so they must leave identical registers, LDS and wave state, and any
-// observer of the routed order or an attached debugger must keep the routed path.
+// being routed to the local memory pipeline: plain loads and stores through
+// their own readers, writebacks and writers, every other form through the
+// routed path's access code. Either way both paths must leave identical
+// registers, LDS and wave state, and any observer of the routed order or an
+// attached debugger must keep the routed path.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"

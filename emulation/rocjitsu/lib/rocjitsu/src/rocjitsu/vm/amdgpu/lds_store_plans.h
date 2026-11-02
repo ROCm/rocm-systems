@@ -80,6 +80,9 @@ constexpr uint64_t prefix(uint32_t lanes) {
   return lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
 }
 
+/// Lane-major payload of a whole wave of the widest store, b128.
+constexpr uint32_t kStagingBytes = 64 * 16;
+
 template <StoreFormat F> RJ_NOINLINE void lane_by_lane(Lds &lds, const StoreRequest &r);
 template <StoreFormat F, uint32_t Span> RJ_NOINLINE void by_shape(Lds &lds, const StoreRequest &r);
 
@@ -203,13 +206,13 @@ RJ_NOINLINE void exact_rule(Lds &lds, const StoreRequest &r, uint64_t lanes, con
 /// frames.
 template <StoreFormat F>
 RJ_NOINLINE void exact_lane(Lds &lds, const StoreRequest &r, uint32_t lane) {
-  alignas(16) uint8_t staged[64 * 16];
+  alignas(16) uint8_t staged[kStagingBytes];
   lane_payload<F>(r, lane, staged + lane * kWidth<F>);
   exact_rule<F>(lds, r, uint64_t{1} << lane, staged);
 }
 
 template <StoreFormat F, uint32_t Span> void exact_span(Lds &lds, const StoreRequest &r) {
-  alignas(64) uint8_t staging[64 * 16];
+  alignas(64) uint8_t staging[kStagingBytes];
   exact_rule<F>(lds, r, r.exec, payload<F, Span>(r, staging));
 }
 
@@ -222,7 +225,7 @@ template <StoreFormat F, uint32_t Span>
 [[gnu::always_inline]] inline void write_blocks(Lds &lds, const StoreRequest &r, BlockPlan plan) {
   constexpr uint32_t Width = kWidth<F>;
   uint8_t *data = Access::materialize(lds, plan.end);
-  alignas(64) uint8_t staging[64 * 16];
+  alignas(64) uint8_t staging[kStagingBytes];
   const uint8_t *src = payload<F, Span>(r, staging);
   const uint32_t offset = r.offset;
   for (uint32_t group = 0; group < Span; group += 16)
@@ -247,7 +250,7 @@ template <StoreFormat F, uint32_t Span>
 [[gnu::always_inline]] inline void write_lanes(Lds &lds, const StoreRequest &r, LanesPlan plan) {
   constexpr uint32_t Width = kWidth<F>;
   uint8_t *data = Access::materialize(lds, plan.end);
-  alignas(64) uint8_t staging[64 * 16];
+  alignas(64) uint8_t staging[kStagingBytes];
   const uint8_t *src = payload<F, Span>(r, staging);
   // Locals: stores through uint8_t* may alias r, and r.offset was reloaded
   // for every lane.
