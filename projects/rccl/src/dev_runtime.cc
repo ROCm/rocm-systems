@@ -2517,9 +2517,9 @@ ncclResult_t ncclCommWindowRegister_impl(struct ncclComm* comm, void* userPtr, s
     regJob->userSize = userSize;
     regJob->winFlags = winFlags;
     regJob->outWinDev = outWinDev;
-    NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)regJob, ncclDevrWindowRegisterJob, ncclDevrRegAsyncJobFree,
-                                      comm),
-                  ret, fail);
+    ret = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)regJob, ncclDevrWindowRegisterJob, ncclDevrRegAsyncJobFree, comm);
+    regJob = nullptr; // enqueue owns and destroys the job on both success and failure
+    NCCLCHECKGOTO(ret, ret, fail);
   } else {
     NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
     task->userPtr = userPtr;

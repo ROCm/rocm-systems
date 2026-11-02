@@ -14,6 +14,7 @@
  *************************************************************************/
 
 #include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/collective_stubs.h"  // g_enqueueRearchEnable
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
@@ -6009,6 +6010,7 @@ protected:
       free(ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue));
     }
     free(comm->devrState.lsaRankList);
+    g_enqueueRearchEnable = 0;
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -6048,6 +6050,47 @@ TEST_F(CommWindowRegisterImplTest, NoWindowSupport_SucceedsWithoutQueueing) {
   EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, 0), ncclSuccess);
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
   EXPECT_EQ(out, nullptr);
+}
+
+// The rearch path hands a job to ncclMgmtTaskEnqueue instead of queueing a task.
+TEST_F(CommWindowRegisterImplTest, Rearch_HandsTheJobToTheManagementQueue) {
+  g_enqueueRearchEnable = 1;
+  ncclAsyncJob* job = nullptr;
+  void (*jobFree)(void*) = nullptr;
+  ncclComm* jobComm = nullptr;
+  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm* c) {
+    job = j;
+    jobFree = d;
+    jobComm = c;
+    return ncclSuccess;
+  };
+
+  ASSERT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclSuccess);
+  ASSERT_NE(job, nullptr);
+  ASSERT_NE(jobFree, nullptr);
+  EXPECT_EQ(jobComm, comm);
+  auto* regJob = reinterpret_cast<ncclDevrRegAsyncJob*>(job);
+  EXPECT_EQ(regJob->userPtr, kUserPtr);
+  EXPECT_EQ(regJob->userSize, 8192u);
+  EXPECT_EQ(regJob->outWinDev, &out);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
+  jobFree(job);
+}
+
+// ncclMgmtTaskEnqueue owns the job once called: when it rejects (a blocking and a nonblocking comm in one
+// group) it runs the destructor itself, so fail: must not free the job again.
+TEST_F(CommWindowRegisterImplTest, RearchEnqueueRejects_JobIsDestroyedOnlyByTheEnqueue) {
+  g_enqueueRearchEnable = 1;
+  int destroyed = 0;
+  g_devrMgmtTaskEnqueue = [&](ncclAsyncJob* j, ncclResult_t (*)(ncclAsyncJob*), void (*d)(void*), ncclComm*) {
+    d(j);
+    ++destroyed;
+    return ncclInvalidArgument;
+  };
+
+  EXPECT_EQ(ncclCommWindowRegister_impl(comm, kUserPtr, 8192, &out, NCCL_WIN_COLL_SYMMETRIC), ncclInvalidArgument);
+  EXPECT_EQ(destroyed, 1);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.regTaskQueue));
 }
 
 // Host-RMA alone is enough to accept the window, even without symmetric support.

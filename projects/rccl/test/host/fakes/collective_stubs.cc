@@ -11,9 +11,10 @@
 //
 // Mostly self-contained: unlike the init binary's transport_stubs.cc (whose
 // NVLS/P2P-level stubs now route through test-driven seam globals defined in
-// the init test's own TUs), this floor has just the one seam global of its
-// own (g_ncclArgsGlobalCheck, for ncclArgsGlobalCheck below), so it still
-// links into any micro-test binary on its own.
+// the init test's own TUs), this floor has just two seam globals of its own
+// (g_ncclArgsGlobalCheck for ncclArgsGlobalCheck, g_enqueueRearchEnable for
+// ncclParamEnqueueRearchEnable), so it still links into any micro-test binary
+// on its own.
 
 #include "collective_stubs.h"
 
@@ -51,10 +52,11 @@ ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm*, struct ncclKernelPla
 ncclResult_t ncclLaunchFinish(struct ncclComm*) { ::abort(); }
 // The 2.31 task-prep split: group.cc calls ncclTaskPrepare where it used to
 // call ncclPrepareTasks, and both it and dev_runtime.cc gate the rearch job
-// path on this param. Pinned to 0 so those call sites take the in-group task
-// branch, which is the one the suites here drive.
+// path on this param. Defaults to 0 so those call sites take the in-group task
+// branch, which is the one the suites here drive; a test opts into the job path.
 ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
-int64_t ncclParamEnqueueRearchEnable() { return 0; }
+int64_t g_enqueueRearchEnable = 0;
+int64_t ncclParamEnqueueRearchEnable() { return g_enqueueRearchEnable; }
 
 // ce_coll.h
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
@@ -82,6 +84,7 @@ ncclResult_t ncclArgsGlobalCheck(struct ncclArgsInfo* info) { return g_ncclArgsG
 
 void ResetCollectiveStubs() {
   g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
+  g_enqueueRearchEnable = 0;
 }
 
 // transport.h -- only the connect/setup entry points group.cc references.
