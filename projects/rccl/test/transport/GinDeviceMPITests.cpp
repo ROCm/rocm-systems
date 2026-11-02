@@ -197,7 +197,7 @@ std::string ginMixedBackendSkipReason() {
 #ifdef ENABLE_ROCSHMEM_GIN
 uint64_t listedGinTypes() {
   uint64_t listed = 0;
-  if (const char* list = std::getenv("NCCL_GIN_TYPES")) ncclGinParseTypeList(list, &listed);
+  if (const char* list = std::getenv("RCCL_GIN_TYPE_LIST")) ncclGinParseTypeList(list, &listed);
   return listed;
 }
 
@@ -208,12 +208,12 @@ std::string gdaAlongsideSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
   if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
-    local = "Requires NCCL_GIN_TYPE unset so NCCL_GIN_TYPES selects the backends";
+    local = "Requires NCCL_GIN_TYPE unset so RCCL_GIN_TYPE_LIST selects the backends";
   const uint64_t listed = listedGinTypes();
   if (local.empty() && (!ginTypeListed(listed, NCCL_GIN_TYPE_ROCSHMEM_GDA) ||
                         !(ginTypeListed(listed, NCCL_GIN_TYPE_ANVIL_SDMA) ||
                           ginTypeListed(listed, NCCL_GIN_TYPE_PROXY))))
-    local = "Requires NCCL_GIN_TYPES to list rocSHMEM GDA (6) with Anvil SDMA (7) and/or the proxy (2)";
+    local = "Requires RCCL_GIN_TYPE_LIST to list rocSHMEM GDA (6) with Anvil SDMA (7) and/or the proxy (2)";
   // Both split MPI_COMM_TYPE_SHARED, so every rank calls them.
   std::string single = singleNodeReason();
   std::string intranet = intranetReason();
@@ -1139,7 +1139,7 @@ TEST_F(GinMPIDeviceTests, Log_ReportsBackendPerComm) {
 }
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// AICOMRCCL-3418: run with NCCL_GIN_TYPES=6,7 and 6,2; each listed backend completes a put + signal.
+// AICOMRCCL-3418: run with RCCL_GIN_TYPE_LIST=6,7 and 6,2; each listed backend completes a put + signal.
 TEST_F(GinMPIDeviceTests, MixedBackends_GdaAlongside) {
   if (auto reason = gdaAlongsideSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;

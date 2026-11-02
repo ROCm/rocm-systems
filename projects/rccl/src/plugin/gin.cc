@@ -179,8 +179,8 @@ static ncclResult_t ncclGinPluginAssignToComm(struct ncclComm* comm, int pluginI
 
     uint64_t ginTypeMask;
     if (ginType == -1 && ncclGinTypeListMask(&ginTypeMask) && !(ginTypeMask & BIT(props.netDeviceType))) {
-      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Skipping plugin %s index %d type %d: not in NCCL_GIN_TYPES=%s", gin->name,
-           pluginIndex, props.netDeviceType, getenv("NCCL_GIN_TYPES"));
+      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Skipping plugin %s index %d type %d: not in RCCL_GIN_TYPE_LIST=%s",
+           gin->name, pluginIndex, props.netDeviceType, getenv("RCCL_GIN_TYPE_LIST"));
       return ncclSuccess;
     }
 
@@ -252,18 +252,18 @@ static void initPluginLibsOnceFunc() {
 
   // Same getenv() source as ncclGinTypeListMask / ncclGinTypeEnabled, so an
   // NCCL_ENV_PLUGIN value cannot be logged here and then ignored at init.
-  const char* envGinTypes = getenv("NCCL_GIN_TYPES");
+  const char* envGinTypes = getenv("RCCL_GIN_TYPE_LIST");
   if (envGinTypes) {
     uint64_t ginTypeMask;
     bool valid = ncclGinParseTypeList(envGinTypes, &ginTypeMask);
     if (getenv("NCCL_GIN_TYPE")) {
-      INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_TYPES=%s ignored: NCCL_GIN_TYPE is set", envGinTypes);
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set", envGinTypes);
     } else if (ginTypeMask == 0) {
-      WARN("NCCL_GIN_TYPES=%s names no valid GIN type, ignoring it", envGinTypes);
+      WARN("RCCL_GIN_TYPE_LIST=%s names no valid GIN type, ignoring it", envGinTypes);
     } else if (!valid) {
-      WARN("NCCL_GIN_TYPES=%s contains an invalid entry, ignoring that entry", envGinTypes);
+      WARN("RCCL_GIN_TYPE_LIST=%s contains an invalid entry, ignoring that entry", envGinTypes);
     } else {
-      INFO(NCCL_ENV | NCCL_NET, "NCCL_GIN_TYPES set by environment to %s", envGinTypes);
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST set by environment to %s", envGinTypes);
     }
   }
 
@@ -340,7 +340,7 @@ static void initPluginLibsOnceFunc() {
   pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
-  // Add internal rocshmem GDA plugin (device-initiated, NCCL_GIN_TYPE=6 or listed in NCCL_GIN_TYPES)
+  // Add internal rocshmem GDA plugin (device-initiated, NCCL_GIN_TYPE=6 or listed in RCCL_GIN_TYPE_LIST)
   pluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
   pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclGinVersion[0];

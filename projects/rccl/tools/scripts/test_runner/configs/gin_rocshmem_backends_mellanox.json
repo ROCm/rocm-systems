@@ -248,7 +248,7 @@
     },
     "gin_devmpi_mixed": {
       "extends": "default",
-      "description": "Mixed GIN backends with NCCL_GIN_TYPE unset (an empty value disables anvil-sdma). Single node. Covers per-comm logging (SDMA+proxy) and rocSHMEM GDA alongside SDMA or the proxy via NCCL_GIN_TYPES.",
+      "description": "Mixed GIN backends with NCCL_GIN_TYPE unset (an empty value disables anvil-sdma). Single node. Covers per-comm logging (SDMA+proxy) and rocSHMEM GDA alongside SDMA or the proxy via RCCL_GIN_TYPE_LIST.",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,
@@ -265,19 +265,19 @@
         { "name": "Log_ReportsBackendPerComm", "description": "Two comms bind different GIN backends (anvil-sdma, proxy) and each DevComm line names its own comm", "test_filter": "GinMPIDeviceTests.Log_ReportsBackendPerComm" },
         {
           "name": "MixedBackends_GdaAlongside_Sdma",
-          "description": "One communicator hosts rocSHMEM GDA alongside Anvil SDMA (NCCL_GIN_TYPES=6,7); default is SDMA; each listed backend completes put + signal",
+          "description": "One communicator hosts rocSHMEM GDA alongside Anvil SDMA (RCCL_GIN_TYPE_LIST=6,7); default is SDMA; each listed backend completes put + signal",
           "test_filter": "GinMPIDeviceTests.MixedBackends_GdaAlongside",
           "env_variables": {
-            "NCCL_GIN_TYPES": "6,7",
+            "RCCL_GIN_TYPE_LIST": "6,7",
             "RCCL_ENABLE_INTRANET": "1"
           }
         },
         {
           "name": "MixedBackends_GdaAlongside_Proxy",
-          "description": "One communicator hosts rocSHMEM GDA alongside the proxy (NCCL_GIN_TYPES=6,2); default is GDA; each listed backend completes put + signal",
+          "description": "One communicator hosts rocSHMEM GDA alongside the proxy (RCCL_GIN_TYPE_LIST=6,2); default is GDA; each listed backend completes put + signal",
           "test_filter": "GinMPIDeviceTests.MixedBackends_GdaAlongside",
           "env_variables": {
-            "NCCL_GIN_TYPES": "6,2",
+            "RCCL_GIN_TYPE_LIST": "6,2",
             "RCCL_ENABLE_INTRANET": "1"
           }
         }
@@ -377,7 +377,7 @@
     },
     {
       "name": "GIN Device MPI Tests - mixed backends (single node)",
-      "description": "Per-comm GIN backend logging plus rocSHMEM GDA alongside Anvil SDMA or the proxy (NCCL_GIN_TYPES), single node",
+      "description": "Per-comm GIN backend logging plus rocSHMEM GDA alongside Anvil SDMA or the proxy (RCCL_GIN_TYPE_LIST), single node",
       "config": "gin_devmpi_mixed",
       "enabled": true
     },

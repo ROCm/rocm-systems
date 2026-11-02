@@ -772,11 +772,11 @@ in the following table.
         | ``3``: GDAKI
         | ``4``: GPI
         | ``5``: EFA GDA
-        | ``6``: rocSHMEM GDA (this value, or ``6`` in ``NCCL_GIN_TYPES``, is
+        | ``6``: rocSHMEM GDA (this value, or ``6`` in ``RCCL_GIN_TYPE_LIST``, is
           required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
 
-    * - | ``NCCL_GIN_TYPES``
+    * - | ``RCCL_GIN_TYPE_LIST``
         | Lists the GIN backend types that may be active together, so DevComms
           on one communicator can use different backends. RCCL-specific.
           Ignored when ``NCCL_GIN_TYPE`` is set.

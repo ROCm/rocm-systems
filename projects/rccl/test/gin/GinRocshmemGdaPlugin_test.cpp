@@ -80,35 +80,35 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
 };
 
 // AICOMRCCL-3418: GDA stays off unless NCCL_GIN_TYPE=6, or NCCL_GIN_TYPE is unset
-// and NCCL_GIN_TYPES lists 6.
+// and RCCL_GIN_TYPE_LIST lists 6.
 TEST_F(GinRocshmemGdaPluginTest, Init_OffByDefault) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
-  ScopedEnv list("NCCL_GIN_TYPES", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
   EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
   EXPECT_EQ(ictx_, nullptr);
 }
 
 TEST_F(GinRocshmemGdaPluginTest, Init_ListedInGinTypes) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
-  ScopedEnv list("NCCL_GIN_TYPES", "6,7");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
   ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
   EXPECT_NE(ictx_, nullptr);
 }
 
 TEST_F(GinRocshmemGdaPluginTest, Init_NotListedInGinTypes) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
-  ScopedEnv list("NCCL_GIN_TYPES", "2,7");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
   EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
   EXPECT_EQ(ictx_, nullptr);
 }
 
 TEST_F(GinRocshmemGdaPluginTest, Init_GinTypeOverridesGinTypes) {
-  ScopedEnv list("NCCL_GIN_TYPES", "2,7");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
   ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
   EXPECT_NE(ictx_, nullptr);
 
   ScopedEnv ty("NCCL_GIN_TYPE", "7");
-  ScopedEnv listWithGda("NCCL_GIN_TYPES", "6,7");
+  ScopedEnv listWithGda("RCCL_GIN_TYPE_LIST", "6,7");
   void* other = nullptr;
   EXPECT_EQ(plugin_.init(&other, 0, nullptr), ncclInternalError);
   EXPECT_EQ(other, nullptr);

@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 
-// NCCL_GIN_TYPE forces one backend; if unset, NCCL_GIN_TYPES lists the types allowed together.
+// NCCL_GIN_TYPE forces one backend; if unset, RCCL_GIN_TYPE_LIST lists the types allowed together.
 // Uncached getenv() so tests can setenv() between cases.
 
 // Parses list into a bitmask of GIN types (bit t set for type t). Returns false if
@@ -37,18 +37,18 @@ static inline bool ncclGinParseTypeList(const char* list, uint64_t* mask) {
   return valid;
 }
 
-// Returns true and fills *mask when NCCL_GIN_TYPE is unset and NCCL_GIN_TYPES names
+// Returns true and fills *mask when NCCL_GIN_TYPE is unset and RCCL_GIN_TYPE_LIST names
 // at least one valid type. Otherwise the list does not apply.
 static inline bool ncclGinTypeListMask(uint64_t* mask) {
   if (getenv("NCCL_GIN_TYPE")) return false;
-  const char* list = getenv("NCCL_GIN_TYPES");
+  const char* list = getenv("RCCL_GIN_TYPE_LIST");
   if (!list) return false;
   ncclGinParseTypeList(list, mask);
   return *mask != 0;
 }
 
 // Whether the backend of the given type may initialize. enabledByDefault is its
-// behavior when neither NCCL_GIN_TYPE nor a usable NCCL_GIN_TYPES is set.
+// behavior when neither NCCL_GIN_TYPE nor a usable RCCL_GIN_TYPE_LIST is set.
 static inline bool ncclGinTypeEnabled(int type, bool enabledByDefault) {
   const char* single = getenv("NCCL_GIN_TYPE");
   if (single) return atoi(single) == type;

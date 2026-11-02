@@ -257,20 +257,20 @@ TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
 }
 
 // AICOMRCCL-3418: with NCCL_GIN_TYPE unset, a backend whose type is not listed in
-// NCCL_GIN_TYPES is not registered on the comm.
+// RCCL_GIN_TYPE_LIST is not registered on the comm.
 TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
   fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   struct ncclGinState* ginState = &sharedRes_->ginState;
   bool isAssigned = true;
   {
-    ScopedEnv list("NCCL_GIN_TYPES", "6,7");
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
     ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
     EXPECT_FALSE(isAssigned);
     EXPECT_EQ(ginState->numActiveBackends, 0);
   }
   {
-    ScopedEnv list("NCCL_GIN_TYPES", "6,2");
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,2");
     ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
     EXPECT_TRUE(isAssigned);
     ASSERT_EQ(ginState->numActiveBackends, 1);
@@ -321,11 +321,11 @@ TEST(GinTypeListTest, FlagsInvalidEntriesAndKeepsValidOnes) {
 
 TEST(GinTypeListTest, GinTypeWinsOverGinTypes) {
   ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
-  ScopedEnv list("NCCL_GIN_TYPES", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
   EXPECT_FALSE(ncclGinTypeEnabled(6, /*enabledByDefault=*/false));
   EXPECT_TRUE(ncclGinTypeEnabled(7, /*enabledByDefault=*/true));
   {
-    ScopedEnv gdaAndProxy("NCCL_GIN_TYPES", "6,2");
+    ScopedEnv gdaAndProxy("RCCL_GIN_TYPE_LIST", "6,2");
     EXPECT_TRUE(ncclGinTypeEnabled(6, false));
     EXPECT_FALSE(ncclGinTypeEnabled(7, true));
     ScopedEnv sdmaOnly("NCCL_GIN_TYPE", "7");
@@ -334,7 +334,7 @@ TEST(GinTypeListTest, GinTypeWinsOverGinTypes) {
   }
   {
     // A list with no valid entry is ignored, so the defaults apply.
-    ScopedEnv noValidEntry("NCCL_GIN_TYPES", "x");
+    ScopedEnv noValidEntry("RCCL_GIN_TYPE_LIST", "x");
     EXPECT_FALSE(ncclGinTypeEnabled(6, false));
     EXPECT_TRUE(ncclGinTypeEnabled(7, true));
   }
