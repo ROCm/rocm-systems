@@ -1629,7 +1629,6 @@ void DsReadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
           },
           wf))
     return;
@@ -1689,7 +1688,6 @@ void DsReadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .sign_extend = true,
           },
           wf))
     return;
@@ -2447,7 +2445,6 @@ void DsWriteB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 1,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -2487,7 +2484,6 @@ void DsWriteB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .data_vgpr = wf.vgpr_alloc().base + 0u + inst_.data0,
               .elem_size = 2,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -2527,7 +2523,6 @@ void DsReadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -2558,7 +2553,6 @@ void DsReadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -2589,8 +2583,6 @@ void DsReadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -2622,8 +2614,6 @@ void DsReadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -2655,7 +2645,6 @@ void DsReadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -2686,7 +2675,6 @@ void DsReadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
               .dst_vgpr = wf.vgpr_alloc().base + 0u + inst_.vdst,
               .elem_size = 2,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;

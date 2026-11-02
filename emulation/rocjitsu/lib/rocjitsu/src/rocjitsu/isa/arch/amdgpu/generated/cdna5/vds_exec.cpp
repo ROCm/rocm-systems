@@ -1433,7 +1433,6 @@ void DsLoadI8Vds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
           },
           wf))
     return;
@@ -1495,7 +1494,6 @@ void DsLoadI16Vds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 2,
               .num_elems = 1,
-              .sign_extend = true,
           },
           wf))
     return;
@@ -3245,7 +3243,6 @@ void DsStoreB8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
                                                                              data0.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -3286,7 +3283,6 @@ void DsStoreB16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
                                                                              data0.vgpr_msb_role()),
               .elem_size = 2,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -3327,7 +3323,6 @@ void DsLoadU8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -3359,7 +3354,6 @@ void DsLoadU8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -3391,8 +3385,6 @@ void DsLoadI8D16Vds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -3425,8 +3417,6 @@ void DsLoadI8D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 1,
               .num_elems = 1,
-              .sign_extend = true,
-              .d16_hi = true,
           },
           wf))
     return;
@@ -3459,7 +3449,6 @@ void DsLoadU16D16Vds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 2,
               .num_elems = 1,
-              .d16_lo = true,
           },
           wf))
     return;
@@ -3491,7 +3480,6 @@ void DsLoadU16D16HiVds::execute_impl(amdgpu::Wavefront &wf) {
                                                                             vdst.vgpr_msb_role()),
               .elem_size = 2,
               .num_elems = 1,
-              .d16_hi = true,
           },
           wf))
     return;

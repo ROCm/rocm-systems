@@ -13,6 +13,10 @@
 ///   lds_store_plans.h          stores: VGPR rows -> LDS, by EXEC and shape
 ///   lds_lane_shapes.h          the address-shape proofs loads and stores share
 ///
+/// Plain loads and stores take "the request path": an LdsAccessRequest, read
+/// and written straight from and to the registers. Every other DS form builds
+/// a VectorMemState and runs the routed path's access code (complete()).
+///
 /// Each hot loop has a plain C++ body that builds anywhere and, where it
 /// measured faster, an AVX2 body, which AVX2 builds use.
 ///
@@ -40,19 +44,20 @@ class Wavefront;
 /// has no per-lane address, payload or response buffers: the request path
 /// reads its operands from, and writes its results to, the registers
 /// themselves. Field order matches the designated initializers the generator
-/// emits.
+/// emits. Sign extension and d16 are not here: they are part of the format
+/// the entry point is instantiated with (DstFormat, StoreFormat).
 struct LdsAccessRequest {
-  uint32_t addr_vgpr = 0;   ///< Physical address VGPR.
-  uint32_t offset = 0;      ///< Byte offset, (offset1 << 8) | offset0.
-  uint32_t offset2 = 0;     ///< Two-address forms: the second access's byte offset.
-  uint32_t data_vgpr = 0;   ///< Stores: first payload VGPR.
-  uint32_t data2_vgpr = 0;  ///< Two-address stores: the second access's first payload VGPR.
-  uint32_t dst_vgpr = 0;    ///< Loads: first destination VGPR.
-  uint8_t elem_size = 0;    ///< 1, 2, 4 or 8 bytes.
-  uint8_t num_elems = 0;    ///< Elements per lane.
-  bool sign_extend = false; ///< Loads of i8/i16.
-  bool d16_hi = false;      ///< Loads write, stores read, the upper 16 bits.
-  bool d16_lo = false;      ///< Loads write the lower 16 bits.
+  /// Physical address VGPR.
+  uint32_t addr_vgpr = 0;
+  /// Byte offset: (offset1 << 8) | offset0, or for a two-address form offset0
+  /// scaled by its element size (and by 64 for stride64).
+  uint32_t offset = 0;
+  uint32_t offset2 = 0;    ///< Two-address forms: offset1, scaled the same way.
+  uint32_t data_vgpr = 0;  ///< Stores: first payload VGPR.
+  uint32_t data2_vgpr = 0; ///< Two-address stores: the second access's first payload VGPR.
+  uint32_t dst_vgpr = 0;   ///< Loads: first destination VGPR.
+  uint8_t elem_size = 0;   ///< 1, 2, 4 or 8 bytes.
+  uint8_t num_elems = 0;   ///< Elements per lane.
 };
 
 /// @brief One access of a plain load between its LDS read and its writeback:
@@ -118,5 +123,5 @@ private:
 } // namespace amdgpu
 } // namespace rocjitsu
 
-// load<F>() is inlined into each generated handler.
+// The entry points are inlined into each generated handler.
 #include "rocjitsu/vm/amdgpu/lds_inline_access_steps.h"

@@ -9522,15 +9522,10 @@ class CodeGenerator:
             f'  .elem_size = {sem.elem_size},',
             f'  .num_elems = {sem.num_elems},',
         ]
-        if is_load and sem.sign_extend:
-            fields.append('  .sign_extend = true,')
-        if sem.d16_hi:
-            fields.append('  .d16_hi = true,')
-        if is_load and sem.d16_lo:
-            fields.append('  .d16_lo = true,')
         # Load or store is fixed by the entry point, and each names its data
         # format, so the writeback (lds_writeback.h) and the store writers
-        # (lds_store_plans.h) are specialized per opcode.
+        # (lds_store_plans.h) are specialized per opcode. Sign extension and
+        # d16 live only in that format, not in the request.
         fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
         if is_load and sem.sign_extend:
             fmt.append('.sign_extend = true')
