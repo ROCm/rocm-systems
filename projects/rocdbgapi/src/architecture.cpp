@@ -7967,6 +7967,23 @@ gfx12_5_architecture_t::register_type (amdgpu_regnum_t regnum) const
 {
   switch (regnum)
     {
+    case amdgpu_regnum_t::pseudo_state_priv:
+      return "flags32_t state_priv {"
+             "  bool WG_RR_EN @0;"
+             "  bool SLEEP_WAKEUP @1;"
+             "  bool BARRIER_COMPLETE @2;"
+             "  bool NAMED_BARRIER_COMPLETE @3;"
+             "  uint32_t NAMED_BARRIER_ID @4-8;"
+             "  bool SCC @9;"
+             "  uint32_t SYS_PRIO @10-11;"
+             "  uint32_t USER_PRIO @12-13;"
+             "  bool HALT @14;"
+             "  bool POISON_ERR @15;"
+             "  bool CLUSTER_BARRIER_COMPLETE @16;"
+             "  bool SCRATCH_EN @18;"
+             "  bool PERF_EN @19;"
+             "  bool TTRACE_EN @20;"
+             "}";
     case amdgpu_regnum_t::mode:
       return "flags32_t mode {"
              "  enum fp_round {"
@@ -8042,6 +8059,14 @@ gfx12_5_architecture_t::register_read_only_mask (amdgpu_regnum_t regnum) const
 {
   switch (regnum)
     {
+    case amdgpu_regnum_t::pseudo_state_priv:
+      {
+        static uint32_t state_priv_ro_bits
+          = (utils::bit_mask<uint32_t> (17, 17)
+             | utils::bit_mask<uint32_t> (19, 20) /* PERF_EN and TTRACE_EN are RO.  */
+             | utils::bit_mask<uint32_t> (21, 31));
+        return &state_priv_ro_bits;
+      }
     case amdgpu_regnum_t::mode:
       {
         static uint32_t mode_ro_bits = utils::bit_mask<uint32_t> (8, 11)

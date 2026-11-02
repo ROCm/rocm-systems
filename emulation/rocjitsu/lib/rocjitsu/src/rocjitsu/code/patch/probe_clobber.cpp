@@ -107,6 +107,8 @@ void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
     note_operand(*op, summary);
   }
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const Operand *op = inst.src_operand(i);
     if (op == nullptr)
       continue;

@@ -57,8 +57,10 @@ enable clang-tidy checks when compiling the source code.
 
 For requirement #6, it is recommended to configure your IDE to automatically add new lines at the end of files.
 
-For requirement #7, the CMake option `ROCPROFILER_BUILD_DEVELOPER` can be used to enable the `-Werror` compiler flag,
-which treats warnings as errors.
+For requirement #7, `ROCPROFILER_BUILD_DEVELOPER=ON` enables
+`-Werror`, which treats warnings as errors, along with `-Wdouble-promotion`, `-Wshadow`, `-Wextra`, and `-Wvla`.
+`ROCPROFILER_BUILD_CI=ON` always enables these flags, including when `ROCPROFILER_BUILD_DEVELOPER=OFF`
+so that formatting and linting tools are optional.
 
 For simplicity, rocprofiler-sdk provides a CMake option `ROCPROFILER_BUILD_CI` to enable the following CMake options by default:
 `ROCPROFILER_BUILD_TESTS`, `ROCPROFILER_BUILD_SAMPLES`, `ROCPROFILER_BUILD_DEVELOPER`. However, if CMake is initially configured

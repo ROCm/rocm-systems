@@ -115,21 +115,30 @@ if(RJ_INSTALL_TESTS)
     # this is a build-time custom command that runs --gtest_list_tests and writes
     # an installed CTest fragment like rocjitsu_tests.cmake.
     function(rj_install_gtest_cases target)
-        set(_fragment "${PROJECT_BINARY_DIR}/tests/install/${target}.cmake")
-        cmake_parse_arguments(ARG "" "TEST_FILTER;TEST_PREFIX" "" ${ARGN})
+        cmake_parse_arguments(
+            ARG
+            ""
+            "TEST_FILTER;TEST_PREFIX;TEST_SUFFIX"
+            "ENVIRONMENT"
+            ${ARGN}
+        )
+        set(_name "${target}${ARG_TEST_SUFFIX}")
+        set(_fragment "${PROJECT_BINARY_DIR}/tests/install/${_name}.cmake")
         add_custom_command(
             OUTPUT "${_fragment}"
             COMMAND
                 ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:${target}>"
                 "-DINSTALLED_EXECUTABLE=bin/${target}"
                 "-DTEST_FILTER=${ARG_TEST_FILTER}"
-                "-DTEST_PREFIX=${ARG_TEST_PREFIX}" "-DOUTPUT_FILE=${_fragment}"
-                -P "${RJ_INSTALL_GTEST_GENERATOR}"
+                "-DTEST_PREFIX=${ARG_TEST_PREFIX}"
+                "-DTEST_SUFFIX=${ARG_TEST_SUFFIX}"
+                "-DTEST_ENVIRONMENT=${ARG_ENVIRONMENT}"
+                "-DOUTPUT_FILE=${_fragment}" -P "${RJ_INSTALL_GTEST_GENERATOR}"
             DEPENDS ${target} "${RJ_INSTALL_GTEST_GENERATOR}"
             COMMENT "Generating installed CTest entries for ${target}"
             VERBATIM
         )
-        add_custom_target(${target}_installed_ctest ALL DEPENDS "${_fragment}")
+        add_custom_target(${_name}_installed_ctest ALL DEPENDS "${_fragment}")
         install(FILES "${_fragment}" DESTINATION ${RJ_INSTALL_TEST_DIR})
     endfunction()
 
