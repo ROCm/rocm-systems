@@ -7,12 +7,13 @@ This directory contains external Python packages that are vendored (included dir
 | Package | Version | License | Source | Vendored |
 |---------|---------|---------|--------|----------|
 | PyYAML  | 6.0.3   | MIT     | https://github.com/yaml/pyyaml | 2024-03-14 |
+| tabulate | 0.9.0  | MIT     | https://github.com/astanin/python-tabulate | 2026-10-31 |
 
 ## Usage
 
 ```python
 # Recommended: Use convenience wrapper
-from vendored import yaml
+from vendored import tabulate, yaml
 
 # Alternative: Direct import
 from vendored.pyyaml.lib import yaml
