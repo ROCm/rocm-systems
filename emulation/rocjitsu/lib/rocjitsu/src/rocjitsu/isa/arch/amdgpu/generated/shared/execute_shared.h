@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_f16_source.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -277,8 +278,8 @@ inline void execute_s_add_co_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_add_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) +
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) +
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -889,7 +890,7 @@ inline void execute_s_cbranch_cdbguser_sopp([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_ceil_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::ceil(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -973,9 +974,9 @@ inline void execute_s_cmovk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_s_cmp_eq_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) ==
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) ==
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1004,9 +1005,9 @@ inline void execute_s_cmp_eq_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_ge_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1029,9 +1030,9 @@ inline void execute_s_cmp_ge_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_gt_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1054,9 +1055,9 @@ inline void execute_s_cmp_gt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_le_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1081,9 +1082,9 @@ template <typename Inst>
 inline void execute_s_cmp_lg_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc(([&]() {
     auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)));
     auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
     return (a < b) || (a > b);
   }()));
 }
@@ -1126,9 +1127,9 @@ inline void execute_s_cmp_lg_u64_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_s_cmp_lt_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1152,9 +1153,9 @@ inline void execute_s_cmp_lt_u32_sopc([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_cmp_neq_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) !=
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)))));
+  wf.write_scc(
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) !=
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)))));
 }
 
 template <typename Inst>
@@ -1167,10 +1168,9 @@ inline void execute_s_cmp_neq_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nge_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >=
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >=
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1183,10 +1183,9 @@ inline void execute_s_cmp_nge_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_ngt_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) >
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) >
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1199,10 +1198,9 @@ inline void execute_s_cmp_ngt_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nle_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <=
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <=
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1217,9 +1215,9 @@ inline void execute_s_cmp_nlg_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((!([&]() {
     auto a =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)));
     auto b =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
     return (a < b) || (a > b);
   }())));
 }
@@ -1237,10 +1235,9 @@ inline void execute_s_cmp_nlg_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_nlt_f16_sopc([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  wf.write_scc((!(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) <
-      util::f16_to_f32(
-          static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+  wf.write_scc((
+      !(util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) <
+        util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1253,9 +1250,9 @@ inline void execute_s_cmp_nlt_f32_sopc([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_cmp_o_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((!std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)))) &&
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)))) &&
                 !std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1268,9 +1265,9 @@ inline void execute_s_cmp_o_f32_sopc([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_s_cmp_u_f16_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.write_scc((std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)))) ||
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf)))) ||
                 std::isnan(util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))))));
+                    static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))))));
 }
 
 template <typename Inst>
@@ -1430,7 +1427,7 @@ inline void execute_s_cvt_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   // SOP1 scalar conversions preserve SCC.
   uint32_t result = std::bit_cast<uint32_t>(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
@@ -1457,7 +1454,7 @@ inline void execute_s_cvt_hi_f32_f16_sop1([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   // SOP1 scalar conversions preserve SCC.
   uint32_t result = std::bit_cast<uint32_t>(util::f16_to_f32(
-      static_cast<uint16_t>((amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0)) >> 16)));
+      static_cast<uint16_t>((amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf, true)) >> 16)));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
 }
 
@@ -1605,7 +1602,7 @@ inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_s_floor_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::floor_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -1629,8 +1626,8 @@ inline void execute_s_fmaak_f32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_s_fmac_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::fma(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))),
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))),
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))),
       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.sdst))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
@@ -1772,8 +1769,8 @@ inline void execute_s_max_num_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MaxNum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1801,8 +1798,8 @@ inline void execute_s_maximum_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Maximum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1849,8 +1846,8 @@ inline void execute_s_min_num_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::MinNum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1878,8 +1875,8 @@ inline void execute_s_minimum_f16_sop2([[maybe_unused]] Inst &inst,
   const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   amdgpu::RegisterAccess(wf).write_scalar(
       inst.sdst, amdgpu::minmax::evaluate<amdgpu::fp_format::F16, amdgpu::minmax::Minimum>(
-                     input_policy, amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0),
-                     amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+                     input_policy, amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf),
+                     amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf)));
 }
 
 template <typename Inst>
@@ -1914,8 +1911,8 @@ inline void execute_s_movk_i32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]
 template <typename Inst>
 inline void execute_s_mul_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) *
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) *
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2322,7 +2319,7 @@ inline void execute_s_rfe_b64_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_rndne_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::rndne_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2551,8 +2548,8 @@ inline void execute_s_sub_co_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_s_sub_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result =
-      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) -
-       util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
+      (util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))) -
+       util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc1, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 
@@ -2606,7 +2603,7 @@ inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wa
 template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = util::trunc_scalar(
-      util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
+      util::f16_to_f32(static_cast<uint16_t>(amdgpu::read_scalar_f16_carrier(inst.ssrc0, wf))));
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, util::f32_to_f16(result));
 }
 

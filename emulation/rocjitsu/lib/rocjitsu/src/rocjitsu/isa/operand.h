@@ -218,6 +218,8 @@ public:
   /// default covers only the literal case; ISA subclasses override it to add
   /// inline-constant resolution. Useful for static analysis (e.g. detecting
   /// `s_mov exec, -1`) where no wavefront is available.
+  /// This is the raw scalar carrier, matching read_scalar(); precision-specific
+  /// lane formatting and numeric scalar F16 reads may interpret it differently.
   [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
@@ -227,6 +229,22 @@ public:
   uint8_t register_byte_mask() const { return register_byte_mask_; }
   /// @brief Construction-only, after literal and extension operands are finalized.
   void set_register_byte_mask(uint8_t mask) { register_byte_mask_ = mask; }
+
+  enum class LaneInlineFloatFormat : uint8_t { F16, F32, BF16 };
+
+  /// @brief Format used for floating inline selectors in 16-bit lane reads.
+  /// @details Set only during decoded-operand construction, after fixups.
+  /// Synthetic operands default to F16, preserving their width-based behavior.
+  /// Raw scalar reads, register carriers and literals are unaffected.
+  LaneInlineFloatFormat lane_inline_float_format() const { return lane_inline_float_format_; }
+  void set_lane_inline_float_format(LaneInlineFloatFormat format) {
+    lane_inline_float_format_ = format;
+  }
+
+  /// @brief Preserve bytes outside the decoded destination's register byte mask.
+  /// @details Construction-only; the decoder publishes immutable operands.
+  bool preserve_unwritten_bytes() const { return preserve_unwritten_bytes_; }
+  void set_preserve_unwritten_bytes() { preserve_unwritten_bytes_ = true; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
   /// @details A construction-time capability flag. Field-bearing operands are
@@ -459,15 +477,12 @@ protected:
     decoded_vgpr_width_ = static_cast<uint8_t>(std::max(1u, unsigned(size_bits_) / 32));
   }
 
-  /// @brief Capability/role flags, set once at construction and never
-  /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
-  /// operands get their (reads_value, writable, is_vgpr) triple from
-  /// apply_fieldless_caps(); generated instruction constructors mark wave
-  /// masks with set_wave_mask(). Kept out of the public interface so only
-  /// construction can flip them: readers do lockless bool loads on the CU
-  /// thread and rely on the flags being immutable post-construction. Query
-  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless() /
-  /// is_wave_mask().
+  /// @brief Capability/role flags, immutable after decoded operands are ready.
+  /// Subclass constructors set is_vgpr_; fieldless operands get their capability
+  /// triple from apply_fieldless_caps(), and generated constructors mark wave
+  /// masks with set_wave_mask(). Construction-only setters finish source formats
+  /// and write windows after literal/extension fixups. CU readers rely on these
+  /// flags remaining immutable once decoding publishes the operand.
   ///
   /// Defaults describe a normal field-bearing operand (readable, writable,
   /// not fieldless, not a wave mask).
@@ -478,7 +493,8 @@ protected:
   bool writable_ : 1 = true;
   bool fieldless_ : 1 = false;
   bool wave_mask_ : 1 = false;
-  uint8_t reserved_caps_ : 3 = 0;
+  LaneInlineFloatFormat lane_inline_float_format_ : 2 = LaneInlineFloatFormat::F16;
+  bool preserve_unwritten_bytes_ : 1 = false;
   EncodingError encoding_error_ = EncodingError::None;
 
 private:
@@ -639,6 +655,18 @@ private:
 private:
   Operand *delegate_ = nullptr;
 };
+
+/// @brief Return the register reference with a Wave32 SGPR wave mask narrowed
+///        to one register.
+/// @details A wave mask is one SGPR in Wave32, where decoders may name the
+/// Wave64 pair. Every other operand, and every operand in Wave64, keeps its
+/// decoded width.
+[[nodiscard]] inline RegisterRef wave_sized_register(const Operand &op, RegisterRef ref,
+                                                     uint32_t wave_size) {
+  if (wave_size == 32 && ref.cls == RegClass::SGPR && op.is_wave_mask())
+    ref.width = 1;
+  return ref;
+}
 
 /// @brief ISA-parameterized operand that adds an ISA-specific operand type tag.
 /// @tparam Isa ISA traits type providing an OperandType enum or type alias.

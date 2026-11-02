@@ -57,6 +57,17 @@ tentative interval is removed. A failed host map must restore the reservation
 before the core releases its tentative interval. The same driver-generic
 owners enforce these rules for the current KFD driver and a fake driver.
 
+The process KFD connection records host-visible BO mappings for registration
+reuse. An alias retains a counted source record and the requested VMs; source
+release and access-set changes return BUSY while aliases remain. The source
+removes its record before native cleanup, so a later registration cannot race
+with unmapping. If a source owner is dropped while aliases survive, its native
+handle, reservation, and VM dependencies remain for process teardown. An
+AMDF source publishes its opaque backing identity before exposing its host
+pointer; aliases carry the source offset and full native extent independently
+of the requested page cover. An inherited post-fork owner never takes the
+parent's host-alias registry lock during drop.
+
 Async HSA signal registrations retain their signal storage. Callback-triggered
 shutdown requests worker exit and defers cleanup until another thread can join
 the workers. The async dispatcher stops before invoking another queued callback

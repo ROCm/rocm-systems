@@ -37,17 +37,6 @@ namespace {
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
 
-// A g_ncclOsTopoGetStrFromSys that answers bios_version and numa_balancing; an absent answer is a failed read.
-auto SysfsAnswers(const char* bios, const char* numaBalancing) {
-  return [=](const char*, const char* file, char* value, int maxLen) {
-    const char* answer = strcmp(file, "bios_version") == 0 ? bios : strcmp(file, "numa_balancing") == 0 ? numaBalancing
-                                                                                                          : nullptr;
-    if (answer == nullptr) return ncclSystemError;
-    snprintf(value, maxLen, "%s", answer);
-    return ncclSuccess;
-  };
-}
-
 constexpr const char* kHyperV = "Hyper-V UEFI Release v4.1";
 
 class NetIbCastGdrMicrotestIsolated : public ::testing::Test {};

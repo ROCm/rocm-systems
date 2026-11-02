@@ -413,6 +413,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
 
+bool rcclCeAllReduceEnabled(const struct ncclComm*) {
+  if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
+  return true;  // arch default: enabled
+}
+bool rcclForceCeAllReduceEnabled(const struct ncclComm*) { return false; }
+
 // ===========================================================================
 // Fail-loud floor -- rccl_wrap.cc entry points no host-only microtest executes.
 // Reaching one aborts AND names itself on stderr, which is the point: an unfaked
@@ -428,6 +434,24 @@ int64_t rcclParamHierarchicalLazyInit() {
 void rcclSetPxn(struct ncclComm*, int&) { FailLoudUnfaked("rccl_wrap_fakes", "rcclSetPxn"); }
 void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
+}
+bool rcclForceCeScratchEnabled(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
+}
+size_t rcclCeAr2ShotMax(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
+}
+size_t rcclCeAr2ShotMin(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
+}
+size_t rcclCeArNonRegCap(const ncclComm*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
+}
+bool rcclNcclAlgoEnvIsSet() {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
+}
+bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
 }
 int64_t g_rcclParamDirectReduceScatterThreshold = 8388608;     // rccl_wrap.cc:51 default
 int64_t rcclParamDirectReduceScatterThreshold() {              // rccl_wrap.cc:51

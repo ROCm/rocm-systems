@@ -339,10 +339,7 @@ static void initPluginLibsOnceFunc() {
   // Add 2 internal ib and socket plugins
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
-      envNet = "IB-CAST";
-    }
+    const char* envNet = rcclCanonicalNetName(ncclGetEnv("NCCL_NET"));
     if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
         (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
       ncclNetPluginRegisterInternal(&pluginCounter, &netIbCast, 0);

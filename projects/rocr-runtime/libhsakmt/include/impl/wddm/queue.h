@@ -226,6 +226,11 @@ public:
   hsa_status_t PreSubmit(void);
   hsa_status_t EndSubmit(void);
 
+#if defined(__linux__)
+  void SubmitIrqBarrier(void);
+  bool SubmitIrqBarrierPacket(uint64_t completion_signal);
+#endif
+
   void *ring; //!< AQL queue, allocated in ROCR and points to the AQL packets
   uint64_t ring_size;
 
@@ -278,6 +283,15 @@ private:
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   GpuMemoryHandle doorbell_mem_;
   uint64_t *doorbell_ptr_;          //!< amd_signal_t::hardware_doorbell_ptr exposed to ROCr
+#if defined(__linux__)
+  static constexpr size_t kIrqBarrierSignalOffset = 64;  //!< amd_signal_t needs 64B alignment
+  //!< Right after the signal; the CP writes the 32-bit event id here
+  static constexpr size_t kIrqBarrierMailboxOffset =
+      (kIrqBarrierSignalOffset + sizeof(amd_signal_t) + alignof(uint64_t) - 1) &
+      ~(alignof(uint64_t) - 1);
+  static constexpr uint32_t kIrqBarrierEventId = 0xffffffff;
+  amd_signal_t *irq_barrier_signal_ = nullptr;  //!< In the doorbell page; native AQL only
+#endif
   std::thread aql_to_pm4_thread_;
   std::thread fault_monitor_thread_;
   std::atomic<bool> thread_stop_;

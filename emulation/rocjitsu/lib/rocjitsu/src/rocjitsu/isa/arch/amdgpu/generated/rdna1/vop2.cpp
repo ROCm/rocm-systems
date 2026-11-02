@@ -2741,6 +2741,10 @@ VAddF16Vop2::VAddF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2824,6 +2828,10 @@ VSubF16Vop2::VSubF16Vop2(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -2910,6 +2918,10 @@ VSubrevF16Vop2::VSubrevF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2995,6 +3007,10 @@ VMulF16Vop2::VMulF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3056,6 +3072,8 @@ VFmacF16Vop2::VFmacF16Vop2(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3105,6 +3123,8 @@ VFmamkF16Vop2::VFmamkF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -3151,6 +3171,8 @@ VFmaakF16Vop2::VFmaakF16Vop2(const MachineInst *inst)
       Operand(16, OperandType::OPR_SIMM32,
               static_cast<int>(
                   (reinterpret_cast<const Vop2InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  vdst.set_register_byte_mask(0x3);
+  vdst.set_preserve_unwritten_bytes();
 }
 
 namespace detail {
@@ -3231,6 +3253,10 @@ VMaxF16Vop2::VMaxF16Vop2(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -3316,6 +3342,10 @@ VMinF16Vop2::VMinF16Vop2(const MachineInst *inst)
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
   }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
+  }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3399,6 +3429,10 @@ VLdexpF16Vop2::VLdexpF16Vop2(const MachineInst *inst)
     sdwa_omod_ = sw->omod;
     if (sw->s1)
       vsrc1 = Operand(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->vsrc1);
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 != amdgpu::SRC_SDWA) {
+    vdst.set_register_byte_mask(0x3);
+    vdst.set_preserve_unwritten_bytes();
   }
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }

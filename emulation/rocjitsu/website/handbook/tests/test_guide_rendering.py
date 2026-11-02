@@ -88,7 +88,10 @@ class GuideRenderingTests(unittest.TestCase):
             ('dbi-design', 'VGPRs — a direct'),
             ('dbi-design', 'anchor_offset is dword aligned.'),
             ('dbi-design', 'build_scratch_store_dword / build_scratch_load_dword'),
-            ('rocjitsu-cli', 'RPC_IOCTL (ALLOC_MEMORY response)'),
+            (
+                'rocjitsu-cli',
+                'RPC_IOCTL (ALLOC_MEMORY and IPC_IMPORT_HANDLE responses)',
+            ),
             ('rocjitsu-cli', 'UnixTransport::listen(endpoint)'),
             ('rocjitsu-cli', 'Unix: Unix domain socket + SCM_RIGHTS'),
         ):

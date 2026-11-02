@@ -16,6 +16,8 @@ test('phone filters, all-page navigation, trend tap and result details stay usab
   await expect(page.getByRole('checkbox', { name: 'default', exact: true })).toHaveCount(0);
   await filters.tap();
   await expect(filters).toHaveAttribute('aria-expanded', 'true');
+  // aria-expanded changes before the panel finishes expanding and moving its controls.
+  await expect(page.locator('#dashboard-filters > .MuiCollapse-root')).toHaveCSS('overflow', 'visible');
   await page.getByRole('checkbox', { name: 'default', exact: true }).uncheck();
   await page.getByRole('checkbox', { name: 'gfx950', exact: true }).check();
   await filters.tap();

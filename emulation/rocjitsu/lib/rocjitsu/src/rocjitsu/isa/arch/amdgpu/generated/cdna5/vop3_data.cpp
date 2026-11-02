@@ -128,6 +128,7 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   src0.set_register_byte_mask(
       src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
@@ -1123,6 +1124,8 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 

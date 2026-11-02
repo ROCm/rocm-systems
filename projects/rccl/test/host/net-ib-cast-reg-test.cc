@@ -158,7 +158,7 @@ TEST_F(NetIbCastRegMicrotest, RegMrDmaBuf_DataDirectDevice_GoesThroughMlx5WithTh
   IbCastDevs[0].ibProvider = IB_PROVIDER_MLX5;
   IbCastDevs[0].capsProvider.mlx5.dataDirect = 1;
   // reg.cc passes the data-direct bool into wrap_reg_dmabuf_mr. The mlx5-then-ibv choice
-  // inside that wrapper is covered by Mlx5dvRegDmabufTest.
+  // inside that wrapper is covered by Mlx5dvwrapRegDmabufMicrotest.
   ScopedHook dmabuf(g_regDmabufMr, [this](struct ibv_mr** ret, struct ibv_pd*, uint64_t offset, size_t length,
                                           uint64_t iova, int fd, int access, bool dataDirect) {
     *ret = NextMr(nullptr, length, iova, offset, fd, access,

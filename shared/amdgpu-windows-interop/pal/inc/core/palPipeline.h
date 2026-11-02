@@ -351,6 +351,24 @@ inline DispatchDims operator*(DispatchDims l, DispatchDims r) { return {l.x * r.
 /// @returns A reference to 'l' after it is updated to the product of 'l' and 'r'.
 inline DispatchDims& operator*=(DispatchDims& l, DispatchDims r) { return l = (l * r); }
 
+/// Component-wise equality check of one DispatchDims with another.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A bool with the value of the check.
+inline bool operator==(const DispatchDims& l, const DispatchDims& r)
+    { return (l.x == r.x) && (l.y == r.y) && (l.z == r.z); }
+
+/// Component-wise inequality check of one DispatchDims with another.
+///
+/// @param [in] l  The left-hand argument.
+/// @param [in] r  The right-hand argument.
+///
+/// @returns A bool with the value of the check.
+inline bool operator!=(const DispatchDims& l, const DispatchDims& r)
+    { return (l == r) == false; }
+
 /// Specifies properties for creation of a compute @ref IPipeline object.  Input structure to
 /// IDevice::CreateComputePipeline().
 struct ComputePipelineCreateInfo

@@ -162,18 +162,21 @@ struct LivenessAnalysisOptions {
 [[nodiscard]] std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks);
 
 /// @brief One past the highest ordinary SGPR named by an explicit operand in
-///        @p blocks, counting operand width, or 0 if the scope names none.
+///        @p blocks, counting wave-adjusted operand width, or 0 if the scope
+///        names none.
 ///
 /// @details An allocation floor for callers placing new scalar storage, computed
-/// without dataflow or a LivenessAnalysis instance. Implicit operands are
-/// excluded: an ordinary SGPR reached implicitly is also named explicitly
-/// (FLAT/GLOBAL `saddr` is both), so only special state would come in, which is
-/// not allocatable. Indices at or past REGISTER_SET_ALLOCATABLE_SGPRS are
-/// excluded as unreachable by any caller bound.
+/// without dataflow or a LivenessAnalysis instance. A wave-mask SGPR operand
+/// counts as one register at Wave32; otherwise its decoded width is preserved
+/// (see @ref wave_sized_register). Implicit operands are excluded: an ordinary
+/// SGPR reached implicitly is also named explicitly (FLAT/GLOBAL `saddr` is
+/// both), so only special state would come in, which is not allocatable. Indices
+/// at or past REGISTER_SET_ALLOCATABLE_SGPRS are excluded as unreachable by any
+/// caller bound.
 ///
 /// A partial scope understates the result and the gap it reports may hold
 /// registers the kernel is using.
-[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks);
+[[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks, uint8_t wave_size);
 
 /// @brief Whether any instruction in @p blocks is an `s_movrel*` form.
 ///
@@ -207,12 +210,17 @@ public:
   /// object. The pointed-to BasicBlocks and their Instructions must outlive this
   /// analysis because deferred CFG queries retain and later dereference them.
   /// @param blocks Blocks in one kernel CFG scope.
+  /// @param wave_size Wave width in lanes the scope executes at, 32 or 64.
+  /// Forwarded to @ref InstDefUse. A Wave32 RDNA scope analyzed at 64 can report a
+  /// live SGPR dead.
   /// @param exec Optional program-point EXEC-state analysis over the same
-  /// @p blocks scope; lets EXEC-masked vector defs count as kills where EXEC is
-  /// provably full. Ownership is moved into the analysis. Defaults to null: with
-  /// no EXEC analysis every EXEC-masked vector def is treated as `Unknown`, so
-  /// the conservative behavior (never promote such a def to a kill) is preserved.
-  LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
+  /// @p blocks scope and @p wave_size; lets EXEC-masked vector defs count as
+  /// kills where EXEC is provably full. Ownership is moved into the analysis.
+  /// Defaults to null: with no EXEC analysis every EXEC-masked vector def is
+  /// treated as `Unknown`, so the conservative behavior (never promote such a
+  /// def to a kill) is preserved.
+  LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
+                   std::unique_ptr<ExecMaskAnalysis> exec = nullptr,
                    LivenessAnalysisOptions options = {},
                    std::span<const ScopedCfgEdge> extra_edges = {});
   ~LivenessAnalysis();
@@ -364,6 +372,7 @@ private:
   bool global_vgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
+  uint8_t wave_size_ = 0;
   std::unique_ptr<Gfx1250VgprMsbAnalysis> gfx1250_vgpr_msb_;
   // EXEC-state analysis over the same scope, captured at construction so the
   // deferred backward dataflow can treat an EXEC-masked vector def as a kill
