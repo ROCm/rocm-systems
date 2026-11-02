@@ -410,11 +410,12 @@ physical-target evidence distinct.
 
 ## Fault injection
 
-The independent offline fault-injection library can remove a qualified complete
-barrier from an AMDGPU code object. It uses Instrumentor's instruction-replacement
-path and does not require the ConSan compiler, runtime, or analyzer. See
-[Fault injection](fault-injection.md) for its architecture, library interface,
-current features, target/wave coverage, and limitations.
+The independent offline `rj_code_mutate` CLI and its fault-injection library can
+remove a qualified complete barrier from an AMDGPU code object. They use
+Instrumentor's instruction-replacement path and do not require the ConSan
+compiler, runtime, or analyzer. See the [command-line usage](fault-injection.md#command-line-usage)
+and [Fault injection](fault-injection.md) for the library interface, current
+features, target/wave coverage, and limitations.
 
 Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
 then execution/capture → analyze. Do not reuse pristine prepared artifacts or
@@ -433,6 +434,27 @@ the [LDS classifier](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp
 Acyclic trampoline returns can be admitted, but true CFG cycles remain rejected
 and native LDS access PCs must increase along every executed path. Mutation
 admission and detector admission remain independent decisions.
+
+For example, reuse the paths and plugin environment from [Build and setup](#build-and-setup).
+Replace `original.hsaco` and `my_kernel` with a `gfx1250` workload's input and
+exact entry containing an admitted complete barrier:
+
+```bash
+consan_mutant="$consan_example/mutant.hsaco"
+"$consan_build/tools/rj_code_mutate" \
+  --input original.hsaco --kernel my_kernel --kind DropBarrier \
+  --ordinal 0 --output "$consan_mutant"
+export RJ_CONSAN_ARTIFACT_DIR="$consan_example/mutant-artifact"
+export RJ_CONSAN_CAPTURE_PATH="$consan_example/mutant-capture.bin"
+"$consan_prepare" \
+  "$consan_mutant" gfx1250 my_kernel "$RJ_CONSAN_ARTIFACT_DIR"
+```
+
+If preparation admits the mutant, continue with [execution and capture](#2-execution-and-capture)
+using the workload's launch code to load `consan_mutant` and its matching entry.
+Keep the new artifact and capture bindings above, then run the existing
+[offline diagnosis](#3-offline-diagnosis) command. The plugin's original image
+is now the mutant; it must not bind the pristine image or its prepared artifact.
 
 Mutation success reports emission after input qualification. It establishes
 neither execution nor detector qualification: removing a barrier does not prove
