@@ -27,6 +27,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -376,6 +378,23 @@ TEST(FaultDropBarrier, ExactSelectorRejectsOtherKernelAndEqualBytesInAnotherCont
         select_drop_barrier(*inventory, {.exact = selected.value(), .ordinal = 0}, error).failed());
     EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
   }
+}
+
+TEST(FaultDropBarrier, UnknownEntryListsDescriptorNamesBeforeBarrierQualification) {
+  const std::vector<uint8_t> image = make_gfx1250_two_kernel_barrier_elf({kSignal, kEnd});
+  const FaultMutationContext context(image);
+  FaultMutationError error;
+  for (const std::string_view entry : {"missing_kernel", ""}) {
+    EXPECT_TRUE(discover_drop_barriers(context, entry, error).failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::BadIdentity);
+    EXPECT_NE(error.message.find("descriptor entries:"), std::string::npos);
+    EXPECT_NE(error.message.find("test_kernel0"), std::string::npos);
+    EXPECT_NE(error.message.find("test_kernel1"), std::string::npos);
+  }
+  EXPECT_TRUE(discover_drop_barriers(context, "test_kernel0", error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::IncompleteSelection);
+  EXPECT_TRUE(discover_drop_barriers(context, "test_kernel1", error).succeeded()) << error.message;
+  EXPECT_TRUE(std::ranges::equal(context.image(), image));
 }
 
 TEST(FaultDropBarrier, CachedQualificationFailureDoesNotPoisonAnotherKernel) {

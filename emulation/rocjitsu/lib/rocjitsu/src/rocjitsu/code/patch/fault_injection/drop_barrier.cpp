@@ -23,6 +23,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -501,9 +502,12 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
   if (matches > 1)
     return reject(error, FaultMutationErrorCode::AmbiguousSelection,
                   "exact entry name identifies multiple descriptors");
-  if (entry.empty() || matches == 0)
-    return reject(error, FaultMutationErrorCode::BadIdentity,
-                  "entry must match one exact kernel name");
+  if (entry.empty() || matches == 0) {
+    std::string message = "entry must match one exact kernel name; descriptor entries:";
+    for (const std::shared_ptr<const FaultBarrierRecord> &record : kernels)
+      message += " " + record->owner.entry;
+    return reject(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+  }
   const std::shared_ptr<const FaultBarrierRecord> record = *std::ranges::find_if(
       kernels, [&](const std::shared_ptr<const FaultBarrierRecord> &candidate) {
         return candidate->owner.entry == entry;
