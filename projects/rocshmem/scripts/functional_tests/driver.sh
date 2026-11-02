@@ -184,6 +184,7 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["signal_ops_on_stream"]="174"
   ["tile_put_rowmajor_start_coord"]="177"
   ["tile_get_rowmajor_start_coord"]="178"
   ["tile_put_wave_rowmajor_start_coord"]="179"
@@ -925,6 +926,7 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
+  ExecTest  "signal_ops_on_stream"   2  1           1
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
 
   ExecTest  "barrier_all_on_stream"  2  1           1

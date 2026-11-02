@@ -72,6 +72,14 @@ __host__ void rocshmem_putmem_signal_on_stream_impl(void *dest, const void *sour
 __host__ void rocshmem_signal_wait_until_on_stream_impl(uint64_t *sig_addr, int cmp,
                                                          uint64_t cmp_value,
                                                          hipStream_t stream);
+
+__host__ void rocshmem_signal_add_on_stream_impl(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream);
+
+__host__ void rocshmem_signal_set_on_stream_impl(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream);
 }  // extern "C"
 
 namespace rocshmem
@@ -107,10 +115,12 @@ ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, getmem_on_stream_fn, 5);
 ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, putmem_on_stream_fn, 6);
 ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, putmem_signal_on_stream_fn, 7);
 ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, signal_wait_until_on_stream_fn, 8);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, signal_add_on_stream_fn, 9);
+ROCSHMEM_ASSERT_OFFSET(rocshmemApiFuncTable, signal_set_on_stream_fn, 10);
 
 #undef ROCSHMEM_ASSERT_OFFSET
 
-static_assert(sizeof(rocshmemApiFuncTable) == compute_table_size(9),
+static_assert(sizeof(rocshmemApiFuncTable) == compute_table_size(11),
               "Update table major/step version and add a new offset assertion if this "
               "fails to compile");
 
@@ -131,7 +141,9 @@ RocshmemGetFunctionTable_impl()
             &rocshmem_getmem_on_stream_impl,
             &rocshmem_putmem_on_stream_impl,
             &rocshmem_putmem_signal_on_stream_impl,
-            &rocshmem_signal_wait_until_on_stream_impl
+            &rocshmem_signal_wait_until_on_stream_impl,
+            &rocshmem_signal_add_on_stream_impl,
+            &rocshmem_signal_set_on_stream_impl
         };
 
 #if defined(ROCSHMEM_ROCPROFILER_REGISTER) && ROCSHMEM_ROCPROFILER_REGISTER > 0
@@ -245,6 +257,24 @@ __host__ void rocshmem_signal_wait_until_on_stream_impl(uint64_t *sig_addr, int 
     LOG_API("host::signal_wait_until_on_stream (sig_addr=%p, cmp=%d)", sig_addr, cmp);
     rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
     ctx->signal_wait_until_on_stream(sig_addr, cmp, cmp_value, stream);
+}
+
+__host__ void rocshmem_signal_add_on_stream_impl(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream)
+{
+    LOG_API("host::signal_add_on_stream (sig_addr=%p, pe=%d)", sig_addr, pe);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->signal_add_on_stream(sig_addr, signal, pe, stream);
+}
+
+__host__ void rocshmem_signal_set_on_stream_impl(uint64_t *sig_addr,
+                                                  uint64_t signal, int pe,
+                                                  hipStream_t stream)
+{
+    LOG_API("host::signal_set_on_stream (sig_addr=%p, pe=%d)", sig_addr, pe);
+    rocshmem::Context* ctx = reinterpret_cast<rocshmem::Context*>(rocshmem::ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque);
+    ctx->signal_set_on_stream(sig_addr, signal, pe, stream);
 }
 
 }  // extern "C"
