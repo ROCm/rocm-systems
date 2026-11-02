@@ -6,7 +6,13 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
+* `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * `hiprtcCreateProgram` and `hiprtcLinkCreate` no longer crash when the COMGR library cannot be loaded or is incompatible. They now return `HIPRTC_ERROR_INTERNAL_ERROR`. This check runs before argument validation, so when COMGR is unavailable, invalid arguments also yield `HIPRTC_ERROR_INTERNAL_ERROR` instead of `HIPRTC_ERROR_INVALID_PROGRAM` or `HIPRTC_ERROR_INVALID_INPUT`. The cause of the load failure is logged at `AMD_LOG_LEVEL=1` or higher.
+
+### Changed
+
+* After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

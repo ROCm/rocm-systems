@@ -2411,6 +2411,8 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2478,6 +2480,8 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2545,6 +2549,8 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2612,6 +2618,8 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2679,6 +2687,8 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2746,6 +2756,8 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2813,6 +2825,8 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2880,6 +2894,8 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2947,6 +2963,8 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3014,6 +3032,8 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3081,6 +3101,8 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -3148,6 +3170,8 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -7093,6 +7117,8 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7163,6 +7189,8 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7233,6 +7261,8 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7303,6 +7333,8 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7373,6 +7405,8 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7443,6 +7477,8 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7513,6 +7549,8 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7583,6 +7621,8 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7653,6 +7693,8 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7723,6 +7765,8 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7793,6 +7837,8 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -7863,6 +7909,8 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
   vdst.set_wave_mask();
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 

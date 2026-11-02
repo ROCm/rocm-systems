@@ -485,7 +485,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
 
     std::vector<VASurfaceID> current_surface_ids;
     std::vector<JpegStreamParameters> jpeg_streams_params;
-    current_surface_ids.resize(batch_size);
+    // Slots stay VA_INVALID_SURFACE until SubmitDecodeBatched assigns a surface to them.
+    current_surface_ids.resize(batch_size, VA_INVALID_SURFACE);
     jpeg_streams_params.resize(batch_size);
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
 
@@ -501,9 +502,12 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
 
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], current_surface_ids.data() + i);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
-            // VA surfaces that are already in-flight on the hardware.
-            for (int j = 0; j < i; j++) {
+            // Sync and release the surfaces of all previous sub-batches and those the failing sub-batch
+            // already acquired, which may be in flight on the hardware, so their pool entries are not leaked.
+            for (int j = 0; j < batch_end; j++) {
+                if (current_surface_ids[j] == VA_INVALID_SURFACE) {
+                    continue;
+                }
                 jpeg_vaapi_decoder_.SyncSurface(current_surface_ids[j]);
                 jpeg_vaapi_decoder_.SetSurfaceAsIdle(current_surface_ids[j]);
             }
@@ -558,7 +562,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     }
 
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
-    std::vector<VASurfaceID> surface_ids(batch_size);
+    // Slots stay VA_INVALID_SURFACE until SubmitDecodeBatched assigns a surface to them.
+    std::vector<VASurfaceID> surface_ids(batch_size, VA_INVALID_SURFACE);
 
     // SubmitDecodeBatched does not touch pending_decodes_ — hold no lock during GPU submission
     // so DecodeBatchedSync can concurrently drain its own states on the sync thread.
@@ -568,9 +573,12 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
 
         RocJpegStatus rocjpeg_status = jpeg_vaapi_decoder_.SubmitDecodeBatched(jpeg_streams_params.data() + i, current_batch_size, &decode_params[i], surface_ids.data() + i);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-            // Sync and release surfaces from all previously successful sub-batches to avoid leaking
-            // VA surfaces that are already in-flight on the hardware.
-            for (int j = 0; j < i; j++) {
+            // Sync and release the surfaces of all previous sub-batches and those the failing sub-batch
+            // already acquired, which may be in flight on the hardware, so their pool entries are not leaked.
+            for (int j = 0; j < batch_end; j++) {
+                if (surface_ids[j] == VA_INVALID_SURFACE) {
+                    continue;
+                }
                 jpeg_vaapi_decoder_.SyncSurface(surface_ids[j]);
                 jpeg_vaapi_decoder_.SetSurfaceAsIdle(surface_ids[j]);
             }

@@ -3,7 +3,7 @@
 
 //! Fixed queue scratch geometry shared by GPU frontends.
 
-use crate::topology::GpuInfo;
+use crate::topology::{GpuInfo, GpuScratchEncoding};
 use crate::{Error, ErrorKind};
 
 /// Largest private segment accepted by the qualified GFX12 queue path.
@@ -46,14 +46,15 @@ pub fn plan_scratch(
     if private_segment_size == 0 || private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
         return Err(invalid_scratch());
     }
-    let (alignment, maximum_wave_units) = match (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) {
-        (9, 0, 8 | 10) | (9, 4, 2) | (9, 5, 0) if gpu.wavefront_size == 64 => (1024_u64, 0x1fff),
-        (12, 0, 0 | 1) | (12, 5, 0) if gpu.wavefront_size == 32 => (256_u64, 0x3_ffff),
-        _ => return Err(invalid_scratch()),
-    };
+    let (alignment, maximum_wave_units) =
+        match gpu.target_profile.scratch_encoding(gpu.wavefront_size) {
+            Some(GpuScratchEncoding::Gfx9) => (1024_u64, 0x1fff),
+            Some(GpuScratchEncoding::Gfx12) => (256_u64, 0x3_ffff),
+            None => return Err(invalid_scratch()),
+        };
     if gpu.xcc_count == 0
         || !matches!(lanes_per_wave, 32 | 64)
-        || (gpu.gfx_major == 9 && lanes_per_wave != 64)
+        || (gpu.target_profile == crate::topology::GpuTargetProfile::Gfx9 && lanes_per_wave != 64)
     {
         return Err(invalid_scratch());
     }
@@ -114,6 +115,7 @@ mod tests {
             gfx_major: 12,
             gfx_minor: 0,
             gfx_stepping: 1,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             wavefront_size: 32,
             compute_unit_count: 64,
             maximum_wave_count_per_compute_unit: 32,
@@ -151,6 +153,7 @@ mod tests {
 
         let mut unsupported = gfx1201();
         unsupported.gfx_stepping = 2;
+        unsupported.target_profile = crate::topology::GpuTargetProfile::Other;
         assert!(plan_scratch(unsupported, 1024, 32).is_err());
         assert!(plan_scratch(gfx1201(), 0, 32).is_err());
         assert!(plan_scratch(gfx1201(), MAX_PRIVATE_SEGMENT_BYTES + 1, 32).is_err());

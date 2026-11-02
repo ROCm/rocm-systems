@@ -254,10 +254,16 @@ TEST(SmemBuilder, ScalarLoadWaitSelectsTheScalarCounter) {
   // and only there is the distinction observable in the encoding.
   const auto cdna3_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_TRUE(cdna3_wait.succeeded());
-  EXPECT_EQ(cdna3_wait.value(), build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna3 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_wait_loads_complete_cdna3.succeeded());
+  EXPECT_EQ(cdna3_wait.value(), maybe_wait_loads_complete_cdna3.value());
   const auto rdna4_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
   ASSERT_TRUE(rdna4_wait.succeeded());
-  EXPECT_NE(rdna4_wait.value(), build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4));
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_rdna4 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_wait_loads_complete_rdna4.succeeded());
+  EXPECT_NE(rdna4_wait.value(), maybe_wait_loads_complete_rdna4.value());
 }
 
 TEST(SmemBuilder, EmitsOneDiagnosticOnlyOnFailure) {

@@ -18,6 +18,7 @@
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
 
 void ResetEnqueueTestDeps() {
+  ResetAllocatorFakes();
   ResetHipFakes();
   ResetNcclFakes();
   ResetNcclStubs();
@@ -25,10 +26,13 @@ void ResetEnqueueTestDeps() {
   ResetCommFakes();
   ResetDevRuntimeFakes();
   ResetGroupFakes();
+  ResetMgmtTaskEnqFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRegisterStubs();
+  ResetRmaFakes();
+  ResetSchedStubs();
   ResetStrongStreamStubs();
   ResetSymKernelsFakes();
   ResetTransportStubs();

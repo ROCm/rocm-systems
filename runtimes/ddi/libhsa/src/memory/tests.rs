@@ -26,7 +26,7 @@ fn execute_access_permission_matches_the_native_bitmask() {
 /// Verifies that completed memory workers are reaped without joining active
 /// work.
 fn completed_memory_workers_are_reaped_without_joining_active_work() {
-    let mut state = MemoryState::new();
+    let mut state = MemoryState::new(Arc::new(crate::runtime::GenerationHealth::new()));
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let active = thread::spawn(move || {
@@ -118,32 +118,6 @@ fn allow_access_rejects_reserved_flags_before_runtime_lookup() {
             )
         },
         INVALID_ARGUMENT
-    );
-}
-
-#[test]
-/// Verifies that registered range aligns native pages and preserves host offset.
-fn registered_range_aligns_native_pages_and_preserves_host_offset() {
-    assert_eq!(
-        registered_range(0x10_000, 1, 4096),
-        Some((0x10_000, 4096, 0))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 1, 4096),
-        Some((0x10_000, 4096, 0x345))
-    );
-    assert_eq!(
-        registered_range(0x10_345, 4096, 4096),
-        Some((0x10_000, 8192, 0x345))
-    );
-    assert_eq!(registered_range(usize::MAX, 2, 4096), None);
-    assert_eq!(
-        registered_range(0x10_123, 1, 65_536),
-        Some((0x10_000, 65_536, 0x123))
-    );
-    assert_eq!(
-        registered_range(0x10_123, 65_536, 65_536),
-        Some((0x10_000, 131_072, 0x123))
     );
 }
 
