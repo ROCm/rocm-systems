@@ -7,11 +7,24 @@ and ``core._push_scope`` / ``_pop_scope``."""
 
 import functools
 import importlib
+import os
+import runpy
 import sys
 import types
+from pathlib import Path
 
 import common  # noqa: F401
 import pytest
+
+from utils.inject_roctx import core
+from utils.inject_roctx import registry as registry_pkg
+from utils.inject_roctx._backends import triton as triton_backend
+from utils.inject_roctx.core import (
+    compose_marker,
+    encode_marker_name,
+    install_global_wraps,
+)
+from utils.inject_roctx.marker_format import cap_args, encode_args
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -50,8 +63,6 @@ def make_backend(name, install_fn=None):
 @pytest.fixture
 def captured_install(monkeypatch):
     """Replace ``registry.install_many`` with a recorder."""
-    from utils.inject_roctx import registry as registry_pkg
-
     calls: list[list[str]] = []
     monkeypatch.setattr(
         registry_pkg, "install_many", functools.partial(record_call, calls)
@@ -60,16 +71,12 @@ def captured_install(monkeypatch):
 
 
 def test_install_global_wraps_empty_input_is_noop(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
     install_global_wraps([])
     install_global_wraps(())
     assert captured_install == []
 
 
 def test_install_global_wraps_list_input(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
     install_global_wraps(["torch"])
     install_global_wraps(["torch", "triton"])
     assert captured_install == [["torch"], ["torch", "triton"]]
@@ -83,8 +90,6 @@ def test_install_global_wraps_list_input(captured_install):
 @pytest.fixture
 def fresh_registry(monkeypatch):
     """Provide an isolated registry for ``install_many`` tests."""
-    from utils.inject_roctx import registry as registry_pkg
-
     monkeypatch.setattr(registry_pkg, "_REGISTRY", {})
     return registry_pkg
 
@@ -151,8 +156,6 @@ def test_install_many_warns_when_module_does_not_register(fresh_registry, monkey
 
 
 def test_triton_backend_skips_when_triton_missing(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util,
@@ -173,8 +176,6 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
 
 def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
     """CompiledKernel.run() is wrapped in preference to __call__."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[tuple] = []
     monkeypatch.setattr(
         triton_backend,
@@ -199,8 +200,6 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
 
 def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     """JITFunction.run is wrapped for eager launches."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[str] = []
     monkeypatch.setattr(
         triton_backend,
@@ -224,51 +223,8 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     assert pushes == ["triton.JITFunction.add_kernel"]
 
 
-def test_triton_backend_reentrancy_dedups_nested_launch(monkeypatch):
-    """Nested JITFunction.run and CompiledKernel.run emit one marker."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
-    pushes: list[str] = []
-    monkeypatch.setattr(
-        triton_backend,
-        "_push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
-    )
-    monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
-
-    class FakeCompiledKernel:
-        name = "inner"
-
-        def run(self, *a, **kw):
-            return "inner_ran"
-
-    class FakeJIT:
-        name = "outer"
-
-        def __init__(self, compiled):
-            self._compiled = compiled
-
-        def run(self, *a, **kw):
-            return self._compiled.run()
-
-    monkeypatch.setattr(triton_backend._STATE, "compiled_kernel", FakeCompiledKernel)
-    monkeypatch.setattr(triton_backend._STATE, "jit_function", FakeJIT)
-    triton_backend.patch_triton_launcher()
-
-    compiled = FakeCompiledKernel()
-    out = FakeJIT(compiled).run()
-
-    assert out == "inner_ran"
-    assert pushes == ["triton.JITFunction.outer"]
-
-
 def test_triton_backend_patch_is_idempotent(monkeypatch):
     """Patching twice does not re-wrap the launch entry point."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[str] = []
     monkeypatch.setattr(
         triton_backend,
@@ -276,9 +232,6 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
         lambda marker, ctx, backend="": pushes.append(marker),
     )
     monkeypatch.setattr(triton_backend, "_pop_scope", lambda: None)
-    # Reset the per-thread guard.
-    if hasattr(triton_backend._thread_local, "in_launch"):
-        del triton_backend._thread_local.in_launch
 
     class FakeJIT:
         name = "k"
@@ -302,9 +255,8 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
 
 def test_triton_backend_registers_framework_root(monkeypatch):
     """install() registers triton's package directory as a framework root."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
+    monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: True)
     monkeypatch.setattr(triton_backend, "patch_triton_launcher", lambda: None)
 
     fake_triton = types.ModuleType("triton")
@@ -321,8 +273,6 @@ def test_triton_backend_registers_framework_root(monkeypatch):
 
 
 def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
     monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: False)
 
@@ -341,8 +291,6 @@ def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
 
 
 def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
-    from utils.inject_roctx import core
-
     saved_push, saved_pop = core._STATE.range_push, core._STATE.range_pop
     try:
         core.set_python_tier_io(lambda _s: None, lambda: None)
@@ -354,8 +302,6 @@ def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
 
 
 def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
-    from utils.inject_roctx._backends import triton as triton_backend
-
     named = types.SimpleNamespace(name="direct")
     assert triton_backend._extract_kernel_name(named) == "direct"
 
@@ -371,109 +317,103 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
     )
 
 
-# ---------------------------------------------------------------------------
-# core push/pop
-# ---------------------------------------------------------------------------
+def test_encode_marker_name_wrap_chars():
+    assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
+    assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
+    assert encode_marker_name("aten::addmm") == "aten::addmm"
 
 
-@pytest.fixture
-def core_with_python_tier():
-    """Return ``core`` wired to in-memory push/pop sinks with empty stacks."""
-    from utils.inject_roctx import core
+def test_compose_marker_python_wrap_wire():
+    expected = (
+        "nn.Module.Linear.forward:simple_net.py:51"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=n/a|torch"
+    )
+    assert (
+        compose_marker("nn.Module.Linear.forward", "simple_net.py:51", backend="torch")
+        == expected
+    )
+    empty_backend = compose_marker(
+        "nn.Module.Linear.forward", "simple_net.py:51", backend=""
+    )
+    assert empty_backend.endswith("args=n/a")
+    assert not empty_backend.endswith("args=n/a|")
 
-    pushed: list[str] = []
-    popped: list[None] = []
-    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
-    for attr in ("marker_stack", "context_stack"):
-        if hasattr(core._thread_local, attr):
-            delattr(core._thread_local, attr)
-    return core, pushed, popped
+
+def test_encode_args_wrap_delimiters():
+    assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
+    assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
 
 
-@pytest.fixture
-def torch_backend_tiers():
-    """Return the torch backend wired to in-memory Python-tier sinks."""
-    from utils.inject_roctx import core
-    from utils.inject_roctx._backends import torch as torch_mod
+def test_cap_args_balanced_parens():
+    assert cap_args("x" * 512) == "x" * 512
+    assert cap_args("x" * 513).endswith("...")
+    blob = "(" + "float32[2x4], " * 40 + ")"
+    assert cap_args(blob).endswith("...)")
 
-    pushed: list[str] = []
-    popped: list[None] = []
-    core.set_python_tier_io(push=pushed.append, pop=lambda: popped.append(None))
-    for attr in ("marker_stack", "context_stack"):
-        if hasattr(core._thread_local, attr):
-            delattr(core._thread_local, attr)
-    if hasattr(torch_mod._thread_local, "tier_stack"):
-        delattr(torch_mod._thread_local, "tier_stack")
-    saved_hook = torch_mod._STATE.native_hook
-    torch_mod._STATE.native_hook = None
+
+def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
+    previous = core.get_python_tier_io()
+    pushes = []
+    pops = []
+    core.set_python_tier_io(pushes.append, lambda: pops.append("pop"))
+    core._thread_local.depth = 0
     try:
-        yield torch_mod, pushed, popped
+        core._push_scope("aten::addmm", "n/a", backend="torch")
+        assert pushes == [core.compose_marker("aten::addmm", "n/a", backend="torch")]
+        core._pop_scope()
+        core._pop_scope()
+        assert pops == ["pop"]
     finally:
-        torch_mod._STATE.native_hook = saved_hook
+        core.set_python_tier_io(*previous)
+        core._thread_local.depth = 0
 
 
-def test_push_scope_appends_backend_suffix(core_with_python_tier):
-    core, pushed, _ = core_with_python_tier
+def test_resolve_user_caller_location_skips_package_and_framework_roots():
 
-    core._push_scope("op", "#1@x:1", backend="torch")
-    assert pushed == ["op:#1@x:1|torch"]
-
-
-def test_push_scope_omits_suffix_when_backend_empty(core_with_python_tier):
-    core, pushed, _ = core_with_python_tier
-
-    core._push_scope("op", "#1@x:1")
-    assert pushed == ["op:#1@x:1"]
-
-
-def test_torch_push_scope_routes_to_native_tier_when_active(torch_backend_tiers):
-    torch_backend, pushed, _ = torch_backend_tiers
-
-    seen: list[tuple] = []
-
-    class Hook:
-        def active(self):
-            return True
-
-        def push(self, marker, context, backend):
-            seen.append((marker, context, backend))
-            return True
-
-        def pop(self):
-            pass
-
-    torch_backend._STATE.native_hook = Hook()
-    torch_backend._push_scope("op", "#1@x:1", backend="torch")
-
-    assert seen == [("op", "#1@x:1", "torch")]
-    assert pushed == []
+    location = core.resolve_user_caller_location()
+    assert location.startswith(Path(__file__).name)
+    assert ":" in location
+    parent = str(Path(__file__).resolve().parent)
+    core.add_framework_root(parent)
+    stored = parent if parent.endswith(os.sep) else parent + os.sep
+    try:
+        skipped = core.resolve_user_caller_location()
+        assert ":" in skipped
+        assert not skipped.startswith(Path(__file__).name)
+    finally:
+        if stored in core._STATE.framework_roots:
+            core._STATE.framework_roots.remove(stored)
 
 
-def test_torch_pop_scope_routes_each_frame_to_its_originating_tier(torch_backend_tiers):
-    torch_backend, pushed, popped = torch_backend_tiers
+def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
 
-    native_pops: list[None] = []
+    target = tmp_path / "target.py"
+    ok_path = tmp_path / "ok.txt"
+    target.write_text(
+        f"from pathlib import Path\nPath({str(ok_path)!r}).write_text('ok')\n",
+        encoding="utf-8",
+    )
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    recorded = []
+    monkeypatch.setattr(
+        core, "install_global_wraps", lambda names: recorded.append(list(names))
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(launch), "--frameworks", "torch", "triton", "--", str(target)],
+    )
+    runpy.run_path(str(launch))
+    assert recorded == [["torch", "triton"]]
+    assert ok_path.read_text(encoding="utf-8") == "ok"
 
-    class Hook:
-        active_flag = True
 
-        def active(self):
-            return self.active_flag
+def test_launch_exits_2_without_target(monkeypatch, capsys):
 
-        def push(self, marker, context, backend):
-            return True
-
-        def pop(self):
-            native_pops.append(None)
-
-    hook = Hook()
-    torch_backend._STATE.native_hook = hook
-    torch_backend._push_scope("native_op", "#1@x:1", backend="torch")
-    hook.active_flag = False
-    torch_backend._push_scope("py_op", "#2@x:2", backend="torch")
-    torch_backend._pop_scope()
-    torch_backend._pop_scope()
-
-    assert pushed == ["native_op/py_op:#1@x:1/#2@x:2|torch"]
-    assert popped == [None]
-    assert native_pops == [None]
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    monkeypatch.setattr(sys, "argv", [str(launch), "--frameworks", "torch"])
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_path(str(launch))
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err

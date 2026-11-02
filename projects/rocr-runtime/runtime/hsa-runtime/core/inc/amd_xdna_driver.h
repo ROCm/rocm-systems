@@ -88,6 +88,10 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t QueryPointerInfo(const void* ptr, const core::MemoryRegion* region,
+                                core::MemoryRegion::AllocateFlags alloc_flags,
+                                const core::DriverMemoryHandle* handle,
+                                HsaPointerInfo* info) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -100,14 +104,14 @@ public:
   /// dispatch queue.
   ///
   /// @param[in] queue_size size of the dispatch queue in number of packets
-  /// @param[in] num_core_tiles number of core tiles to give the queue's hardware context. The
-  /// driver divides this by the number of core rows to get a column count, so a value smaller
-  /// than one row's worth of tiles asks for zero columns and is rejected.
+  /// @param[in] num_cols number of columns to create the queue's initial hardware context with.
+  /// Dispatch resizes the context to the columns its kernels declare.
+  /// @param[in] num_core_rows number of core tiles in each column
   /// @param[in] device_id PCI device ID of the agent the queue dispatches to, resolved here so
   /// dispatch does not look the device type up per batch
   /// @param[out] queue_metadata KMQ metadata created for the dispatch queue
-  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_core_tiles, uint16_t device_id,
-                                     void** queue_metadata) const;
+  hsa_status_t CreateKernelModeQueue(size_t queue_size, uint32_t num_cols, uint32_t num_core_rows,
+                                     uint16_t device_id, void** queue_metadata) const;
 
   /// @brief Destroy the Kernel Mode Queue (KMQ) metadata.
   ///
@@ -178,6 +182,10 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
  private:
   /// @brief Queries the driver version and updates internal state.

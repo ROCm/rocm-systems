@@ -13,7 +13,6 @@ srcDevice, size_t sizeBytes, hipStream_t stream) ` -
 * Copies data between devices.
 */
 
-#include <cmd_options.hh>
 #include <hip_array_common.hh>
 #include <hip_test_common.hh>
 #include <iomanip>

@@ -54,6 +54,13 @@ public:
   static __device__ inline size_t amo_count{0};
   static __device__ inline size_t quiet_count{0};
 
+  // Per queue pair. poll_cq_once() reports busy for busy_polls polls, then treats all but the
+  // newest pending_wqes of the posted WQEs as complete.
+  size_t posted{0};
+  size_t busy_polls{0};
+  size_t pending_wqes{0};
+  size_t polls{0};
+
 public:
   __host__ QueuePairMock()                                      = default;
   __host__ QueuePairMock(const QueuePairMock& other)            = delete;
@@ -88,6 +95,10 @@ public:
                                        PostOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
+
+  __device__ __forceinline__ uint64_t cq_target();
+
+  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
 
   /**
@@ -161,12 +172,13 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
   }
 
   if (wf_info.is_pe_group_first) {
-    __hip_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes,
+                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    posted += wf_info.num_pe_group_lanes;
   }
 
   if (can_inline<Op>(size)) {
-    __hip_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 
   if constexpr (Op == OpCode::RDMA_WRITE) {
@@ -188,10 +200,11 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
     return;
   }
 
-  __hip_atomic_fetch_add(&rma_count, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_fetch_add(&rma_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  ++posted;
 
   if (can_inline<Op>(size)) {
-    __hip_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_fetch_add(&rma_inline_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 
   if constexpr (Op == OpCode::RDMA_WRITE) {
@@ -216,20 +229,21 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   }
 
   if (wf_info.is_pe_group_first) {
-    __hip_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes,
-                           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes,
+                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    posted += wf_info.num_pe_group_lanes;
   }
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
     // ATOMIC_CS: obj is raddr, expected is &compare, desired is swap_add
-    __hip_atomic_compare_exchange_strong(reinterpret_cast<uint64_t*>(raddr), &compare, swap_add,
-                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_compare_exchange_n(reinterpret_cast<uint64_t*>(raddr), &compare, swap_add,
+                                       false, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                       __MEMORY_SCOPE_DEVICE);
   } else if constexpr (Op == OpCode::ATOMIC_FA) {
     // ATOMIC_FA: obj is raddr, arg is swap_add; compare is otherwise unused, use for fetch val
     assert(compare == 0);
-    compare = __hip_atomic_fetch_add(reinterpret_cast<uint64_t*>(raddr), swap_add,
-                                     __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    compare = __scoped_atomic_fetch_add(reinterpret_cast<uint64_t*>(raddr), swap_add,
+                                        __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   } else {
     static_assert(false, "invalid OpCode: post_wqe_amo only supports ATOMIC_CS and ATOMIC_FA");
   }
@@ -254,18 +268,19 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
     return amo_ret_t<Fetch>{};
   }
 
-  __hip_atomic_fetch_add(&amo_count, 1, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_fetch_add(&amo_count, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  ++posted;
 
   if constexpr (Op == OpCode::ATOMIC_CS) {
     // ATOMIC_CS: obj is raddr, expected is &compare, desired is swap_add
-    __hip_atomic_compare_exchange_strong(reinterpret_cast<uint64_t*>(raddr), &compare, swap_add,
-                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                         __HIP_MEMORY_SCOPE_AGENT);
+    __scoped_atomic_compare_exchange_n(reinterpret_cast<uint64_t*>(raddr), &compare, swap_add,
+                                       false, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                       __MEMORY_SCOPE_DEVICE);
   } else if constexpr (Op == OpCode::ATOMIC_FA) {
     // ATOMIC_FA: obj is raddr, arg is swap_add; compare is otherwise unused, use for fetch val
     assert(compare == 0);
-    compare = __hip_atomic_fetch_add(reinterpret_cast<uint64_t*>(raddr), swap_add,
-                                     __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    compare = __scoped_atomic_fetch_add(reinterpret_cast<uint64_t*>(raddr), swap_add,
+                                        __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   } else {
     static_assert(false, "invalid OpCode: post_wqe_amo_single only supports ATOMIC_CS and ATOMIC_FA");
   }
@@ -282,7 +297,21 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
 
 __device__ __forceinline__ void QueuePairMock::quiet_single() {
   // Release ensures that prior stores and RMW occur before the increment of quiet_count
-  __hip_atomic_fetch_add(&quiet_count, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_fetch_add(&quiet_count, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
+}
+
+__device__ __forceinline__ uint64_t QueuePairMock::cq_target() {
+  return posted;
+}
+
+__device__ __forceinline__ bool QueuePairMock::poll_cq_once(uint64_t target) {
+  quiet_single();
+  ++polls;
+  if (busy_polls != 0) {
+    --busy_polls;
+    return false;
+  }
+  return target + pending_wqes <= posted;
 }
 
 }  // namespace rocshmem

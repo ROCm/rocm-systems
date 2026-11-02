@@ -13,6 +13,8 @@
 #include "checks.h"
 #include "compiler.h"
 
+#define RUBIN_AND_LATER(sm) (sm >= 107 && sm != 110 && sm != 120 && sm != 121)
+
 // Is cuMem API usage enabled
 extern int ncclCuMemEnable();
 extern int ncclCuMemHostEnable();
@@ -120,6 +122,7 @@ DECLARE_CUDA_PFN_EXTERN(cuCtxGetDevice, 2000);
 DECLARE_CUDA_PFN_EXTERN(cuDevicePrimaryCtxRetain, 7000);
 DECLARE_CUDA_PFN_EXTERN(cuDevicePrimaryCtxRelease, 11000);
 DECLARE_CUDA_PFN_EXTERN(cuPointerGetAttribute, 4000);
+DECLARE_CUDA_PFN_EXTERN(cuPointerSetAttribute, 6000);
 DECLARE_CUDA_PFN_EXTERN(cuLaunchKernel, 4000);
 #if CUDART_VERSION >= 11080
 DECLARE_CUDA_PFN_EXTERN(cuLaunchKernelEx, 11060);
@@ -168,6 +171,7 @@ DECLARE_CUDA_TYPE_EXTERN_V13030(
     CU_LOGICAL_ENDPOINT_TYPE_UNICAST          = 0,
     CU_LOGICAL_ENDPOINT_TYPE_MULTICAST        = 0,
     CU_LOGICAL_ENDPOINT_FLAG_NONE             = 0,
+    CU_LOGICAL_ENDPOINT_FLAG_COUNTED_OPS      = 0,
     CU_LOGICAL_ENDPOINT_IPC_HANDLE_TYPE_FABRIC = 0,
   };
 )
@@ -238,6 +242,8 @@ inline ncclResult_t ncclCudaDriverVersion(int* driver) {
   return ncclSuccess;
 }
 #endif
+
+ncclResult_t ncclCuMemGdrSupport(int cudaDev, bool* support);
 
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 

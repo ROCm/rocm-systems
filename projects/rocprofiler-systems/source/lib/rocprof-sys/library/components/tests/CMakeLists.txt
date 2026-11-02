@@ -19,7 +19,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-timemory
         rocprofiler-systems-core-library
-        # category_region.hpp pulls in tracing/annotation/rocprofiler-sdk/perfetto headers
+        # category_region.hpp pulls in tracing/rocprofiler-sdk/perfetto headers
         rocprofiler-systems::rocprofiler-systems-interface-library
 )
 

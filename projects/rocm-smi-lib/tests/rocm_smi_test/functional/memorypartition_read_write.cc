@@ -191,18 +191,22 @@ void TestMemoryPartitionReadWrite::Run(void) {
     }
     ASSERT_TRUE(ret == RSMI_STATUS_SUCCESS);
 
-    // Verify api support checking functionality is working
-    uint32_t kLen = 2;
-    char smallBuffer[kLen];
+    // Verify api support checking functionality is working. The byte after
+    // the kLen usable bytes is a guard: the name must be truncated and
+    // terminated inside kLen, with nothing written past it.
+    constexpr uint32_t kLen = 2;
+    constexpr char kGuard = '#';
+    char smallBuffer[kLen + 1];
+    smallBuffer[kLen] = kGuard;
     err = rsmi_dev_memory_partition_get(dv_ind, smallBuffer, kLen);
-    size_t size = sizeof(smallBuffer) / sizeof(*smallBuffer);
     ASSERT_EQ(err, RSMI_STATUS_INSUFFICIENT_SIZE);
-    ASSERT_EQ((size_t)kLen, size);
+    ASSERT_EQ(smallBuffer[kLen], kGuard);
+    ASSERT_EQ(smallBuffer[kLen - 1], '\0');
     if (err == RSMI_STATUS_INSUFFICIENT_SIZE) {
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Confirmed RSMI_STATUS_INSUFFICIENT_SIZE was returned "
-                  << "and size matches kLen requested." << std::endl;
+                  << "and nothing was written past kLen." << std::endl;
       }
     }
 

@@ -7,10 +7,11 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <set>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -41,6 +42,7 @@ void ReclaimWindow(ncclDevrWindow* w) {
   if (w == nullptr) return;
   free(w->ipcPeerPtrs);
   free(w->ipcPeerPtrsAllocBase);
+  free(w->ipcPeerIsCuMem);
   free(w);
 }
 
@@ -164,15 +166,9 @@ protected:
   uint64_t* PeerWinByLsa(int lsaRank) { return peerWins_.data() + lsaRank * kWinSlots; }
   uint64_t* PeerWin(int peerWorldRank) { return PeerWinByLsa(LsaOf(peerWorldRank)); }
 
-  // Mirrors the entry windowRegisterNonSym all-gathers; the layout has to match
-  // for the hook to publish values the function then reads back.
-  struct ExchangeEntry {
-    hipIpcMemHandle_t handle;
-    uint64_t hostHash;
-    uint64_t pidHash;
-    size_t userOffset;
-    size_t userSize;
-  };
+  // The record windowRegisterNonSym all-gathers. Same type as production, so a
+  // field added on one side cannot be reinterpreted by the other.
+  using ExchangeEntry = ncclDevrNonSymExchangeEntry;
 
   void SetUp() override {
     ResetCeFakes();
@@ -231,8 +227,10 @@ protected:
           for (int r = 0; r < size; r++) {
             e[r].hostHash = (r == self) ? peerInfo_[kRank].hostHash : 500 + r;
             e[r].pidHash = (r == self) ? peerInfo_[kRank].pidHash : 600 + r;
-            e[r].userOffset = static_cast<size_t>(r) * kWinSlots * sizeof(uint64_t);
             e[r].userSize = kWinSlots * sizeof(uint64_t);
+            e[r].userOffset = static_cast<size_t>(r) * e[r].userSize;
+            e[r].allocSize = static_cast<size_t>(size) * e[r].userSize;
+            e[r].isCuMem = 0;
           }
           return ncclSuccess;
         };
@@ -522,6 +520,13 @@ protected:
     };
   }
 
+  // What every teardown leaves behind, whatever it reported on the way out.
+  void ExpectTornDown() {
+    EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxCount, 0);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxs, nullptr);
+  }
+
 };
 
 // The whole point: after teardown the comm reports no CE state, so a later
@@ -579,24 +584,31 @@ TEST_F(RmaCeFinalizeTest, Finalize_AfterInit_DeregistersAndFreesEverySignalWindo
   }
 }
 
-// Releasing the stream is the first thing teardown does after the task queue, so
-// a failure there propagates with the contexts still standing.
-TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_Propagates) {
+// Destroying the stream is best-effort: teardown swallows a failure there
+// (CUDACHECKIGNORE), reports a clean finalize, and still runs to completion,
+// clearing the initialized flag.
+TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
-  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
+  EXPECT_EQ(destroy.calls, 1);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceStream, nullptr);
+  ExpectTornDown();
 }
 
-// A device buffer that will not release stops teardown rather than carrying on
-// and reporting a clean finalize.
+// A device buffer that will not release surfaces as the return value, but
+// teardown is best-effort: it carries on releasing the rest and finishes with
+// the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
+  // The deregister runs after two of the failing frees, so seeing it proves the
+  // loop carried on instead of abandoning the context at the first one.
+  EXPECT_EQ(deregistered_.size(), 1u);
+  ExpectTornDown();
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it
@@ -623,17 +635,23 @@ TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->rmaCeInitTaskQueue));
 }
 
-// A failed deregistration stops teardown and surfaces, rather than carrying on
-// and reporting the state as cleanly torn down.
-TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_PropagatesAndLeavesStateMarked) {
+// A failed deregistration surfaces as the return value, but teardown is
+// best-effort: it keeps releasing the remaining resources and finishes with the
+// state cleared rather than stopping at the failure.
+TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_Propagates) {
+  comm_->config.numRmaCtx = 3;   // so "kept going" is observed, not inferred
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-  g_devrNcclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
+  // Distinct codes after the first, so the returned one pins NCCLCHECKIGNORE's
+  // first-wins rule (checks.h:171) rather than merely "some error surfaced".
+  int seen = 0;
+  ScopedHook dereg(g_devrNcclCommWindowDeregister,
+                   [&seen](ncclComm_t, ncclWindow_t) {
+                     return ++seen == 1 ? ncclInternalError : ncclSystemError;
+                   });
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
-  EXPECT_TRUE(comm_->rmaState.rmaCeState.initialized);
-  // Not retried here, and the state is left allocated on purpose: the failed
-  // attempt already released this context's buffers before the deregister, and
-  // Finalize restarts at context 0, so a second call double-frees them.
+  EXPECT_EQ(dereg.calls, 3);   // attempted for every context, not just the first
+  ExpectTornDown();
 }
 
 // ---------------------------------------------------------------------------
@@ -756,6 +774,9 @@ struct Submission {
   Kind kind;
   std::vector<SubmittedOp> ops;    // kBatch
   std::vector<MemOp> memOps;       // kMemOps
+  // Copied from the batch params at launch. Only the data batch's flag is the
+  // chunking decision; the signal batch that follows is never chunked.
+  bool chunking = false;
 };
 
 // Drives one non-persistent put launch and records everything it enqueued.
@@ -808,6 +829,7 @@ protected:
     g_ceLaunchBatchOps = [this](ncclComm*, ncclCeBatchOpsParams* p, hipStream_t,
                                 ncclCeCollArgs*) {
       Submission s{Submission::kBatch, {}, {}};
+      s.chunking = p->chunking;
       for (size_t i = 0; i < p->numOps; i++) s.ops.push_back({p->srcs[i], p->dsts[i], p->sizes[i]});
       log_.push_back(std::move(s));
       return ncclSuccess;
@@ -854,6 +876,33 @@ protected:
     }
     return out;
   }
+
+  // The data batch is the first kBatch submission. A data-only round still
+  // launches an empty signal batch after it, so later batches are not the decision.
+  const Submission* DataBatch() const {
+    for (const auto& s : log_) {
+      if (s.kind == Submission::kBatch) return &s;
+    }
+    return nullptr;
+  }
+
+  // One data submission per round. Each round launches data, then signal, so
+  // the data round is every other kBatch entry. Chunking is recomputed per
+  // round; DataBatch() only returns the first.
+  std::vector<const Submission*> DataRounds() const {
+    std::vector<const Submission*> out;
+    int batchIdx = 0;
+    for (const auto& s : log_) {
+      if (s.kind != Submission::kBatch) continue;
+      if ((batchIdx % 2) == 0) out.push_back(&s);
+      batchIdx++;
+    }
+    return out;
+  }
+
+  // Self resolves to the local window base. That base is the PeerData(4) image
+  // (LSA slot 0), not the IPC image of world rank 0.
+  void* SelfData() const { return dataWin_.userPtr; }
 };
 
 // A data-carrying task becomes one copy from the task's own buffer to the peer
@@ -883,11 +932,14 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
+  // NCCL 2.32 orders peers LSA-cyclically from lsaSelf+1 (not in enqueue order) to
+  // avoid destination incast. With kLsaSelf=3 and kLsaWorld={4,3,1,0,2} the walk
+  // visits world ranks 2,4,3,1, so peer 3 precedes peer 1.
   auto batches = Batches();
   ASSERT_EQ(batches.size(), 2u);
   ASSERT_EQ(batches[0].size(), 2u);
-  EXPECT_EQ(batches[0][0].dst, PeerData(1));
-  EXPECT_EQ(batches[0][1].dst, PeerData(3));
+  EXPECT_EQ(batches[0][0].dst, PeerData(3));
+  EXPECT_EQ(batches[0][1].dst, PeerData(1));
 
   // Both peers signal in the same round, so each takes its own staging slot --
   // sharing one would make the second overwrite the first. Pinned on the staging
@@ -899,8 +951,163 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   ASSERT_EQ(batches[1].size(), 2u);
   EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
   EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
-  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(1, ceCtx->signalOffset));
-  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(1, ceCtx->signalOffset));
+}
+
+// Chunking is requested only for a dense heterogeneous remote batch: every other
+// LSA rank is present and those remote sizes differ. The walk from lsaSelf+1
+// (kLsaWorld={4,3,1,0,2}, kLsaSelf=3) visits world ranks 2, 4, 3, 1, then self.
+// Dense here is the four remotes; self is not one of them.
+
+// Every other LSA rank, unequal sizes: the data batch asks for round-robin waves.
+TEST_F(RmaCeNonPersistTest, NonPersist_DenseUnequalRemotes_RequestsChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_TRUE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 4u);
+  EXPECT_EQ(data->ops[0].dst, PeerData(2));
+  EXPECT_EQ(data->ops[0].size, 64u);
+  EXPECT_EQ(data->ops[1].dst, PeerData(4));
+  EXPECT_EQ(data->ops[1].size, 16u);
+  EXPECT_EQ(data->ops[2].dst, PeerData(3));
+  EXPECT_EQ(data->ops[2].size, 32u);
+  EXPECT_EQ(data->ops[3].dst, PeerData(1));
+  EXPECT_EQ(data->ops[3].size, 48u);
+}
+
+// The same dense set with equal sizes is the alltoall/allgather case and must
+// not be chunked.
+TEST_F(RmaCeNonPersistTest, NonPersist_DenseEqualRemotes_DoesNotRequestChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/32, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 4u);
+}
+
+// Two remotes, even with different sizes, are not a full LSA fan-out.
+TEST_F(RmaCeNonPersistTest, NonPersist_SparseUnequalRemotes_DoesNotRequestChunking) {
+  PushTask(/*peer=*/1, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/48, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 2u);
+  // Cyclic order still applies: peer 3 is visited before peer 1.
+  EXPECT_EQ(data->ops[0].dst, PeerData(3));
+  EXPECT_EQ(data->ops[1].dst, PeerData(1));
+}
+
+// Three unequal remotes are still one short of every other LSA rank
+// (lsaSize - 1 == 4). A looser "at least lsaSize - 2" predicate would chunk this.
+TEST_F(RmaCeNonPersistTest, NonPersist_ThreeRemotesUnequal_DoesNotRequestChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 3u);
+  // Visit order with peer 2 absent: 4, 3, 1.
+  EXPECT_EQ(data->ops[0].dst, PeerData(4));
+  EXPECT_EQ(data->ops[1].dst, PeerData(3));
+  EXPECT_EQ(data->ops[2].dst, PeerData(1));
+}
+
+// A self put is not a remote peer, so it cannot arm chunking.
+TEST_F(RmaCeNonPersistTest, NonPersist_SelfOnly_DoesNotRequestChunking) {
+  PushTask(/*peer=*/0, /*bytes=*/32, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 1u);
+  EXPECT_EQ(data->ops[0].dst, SelfData());
+  EXPECT_EQ(data->ops[0].size, 32u);
+}
+
+// Self is excluded from the min/max. Equal remotes stay unchunked even when the
+// local copy is a different size, and self is issued last.
+TEST_F(RmaCeNonPersistTest, NonPersist_EqualRemotesDifferentSelf_DoesNotRequestChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/0, /*bytes=*/64, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_FALSE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 5u);
+  EXPECT_EQ(data->ops[4].dst, SelfData());
+  EXPECT_EQ(data->ops[4].size, 64u);
+}
+
+// Dense unequal remotes plus self: chunking stays on, and the local copy is last.
+TEST_F(RmaCeNonPersistTest, NonPersist_DenseUnequalIncludingSelf_IssuesSelfLast) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false);
+  PushTask(/*peer=*/0, /*bytes=*/8, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  const Submission* data = DataBatch();
+  ASSERT_NE(data, nullptr);
+  EXPECT_TRUE(data->chunking);
+  ASSERT_EQ(data->ops.size(), 5u);
+  EXPECT_EQ(data->ops[0].dst, PeerData(2));
+  EXPECT_EQ(data->ops[3].dst, PeerData(1));
+  EXPECT_EQ(data->ops[4].dst, SelfData());
+  EXPECT_EQ(data->ops[4].size, 8u);
+}
+
+// Chunking is cleared and decided again each round. A dense unequal first
+// round must not leave the flag set once only one peer still has work.
+TEST_F(RmaCeNonPersistTest, NonPersist_SecondRound_DropsChunking) {
+  PushTask(/*peer=*/4, /*bytes=*/16, /*signal=*/false);
+  PushTask(/*peer=*/3, /*bytes=*/32, /*signal=*/false);
+  PushTask(/*peer=*/1, /*bytes=*/48, /*signal=*/false);
+  PushTask(/*peer=*/2, /*bytes=*/64, /*signal=*/false);
+  // Peer 2's second task is the only work left, so the next round is not dense.
+  PushTask(/*peer=*/2, /*bytes=*/8, /*signal=*/false);
+
+  ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
+
+  auto rounds = DataRounds();
+  ASSERT_EQ(rounds.size(), 2u);
+  EXPECT_TRUE(rounds[0]->chunking);
+  ASSERT_EQ(rounds[0]->ops.size(), 4u);
+  EXPECT_EQ(rounds[0]->ops[0].size, 64u);
+  EXPECT_FALSE(rounds[1]->chunking);
+  ASSERT_EQ(rounds[1]->ops.size(), 1u);
+  EXPECT_EQ(rounds[1]->ops[0].dst, PeerData(2));
+  EXPECT_EQ(rounds[1]->ops[0].size, 8u);
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does
@@ -1067,6 +1274,20 @@ TEST_F(RmaCeNonPersistTest, NonPersist_PeerOutsideLsaTeam_Propagates) {
   PushTask(/*peer=*/5, 32, /*signal=*/false);   // 5 is in nRanks but not in the LSA team
 
   EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+}
+
+// The cyclic reorder only walks the LSA list. A queued peer that is not on it
+// is reported as a lost peer, and the task is returned to the pool instead of
+// being left on the per-peer queue.
+TEST_F(RmaCeNonPersistTest, NonPersist_PeerOutsideLsaTeam_ReturnsTaskToThePool) {
+  PushTask(/*peer=*/5, 32, /*signal=*/false);
+
+  EXPECT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclInternalError);
+
+  EXPECT_EQ(DataBatch(), nullptr);   // failed before any copy was launched
+  auto freeList = PoolFreeList();
+  ASSERT_EQ(freeList.size(), 1u);
+  EXPECT_EQ(freeList[0], pushed_[0]);
 }
 
 // Sizing the batch params is the first thing the round loop needs; a failure

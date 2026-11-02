@@ -247,11 +247,14 @@ public:
     {
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;
+        this->owner          = other.owner;
         this->loaded_codeobj = other.loaded_codeobj;
     }
 
     aqlprofile_handle_t    GetHandle() const { return tracepool->handle; }
     rocprofiler_agent_id_t GetAgent() const { return tracepool->agent_id; }
+    uint64_t               GetOwner() const { return owner; }
+    void                   SetOwner(uint64_t value) { owner = value; }
 
     void populate_before() override
     {
@@ -271,6 +274,7 @@ public:
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;
     aqlprofile_att_control_aql_packets_t packets;
+    uint64_t                             owner = 0;
 
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };
@@ -284,6 +288,9 @@ struct sqtt_buffer_status_t
     bool                         gpu_full{};
 };
 
+aqlprofile_att_gpu_clock_t
+get_gpu_clock(aqlprofile_handle_t handle, int shader_engine_id);
+
 // Virtual members for mocking in tests
 class SQTTBufferingPackets
 {
@@ -293,6 +300,7 @@ public:
 
     hsa_ext_amd_aql_pm4_packet_t                query_status{};
     virtual std::optional<sqtt_buffer_status_t> query_buffer_status();
+    virtual aqlprofile_att_gpu_clock_t          get_gpu_clock() const;
     virtual hsa_status_t iterate_data(aqlprofile_att_data_callback_t callback, void* data)
     {
         return aqlprofile_att_iterate_data(handle, callback, data);

@@ -1,0 +1,8 @@
+cpu_cores_count 16
+simd_count 0
+cpu_core_id_base 0
+max_engine_clk_ccompute 4200
+mem_banks_count 1
+caches_count 1
+io_links_count 0
+p2p_links_count 0

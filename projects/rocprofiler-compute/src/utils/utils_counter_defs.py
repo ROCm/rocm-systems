@@ -8,6 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
+from typing import Any
 
 from utils.logger import console_error
 
@@ -89,6 +90,12 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
             "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
         },
     }
+    if gpu_series == "GFX1250_SERIES":
+        # gfx1250 exposes GUI-active cycles summed across XCD dimensions. Divide
+        # the explicit sum by the visible num_xcd to preserve per-XCD semantics.
+        build_in_vars["cdna"]["GRBM_GUI_ACTIVE_PER_XCD"] = (
+            "GRBM_GUI_ACTIVE_sum / $num_xcd"
+        )
 
     if gpu_series == "GFX1250_SERIES" or gpu_series.startswith("MI"):
         return build_in_vars["cdna"]
@@ -111,6 +118,29 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 # Stateless counter-parsing helpers
 # ---------------------------------------------------------------------------
+
+
+def metric_value_keys(table: dict[str, Any]) -> set[str]:
+    """Metric keys whose values are columns of a metric_table: the header's
+    keys except metric and expr."""
+    return set(table["header"]) - {"metric", "expr"}
+
+
+def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:
+    """Return the expressions of one metric of a metric_table.
+
+    simple_box tables keep their one expression in expr; other tables use
+    metric_value_keys. Empty and "None" values are left out.
+    """
+    if table.get("cli_style") == "simple_box":
+        keys = {"expr"}
+    else:
+        keys = metric_value_keys(table)
+    return [
+        value
+        for key, value in metric.items()
+        if key in keys and isinstance(value, str) and value and value != "None"
+    ]
 
 
 def parse_counters_text(text: str) -> tuple[set[str], set[str]]:

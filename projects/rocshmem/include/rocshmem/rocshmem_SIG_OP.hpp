@@ -615,9 +615,36 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_signal_nbi_wave(
     uint64_t signal, int sig_op, int pe);
 
 
+__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_add(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_signal_add(
+    uint64_t *sig_addr, uint64_t signal, int pe);
+
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at work-group scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wg(const uint64_t *sig_addr);
+
+/**
+ * @brief Atomically fetch a signal value collectively at wave scope.
+ *
+ * @deprecated Use rocshmem_signal_fetch() instead.
+ */
+[[deprecated("Use rocshmem_signal_fetch() instead")]]
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch_wave(const uint64_t *sig_addr);
+
+__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_set(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_signal_set(
+    uint64_t *sig_addr, uint64_t signal, int pe);
+
+__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(
+    uint64_t *sig_addr, int cmp, uint64_t cmp_value);
 
 /**
  * @brief Kernel wrapper for putmem_signal operation on stream

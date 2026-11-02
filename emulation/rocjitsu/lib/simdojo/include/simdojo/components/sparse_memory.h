@@ -213,7 +213,8 @@ public:
 private:
   static constexpr size_t NUM_PAGE_STRIPES = 1024;
 
-  struct PageStripe {
+  // Keep concurrent readers of neighboring stripes off the same host cache line.
+  struct alignas(64) PageStripe {
     mutable std::shared_mutex mutex;
     mutable std::unordered_map<uint64_t, Page> pages;
   };

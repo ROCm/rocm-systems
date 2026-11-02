@@ -20,6 +20,8 @@ join(std::string_view delim, Args&&... args)
 {
     std::ostringstream oss;
     oss << std::boolalpha;
+    // NOLINTNEXTLINE(misc-const-correctness) - mutated via `sep = delim` in the fold
+    // below
     std::string_view sep;
 
     ((oss << sep << args, sep = delim), ...);
@@ -32,7 +34,7 @@ template <typename... Args>
 [[nodiscard]] inline std::string
 join_with_strings_quoted(std::string_view delim, Args&&... args)
 {
-    auto quote_if_string = [](auto&& arg) -> decltype(auto) {
+    auto const quote_if_string = [](auto&& arg) -> decltype(auto) {
         using decayed_arg_type = std::decay_t<decltype(arg)>;
         if constexpr(traits::string_literal<decayed_arg_type>)
         {

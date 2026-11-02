@@ -15,9 +15,9 @@
 #
 # If clang-tidy reports "Error: no checks enabled." with this config, the wrong
 # clang-tidy was selected -- a ROCm-built one, which has no clang-analyzer-*
-# checks compiled in. Set AIS_CLANG_TIDY_EXECUTABLE to an upstream clang-tidy
-# instead. Do NOT "fix" it with --allow-no-checks or by loosening the globs
-# below; that silently lints nothing.
+# checks compiled in. Set HIPFILE_CLANG_TIDY_EXECUTABLE to an upstream
+# clang-tidy instead. Do NOT "fix" it with --allow-no-checks or by loosening the
+# globs below; that silently lints nothing.
 
 # `clang-diagnostic-*` is silently prepended to this list. It re-reports compiler
 # warnings that get flagged in the normal build process. `-*` suppresses these

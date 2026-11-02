@@ -13,8 +13,10 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -39,8 +41,8 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
     return ncclInvalidArgument;
   }
 
-  // Use the block cap chosen at init (barrier flag buffer is sized for it).
-  const int nBlocksMax = comm->ddaFabricMaxBlocks;
+  // At most the block cap chosen at init (barrier flag buffer is sized for it).
+  const int nBlocksMax = rcclDdaFabricVmmBlocks(comm);
   // For reduce-scatter we use recvcount for grid calculation since each rank
   // processes its own shard.
   auto gridBlock = dda::common::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
@@ -58,21 +60,22 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
   INFO(NCCL_COLL, "DDA fabric ReduceScatter: launching kernel: nRanks=%d recvcount=%zu grid=%u block=%u%s", nRanks,
        recvcount, grid.x, block.x, (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)");
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
-    dda::common::ddaReduceScatterFabric<T, 4, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 4, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
     break;
   case 8:
-    dda::common::ddaReduceScatterFabric<T, 8, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 8, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
     break;
   default:
-    dda::common::ddaReduceScatterFabric<T, 0, false>
-      <<<grid, block, 0, stream>>>(d_ipcbuffs, static_cast<T*>(recvbuff), recvcount, static_cast<const T*>(sendbuff),
-                                   comm->rank, nRanks, barrierHost, nullptr);
+    hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabric<T, 0, false>), grid, block, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                          recvcount, static_cast<const T*>(sendbuff), comm->rank, nRanks, barrierHost, nullptr);
     break;
   }
 
@@ -107,7 +110,7 @@ bool ncclReduceScatterDdaFabricEligible(ncclComm* comm, const void* sendbuff, vo
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -140,6 +143,10 @@ ncclResult_t ncclReduceScatterDdaFabric(const void* sendbuff, void* recvbuff, si
     return ncclReduceScatterDdaFabricTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
     return ncclReduceScatterDdaFabricTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e4m3:
+    return ncclReduceScatterDdaFabricTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e5m2:
+    return ncclReduceScatterDdaFabricTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

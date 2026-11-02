@@ -42,6 +42,7 @@
 #include "comm.h"        // struct ncclComm, struct ncclPeerInfo
 #include "graph.h"       // ncclTopoGetNetDev(), ncclTopoComputePaths(), ncclTopoFree()
 #include "graph/topo.h"  // struct ncclTopoSystem, ncclTopoGetSystemFromXml(), GPU/NET
+#include "../common/TopoRailPlane.hpp"
 #include "graph/xml.h"   // struct ncclXml, ncclTopoGetXmlFromFile()
 
 #include "ProcessIsolatedTestRunner.hpp"
@@ -97,7 +98,8 @@ ncclResult_t loadTopoSystem(const char* path, struct ncclTopoSystem** system)
         free(xml);
         return res;
     }
-    res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
+    res = RcclUnitTesting::fillMissingRailPlane(xml);
+    if(res == ncclSuccess) res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
     free(xml);
     return res;
 }

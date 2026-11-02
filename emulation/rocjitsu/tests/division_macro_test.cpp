@@ -71,6 +71,7 @@ TEST(Gfx1250ExecutionTest, DivisionMacrosCoverScalingAndExceptionalQuotients) {
   for (bool scalar : {false, true}) {
     util::set_force_scalar_for_testing(scalar);
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     amdgpu::ComputeUnitCore *cu = sim.cu();
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
     ASSERT_NE(wf, nullptr);

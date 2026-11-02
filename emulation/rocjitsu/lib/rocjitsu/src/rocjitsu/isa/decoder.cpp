@@ -49,10 +49,13 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_c
 Decoder::~Decoder() {
   // Clear direct and temporarily suppressed references to this pool so no
   // later allocation scope can restore a pointer into a destroyed decoder.
-  Instruction::invalidate_allocator_pool(&pool_);
+  disable_pool();
 }
 
-void Decoder::disable_pool() { Instruction::invalidate_allocator_pool(&pool_); }
+void Decoder::disable_pool() {
+  if (pool_)
+    Instruction::invalidate_allocator_pool(pool_.get());
+}
 
 DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                              const DecodeErrorEmitter &emit_error) {

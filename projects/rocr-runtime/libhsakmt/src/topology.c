@@ -1679,6 +1679,8 @@ static HSAKMT_STATUS topology_sysfs_get_cache_props(
 			props->CacheLatency = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "type") == 0)
 			props->CacheType.Value = (uint32_t)prop_val;
+        else if(strcmp(prop_name, "persisting_cache_size_max") == 0)
+            props->PersistingCacheSizeMax = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "sibling_map") == 0)
 			break;
 	}

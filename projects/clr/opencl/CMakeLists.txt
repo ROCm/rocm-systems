@@ -14,18 +14,6 @@ include(GNUInstallDirs)
 option(BUILD_TESTS "Enable building OpenCL tests" OFF)
 option(BUILD_ICD "Enable building OpenCL ICD Loader" OFF)
 option(EMU_ENV "Enable building for emulation environment" OFF)
-option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
-
-# Address sanitizer options
-if(ENABLE_ADDRESS_SANITIZER)
-  message(STATUS "Building ocltst tests with Address Sanitizer options")
-  set(CMAKE_C_COMPILER clang)
-  set(CMAKE_CXX_COMPILER clang++)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
-endif()
-
 if(NOT WIN32)
   set(AMDOCL_INSTALL_LIBDIR ${PROJECT_NAME})
 endif()

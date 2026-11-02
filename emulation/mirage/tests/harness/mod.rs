@@ -35,6 +35,7 @@ pub(crate) struct Env {
     config: PathBuf,
     runtime: PathBuf,
     bin: PathBuf,
+    preserve_host_xdg: bool,
 }
 
 impl Env {
@@ -51,8 +52,15 @@ impl Env {
             config: dir.path().join("config"),
             runtime: short_runtime_dir(),
             bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
+            preserve_host_xdg: false,
             dir,
         }
+    }
+
+    pub(crate) fn with_host_xdg() -> Self {
+        let mut env = Self::new();
+        env.preserve_host_xdg = true;
+        env
     }
 
     /// The mirage binary under test.
@@ -102,11 +110,10 @@ impl Env {
     /// A `mirage` command wired to this environment.
     pub(crate) fn mirage(&self) -> Command {
         let mut c = Command::new(&self.bin);
-        c.env("XDG_CONFIG_HOME", &self.config)
-            .env("XDG_RUNTIME_DIR", &self.runtime)
-            .env_remove("MIRAGE_LOG")
+        c.env_remove("MIRAGE_LOG")
             .env_remove("MIRAGE_CONFIG")
-            .env_remove("MIRAGE_RUNTIME");
+            .env_remove("MIRAGE_RUNTIME")
+            .envs(self.child_env());
         c
     }
 
@@ -115,6 +122,18 @@ impl Env {
     /// Exposed separately from [`Env::mirage`] so a test that builds its
     /// own command still gets the same isolation.
     pub(crate) fn child_env(&self) -> Vec<(String, String)> {
+        if self.preserve_host_xdg {
+            return vec![
+                (
+                    "MIRAGE_CONFIG".to_string(),
+                    self.config.join("mirage").display().to_string(),
+                ),
+                (
+                    "MIRAGE_RUNTIME".to_string(),
+                    self.runtime.join("mirage").display().to_string(),
+                ),
+            ];
+        }
         vec![
             (
                 "XDG_CONFIG_HOME".to_string(),
@@ -261,7 +280,11 @@ impl Run {
             if let Some(child) = self.child.as_mut()
                 && let Ok(Some(status)) = child.try_wait()
             {
-                panic!("`mirage run` exited before serving its socket: {status:?}");
+                let output = self.wait(Duration::from_secs(1));
+                panic!(
+                    "`mirage run` exited before serving its socket: {status:?}\nstderr: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
             if let Ok(entries) = std::fs::read_dir(&self.socket_dir)
                 && let Some(id) = entries

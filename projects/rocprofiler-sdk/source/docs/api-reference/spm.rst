@@ -21,15 +21,15 @@ ROCprofiler-SDK SPM service
 
 This section describes how to use ROCProfiler-SDK SPM API to configure and use SPM service. For fully functional examples, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
-Currently,  **Dispatch counting** is supported for SPM. Please refer to :ref:`counter collection services` for information on dispatch counting, counters and profile configuration. 
+Both **Dispatch counting** and **Device counting** modes are supported for SPM. Please refer to :ref:`counter collection services` for information on dispatch counting, device counting, counters, and profile configuration.
 
-The set up for SPM service is similar to counter collection services. 
+The set up for SPM service is similar to counter collection services.
 
 SPM counter service cannot be enabled together with PMC or PC sampling service.
 
-kernels are serialized in dispatch counting SPM service.
+Kernels are serialized in dispatch counting SPM service. Device counting SPM service does not serialize kernels.
 
-Currently, collection of basic counters are supported with SPM.
+Currently, collection of basic counters is supported with SPM.
 
 tool_init() setup
 ++++++++++++++++++
@@ -228,3 +228,107 @@ For more information on the data comprising a single sample, see `spm.h <https:/
 
 .. note::
     A user can synchronously flush buffers via ``rocprofiler_buffer_flush`` that triggers ``spm_sampling_callback``. SPM is currently supported on AMD Instinct MI300, MI325, MI350, and MI355.
+
+Device Counting
+--------------------------
+
+Device counting mode collects SPM counter data at the device level rather than per kernel dispatch. This mode is useful for monitoring GPU-wide utilization over a time window without serializing kernel execution.
+
+tool_init() setup
+++++++++++++++++++
+
+Create a context and buffer, then configure the SPM device counting service for a specific GPU agent:
+
+.. code-block:: cpp
+
+    auto ctx = rocprofiler_context_id_t{0};
+    auto buff = rocprofiler_buffer_id_t{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,
+                                                8 * 1024 * 1024,
+                                                4 * 1024 * 1024,
+                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                spm_sampling_callback,
+                                                user_data,
+                                                &buff),
+                        "buffer creation failed");
+
+For more details on buffer creation, see :ref:`buffered-services`.
+
+.. code-block:: cpp
+
+    /* For Device Counting */
+    // Setup the device counting SPM service. The set_spm_profile callback
+    // is called when the context is started to specify which counters to collect.
+    ROCPROFILER_CALL(
+        rocprofiler_configure_spm_device_counting_service(
+            ctx, buff, agent_id, set_spm_profile, nullptr),
+        "Could not setup SPM device counting service");
+
+There may only be one counting service configured per agent in a context, and only one active context can profile a single agent at a time. Multiple agent contexts can be started simultaneously if they profile different agents.
+
+Agent Set Profile Callback
+++++++++++++++++++++++++++
+
+When the context is started, the agent set profile callback is invoked for the tool to supply a profile configuration. The tool returns a ``rocprofiler_counter_config_id_t`` via the ``set_config`` callback:
+
+.. code-block:: cpp
+
+    void
+    set_spm_profile(rocprofiler_context_id_t               context_id,
+                    rocprofiler_agent_id_t                 agent,
+                    rocprofiler_device_counting_agent_cb_t set_config,
+                    void*)
+    {
+        // Look up a pre-built profile for this agent and supply it
+        auto config = get_profile_for_agent(agent);
+        set_config(context_id, config);
+    }
+
+The profile is constructed using the same ``rocprofiler_spm_create_counter_config`` API described in the `Profile Setup`_ section above. Counters available for device counting can be queried with ``rocprofiler_spm_iterate_agent_supported_counters``.
+
+Processing SPM Device Counting Samples
+++++++++++++++++++++++++++++++++++++++++
+
+SPM device counting delivers samples asynchronously via the buffer callback. Unlike dispatch counting, there is no dispatch header record; the buffer contains only counter value records:
+
+.. code-block:: cpp
+
+    void
+    spm_sampling_callback(rocprofiler_context_id_t,
+                          rocprofiler_buffer_id_t,
+                          rocprofiler_record_header_t** headers,
+                          size_t                        num_headers,
+                          void*                         user_data,
+                          uint64_t                      drop_count)
+    {
+        for(size_t i = 0; i < num_headers; ++i)
+        {
+            auto* header = headers[i];
+            if(!header) continue;
+            if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+               header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
+            {
+                auto* record = static_cast<rocprofiler_spm_counter_record_t*>(header->payload);
+                // Process the counter sample:
+                // record->timestamp, record->id, record->value, record->agent_id
+            }
+        }
+    }
+
+Context Lifecycle
++++++++++++++++++
+
+After configuring the service, start and stop the context to control the collection window:
+
+.. code-block:: cpp
+
+    // Start collecting device counters
+    ROCPROFILER_CALL(rocprofiler_start_context(ctx), "start context failed");
+
+    // ... application workload executes ...
+
+    // Stop collecting and flush remaining samples
+    rocprofiler_stop_context(ctx);
+    rocprofiler_flush_buffer(buff);
+    

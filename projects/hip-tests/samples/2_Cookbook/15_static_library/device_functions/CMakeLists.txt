@@ -18,6 +18,10 @@ endif()
 
 project(static_lib LANGUAGES CXX HIP)
 
+if(UNIX)
+  find_package(amd_comgr REQUIRED)
+endif()
+
 # For windows, AR is MS Librarian and that is picked by Visual Studio's command prompt.
 # If using LLVM/Clang toolchain, use llvm-ar instead.
 if(WIN32)

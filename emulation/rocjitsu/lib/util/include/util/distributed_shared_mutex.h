@@ -59,10 +59,9 @@ public:
 
 private:
   // TSan's deadlock detector tracks at most 64 or 128 simultaneously held
-  // locks, depending on the runtime version. Device-wide cache maintenance
-  // locks all eight XCD caches beneath two coordinator locks. Four shards
-  // use 34 entries, leaving room for other nested locks with every shard
-  // still instrumented. Normal builds retain the wider reader distribution.
+  // locks, depending on the runtime version. Each exclusive acquisition here
+  // holds every shard, so use fewer shards under TSan to leave room for callers'
+  // other nested locks. Normal builds retain the wider reader distribution.
 #if defined(__SANITIZE_THREAD__)
   static constexpr size_t kShards = 4;
 #elif defined(__has_feature)

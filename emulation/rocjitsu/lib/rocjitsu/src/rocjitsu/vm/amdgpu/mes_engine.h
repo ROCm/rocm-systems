@@ -10,7 +10,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h"
 
 #include <cstddef>
 #include <cstdint>

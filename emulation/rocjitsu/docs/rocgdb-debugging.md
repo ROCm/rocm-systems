@@ -120,7 +120,8 @@ memory.
 
 ## 5. Sources
 
-- KFD UAPI: `linux/uapi/kfd_ioctl.h`, `linux/uapi/kfd_sysfs.h` (vendored).
+- KFD UAPI: `runtimes/api-headers/include/uapi/linux/kfd_ioctl.h` and
+  `runtimes/api-headers/include/uapi/linux/kfd_sysfs.h`.
 - KFD driver: `amd/amdkfd/{kfd_chardev.c,kfd_debug.c,kfd_topology.c}`
   (amdgpu-6.16.13).
 - Client: `projects/rocdbgapi/src/os_driver_kfd.cpp`.

@@ -32,7 +32,7 @@ struct callchain : comp::empty_base
     struct record
     {
         std::uint64_t                                    timestamp = 0;
-        container::static_vector<uintptr_t, stack_depth> data      = {};
+        container::static_vector<uintptr_t, stack_depth> data;
 
         bool operator<(const record& rhs) const;
     };
@@ -68,6 +68,6 @@ struct callchain : comp::empty_base
     data_t                      get_data() const { return m_data; }
 
 private:
-    data_t m_data = {};
+    data_t m_data;
 };
 }  // namespace rocprofsys::component

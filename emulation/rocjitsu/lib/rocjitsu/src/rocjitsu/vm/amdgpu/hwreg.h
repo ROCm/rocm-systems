@@ -53,6 +53,9 @@ enum class HwregWriteKind : uint8_t {
 /// @brief Extract the register ID field from an encoded HWREG operand.
 [[nodiscard]] uint32_t hwreg_id(uint16_t hwreg);
 
+/// Whether this permitted HWREG access reads or replaces the SCC bit.
+[[nodiscard]] bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write);
+
 /// @brief Return the architecture-specific name for an encoded HWREG operand.
 [[nodiscard]] const char *hwreg_name(const Wavefront &wf, uint16_t hwreg);
 

@@ -4,10 +4,10 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/sample_processor.hpp"
+#include "core/trace_cache/sample_processor_interface.hpp"
 
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "trace_cache/sample_type.hpp"
 
 #include <profiler-hub/storage.hpp>
@@ -17,34 +17,36 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <unordered_set>
 
 namespace rocprofsys::trace_cache
 {
 
-class rocpd_processor_t : public processor_t<rocpd_processor_t>
+class rocpd_processor_t : public sample_processor_interface
 {
 public:
     rocpd_processor_t(const std::shared_ptr<metadata_registry>& metadata,
-                      const std::shared_ptr<agent_manager>& agent_mngr, int pid, int ppid,
-                      output_file_registry& output_registry);
+                      const std::shared_ptr<agent_manager>& agent_mngr, pid_t pid,
+                      pid_t ppid);
 
-    void prepare_for_processing();
-    void finalize_processing();
+    void prepare_for_processing() override;
+    void finalize_processing() override;
 
-    void handle(const kernel_dispatch_sample& sample);
-    void handle(const scratch_memory_sample& sample);
-    void handle(const memory_copy_sample& sample);
-    void handle(const memory_allocate_sample& sample);
-    void handle(const region_sample& sample);
-    void handle(const in_time_sample& sample);
-    void handle(const pmc_event_with_sample& sample);
-    void handle(const backtrace_region_sample& sample);
-    void handle(const gpu_pmc_sample& sample);
-    void handle(const ainic_pmc_sample& sample);
-    void handle(const cpu_pmc_sample& sample);
-    void handle(const gpu_perf_counter_sample& sample);
-    void handle(const kfd_sample& sample);
+    void handle(const kernel_dispatch_sample& sample) override;
+    void handle(const scratch_memory_sample& sample) override;
+    void handle(const memory_copy_sample& sample) override;
+    void handle(const memory_allocate_sample& sample) override;
+    void handle(const region_sample& sample) override;
+    void handle(const in_time_sample& sample) override;
+    void handle(const pmc_event_with_sample& sample) override;
+    void handle(const backtrace_region_sample& sample) override;
+    void handle(const gpu_pmc_sample& sample) override;
+    void handle(const ainic_pmc_sample& sample) override;
+    void handle(const cpu_pmc_sample& sample) override;
+    void handle(const gpu_perf_counter_sample& sample) override;
+    void handle(const hipfile_pmc_sample& sample) override;
+    void handle(const kfd_sample& sample) override;
 
 private:
     void post_process_metadata();
@@ -69,7 +71,7 @@ private:
     std::shared_ptr<metadata_registry>      m_metadata;
     std::shared_ptr<agent_manager>          m_agent_manager;
     std::unique_ptr<profiler_hub::writer_t> m_writer;
-    output_file_registry&                   m_output_registry;
+    pid_t                                   m_pid;
     std::string                             m_db_output_path;
 
     // PMC keys that have already been warned about

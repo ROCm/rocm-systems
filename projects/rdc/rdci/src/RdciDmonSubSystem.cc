@@ -570,7 +570,8 @@ void RdciDmonSubSystem::process() {
   result = rdc_group_gpu_get_info(rdc_handle_, options_[OPTIONS_GROUP_ID], &group_info);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    // rdcd releases before ROCm 7.12 report a missing group as RDC_ST_NOT_FOUND.
+    if (result == RDC_ST_GROUP_NOT_FOUND || result == RDC_ST_NOT_FOUND) {
       error_msg = "Cannot find the group " + std::to_string(options_[OPTIONS_GROUP_ID]);
     }
     throw RdcException(result, error_msg.c_str());
@@ -583,7 +584,8 @@ void RdciDmonSubSystem::process() {
   result = rdc_group_field_get_info(rdc_handle_, options_[OPTIONS_FIELD_GROUP_ID], &field_info);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    // rdcd releases before ROCm 7.12 report a missing field group as RDC_ST_NOT_FOUND.
+    if (result == RDC_ST_FLDGROUP_NOT_FOUND || result == RDC_ST_NOT_FOUND) {
       error_msg = "Cannot find the field group " + std::to_string(options_[OPTIONS_FIELD_GROUP_ID]);
     }
     throw RdcException(result, error_msg.c_str());

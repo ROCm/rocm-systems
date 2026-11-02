@@ -32,6 +32,8 @@ foreach(SOURCE_FILE IN LISTS SDMA_CORE_SOURCES)
             "AqlPacketProcessor"
             "aql_queue_binding_factory"
             "AqlQueueBindingFactory"
+            "compute_queue_binding_factory"
+            "ComputeQueueBindingFactory"
             "dispatch_entry.h"
             "DispatchEntry"
             "pm4_"

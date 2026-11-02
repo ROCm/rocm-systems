@@ -98,7 +98,7 @@ parse_memory_operation_name(std::string_view memory_operation_name)
             { "SCRATCH_MEMORY_ASYNC_RECLAIM", { "ASYNC_RECLAIM", "SCRATCH" } },
         };
 
-    auto item = parsing_map.find(memory_operation_name);
+    auto const item = parsing_map.find(memory_operation_name);
     if(item == parsing_map.end())
     {
         return { "UNKNOWN", "UNKNOWN" };

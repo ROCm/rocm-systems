@@ -201,13 +201,12 @@ void check_case(const FmaCase &c, uint64_t exec) {
   const auto scalar_out = run_mode(/*force_scalar=*/true);
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
-  // Core A/B equivalence per active, non-skipped lane. NaN-input lanes carry an
-  // accepted NaN-payload divergence and are excluded identically in both runs
-  // (the skip condition is input-derived).
+  // F32 compares every active lane, including the selected NaN payload.
+  // Legacy F16 forms retain their separate host-arithmetic behavior.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (nan_lane[lane])
+      if (c.is_f16 && nan_lane[lane])
         continue;
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.label << " lane " << lane << ": SIMD path diverged from scalar body";

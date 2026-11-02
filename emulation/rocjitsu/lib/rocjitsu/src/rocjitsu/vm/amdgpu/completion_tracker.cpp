@@ -36,7 +36,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
-                                           std::vector<AqlQueueRecord> &queues) {
+                                           std::vector<ComputeQueueRecord> &queues) {
   for (auto &qs : queues) {
     for (auto &entry : qs.entries) {
       if (entry.dispatch_id == dispatch_id) {
@@ -54,7 +54,8 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
   }
 }
 
-CompletionDrainResult CompletionTracker::drain_completions(std::vector<AqlQueueRecord> &queues) {
+CompletionDrainResult
+CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
   CompletionDrainResult result;
   for (auto &qs : queues)
     qs.publication_retry_pending = false;
@@ -348,7 +349,7 @@ void CompletionTracker::flush_caches(uint32_t vmid) {
   }
 }
 
-bool CompletionTracker::all_complete(const std::vector<AqlQueueRecord> &queues) const {
+bool CompletionTracker::all_complete(const std::vector<ComputeQueueRecord> &queues) const {
   for (const auto &qs : queues) {
     if (!qs.entries.empty() || qs.idle_publication.active() || qs.scratch_reclaim.active())
       return false;

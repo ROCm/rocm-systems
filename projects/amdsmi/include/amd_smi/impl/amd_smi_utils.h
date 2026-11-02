@@ -44,6 +44,11 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// PLX temperature is carried in gpu_metrics rather than hwmon. Reports
+// NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
+// no such sensor), otherwise writes *temperature.
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
@@ -308,5 +313,13 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  *  @param[out] info Structure to reset to its not-supported state.
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
+
+/**
+ *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
+ *
+ *  Returns an empty string (N/A) for ``0``, which kernels without a DRM driver
+ *  date report.
+ */
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

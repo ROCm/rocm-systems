@@ -4,13 +4,13 @@
 /// @file mma_exact_test_support.h
 /// @brief Shared fixture for MFMA/WMMA SIMD-vs-scalar bit-exact tests.
 ///
-/// The fused-FMA SIMD path and the non-fused scalar path can only round apart
-/// when an intermediate K-sum actually rounds, so the random generators seed
-/// integer-valued elements that stay exact through every product and partial
-/// sum (max |prod| 64, max K-sum 8192 < 2^24); boundary modes drive the
-/// rounding-free corners directly (NaN, +/-Inf, +/-0, denormals, max-finite
-/// overflow, +1/-1 cancellation). Under those inputs SIMD and scalar must be
-/// bit-identical, and the suites assert word-for-word EXPECT_EQ on the dst.
+/// SIMD and scalar accumulation can only round apart when an intermediate
+/// K-sum actually rounds, so the random generators seed integer-valued elements
+/// that stay exact through every product and partial sum (max |prod| 64, max
+/// K-sum 8192 < 2^24); boundary modes drive the rounding-free corners directly
+/// (NaN, +/-Inf, +/-0, denormals, max-finite overflow, +1/-1 cancellation).
+/// Under those inputs SIMD and scalar must be bit-identical, and the suites
+/// assert word-for-word EXPECT_EQ on the dst.
 
 #pragma once
 
@@ -188,8 +188,8 @@ struct ExactFixture {
   uint32_t vbase = 0;
   uint32_t wf_size;
 
-  explicit ExactFixture(rj_code_arch_t arch, uint32_t wave)
-      : gpu_mem("mma_exact_mem"), l2("mma_exact_l2"), wf_size(wave) {
+  explicit ExactFixture(rj_code_arch_t arch, uint32_t wave_size)
+      : gpu_mem("mma_exact_mem"), l2("mma_exact_l2"), wf_size(wave_size) {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
     cfg.num_wf_slots = 1;

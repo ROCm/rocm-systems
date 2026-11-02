@@ -71,7 +71,7 @@ class TestGeneral(TestCliBase):
             ("amd-smi list --invalid", self.FAIL),
             ("amd-smi static --invalid", self.FAIL),
             ("amd-smi firmware --invalid", self.FAIL),
-            ("amd-smi bad_pages --invalid", self.FAIL),
+            ("amd-smi bad-pages --invalid", self.FAIL),
             ("amd-smi metric --invalid", self.FAIL),
             ("amd-smi process --invalid", self.FAIL),
             ("amd-smi event --invalid", self.FAIL),

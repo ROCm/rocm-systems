@@ -112,11 +112,22 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 253 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
+        encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
+      initialize_vgpr_reference((encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0) &
+                                ((size_bits == 16 && (packed_16bit_source)) ? 127 : 255));
+      if (size_bits == 16 && (packed_16bit_source))
+        set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+    }
     break;
   case OperandType::OPR_SRC_NOINLINE:
     if (!((encoding_value >= 0 && encoding_value <= 127) ||
           (encoding_value >= 254 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MIN &&
+        encoding_value <= OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcNoinline::OPR_SRC_NOINLINE_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_SIMPLE:
     if (!((encoding_value >= 0 && encoding_value <= 208) ||
@@ -126,16 +137,29 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
           (encoding_value >= 253 && encoding_value <= 253) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN &&
+        encoding_value <= OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcSimple::OPR_SRC_SIMPLE_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_VGPR:
     if (!((encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+    if (encoding_value >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_VGPR_OR_INLINE:
     if (!((encoding_value >= 128 && encoding_value <= 208) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value -
+                                OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SREG:
     if (!((encoding_value >= 0 && encoding_value <= 124)))
@@ -175,6 +199,14 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
   case OperandType::OPR_VGPR:
     if (!((encoding_value >= 0 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(
+          (encoding_value - OpSelVgpr::OPR_VGPR_VGPR_MIN + 0) &
+          ((size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) ? 127 : 255));
+      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst))
+        set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+    }
     break;
   default:
     break;
@@ -1560,6 +1592,37 @@ std::optional<RegClass> Operand::to_special_reg_class() const {
     break;
   }
   return std::nullopt;
+}
+
+bool Operand::has_register_selector() const {
+  switch (opr_type_) {
+  case OperandType::OPR_SDST:
+    return !fieldless_;
+  case OperandType::OPR_SGPR:
+    return !fieldless_;
+  case OperandType::OPR_SMEM_OFFSET:
+    return !fieldless_;
+  case OperandType::OPR_SMEM_OFFSET_NOK:
+    return !fieldless_;
+  case OperandType::OPR_SRC:
+    return !fieldless_;
+  case OperandType::OPR_SRC_NOINLINE:
+    return !fieldless_;
+  case OperandType::OPR_SRC_SIMPLE:
+    return !fieldless_;
+  case OperandType::OPR_SREG:
+    return !fieldless_;
+  case OperandType::OPR_SREG_M0:
+    return !fieldless_;
+  case OperandType::OPR_SSRC:
+    return !fieldless_;
+  case OperandType::OPR_SSRC_BARRIER_ID:
+    return !fieldless_;
+  case OperandType::OPR_SSRC_LANESEL:
+    return !fieldless_;
+  default:
+    return false;
+  }
 }
 
 bool Operand::simd_capable() const {

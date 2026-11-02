@@ -33,6 +33,8 @@
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
@@ -55,6 +57,7 @@
 #include <cstdint>
 #include <set>
 #include <sstream>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 
@@ -211,9 +214,15 @@ struct test_kernels
     test_kernels(const rocprofiler::hsa::AgentCache& agent)
     {
         CHECK(agent.get_rocp_agent());
+        // The hsaco files are named after the HSA-reported ISA name (e.g. "gfx1250-strict"),
+        // since that is what CMake's GPU_TARGETS used to compile them for. This can differ
+        // from rocprofiler_agent_t::name, which is reconstructed from KFD's gfx_target_version
+        // and intentionally omits ISA variant suffixes such as "-strict".
+        char isa_name[64] = {};
+        CHECK_EQ(hsa_agent_get_info(agent.get_hsa_agent(), HSA_AGENT_INFO_NAME, isa_name),
+                 HSA_STATUS_SUCCESS);
         // Getting hasco Path
-        std::string hasco_file_path =
-            std::string(agent.get_rocp_agent()->name) + std::string("_agent_kernels.hsaco");
+        std::string hasco_file_path = std::string(isa_name) + std::string("_agent_kernels.hsaco");
         search_hasco(common::filesystem::current_path(), hasco_file_path);
         CHECK_EQ(load_code_object(hasco_file_path, agent.get_hsa_agent(), obj), HSA_STATUS_SUCCESS);
     }
@@ -929,6 +938,28 @@ TEST(profiler_ioctl_request, version_2_0_uses_mainline_request)
 {
     EXPECT_EQ(counters::get_profiler_ioctl_request_for_version(2, 0),
               static_cast<unsigned long>(AMDKFD_IOWR(0x28, struct kfd_ioctl_profiler_args)));
+}
+
+// WSL2/DXG does not expose KFD: the KFD-only device lock and PTL controls must degrade to
+// "unsupported" so PMC collection continues without them.
+TEST(profiler_ioctl_request, no_kfd_device_lock_and_ptl_unavailable)
+{
+    if(!platform::wsl::is_available()) GTEST_SKIP() << "not running under WSL2/DXG";
+
+    rocprofiler_agent_t agent{};
+    agent.gpu_id = 1;
+
+    EXPECT_EQ(pc_sampling::ioctl::get_kfd_fd(), -1);
+    EXPECT_FALSE(counters::counter_collection_has_device_lock());
+    EXPECT_FALSE(counters::ptl_control_supported());
+    EXPECT_EQ(counters::counter_collection_device_lock(&agent, true),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_device_unlock(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_ptl_disable(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
+    EXPECT_EQ(counters::counter_collection_ptl_enable(&agent),
+              ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE);
 }
 
 TEST_F(device_counting_service_test, sync_grbm_verify)

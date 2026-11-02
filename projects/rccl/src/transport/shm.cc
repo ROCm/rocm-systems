@@ -540,7 +540,7 @@ static void initCeOperation() {
     }
     shmLocality = ncclParamShmLocality();
     if (shmLocality != SHM_SEND_SIDE && shmLocality != SHM_RECV_SIDE) {
-      WARN("Ignoring SHM locality, must be 1 (sender side) or 2 (receiver side, default)");
+      ATTN("Ignoring SHM locality, must be 1 (sender side) or 2 (receiver side, default)");
       shmLocality = SHM_RECV_SIDE;
     }
     init = 1;
@@ -623,11 +623,11 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     // Import and map the remote memory descriptor to the local GPU
     if (type == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
       // UDS fd support
-      int fd = -1;
+      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       // Send cuMem handle to remote for conversion to an fd
       NCCLCHECK(ncclProxyClientGetFdBlocking(comm, proxyRank, &desc->shmci.data, &fd));
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)(uintptr_t)fd, type));
-      (void)close(fd);
+      (void)ncclIpcFdClose(fd);
     } else {
       CUCHECK(cuMemImportFromShareableHandle(&handle, &desc->shmci.handle, type));
     }

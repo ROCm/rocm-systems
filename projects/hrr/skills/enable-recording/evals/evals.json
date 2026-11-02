@@ -1,0 +1,93 @@
+{
+  "evaluations": [
+    {
+      "id": "symptom-memory-access-fault",
+      "skill_should_trigger": true,
+      "prompt": "Our inference server on an MI300 node dies every few hours with 'Memory access fault by GPU node-4'. We cannot share the model or the code with you. What should we send you so you can debug it?",
+      "expected_behavior": [
+        "Proposes recording the failing run into an archive that replays without the application, its source or its data",
+        "Checks that the HIP runtime the workload loads has capture built in, rather than only giving the environment variable",
+        "Says the archive has to be verified as readable before it is sent"
+      ],
+      "unexpected_behavior": [
+        "Asks for the model weights, the source code or a reproducer script",
+        "Recommends a profiler"
+      ]
+    },
+    {
+      "id": "wrong-results-without-a-crash",
+      "skill_should_trigger": true,
+      "prompt": "Our fine-tuning job on an AMD GPU starts producing NaN losses after a few hundred steps. Nothing crashes and we cannot hand over the dataset. How do we get this to the runtime team?",
+      "expected_behavior": [
+        "Proposes recording the failing run into an archive rather than asking for the dataset"
+      ]
+    },
+    {
+      "id": "empty-archive-is-the-runtime-not-the-workload",
+      "skill_should_trigger": true,
+      "prompt": "I set HIP_HRR_CAPTURE_OUTPUT and ran my PyTorch training job. It ran fine but the verify output says:\n\nArchive: /tmp/run.hrr\n\nVerdict: no archive. The directory was never created, so capture never started.\n\nWhat went wrong?",
+      "expected_behavior": [
+        "Explains that the HIP runtime the workload loaded has no capture compiled in, so the environment variable was ignored",
+        "Points out that a Python workload usually loads the runtime shipped inside the torch wheel rather than the one in the ROCm install",
+        "Tells the user to run the skill's preflight in the workload's own environment"
+      ],
+      "unexpected_behavior": [
+        "Suggests the archive is corrupt"
+      ]
+    },
+    {
+      "id": "incomplete-archive-is-still-worth-sending",
+      "skill_should_trigger": true,
+      "prompt": "Is this capture usable?\n\nArchive: /work/captures/crash.hrr\nProcesses: 1\n\n  pid-142\n    events: 12,904   blobs: 3,201   state: incomplete (no clean-shutdown trailer)\n\nVerdict: recorded. 1 of 1 process directories hold events.",
+      "expected_behavior": [
+        "Says the archive is usable and worth sending",
+        "Explains that the missing clean-shutdown trailer is the expected signature of a workload that crashed, not corruption"
+      ],
+      "unexpected_behavior": [
+        "Tells the user to capture again because the archive is broken",
+        "Names a kernel or diagnoses the crash, which is a different skill's job"
+      ]
+    },
+    {
+      "id": "what-is-inside-the-archive-before-sharing",
+      "skill_should_trigger": true,
+      "prompt": "Capture worked and we have an archive. Our legal team wants to know what is inside it before we upload it to a vendor. What do we tell them?",
+      "expected_behavior": [
+        "States that the recorded buffers hold the real workload data in the clear, including prompts and generated text"
+      ],
+      "unexpected_behavior": [
+        "Claims the archive can be anonymised, scrubbed or randomised by a flag",
+        "Claims the archive holds only metadata or only API calls"
+      ]
+    },
+    {
+      "id": "multi-process-archive-is-kept-together",
+      "skill_should_trigger": true,
+      "prompt": "Our capture produced two pid directories, pid-49 and pid-579, under the same archive directory. Which one do I send?",
+      "expected_behavior": [
+        "Says to send the whole archive directory rather than one pid directory"
+      ],
+      "unexpected_behavior": [
+        "Picks a single pid directory as the one to send"
+      ]
+    },
+    {
+      "id": "gemm-performance-question",
+      "skill_should_trigger": false,
+      "note": "Capture makes a run slower and measures nothing. This belongs to the profilers.",
+      "prompt": "Our GEMM kernel on MI300 reaches only 40% of peak. How do I find out which part of it is slow?"
+    },
+    {
+      "id": "triage-an-archive-that-already-exists",
+      "skill_should_trigger": false,
+      "note": "An archive in hand is decode-and-triage's job, not this skill's.",
+      "prompt": "I already have an HRR archive at /work/captures/crash.hrr. Replay it and tell me which kernel faulted."
+    },
+    {
+      "id": "failure-above-the-gpu-runtime",
+      "skill_should_trigger": false,
+      "note": "Only HIP calls are recorded, so an application-level bug is out of scope.",
+      "prompt": "My training script raises a KeyError in the data loader before the first epoch finishes. How do I debug it?"
+    }
+  ]
+}

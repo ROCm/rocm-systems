@@ -176,7 +176,7 @@ TEST(StaticVector, iteration)
     vec = { 1, 2, 3 };
 
     int sum = 0;
-    for(auto elem : vec)
+    for(auto const elem : vec)
     {
         sum += elem;
     }

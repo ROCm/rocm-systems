@@ -21,8 +21,9 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
 
-.. grid:: 2
-   :gutter: 3
+   .. grid-item-card:: Conceptual
+
+      * :doc:`AMD Infinity Storage <conceptual/amd-infinity-storage>`
 
    .. grid-item-card:: How to
 
@@ -38,18 +39,21 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
       * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
       * :doc:`Async multistream I/O <tutorials/async-multistream-io>`
+      * :doc:`Batch I/O <tutorials/batch-io>`
       * :doc:`Query the hipFile version <tutorials/get-version>`
       * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
 
    .. grid-item-card:: Reference
 
       * :doc:`hipFile fastpath and fallback backends <reference/hipFile-io-backends>`
+      * :doc:`hipFile kernel P2PDMA support <reference/hipFile-kernel-p2pdma-support>`
       * :doc:`hipFile file registration <reference/hipFile-file-registration>`
       * :doc:`hipFile buffer registration <reference/hipFile-buffer-registration>`
       * :doc:`hipFile reference counting <reference/hipFile-reference-count>`
       * :doc:`hipFile ais-stats tool <reference/hipFile-ais-stats-tool>`
       * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
       * :doc:`cuFile compatibility <reference/hipFile-cuFile-compatibility>`
+      * :doc:`Frameworks and applications using hipFile <reference/hipFile-integrations>`
       * :doc:`hipFile API reference <reference/hipFile-api-reference>`
 
    .. grid-item-card:: Troubleshooting

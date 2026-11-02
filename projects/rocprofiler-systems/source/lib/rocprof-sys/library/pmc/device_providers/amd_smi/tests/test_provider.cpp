@@ -125,7 +125,8 @@ protected:
     {
         EXPECT_CALL(*g_mock, initialize());
         EXPECT_CALL(*g_mock, get_lib_version())
-            .WillOnce(Return(mock_version{ major, minor, release, build }));
+            .WillOnce(Return(mock_version{
+                .major = major, .minor = minor, .release = release, .build = build }));
     }
 
     void expect_shutdown() { EXPECT_CALL(*g_mock, shutdown()); }
@@ -218,7 +219,8 @@ TEST_F(ProviderTest, move_assignment_shuts_down_overwritten_backend)
     EXPECT_CALL(*g_mock, initialize()).Times(2);
     EXPECT_CALL(*g_mock, get_lib_version())
         .Times(2)
-        .WillRepeatedly(Return(mock_version{ 1, 0, 0, nullptr }));
+        .WillRepeatedly(Return(
+            mock_version{ .major = 1, .minor = 0, .release = 0, .build = nullptr }));
     EXPECT_CALL(*g_mock, shutdown()).Times(2);
 
     provider_t p1;

@@ -46,7 +46,8 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:

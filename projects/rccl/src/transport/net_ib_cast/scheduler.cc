@@ -506,7 +506,13 @@ extern "C" ncclResult_t ncclIbCastGetGrhState(void* sendComm, struct ncclIbCastG
       }
     }
   }
+  return ncclSuccess;
+}
 
+extern "C" ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out) {
+  if (!comm || !out) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *out = base->optRecvCompletion ? 1 : 0;
   return ncclSuccess;
 }
 

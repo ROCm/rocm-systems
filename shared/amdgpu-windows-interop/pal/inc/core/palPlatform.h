@@ -162,7 +162,6 @@ enum class ApplicationProfileClient : uint32
     DutyCycleScaling,
     ProBoost,
     RisWindowed,
-    FreeMux,
     FsrOvr,
     Ffx,
     Count
@@ -391,6 +390,19 @@ public:
     /// @returns A valid DevDriver::DevDriverServer pointer if developer mode is enabled. If developer mode is not
     ///          enabled, nullptr will be returned.
     virtual DevDriver::DevDriverServer* GetDevDriverServer() = 0;
+
+    /// Performs deferred DevDriver initialization when tool connection is detected.
+    ///
+    /// This function creates the DevDriver infrastructure (server, services, event providers) if it was skipped
+    /// during platform initialization. It progresses through the complete state machine sequence and is safe to
+    /// call multiple times (will return Success if already initialized).
+    ///
+    /// @returns Success if DevDriver infrastructure was successfully initialized or was already initialized.
+    ///          Otherwise, one of the following errors may be returned:
+    ///          + NotReady if no tool connection is available.
+    ///          + ErrorOutOfMemory if DevDriver objects could not be allocated.
+    ///          + ErrorUnknown if initialization failed for another reason.
+    virtual Result PerformDeferredDevDriverInit() = 0;
 
     /// Client drivers can register their DevDriver based settings components via SettingsRpcService.
     ///

@@ -3,9 +3,9 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import sys
-import json
 import argparse
+import json
+import sys
 
 
 def validate_json(data, labels, counts, depths):
@@ -71,7 +71,7 @@ if __name__ == "__main__":
                 if _idx is not None:
                     _prefix = _prefix[(_idx + 4) :]
 
-                print("| {:40} | {:6} | {:6} |".format(_prefix, _count, _depth))
+                print(f"| {_prefix:40} | {_count:6} | {_depth:6} |")
 
         try:
             validate_json(

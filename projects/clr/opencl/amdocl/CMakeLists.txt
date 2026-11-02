@@ -6,25 +6,6 @@ project(amdocl)
 
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
-if(ADDRESS_SANITIZER)
-  set(ASAN_LINKER_FLAGS "-fsanitize=address")
-  set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
-
-  if(NOT CMAKE_COMPILER_IS_GNUCC)
-    if(BUILD_SHARED_LIBS)
-      set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
-    else()
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -static-libsan")
-    endif()
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
-endif()
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
 if(BUILD_SHARED_LIBS)

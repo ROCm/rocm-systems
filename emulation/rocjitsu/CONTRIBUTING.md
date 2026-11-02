@@ -30,6 +30,7 @@
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |
 | CLI changes | `tools/rocjitsu/` |
+| Python execution API | `python/` (tests in `python/tests/`) |
 | New GPU topology config | `configs/` |
 | Tests | `tests/` (mirror the source structure: `tests/dbt/`, `tests/analysis/`, `tests/patch/`, etc.) |
 
@@ -92,12 +93,14 @@ Before writing new infrastructure, check these existing libraries:
   survive a log-groups-OFF build, and its signal-backtrace path must stay
   async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
 - **Errors.** Expected failures such as a rejected instruction encoding return
-  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Exceptions are
+  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Do not introduce
+  new exception use unless an existing code path requires it. Exceptions are
   reserved for unrecoverable initialization, configuration, or execution
-  failures. Do not throw exceptions in simulation hot paths (event handlers,
-  instruction execution, cache lookups). Do not add `try`/`catch` blocks unless
-  you are at a boundary that must translate an error (e.g., the C API layer).
-  There is no general exception safety guarantee unless explicitly documented.
+  failures. The project plans to disable exceptions entirely in the future.
+  Do not throw exceptions in simulation hot paths (event handlers, instruction
+  execution, cache lookups). Do not add `try`/`catch` blocks unless you are at a
+  boundary that must translate an error (e.g., the C API layer). There is no
+  general exception safety guarantee unless explicitly documented.
 
 ## ISA codegen workflow
 
@@ -115,7 +118,12 @@ When modifying instruction semantics or adding instruction support:
 - Add tests for new functionality. Place them in `tests/` mirroring
   the source directory structure.
 - Run the test suite: `ctest --test-dir build`
-- Run Python tests: `cd lib/python && python -m pytest amdisa/tests/ -x`
+- Run ISA codegen tests: `cd lib/python && python -m pytest amdisa/tests/ -x`
+- Run Python API tests: `python -B python/tests/test_api.py -v` after installing
+  the package and native runtime as described in [python/README.md](python/README.md).
+  The CTest `PythonApiTest` entry uses the configured Python interpreter's native
+  installation, then `PATH` if none is installed. Reinstall native changes before
+  testing; adding a build to `PATH` does not override an installed runtime.
 - Ensure zero compiler warnings before submitting.
 
 ## Proposing architectural changes

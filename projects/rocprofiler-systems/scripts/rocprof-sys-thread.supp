@@ -19,7 +19,6 @@ called_from_lib:libpatchAPI.so
 called_from_lib:libpcontrol.so
 called_from_lib:libstackwalk.so
 called_from_lib:libsymtabAPI.so
-called_from_lib:libtbb.so
 
 # OpenMP runtime: Dyninst's parallel sections in BPatch produce malloc/free
 # hand-offs between the main thread and libgomp workers. Not actionable in

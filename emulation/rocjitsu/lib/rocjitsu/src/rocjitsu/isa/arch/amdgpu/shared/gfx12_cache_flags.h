@@ -6,14 +6,18 @@
 ///
 /// RDNA4 uses a packed SCOPE field (2 bits) and a TH field (2–3 bits depending
 /// on instruction format).  For load/store instructions TH is a temporal hint;
-/// for atomics the same field encodes atomic-return mode.  There are no
-/// GLC/DLC/SLC fields.
+/// for atomics it holds independent return, non-temporal and cascade bits.
+/// There are no GLC/DLC/SLC fields.
 ///
 /// SCOPE encoding:
 ///   0 = CU, 1 = SE (Shader Engine), 2 = DEVICE, 3 = SYSTEM
 ///
-/// TH encoding (simplified for simulator):
+/// TH encoding for load/store instructions (simplified for simulator):
 ///   0 = regular, 1 = non-temporal (NT), 2+ = format-specific hints
+///
+/// Atomic TH uses independent bits: bit 0 returns the old value, bit 1
+/// requests non-temporal handling, and bit 2 requests cascading. Returning
+/// atomics are not deferred even when the cascade bit is set.
 ///
 /// | SCOPE | TH  | Mtype | Behavior                             |
 /// |-------|-----|-------|--------------------------------------|
@@ -37,8 +41,14 @@ namespace amdgpu {
 /// @brief Non-temporal TH value for GFX12.
 inline constexpr uint8_t GFX12_TH_NT = 1;
 
-/// @brief Atomic-return TH value for GFX12 atomic memory instructions.
+/// @brief Atomic-return bit in TH for GFX12 atomic memory instructions.
 inline constexpr uint8_t GFX12_TH_ATOMIC_RETURN = 1;
+
+/// @brief Non-temporal bit in TH for GFX12 atomic memory instructions.
+inline constexpr uint8_t GFX12_TH_ATOMIC_NT = 2;
+
+/// @brief Cascade bit in TH for GFX12 atomic memory instructions.
+inline constexpr uint8_t GFX12_TH_ATOMIC_CASCADE = 4;
 
 enum class Gfx12TemporalHintKind : uint8_t { Load, Store, Atomic };
 
@@ -55,14 +65,14 @@ inline void append_gfx12_cache_policy(std::string &out, uint8_t th, uint8_t scop
     out += " th:";
     if (kind == Gfx12TemporalHintKind::Atomic) {
       out += "TH_ATOMIC_";
-      if ((th & 4) != 0) {
+      if ((th & GFX12_TH_ATOMIC_CASCADE) != 0) {
         if (scope >= 2)
-          out += (th & 2) != 0 ? "CASCADE_NT" : "CASCADE_RT";
+          out += (th & GFX12_TH_ATOMIC_NT) != 0 ? "CASCADE_NT" : "CASCADE_RT";
         else
           append_gfx12_hex_hint(out, th);
-      } else if ((th & 2) != 0) {
-        out += (th & 1) != 0 ? "NT_RETURN" : "NT";
-      } else if ((th & 1) != 0) {
+      } else if ((th & GFX12_TH_ATOMIC_NT) != 0) {
+        out += (th & GFX12_TH_ATOMIC_RETURN) != 0 ? "NT_RETURN" : "NT";
+      } else if ((th & GFX12_TH_ATOMIC_RETURN) != 0) {
         out += "RETURN";
       } else {
         append_gfx12_hex_hint(out, th);
@@ -122,9 +132,9 @@ inline void append_gfx12_cache_policy(std::string &out, uint8_t th, uint8_t scop
   return mtype_from_scope_nt(scope_val, th == GFX12_TH_NT);
 }
 
-/// @brief Return true when a GFX12 atomic instruction writes back the old value.
+/// @brief Return true when TH[0] requests old-value writeback for a GFX12 atomic.
 [[nodiscard]] inline constexpr bool gfx12_atomic_returns(uint8_t th) {
-  return th == GFX12_TH_ATOMIC_RETURN;
+  return (th & GFX12_TH_ATOMIC_RETURN) != 0;
 }
 
 } // namespace amdgpu

@@ -66,8 +66,7 @@ config=/path/to/rocjitsu-config.json
 cmake -S "$repo/emulation/rocjitsu" -B "$build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=OFF \
-  -DLTO=OFF \
-  -DROCM_PATH="$rocm_sdk"
+  -DLTO=OFF
 cmake --build "$build" --target \
   rocjitsu_bin rocjitsu_shared rocjitsu_plugin_throughput_so
 
@@ -82,6 +81,10 @@ Run from each revision's build tree; do not install either build into a shared
 SDK during the comparison.
 
 ## Prepare the host
+
+For dedicated Actions benchmark runners, see the
+[benchmark runner setup guide](benchmark-runner-setup.md) for CPU reservation,
+fixed frequency and idle settings, and Bpfland.
 
 Prefer a quiet host. If background work cannot be stopped, reserve complete
 physical cores with disjoint systemd cgroup cpusets. `taskset` constrains only

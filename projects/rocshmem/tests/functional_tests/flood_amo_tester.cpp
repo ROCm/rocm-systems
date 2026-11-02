@@ -120,7 +120,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
         rocshmem_sync_all();
       grid_barrier(&grid_psync[1], num_wg * (i+1));
       if (is_thread_zero_in_block()) {
-        //uint64_t observed = __hip_atomic_load(&d_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        //uint64_t observed = __scoped_atomic_load_n(&d_buf[wg_id], __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         //uint64_t observed = static_cast<volatile uint64_t>(d_buf[wg_id]);
         uint64_t observed = d_buf[wg_id];
         if (expected != observed) {

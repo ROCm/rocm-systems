@@ -108,6 +108,8 @@ def validate_inspector_log_file(filepath):
             except json.JSONDecodeError as e:
                 errors.append(f"Line {lineno}: Invalid JSON: {e}")
                 continue
+            if "dump_stats" in record:  # per-dump counters
+                continue
             validate = (validate_inspector_p2p_line if "p2p_perf" in record
                         else validate_inspector_log_line)
             is_valid, _, error_msg = validate(line)
@@ -136,6 +138,8 @@ def count_inspector_records(filepath, coll=None):
                     continue
                 try:
                     record = json.loads(line)
+                    if "dump_stats" in record:
+                        continue
                     if coll is None or record.get("coll_perf", {}).get("coll") == coll:
                         count += 1
                 except json.JSONDecodeError:

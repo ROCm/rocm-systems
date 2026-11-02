@@ -161,102 +161,102 @@ namespace rocshmem {
 
   // Collective - Allgather
   __device__ int rocshmem_tile_allgather_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, uint64_t flags);
 
   __device__ int rocshmem_tile_allgather_wave_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, uint64_t flags);
 
   __device__ int rocshmem_tile_allgather_wg_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, uint64_t flags);
 
   // Collective - Broadcast
   __device__ int rocshmem_tile_broadcast_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int pe_root, uint64_t flags);
 
   __device__ int rocshmem_tile_broadcast_wave_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int pe_root, uint64_t flags);
 
   __device__ int rocshmem_tile_broadcast_wg_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int pe_root, uint64_t flags);
 
   // Collective - SUM Reduce
   __device__ int rocshmem_tile_sum_reduce_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_sum_reduce_wave_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_sum_reduce_wg_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   // Collective - MAX Reduce
   __device__ int rocshmem_tile_max_reduce_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_max_reduce_wave_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_max_reduce_wg_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   // Collective - MIN Reduce
   __device__ int rocshmem_tile_min_reduce_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_min_reduce_wave_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   __device__ int rocshmem_tile_min_reduce_wg_internal(
-      rocshmem_team_t team, void* dst_data, const void* src_data,
+      rocshmem_ctx_t ctx, rocshmem_team_t team, void* dst_data, const void* src_data,
       const size_t* dst_strides, const size_t* src_strides,
       const size_t* start_coord, const size_t* boundary,
       int ndim, size_t element_size, int root, uint64_t flags);
 
   // Collective wait
   __device__ int rocshmem_tile_collective_wait_internal(
-      rocshmem_team_t team, uint64_t flags);
+      rocshmem_ctx_t ctx, rocshmem_team_t team, uint64_t flags);
 
 /******************************************************************************
  **************** RMA OPERATIONS - CONTEXT VERSIONS (5) ***********************
@@ -507,7 +507,7 @@ __device__ inline int rocshmem_ctx_tile_allgather(rocshmem_ctx_t ctx, rocshmem_t
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                     dst_strides, src_strides,
                                     start_arr, boundary_arr,
                                     ndim, sizeof(element_t), flags);
@@ -536,7 +536,7 @@ __device__ inline int rocshmem_ctx_tile_allgather_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather_wave_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_wave_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                          dst_strides, src_strides,
                                          start_arr, boundary_arr,
                                          ndim, sizeof(element_t), flags);
@@ -565,7 +565,7 @@ __device__ inline int rocshmem_ctx_tile_allgather_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_allgather_wg_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_allgather_wg_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                        dst_strides, src_strides,
                                        start_arr, boundary_arr,
                                        ndim, sizeof(element_t), flags);
@@ -626,7 +626,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                     dst_strides, src_strides,
                                     start_arr, boundary_arr,
                                     ndim, sizeof(element_t), pe_root, flags);
@@ -655,7 +655,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wave(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast_wave_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_wave_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                          dst_strides, src_strides,
                                          start_arr, boundary_arr,
                                          ndim, sizeof(element_t), pe_root, flags);
@@ -684,7 +684,7 @@ __device__ inline int rocshmem_ctx_tile_broadcast_wg(rocshmem_ctx_t ctx,
   }
 
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_broadcast_wg_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_broadcast_wg_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                        dst_strides, src_strides,
                                        start_arr, boundary_arr,
                                        ndim, sizeof(element_t), pe_root, flags);
@@ -729,7 +729,7 @@ __device__ inline int rocshmem_ctx_tile_collective_wait(rocshmem_ctx_t ctx,
                                                  rocshmem_team_t team,
                                                  uint64_t flags) {
   // Forward to type-erased bitcode implementation
-  return rocshmem_tile_collective_wait_internal(team, flags);
+  return rocshmem_tile_collective_wait_internal(ctx, team, flags);
 }
 
 /******************************************************************************
@@ -769,7 +769,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_sum_reduce_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
                                      ndim, sizeof(element_t), root, typed_flags);
@@ -801,7 +801,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wave(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_sum_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_wave_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
                                           ndim, sizeof(element_t), root, typed_flags);
@@ -833,7 +833,7 @@ __device__ inline int rocshmem_ctx_tile_sum_reduce_wg(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_sum_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_sum_reduce_wg_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
                                         ndim, sizeof(element_t), root, typed_flags);
@@ -899,7 +899,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_max_reduce_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_max_reduce_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
                                      ndim, sizeof(element_t), root, typed_flags);
@@ -931,7 +931,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wave(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_max_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_max_reduce_wave_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
                                           ndim, sizeof(element_t), root, typed_flags);
@@ -963,7 +963,7 @@ __device__ inline int rocshmem_ctx_tile_max_reduce_wg(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_max_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_max_reduce_wg_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
                                         ndim, sizeof(element_t), root, typed_flags);
@@ -1029,7 +1029,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_min_reduce_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_min_reduce_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                      dst_strides, src_strides,
                                      start_arr, boundary_arr,
                                      ndim, sizeof(element_t), root, typed_flags);
@@ -1061,7 +1061,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wave(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_min_reduce_wave_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_min_reduce_wave_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                           dst_strides, src_strides,
                                           start_arr, boundary_arr,
                                           ndim, sizeof(element_t), root, typed_flags);
@@ -1093,7 +1093,7 @@ __device__ inline int rocshmem_ctx_tile_min_reduce_wg(rocshmem_ctx_t ctx,
 
   // Forward to type-erased bitcode implementation
   const uint64_t typed_flags = rocshmem_tile_flags_with_element_type<element_t>(flags);
-  return rocshmem_tile_min_reduce_wg_internal(team, dst.data_handle(), src.data_handle(),
+  return rocshmem_tile_min_reduce_wg_internal(ctx, team, dst.data_handle(), src.data_handle(),
                                         dst_strides, src_strides,
                                         start_arr, boundary_arr,
                                         ndim, sizeof(element_t), root, typed_flags);

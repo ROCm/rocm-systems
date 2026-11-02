@@ -16,7 +16,14 @@ from amdisa.isa_additions import (
     IsaAdditionError,
     apply_isa_additions,
 )
-from amdisa.isa_profile import Cdna1Profile, Cdna5Profile, Rdna4Profile
+from amdisa.isa_profile import (
+    Cdna1Profile,
+    Cdna2Profile,
+    Cdna4Profile,
+    CdnaProfile,
+    Cdna5Profile,
+    Rdna4Profile,
+)
 from amdisa.parser import Parser
 
 _BASE_XML = '''\
@@ -1532,3 +1539,30 @@ def test_nonempty_additions_document_generates_decoder_dispatch(tmp_path):
     assert match is not None
     entries = [entry.strip() for entry in match.group(1).split(',')]
     assert entries[7] == '&detail::decodeSAdditionTestB32Sop1'
+
+
+@pytest.mark.parametrize(
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+    ],
+)
+def test_legacy_math_additions_match_llvm_encodings(arch, profile):
+    isa_dir = (
+        Path(__file__).resolve().parents[6] / 'shared' / 'machine-readable-isa' / 'isa'
+    )
+    spec = Parser(
+        str(isa_dir / f'amdgpu_isa_{arch}.xml'),
+        profile,
+        [str(isa_dir / f'amdgpu_isa_{arch}_legacy_math.xml')],
+    ).parse()
+    # LLVM AMDGPU VOP1Instructions.td VOP1_Real_vi: opcodes 0x4b/0x4c.
+    # llvm-mc -mcpu=gfx942/gfx950 gives e64 opcodes 0x18b/0x18c.
+    for encoding, offset in [('ENC_VOP1', 0), ('ENC_VOP3', 320)]:
+        for name, opcode in [('V_EXP_LEGACY_F32', 75), ('V_LOG_LEGACY_F32', 76)]:
+            inst = next(i for i in spec.encoding_map[encoding].insts if i.name == name)
+            assert inst.opcode == opcode + offset
+            assert spec.encoding_map[encoding].primary_dt_ptrs[inst.opcode] != -1

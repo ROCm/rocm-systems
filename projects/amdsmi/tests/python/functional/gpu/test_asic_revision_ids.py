@@ -123,7 +123,3 @@ class TestGpuAsicRevisionIds(unittest.TestCase):
 
         if checked == 0:
             self.skipTest(f"no render node was readable: {unreachable}")
-
-
-if __name__ == "__main__":
-    unittest.main()

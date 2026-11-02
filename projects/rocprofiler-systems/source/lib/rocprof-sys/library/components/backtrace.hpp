@@ -31,7 +31,6 @@ struct backtrace : comp::empty_base
     using data_t            = tim::unwind::stack<stack_depth>;
     using cache_type        = data_t::cache_type;
     using entry_type        = tim::unwind::processed_entry;
-    using clock_type        = std::chrono::steady_clock;
     using value_type        = void;
     using system_clock      = std::chrono::system_clock;
     using system_time_point = system_clock::time_point;
@@ -59,6 +58,6 @@ struct backtrace : comp::empty_base
     data_t                  get_data() const { return m_data; }
 
 private:
-    data_t m_data = {};
+    data_t m_data;
 };
 }  // namespace rocprofsys::component

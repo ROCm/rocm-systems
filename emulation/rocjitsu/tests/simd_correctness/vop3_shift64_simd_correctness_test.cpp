@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_shift64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the 64-bit-lane
-/// VOP3 shifts on CDNA4: the reverse shifts v_lshlrev_b64 / v_lshrrev_b64 /
-/// v_ashrrev_i64 (shift the 64-bit src1 by the 32-bit src0, masked to [0,63])
-/// and v_lshl_add_u64 ((src0 << (src1 & 63)) + src2). The mad64 coverage also
-/// checks v_mad_u64_u32's explicit SDST carry-out mask. These use the new
-/// mixed-width 64-bit shift glue (32-bit count + 64-bit value); shifts produce
-/// no NaN so every value is compared exactly. Each case runs TWICE in the same
-/// process -- once forcing the scalar body, once the SIMD fast path, with
-/// identical inputs/EXEC -- and the f64 dst results are asserted equal with
-/// EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
-/// The wide MAD cases also compare the explicit SGPR-pair carry/overflow mask.
-/// In-process inactive lanes must keep the sentinel.
+/// @brief Compare CDNA4 SIMD and scalar 64-bit shifts and wide multiply-adds.
+///
+/// Shift tests cover reverse shifts and v_lshl_add_u64 with exact comparisons.
+/// Wide MAD tests distinguish unsigned carry-out from signed bit 64, with
+/// clamped and unclamped results. CDNA4 runs both available execution paths;
+/// RDNA4's separate CO executor is scalar-only. Inactive lanes must preserve
+/// destination sentinels, and wave32 SDST writes must preserve the next SGPR.
 
 #include "decode_test_util.h"
+#include "util/big_int.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -30,6 +30,7 @@
 #include "util/simd.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
@@ -67,6 +68,27 @@ constexpr void vop3_sdstenc_encode(uint32_t op, uint32_t vdst, uint32_t sdst, ui
   words[1] = (src0 & 0x1FF) | ((src1 & 0x1FF) << 9) | ((src2 & 0x1FF) << 18);
 }
 
+std::array<uint32_t, 2> encode_mad64(rj_code_arch_t arch, bool is_signed, uint32_t sdst,
+                                     uint32_t clamp = 0) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return rdna4::build_vop3_sdst_enc(is_signed ? rdna4::kVMadCoI64I32Vop3SdstEnc
+                                                : rdna4::kVMadCoU64U32Vop3SdstEnc,
+                                      {.vdst = kDstVgpr,
+                                       .sdst = static_cast<uint8_t>(sdst),
+                                       .clamp = static_cast<uint8_t>(clamp),
+                                       .src0 = 256,
+                                       .src1 = 258,
+                                       .src2 = 260});
+  return cdna4::build_vop3_sdst_enc(is_signed ? cdna4::kVMadI64I32Vop3SdstEnc
+                                              : cdna4::kVMadU64U32Vop3SdstEnc,
+                                    {.vdst = kDstVgpr,
+                                     .sdst = static_cast<uint8_t>(sdst),
+                                     .clamp = static_cast<uint8_t>(clamp),
+                                     .src0 = 256,
+                                     .src1 = 258,
+                                     .src2 = 260});
+}
+
 // 64-bit values: sign bit set/clear, all-ones, alternating, powers of two.
 const std::array<uint64_t, 12> kVals64 = {{
     0x0000000000000000ull,
@@ -92,15 +114,16 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  Fixture() : gpu_mem("vop3_shift64_mem"), l2("vop3_shift64_l2") {
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+      : gpu_mem("vop3_shift64_mem"), l2("vop3_shift64_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_vop3_shift64", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -227,16 +250,21 @@ Mad64Result expected_mad_u64_u32(uint32_t a, uint32_t b, uint64_t c) {
   return {value, value < product};
 }
 
+template <typename Wide = util::int128_t>
 Mad64Result expected_mad_i64_i32(uint32_t a, uint32_t b, uint64_t c) {
   int64_t lhs = static_cast<int64_t>(static_cast<int32_t>(a));
   int64_t rhs = static_cast<int64_t>(static_cast<int32_t>(b));
   int64_t product_signed = lhs * rhs;
   uint64_t product = static_cast<uint64_t>(product_signed);
   uint64_t value = product + c;
-  int64_t addend = static_cast<int64_t>(c);
-  bool overflow = (addend > 0 && product_signed > std::numeric_limits<int64_t>::max() - addend) ||
-                  (addend < 0 && product_signed < std::numeric_limits<int64_t>::min() - addend);
-  return {value, overflow};
+  // The 65-bit sum fits exactly in 128 bits. SDST receives its sign bit,
+  // including for negative results that fit in 64 bits.
+  const auto widen = [](int64_t v) {
+    const auto bits = static_cast<uint64_t>(v);
+    return v < 0 ? -Wide{uint64_t{0} - bits} : Wide{bits};
+  };
+  const auto wide = widen(product_signed) + widen(std::bit_cast<int64_t>(c));
+  return {value, wide < Wide{}};
 }
 
 uint64_t expected_mad64_sdst(bool is_signed, uint64_t exec, uint32_t arot, uint32_t crot) {
@@ -318,6 +346,67 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64) {
   check_mad64("v_mad_i64_i32_vop3", 489, /*is_signed=*/true, 0xA5A5'F0F0'1234'8001ULL);
 }
 
+TEST(Vop3Shift64SimdCorrectness, SignedMadCarryIsBit64OfTheWidenedResult) {
+  // CDNA3/4 specify a signed 65-bit result. These values were also measured
+  // on native gfx1100 and gfx1201; a negative in-range result sets SDST,
+  // whereas a positive sum overflowing signed 64 bits leaves SDST clear.
+  struct Case {
+    int32_t src0, src1;
+    uint64_t src2, expected, expected_carry;
+  };
+  constexpr std::array cases{
+      Case{3, -4, 0, 0xfffffffffffffff4, 1},
+      Case{INT32_MAX, -1, 0, 0xffffffff80000001, 1},
+      Case{INT32_MAX, INT32_MAX, 0, 0x3fffffff00000001, 0},
+      Case{-1, 1, 0x8000000000000000, 0x7fffffffffffffff, 1},
+      Case{1, 1, 0x7fffffffffffffff, 0x8000000000000000, 0},
+      Case{1, 1, UINT64_MAX, 0, 0},
+      Case{-1, 1, 1, 0, 0},
+      Case{-1, 1, 0, UINT64_MAX, 1},
+  };
+  ForceScalarGuard guard;
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool force_scalar : {false, true}) {
+      if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+        continue; // The CO executor has no SIMD fast path.
+      SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
+      util::set_force_scalar_for_testing(force_scalar);
+      Fixture fx(arch);
+      ASSERT_NE(fx.wf, nullptr);
+      const uint32_t vb = fx.wf->vgpr_alloc().base;
+      const uint32_t sb = fx.wf->sgpr_alloc().base;
+      const auto words = encode_mad64(arch, true, sb);
+      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
+        fx.cu->write_vgpr(vb, lane, cases[lane].src0);
+        fx.cu->write_vgpr(vb + 2, lane, cases[lane].src1);
+        fx.write64(vb + 4, lane, cases[lane].src2);
+      }
+      for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+        fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
+      fx.wf->set_exec((1ULL << cases.size()) - 1);
+      fx.write_sgpr64(sb, SDST_SENTINEL);
+      ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+      const uint64_t mask = fx.wf->wf_size() == 32 ? fx.cu->read_sgpr(sb) : fx.read_sgpr64(sb);
+      EXPECT_EQ(mask >> cases.size(), 0u);
+      if (fx.wf->wf_size() == 32) {
+        EXPECT_EQ(fx.cu->read_sgpr(sb + 1), SDST_SENTINEL >> 32);
+      }
+      for (uint32_t lane = cases.size(); lane < fx.wf->wf_size(); ++lane)
+        EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), dst_sentinel(lane));
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
+        SCOPED_TRACE(testing::Message() << "lane=" << lane << " scalar=" << force_scalar);
+        EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), cases[lane].expected);
+        EXPECT_EQ((mask >> lane) & 1, cases[lane].expected_carry);
+        const auto fallback = expected_mad_i64_i32<util::detail::fallback_int128_t>(
+            cases[lane].src0, cases[lane].src1, cases[lane].src2);
+        EXPECT_EQ(fallback.value, cases[lane].expected);
+        EXPECT_EQ(fallback.carry, cases[lane].expected_carry);
+      }
+    }
+}
+
 TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
   ForceScalarGuard gate_guard;
   struct ClampCase {
@@ -326,41 +415,51 @@ TEST(Vop3Shift64SimdCorrectness, MadWide64ClampSaturatesAndPreservesCarry) {
     uint32_t src1;
     uint64_t src2;
     uint64_t expected;
+    uint64_t expected_carry;
   };
+  // Signed saturation and SDST were measured on native gfx1100 and gfx1201.
   constexpr std::array kCases{
-      ClampCase{false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX},
+      ClampCase{false, UINT32_MAX, UINT32_MAX, UINT64_MAX, UINT64_MAX, 1},
       ClampCase{true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
-                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN)},
+                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), 1},
       ClampCase{true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX)},
+                static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), 0},
   };
   for (const ClampCase &test : kCases) {
-    for (bool force_scalar : {false, true}) {
-      util::set_force_scalar_for_testing(force_scalar);
-      Fixture fx;
-      ASSERT_NE(fx.cu, nullptr);
-      ASSERT_NE(fx.wf, nullptr);
-      const uint32_t sb = fx.wf->sgpr_alloc().base;
-      ASSERT_EQ(sb % 2u, 0u);
-      const uint32_t opcode = test.is_signed ? 489u : 488u;
-      uint32_t words[2] = {0u, 0u};
-      vop3_sdstenc_encode(opcode, kDstVgpr, sb, /*src0=*/256, /*src1=*/258, /*src2=*/260, words,
-                          /*clamp=*/1);
-      std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words));
-      ASSERT_NE(inst, nullptr);
-      const uint32_t vb = fx.wf->vgpr_alloc().base;
-      fx.cu->write_vgpr(vb, 0, test.src0);
-      fx.cu->write_vgpr(vb + 2, 0, test.src1);
-      fx.write64(vb + 4, 0, test.src2);
-      fx.write64(vb + kDstVgpr, 0, 0u);
-      fx.write_sgpr64(sb, 0u);
-      fx.wf->set_exec(1u);
-      EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-      EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
-          << "signed " << test.is_signed << " scalar " << force_scalar;
-      EXPECT_EQ(fx.read_sgpr64(sb) & 1u, 1u)
-          << "signed " << test.is_signed << " scalar " << force_scalar;
-    }
+    for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4})
+      for (bool force_scalar : {false, true}) {
+        if (arch == ROCJITSU_CODE_ARCH_RDNA4 && !force_scalar)
+          continue; // The CO executor has no SIMD fast path.
+        SCOPED_TRACE(testing::Message() << "arch=" << arch << " scalar=" << force_scalar);
+        util::set_force_scalar_for_testing(force_scalar);
+        Fixture fx(arch);
+        ASSERT_NE(fx.cu, nullptr);
+        ASSERT_NE(fx.wf, nullptr);
+        const uint32_t sb = fx.wf->sgpr_alloc().base;
+        ASSERT_EQ(sb % 2u, 0u);
+        const auto words = encode_mad64(arch, test.is_signed, sb, 1);
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        const uint32_t vb = fx.wf->vgpr_alloc().base;
+        fx.cu->write_vgpr(vb, 0, test.src0);
+        fx.cu->write_vgpr(vb + 2, 0, test.src1);
+        fx.write64(vb + 4, 0, test.src2);
+        for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane)
+          fx.write64(vb + kDstVgpr, lane, dst_sentinel(lane));
+        fx.write_sgpr64(sb, SDST_SENTINEL);
+        fx.wf->set_exec(1u);
+        EXPECT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+        EXPECT_EQ(fx.read64(vb + kDstVgpr, 0), test.expected)
+            << "signed " << test.is_signed << " scalar " << force_scalar;
+        const uint64_t mask = fx.wf->wf_size() == 32 ? fx.cu->read_sgpr(sb) : fx.read_sgpr64(sb);
+        for (uint32_t lane = 1; lane < fx.wf->wf_size(); ++lane)
+          EXPECT_EQ(fx.read64(vb + kDstVgpr, lane), dst_sentinel(lane));
+        if (fx.wf->wf_size() == 32) {
+          EXPECT_EQ(fx.cu->read_sgpr(sb + 1), SDST_SENTINEL >> 32);
+        }
+        EXPECT_EQ(mask, test.expected_carry)
+            << "signed " << test.is_signed << " scalar " << force_scalar;
+      }
   }
 }
 

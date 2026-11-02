@@ -127,7 +127,9 @@ TEST(track_registry, concurrent_emplace_under_mutex_is_race_free)
     }
     go.store(true, std::memory_order_release);
     for(auto& th : threads)
+    {
         th.join();
+    }
 
     EXPECT_EQ(reg.map().size(), static_cast<size_t>(thread_count * inserts_each));
 }

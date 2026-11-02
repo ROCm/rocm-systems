@@ -21,6 +21,11 @@
 #ifndef RCCL_TEST_HOST_ENV_FAKES_H_
 #define RCCL_TEST_HOST_ENV_FAKES_H_
 
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
 // Strict: a name the fixture has not scripted reads as unset, so no test can
 // depend on the ambient environment. ncclGetEnv routes here.
 const char* micro_getenv(const char* name);
@@ -29,10 +34,15 @@ const char* micro_getenv(const char* name);
 // fall through to the real getenv.
 void SetMicroEnv(const char* name, const char* value);
 void SetMicroEnvAbsent(const char* name);
+void SetMicroEnviron(const std::vector<std::string>& entries);
 void ClearMicroEnv();
 
+extern std::function<int64_t(char const*, int64_t, int64_t, int64_t*, int8_t*)> g_ncclLoadParam;
+int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache,
+                         int8_t* noCache);
+
 // Named like every other per-TU reset so a Reset*Fakes() chain reads as one list
-// and "did I add mine?" is checkable by pattern. Currently just ClearMicroEnv().
+// and "did I add mine?" is checkable by pattern.
 void ResetEnvFakes();
 
 #endif  // RCCL_TEST_HOST_ENV_FAKES_H_

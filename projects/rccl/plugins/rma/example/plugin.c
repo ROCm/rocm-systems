@@ -41,6 +41,7 @@ struct rmaMemHandle {
 
 struct rmaRequest {
   int done;
+  uint32_t optFlags;
 };
 
 /* Shared functions */
@@ -100,7 +101,7 @@ __hidden ncclResult_t rmaConnect(void* ctx, void* handles[], int nranks, int ran
   return ncclSuccess;
 }
 
-__hidden ncclResult_t rmaCreateContext(void* collComm, ncclRmaConfig_v14_t* config, void** rmaCtxOut) {
+__hidden ncclResult_t rmaCreateContext(void* collComm, ncclRmaConfig_v15_t* config, void** rmaCtxOut) {
   struct rmaCtx* ctx = (struct rmaCtx*)calloc(1, sizeof(*ctx));
   if (ctx == NULL) return ncclSystemError;
   ctx->nContexts = config->nContexts;
@@ -153,15 +154,17 @@ __hidden ncclResult_t rmaFinalize(void* ctx) {
   return ncclSuccess;
 }
 
-__hidden struct rmaRequest* rmaAllocRequest(void) {
-  return (struct rmaRequest*)calloc(1, sizeof(struct rmaRequest));
+__hidden struct rmaRequest* rmaAllocRequest(uint32_t optFlags) {
+  struct rmaRequest* request = (struct rmaRequest*)calloc(1, sizeof(struct rmaRequest));
+  if (request != NULL) request->optFlags = optFlags;
+  return request;
 }
 
 /* Data operations */
 
 __hidden ncclResult_t rmaIput(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-    uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
-  struct rmaRequest* r = rmaAllocRequest();
+    uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
+  struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
   *request = r;
   return ncclSuccess;
@@ -170,23 +173,23 @@ __hidden ncclResult_t rmaIput(void* rmaCtx, int context, uint64_t srcOff, void* 
 __hidden ncclResult_t rmaIputSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle,
     size_t size, uint64_t dstOff, void* dstMhandle,
     uint32_t rank, uint64_t signalOff, void* signalMhandle,
-    uint64_t signalValue, uint32_t signalOp, bool isStrongSignal, void** request) {
-  struct rmaRequest* r = rmaAllocRequest();
+    uint64_t signalValue, uint32_t signalOp, bool isStrongSignal, uint32_t optFlags, void** request) {
+  struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
   *request = r;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t rmaIget(void* rmaCtx, int context, uint64_t remoteOff, void* remoteMhandle, size_t size,
-    uint64_t localOff, void* localMhandle, uint32_t rank, void** request) {
-  struct rmaRequest* r = rmaAllocRequest();
+    uint64_t localOff, void* localMhandle, uint32_t rank, uint32_t optFlags, void** request) {
+  struct rmaRequest* r = rmaAllocRequest(optFlags);
   if (r == NULL) return ncclSystemError;
   *request = r;
   return ncclSuccess;
 }
 
 __hidden ncclResult_t rmaIflush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
-  struct rmaRequest* r = rmaAllocRequest();
+  struct rmaRequest* r = rmaAllocRequest(ncclRmaOptFlagsDefault);
   if (r == NULL) return ncclSystemError;
   *request = r;
   return ncclSuccess;
@@ -204,7 +207,7 @@ __hidden ncclResult_t rmaProgress(void* rmaCtx) {
 
 /* Exported plugin struct */
 
-const ncclRma_v14_t ncclRmaPlugin_v14 = {
+const ncclRma_v15_t ncclRmaPlugin_v15 = {
   .name = "Example",
   .init = rmaInit,
   .devices = rmaDevices,

@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "util/except.h"
 #include <cstring>
 #include <string>
@@ -398,6 +397,9 @@ Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exe
     size_ += sizeof(MachineInst);
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop1VopDpp16MachineInst *>(inst));
 }
 
 void Vop1::implicit_uses(RegisterSet &uses) const {
@@ -757,6 +759,9 @@ Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exe
     literal_ = reinterpret_cast<const uint32_t *>(inst)[1];
   std::memcpy(raw_words_.data(), inst, size_);
   raw_encoding_ = raw_words_.data();
+  if (has_encoded_dpp())
+    dpp_modifiers_ = amdgpu::dpp::SourceModifiers::decode(
+        *reinterpret_cast<const Vop2VopDpp16MachineInst *>(inst));
 }
 
 void Vop2::implicit_uses(RegisterSet &uses) const {
@@ -1382,8 +1387,9 @@ bool Vop3p::has_lit_0_has_lit_1_has_lit_2() {
 }
 
 bool Ds::uses_split_ds_offsets() const {
-  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 55 && inst_.op <= 56) ||
-         (inst_.op >= 78 && inst_.op <= 79) || (inst_.op >= 119 && inst_.op <= 120);
+  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 46 && inst_.op <= 47) ||
+         (inst_.op >= 55 && inst_.op <= 56) || (inst_.op >= 78 && inst_.op <= 79) ||
+         (inst_.op >= 110 && inst_.op <= 111) || (inst_.op >= 119 && inst_.op <= 120);
 }
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)
@@ -1442,7 +1448,7 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
 }
 
 void Flat::implicit_uses(RegisterSet &uses) const {
-  if (inst_.saddr == 0x7F)
+  if (!(inst_.saddr != 0x7D && inst_.saddr != 127))
     return;
   if (inst_.seg == 1) {
     uses.expand(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(inst_.saddr), 1});

@@ -36,6 +36,7 @@ static inline size_t ncclRmaSignalOffset(int nRanks, int sigIdx, int rank) {
   return ncclRmaSignalSlot(nRanks, sigIdx, rank) * sizeof(uint64_t);
 }
 
+int64_t ncclParamRMADisable();
 bool ncclRmaProxyEnabled(struct ncclComm* comm);
 bool ncclRmaInitialized(struct ncclComm* comm);
 

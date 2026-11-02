@@ -281,6 +281,7 @@ def test_single_node_detailed_profiling(paths):
 
 @pytest.mark.ext_profiler
 @pytest.mark.reducescatter
+@pytest.mark.multinode
 def test_multinode_detailed_profiling(paths):
     """Test profiler with multi-node ReduceScatter operations using full event mask (255)"""
     

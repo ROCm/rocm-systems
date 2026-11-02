@@ -14,7 +14,7 @@
 ..     - python/hipfile/error.py
 ..     - python/hipfile/enums.py
 ..     - python/hipfile/properties.py
-..     - python/main.py
+..     - python/tests/main.py
 
 *******************
 Use the Python API

@@ -33,6 +33,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
 
   .. grid-item-card:: How to
 
+    * :doc:`Using the rocsys command <./how-to/using-rocsys>`
     * :doc:`Configuring the environment <./how-to/configuring-validating-environment>`
 
       * :doc:`Configuring runtime options <./how-to/configuring-runtime-options>`
@@ -50,6 +51,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
       * :doc:`OpenMP performance profiling <./how-to/openmp-profiling>`
       * :doc:`VCN and JPEG sampling and tracing <./how-to/vcn-jpeg-sampling>`
       * :doc:`XGMI, PCIe, and SDMA metrics monitoring <./how-to/xgmi-pcie-sdma-sampling>`
+      * :doc:`hipFile's AMD Infinity Storage I/O telemetry <./how-to/hipfile-telemetry>`
 
     * :doc:`Understanding the output <./how-to/understanding-rocprof-sys-output>`
     * :doc:`Use the preset profiles <./how-to/using-preset-profiles>`

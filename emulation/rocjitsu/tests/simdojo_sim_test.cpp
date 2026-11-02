@@ -17,11 +17,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <ctime>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <time.h>
 #include <vector>
 
 using namespace simdojo;
@@ -64,6 +64,13 @@ public:
 private:
   uint32_t num_events_;
   Event timer_event_{this, EventType::TIMER_CALLBACK};
+};
+
+/// Leaf kept alive until an external producer finishes posting events.
+class AsyncPrimaryComponent : public Component {
+public:
+  explicit AsyncPrimaryComponent(std::string name) : Component(std::move(name)) {}
+  void startup() override { engine()->register_as_primary(); }
 };
 
 /// Component with IN/OUT ports that replies to each received message.
@@ -1138,24 +1145,79 @@ TEST(TerminationTest, RequestExitWakesAllPartitions) {
 // down after the guest exited - which TSan caught as a data race and a use-after-free
 // on the partition's idle_wakeup_ flag.
 TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
-  // Single-threaded mode is what arms the wake path that dereferences contexts_[0].
-  // Iterate: the two threads must interleave inside the narrow shutdown window.
-  for (int iter = 0; iter < 200; ++iter) {
-    SimulationEngine engine({.num_threads = 1});
-    auto root = std::make_unique<CompositeComponent>("root");
-    root->add_child(std::make_unique<CounterComponent>("c0", 4));
-    engine.topology().set_root(std::move(root));
-    engine.create();
+  // Every worker mode dereferences context zero in its wake path. Iterate:
+  // the two threads must interleave inside the narrow shutdown window.
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    for (int iter = 0; iter < 100; ++iter) {
+      SimulationEngine engine({.num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      root->add_child(std::make_unique<CounterComponent>("c0", 4));
+      engine.topology().set_root(std::move(root));
+      if (partitions > 1)
+        engine.topology().partition_balanced(partitions);
+      engine.create();
 
-    // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
-    std::thread runner([&engine]() {
-      engine.run();
-      engine.shutdown();
-    });
+      // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
+      std::thread runner([&engine]() {
+        engine.run();
+        engine.shutdown();
+      });
 
-    // Mirrors the daemon teardown path landing concurrently with that shutdown.
-    engine.request_exit("test stop");
-    runner.join();
+      // Mirrors the daemon teardown path landing concurrently with that shutdown.
+      engine.request_exit("test stop");
+      runner.join();
+    }
+  }
+}
+
+// All foreign-thread termination paths must wake an idle engine, including a
+// barrier completion sleeping on behalf of the other partitions. No async event
+// is posted after termination to rescue a missing publication.
+TEST(TerminationTest, IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode) {
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    for (const bool release_primary : {false, true}) {
+      for (int iteration = 0; iteration < 16; ++iteration) {
+        SCOPED_TRACE(::testing::Message() << "partitions=" << partitions << " primary="
+                                          << release_primary << " iteration=" << iteration);
+        SimulationEngine engine({.num_threads = partitions, .await_primaries = true});
+        auto root = std::make_unique<CompositeComponent>("root");
+        if (release_primary)
+          root->add_child(std::make_unique<AsyncPrimaryComponent>("primary"));
+        engine.topology().set_root(std::move(root));
+        if (partitions > 1)
+          engine.topology().partition_balanced(partitions);
+        engine.create();
+
+        ExitStatus exit_status;
+        std::atomic<bool> finished{false};
+        std::thread runner([&]() {
+          exit_status = engine.run();
+          finished.store(true, std::memory_order_release);
+        });
+        const bool started = engine.wait_until_started();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (release_primary)
+          engine.primary_release();
+        else
+          engine.request_exit("idle exit", 7);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!finished.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+        if (!finished_on_its_own)
+          engine.request_exit("idle termination timeout", 1);
+        runner.join();
+
+        EXPECT_TRUE(started);
+        EXPECT_TRUE(finished_on_its_own);
+        EXPECT_EQ(exit_status.reason,
+                  release_primary ? ExitReason::COMPLETED : ExitReason::EXIT_REQUEST);
+        EXPECT_EQ(exit_status.code, release_primary ? 0 : 7);
+      }
+    }
   }
 }
 
@@ -1269,36 +1331,104 @@ TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
   EXPECT_EQ(responder->recv_count, 1u);
 }
 
-// Regression: a quiescent multi-partition engine must idle, not spin.
+#if defined(CLOCK_THREAD_CPUTIME_ID)
+class IdleCpuProbe : public Component {
+public:
+  IdleCpuProbe(std::string name, std::atomic<uint64_t> &sample)
+      : Component(std::move(name)), sample_(sample) {
+    sample_event_.set_handler([this](Tick, Message *) {
+      timespec cpu{};
+      const uint64_t value = ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu) == 0
+                                 ? static_cast<uint64_t>(cpu.tv_sec) * 1'000'000'000 + cpu.tv_nsec
+                                 : UINT64_MAX;
+      sample_.store(value, std::memory_order_release);
+    });
+  }
+
+  void startup() override { engine()->register_as_primary(); }
+  Event *sample_event() { return &sample_event_; }
+
+private:
+  std::atomic<uint64_t> &sample_;
+  Event sample_event_{this, EventType::TIMER_CALLBACK};
+};
+#endif
+
+// Regression: a quiescent engine must idle, not spin, in every worker mode.
 //
-// With no idle wait in the epoch loop, every partition of an idle engine burns a
-// host core going round the barrier. rocjitsu's own suite runs many emulators at
-// once under `ctest -j`, and those spinning partitions starved the guest process
-// that had to ring the next doorbell -- so an idle engine never became busy
-// again. Measured as CPU time, which is what starves a peer; wall time is not.
+// The single worker waits directly; in multi-worker mode, barrier completion
+// waits on behalf of all partitions. Removing either wait burns host CPU and
+// can starve the guest process that must ring the next doorbell. Measure only
+// worker CPU time so sanitizer and helper threads do not count against this
+// engine's budget. Sampling events also finish worker startup before measuring.
 TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
-  SimulationEngine engine({.num_threads = 4});
-  auto root = std::make_unique<CompositeComponent>("root");
-  for (int i = 0; i < 4; ++i)
-    root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
-  engine.topology().set_root(std::move(root));
-  engine.topology().partition_balanced(4);
-  engine.create();
+#if !defined(CLOCK_THREAD_CPUTIME_ID)
+  GTEST_SKIP() << "per-thread CPU clocks are unavailable";
+#else
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    std::vector<std::atomic<uint64_t>> samples(partitions);
+    SimulationEngine engine({.num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    std::vector<IdleCpuProbe *> probes;
+    for (uint32_t i = 0; i < partitions; ++i) {
+      auto probe = std::make_unique<IdleCpuProbe>("idle" + std::to_string(i), samples[i]);
+      probes.push_back(probe.get());
+      root->add_child(std::move(probe));
+    }
+    engine.topology().set_root(std::move(root));
+    engine.topology().partition_balanced(partitions);
+    engine.create();
+    for (uint32_t i = 0; i < partitions; ++i)
+      ASSERT_EQ(std::ranges::count_if(
+                    probes, [i](const IdleCpuProbe *probe) { return probe->partition_id() == i; }),
+                1);
 
-  std::thread runner([&]() { engine.run(); });
-  ASSERT_TRUE(engine.wait_until_started());
+    std::thread runner([&]() { engine.run(); });
+    const bool started = engine.wait_until_started();
 
-  const auto cpu_before = std::clock();
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  const auto cpu_used =
-      static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+    const auto sample_cpu = [&](uint64_t &total) {
+      for (std::atomic<uint64_t> &sample : samples)
+        sample.store(0, std::memory_order_relaxed);
+      for (IdleCpuProbe *probe : probes)
+        engine.schedule_event_now(probe->sample_event());
+      const std::chrono::steady_clock::time_point deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (std::chrono::steady_clock::now() < deadline) {
+        total = 0;
+        bool ready = true;
+        for (const std::atomic<uint64_t> &sample : samples) {
+          const uint64_t value = sample.load(std::memory_order_acquire);
+          if (value == UINT64_MAX)
+            return false;
+          ready &= value != 0;
+          total += value;
+        }
+        if (ready)
+          return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      return false;
+    };
+    uint64_t cpu_before = 0, cpu_after = 0;
+    const bool sampled_before = started && sample_cpu(cpu_before);
+    if (sampled_before)
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const bool sampled_after = sampled_before && sample_cpu(cpu_after);
 
-  engine.request_exit("test stop");
-  runner.join();
+    engine.request_exit("test stop");
+    runner.join();
 
-  // Four spinning partitions burn ~0.8s of CPU over this window; four idle ones
-  // burn milliseconds. The threshold is one core's worth, well clear of both.
-  EXPECT_LT(cpu_used, 0.2) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+    ASSERT_TRUE(started);
+    ASSERT_TRUE(sampled_before);
+    ASSERT_TRUE(sampled_after);
+    ASSERT_GE(cpu_after, cpu_before);
+    const double cpu_used = static_cast<double>(cpu_after - cpu_before) / 1'000'000'000;
+    // Even one spinning worker burns about 0.2s of CPU over this window; idle
+    // workers burn milliseconds. Leave room for startup and scheduling noise.
+    EXPECT_LT(cpu_used, 0.05) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+  }
+#endif
 }
 
 TEST(TerminationTest, StepModeConsistency) {
@@ -1450,6 +1580,109 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   }
 
   EXPECT_GE(injected_tick.load(), before);
+}
+
+// Regression: draining a handler's async self-post can leave its wake flag set.
+// Clearing that stale notification must acquire any concurrent producer's
+// publication, or the worker can sleep with an event stranded in the async queue.
+TEST(AsyncCausalityTest, StaleWakeDoesNotHideConcurrentPublication) {
+  constexpr uint32_t kEvents = 2000;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *target = root->add_child(std::make_unique<AsyncPrimaryComponent>("target"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  std::atomic<uint32_t> processed{0};
+  Event noop{target, EventType::TIMER_CALLBACK, [](Tick, Message *) {}};
+  Event test_event{target, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+                     // Self-posting leaves a stale wake flag after the no-op is
+                     // drained, so idle entry can race the next publication.
+                     engine.schedule_event_now(&noop);
+                     if (processed.fetch_add(1, std::memory_order_release) + 1 == kEvents)
+                       engine.primary_release();
+                   }};
+  ExitStatus exit_status;
+  std::thread runner([&]() { exit_status = engine.run(); });
+  const bool started = engine.wait_until_started();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  uint32_t sent = 0;
+  if (started) {
+    // Only one producer event may be outstanding: a later publication must not
+    // rescue a lost wake.
+    while (sent < kEvents && std::chrono::steady_clock::now() < deadline) {
+      engine.schedule_event_now(&test_event);
+      ++sent;
+      while (processed.load(std::memory_order_acquire) < sent &&
+             std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    }
+  }
+  const bool completed = processed.load(std::memory_order_acquire) == kEvents;
+  if (!completed)
+    engine.request_exit("async notification timeout", /*code=*/1);
+  runner.join();
+  EXPECT_TRUE(started);
+  EXPECT_TRUE(completed) << "sent " << sent << ", processed " << processed.load();
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+}
+
+// Successive quiescent barrier completions can run on different workers, but
+// they share one notification consumer. Exercise publications to every partition
+// while self-posts leave stale notifications; a later producer cannot rescue a
+// stranded event because at most one producer event is outstanding.
+TEST(AsyncCausalityTest, QuiescentPublicationsToEveryPartitionMakeProgress) {
+  constexpr uint32_t kEvents = 2000;
+  for (const uint32_t partitions : {2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    std::vector<Component *> targets;
+    for (uint32_t i = 0; i < partitions; ++i)
+      targets.push_back(
+          root->add_child(std::make_unique<AsyncPrimaryComponent>("target" + std::to_string(i))));
+    engine.topology().set_root(std::move(root));
+    engine.topology().partition_manual(partitions, partition_by_name_suffix);
+    engine.create();
+
+    std::atomic<uint32_t> processed{0};
+    std::vector<std::unique_ptr<Event>> noops;
+    std::vector<std::unique_ptr<Event>> events;
+    for (uint32_t i = 0; i < partitions; ++i) {
+      noops.push_back(
+          std::make_unique<Event>(targets[i], EventType::TIMER_CALLBACK, [](Tick, Message *) {}));
+      events.push_back(
+          std::make_unique<Event>(targets[i], EventType::TIMER_CALLBACK, [&, i](Tick, Message *) {
+            engine.schedule_event_now(noops[i].get());
+            processed.fetch_add(1, std::memory_order_release);
+          }));
+    }
+    ExitStatus exit_status;
+    std::thread runner([&]() { exit_status = engine.run(); });
+    const bool started = engine.wait_until_started();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint32_t sent = 0;
+    if (started) {
+      while (sent < kEvents && std::chrono::steady_clock::now() < deadline) {
+        engine.schedule_event_now(events[sent % partitions].get());
+        ++sent;
+        while (processed.load(std::memory_order_acquire) < sent &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+      }
+    }
+    const bool completed = processed.load(std::memory_order_acquire) == kEvents;
+    if (completed) {
+      for (uint32_t i = 0; i < partitions; ++i)
+        engine.primary_release();
+    } else {
+      engine.request_exit("multi-partition notification timeout", 1);
+    }
+    runner.join();
+    EXPECT_TRUE(started);
+    EXPECT_TRUE(completed) << "sent " << sent << ", processed " << processed.load();
+    EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+  }
 }
 
 TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
@@ -1668,6 +1901,66 @@ template <uint32_t Ways> void check_lru_way_indices() {
     EXPECT_EQ(copied.victim(1), 0u);
   }
 }
+
+template <uint32_t LineSizeBits> void check_valid_byte_range_updates() {
+  using RangeCache = Cache<LineSizeBits, 1, 1>;
+  constexpr std::array<std::array<uint64_t, 2>, 6> initial_masks = {{
+      {0, 0},
+      {~uint64_t{0}, ~uint64_t{0}},
+      {0, ~uint64_t{0}},
+      {~uint64_t{0}, 0},
+      {0xA5A5A5A5A5A5A5A5, 0x5A5A5A5A5A5A5A5A},
+      {0x0123456789ABCDEF, 0xFEDCBA9876543210},
+  }};
+  for (const auto &initial : initial_masks) {
+    std::array<bool, 128> initial_bytes{};
+    for (uint32_t byte = 0; byte < initial_bytes.size(); ++byte)
+      initial_bytes[byte] = (initial[byte / 64] >> (byte % 64)) & 1;
+    for (uint32_t offset = 0; offset <= RangeCache::LINE_SIZE; ++offset) {
+      for (uint32_t size = 0; size <= RangeCache::LINE_SIZE - offset; ++size) {
+        CacheTag tag;
+        tag.valid_bytes = initial;
+        auto expected_bytes = initial_bytes;
+        bool expected_valid = true;
+        for (uint32_t byte = offset; byte < offset + size; ++byte) {
+          expected_valid &= expected_bytes[byte];
+          expected_bytes[byte] = true;
+        }
+        ASSERT_EQ(RangeCache::bytes_valid(tag, offset, size), expected_valid)
+            << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size;
+        ASSERT_EQ(tag.valid_bytes, initial);
+        RangeCache::mark_valid_bytes(tag, offset, size);
+        // Inspect the full two-word mask, including bits beyond smaller line
+        // geometries: marking this range must leave those bits unchanged.
+        for (uint32_t byte = 0; byte < expected_bytes.size(); ++byte) {
+          const bool observed = (tag.valid_bytes[byte / 64] >> (byte % 64)) & 1;
+          ASSERT_EQ(observed, expected_bytes[byte])
+              << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size
+              << " byte=" << byte;
+        }
+        ASSERT_TRUE(RangeCache::bytes_valid(tag, offset, size));
+      }
+    }
+  }
+}
+
+template <uint32_t LineSizeBits> void check_valid_byte_queries_with_one_missing_byte() {
+  using RangeCache = Cache<LineSizeBits, 1, 1>;
+  for (uint32_t missing = 0; missing < RangeCache::LINE_SIZE; ++missing) {
+    CacheTag tag;
+    tag.valid_bytes[missing / 64] &= ~(uint64_t{1} << (missing % 64));
+    const auto initial = tag.valid_bytes;
+    for (uint32_t offset = 0; offset <= RangeCache::LINE_SIZE; ++offset) {
+      for (uint32_t size = 0; size <= RangeCache::LINE_SIZE - offset; ++size) {
+        const bool expected_valid = missing < offset || missing >= offset + size;
+        ASSERT_EQ(RangeCache::bytes_valid(tag, offset, size), expected_valid)
+            << "line=" << RangeCache::LINE_SIZE << " offset=" << offset << " size=" << size
+            << " missing=" << missing;
+      }
+    }
+    ASSERT_EQ(tag.valid_bytes, initial);
+  }
+}
 } // namespace
 
 TEST(CacheLruTest, WayIndicesCoverByteBoundary) {
@@ -1745,6 +2038,28 @@ TEST(CacheStorageTest, PartialLineTracksValidBytes) {
   EXPECT_EQ(observed, kBytes);
 }
 
+TEST(CacheStorageTest, ValidByteRangesMatchIndependentByteOracle) {
+  check_valid_byte_range_updates<0>();
+  check_valid_byte_range_updates<1>();
+  check_valid_byte_range_updates<2>();
+  check_valid_byte_range_updates<3>();
+  check_valid_byte_range_updates<4>();
+  check_valid_byte_range_updates<5>();
+  check_valid_byte_range_updates<6>();
+  check_valid_byte_range_updates<7>();
+}
+
+TEST(CacheStorageTest, ValidByteQueriesDetectEveryMissingByte) {
+  check_valid_byte_queries_with_one_missing_byte<0>();
+  check_valid_byte_queries_with_one_missing_byte<1>();
+  check_valid_byte_queries_with_one_missing_byte<2>();
+  check_valid_byte_queries_with_one_missing_byte<3>();
+  check_valid_byte_queries_with_one_missing_byte<4>();
+  check_valid_byte_queries_with_one_missing_byte<5>();
+  check_valid_byte_queries_with_one_missing_byte<6>();
+  check_valid_byte_queries_with_one_missing_byte<7>();
+}
+
 TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
   TestCache cache;
   for (uint32_t round = 0; round < 4; ++round) {
@@ -1760,6 +2075,33 @@ TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
     EXPECT_FALSE(tag->dirty);
     EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
     EXPECT_EQ(tag->coherence_epoch, 0u);
+    cache.invalidate_all();
+  }
+}
+
+TEST(CacheMaintenanceTest, FullInvalidationVisitsSparseAndBoundarySets) {
+  Cache<6, 32, 2> cache;
+  constexpr std::array<uint32_t, 5> sets{0, 7, 8, 24, 31};
+  std::array<CacheTag *, sets.size()> retained{};
+  for (uint32_t round = 0; round != 3; ++round) {
+    for (size_t index = 0; index != sets.size(); ++index) {
+      const uint64_t address = uint64_t{sets[index]} * 64;
+      auto *tag = cache.allocate(address, round);
+      tag->dirty = true;
+      tag->coherence_epoch = 17;
+      tag->coherence = CoherenceState::MODIFIED;
+      retained[index] = tag;
+      if (index % 2 == 0)
+        cache.invalidate(address, round);
+    }
+    cache.invalidate_all();
+    for (size_t index = 0; index != sets.size(); ++index) {
+      EXPECT_FALSE(cache.lookup(uint64_t{sets[index]} * 64, nullptr, round));
+      EXPECT_FALSE(retained[index]->valid);
+      EXPECT_FALSE(retained[index]->dirty);
+      EXPECT_EQ(retained[index]->coherence_epoch, 0u);
+      EXPECT_EQ(retained[index]->coherence, CoherenceState::INVALID);
+    }
     cache.invalidate_all();
   }
 }

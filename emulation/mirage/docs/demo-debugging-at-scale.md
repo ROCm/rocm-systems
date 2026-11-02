@@ -196,7 +196,7 @@ flowchart TB
     root --> ctl["mirage_ctl<br/>CLI verbs · run · exec"]
     root --> core["mirage_core<br/>types · XDG paths · proto · traits"]
     ctl --> sup["mirage_supervisor<br/>session/exec/process engine"]
-    ctl --> builtin["mirage_builtin<br/>embedded agents/topologies/profiles"]
+    ctl --> builtin["mirage_builtin<br/>embedded agents/topologies<br/>generated profiles"]
     sup --> cont["mirage_container<br/>podman/docker provider"]
     root -.link-only.-> rj["mirage_rocjitsu (+ dbt)"]
     root -.link-only.-> hot["mirage_hotswap"]

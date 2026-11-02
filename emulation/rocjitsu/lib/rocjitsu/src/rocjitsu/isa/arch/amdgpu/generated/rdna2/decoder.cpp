@@ -4104,7 +4104,7 @@ const std::array<DecoderImpl::DecodeFunc, 1024> DecoderImpl::sub_decode_vop3 = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeVLshlrevB64Vop3,
     &detail::decodeVLshrrevB64Vop3,
     &detail::decodeVAshrrevI64Vop3,
     &DecoderImpl::decodeInvalid,

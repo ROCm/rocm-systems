@@ -92,6 +92,8 @@ def test_single_node(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 # Single-node AllGather is a collective; p2p_perf records are from
                 # explicit Send/Recv and are skipped here.
@@ -184,6 +186,8 @@ def test_single_node_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 if "coll_perf" not in record:
                     continue
@@ -301,6 +305,8 @@ def test_multinode(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 if "coll_perf" not in record:
                     continue
@@ -426,6 +432,8 @@ def test_multinode_verbose(paths, inspector_helpers):
                 if not line:
                     continue
                 record = json.loads(line)
+                if "dump_stats" in record:
+                    continue
 
                 if "coll_perf" not in record:
                     continue
