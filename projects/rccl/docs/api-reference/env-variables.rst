@@ -1200,6 +1200,17 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL tier ceiling, overriding the table.
           Pre-table default: ``65536`` (64 KiB).
 
+    * - | ``RCCL_DDA_LL_ONESHOT_THRESHOLD``
+        | Upper bound in bytes for the DDA LL one-shot AllReduce; larger messages in
+          the LL tier use the LL two-shot. When unset on gfx1250 (except DPX),
+          messages above 349520 bytes also move to the LL two-shot when it saves at
+          least 1 MiB of wire per rank and the message divides into 16-byte shards
+          per rank. Setting the variable, even to its default, keeps the one-shot up
+          to the given size.
+      - | Default: ``1048576`` (1 MiB).
+        | ``N`` (bytes): Use ``N`` as the one-shot limit; no earlier hand-off to the
+          two-shot.
+
     * - | ``RCCL_DDA_LL128``
         | Enables the DDA LL128 protocol tier. When ``-1`` (auto), LL128 is enabled
           only for architectures whose per-arch table has a non-zero ``ddaLL128Max``
