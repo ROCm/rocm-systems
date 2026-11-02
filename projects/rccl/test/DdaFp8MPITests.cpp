@@ -364,7 +364,7 @@ protected:
 
 // ---------------------------------------------------------------------------
 // LL: the defaults. Every size here is inside every collective's LL window, and
-// AllReduce is inside this comm's one-shot cap.
+// AllReduce is inside the 1 MiB one-shot threshold.
 // ---------------------------------------------------------------------------
 
 class DdaFp8MPI_LL : public DdaFp8MPITest
@@ -376,11 +376,9 @@ protected:
     }
 };
 
-// The largest size follows this comm's LL one-shot cap, so the one-shot claims every size.
 TEST_F(DdaFp8MPI_LL, AllReduceOneShot)
 {
-    const size_t largest = DdaFabricMPI::ddaLLOneShotCount(getActiveCommunicator(), 64 * 1024, 1);
-    forEachFp8AndCount({kLine, kPrimeLines, largest}, [this](ncclDataType_t datatype, size_t count) {
+    forEachFp8AndCount({kLine, kPrimeLines, 64 * 1024}, [this](ncclDataType_t datatype, size_t count) {
         runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL, ArVariant::LLOneShot);
     });
 }

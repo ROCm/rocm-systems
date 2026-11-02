@@ -571,7 +571,7 @@ struct DdaRevokeCase
     int                        expectedAlgo;
     int                        expectedProtocol;
     std::vector<DdaEnvSetting> overrides;
-    bool                       llOneShot = false; // clip count to this comm's LL one-shot cap and require the one-shot
+    bool                       llOneShot = false; // also require the LL one-shot variant
 };
 
 size_t ddaSendElems(ncclFunc_t func, size_t count, int nRanks)
@@ -642,14 +642,8 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     const int    rank      = MPIEnvironment::world_rank;
     const int    worldSize = MPIEnvironment::world_size;
     const int    skipRank  = worldSize - 1;
-    const size_t count
-        = tc.llOneShot ? DdaFabricMPI::ddaLLOneShotCount(parent, tc.count, sizeof(float)) : tc.count;
-    const std::string capSkip
-        = mpiCoordinatedSkipReason(count == 0, "RCCL_DDA_LL_ONESHOT_THRESHOLD leaves no one-shot size");
-    if(!capSkip.empty())
-        GTEST_SKIP() << capSkip;
-    const size_t sendElems = ddaSendElems(tc.func, count, worldSize);
-    const size_t recvElems = ddaRecvElems(tc.func, count, worldSize);
+    const size_t sendElems = ddaSendElems(tc.func, tc.count, worldSize);
+    const size_t recvElems = ddaRecvElems(tc.func, tc.count, worldSize);
 
     void* sendBuf = nullptr;
     void* recvBuf = nullptr;
@@ -665,12 +659,12 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     int protocol    = -1;
     int maxChannels = -1;
     ASSERT_MPI_EQ(ncclSuccess,
-                  rcclGetCollImplInfo(parent, tc.func, count, ncclFloat32, ncclSum, sendBuf,
+                  rcclGetCollImplInfo(parent, tc.func, tc.count, ncclFloat32, ncclSum, sendBuf,
                                       recvBuf, /*graphCapturing=*/0, &algo, &protocol,
                                       &maxChannels));
     // rcclGetCollImplInfo names the LL tier, not the variant, so the one-shot is checked on its own.
     const bool variantOk
-        = !tc.llOneShot || ddaLLArOneShotEligible(parent, sendBuf, recvBuf, count, ncclFloat32, ncclSum);
+        = !tc.llOneShot || ddaLLArOneShotEligible(parent, sendBuf, recvBuf, tc.count, ncclFloat32, ncclSum);
     const bool pathOk = algo == tc.expectedAlgo && protocol == tc.expectedProtocol && variantOk;
     if(!tc.overrides.empty())
     {
@@ -685,7 +679,7 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 
     ncclResult_t launchRes = ncclSuccess;
     if(rank != skipRank)
-        launchRes = ddaLaunch(tc.func, sendBuf, recvBuf, count, parent, stream);
+        launchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream);
     ASSERT_MPI_EQ(ncclSuccess, launchRes);
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -696,7 +690,7 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
                                                 "DDA wait after ncclCommRevoke");
 
     // The revoked parent still has unconsumed barrier flags, so DDA must not run on it again.
-    ASSERT_MPI_EQ(ncclInvalidUsage, ddaLaunch(tc.func, sendBuf, recvBuf, count, parent, stream));
+    ASSERT_MPI_EQ(ncclInvalidUsage, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream));
 
     std::vector<int> excludeList;
     bool             isExcluded = false;
@@ -716,7 +710,7 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     // DDA IPC needs exactly 8 ranks, so for the IPC cases the 7-rank child runs a generic kernel.
     ncclResult_t childLaunchRes = ncclSuccess;
     if(!isExcluded)
-        childLaunchRes = ddaLaunch(tc.func, sendBuf, recvBuf, count, child, stream);
+        childLaunchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, child, stream);
     ASSERT_MPI_EQ(ncclSuccess, childLaunchRes);
     if(!isExcluded)
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));

@@ -1746,6 +1746,7 @@ constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
+  t.ddaArLLOneShotMaxBytes = 349520;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
   t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
@@ -6962,25 +6963,6 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
-// With an arch table the LL one-shot AllReduce stops at 349520 bytes per peer at every rank count; without one it
-// keeps the RCCL_DDA_LL_ONESHOT_THRESHOLD default.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_PerPeerCapAtEveryRankCount) {
-  RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_PerPeerCapAtEveryRankCount",
-      []() {
-        SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        rcclArchThresholds table = MakeRankScaledTable();
-        comm->archThresholds = &table;
-        for (int nRanks : {2, 4, 8, 15, 16, 32, 64}) {
-          comm->nRanks = nRanks;
-          EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm)) << nRanks;
-        }
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr)) << "no comm, no table: the default";
-        DeleteCommWithArch(comm);
-      });
-}
-
 // The cap applies with an arch table, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsCap) {
   RUN_ISOLATED_TEST(
@@ -7006,10 +6988,8 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverCap) {
         g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(1) << 20);
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
-        for (int nRanks : {4, 8, 16, 32}) {
-          comm->nRanks = nRanks;
-          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << nRanks;
-        }
+        comm->nRanks = 8;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -7835,7 +7815,7 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx1250 DPX and SPX: the LL one-shot AllReduce stops at 349520 bytes at every rank count.
+// gfx1250 DPX and SPX tables: the LL one-shot AllReduce crossover is 349520 bytes at every rank count; none elsewhere.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLOneShotThreshold_Gfx1250PerPeerCap",
@@ -7850,6 +7830,10 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
             EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm)) << (int)part << " " << nRanks;
           }
         }
+        rcclArchThresholds noCap{};
+        comm->archThresholds = &noCap;
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "a table without the field keeps the default";
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr)) << "no comm, no table: the default";
         DeleteCommWithArch(comm);
       });
 }

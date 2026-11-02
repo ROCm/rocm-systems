@@ -863,10 +863,11 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_InvalidDatatypeDispatch)
 // enabled by DDA_LL and each carries its own threshold on the total message
 // size, with one-shot tested first.
 //
-// These run under the default parameter values -- DDA_LL=1, a 1 MiB
-// DDA_LL_ONESHOT_THRESHOLD and a 2 MiB DDA_LL_TWOSHOT_THRESHOLD, which gfx1250
-// raises to nRanks x 1 MiB from 8 ranks -- so sizes above 1 MiB are claimed by
-// the two-shot tier, which is what makes the tier split observable from here. They deliberately do not setenv:
+// These run under the default parameter values: DDA_LL=1, a 1 MiB
+// DDA_LL_ONESHOT_THRESHOLD that gfx1250 lowers to a 349520-byte crossover, and a
+// 2 MiB DDA_LL_TWOSHOT_THRESHOLD, which gfx1250 raises to nRanks x 1 MiB from 8
+// ranks. Above the crossover the two-shot tier claims what it can take, which is
+// what makes the tier split observable from here. They deliberately do not setenv:
 // RCCL_PARAM caches on first read, and the NCCL_NO_CACHE opt-out is resolved once
 // per process, so a test that changed a threshold would depend on being the first
 // in the binary to touch it. Two guards stay out of reach as a result:
@@ -993,15 +994,17 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_EligibleBfloat16)
         mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16, ncclSum));
 }
 
-// 262144 floats is exactly the default 1 MiB DDA_LL_ONESHOT_THRESHOLD, which the
-// tier takes with <=.
-TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtOneShotThresholdEligible)
+// gfx1250's 349520-byte LL one-shot crossover (87380 floats), taken with <=. Past it the one-shot yields only to a
+// two-shot that takes the message: 87392 floats divide into 16 B shards on 8 ranks, 87384 floats do not.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_OneShotCrossoverYieldsToTwoShotOnly)
 {
-    EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
-        mockComm_.get(), sendbuff_, recvbuff_, 262144, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ddaLLArOneShotEligible(mockComm_.get(), sendbuff_, recvbuff_, 87380, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLLArOneShotEligible(mockComm_.get(), sendbuff_, recvbuff_, 87392, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ddaLLArTwoShotEligible(mockComm_.get(), sendbuff_, recvbuff_, 87392, ncclFloat32, ncclSum));
+    EXPECT_TRUE(ddaLLArOneShotEligible(mockComm_.get(), sendbuff_, recvbuff_, 87384, ncclFloat32, ncclSum));
 }
 
-// 262176 floats is 1 MiB + 128 bytes: past the one-shot threshold, so one-shot
+// 262176 floats is 1 MiB + 128 bytes: past the 1 MiB one-shot limit, so one-shot
 // cannot be what accepts it, and a multiple of 16 * nRanks so the shard satisfies
 // the two-shot shape rules. Accepting it is the two-shot tier serving the range
 // above the one-shot threshold.

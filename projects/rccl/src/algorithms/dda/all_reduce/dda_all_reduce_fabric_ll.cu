@@ -37,6 +37,7 @@
 #include <utility>
 
 RCCL_PARAM_DECLARE(DdaLL);
+RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
 
 namespace {
@@ -314,9 +315,7 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
 // the tier is switched on for this size.
 bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                             ncclDataType_t datatype, ncclRedOp_t op) {
-  (void)sendbuff;
-  (void)recvbuff;
-  if (count * ncclTypeSize(datatype) > rcclDdaLLOneShotThreshold(comm)) {
+  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
     return false;
   }
 
@@ -349,6 +348,11 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   // the bank gives each rank. A bank too small for one packet per rank takes the
   // tier out entirely.
   if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
+    return false;
+  }
+  // Past rcclDdaLLOneShotThreshold the LL two-shot is cheaper; the one-shot keeps a message the two-shot cannot take.
+  if (bytes > rcclDdaLLOneShotThreshold(comm) &&
+      ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     return false;
   }
 
