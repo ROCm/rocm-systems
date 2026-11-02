@@ -35,3 +35,22 @@ Prefer short, precise comments over verbose descriptions. File comments explain
 scope; function comments explain purpose and contract. Comments within a function
 explain nontrivial arithmetic or layout decisions. Plain `//` comments suffice;
 Doxygen markup is not required.
+
+## CPU-specific implementation symbols
+
+CMake selects `RJ_ARITH_IMPL_NAMESPACE` together with each source's CPU options.
+Shared implementation definitions belong to that namespace, so the linker cannot
+substitute a definition compiled for a different ISA. Backend entry points carry
+their ISA in their name; cross-backend headers contain declarations only.
+File-local helpers may instead have internal linkage.
+
+Implementation code avoids runtime C++ standard-library functions, including
+implicit calls through containers and initializer lists. Use the small internal
+bit helpers, compiler intrinsics, fixed arrays, or C library functions as needed.
+Compile-time traits are fine. Tests and benchmarks are not subject to this rule.
+
+The baseline resets the CPU model with `-march=x86-64`. Enclosing builds must
+not enable stronger explicit ISA flags globally: a trailing `-march` does not
+cancel options such as `-mavx2`. The archive audit checks symbol ownership,
+not the instruction set of each function. Debug CI exercises emitted inline
+definitions that optimized builds may remove.

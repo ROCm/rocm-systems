@@ -10,7 +10,7 @@ use super::output::write_value;
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::{self, *};
-use crate::runtime::{boundary, lock, map_error};
+use crate::runtime::{boundary, lock, map_error, plain_boundary};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
 use crate::{image_abi, loader};
 use crate::{image_gfx12, runtime};
@@ -342,21 +342,25 @@ pub unsafe extern "C" fn hsa_system_get_extension_table(
     version_minor: u16,
     table: *mut c_void,
 ) -> Status {
-    let table_length = match (extension, version_major, version_minor) {
-        (EXTENSION_IMAGES, 1, 0) => 10 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 0) => 3 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 1) => 5 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 2) => 6 * size_of::<usize>(),
-        (EXTENSION_AMD_LOADER, 1, 3) => 7 * size_of::<usize>(),
-        (EXTENSION_AMD_PC_SAMPLING, 1, 0) => 7 * size_of::<usize>(),
-        _ => 0,
-    };
-    if table_length == 0 {
-        return ERROR;
-    }
-    // SAFETY: This deprecated entry point selects the historical table length
-    // and delegates the pointer contract to the major-version API.
-    unsafe { hsa_system_get_major_extension_table(extension, version_major, table_length, table) }
+    boundary(|| {
+        let table_length = match (extension, version_major, version_minor) {
+            (EXTENSION_IMAGES, 1, 0) => 10 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 0) => 3 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 1) => 5 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 2) => 6 * size_of::<usize>(),
+            (EXTENSION_AMD_LOADER, 1, 3) => 7 * size_of::<usize>(),
+            (EXTENSION_AMD_PC_SAMPLING, 1, 0) => 7 * size_of::<usize>(),
+            _ => 0,
+        };
+        if table_length == 0 {
+            return ERROR;
+        }
+        // SAFETY: This deprecated entry point selects the historical table
+        // length and delegates to the major-version API.
+        unsafe {
+            hsa_system_get_major_extension_table(extension, version_major, table_length, table)
+        }
+    })
 }
 
 /// # Safety
@@ -466,7 +470,7 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_status_string(status: Status, output: *mut *const c_char) -> Status {
-    boundary(|| {
+    plain_boundary(|| {
         if output.is_null() {
             return INVALID_ARGUMENT;
         }
