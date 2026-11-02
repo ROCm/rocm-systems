@@ -6963,10 +6963,10 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
-// The cap applies with an arch table, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsCap) {
+// The crossover comes from the arch table, so RCCL_IGNORE_ARCH_TABLE=1 keeps the 1 MiB default on gfx1250.
+TEST(WrapMicrotestIsolated, DdaLLOneShotCrossover_IgnoreArchTableKeepsTheDefault) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_IgnoreArchTableDropsCap",
+      "Wrap_DdaLLOneShotCrossover_IgnoreArchTableKeepsTheDefault",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         g_loadParam = ForceParam("RCCL_IGNORE_ARCH_TABLE", int64_t(1));
@@ -6978,26 +6978,25 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsCap) {
       });
 }
 
-// A user-set RCCL_DDA_LL_ONESHOT_THRESHOLD wins at every rank count, even at
-// its default value.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverCap) {
+// A user-set RCCL_DDA_LL_ONESHOT_THRESHOLD is the crossover, above the table's 349520 bytes too.
+TEST(WrapMicrotestIsolated, DdaLLOneShotCrossover_EnvWinsOverTheTable) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_EnvWinsOverCap",
+      "Wrap_DdaLLOneShotCrossover_EnvWinsOverTheTable",
       []() {
-        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "1048576");
-        g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(1) << 20);
+        SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "524288");
+        g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(524288));
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 8;
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(comm));
+        EXPECT_EQ(512 * kKiB, rcclDdaLLOneShotCrossover(comm));
         DeleteCommWithArch(comm);
       });
 }
 
-// An empty value is not a setting, so the cap stays in force.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
+// An empty value is not a setting, so the table's crossover applies.
+TEST(WrapMicrotestIsolated, DdaLLOneShotCrossover_EmptyEnvIsUnset) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_EmptyEnvIsUnset",
+      "Wrap_DdaLLOneShotCrossover_EmptyEnvIsUnset",
       []() {
         SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "");
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -7815,10 +7814,10 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx1250 SPX table: the LL one-shot AllReduce crossover is 349520 bytes at every rank count; DPX keeps the default.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
+// gfx1250 tables: the LL one-shot AllReduce crossover is 349520 bytes at every rank count; DPX keeps the 1 MiB default.
+TEST(WrapMicrotestIsolated, DdaLLOneShotCrossover_Gfx1250ExceptDpx) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_Gfx1250PerPeerCap",
+      "Wrap_DdaLLOneShotCrossover_Gfx1250ExceptDpx",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -7832,8 +7831,8 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
             EXPECT_EQ(part.second, rcclDdaLLOneShotCrossover(comm)) << (int)part.first << " " << nRanks;
           }
         }
-        rcclArchThresholds noCap{};
-        comm->archThresholds = &noCap;
+        rcclArchThresholds noCrossover{};
+        comm->archThresholds = &noCrossover;
         EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(comm)) << "a table without the field keeps the default";
         EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotCrossover(nullptr)) << "no comm, no table: the default";
         DeleteCommWithArch(comm);

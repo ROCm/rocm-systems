@@ -864,10 +864,11 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_InvalidDatatypeDispatch)
 // size, with one-shot tested first.
 //
 // These run under the default parameter values: DDA_LL=1, a 1 MiB
-// DDA_LL_ONESHOT_THRESHOLD that gfx1250 lowers to a 349520-byte crossover, and a
-// 2 MiB DDA_LL_TWOSHOT_THRESHOLD, which gfx1250 raises to nRanks x 1 MiB from 8
-// ranks. Above the crossover the two-shot tier claims what it can take, which is
-// what makes the tier split observable from here. They deliberately do not setenv:
+// DDA_LL_ONESHOT_THRESHOLD with a 349520-byte crossover on gfx1250 (except DPX),
+// and a 2 MiB DDA_LL_TWOSHOT_THRESHOLD, which gfx1250 raises to nRanks x 1 MiB
+// from 8 ranks. Above the crossover the two-shot tier claims what it can take
+// where it saves enough wire, which is what makes the tier split observable from
+// here. They deliberately do not setenv:
 // RCCL_PARAM caches on first read, and the NCCL_NO_CACHE opt-out is resolved once
 // per process, so a test that changed a threshold would depend on being the first
 // in the binary to touch it. Two guards stay out of reach as a result:
@@ -994,8 +995,9 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_EligibleBfloat16)
         mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16, ncclSum));
 }
 
-// gfx1250's 349520-byte LL one-shot crossover (87380 floats), taken with <=. Past it the one-shot yields only to a
-// two-shot that takes the message: 87392 floats divide into 16 B shards on 8 ranks, 87384 floats do not.
+// The 349520-byte LL one-shot crossover on gfx1250 (except DPX) is 87380 floats, taken with <=. Past it the one-shot
+// yields to a two-shot that takes the message and saves >= 1 MiB of wire per rank (1.75 MiB on 8 ranks):
+// 87392 floats divide into 16 B shards on 8 ranks, 87384 floats do not.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_OneShotCrossoverYieldsToTwoShotOnly)
 {
     EXPECT_TRUE(ddaLLArOneShotEligible(mockComm_.get(), sendbuff_, recvbuff_, 87380, ncclFloat32, ncclSum));
