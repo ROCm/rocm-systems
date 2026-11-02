@@ -235,7 +235,19 @@
   X(TilePutWave3D,                  191)  \
   X(TileGetWave3D,                  192)  \
   X(TilePutWave4D,                  193)  \
-  X(TileGetWave4D,                  194)
+  X(TileGetWave4D,                  194)  \
+  X(TilePut3DStrided,               195)  \
+  X(TileGet3DStrided,               196)  \
+  X(TilePutWG3DStrided,             197)  \
+  X(TileGetWG3DStrided,             198)  \
+  X(TilePutWave3DStrided,           199)  \
+  X(TileGetWave3DStrided,           200)  \
+  X(TilePut4DStrided,               201)  \
+  X(TileGet4DStrided,               202)  \
+  X(TilePutWG4DStrided,             203)  \
+  X(TileGetWG4DStrided,             204)  \
+  X(TilePutWave4DStrided,           205)  \
+  X(TileGetWave4DStrided,           206)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
