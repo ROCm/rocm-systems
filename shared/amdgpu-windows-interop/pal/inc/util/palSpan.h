@@ -35,7 +35,6 @@
 #include "palUtil.h"
 #include "palAssert.h"
 #include "palConcepts.h"
-#include "palSysMemory.h"
 #include "palInlineFuncs.h"
 
 // stl
@@ -124,7 +123,20 @@ public:
     }
 
     ///@{
+    /// Returns a pointer the element at the specified index or nullptr if the index is out of bounds.
+    ///
+    /// @param [in] index Integer location of the element needed.
+    ///
+    /// @returns A pointer to the element at location specified by index or nullptr.
+    constexpr T* TryAt(size_t index) const
+    {
+        return (index < m_numElements) ? (m_pData + index) : nullptr;
+    }
+
+    ///@{
     /// Returns the element at the location specified.
+    ///
+    /// @warning It is illegal to pass in an out of bounds index!
     ///
     /// @param [in] index Integer location of the element needed.
     ///
@@ -132,7 +144,7 @@ public:
     constexpr T& At(size_t index) const
     {
         PAL_CONSTEXPR_ASSERT(index < m_numElements);
-        return *(m_pData + index);
+        return *TryAt(index);
     }
 
     constexpr T& operator[](size_t index) const noexcept { return At(index); }
@@ -351,6 +363,7 @@ protected:
     size_t m_numElements; // Number of elements present.
 };
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1012
 /**
  ***********************************************************************************************************************
  * @brief Span template specialization for const void byte buffers.
@@ -670,6 +683,7 @@ private:
     template<typename U>
     friend class Span;
 };
+#endif
 
 /**
  ***********************************************************************************************************************
@@ -712,8 +726,18 @@ public:
 
     /// Template constructor from any array
     ///
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1014
+    /// @note Implicit for all types except Characters.
+    ///       This is to discourage accidentally constructing a Span from a string literal.
+    ///       You can still explicitly construct one by invoking the ctor directly i.e. Span<char>("hello").
+    ///       If you're dealing with strings, you should consider StringView<char> instead.
+#endif
+    ///
     /// @param [in] src array
     template<typename T, size_t NumElements>
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1014
+    explicit(Concepts::Character<T>)
+#endif
     constexpr ConstByteSpan(const T(& src)[NumElements])
         : ConstByteSpan(src, NumElements, _detail::NullInvariantHolds{}) {}
 
@@ -761,6 +785,7 @@ public:
     ///
     /// @returns A pointer interpreting this Span as the given type, or nullptr if this Span is too small.
     template<typename T>
+    requires (_detail::IsSpan<T> == false)
     const T* Cast() const
     {
         // The C++ spec only lets us manipulate a type's underlying "object representation" if it's trivially copyable.
@@ -786,6 +811,7 @@ public:
     ///
     /// @returns A subspan with typed elements and NumElements truncated down to the nearest sizeof(T).
     template<typename T>
+    requires (_detail::IsSpan<T> == false)
     Span<const T> CastSpan() const
     {
         // The C++ spec only lets us manipulate a type's underlying "object representation" if it's trivially copyable.
@@ -856,8 +882,18 @@ public:
 
     /// Template constructor from any C++ array
     ///
+ #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1014
+    /// @note Implicit for all types except Characters.
+    ///       This is to discourage accidentally constructing a Span from a string literal.
+    ///       You can still explicitly construct one by invoking the ctor directly i.e. Span<char>("hello").
+    ///       If you're dealing with strings, you should consider StringView<char> instead.
+#endif
+    ///
     /// @param [in] src C++ array
     template<Concepts::NonConst T, size_t NumElements>
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1014
+    explicit(Concepts::Character<T>)
+#endif
     constexpr ByteSpan(T(& src)[NumElements]) : ByteSpan(src, NumElements, _detail::NullInvariantHolds{}) {}
 
     /// Constructor from any single value
@@ -916,7 +952,8 @@ public:
     ///
     /// @param [in] src  Specifies the address and length of the source range.
     template<typename T>
-    constexpr void AssignSpan(const Span<T>& src) const { Base::AssignSpan(ConstByteSpan(src)); }
+    void AssignSpan(const Span<T>& src) const { Base::AssignSpan(ConstByteSpan(src)); }
+    void AssignSpan(ConstByteSpan src) const { Base::AssignSpan(src); }
 
     /// Fills the bytes in this Span with the given 8-bit pattern.
     /// This modifies this Span's underlying data, not the Span object itself.
@@ -936,6 +973,7 @@ public:
     ///
     /// @returns A pointer interpreting this Span as the given type, or nullptr if this Span is too small.
     template<typename T>
+    requires (_detail::IsSpan<T> == false)
     T* Cast() const
     {
         // The C++ spec only lets us manipulate a type's underlying "object representation" if it's trivially copyable.
@@ -960,6 +998,7 @@ public:
     ///
     /// @returns A subspan with typed elements and NumElements truncated down to the nearest sizeof(T).
     template<typename T>
+    requires (_detail::IsSpan<T> == false)
     Span<T> CastSpan() const
     {
         // The C++ spec only lets us manipulate a type's underlying "object representation" if it's trivially copyable.

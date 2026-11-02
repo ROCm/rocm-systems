@@ -9,7 +9,9 @@
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{code_object_file_uri, driver_uid, event, fd, memory, node_id};
+pub(crate) use linux::{
+    code_object_file_uri, driver_uid, event, fd, memory, native_cpu_node_ordinal, node_id,
+};
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("the HSA frontend currently requires a platform adapter");

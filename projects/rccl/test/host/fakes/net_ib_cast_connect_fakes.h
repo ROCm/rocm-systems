@@ -47,6 +47,8 @@ extern std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_
     g_ibCastGidInfoQuery;
 extern std::function<void(void*, int)> g_ibCastSetTrafficClass;
 extern int g_ibCastReportMatchingSchemeCalls;
+// The P2P QP policy net.cc applies to an IB-cast connect handle. Defaults to fail-loud.
+extern std::function<ncclResult_t(void* /*handle*/, int /*isP2p*/)> g_rcclCastNetP2pPolicy;
 
 void ResetNetIbCastConnectFakes();
 
