@@ -29,13 +29,23 @@
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
 
+### Resolved issues
+* Fixed lost updates and hangs on the RO backend when more blocking operations
+  are in flight on one context than its proxy queue holds. A blocking call now
+  waits on its own status flag instead of re-reading it from the queue slot,
+  which the host may already have handed to another thread.
+  The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
+  `putmem_signal_on_stream` functional tests now run on RO.
+
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
 ### Changed
-* SDMA transport, when built in (`USE_SDMA=ON`), is disabled at runtime by default;
-  set `ROCSHMEM_SDMA_ENABLED=1` to activate it.
+* SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`
+  when `USE_IPC=ON`). SDMA is disabled at runtime by default; set
+  `ROCSHMEM_SDMA_ENABLED=1` to activate it. This allows SDMA to be used without
+  rebuilding the library.
 * `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
   Wave and workgroup operations automatically scale the threshold by the wavefront size,
   avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.

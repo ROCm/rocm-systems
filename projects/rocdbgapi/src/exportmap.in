@@ -112,3 +112,9 @@ global: amd_dbgapi_architecture_get_info;
         amd_dbgapi_wave_get_info;
         amd_dbgapi_workgroup_get_info;
 } @AMD_DBGAPI_NAME@_0.81;
+
+@AMD_DBGAPI_NAME@_0.83 {
+global: amd_dbgapi_property_list;
+        amd_dbgapi_property_get_info;
+        amd_dbgapi_process_set_property;
+} @AMD_DBGAPI_NAME@_0.82;

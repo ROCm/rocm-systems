@@ -162,7 +162,8 @@ instruction, and this plugin copies each mnemonic on first sight rather than
 storing the view. A plugin that keys a long-lived map on the view will read
 freed memory;
 `InstructionMixPluginTest.OwnsMnemonicStorageWhenTheSourceIsNotStatic` pins the
-behaviour.
+behaviour. See [Retaining instruction information](#retaining-instruction-information)
+for the other borrowed parts of an `Instruction`.
 
 ### Kernel Logging Plugin
 
@@ -495,8 +496,21 @@ LDS-base arithmetic, but identify neither a DDS backing location nor a valid
 LDS allocation address. Requesting DDS lanes emit a warning naming the instruction
 and PC, then fault before any memory effects because DDS backing is unimplemented.
 On other architectures the shared aperture remains LDS; out-of-backing accesses
-read zero and discard writes. RDNA4 FLAT low-17-bit address truncation remains
-a separate follow-up.
+read zero and discard writes.
+
+For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
+workgroup base. `flat_local_allocation_end` captures the exclusive modeled
+`lds_base + lds_size` limit and remains fixed across retries. This includes the
+current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
+before that rounding. Target allocation and encoding granules remain unmodeled.
+A lane whose first memory element does not fit is rejected in full and appears
+in `flat_local_oob_lane_mask`. Other lanes retain only complete elements below
+the allocation end (DWORDs for multiword transfers); atomics require their whole
+element. Rejected reads return zero and rejected writes are discarded. These
+bounds leave `valid_lane_mask`, `request_lane_mask` and nominal counter
+participation unchanged, so those masks describe requests rather than bytes
+actually accessed.
+
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.
@@ -555,6 +569,63 @@ before publishing the group to simulation components. `add()` is not
 thread-safe, and the group must remain immutable while callbacks may dispatch
 concurrently.
 
+### Retaining instruction information
+
+The `Instruction` passed to instruction and memory hooks is borrowed and is
+valid only during the callback. So are the views it returns: `raw_encoding()`
+points to encoding words owned by the decoder or the instruction, and
+`mnemonic()` can view a member of the instruction (see the note on mnemonic
+storage above). Copy anything you keep before the callback returns.
+`Instruction::disassemble()` is different: it formats a new `std::string` on
+each call, and the caller owns the result, so a plugin may keep it.
+
+Formatting text for every executed instruction is expensive when little of it
+is ever printed. A plugin that needs text only when it reports something can
+instead copy the instruction's PC and encoding as it executes, and disassemble
+the copy when the report is written. Validate the encoding before copying it:
+`raw_encoding()` is null when the instruction has no encoding, and the copy
+needs `size()` to be a positive multiple of four bytes that fits the buffer.
+An encoding is at most four words (the CU's 16-byte fetch window). The example
+rejects anything else at capture, as the race detector does, so every stored
+copy can be disassembled.
+
+```cpp
+// Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
+struct LastInstruction : WavefrontState {
+  uint64_t pc = 0;
+  std::array<uint32_t, 4> words{};
+  size_t word_count = 0; // Zero until the wave executes an instruction.
+};
+
+void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
+                                      amdgpu::Wavefront &wf) override {
+  auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
+  const int bytes = inst.size();
+  if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
+      static_cast<size_t>(bytes) > sizeof(last.words))
+    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
+  last.pc = pc;
+  last.word_count = bytes / sizeof(uint32_t);
+  std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
+}
+
+// Later, when a report about this wave needs text:
+if (last.word_count != 0) {
+  std::string text = wf.disassemble_instruction(
+      std::span(last.words).first(last.word_count), last.pc);
+  // ...
+}
+```
+
+`Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
+decoder, so a standalone plugin module can use it without linking the
+simulator. Call it on the CU execution thread, for example from one of that
+wave's synchronous hooks. It throws `std::logic_error` if the encoding is empty,
+truncated, or cannot be decoded. Because the text comes from the copied bytes,
+it describes the instruction that executed even if the code was later
+overwritten or unmapped. The race detector formats its instruction traces this
+way.
+
 ## Adding a new plugin
 
 1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
@@ -583,6 +654,8 @@ concurrently.
    hooks. Keep the default `false` for ordered event state or complete
    architectural snapshots. One non-opted-in plugin disables async execution
    for the entire group.
+9. Copy any instruction data that the plugin keeps beyond a callback; see
+   [Retaining instruction information](#retaining-instruction-information).
 
 ## Asynchronous arithmetic
 
@@ -598,7 +671,8 @@ Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
 
-Throughput, instruction mix, and kernel logging support this contract. ConSan
-keeps synchronous execution until its dependency-event access and diagnostic
-context support concurrent register hooks within one wave. Plugins and the host
+Throughput, instruction mix, and kernel logging support this contract. The
+[simulator race detector](race-detector.md) keeps synchronous execution until
+its dependency-event access and diagnostic context support concurrent register
+hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.

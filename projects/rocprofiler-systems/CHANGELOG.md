@@ -29,6 +29,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+- Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
+  finalization. Regions that never received their end callback are now emitted with the
+  finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
 - Fixed `rocprof-sys-instrument` aborting with `SIGABRT` on invalid input (non-ELF text
   file, missing target, or already-instrumented binary). Uncaught `std::runtime_error`
   exceptions from instrumentation setup are now caught in `main`, reported as

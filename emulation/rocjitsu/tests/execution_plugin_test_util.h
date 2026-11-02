@@ -125,6 +125,8 @@ public:
                         std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
                         bool exec_masked = true)
       : Instruction("test_mem", nullptr) {
+    size_ = sizeof(encoding_);
+    raw_encoding_ = &encoding_;
     set_memory_issue_info(counter_obligations, exec_masked);
     set_data(std::move(state));
   }
@@ -134,6 +136,8 @@ public:
       std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt,
       bool memory_wait_producer = false)
       : Instruction(mnemonic, nullptr) {
+    size_ = sizeof(encoding_);
+    raw_encoding_ = &encoding_;
     if (memory_wait_producer)
       flags_ |= MEMORY_WAIT_PRODUCER;
     if (state->tag() == amdgpu::SCALAR_MEM) {
@@ -161,6 +165,11 @@ public:
     }
     set_data(std::move(state));
   }
+
+private:
+  // These tests inject memory state directly. A valid nop encoding lets race
+  // reports decode the synthetic instruction without depending on code memory.
+  uint32_t encoding_ = S_NOP;
 };
 
 // Routing tests supply a synthetic execution result, but wait tracking needs
@@ -289,6 +298,8 @@ struct CapturedAccess {
   uint64_t scratch_lane_mask = 0;
   uint64_t flat_local_lane_mask = 0;
   uint64_t flat_dds_lane_mask = 0;
+  uint64_t flat_local_oob_lane_mask = 0;
+  std::optional<uint64_t> flat_local_allocation_end;
   uint32_t scratch_element_stride_bytes = 0;
   bool non_temporal = false;
   std::vector<uint64_t> element_lane_masks;
@@ -368,6 +379,8 @@ public:
     captured.scratch_lane_mask = access.scratch_lane_mask;
     captured.flat_local_lane_mask = access.flat_local_lane_mask;
     captured.flat_dds_lane_mask = access.flat_dds_lane_mask;
+    captured.flat_local_oob_lane_mask = access.flat_local_oob_lane_mask;
+    captured.flat_local_allocation_end = access.flat_local_allocation_end;
     captured.scratch_element_stride_bytes = access.scratch_element_stride_bytes;
     captured.non_temporal = access.non_temporal;
     captured.element_lane_masks.assign(access.element_lane_masks.begin(),

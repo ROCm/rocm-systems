@@ -682,6 +682,12 @@ typedef unsigned long amd_dbgapi_DWORD;
  */
 #define AMD_DBGAPI_VERSION_0_82
 
+/**
+ * The function was introduced in version 0.83 of the interface and has the
+ * symbol version string of ``"@AMD_DBGAPI_NAME@_0.83"``.
+ */
+#define AMD_DBGAPI_VERSION_0_83
+
 /** @} */
 
 /** \ingroup callbacks_group
@@ -1111,6 +1117,10 @@ typedef enum
    * The cluster handle is invalid.
    */
   AMD_DBGAPI_STATUS_ERROR_INVALID_CLUSTER_ID = -51,
+  /**
+   * The property handle is invalid.
+   */
+  AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID = -52,
 } amd_dbgapi_status_t;
 
 /**
@@ -6981,6 +6991,225 @@ amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_write_memory (
     amd_dbgapi_address_space_id_t address_space_id,
     amd_dbgapi_segment_address_t segment_address,
     amd_dbgapi_size_t *value_size, const void *value) AMD_DBGAPI_VERSION_0_78;
+
+/**
+ * Opaque property handle.
+ *
+ * A handle to a configurable property of a system.
+ *
+ * Globally unique for a single library instance.
+ */
+typedef struct
+{
+  uint64_t handle;
+} amd_dbgapi_property_id_t;
+
+/**
+ * The NULL property handle.
+ */
+#define AMD_DBGAPI_PROPERTY_NONE \
+    AMD_DBGAPI_HANDLE_LITERAL (amd_dbgapi_property_id_t, 0)
+
+/**
+ * Possible types of properties.
+ */
+typedef enum
+{
+  /**
+   * The type is of a boolean nature: true or false.
+   * The storage size is dictated by ::amd_dbgapi_property_bool_t.
+   * Possbile values are:
+   * - 0 to indicate false.
+   * - anything else is true.
+   */
+  AMD_DBGAPI_PROPERTY_TYPE_BOOL = 1,
+} amd_dbgapi_property_type_t;
+
+/**
+ * The type to use when dealing with an AMD_DBGAPI_PROPERTY_TYPE_BOOL
+ * property value.  Any non-zero value is considered true.
+ */
+typedef uint32_t amd_dbgapi_property_bool_t;
+
+/**
+ * The scope for which a property is valid.
+ */
+typedef enum
+{
+  /**
+   * No scope.
+   */
+  AMD_DBGAPI_PROPERTY_SCOPE_NONE = 0,
+  /**
+   * The property is valid per process.
+   */
+  AMD_DBGAPI_PROPERTY_SCOPE_PROCESS = 1 << 0,
+} amd_dbgapi_property_scope_t;
+
+/**
+ * Property queries that are supported by ::amd_dbgapi_property_get_info.
+ *
+ * Each query specifies the type of data returned in the \p value argument to
+ * ::amd_dbgapi_property_get_info.
+ */
+typedef enum
+{
+  /**
+   * Return the name of the property.  The type of this attribute is
+   * a \p char* pointing to a null-terminated string.  It is allocated by
+   * the amd_dbgapi_callbacks_s::allocate_memory callback and is owned
+   * by the client.
+   */
+  AMD_DBGAPI_PROPERTY_INFO_NAME,
+  /**
+   * Return the description of the property.  The type of this attribute
+   * is a \p char* pointing to a null-terminated string.  It is allocated
+   * by the amd_dbgapi_callbacks_s::allocate_memory callback and is owned
+   * by the client.
+   */
+  AMD_DBGAPI_PROPERTY_INFO_DESCRIPTION,
+  /**
+   * Return the type of the property.  The type of this attribute is
+   * ::amd_dbgapi_property_type_t.
+   */
+  AMD_DBGAPI_PROPERTY_INFO_TYPE,
+  /**
+   * Return the bitmask of scopes that the property can apply to.
+   * The type of this attribute is ::amd_dbgapi_property_scope_t.
+   */
+  AMD_DBGAPI_PROPERTY_INFO_SCOPE,
+} amd_dbgapi_property_info_t;
+
+/**
+ * Return the list of properties supported by the library.
+ *
+ * \param[out] property_count The number of properties returned.
+ *
+ * \param[out] properties A pointer to an array of ::amd_dbgapi_property_id_t
+ * with \p property_count elements.  It is allocated by the
+ * amd_dbgapi_callbacks_s::allocate_memory callback and is owned by the client.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the result is stored in \p property_count and \p
+ * properties.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized; and \p property_count and \p properties are unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized; and \p property_count and
+ * \p properties are unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p property_count or \p
+ * properties are NULL.  \p property_count and \p properties are unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK This will be reported if
+ * the amd_dbgapi_callbacks_s::allocate_memory callback used to allocate \p
+ * properties returns NULL.  \p property_count and \p properties are unaltered.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_property_list (
+    size_t *property_count,
+    amd_dbgapi_property_id_t **properties) AMD_DBGAPI_VERSION_0_83;
+
+/**
+ * Query information about a property.
+ *
+ * ::amd_dbgapi_property_info_t specifies the queries supported and the type
+ * returned using the \p value argument.
+ *
+ * \param[in] property_id The handle of the property being queried.
+ *
+ * \param[in] query The query being requested.
+ *
+ * \param[in] value_size Size of the memory pointed to by \p value.  Must be
+ * equal to the byte size of the query result.
+ *
+ * \param[out] value Pointer to memory where the query result is stored.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the result is stored in \p value.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized and \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized and \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID \p property_id is
+ * invalid.  \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p value is NULL or \p
+ * query is invalid.  \p value is unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY \p
+ * value_size does not match the size of the \p query result.  \p value is
+ * unaltered.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_CLIENT_CALLBACK This will be reported if
+ * the amd_dbgapi_callbacks_s::allocate_memory callback used to allocate \p
+ * value returns NULL.  \p value is unaltered.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_property_get_info (
+    amd_dbgapi_property_id_t property_id,
+    amd_dbgapi_property_info_t query,
+    size_t value_size, void *value) AMD_DBGAPI_VERSION_0_83;
+
+/**
+ * Set the value of a process property.
+ *
+ * This function configures properties with ::AMD_DBGAPI_PROPERTY_SCOPE_PROCESS
+ * scope, as reported by the ::AMD_DBGAPI_PROPERTY_INFO_SCOPE query, and \p
+ * process_id identifies the process being configured.  Setting a property of
+ * any other scope returns
+ * ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY.
+ *
+ * \param[in] property_id The handle of the property being set.
+ *
+ * \param[in] process_id The process being configured.
+ *
+ * \param[in] value_size Size of the memory pointed to by \p value.  Must be
+ * equal to the byte size of the property type.  For a
+ * ::AMD_DBGAPI_PROPERTY_TYPE_BOOL property this is the size of
+ * ::amd_dbgapi_property_bool_t.
+ *
+ * \param[in] value Pointer to memory holding the value to set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_SUCCESS The function has been executed
+ * successfully and the property has been set.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_FATAL A fatal error occurred.  The library is
+ * left uninitialized.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED The library is not
+ * initialized.  The library is left uninitialized and no configuration is
+ * changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID \p process_id is
+ * invalid.  No configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID \p property_id is
+ * invalid.  No configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT \p value is NULL.  No
+ * configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY The property
+ * does not have ::AMD_DBGAPI_PROPERTY_SCOPE_PROCESS scope, or \p value_size
+ * does not match the byte size of the property type.  No configuration is
+ * changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN The process is frozen,
+ *  its properties cannot be modified.  No configuration is changed.
+ *
+ * \retval ::AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED \p process_id identifies a
+ * core-file (post-mortem) target, its properties cannot be modified, or the
+ * requested property value is not supported by the architecture of all the
+ * agents of the process.  No configuration is changed.
+ */
+amd_dbgapi_status_t AMD_DBGAPI amd_dbgapi_process_set_property (
+    amd_dbgapi_process_id_t process_id,
+    amd_dbgapi_property_id_t property_id,
+    size_t value_size, const void *value) AMD_DBGAPI_VERSION_0_83;
 
 /**
  * Memory access precision.

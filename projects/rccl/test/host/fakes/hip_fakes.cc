@@ -19,6 +19,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <fcntl.h>     // InstallHipVmmEmulator's DMA-BUF export fd
 #include <sys/mman.h>  // InstallHipVmmEmulator's mmap-backed VA
 
 #include <hip/hip_ext.h>  // hipExtModuleLaunchKernel, for the profile-interceptor stubs
@@ -228,7 +229,7 @@ int g_currentDevice = 0;
 static hipError_t DefaultHipGetDevice(int* dev)
 {
     if (dev) {
-        *dev = g_currentDevice;
+        *dev = __atomic_load_n(&g_currentDevice, __ATOMIC_RELAXED);
     }
     return hipSuccess;
 }
@@ -236,7 +237,8 @@ std::function<hipError_t(int*)> g_hipGetDevice = DefaultHipGetDevice;
 
 static hipError_t DefaultHipSetDevice(int dev)
 {
-    g_currentDevice = dev;
+    // group.cc's async jobs set the device from several threads at once.
+    __atomic_store_n(&g_currentDevice, dev, __ATOMIC_RELAXED);
     return hipSuccess;
 }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
@@ -521,6 +523,13 @@ void InstallHipVmmEmulator()
     g_hipMemSetAccess = [](void*, size_t, const hipMemAccessDesc*, size_t) { return hipSuccess; };
     g_hipMemUnmap     = [](void*, size_t) { return hipSuccess; };
     g_hipMemRelease   = [](hipMemGenericAllocationHandle_t) { return hipSuccess; };
+#ifdef RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED
+    g_hipMemGetHandleForAddressRange = [](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                          unsigned long long) {
+        *static_cast<int*>(handle) = open("/dev/null", O_RDONLY);
+        return hipSuccess;
+    };
+#endif
     g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t* handle, void*) {
         if (handle) *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
         return hipSuccess;

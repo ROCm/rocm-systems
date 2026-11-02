@@ -32,6 +32,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -137,11 +138,6 @@ inline void record_simd_fast_path(SimdFastPath path) {
 }
 
 } // namespace detail
-
-/// True when a source-selector field names one of the nine inline float
-/// constants (0.5 .. 1/(2*pi)). A 32-bit literal is selector 255, so it never
-/// matches here even when its value lands in the same range.
-inline bool is_inline_float_src(uint32_t selector) { return selector >= 240u && selector <= 248u; }
 
 /// True when a packed 16-bit body has to re-narrow this source itself. An
 /// inline float constant reaches a 32-bit source in single precision, so the
@@ -1377,7 +1373,8 @@ template <uint16_t kMovOp, uint16_t kAddOp, uint16_t kLshlOp, typename Slot>
     case kLshlOp:
       return simd_lshl_u32(src1_view->template load_native<uint32_t>(lane_base), src0);
     default:
-      throw util::UnimplementedInst("unsupported VOPD integer SIMD operation");
+      assert(false && "integer slot was validated before SIMD execution");
+      return decltype(src0)(0);
     }
   };
   constexpr uint32_t kWidth = util::native_width_v<uint32_t>;

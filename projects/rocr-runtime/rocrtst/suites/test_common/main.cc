@@ -60,6 +60,7 @@
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
+#include "suites/functional/loader_reserved_address.h"
 #include "suites/functional/svm_memory.h"
 #include "suites/functional/time_stamp.h"
 #include "suites/functional/heap_reservation.h"
@@ -866,6 +867,13 @@ TEST(rocrtstFunc, VirtMemory_Host_Backed_Alloc_Import_Info_Test) {
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestHostBackedAllocImportInfo();
   RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, Loader_ReservedAddress_Test) {
+  LoaderReservedAddressTest lra;
+  if (!RunCustomTestProlog(&lra)) return;
+  lra.LoadAtAddressTest();
+  RunCustomTestEpilog(&lra);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {

@@ -47,6 +47,44 @@ fn marker_state() -> usize {
     }
 }
 
+/// A separate wipe-on-fork page that validates one process-owned slot.
+/// Unlike the shared hot-path marker, an inherited slot never rewrites this
+/// witness after a fork, even if a descendant later reuses the original PID.
+pub(crate) struct FreshForkWitness {
+    /// Unpublished witness mapping, dropped when slot publication loses a race.
+    page: ForkMarkerPage,
+}
+
+impl FreshForkWitness {
+    /// Creates a witness when the kernel supports wipe-on-fork mappings.
+    pub(crate) fn new() -> Option<Self> {
+        let page = ForkMarkerPage::new().ok()?;
+        // SAFETY: The unpublished page is aligned for an atomic marker and
+        // remains owned by `page` until publication or drop.
+        unsafe { &*(page.address() as *const AtomicU32) }.store(1, Ordering::Release);
+        Some(Self { page })
+    }
+
+    /// Returns the address retained in the process slot before publication.
+    pub(crate) fn address(&self) -> usize {
+        self.page.address()
+    }
+
+    /// Keeps a published witness mapped through process exit.
+    pub(crate) fn retain_until_exit(self) {
+        self.page.retain_until_exit();
+    }
+}
+
+/// Checks that an inherited slot's witness was not wiped by a fork.
+/// Missing witnesses use the PID fallback on older kernels.
+pub(crate) fn fork_witness_valid(address: Option<usize>) -> bool {
+    address.is_none_or(|address| {
+        // SAFETY: A published witness mapping remains allocated through exit.
+        unsafe { &*(address as *const AtomicU32) }.load(Ordering::Acquire) != 0
+    })
+}
+
 /// Enables cheap checks after an allocation passed its session process check.
 /// This preserves inert instance creation and the getpid fallback before the
 /// first host allocation or after a fork.
@@ -106,6 +144,20 @@ mod tests {
     }
 
     const SYS_FORK: c_long = 57;
+
+    #[test]
+    fn wiped_slot_witness_rejects_even_a_matching_pid() {
+        assert!(fork_witness_valid(None));
+        let Some(witness) = FreshForkWitness::new() else {
+            return;
+        };
+        let address = witness.address();
+        assert!(fork_witness_valid(Some(address)));
+        // SAFETY: This test owns the unpublished witness mapping and changes
+        // only its atomic word to model the kernel's fork-time wipe.
+        unsafe { &*(address as *const AtomicU32) }.store(0, Ordering::Release);
+        assert!(!fork_witness_valid(Some(address)));
+    }
 
     #[test]
     #[allow(clippy::used_underscore_items)]

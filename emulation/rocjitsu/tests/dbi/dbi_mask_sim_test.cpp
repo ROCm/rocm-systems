@@ -26,6 +26,7 @@
 /// argument is written in every lane, and the masked case additionally exercises
 /// the anchor-mask restore that force_full_exec is defined by skipping.
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
 
@@ -78,8 +79,8 @@ struct MaskSimArch {
   uint32_t e_flags;
   uint32_t wave_size;
   // The descriptor's wave32 bit drives the patch-time gates, which is all this
-  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
-  // without the bit, so every target dispatches Wave64 and wave_size only says
+  // selects. It does not reach execution: this suite does not opt DbiSim into a
+  // Wave32 dispatch, so every target dispatches Wave64 and wave_size only says
   // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
   // CDNA is Wave64 by construction.
   bool wave32;
@@ -110,12 +111,13 @@ protected:
     anchor_offset_ = static_cast<uint64_t>(text.size()) * sizeof(uint32_t);
     text.push_back(anchor_word);
     text.push_back(build_s_endpgm(a_.arch));
-    return test::make_amdgpu_kernel_elf(text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
-                                        a_.e_flags, /*granulated_vgpr_count=*/0,
-                                        /*accum_offset=*/0, /*unterminated_kd_name=*/false,
-                                        /*wrap_section_header_table=*/false,
-                                        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
-                                        a_.wave32);
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false,
+        /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, a_.wave32);
+    return test::with_descriptor_metadata(image, a_.arch);
   }
 
   // Patch the anchor with @p probe_body and run. Returns the per-lane values of

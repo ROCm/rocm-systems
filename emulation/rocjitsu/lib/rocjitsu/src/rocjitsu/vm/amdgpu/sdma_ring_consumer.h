@@ -88,7 +88,8 @@ private:
   [[nodiscard]] SdmaRingStatus initialize_cursor();
   [[nodiscard]] SdmaRingStatus ensure_packet_bytes(uint64_t producer, std::size_t required_bytes);
   [[nodiscard]] SdmaRingStatus publish_cursor();
-  [[nodiscard]] SdmaRingStatus latch(SdmaRingStatus outcome);
+  [[nodiscard]] SdmaRingStatus latch(SdmaRingStatus outcome,
+                                     std::optional<uint32_t> malformed_header = std::nullopt);
   void clear_packet();
   void clear_in_flight();
 
@@ -102,8 +103,10 @@ private:
   std::vector<std::byte> packet_bytes_;
   std::size_t packet_fetch_progress_ = 0;
   std::vector<uint32_t> packet_words_;
+  uint64_t packet_start_cursor_ = 0;
   std::optional<SdmaPacketProcessResult> pending_retirement_;
   std::optional<SdmaRingStatus> terminal_after_publication_;
+  std::optional<uint32_t> terminal_packet_header_;
   std::optional<SdmaRingStatus> terminal_;
 };
 
