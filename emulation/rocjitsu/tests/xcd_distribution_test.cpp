@@ -101,6 +101,7 @@ struct XcdDistributionFixture {
 
   void initialize(Threading threading = Threading::Single, uint32_t dispatch_threads = 1,
                   const std::string &config_path = CONFIG_PATH) {
+    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(config_path, loaded));
     soc = loaded.soc();
     memory = loaded.memory();
@@ -113,12 +114,14 @@ struct XcdDistributionFixture {
             : 1u;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     if (loaded.engine_config.num_threads > 1 &&
         !amdgpu::partition_topology_by_xcds(engine->topology(), soc,
                                             loaded.engine_config.num_threads))
       ADD_FAILURE() << "multi-threaded topology requires per-XCD partitioning";
-    engine->create();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
@@ -143,14 +146,17 @@ struct Cdna5ScratchTopologyFixture {
   amdgpu::GpuMemory *memory = nullptr;
 
   void initialize() {
+    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(CDNA5_CONFIG_PATH, loaded));
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
 
     using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
