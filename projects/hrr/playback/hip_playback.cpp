@@ -1205,6 +1205,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                                  co_hash_lo, co_hash_hi);
     if (!func) return hipErrorNotFound;
 
+    // Before the arguments: translate_stream throws for an unmapped stream, and
+    // decoding may relocate guarded blocks that only the returns below tear down.
+    hipStream_t stream = ctx.translate_stream(stream_rec);
+
     // Build kernelParams[] from captured args, translating GPU pointers.
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
@@ -1277,7 +1281,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         }
     }
 
-    hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
     if (hipError_t sr = num_snapshots ? restore_host_snapshots(ctx, snapshots, num_snapshots,

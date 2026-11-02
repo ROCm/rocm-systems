@@ -806,7 +806,8 @@ struct PlaybackContext {
     // 0, hipStreamLegacy and hipStreamPerThread pass through as themselves;
     // HIP resolves hipStreamPerThread on the calling replay thread. Any other
     // handle is the stream replay created for it, or throws hrr_unmapped_stream
-    // unless --lossy-streams substitutes the null stream.
+    // unless --lossy-streams substitutes the null stream. A handler calls it
+    // before acquiring anything that only its explicit returns release.
     hipStream_t   translate_stream  (uint64_t rec) const {
         if (rec == 0) return nullptr;
         if (rec == reinterpret_cast<uint64_t>(hipStreamLegacy))    return hipStreamLegacy;
