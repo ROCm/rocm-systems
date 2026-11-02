@@ -173,6 +173,21 @@ __device__ void IPCContext::internal_getmem_wg(void *dest, const void *source,
   __builtin_amdgcn_s_barrier();
 }
 
+__device__ void IPCContext::internal_putmem_wg_tdm(void *dest, const void *source,
+                                     size_t nelems, int pe) {
+  uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wg_tdm<MemcpyKind::Put>(wrk_sync_pool_bases_[pe] + L_offset, const_cast<void *>(source), nelems);
+  __builtin_amdgcn_s_barrier();
+}
+
+__device__ void IPCContext::internal_getmem_wg_tdm(void *dest, const void *source,
+                                     size_t nelems, int pe) {
+  const char *src_typed = reinterpret_cast<const char *>(source);
+  uint64_t L_offset = const_cast<char *>(src_typed) - wrk_sync_pool_bases_[constmem.my_pe];
+  memcpy_wg_tdm<MemcpyKind::Get>(dest, wrk_sync_pool_bases_[pe] + L_offset, nelems);
+  __builtin_amdgcn_s_barrier();
+}
+
 __device__ void IPCContext::internal_putmem_wave(void *dest,
                         const void *source, size_t nelems, int pe) {
   uint64_t L_offset = reinterpret_cast<char *>(dest) - wrk_sync_pool_bases_[constmem.my_pe];

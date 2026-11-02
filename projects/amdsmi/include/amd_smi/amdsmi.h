@@ -1284,6 +1284,20 @@ typedef enum {
 } amdsmi_link_status_t;
 
 /**
+ * @brief Unified link topology information between two processors
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint64_t weight;                   //!< link weight
+  amdsmi_link_status_t link_status;  //!< link status; synthesized on baremetal (not live HW status)
+  amdsmi_link_type_t link_type;      //!< type of the link
+  uint8_t num_hops;                  //!< number of hops
+  uint8_t fb_sharing;                //!< 1 if P2P framebuffer access is available, 0 otherwise
+  uint32_t reserved[10];
+} amdsmi_link_topology_t;
+
+/**
  * @brief Link Metrics
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -1323,17 +1337,9 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{host} @endcond
  */
 typedef struct {
-  char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< Driver version, such as
-                                                         //!< 6.19.14.31400000
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];            //!< Driver release date
-  char driver_name[AMDSMI_MAX_STRING_LENGTH];            //!< Driver name
-  char driver_kernel_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu kernel source version,
-                                                         //!< such as 6.19.14
-  char amdgpu_driver_version[AMDSMI_MAX_STRING_LENGTH];  //!< amdgpu module version, such
-                                                         //!< as 31400000
-  char driver_build_version[AMDSMI_MAX_STRING_LENGTH];   //!< DKMS build, such as 2370381
-  char driver_full_version[AMDSMI_MAX_STRING_LENGTH];    //!< Full version, such
-                                                         //!< as 6.19.14.31400000-2370381
+  char driver_version[AMDSMI_MAX_STRING_LENGTH];
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];
+  char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
 /**
@@ -1496,9 +1502,7 @@ typedef struct {
 #define AMDSMI_MAX_NUM_FREQUENCIES \
   33  //!< Guaranteed maximum possible number of supported frequencies
 
-//! Maximum possible value for fan speed for legacy hwmon GPUs.
-//! For GPUs with the gpu_od sysfs interface, use
-//! amdsmi_get_gpu_fan_speed_max() to query the actual maximum.
+//! Maximum fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max().
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255
 
@@ -2211,7 +2215,10 @@ typedef struct {
  * ::amdsmi_gpu_metrics_t.apu_metrics when APU-specific metrics are available.
  *
  * **Version Support:**
- * - v2.4: format_revision == 2 && content_revision == 4
+ * - v2.x: format_revision == 2 && content_revision in [1, 4]. Revisions v2.1-v2.3
+ *   are byte-prefix subsets of the v2.4 layout, so they populate the fields their
+ *   own revision defines and leave the later ones at the sentinel described below.
+ *   v2.0 orders its fields differently and is not supported.
  * - v3.0: format_revision == 3 && content_revision == 0
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
  * the fields.
@@ -2225,7 +2232,8 @@ typedef struct {
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
- * as invalid/not applicable.
+ * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
+ * reading of 0 (not measured) is also returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2242,9 +2250,9 @@ typedef struct {
   /**
    * @brief Utilization
    */
-  uint16_t average_gfx_activity;                            //!< v2_4, v3_0
-  uint16_t average_mm_activity;                             //!< v2_4
-  uint16_t average_vcn_activity;                            //!< v3_0
+  uint16_t average_gfx_activity;                            //!< v2_4, v3_0 [%]
+  uint16_t average_mm_activity;                             //!< v2_4 [%]
+  uint16_t average_vcn_activity;                            //!< v3_0 [%]
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
@@ -2556,9 +2564,9 @@ typedef struct {
    * @brief APU metrics auxiliary data
    *
    * This pointer is non-null only when the queried device reports APU-specific
-   * metrics (currently APU metrics table versions 2.4 or 3.0). Callers must
-   * validate it before dereferencing. For GPU (discrete) devices, this pointer
-   * will be nullptr.
+   * metrics (APU metrics table versions 2.1 through 2.4, or 3.0; v2.0 is
+   * unsupported). Callers must validate it before dereferencing. For GPU
+   * (discrete) devices, this pointer will be nullptr.
    *
    * **Thread Safety and Lifetime:**
    * The pointed-to storage uses thread-local storage and is invalidated by ANY
@@ -2574,13 +2582,16 @@ typedef struct {
    * **Version Detection:**
    * Use ::common_header.format_revision and ::common_header.content_revision to
    * determine which APU metrics version is active:
-   * - v2.4: format_revision == 2 && content_revision == 4
+   * - v2.x: format_revision == 2 && content_revision in [1, 4] (v2.0 unsupported)
    * - v3.0: format_revision == 3 && content_revision == 0
    *
    * **Field Validity:**
-   * Not all fields are valid for all versions. Fields contain sentinel value
-   * 0xFFFF (65535) when not populated for the current version. Refer to inline
-   * comments in ::amdsmi_apu_metrics_t for per-field version availability.
+   * Not all fields are valid for all versions. A field the current version does
+   * not populate reads back as the maximum value of its own type: 0xFFFF for
+   * uint16_t, 0xFFFFFFFF for uint32_t and UINT64_MAX for uint64_t. Refer to
+   * inline comments in ::amdsmi_apu_metrics_t for per-field availability; the
+   * `v2_4` annotation names the v2.x layout, and a device reporting an earlier
+   * v2.1-v2.3 revision leaves the fields that revision omits at the sentinel.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
@@ -3540,9 +3551,16 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
                                           amdsmi_bdf_t* bdf);
 
 /**
- *  @brief Returns the UUID of the device
+ *  @brief Returns the legacy device UUID
  *
  *  @ingroup tagProcDiscovery
+ *
+ *  Superseded by ::amdsmi_get_gpu_cuid_info. This value is **not** a Component
+ *  Unified ID: it is built from the SMU unique ID, the PCI device ID and the KFD
+ *  partition index, so it names an addressable device and changes when the GPU
+ *  is repartitioned. A CUID names the physical component and carries the
+ *  partition in its UnitID field instead. Retained unchanged for consumers that
+ *  have already recorded its output; record a CUID for new work.
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
@@ -3566,8 +3584,10 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
- *  @platform{guest_windows}
+ *  The derived CUID that ::amdsmi_get_gpu_cuid_info reports, without its
+ *  provenance.
+ *
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -3582,6 +3602,190 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid);
+
+/**
+ *  @brief Source that answered a CUID lookup.
+ *
+ *  The staged lookup tries the driver, then its own computation. Only a
+ *  driver-sourced value is authoritative, because only the driver reads the
+ *  privileged identity.
+ *
+ *  libamdcuid records the answering stage through AMDCUID_QUERY_SOURCE, so
+ *  amd-smi reports DRIVER or LIBRARY, and UNKNOWN only when that query fails.
+ *  Treat ::AMDSMI_CUID_SOURCE_UNKNOWN as "not known to be driver-published"
+ *  rather than as "locally computed".
+ */
+typedef enum {
+  AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
+  AMDSMI_CUID_SOURCE_DRIVER = 1,   //!< Published by the device driver
+  AMDSMI_CUID_SOURCE_LIBRARY = 3   //!< Computed by the CUID library
+} amdsmi_cuid_source_t;
+
+/**
+ *  @brief CUID Component Type, on the specification's on-wire values.
+ *
+ *  These are the values that appear in payload bits 118:121, so they can be
+ *  compared directly against a decoded CUID with no translation step. All
+ *  assigned values are named, so that a CUID from a component amd-smi does not
+ *  manage still arrives as a named value; 0xb through 0xe are reserved by the
+ *  specification and have no enumerator, so the assigned range is not
+ *  contiguous.
+ *
+ *  ::AMDSMI_CUID_COMPONENT_UNKNOWN is outside the range a 4-bit field can hold,
+ *  so the sentinel can never be mistaken for a Component Type. The values match
+ *  ::amdcuid_device_type_t one for one.
+ */
+typedef enum {
+  AMDSMI_CUID_COMPONENT_PLATFORM = 0x0,  //!< Platform (chassis, motherboard)
+  AMDSMI_CUID_COMPONENT_CPU = 0x1,       //!< CPU
+  AMDSMI_CUID_COMPONENT_GPU = 0x2,       //!< GPU
+  AMDSMI_CUID_COMPONENT_NIC = 0x3,       //!< Network interface controller
+  AMDSMI_CUID_COMPONENT_NPU = 0x4,       //!< Neural processing unit
+  AMDSMI_CUID_COMPONENT_STORAGE = 0x5,   //!< Storage device
+  AMDSMI_CUID_COMPONENT_MEMORY = 0x6,    //!< Memory device
+  AMDSMI_CUID_COMPONENT_GENPCIE = 0x7,   //!< Generic PCIe device
+  AMDSMI_CUID_COMPONENT_GENC = 0x8,      //!< Generic component
+  AMDSMI_CUID_COMPONENT_RACKTRAY = 0x9,  //!< Rack tray
+  AMDSMI_CUID_COMPONENT_RACK = 0xa,      //!< Rack
+  //! 0xb through 0xe are reserved by the specification and have no enumerator.
+  AMDSMI_CUID_COMPONENT_OTHER = 0xf,    //!< Any component none of the above names
+  AMDSMI_CUID_COMPONENT_UNKNOWN = 0xFF  //!< Not a value a 4-bit field can hold
+} amdsmi_cuid_component_type_t;
+
+/**
+ *  @brief A component's Component Unified ID and everything needed to trust it.
+ *
+ *  The fields describe one component and are returned together so that a caller
+ *  does not pair values from separate calls. They are filled from several
+ *  queries, so they are not an atomic snapshot under a concurrent re-key or
+ *  device rescan.
+ */
+typedef struct {
+  //! Canonical CUID as a UUIDv8 string. Empty when the caller lacks the
+  //! privilege to read it: the primary payload embeds the raw serial number, so
+  //! it is CAP_SYS_ADMIN-gated at the source. Also empty when the derived CUID
+  //! is temporary and the component has no primary. An empty primary is not an
+  //! error; the derived CUID below is still populated.
+  char primary[AMDSMI_GPU_CUID_SIZE];
+  //! Derived CUID as a UUIDv8 string. Names the component without
+  //! disclosing its serial, and is the value to record.
+  char derived[AMDSMI_GPU_CUID_SIZE];
+  //! Component Type field of the payload.
+  amdsmi_cuid_component_type_t component_type;
+  //! Which stage of the staged lookup answered.
+  amdsmi_cuid_source_t source;
+  //! Non-zero for a temporary CUID, payload bit 117: the identity was built
+  //! from the machine ID and world-readable device information, so it changes
+  //! when the machine ID changes and is not unique across nodes. Do not
+  //! record it in the same column as a canonical CUID. Meaningful only
+  //! on ::AMDSMI_STATUS_SUCCESS: there is no encoding for "undetermined", so a
+  //! call that cannot establish this flag fails rather than reporting zero.
+  uint8_t auxiliary;
+  //! Reserved. Eleven bytes rather than the seven the flags need, so that
+  //! `reserved` starts 8-byte aligned with no implicit padding ahead of it: a
+  //! compiler-inserted hole has to be reproduced by hand in every non-C binding.
+  uint8_t reserved_flags[11];
+  uint64_t reserved[8];
+} amdsmi_cuid_info_t;
+
+/**
+ *  @brief Returns the Component Unified ID of the device, with its provenance
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  Prefer this over ::amdsmi_get_gpu_device_uuid, which returns a legacy device
+ *  UUID rather than a CUID.
+ *
+ *  The handle is resolved through its render node. A GPU in SPX reports the
+ *  whole GPU's CUID. In DPX and above each handle is a compute partition and
+ *  reports that partition's own CUID, never the whole GPU's; a partition
+ *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  On failure @p info comes back cleared, never partly filled: a caller that
+ *  may not read the auxiliary flag gets ::AMDSMI_STATUS_NO_PERM rather than a
+ *  zero it cannot distinguish from a determined "not auxiliary". A caller
+ *  privileged to read the primary CUID of a derived CUID that is not temporary
+ *  gets the failure that kept it from doing so, not an empty primary.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Pointer to an ::amdsmi_cuid_info_t allocated by the caller
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
+ *          no CUID exists for this device, for a partition the driver
+ *          publishes, or for a partition other than partition 0 whose driver
+ *          publishes nothing,
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read
+ *          a field the snapshot must report, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_cuid_info_t* info);
+
+/**
+ *  @brief One component of the node and its Component Unified ID.
+ */
+typedef struct {
+  //! The component's CUID, as ::amdsmi_get_gpu_cuid_info reports it for a GPU.
+  amdsmi_cuid_info_t info;
+  //! PCI address, "dddd:bb:dd.f", of a PCI component. A GPU partition has
+  //! the address amd-smi uses for it, as `amd-smi list` shows it, with the
+  //! partition index in the function number. Empty for the platform and for
+  //! CPUs.
+  char bdf[AMDSMI_MAX_STRING_LENGTH];
+  //! Sysfs path the component was found at, for example
+  //! /sys/devices/system/cpu/cpu0 for the first CPU package,
+  //! /sys/class/drm/renderD128 for a GPU, or a partition's xcp directory.
+  //! Empty for the platform.
+  char device_path[AMDSMI_MAX_STRING_LENGTH];
+  //! PCI or CPUID vendor ID. Zero for the platform.
+  uint16_t vendor_id;
+  uint16_t reserved_id;   //!< Reserved.
+  uint32_t reserved_pad;  //!< Reserved.
+  uint64_t reserved[4];   //!< Reserved.
+} amdsmi_cuid_component_t;
+
+/**
+ *  @brief Lists every component on the node that has a CUID
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  The platform, each CPU package, each AMD GPU or GPU partition, each NPU,
+ *  and each NIC function, ordered by component type, then BDF, then device
+ *  path.
+ *  Unlike ::amdsmi_get_gpu_cuid_info this needs no processor handle, so it
+ *  also covers components amd-smi does not manage.
+ *
+ *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
+ *  function number, so the functions of one card have distinct CUIDs even
+ *  where they report one serial number. Two components whose CUIDs coincide
+ *  anyway are both left out, since such a CUID identifies neither.
+ *
+ *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
+ *  primary CUIDs are empty.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in,out] count As input, the number of entries @p components can
+ *                 hold. As output, the number of components on the node, even
+ *                 when that is more than were written.
+ *
+ *  @param[out] components Array of @p count entries allocated by the caller,
+ *              or nullptr to learn the count only.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including
+ *          with *@p count set to 0 when the node has no components,
+ *          ::AMDSMI_STATUS_INVAL when @p count is null,
+ *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
+ *          (the first N entries, N being the input *@p count, are written),
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a
+ *          component's auxiliary flag,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
+ *          non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_component_t* components);
 
 /**
  *  @brief          Returns the Enumeration information for the device
@@ -4636,9 +4840,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p speed, this function will write the current fan speed (a value
  *  between 0 and the maximum fan speed) to the uint32_t pointed to by @p speed.
- *  For legacy hwmon GPUs the maximum is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_max()
- *  to query the actual maximum
+ *  The value is the hwmon pwm1 duty cycle, whose maximum is
+ *  ::AMDSMI_MAX_FAN_SPEED (255).
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value or from amdsmi_get_gpu_fan_speed_max()
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4668,9 +4875,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p max_speed, this function will write the maximum fan speed possible to
  *  the uint32_t pointed to by @p max_speed.
- *  For legacy hwmon GPUs this is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, the maximum is read from the
- *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100)
+ *  This is the hwmon pwm1_max ceiling, ::AMDSMI_MAX_FAN_SPEED (255), and pairs
+ *  with amdsmi_get_gpu_fan_speed().
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -5104,15 +5314,34 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
+ *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
+ *  v3.0; v2.0 is not supported),
  *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
  *  This pointer is invalidated by ANY subsequent call to
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
  *  the same thread, even for different devices. Callers must copy the entire
  *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
+ *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
+ *  including a GPU metrics table (v1.x) reported by an APU: the pointer
+ *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  GFX, MM and VCN activity are whole percent for every revision, in @p pgpu_metrics
+ *  and in its APU sub-struct alike. The APU sub-struct keeps its power fields in
+ *  milliwatts.
+ *
+ *  A field the reported revision does not carry reads back as the not-applicable
+ *  sentinel, the maximum value of its type. The sentinel is never scaled, so a
+ *  field marked not applicable stays recognizable as one at both levels.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -5137,15 +5366,22 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.4 or v3.0),
- *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
- *  This pointer is invalidated by ANY subsequent call to
- *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
- *  the same thread, even for different devices. Callers must copy the entire
- *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
+ *  A partition metrics table never carries them. This call resolves only the XCP
+ *  partition revisions, so @p pgpu_metrics->apu_metrics is always nullptr here;
+ *  use ::amdsmi_get_gpu_metrics_info for a device that publishes an APU table.
+ *  This call does still invalidate an ::amdsmi_apu_metrics_t pointer obtained
+ *  earlier from that function on the same thread, so copy what it returned before
+ *  calling this one.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
                                                       amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -6991,6 +7227,41 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
                                           uint64_t* hops, amdsmi_link_type_t* type);
 
 /**
+ *  @brief Retrieve the unified link topology information between 2 GPUs
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Returns weight, status, type, hops, and framebuffer sharing in
+ *  ::amdsmi_link_topology_t, matching the host interface.
+ *
+ *  @note Baremetal behavior:
+ *  - Self pair: INTERNAL, ENABLED, zero weight and hops, fb_sharing=1.
+ *  - Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+ *  - Current successful calls always report ::AMDSMI_LINK_STATUS_ENABLED.
+ *  - UNKNOWN-to-DISABLED is defensive, not a current success case.
+ *    INACTIVE and ERROR are not produced.
+ *  - Status provides host API parity, not link health or P2P access.
+ *    The topology CLI uses ::amdsmi_is_P2P_accessible, so its status can differ.
+ *  - num_hops is the abstracted count from ::amdsmi_topo_get_link_type,
+ *    not physical xGMI links; values above 255 are capped.
+ *  - fb_sharing is best-effort: 0 means no P2P access or a failed P2P query.
+ *  - Queries are sequential, so topology changes can affect field consistency.
+ *
+ *  @param[in] processor_handle_src the source processor handle
+ *
+ *  @param[in] processor_handle_dst the destination processor handle
+ *
+ *  @param[out] topology_info Receives the link topology.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info);
+
+/**
  *  @brief Retrieve the set of GPUs that are nearest to a given device
  *         at a specific interconnectivity level.
  *
@@ -7627,14 +7898,6 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
- *
- *  @details On Linux, driver_version is /sys/module/amdgpu/version, such as
- *           6.19.14.31400000, or N/A. driver_kernel_version (6.19.14) and
- *           amdgpu_driver_version (31400000) are its parts,
- *           driver_build_version is the active DKMS build, and
- *           driver_full_version is driver_version-build, or driver_version
- *           when there is no build. The other fields are empty when
- *           unavailable.
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -9946,6 +10209,239 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
                                                  amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
+
+/** @defgroup tagAMPP AMD-SMI Power Profile (AMPP)
+ *  AMPP lets a caller select a predefined power/performance recipe instead of
+ *  tuning individual clocks by hand. Recipes are driver-authored (not
+ *  firmware); PMFW enforces safety bounds. Everything here is dynamically
+ *  enumerated at runtime — the driver does not guarantee a fixed field set,
+ *  profile count, or naming across SoC generations, so nothing is hardcoded.
+ *
+ *  @note This uses a kernel UAPI sysfs interface
+ *  (/sys/class/drm/<device>/device/app_modes/), not libdrm.
+ *
+ *  @note This is unrelated to the legacy ::amdsmi_get_gpu_power_profile_presets /
+ *  ::amdsmi_set_gpu_power_profile preset-mask API; that API is untouched by AMPP.
+ *
+ *  @note Per-partition profile selection is out of scope for AMPP.
+ *  @{
+ */
+
+/**
+ * @brief A single opaque AMPP field name/value/unit tuple.
+ *
+ * Field name and unit are opaque strings taken verbatim from sysfs; AMPP
+ * never maps them to an AMDSMI-defined enum. Value is the numeric portion
+ * parsed from the sysfs content "<value> <unit>" (e.g. "300 W", "1 bool").
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  char name[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque field name (e.g. "PPT0_Limit")
+  char unit[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque unit string (e.g. "W", "-")
+  int64_t value;                        //!< Parsed value
+  int64_t limit_min;                    //!< Guidance-only lower bound from limits/min/<field>
+  int64_t limit_max;                    //!< Guidance-only upper bound from limits/max/<field>
+  bool has_limits;                      //!< True if limit_min/limit_max were found in limits/
+  //! Reserved for future expansion. Callers MUST zero-initialize this (e.g.
+  //! `= {}` or memset) before passing the struct to
+  //! ::amdsmi_configure_ampp_profile -- it is forwarded to the implementation.
+  uint32_t reserved[4];
+} amdsmi_ampp_field_t;
+
+/**
+ * @brief A single AMPP profile slot descriptor (app_modes/profile_N).
+ *
+ * @note After a driver reload, custom slots 5-7 read back as unconfigured
+ * (is_configured == false) via sysfs even if they were previously
+ * committed. PMFW retains the last-committed recipe internally; sysfs
+ * simply does not re-expose it until the slot is reconfigured. This is
+ * expected driver behavior, not data loss.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef struct {
+  char name[AMDSMI_MAX_STRING_LENGTH];  //!< Opaque profile name (e.g. "profile_2")
+  uint32_t index;                       //!< Slot index, as parsed from the profile_N dirname
+  bool is_active;                       //!< True if this is app_modes/active_profile
+  bool is_writable;                     //!< True if index's bit is set in config/writable_slot_mask
+  bool is_configured;                   //!< False for an empty, unconfigured custom slot
+  uint32_t reserved[4];                 //!< Reserved for future expansion
+} amdsmi_ampp_profile_t;
+
+/**
+ *  @brief Get the list of AMPP power profiles published by the driver
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Enumerates whatever profile_N directories currently exist under
+ *  app_modes/ at the time of the call; the set of published slots is
+ *  entirely driver/PMFW defined and is discovered at runtime rather than
+ *  assumed by this API. This follows the "query size first" idiom used
+ *  elsewhere in this header: call
+ *  once with @p profiles == NULL to learn the required array size, allocate,
+ *  then call again with a buffer of at least that size.
+ *
+ *  @param[in] processor_handle Device to query
+ *
+ *  @param[out] version If non-NULL, filled with the app_modes/profile_abi
+ *  string (e.g. "1.0"), NUL-terminated, truncated to fit
+ *  AMDSMI_MAX_STRING_LENGTH. Left as an empty string if profile_abi does not
+ *  exist. This is a single tree-wide ABI version, not a per-profile value.
+ *
+ *  @param[in,out] num_profiles On input, the capacity of @p profiles (ignored
+ *  if @p profiles is NULL). On output, the number of profiles currently
+ *  published by the driver.
+ *
+ *  @param[out] profiles If NULL, only @p num_profiles is filled with the
+ *  required size. Otherwise, must point to an array with at least
+ *  @p num_profiles entries on input; filled with up to that many published
+ *  profiles. At most one returned entry has is_active set -- none will if
+ *  active_profile currently points to a slot that is not (or no longer)
+ *  published. On any return other than ::AMDSMI_STATUS_SUCCESS, treat
+ *  @p num_profiles and the contents of @p profiles as undefined.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/
+ *          (AMPP not implemented on this ASIC),
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if @p profiles is non-NULL but
+ *          too small to hold all published profiles,
+ *          ::AMDSMI_STATUS_INVAL if @p num_profiles is NULL,
+ *          ::AMDSMI_STATUS_NO_DATA if active_profile does not exist,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if active_profile or
+ *          config/writable_slot_mask exists but its content does not parse
+ *          as well-formed (e.g. a malformed index or hex bitmask)
+ */
+amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
+                                         char version[AMDSMI_MAX_STRING_LENGTH],
+                                         uint32_t* num_profiles, amdsmi_ampp_profile_t* profiles);
+
+/**
+ *  @brief Get the fields of a single AMPP power profile
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Enumerates whatever field files currently exist under
+ *  app_modes/<profile_name>/, merging in guidance bounds from
+ *  limits/min/<field> and limits/max/<field> when present. Field names are
+ *  not a fixed compile-time list; treat each as an opaque string from sysfs.
+ *  Follows the "query size first" idiom: call once with @p fields == NULL to
+ *  learn the required array size.
+ *
+ *  @param[in] processor_handle Device to query
+ *
+ *  @param[in] profile_name Name of the profile to query (e.g. "profile_2"),
+ *  as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @param[in,out] num_fields On input, the capacity of @p fields (ignored if
+ *  @p fields is NULL). On output, the number of fields currently published
+ *  for this profile.
+ *
+ *  @param[out] fields If NULL, only @p num_fields is filled with the required
+ *  size. Otherwise, must point to an array with at least @p num_fields
+ *  entries on input; filled with up to that many published fields. On any
+ *  return other than ::AMDSMI_STATUS_SUCCESS, treat @p num_fields and the
+ *  contents of @p fields as undefined.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if @p fields is non-NULL but too
+ *          small to hold all published fields,
+ *          ::AMDSMI_STATUS_NO_DATA if @p profile_name is a writable but
+ *          unconfigured custom slot (e.g. an empty profile_5),
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          profile_N directory currently published, or @p num_fields is NULL,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a field or limits/min|max
+ *          file exists but its content does not parse, or if
+ *          config/writable_slot_mask exists but its content does not parse
+ *          as a well-formed hex bitmask
+ */
+amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
+                                       const char* profile_name, uint32_t* num_fields,
+                                       amdsmi_ampp_field_t* fields);
+
+/**
+ *  @brief Activate an AMPP profile
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Switches app_modes/active_profile to the slot matching
+ *  @p profile_name.
+ *
+ *  @param[in] processor_handle Device to modify
+ *
+ *  @param[in] profile_name Name of the profile to activate (e.g.
+ *  "profile_2"), as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
+ *          app_modes/active_profile (typically requires root/CAP_SYS_ADMIN),
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          published profile_N
+ */
+amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_handle,
+                                             const char* profile_name);
+
+/**
+ *  @brief Configure a custom AMPP profile slot
+ *
+ *  @ingroup tagAMPP
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details @p profile_name must name a writable custom slot (one whose
+ *  index's bit is set in config/writable_slot_mask). Stages each of
+ *  @p fields into config/<field name>, then writes config/commit=1.
+ *  Partial staging is allowed and is not padded/zero-filled by AMDSMI —
+ *  unspecified fields are resolved by the driver from either the active
+ *  profile (first-ever commit to this slot) or the slot's own last-committed
+ *  values (subsequent commits). Because PMFW may silently clamp committed
+ *  values, callers should re-read via ::amdsmi_get_ampp_fields after this
+ *  call rather than trusting the values just written.
+ *
+ *  The driver rejects config/commit with -EINVAL if no field was ever
+ *  staged for this attempt (config/profile alone is not sufficient). This
+ *  function requires @p fields to be non-NULL with @p num_fields >= 1 and
+ *  returns ::AMDSMI_STATUS_INVAL proactively rather than relying on that
+ *  kernel -EINVAL bubbling up uninterpreted.
+ *
+ *  @param[in] processor_handle Device to modify
+ *
+ *  @param[in] profile_name Name of the profile to configure (e.g.
+ *  "profile_5"), as returned by ::amdsmi_get_ampp_profiles
+ *
+ *  @param[in] fields Array of fields to stage; must be non-NULL with at
+ *  least one entry
+ *
+ *  @param[in] num_fields Number of entries in @p fields; must be >= 1
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
+ *          if the profile is not listed in config/writable_slot_mask,
+ *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
+ *          the files under app_modes/<profile_name>/config/ (typically requires
+ *          root/CAP_SYS_ADMIN),
+ *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
+ *          published profile_N, if @p fields contains a field name not
+ *          recognized for this profile, or if @p fields is NULL or
+ *          @p num_fields == 0,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if config/writable_slot_mask
+ *          exists but its content does not parse as a well-formed hex
+ *          bitmask
+ */
+amdsmi_status_t amdsmi_configure_ampp_profile(amdsmi_processor_handle processor_handle,
+                                              const char* profile_name,
+                                              const amdsmi_ampp_field_t* fields,
+                                              uint32_t num_fields);
+
+/** @} End tagAMPP */
 
 /** @defgroup tagMemConfig Memory Configuration
  *  These functions are used to configure UMA (Unified Memory Architecture)

@@ -10,6 +10,8 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#include <cstring>
+
 HIP_TEST_CASE(Unit_hipMemcpyAsync_Positive_Basic) {
   using namespace std::placeholders;
   const auto stream_type = isQuickLevel()
@@ -140,4 +142,75 @@ HIP_TEST_CASE(Unit_hipMemcpyAsync_Capture) {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/*
+ * Regression test for a silently lost host-to-device copy.
+ *
+ * A small async H2D copy from pageable memory is staged: the runtime memcpy's the source into a
+ * pinned staging slot, then a blit shader reads that slot and writes the destination. Slots are
+ * bump-allocated and aligned to the cache line size the agent reports through
+ * HSA_AMD_AGENT_INFO_CACHELINE_SIZE.
+ *
+ * KFD reported that size as zero on gfx11 and CLR substituted its 64-byte fallback, while L2
+ * tracks 128-byte lines. Two consecutive copies therefore landed in one line.
+ *
+ * All four of these were needed to reproduce; drop any one and the failure disappears:
+ *   - the source is pageable host memory; a pinned source is read directly, with no staging
+ *   - the copy is asynchronous
+ *   - the copy is smaller than the 128-byte granule, so that two of them share a line;
+ *
+ * Due to the nature of the regression, the test needs to be probabilistic.
+ */
+HIP_TEST_CASE(Unit_hipMemcpyAsync_Regression_PageableStaging_ConsecutiveSmallCopies) {
+  // Two copies have to share one 128-byte line for the stale read to be reachable; at 128 bytes
+  // and above each gets a line of its own and nothing is ever lost.
+  constexpr size_t kCopyBytes = 64;
+
+  // Slots are handed out consecutively, so every second copy inherits a line its predecessor
+  // already pulled into L2, and only those odd-numbered copies can be lost.
+  constexpr int kCopiesPerStream = 32;
+
+  constexpr int kIterations = 500;
+
+  constexpr size_t kBlockBytes = kCopyBytes * kCopiesPerStream;
+
+  LinearAllocGuard<unsigned char> pattern(LinearAllocs::malloc, kCopyBytes);
+  LinearAllocGuard<unsigned char> expected(LinearAllocs::malloc, kBlockBytes);
+  LinearAllocGuard<unsigned char> readback(LinearAllocs::malloc, kBlockBytes);
+  for (size_t i = 0; i < kCopyBytes; ++i) {
+    pattern.ptr()[i] = static_cast<unsigned char>(0xA5 + i);
+  }
+  for (int copy = 0; copy < kCopiesPerStream; ++copy) {
+    std::memcpy(expected.ptr() + copy * kCopyBytes, pattern.ptr(), kCopyBytes);
+  }
+
+  LinearAllocGuard<unsigned char> device(LinearAllocs::hipMalloc, kBlockBytes);
+
+  for (int iteration = 0; iteration < kIterations; ++iteration) {
+    const StreamGuard stream_guard(Streams::created);
+    const hipStream_t stream = stream_guard.stream();
+
+    for (int copy = 0; copy < kCopiesPerStream; ++copy) {
+      HIP_CHECK(hipMemcpyAsync(device.ptr() + copy * kCopyBytes, pattern.ptr(), kCopyBytes,
+                               hipMemcpyDefault, stream));
+    }
+
+    // Poison the landing area so a zero readback can only have come from the device.
+    std::memset(readback.ptr(), 0xFF, kBlockBytes);
+    HIP_CHECK(hipMemcpyAsync(readback.ptr(), device.ptr(), kBlockBytes, hipMemcpyDefault, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    if (std::memcmp(readback.ptr(), expected.ptr(), kBlockBytes) == 0) {
+      continue;
+    }
+
+    for (size_t byte = 0; byte < kBlockBytes; ++byte) {
+      INFO("Iteration " << iteration << ", copy " << byte / kCopyBytes << " of "
+                        << kCopiesPerStream << ", byte " << byte % kCopyBytes << ", wrote 0x"
+                        << std::hex << static_cast<int>(expected.ptr()[byte]) << ", read 0x"
+                        << static_cast<int>(readback.ptr()[byte]));
+      REQUIRE(readback.ptr()[byte] == expected.ptr()[byte]);
+    }
+  }
 }

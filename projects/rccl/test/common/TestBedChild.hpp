@@ -36,7 +36,8 @@ namespace RcclUnitTesting
       CHILD_STOP             = 11, // Stop()
       CHILD_REGISTER_MEM     = 12, // RegisterMem()
       CHILD_QUERY_SYMMETRIC  = 13, // QuerySymmetricSupport()
-      NUM_CHILD_COMMANDS     = 14
+      CHILD_DEREGISTER_MEM   = 14, // DeregisterMem()
+      NUM_CHILD_COMMANDS     = 15
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -54,7 +55,8 @@ namespace RcclUnitTesting
       "DESTROY_GRAPHS",
       "STOP",
       "REGISTER_MEM",
-      "QUERY_SYMMETRIC"
+      "QUERY_SYMMETRIC",
+      "DEREGISTER_MEM"
     };
 
     // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
@@ -155,6 +157,9 @@ namespace RcclUnitTesting
 
     ErrCode RegisterMem();
 
+    // Deregister all selected ranks before their backing allocations are freed
+    ErrCode DeregisterMem();
+
     // Returns (as int) whether every local comm reports symmetric kernel support
     ErrCode QuerySymmetricSupport(std::vector<char>& retValBuf);
 
@@ -164,6 +169,7 @@ namespace RcclUnitTesting
     ErrCode RegisterMemSymmetric(int localRank, CollectiveArgs& collArg);
     ErrCode RegisterMemLegacy(int localRank, CollectiveArgs& collArg);
 
+    // Deregisters one local rank inside the caller's NCCL group.
     ErrCode DeregisterMemInternal(int groupId, int collId, int localRank);
 
     ErrCode DeallocateMemInternal(int groupId, int collId, int localRank);

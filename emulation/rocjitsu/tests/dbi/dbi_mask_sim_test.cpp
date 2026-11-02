@@ -26,6 +26,7 @@
 /// argument is written in every lane, and the masked case additionally exercises
 /// the anchor-mask restore that force_full_exec is defined by skipping.
 
+#include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
 
@@ -78,8 +79,8 @@ struct MaskSimArch {
   uint32_t e_flags;
   uint32_t wave_size;
   // The descriptor's wave32 bit drives the patch-time gates, which is all this
-  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
-  // without the bit, so every target dispatches Wave64 and wave_size only says
+  // selects. It does not reach execution: this suite does not opt DbiSim into a
+  // Wave32 dispatch, so every target dispatches Wave64 and wave_size only says
   // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
   // CDNA is Wave64 by construction.
   bool wave32;
@@ -110,21 +111,21 @@ protected:
     anchor_offset_ = static_cast<uint64_t>(text.size()) * sizeof(uint32_t);
     text.push_back(anchor_word);
     text.push_back(build_s_endpgm(a_.arch));
-    return test::make_amdgpu_kernel_elf(text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3,
-                                        a_.e_flags, /*granulated_vgpr_count=*/0,
-                                        /*accum_offset=*/0, /*unterminated_kd_name=*/false,
-                                        /*wrap_section_header_table=*/false,
-                                        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false,
-                                        a_.wave32);
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        text, /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*granulated_vgpr_count=*/0,
+        /*accum_offset=*/0, /*unterminated_kd_name=*/false,
+        /*wrap_section_header_table=*/false,
+        /*wrap_symtab_range=*/false, /*kd_crosses_section=*/false, a_.wave32);
+    return test::with_descriptor_metadata(image, a_.arch);
   }
 
   // Patch the anchor with @p probe_body and run. Returns the per-lane values of
   // @p regs.
-  std::vector<std::vector<uint32_t>> run_patched(const std::vector<uint8_t> &target,
-                                                 const std::vector<uint32_t> &probe_body,
-                                                 const std::vector<ProbeArgValue> &args,
-                                                 bool full_exec,
-                                                 const std::vector<uint32_t> &regs) {
+  util::FailureOr<std::vector<std::vector<uint32_t>>>
+  run_patched(const std::vector<uint8_t> &target, const std::vector<uint32_t> &probe_body,
+              const std::vector<ProbeArgValue> &args, bool full_exec,
+              const std::vector<uint32_t> &regs) {
     auto probe = test::make_amdgpu_probe_elf("rj_test_mask_probe", probe_body, a_.e_flags);
     AmdGpuCodeObject obj(target.data(), target.size());
     AmdGpuCodeObject probe_obj(probe.data(), probe.size());
@@ -144,7 +145,7 @@ protected:
     EXPECT_TRUE(result.errors.empty())
         << (result.errors.empty() ? std::string{} : result.errors.front());
     if (!result.errors.empty())
-      return std::vector<std::vector<uint32_t>>(regs.size());
+      return util::Result::failure();
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     EXPECT_TRUE(patched.is_valid());
@@ -152,7 +153,10 @@ protected:
     patched_scratch_ = test::patched_private_segment_size(patched);
     EXPECT_FALSE(patched_text_.empty());
 
-    test::DbiSim sim(a_.sim_arch, a_.wave_size);
+    test::DbiSim sim;
+    sim.initialize(a_.sim_arch, a_.wave_size);
+    if (testing::Test::HasFatalFailure())
+      return util::Result::failure();
     return sim.run_and_read_vgprs(patched_text_, patched_scratch_, regs);
   }
 
@@ -205,8 +209,9 @@ protected:
   //============================================================================
 
   void expect_masked_probe_reaches_only_active_lanes() {
-    const std::vector<uint32_t> v3 =
-        run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/false, {3}).front();
+    auto v3_result = run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/false, {3});
+    ASSERT_TRUE(v3_result.succeeded());
+    const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
       EXPECT_EQ(v3[lane], lane_active(lane) ? kProbeSentinel : kUntouched)
@@ -214,8 +219,9 @@ protected:
   }
 
   void expect_full_exec_probe_reaches_every_lane() {
-    const std::vector<uint32_t> v3 =
-        run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/true, {3}).front();
+    auto v3_result = run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/true, {3});
+    ASSERT_TRUE(v3_result.succeeded());
+    const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
       EXPECT_EQ(v3[lane], kProbeSentinel)
@@ -231,8 +237,10 @@ protected:
   // writes and the call. That restore is precisely what force_full_exec omits,
   // so this is the case the policy is defined against.
   void expect_masked_probe_with_a_live_argument_restores_the_anchor_mask() {
-    const auto regs = run_patched(live_argument_target(), echo_probe(),
-                                  {probe_arg_imm(kProbeSentinel)}, /*full_exec=*/false, {3, 1});
+    auto regs_result = run_patched(live_argument_target(), echo_probe(),
+                                   {probe_arg_imm(kProbeSentinel)}, /*full_exec=*/false, {3, 1});
+    ASSERT_TRUE(regs_result.succeeded());
+    const auto regs = std::move(regs_result).value();
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to spill the live v0";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
@@ -248,8 +256,10 @@ protected:
   // The same site under force_full_exec: the probe now reaches every lane, and
   // the spill still round-trips, so the guest is unharmed either way.
   void expect_full_exec_probe_with_a_live_argument_spills_and_reaches_every_lane() {
-    const auto regs = run_patched(live_argument_target(), echo_probe(),
-                                  {probe_arg_imm(kProbeSentinel)}, /*full_exec=*/true, {3, 1});
+    auto regs_result = run_patched(live_argument_target(), echo_probe(),
+                                   {probe_arg_imm(kProbeSentinel)}, /*full_exec=*/true, {3, 1});
+    ASSERT_TRUE(regs_result.succeeded());
+    const auto regs = std::move(regs_result).value();
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to spill the live v0";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
@@ -270,10 +280,10 @@ protected:
   // already runs under EXEC = -1, so a lane reading kUntouched would mean the
   // value never arrived rather than that the lane was inactive.
   void expect_probe_receives_the_anchor_mask() {
-    const std::vector<uint32_t> v3 =
-        run_patched(bare_target(), echo_probe(), {{ProbeArgSource::AnchorExecLo, 0}},
-                    /*full_exec=*/true, {3})
-            .front();
+    auto v3_result = run_patched(bare_target(), echo_probe(), {{ProbeArgSource::AnchorExecLo, 0}},
+                                 /*full_exec=*/true, {3});
+    ASSERT_TRUE(v3_result.succeeded());
+    const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
       EXPECT_EQ(v3[lane], kAnchorMask)
@@ -291,9 +301,11 @@ protected:
     // Publish v0 (exec_lo) in v3 and v1 (exec_hi) in v2.
     const std::vector<uint32_t> probe{kMovV3V0, kMovV2V1,
                                       build_s_setpc_b64(/*s[30:31]=*/30, a_.arch)};
-    const auto regs = run_patched(
+    auto regs_result = run_patched(
         target, probe, {{ProbeArgSource::AnchorExecLo, 0}, {ProbeArgSource::AnchorExecHi, 0}},
         /*full_exec=*/true, {3, 2});
+    ASSERT_TRUE(regs_result.succeeded());
+    const auto regs = std::move(regs_result).value();
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(regs[0][lane], kAnchorMask) << "lane " << lane << ": wrong exec_lo";
@@ -337,8 +349,10 @@ protected:
   //============================================================================
 
   void expect_probe_narrowing_exec_does_not_strand_the_spill_reload() {
-    const auto regs = run_patched(live_argument_target(), narrowing_sentinel_probe(),
-                                  {probe_arg_imm(kArgValue)}, /*full_exec=*/true, {3, 0});
+    auto regs_result = run_patched(live_argument_target(), narrowing_sentinel_probe(),
+                                   {probe_arg_imm(kArgValue)}, /*full_exec=*/true, {3, 0});
+    ASSERT_TRUE(regs_result.succeeded());
+    const auto regs = std::move(regs_result).value();
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
     EXPECT_EQ(patched_scratch_, 68u) << "descriptor scratch must grow to spill the live v0";
     for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
@@ -358,9 +372,9 @@ protected:
   // re-widen is unobservable: the other probes here leave EXEC at -1, where
   // writing -1 over it changes nothing.
   void expect_without_the_post_call_rewiden_the_reload_strands_switched_off_lanes() {
-    ASSERT_NO_FATAL_FAILURE((void)run_patched(live_argument_target(), narrowing_sentinel_probe(),
-                                              {probe_arg_imm(kArgValue)}, /*full_exec=*/true,
-                                              {3, 0}));
+    auto patched_result = run_patched(live_argument_target(), narrowing_sentinel_probe(),
+                                      {probe_arg_imm(kArgValue)}, /*full_exec=*/true, {3, 0});
+    ASSERT_TRUE(patched_result.succeeded());
     ASSERT_FALSE(patched_text_.empty());
 
     const uint32_t widen =
@@ -376,7 +390,8 @@ protected:
     ASSERT_NE(it, sabotaged.end());
     *it = build_s_nop(0, a_.arch);
 
-    test::DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v0 = broken.run_and_read_vgpr(sabotaged, patched_scratch_,
                                                               /*reg=*/0);
     ASSERT_EQ(v0.size(), a_.wave_size);
@@ -390,8 +405,8 @@ protected:
   // Proves the extra lanes come from that instruction and not from the wave
   // happening to be fully active.
   void expect_without_the_widen_full_exec_reaches_only_active_lanes() {
-    ASSERT_NO_FATAL_FAILURE(
-        (void)run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/true, {3}));
+    auto patched_result = run_patched(bare_target(), sentinel_probe(), {}, /*full_exec=*/true, {3});
+    ASSERT_TRUE(patched_result.succeeded());
     ASSERT_FALSE(patched_text_.empty());
 
     const uint32_t widen =
@@ -401,7 +416,8 @@ protected:
     ASSERT_NE(it, sabotaged.end()) << "full-mask widen not found in the patched text";
     *it = build_s_nop(0, a_.arch);
 
-    test::DbiSim broken(a_.sim_arch, a_.wave_size);
+    test::DbiSim broken;
+    ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3 = broken.run_and_read_vgpr(sabotaged, patched_scratch_,
                                                               /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size);

@@ -63,7 +63,8 @@ __launch_bounds__(512)
                                      int selfRank, int nRanksRt,
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
                                      int epochLen,                          // number of cells in epochDev
-                                     size_t bankSize) {                     // scratch bank size (from host)
+                                     size_t bankSize,                     // scratch bank size (from host)
+                                     DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -92,20 +93,31 @@ __launch_bounds__(512)
     }
   }
 
-  // Phase 2: poll my slots for the other ranks, reduce with my own data.
+  // Phase 2: poll my slots for the other ranks and fold every rank's payload in
+  // rank order, so each rank rounds the same partial sums and all get the same
+  // result. My own payload comes straight from sendbuff.
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
-    uint32_t acc0 = in[2 * pk];
-    uint32_t acc1 = in[2 * pk + 1];
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+    uint32_t acc0 = 0, acc1 = 0;
+    for (int peer = 0; peer < nRanks; ++peer) {
+      uint32_t d0, d1;
+      if (peer == selfRank) {
+        d0 = in[2 * pk];
+        d1 = in[2 * pk + 1];
+      } else {
+        volatile LLPacket16* src = myBase + (size_t)peer * slot;
+        uint32_t f0, f1;
+        if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
+          ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+          return;
+        }
+      }
+      if (peer == 0) {
+        acc0 = d0;
+        acc1 = d1;
+      } else {
+        ddaLLAddPayload<T>(acc0, acc1, d0, d1);
+      }
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;

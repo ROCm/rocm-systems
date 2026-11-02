@@ -27,10 +27,11 @@ namespace simdojo {
 ///
 /// @details Each worker thread manages exactly one partition and holds the
 /// partition's event queue, incoming message queues, and synchronization
-/// state. In single-threaded mode only the event queue and async wakeup
-/// fields are used. In multi-threaded mode, threads synchronize via a
+/// state. In single-threaded mode only the event queue and idle publication
+/// flag are used. In multi-threaded mode, threads synchronize via a
 /// global barrier; each partition publishes its local_next before the
 /// barrier, and the barrier completion function computes the new global LBTS.
+/// Context zero's idle publication flag serves both worker modes.
 class alignas(64) PartitionContext {
 public:
   explicit PartitionContext(PartitionID pid, uint32_t num_partitions) : partition_id(pid) {
@@ -72,7 +73,11 @@ private:
   /// local_next values to compute the new global LBTS.
   std::atomic<Tick> local_next{TICK_MAX};
 
-  /// @brief Single-threaded idle wait (atomic wait/notify for async wakeup).
+  /// @brief Engine-wide idle publication flag, stored on context zero.
+  /// @details Producers exchange true with release ordering. Only the single
+  /// worker or barrier completion consumes the flag with an acquire-release
+  /// exchange before rechecking event and exit state. Other contexts' flags
+  /// are unused.
   std::atomic<bool> idle_wakeup_{false};
 
   /// @brief Drain all incoming queues into the local event queue.
@@ -87,7 +92,7 @@ private:
 /// **Single-threaded mode** (`num_threads == 1`): drains events directly from
 /// the priority queue in timestamp order. No LBTS computation, no barriers,
 /// no epoch structure. When the queue empties, drains async buffers and either
-/// terminates or blocks on a condition variable for external events.
+/// terminates or waits for external event publications (timed when paced).
 ///
 /// **Multi-threaded mode** (`num_threads > 1`): runs a conservative
 /// barrier-based Parallel Discrete Event Simulation (PDES) loop. Each epoch:
@@ -101,7 +106,7 @@ private:
 /// Functional\<Base\> CRTP mixin, which self-schedules a timer callback and
 /// re-enqueues after each advance(). If no events are ever scheduled and no
 /// primaries are registered, the simulation terminates via quiescence. If
-/// primaries are registered, the engine blocks until async events arrive or
+/// primaries are registered, the engine waits until async events arrive or
 /// all primaries signal completion.
 ///
 /// Typical usage:
@@ -157,6 +162,8 @@ public:
   ///
   /// @details After shutdown(), the engine can be rebuilt with a new create() call.
   /// Called automatically by the destructor if still built.
+  /// Requires run() or step() to have returned; use request_exit() to stop a
+  /// running engine from another thread, then join that thread before shutdown().
   void shutdown();
 
   /// @brief Return whether the engine has been created and is ready for execution.
@@ -257,6 +264,12 @@ public:
   /// @returns Const reference to the stored exit event.
   const ExitStatus &last_exit() const { return exit_status_; }
 
+  /// @brief Read the exit code safely while a host thread may request exit.
+  int exit_code() const {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_.code;
+  }
+
   /// @brief Enqueue an event from any thread (thread-safe).
   ///
   /// @details The event is buffered and drained into the target partition's queue
@@ -349,12 +362,12 @@ private:
   /// updates current_time_, runs service callbacks, and checks termination.
   void barrier_completion();
 
-  /// @brief Sleep out an epoch in which every partition published TICK_MAX.
+  /// @brief Wait out an epoch in which every partition published TICK_MAX.
   ///
   /// @details Called from @ref barrier_completion, so every other worker is
-  /// parked in the barrier for its duration. Returns as soon as an async event
-  /// is pending or the run is done, and in any case within a millisecond so
-  /// termination keeps being re-checked.
+  /// parked in the barrier for its duration. Returns when async work, a primary
+  /// release or an exit publication requires another epoch. Event and exit
+  /// producers must change and notify context zero's publication flag.
   void idle_wait_quiescent();
 
   /// @brief Whether any partition has undrained async events.
@@ -452,18 +465,21 @@ private:
   /// @brief Set up partition contexts, async queues, and engine pointers.
   void setup_partitions();
 
-  /// @brief Wake an idle single-threaded worker so it re-checks its exit and event state.
+  /// @brief Wake the idle worker or quiescent barrier completion.
   ///
-  /// @details No-op outside single-threaded mode, or once the partition is gone.
+  /// @details No-op once the partition is gone. Multi-threaded publications share
+  /// context zero's flag because only barrier completion can wait for them.
   /// The caller must already hold @ref contexts_mutex_ (shared or exclusive).
-  /// @param pid The partition to wake.
+  /// @param pid The publication's partition, checked for liveness. The wake
+  /// always targets context zero's shared flag.
   void wake_partition_locked(PartitionID pid);
 
-  /// @brief Wake an idle single-threaded worker, guarding against concurrent teardown.
+  /// @brief Wake the idle engine, guarding against concurrent teardown.
   ///
   /// @details Takes a shared lock on @ref contexts_mutex_ so the context cannot be
   /// destroyed by shutdown() between the bounds check and the notify.
-  /// @param pid The partition to wake.
+  /// @param pid The publication's partition, checked for liveness. The wake
+  /// always targets context zero's shared flag.
   void wake_partition(PartitionID pid);
 
   Topology topology_; ///< The simulation topology.
@@ -537,7 +553,7 @@ private:
   };
   std::vector<std::unique_ptr<AsyncQueue>> async_queues_; ///< One per partition.
 
-  std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
+  mutable std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
   bool exit_set_ = false; ///< True once exit_status_ has been written (sentinel for set_exit).
 };
 

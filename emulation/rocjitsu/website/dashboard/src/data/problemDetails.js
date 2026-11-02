@@ -3,7 +3,7 @@ import { hasDisplayValue } from '../utils/values';
 function displayValue(value) {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string' || typeof value === 'number') return String(value);
-  return null;
+  return value === null || typeof value === 'object' ? JSON.stringify(value) : null;
 }
 
 function displayKey(key) {

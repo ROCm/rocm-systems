@@ -72,7 +72,7 @@ enum SocketType {
   SocketTypeNetIb = 4
 };
 
-const char* SocketToString(union SocketAddress* addr, char* buf, const int numericHostForm = 1);
+const char* SocketToString(union SocketAddress* addr, char* buf, size_t bufLen, const int numericHostForm = 1);
 void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair);
 int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, union SocketAddress* remoteAddr,
                              int ifNameMaxSize, int maxIfs);
@@ -109,6 +109,8 @@ class Socket {
  private:
   void tryAccept();
   void finalizeAccept();
+  void discardAccept();
+  bool recvMagic(uint64_t* magic, int* received);
   void startConnect();
   void pollConnect();
   void finalizeConnect();

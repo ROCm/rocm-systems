@@ -1,0 +1,32 @@
+defaults:
+  numbered: false
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install
+
+- caption: How to
+  entries:
+  - file: how-to/read-cuids
+  - url: https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid/example/main.cc
+    title: Sample program using CUID API
+
+- caption: API reference
+  entries:
+  - file: reference/amdcuid-c-api
+    entries:
+    - file: doxygen/docBin/html/amd__cuid_8h
+      title: amd_cuid.h file reference
+    - file: doxygen/docBin/html/annotated
+      title: Data structures
+    - file: doxygen/docBin/html/globals
+      title: Globals
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/what_is_cuid
+
+- caption: About
+  entries:
+  - file: license

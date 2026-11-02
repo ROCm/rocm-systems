@@ -45,6 +45,45 @@
       ]
     },
     {
+      "id": "triage-recorded-memory-fault",
+      "skill_should_trigger": true,
+      "note": "Fault from recorded evidence. hooks.py stages tests/fixtures/replay_memory_fault.log and info_crash.txt, then requires the skill to have loaded and the reply to carry the fault address 0x7f91da000000 and the kernel crash_oob.",
+      "prompt": "A customer's HRR archive faulted on replay. The archive stayed with them, but replay.log is the replay output and info.txt is `hrr-playback --info` for it. Triage it.",
+      "expected_behavior": [
+        "Report a GPU memory access fault, outcome MAF or fault class illegal_memory_access",
+        "Say that crash_oob was inferred because the archive holds one kernel, or suggest confirming it with --sync-after-launch"
+      ],
+      "unexpected_behavior": [
+        "Invent a root cause the evidence does not support"
+      ]
+    },
+    {
+      "id": "triage-unreadable-archive",
+      "skill_should_trigger": true,
+      "note": "A format mismatch means nothing was replayed, so nothing faulted. hooks.py stages tests/fixtures/version_mismatch.log, then requires the skill to have loaded and no tool call to have passed --repair.",
+      "prompt": "Our HRR replay stopped at once. What happened? The output is in replay.log.",
+      "expected_behavior": [
+        "Report that the archive format and the hrr-playback reader disagree, so nothing was replayed",
+        "Say a reader matching the runtime that captured is needed"
+      ],
+      "unexpected_behavior": [
+        "Report a GPU fault or name a faulting kernel"
+      ]
+    },
+    {
+      "id": "triage-clean-pass-of-crashing-workload",
+      "skill_should_trigger": true,
+      "note": "A clean replay of a workload that crashed is itself a finding. hooks.py stages tests/fixtures/replay_pass.log, then requires the skill to have loaded and the reply to report PASS.",
+      "prompt": "This workload crashed for our customer with a memory access fault. Here is the replay of its HRR archive: replay.log. What happened?",
+      "expected_behavior": [
+        "Say the fault did not reproduce on replay, or ask for the original failure signature"
+      ],
+      "unexpected_behavior": [
+        "Name any kernel as implicated in a failure",
+        "Claim to have reproduced the customer's memory access fault"
+      ]
+    },
+    {
       "id": "no-archive-yet",
       "skill_should_trigger": false,
       "note": "Nothing to triage: recording the failure first is the other skill's job.",
@@ -55,6 +94,12 @@
       "skill_should_trigger": false,
       "note": "Replay timings are replay-side and measure nothing about the original run.",
       "prompt": "Our model runs slower than we expect on MI300X. Where is the time going?"
+    },
+    {
+      "id": "core-dump-under-rocgdb",
+      "skill_should_trigger": false,
+      "note": "A core dump with no HRR archive belongs to the crash-analysis tools.",
+      "prompt": "My HIP application dumped core. Open core.4242 with rocgdb and show me the backtrace."
     },
     {
       "id": "cuda-crash",

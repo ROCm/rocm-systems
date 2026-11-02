@@ -23,6 +23,7 @@
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_convertSymTaskDevOp, convertSymTaskDevOp);
+ASSERT_HOOK_MATCHES_PROD(g_ncclLaunchOneRank, ncclLaunchOneRank);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // scheduler/symmetric_sched.cc
@@ -44,10 +45,6 @@ static void DefaultConvertSymTaskDevOp(struct ncclComm*, struct ncclTaskColl*) {
 
 std::function<void(struct ncclComm*, struct ncclTaskColl*)> g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
 
-void ResetSchedStubs() {
-  g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
-}
-
 void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
   g_convertSymTaskDevOp(comm, task);
 }
@@ -64,7 +61,20 @@ ncclResult_t ncclRmaProxyReclaimPlan(struct ncclComm*, struct ncclKernelPlan*) {
 }
 
 // device/onerank.cu
-ncclResult_t ncclLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull,
-                               ncclDataType_t, hipStream_t, void const*) {
+static ncclResult_t DefaultLaunchOneRank(void*, void const*, size_t, struct ncclDevRedOpFull, ncclDataType_t,
+                                         hipStream_t, hipEvent_t, void const*) {
   FailLoudUnfaked("sched_stubs", "ncclLaunchOneRank");
+}
+std::function<ncclResult_t(void*, void const*, size_t, struct ncclDevRedOpFull, ncclDataType_t, hipStream_t,
+                           hipEvent_t, void const*)>
+    g_ncclLaunchOneRank = DefaultLaunchOneRank;
+ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
+                               ncclDataType_t type, hipStream_t stream, hipEvent_t launchCompletionEvent,
+                               void const* acc) {
+  return g_ncclLaunchOneRank(dst, src, nElts, redOp, type, stream, launchCompletionEvent, acc);
+}
+
+void ResetSchedStubs() {
+  g_convertSymTaskDevOp = DefaultConvertSymTaskDevOp;
+  g_ncclLaunchOneRank = DefaultLaunchOneRank;
 }

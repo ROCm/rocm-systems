@@ -8,7 +8,7 @@ set -e
 : ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.188}
-: ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
+: ${PYTHON_VERSIONS:="8 9 10 11 12 13 14 15"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
 : ${GPU_TYPE:=""}

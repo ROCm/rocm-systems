@@ -132,9 +132,10 @@ protected:
     };
     context.wake = [] {};
     context.flush_caches = [] {};
-    context.dispatch = [this](const std::array<uint32_t, 4> &dimensions) {
+    context.dispatch = [this](const std::array<uint32_t, 4> &dimensions, util::DiagnosticEmitter) {
       dispatches.push_back(dimensions);
       queue.dispatches.push_entry({});
+      return util::Result::success();
     };
   }
 
@@ -398,6 +399,44 @@ TEST_F(Pm4PacketProcessorTest, DispatchPausesInterpretationUntilCpRetiresIt) {
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0xdeadbeefu);
   EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReturnedDispatchFailureDoesNotRetireNativeRingPacket) {
+  const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
+  constexpr uint64_t kInitialCursor = 3;
+  memory->store<uint32_t>(kReadPointer, kInitialCursor);
+  submit(words, true, kInitialCursor);
+  uint32_t dispatch_attempts = 0;
+  context.dispatch = [&](const std::array<uint32_t, 4> &dimensions,
+                         util::DiagnosticEmitter emit_error) -> util::Result {
+    EXPECT_EQ(dimensions, (std::array<uint32_t, 4>{2, 3, 4, 1}));
+    ++dispatch_attempts;
+    return emit_error.emit() << "invalid test launch";
+  };
+
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(dispatch_attempts, 1u);
+  EXPECT_TRUE(queue.faulted);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), kInitialCursor);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), kInitialCursor);
+  EXPECT_FALSE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReturnedDispatchFailureCancellationIsNotCaughtAgain) {
+  const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
+  submit(words);
+  context.dispatch = [](const std::array<uint32_t, 4> &,
+                        util::DiagnosticEmitter emit_error) -> util::Result {
+    return emit_error.emit() << "invalid test launch";
+  };
+  uint32_t cancellations = 0;
+  context.fault_queue = [&] {
+    ++cancellations;
+    throw std::runtime_error("cancellation callback failed");
+  };
+  EXPECT_THROW(service(), std::runtime_error);
+  EXPECT_EQ(cancellations, 1u);
+  EXPECT_FALSE(completed);
 }
 
 TEST_F(Pm4PacketProcessorTest, QueueCancellationKeepsThePacketExceptionScope) {

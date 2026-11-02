@@ -66,9 +66,11 @@
 #include <cctype>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <unordered_map>
@@ -261,7 +263,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 5};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1705,6 +1707,191 @@ write_rocpd(
 
         auto spm_name_id = string_entries.at("SPM");
 
+        // One rocpd_info_pmc row per agent and counter location. The same
+        // counter and XCC/SE/SA/WGP/instance on two GPUs are different rows.
+        // Ids sit above the KFD pmc id range (0x7000000000000000) so they do
+        // not collide with counter ids or KFD rows. XCC, SE, SA, and WGP are
+        // NULL when the counter does not provide that dimension. Instance is
+        // always present.
+        struct spm_location_key
+        {
+            uint64_t               agent_id   = 0;
+            uint64_t               counter_id = 0;
+            std::optional<int64_t> xcc;
+            std::optional<int64_t> shader_engine;
+            std::optional<int64_t> shader_array;
+            std::optional<int64_t> wgp;
+            int64_t                instance = 0;
+
+            bool operator==(const spm_location_key& rhs) const
+            {
+                return agent_id == rhs.agent_id && counter_id == rhs.counter_id && xcc == rhs.xcc &&
+                       shader_engine == rhs.shader_engine && shader_array == rhs.shader_array &&
+                       wgp == rhs.wgp && instance == rhs.instance;
+            }
+        };
+        struct spm_location_key_hash
+        {
+            size_t operator()(const spm_location_key& key) const
+            {
+                auto mix = [](size_t seed, uint64_t value) {
+                    return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+                                   (seed << 6) + (seed >> 2));
+                };
+                auto mix_dimension = [&mix](size_t seed, const std::optional<int64_t>& value) {
+                    seed = mix(seed, value.has_value());
+                    return value ? mix(seed, static_cast<uint64_t>(*value)) : seed;
+                };
+                size_t seed = 0;
+                seed        = mix(seed, key.agent_id);
+                seed        = mix(seed, key.counter_id);
+                seed        = mix_dimension(seed, key.xcc);
+                seed        = mix_dimension(seed, key.shader_engine);
+                seed        = mix_dimension(seed, key.shader_array);
+                seed        = mix_dimension(seed, key.wgp);
+                seed        = mix(seed, static_cast<uint64_t>(key.instance));
+                return seed;
+            }
+        };
+        // Counter metadata is the same for every sample of an (agent, counter)
+        // pair. Cache it so later samples skip the counter scan and the
+        // dimension-id searches.
+        struct spm_counter_meta_key
+        {
+            uint64_t agent_id   = 0;
+            uint64_t counter_id = 0;
+
+            bool operator==(const spm_counter_meta_key& rhs) const
+            {
+                return agent_id == rhs.agent_id && counter_id == rhs.counter_id;
+            }
+        };
+        struct spm_counter_meta_key_hash
+        {
+            size_t operator()(const spm_counter_meta_key& key) const
+            {
+                auto mix = [](size_t seed, uint64_t value) {
+                    return seed ^ (std::hash<uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+                                   (seed << 6) + (seed >> 2));
+                };
+                return mix(mix(0, key.agent_id), key.counter_id);
+            }
+        };
+        struct spm_counter_meta
+        {
+            const tool_counter_info* base_info         = nullptr;
+            bool                     has_xcc           = false;
+            bool                     has_shader_engine = false;
+            bool                     has_shader_array  = false;
+            bool                     has_wgp           = false;
+        };
+        auto counter_meta_cache =
+            std::unordered_map<spm_counter_meta_key, spm_counter_meta, spm_counter_meta_key_hash>{};
+        auto location_ids = std::unordered_map<spm_location_key, uint64_t, spm_location_key_hash>{};
+        auto next_location_pmc_id = uint64_t{0x7100000000000000ULL};
+
+        auto cached_counter_meta = [&](rocprofiler_agent_id_t agent, uint64_t counter_id) {
+            auto cache_key = spm_counter_meta_key{agent.handle, counter_id};
+            if(auto found = counter_meta_cache.find(cache_key); found != counter_meta_cache.end())
+                return found->second;
+
+            auto meta = spm_counter_meta{};
+            if(auto agent_counters = tool_metadata.agent_counter_info.find(agent);
+               agent_counters != tool_metadata.agent_counter_info.end())
+            {
+                for(const auto& counter_info : agent_counters->second)
+                {
+                    if(counter_info.id.handle != counter_id) continue;
+                    meta.base_info = &counter_info;
+                    auto provides =
+                        [&](counters::rocprofiler_profile_counter_instance_types dimension) {
+                            auto dimension_id =
+                                static_cast<rocprofiler_counter_dimension_id_t>(dimension);
+                            return std::find(counter_info.dimension_ids.begin(),
+                                             counter_info.dimension_ids.end(),
+                                             dimension_id) != counter_info.dimension_ids.end();
+                        };
+                    meta.has_xcc = provides(counters::ROCPROFILER_DIMENSION_XCC);
+                    meta.has_shader_engine =
+                        provides(counters::ROCPROFILER_DIMENSION_SHADER_ENGINE);
+                    meta.has_shader_array = provides(counters::ROCPROFILER_DIMENSION_SHADER_ARRAY);
+                    meta.has_wgp          = provides(counters::ROCPROFILER_DIMENSION_WGP);
+                    break;
+                }
+            }
+            return counter_meta_cache.emplace(cache_key, meta).first->second;
+        };
+
+        auto spm_location_pmc_id = [&](const auto&            count,
+                                       rocprofiler_agent_id_t sample_agent) -> uint64_t {
+            auto meta = cached_counter_meta(sample_agent, count.id.handle);
+            auto dimension_value =
+                [&](bool present, counters::rocprofiler_profile_counter_instance_types dimension)
+                -> std::optional<int64_t> {
+                if(!present) return std::nullopt;
+                return static_cast<int64_t>(counters::rec_to_dim_pos(count.instance_id, dimension));
+            };
+            auto key = spm_location_key{
+                sample_agent.handle,
+                count.id.handle,
+                dimension_value(meta.has_xcc, counters::ROCPROFILER_DIMENSION_XCC),
+                dimension_value(meta.has_shader_engine,
+                                counters::ROCPROFILER_DIMENSION_SHADER_ENGINE),
+                dimension_value(meta.has_shader_array,
+                                counters::ROCPROFILER_DIMENSION_SHADER_ARRAY),
+                dimension_value(meta.has_wgp, counters::ROCPROFILER_DIMENSION_WGP),
+                static_cast<int64_t>(counters::rec_to_dim_pos(
+                    count.instance_id, counters::ROCPROFILER_DIMENSION_INSTANCE)),
+            };
+            if(auto found = location_ids.find(key); found != location_ids.end())
+                return found->second;
+
+            auto pmc_id = next_location_pmc_id++;
+            location_ids.emplace(key, pmc_id);
+
+            const auto* base_info          = meta.base_info;
+            const auto* agent              = tool_metadata.get_agent(sample_agent);
+            auto        json_data          = get_json_string([agent](auto& ar) {
+                if(agent) cereal::save(ar, *agent);
+            });
+            const auto* name               = base_info ? base_info->name : "";
+            const auto* description        = base_info ? base_info->description : "";
+            const auto* block              = base_info ? base_info->block : "";
+            const auto* expression         = base_info ? base_info->expression : "";
+            auto        nullable_dimension = [](std::string_view              column,
+                                         const std::optional<int64_t>& value) {
+                return value ? insert_value(column, *value) : sql_insert_value{column, nullptr};
+            };
+
+            get_insert_statement(
+                db,
+                "rocpd_info_pmc{{uuid}}",
+                {
+                    insert_value("id", pmc_id),
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("target_arch", std::string_view{"GPU"}),
+                    insert_value("agent_id", agent ? agent->node_id : 0),
+                    insert_value("name", name, allow_empty_string{}),
+                    insert_value("symbol", name, allow_empty_string{}),
+                    insert_value("description", description, allow_empty_string{}),
+                    insert_value("component", std::string_view{"rocm"}),
+                    insert_value("value_type", std::string_view{"ABS"}),
+                    insert_value("block", block, allow_empty_string{}),
+                    insert_value("expression", expression, allow_empty_string{}),
+                    insert_value("is_constant", base_info ? base_info->is_constant : 0),
+                    insert_value("is_derived", base_info ? base_info->is_derived : 0),
+                    insert_value("spm_support", base_info ? base_info->spm_support : 1),
+                    nullable_dimension("xcc", key.xcc),
+                    nullable_dimension("shader_engine", key.shader_engine),
+                    nullable_dimension("shader_array", key.shader_array),
+                    nullable_dimension("wgp", key.wgp),
+                    insert_value("instance", key.instance),
+                    insert_value("extdata", json_data),
+                });
+            return pmc_id;
+        };
+
         for(auto ditr : spm_collection_gen)
         {
             for(const auto& record : spm_collection_gen.get(ditr))
@@ -1744,20 +1931,8 @@ write_rocpd(
                                 insert_value("id", idx++),
                                 insert_value("event_id", evt_id),
                                 insert_value("sample_id", sample_id),
-                                insert_value("pmc_id", count.id.handle),
+                                insert_value("pmc_id", spm_location_pmc_id(count, info.agent_id)),
                                 insert_value("value", count.value),
-                                insert_value(
-                                    "xcc",
-                                    counters::rec_to_dim_pos(count.instance_id,
-                                                             counters::ROCPROFILER_DIMENSION_XCC)),
-                                insert_value("shader_engine",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_SHADER_ENGINE)),
-                                insert_value("instance",
-                                             counters::rec_to_dim_pos(
-                                                 count.instance_id,
-                                                 counters::ROCPROFILER_DIMENSION_INSTANCE)),
                             });
                     }
                 }

@@ -198,6 +198,8 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = static_cast<int>(wrkGrpInfo->maxDynamicSharedSizeBytes_);
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      // note: this intentionally ignores coarseMemCarveout_; i.e. it is not returning an
+      // "effective" carveout; instead behaves just like a getter
       *value = wrkGrpInfo->groupMemCarveout_;
       break;
     default:
@@ -1110,7 +1112,8 @@ hipError_t hipLaunchKernel_common(
     return hipErrorInvalidValue;
   }
   CHECK_STREAM_DETACHED(stream);
-  STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
+  STREAM_CAPTURE(hipLaunchKernelCommon, stream, hostFunction, gridDim, blockDim, args,
+                 sharedMemBytes, clusterDim, clusterDimsSpecified);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim, clusterDimsSpecified, dynDataPrefetchConfig);
 }

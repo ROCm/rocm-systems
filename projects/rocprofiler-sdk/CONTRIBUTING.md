@@ -42,7 +42,7 @@ All changes must meet the following requirements for review/acceptance:
 7. All C and C++ compiler warnings must be fixed
 
 All the above checks are enforced during CI.
-The [requirements.txt](requirements.txt) defines the exact versions of formatters and linters as needed.
+The [requirements-dev.txt](requirements-dev.txt) defines the exact versions of formatters and linters as needed.
 
 In order to streamline requirements 1-5, support has been built into the rocprofiler-sdk build system.
 By default, CMake will search for `clang-format`, `black`, and `cmake-format`. If `clang-format` is found,
@@ -57,8 +57,10 @@ enable clang-tidy checks when compiling the source code.
 
 For requirement #6, it is recommended to configure your IDE to automatically add new lines at the end of files.
 
-For requirement #7, the CMake option `ROCPROFILER_BUILD_DEVELOPER` can be used to enable the `-Werror` compiler flag,
-which treats warnings as errors.
+For requirement #7, `ROCPROFILER_BUILD_DEVELOPER=ON` enables
+`-Werror`, which treats warnings as errors, along with `-Wdouble-promotion`, `-Wshadow`, `-Wextra`, and `-Wvla`.
+`ROCPROFILER_BUILD_CI=ON` always enables these flags, including when `ROCPROFILER_BUILD_DEVELOPER=OFF`
+so that formatting and linting tools are optional.
 
 For simplicity, rocprofiler-sdk provides a CMake option `ROCPROFILER_BUILD_CI` to enable the following CMake options by default:
 `ROCPROFILER_BUILD_TESTS`, `ROCPROFILER_BUILD_SAMPLES`, `ROCPROFILER_BUILD_DEVELOPER`. However, if CMake is initially configured
@@ -68,7 +70,7 @@ with `ROCPROFILER_BUILD_CI=OFF` (the default), re-running cmake with `ROCPROFILE
 Thus, the build setup for developer contributions is the following:
 
 ```bash
-python3 -m pip install --user ./requirements.txt
+python3 -m pip install --user -r requirements-dev.txt
 cmake -B build-rocprofiler-sdk . -DROCPROFILER_BUILD_CI=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON
 ```
 

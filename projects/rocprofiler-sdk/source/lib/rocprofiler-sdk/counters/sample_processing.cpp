@@ -36,6 +36,8 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <pthread.h>
+
 namespace rocprofiler
 {
 namespace counters
@@ -85,10 +87,10 @@ process_completed_cb(completed_cb_params_t&& params)
             // callback branch below and CHECK on a record_callback this context never configured,
             // and aborting here would turn a late completion into a crash in the tool's own
             // shutdown path.
-            ROCP_WARNING << "counter collection: buffer " << info->buffer->handle
-                         << " was destroyed before dispatch "
-                         << packet.callback_record.dispatch_info.dispatch_id
-                         << " completed; dropping its counter record";
+            ROCP_CI_LOG(WARNING) << "counter collection: buffer " << info->buffer->handle
+                                 << " was destroyed before dispatch "
+                                 << packet.callback_record.dispatch_info.dispatch_id
+                                 << " completed; dropping its counter record";
             return;
         }
     }
@@ -174,11 +176,25 @@ process_completed_cb(completed_cb_params_t&& params)
 
 using callback_consumer_t = consumer_thread_t<completed_cb_params_t>;
 
+callback_consumer_t*&
+callback_thread_slot()
+{
+    static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
+    return _v;
+}
+
 callback_consumer_t&
 callback_thread_get()
 {
-    static auto*& _v = common::static_object<callback_consumer_t>::construct(&process_completed_cb);
-    return *CHECK_NOTNULL(_v);
+    auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
+    static std::once_flag once;
+    std::call_once(once, []() {
+        ::pthread_atfork(nullptr, nullptr, []() {
+            if(auto* v = callback_thread_slot())
+                ::new(v) callback_consumer_t{&process_completed_cb};
+        });
+    });
+    return consumer;
 }
 
 // Reference count for the callback consumer thread. Incremented by callback_thread_start()

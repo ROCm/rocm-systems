@@ -95,6 +95,34 @@ resolve_scalar_register_range(const Wavefront &wf, uint32_t selector, uint32_t c
   return first;
 }
 
+/// Resolve MOVREL within its original SGPR/VCC or TTMP region and allocation.
+/// Missing sources use SGPR0; missing destinations suppress the instruction.
+/// B64 alignment follows RDNA3/3.5 and measured RDNA4 behavior. CDNA requires
+/// even indices; its odd-index handling is extrapolated from RDNA. The shared
+/// SGPR/VCC region and CDNA FLAT_SCRATCH exclusion are also extrapolations;
+/// CDNA manuals do not explicitly specify the RDNA SGPR-to-VCC exception.
+[[nodiscard]] inline std::optional<uint32_t>
+relative_scalar_selector(const Wavefront &wf, uint32_t selector, uint32_t m0, uint32_t width,
+                         bool destination, bool split) {
+  uint32_t offset = split ? (m0 >> (destination ? 16 : 0)) & 0x3ffu : m0;
+  if (width == 2)
+    offset &= ~1u;
+  const uint64_t indexed = uint64_t{selector} + offset;
+  const uint32_t last = selector <= kVccSelectorLast ? kVccSelectorLast : kTtmpSelectorLast;
+  if (selector > kTtmpSelectorLast || indexed + width > uint64_t{last} + 1)
+    return std::nullopt;
+  const auto base = scalar_register_for_selector(wf, selector);
+  const auto range = resolve_scalar_register_range(wf, static_cast<uint32_t>(indexed), width);
+  if (!base || !range)
+    return std::nullopt;
+  const auto general = [](ScalarRegisterStorage storage) {
+    return storage == ScalarRegisterStorage::SGPR || storage == ScalarRegisterStorage::VCC;
+  };
+  if (base->storage != range->storage && !(general(base->storage) && general(range->storage)))
+    return std::nullopt;
+  return static_cast<uint32_t>(indexed);
+}
+
 /// @brief Check that a complete selector range has backing owned by this wave.
 [[nodiscard]] inline bool scalar_selector_range_is_backed(const Wavefront &wf, uint32_t selector,
                                                           uint32_t count) {

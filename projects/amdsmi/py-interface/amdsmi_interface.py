@@ -55,7 +55,7 @@ AMDSMI_MAX_NUM_PM_POLICIES = 32
 # Max supported frequencies
 AMDSMI_MAX_NUM_FREQUENCIES = 33
 
-# Max Fan speed (legacy hwmon). For gpu_od GPUs, use amdsmi_get_gpu_fan_speed_max().
+# Max Fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max()
 AMDSMI_MAX_FAN_SPEED = 255
 
 # Max Votlage Curve Points
@@ -692,6 +692,13 @@ class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_PCIE = amdsmi_wrapper.AMDSMI_LINK_TYPE_PCIE
     AMDSMI_LINK_TYPE_NOT_APPLICABLE = amdsmi_wrapper.AMDSMI_LINK_TYPE_NOT_APPLICABLE
     AMDSMI_LINK_TYPE_UNKNOWN = amdsmi_wrapper.AMDSMI_LINK_TYPE_UNKNOWN
+
+
+class AmdSmiLinkStatus(IntEnum):
+    AMDSMI_LINK_STATUS_ENABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED
+    AMDSMI_LINK_STATUS_DISABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED
+    AMDSMI_LINK_STATUS_INACTIVE = amdsmi_wrapper.AMDSMI_LINK_STATUS_INACTIVE
+    AMDSMI_LINK_STATUS_ERROR = amdsmi_wrapper.AMDSMI_LINK_STATUS_ERROR
 
 
 class AmdSmiUtilizationCounterType(IntEnum):
@@ -2808,6 +2815,143 @@ def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
     return cuid.value.decode("utf-8")
 
 
+_CUID_SOURCE_NAMES = {
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_UNKNOWN: "UNKNOWN",
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_DRIVER: "DRIVER",
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_LIBRARY: "LIBRARY",
+}
+
+_CUID_COMPONENT_NAMES = {
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_PLATFORM: "PLATFORM",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_CPU: "CPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GPU: "GPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_NIC: "NIC",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_NPU: "NPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_STORAGE: "STORAGE",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_MEMORY: "MEMORY",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GENPCIE: "GENPCIE",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GENC: "GENC",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_RACKTRAY: "RACKTRAY",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_RACK: "RACK",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_OTHER: "OTHER",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_UNKNOWN: "UNKNOWN",
+}
+
+
+def _amdsmi_entry_point(name: str):
+    """Return the wrapper's binding for `name`, or raise NOT_SUPPORTED.
+
+    amdsmi_wrapper binds every entry point inside `try: ... except
+    AttributeError: pass`, so against a libamd_smi.so older than a symbol the
+    attribute is absent. A shared library too old to carry the call is
+    AMDSMI_STATUS_NOT_SUPPORTED, not an AttributeError the caller has to handle
+    separately.
+    """
+    entry = getattr(amdsmi_wrapper, name, None)
+    if entry is None:
+        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+    return entry
+
+
+def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Retrieves a GPU's Component Unified ID together with its provenance.
+
+    Built from several queries, so not atomic under a concurrent rekey or
+    topology change.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle_t): The processor handle.
+
+    Returns:
+        Dict[str, Any]: with keys
+
+            primary (str): the canonical CUID, or "" when the caller lacks the
+                privilege to read it. The primary payload embeds the raw serial
+                number, so it is CAP_SYS_ADMIN-gated at the source; an empty
+                value is not an error.
+            derived (str): the derived CUID. This is the value to record.
+            component_type (str): the on-wire Component Type by name (PLATFORM,
+                CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
+                RACK, OTHER), or UNKNOWN.
+            source (str): which stage of the staged lookup answered: DRIVER,
+                LIBRARY or UNKNOWN.
+            auxiliary (bool): True for a temporary CUID, built from the
+                machine ID and world-readable device information. Such a value
+                changes when the machine ID changes and is not unique across
+                nodes.
+
+    Raises:
+        AmdSmiParameterException: If the input parameters are invalid.
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
+            the call, or when the auxiliary flag cannot be read.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    entry = _amdsmi_entry_point("amdsmi_get_gpu_cuid_info")
+
+    info = amdsmi_wrapper.amdsmi_cuid_info_t()
+    _check_res(entry(processor_handle, ctypes.byref(info)))
+
+    return {
+        "primary": info.primary.decode("utf-8"),
+        "derived": info.derived.decode("utf-8"),
+        "component_type": _CUID_COMPONENT_NAMES.get(info.component_type, "UNKNOWN"),
+        "source": _CUID_SOURCE_NAMES.get(info.source, "UNKNOWN"),
+        "auxiliary": bool(info.auxiliary),
+    }
+
+
+def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
+    """
+    Lists every component on the node that has a CUID: the platform, each CPU
+    package, each AMD GPU or GPU partition, each NPU, and each NIC, ordered by
+    component type, then BDF, then device path. Needs no processor handle.
+
+    Every CUID is temporary, so the primary CUIDs are empty.
+
+    Returns:
+        List[Dict[str, Any]]: one dictionary per component, with the keys of
+        amdsmi_get_gpu_cuid_info plus
+
+            bdf (str): PCI address, or "" for the platform and CPUs.
+            device_path (str): sysfs path, or "" for the platform.
+            vendor_id (int): PCI or CPUID vendor ID, 0 for the platform.
+
+    Raises:
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NO_PERM when this caller may not read a component's
+            auxiliary flag, and AMDSMI_STATUS_NOT_SUPPORTED when built without
+            CUID or against a libamd_smi.so that predates the call.
+    """
+    entry = _amdsmi_entry_point("amdsmi_get_cuid_components")
+
+    while True:
+        count = ctypes.c_uint32(0)
+        _check_res(entry(ctypes.byref(count), None))
+        components = (amdsmi_wrapper.amdsmi_cuid_component_t * count.value)()
+        status = entry(ctypes.byref(count), components)
+        if status != amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE:
+            _check_res(status)
+            break
+
+    return [
+        {
+            "primary": c.info.primary.decode("utf-8"),
+            "derived": c.info.derived.decode("utf-8"),
+            "component_type": _CUID_COMPONENT_NAMES.get(c.info.component_type, "UNKNOWN"),
+            "source": _CUID_SOURCE_NAMES.get(c.info.source, "UNKNOWN"),
+            "auxiliary": bool(c.info.auxiliary),
+            "bdf": c.bdf.decode("utf-8"),
+            "device_path": c.device_path.decode("utf-8"),
+            "vendor_id": c.vendor_id,
+        }
+        for c in components[: count.value]
+    ]
+
+
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
     """
     Retrieves GPU enumeration information including DRM card ID, DRM render ID, HIP ID, and HIP UUID.
@@ -3017,11 +3161,17 @@ def amdsmi_get_power_cap_info(
     )
 
     return {
-        "power_cap": power_cap_info.power_cap,
-        "default_power_cap": power_cap_info.default_power_cap,
-        "dpm_cap": power_cap_info.dpm_cap,
-        "min_power_cap": power_cap_info.min_power_cap,
-        "max_power_cap": power_cap_info.max_power_cap,
+        "power_cap": _validate_if_max_uint(power_cap_info.power_cap, MaxUIntegerTypes.UINT64_T),
+        "default_power_cap": _validate_if_max_uint(
+            power_cap_info.default_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
+        "dpm_cap": _validate_if_max_uint(power_cap_info.dpm_cap, MaxUIntegerTypes.UINT64_T),
+        "min_power_cap": _validate_if_max_uint(
+            power_cap_info.min_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
+        "max_power_cap": _validate_if_max_uint(
+            power_cap_info.max_power_cap, MaxUIntegerTypes.UINT64_T
+        ),
     }
 
 
@@ -3205,8 +3355,9 @@ def amdsmi_get_gpu_activity(processor_handle: processor_handle_t) -> Dict[str, A
     }
 
     for key, value in activity_dict.items():
-        if value == 0xFFFF:
-            activity_dict[key] = "N/A"
+        activity_dict[key] = _validate_if_max_uint(
+            value, MaxUIntegerTypes.UINT16_T, isActivity=True
+        )
 
     return activity_dict
 
@@ -3713,12 +3864,15 @@ def amdsmi_get_fabric_cper_entries(
     return entries, cur.value, cper_data, ret
 
 
-def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
+def amdsmi_get_afids_from_cper(
+    cper_afid_data: Union[bytes, List[Dict[str, Any]]],
+) -> Tuple[List[int], int]:
     """
     Extract AFIDs from a CPER blob.
 
     Args:
-        cper_afid_data: raw bytes of a single CPER record.
+        cper_afid_data: raw bytes of a single CPER record, or a list of records,
+            each a dict with "bytes" (list of byte values) and "size" keys.
 
     Returns:
         Tuple[List[int], int]: A tuple containing:
@@ -3729,10 +3883,10 @@ def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
     # Normalize single blob into a list of records
     if isinstance(cper_afid_data, bytes):
         cper_records = [{"bytes": list(cper_afid_data), "size": len(cper_afid_data)}]
-    elif isinstance(cper_afid_data, List[Dict[str, Any]]):
+    elif isinstance(cper_afid_data, list):
         cper_records = cper_afid_data
     else:
-        raise AmdSmiParameterException(cper_afid_data, bytes)
+        raise AmdSmiParameterException(cper_afid_data, (bytes, list))
 
     all_afids: List[int] = []
 
@@ -4027,10 +4181,6 @@ def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str
         "driver_name": info.driver_name.decode("utf-8"),
         "driver_version": info.driver_version.decode("utf-8"),
         "driver_date": info.driver_date.decode("utf-8"),
-        "driver_kernel_version": info.driver_kernel_version.decode("utf-8"),
-        "amdgpu_driver_version": info.amdgpu_driver_version.decode("utf-8"),
-        "driver_build_version": info.driver_build_version.decode("utf-8"),
-        "driver_full_version": info.driver_full_version.decode("utf-8"),
     }
 
     for key, value in driver_info.items():
@@ -4470,6 +4620,49 @@ def amdsmi_topo_get_link_type(
     )
 
     return {"hops": hops_64.value, "type": type_32.value}
+
+
+def amdsmi_get_link_topology(
+    processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
+):
+    """Return GPU link topology using the host API's fields.
+
+    Returns:
+        dict: ``{"weight": int, "link_status": int, "link_type": int,
+        "num_hops": int, "fb_sharing": int}``.
+        Interpret status/type with :class:`AmdSmiLinkStatus`/:class:`AmdSmiLinkType`.
+
+    Note:
+        Baremetal behavior:
+
+        - Self pair: INTERNAL/ENABLED, zero weight and hops, ``fb_sharing=1``.
+        - Current successful calls report ENABLED; UNKNOWN-to-DISABLED is defensive.
+        - Status is not link health or the topology CLI's P2P access check.
+        - ``num_hops`` counts abstracted steps, capped at 255, not physical links.
+        - ``fb_sharing=0`` means no P2P access or a failed P2P query.
+        - Fields are queried sequentially, not atomically.
+    """
+    if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
+
+    topology_info = amdsmi_wrapper.amdsmi_link_topology_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_link_topology(
+            processor_handle_src, processor_handle_dst, ctypes.byref(topology_info)
+        )
+    )
+
+    return {
+        "weight": topology_info.weight,
+        "link_status": topology_info.link_status,
+        "link_type": topology_info.link_type,
+        "num_hops": topology_info.num_hops,
+        "fb_sharing": topology_info.fb_sharing,
+    }
 
 
 def amdsmi_topo_get_p2p_status(
@@ -5150,7 +5343,7 @@ def amdsmi_get_gpu_pci_replay_counter(processor_handle: processor_handle_t):
         amdsmi_wrapper.amdsmi_get_gpu_pci_replay_counter(processor_handle, ctypes.byref(counter))
     )
 
-    return counter.value
+    return _validate_if_max_uint(counter.value, MaxUIntegerTypes.UINT64_T)
 
 
 def amdsmi_get_gpu_topo_numa_affinity(processor_handle: processor_handle_t):
@@ -7462,7 +7655,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return gpu_busy_percent.value
+    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T, isActivity=True)
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):
@@ -7538,6 +7731,219 @@ def amdsmi_set_gpu_uma_carveout(processor_handle: processor_handle_t, option_ind
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     _check_res(amdsmi_wrapper.amdsmi_set_gpu_uma_carveout(processor_handle, option_index))
+
+
+# AMPP (amdsmi power profile) functions
+# Note: This is a kernel UAPI sysfs feature (app_modes/), not libdrm, and is
+# unrelated to the legacy amdsmi_get_gpu_power_profile_presets/
+# amdsmi_set_gpu_power_profile preset-mask API. Profile names, field names,
+# and units are all opaque strings enumerated at runtime -- never mapped to
+# an AMDSMI-defined enum here.
+
+
+def _ampp_profile_to_dict(profile) -> Dict[str, Any]:
+    name = profile.name.decode("utf-8") if isinstance(profile.name, bytes) else profile.name
+    return {
+        "name": name,
+        "index": profile.index,
+        "is_active": bool(profile.is_active),
+        "is_writable": bool(profile.is_writable),
+        "is_configured": bool(profile.is_configured),
+    }
+
+
+def _ampp_field_to_dict(field) -> Dict[str, Any]:
+    name = field.name.decode("utf-8") if isinstance(field.name, bytes) else field.name
+    unit = field.unit.decode("utf-8") if isinstance(field.unit, bytes) else field.unit
+    return {
+        "name": name,
+        "unit": unit,
+        "value": field.value,
+        "limit_min": field.limit_min,
+        "limit_max": field.limit_max,
+        "has_limits": bool(field.has_limits),
+    }
+
+
+def amdsmi_get_ampp_profiles(
+    processor_handle: processor_handle_t,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Get the list of AMPP power profiles published by the driver.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        Tuple[str, List[dict]]: (version, profiles).
+        version is the app_modes/profile_abi string (e.g. "1.0"); this is a
+        single tree-wide value, not a per-profile one.
+        profiles is one dict per published profile_N, each with 'name',
+        'index', 'is_active', 'is_writable', 'is_configured'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NOT_SUPPORTED if the
+            device has no app_modes/ sysfs tree)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_profiles = ctypes.c_uint32(0)
+    version_buf = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_profile_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, ctypes.byref(num_profiles), nullptr
+        )
+    )
+
+    profiles = (amdsmi_wrapper.amdsmi_ampp_profile_t * num_profiles.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, ctypes.byref(num_profiles), profiles
+        )
+    )
+
+    version = version_buf.value.decode("utf-8")
+    return version, [_ampp_profile_to_dict(profiles[i]) for i in range(num_profiles.value)]
+
+
+def amdsmi_get_ampp_fields(
+    processor_handle: processor_handle_t, profile_name: str
+) -> List[Dict[str, Any]]:
+    """
+    Get the fields of a single AMPP power profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to query (e.g. "profile_2"), as
+            returned by amdsmi_get_ampp_profiles
+
+    Returns:
+        List[dict]: One dict per published field, each with 'name', 'unit',
+        'value', 'limit_min', 'limit_max', 'has_limits'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_DATA if the profile
+            is a writable but unconfigured custom slot, INVAL if
+            profile_name is not currently published)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    profile_name_bytes = (
+        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    )
+
+    num_fields = ctypes.c_uint32(0)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_field_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), nullptr
+        )
+    )
+
+    fields = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), fields
+        )
+    )
+
+    return [_ampp_field_to_dict(fields[i]) for i in range(num_fields.value)]
+
+
+def amdsmi_activate_ampp_profile(processor_handle: processor_handle_t, profile_name: str):
+    """
+    Activate an AMPP profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to activate (e.g. "profile_2"),
+            as returned by amdsmi_get_ampp_profiles
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, INVAL for an unpublished profile_name)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_activate_ampp_profile(processor_handle, profile_name.encode("utf-8"))
+    )
+
+
+def amdsmi_configure_ampp_profile(
+    processor_handle: processor_handle_t, profile_name: str, fields: List[Dict[str, Any]]
+):
+    """
+    Configure a custom AMPP profile slot.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to configure (e.g. "profile_5"),
+            as returned by amdsmi_get_ampp_profiles
+        fields: List of dicts with 'name' and 'value' to stage (partial
+            staging of a subset of fields is allowed, but at least one
+            field is required -- the driver rejects a commit with nothing
+            ever staged)
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid, a field
+            name isn't a str or doesn't fit in AMDSMI_MAX_STRING_LENGTH
+            bytes, or a field value isn't representable as an int64
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, NOT_SUPPORTED if the profile is not
+            writable, INVAL for an unpublished profile_name, unrecognized
+            field name, or an empty `fields` list)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
+    if not isinstance(fields, list):
+        raise AmdSmiParameterException(fields, list)
+
+    num_fields = len(fields)
+    field_array = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields)()
+    for i, field in enumerate(fields):
+        if not isinstance(field, dict) or "name" not in field or "value" not in field:
+            raise AmdSmiParameterException(field, "dict with keys 'name' and 'value'")
+        field_name = field["name"]
+        if not isinstance(field_name, str):
+            raise AmdSmiParameterException(field_name, str)
+        encoded_name = field_name.encode("utf-8")
+        if len(encoded_name) >= AMDSMI_MAX_STRING_LENGTH:
+            raise AmdSmiParameterException(field_name, str)
+        field_array[i].name = encoded_name
+        field_value = field["value"]
+        if not isinstance(field_value, int) or isinstance(field_value, bool):
+            raise AmdSmiParameterException(field_value, int)
+        if not -(2**63) <= field_value < 2**63:
+            raise AmdSmiParameterException(field_value, int)
+        field_array[i].value = field_value
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_configure_ampp_profile(
+            processor_handle, profile_name.encode("utf-8"), field_array, num_fields
+        )
+    )
 
 
 def amdsmi_get_ttm_info():

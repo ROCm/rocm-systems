@@ -6,7 +6,7 @@
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(crate) use linux::{IntoRawFd, memory, native_identity, render_supported};
+pub(crate) use linux::{IntoRawFd, host_numa_node, memory, native_identity, render_supported};
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("the AMDF frontend currently requires a platform adapter");

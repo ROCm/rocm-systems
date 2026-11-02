@@ -311,10 +311,12 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Attrs_Negative) {
   std::array<size_t, 3> attrs_idxs{0, 1, 2};
 
   SECTION("Null attrs with nonzero numAttrs") {
+    size_t fail_idx = 0;
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dst_ptrs.data(), src_ptrs.data(), sizes.data(), kCount, nullptr,
-                            attrs_idxs.data(), 1, nullptr, stream_guard.stream()),
+                            attrs_idxs.data(), 1, &fail_idx, stream_guard.stream()),
         hipErrorInvalidValue);
+    REQUIRE(fail_idx == SIZE_MAX);  // batch-wide error
   }
 
   SECTION("Null attrsIdxs with nonzero numAttrs") {

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
 
 #include <array>
 #include <cstdint>
@@ -30,8 +31,9 @@ struct Pm4ExecutionContext {
   /// @brief Admit a dispatch through CP using X, Y, Z, and the initiator word.
   /// @details The initiator determines whether dimensions count threads or groups.
   /// CP appends admitted work to queue.dispatches.entries; processing pauses
-  /// until CP retires those entries.
-  std::function<void(const std::array<uint32_t, 4> &)> dispatch;
+  /// until CP retires those entries. On failure, emit the reason and return failure;
+  /// the processor faults the queue without retiring the failed packet.
+  std::function<util::Result(const std::array<uint32_t, 4> &, util::DiagnosticEmitter)> dispatch;
   /// @brief Preserve the owner's retry scheduling at the original execution points.
   /// @details Set queue.command_retry_pending and arrange a later CP scheduling
   /// turn. CP clears the flag before resuming processing.

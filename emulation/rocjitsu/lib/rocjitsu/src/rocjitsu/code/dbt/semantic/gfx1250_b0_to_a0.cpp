@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -32,6 +33,10 @@
 namespace rocjitsu {
 
 namespace {
+
+// gfx1250 is Wave32-only.
+constexpr uint8_t kGfx1250WaveSize =
+    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
 
 [[nodiscard]] bool always_residual(const Instruction &) { return true; }
 [[nodiscard]] bool scale16_residual(const Instruction &inst);
@@ -145,16 +150,48 @@ void append_gfx1250_vgpr_msb_transition(std::vector<uint32_t> &words, uint8_t &c
   current_mode = new_mode;
 }
 
-[[nodiscard]] std::optional<uint8_t> gfx1250_vgpr_mode_before(const Instruction &inst,
-                                                              const LivenessAnalysis &liveness) {
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
-  if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
-    return std::nullopt;
-  return static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) |
-                              (*dst_bank << 6));
+/// @brief Per-role state keeps unknown banks distinct from unavailable analysis.
+struct Gfx1250VgprBanks {
+  std::optional<uint8_t> src0, src1, src2, dst;
+
+  std::optional<uint8_t> mode() const {
+    if (!src0 || !src1 || !src2 || !dst)
+      return std::nullopt;
+    return static_cast<uint8_t>(*src0 | (*src1 << 2) | (*src2 << 4) | (*dst << 6));
+  }
+};
+
+FailureOr<Gfx1250VgprBanks> gfx1250_vgpr_banks_before(const Instruction &inst,
+                                                      const LivenessAnalysis &liveness) {
+  FailureOr<std::optional<uint8_t>> maybe_src0_bank =
+      liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
+  if (maybe_src0_bank.failed())
+    return Result::failure();
+  const auto src0_bank = maybe_src0_bank.value();
+  FailureOr<std::optional<uint8_t>> maybe_src1_bank =
+      liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
+  if (maybe_src1_bank.failed())
+    return Result::failure();
+  const auto src1_bank = maybe_src1_bank.value();
+  FailureOr<std::optional<uint8_t>> maybe_src2_bank =
+      liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
+  if (maybe_src2_bank.failed())
+    return Result::failure();
+  const auto src2_bank = maybe_src2_bank.value();
+  FailureOr<std::optional<uint8_t>> maybe_dst_bank =
+      liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  if (maybe_dst_bank.failed())
+    return Result::failure();
+  const auto dst_bank = maybe_dst_bank.value();
+  return Gfx1250VgprBanks{src0_bank, src1_bank, src2_bank, dst_bank};
+}
+
+FailureOr<std::optional<uint8_t>> gfx1250_vgpr_mode_before(const Instruction &inst,
+                                                           const LivenessAnalysis &liveness) {
+  FailureOr<Gfx1250VgprBanks> banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (banks.failed())
+    return Result::failure();
+  return banks.value().mode();
 }
 
 /// @brief Save or restore one spill-backed low-bank VGPR lease through scratch ST mode.
@@ -249,7 +286,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank operand conservatively forbids its low-bank alias. Supporting
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
-  const InstDefUse def_use(inst);
+  const InstDefUse def_use(inst, kGfx1250WaveSize);
   return (def_use.uses | def_use.defs).ordinary_only();
 }
 
@@ -281,15 +318,22 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// SemanticScratchAllocator, whose leases are low-bank VGPRs. When
 /// `carrier_mode` is not None, `allocator` supplies those VGPR carriers;
 /// passing a null allocator deliberately disables carrier fallback.
-[[nodiscard]] std::optional<Gfx1250SgprScratchLease>
+FailureOr<std::optional<Gfx1250SgprScratchLease>>
 acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
                       TranslationContext &context, SemanticScratchAllocator *allocator,
                       const Gfx1250SgprScratchRequest &request) {
-  if (request.count == 0 || request.count > kGfx1250MaxScratchSgprs ||
-      !liveness.has_live_before(inst))
-    return std::nullopt;
+  if (request.count == 0 || request.count > kGfx1250MaxScratchSgprs)
+    return std::optional<Gfx1250SgprScratchLease>{};
+  auto maybe_has_live = liveness.has_live_before(inst);
+  if (maybe_has_live.failed())
+    return Result::failure();
+  if (!maybe_has_live.value())
+    return std::optional<Gfx1250SgprScratchLease>{};
 
-  const RegisterSet &live = liveness.live_before(inst);
+  auto maybe_live = liveness.live_before(inst);
+  if (maybe_live.failed())
+    return Result::failure();
+  const RegisterSet &live = *maybe_live.value();
   for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
        ++base) {
     if (!gfx1250_sgpr_window_allowed(base, request))
@@ -298,15 +342,16 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
     candidate.expand({RegClass::SGPR, base, static_cast<uint8_t>(request.count)});
     if (!candidate.intersects(live)) {
       context.require_sgprs(static_cast<uint32_t>(base) + request.count);
-      return Gfx1250SgprScratchLease{.base = base,
-                                     .count = request.count,
-                                     .carrier = std::nullopt,
-                                     .carrier_mode = Gfx1250SgprCarrierMode::None};
+      return std::optional<Gfx1250SgprScratchLease>{
+          Gfx1250SgprScratchLease{.base = base,
+                                  .count = request.count,
+                                  .carrier = std::nullopt,
+                                  .carrier_mode = Gfx1250SgprCarrierMode::None}};
     }
   }
 
   if (request.carrier_mode == Gfx1250SgprCarrierMode::None || allocator == nullptr)
-    return std::nullopt;
+    return std::optional<Gfx1250SgprScratchLease>{};
 
   std::optional<uint16_t> victim;
   for (uint16_t base = 0; static_cast<uint32_t>(base) + request.count <= kGfx1250MaxScratchSgprs;
@@ -317,7 +362,7 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
     }
   }
   if (!victim)
-    return std::nullopt;
+    return std::optional<Gfx1250SgprScratchLease>{};
 
   SemanticScratchRequest carrier_request;
   carrier_request.count = request.count;
@@ -330,14 +375,17 @@ acquire_gfx1250_sgprs(const Instruction &inst, const LivenessAnalysis &liveness,
   const SemanticScratchResult carrier = allocator->acquire_vgprs(carrier_request);
   // TODO: Return the carrier failure alongside the lease so a rejected
   // dynamic-stack spill can retain its actionable rule-specific diagnostic.
+  if (carrier.failure == SemanticScratchFailure::LivenessUnavailable)
+    return Result::failure();
   if (!carrier)
-    return std::nullopt;
+    return std::optional<Gfx1250SgprScratchLease>{};
 
   context.require_sgprs(static_cast<uint32_t>(*victim) + request.count);
-  return Gfx1250SgprScratchLease{.base = *victim,
-                                 .count = request.count,
-                                 .carrier = *carrier.lease,
-                                 .carrier_mode = request.carrier_mode};
+  return std::optional<Gfx1250SgprScratchLease>{
+      Gfx1250SgprScratchLease{.base = *victim,
+                              .count = request.count,
+                              .carrier = *carrier.lease,
+                              .carrier_mode = request.carrier_mode}};
 }
 
 /// @brief Save or restore a live SGPR lease through its low-bank VGPR carriers.
@@ -699,17 +747,17 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
 
   const auto first = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset0), false);
   const auto second = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset1), true);
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed(
         "gfx1250 DS2 lowering cannot prove the VGPR-MSB mode",
         {"Make the VGPR-MSB fields known on every CFG path reaching this instruction."});
   }
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
 
   const auto physical = [](uint8_t selector, uint8_t bank) {
     return static_cast<uint16_t>(static_cast<uint16_t>(bank) * 256u + selector);
@@ -892,7 +940,10 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   Gfx1250SgprScratchRequest scratch_request;
   scratch_request.count = 1;
   scratch_request.forbidden = gfx1250_instruction_registers(inst);
-  const auto scratch = acquire_gfx1250_sgprs(inst, liveness, context, nullptr, scratch_request);
+  auto maybe_scratch = acquire_gfx1250_sgprs(inst, liveness, context, nullptr, scratch_request);
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch || scratch->base > kLastOrdinarySgpr) {
     return ExpandResult::failed("gfx1250 tensor-load mask rule could not allocate scalar scratch",
                                 {"Provide one dead ordinary SGPR."});
@@ -961,11 +1012,11 @@ gfx1250_split_m32_fp4(const Instruction &inst, const LivenessAnalysis &liveness,
   const uint16_t src0 = static_cast<uint16_t>(matrix.src0 - kVgprEncoding);
   const uint16_t src1 = static_cast<uint16_t>(matrix.src1 - kVgprEncoding);
   const uint16_t src2 = src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed(std::string(context) + " FP4 split cannot prove the VGPR-MSB mode");
   }
@@ -1001,8 +1052,7 @@ gfx1250_split_m32_fp4(const Instruction &inst, const LivenessAnalysis &liveness,
     return ExpandResult::failed(std::string(context) + " FP4 split exceeds the VGPR address space");
   }
 
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
   std::vector<uint32_t> words;
   words.reserve(12);
   uint8_t current_mode = original_mode;
@@ -1205,11 +1255,11 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
   const uint16_t src1 = static_cast<uint16_t>(matrix.src1 - kVgprEncoding);
   const bool src2_is_vgpr = matrix.src2 >= kVgprEncoding;
   const uint16_t src2 = src2_is_vgpr ? static_cast<uint16_t>(matrix.src2 - kVgprEncoding) : 0;
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed("gfx1250 Scale16 32x16 FP4 split cannot prove the VGPR-MSB mode");
   }
@@ -1248,8 +1298,7 @@ ExpandResult expand_gfx1250_wmma_scale16(const Instruction &inst, uint32_t, uint
     return ExpandResult::failed("gfx1250 Scale16 32x16 FP4 split exceeds the VGPR address space");
   }
 
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
   std::vector<uint32_t> words;
   words.reserve(12);
   uint8_t current_mode = original_mode;
@@ -1449,7 +1498,10 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   scratch_request.count = 1;
   scratch_request.forbidden = gfx1250_instruction_registers(inst);
   scratch_request.carrier_mode = Gfx1250SgprCarrierMode::LaneZero;
-  const auto scratch = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, scratch_request);
+  auto maybe_scratch = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, scratch_request);
+  if (maybe_scratch.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto scratch = maybe_scratch.value();
   if (!scratch || scratch->base > 105) {
     return ExpandResult::failed(
         "gfx1250 cluster load could not allocate scalar scratch for M0 preservation");
@@ -1468,7 +1520,10 @@ ExpandResult expand_gfx1250_cluster_load(const Instruction &inst, uint32_t, uint
   uint8_t current_mode = 0;
   std::optional<uint8_t> original_mode;
   if (scratch->has_carrier()) {
-    original_mode = gfx1250_vgpr_mode_before(inst, liveness);
+    auto maybe_original_mode = gfx1250_vgpr_mode_before(inst, liveness);
+    if (maybe_original_mode.failed())
+      return ExpandResult::liveness_unavailable();
+    original_mode = maybe_original_mode.value();
     if (!original_mode)
       return ExpandResult::failed(
           "gfx1250 cluster-load SGPR carrier cannot prove the VGPR-MSB mode");
@@ -1522,16 +1577,15 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
 
   cdna5::VdsMachineInst source{};
   std::memcpy(&source, inst.raw_encoding(), sizeof(source));
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed("gfx1250 ADDTID lowering cannot prove the VGPR-MSB mode");
   }
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
 
   uint16_t temp = source.vdst;
   std::optional<SemanticScratchLease> store_scratch;
@@ -1545,6 +1599,8 @@ ExpandResult expand_gfx1250_ds_addtid(const Instruction &inst, uint32_t, uint64_
     request.forbidden = gfx1250_instruction_registers(inst);
     request.allow_spill = true;
     const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+      return ExpandResult::liveness_unavailable();
     if (!scratch) {
       if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
         return ExpandResult::failed(
@@ -1744,6 +1800,8 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    return ExpandResult::liveness_unavailable();
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -1761,18 +1819,20 @@ ExpandResult expand_gfx1250_cvt_pk_fp8_f32_e5m3(const Instruction &inst, uint32_
   mask_request.forbidden = request.forbidden;
   mask_request.forbidden.expand(scratch.lease->registers());
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
-  const auto masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  if (maybe_masks.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto masks = maybe_masks.value();
   if (!masks)
     return ExpandResult::failed("gfx1250 E5M3 pack could not allocate four scratch SGPRs");
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
     return ExpandResult::failed("gfx1250 E5M3 pack cannot prove the VGPR-MSB mode");
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
 
   std::vector<uint32_t> words;
   words.reserve(160);
@@ -1891,6 +1951,8 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    return ExpandResult::liveness_unavailable();
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -1909,7 +1971,10 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   mask_request.forbidden = request.forbidden;
   mask_request.forbidden.expand(scratch.lease->registers());
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
-  const auto masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  if (maybe_masks.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto masks = maybe_masks.value();
   if (!masks)
     return ExpandResult::failed("gfx1250 stochastic E5M3 could not allocate five scratch SGPRs");
   const uint16_t nan_mask = masks->base;
@@ -1917,15 +1982,14 @@ ExpandResult expand_gfx1250_cvt_sr_fp8_f32_e5m3(const Instruction &inst, uint32_
   const uint16_t overflow_mask = static_cast<uint16_t>(masks->base + 2u);
   const uint16_t tiny_mask = static_cast<uint16_t>(masks->base + 3u);
   const uint16_t fp16_ovfl = static_cast<uint16_t>(masks->base + 4u);
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
     return ExpandResult::failed("gfx1250 stochastic E5M3 cannot prove the VGPR-MSB mode");
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
 
   const auto append_literal = [](std::vector<uint32_t> &output, uint16_t opcode,
                                  cdna5::Vop3BuilderFields fields, uint32_t value) {
@@ -2132,6 +2196,8 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   request.forbidden = gfx1250_instruction_registers(inst);
   request.allow_spill = true;
   const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+  if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+    return ExpandResult::liveness_unavailable();
   if (!scratch) {
     if (scratch.failure == SemanticScratchFailure::DynamicStackUnsupported) {
       return ExpandResult::failed(
@@ -2150,22 +2216,24 @@ ExpandResult expand_gfx1250_cvt_f32_fp8_e5m3(const Instruction &inst, uint32_t, 
   // under EXEC=0. The compare masks and their carrier save/restore are skipped
   // as one region, so the borrowed SGPR window remains untouched.
   mask_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
-  const auto masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  auto maybe_masks = acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mask_request);
+  if (maybe_masks.failed())
+    return ExpandResult::liveness_unavailable();
+  const auto masks = maybe_masks.value();
   if (!masks) {
     return ExpandResult::failed("gfx1250 E5M3 unpack could not allocate two SGPR masks");
   }
   const uint16_t nan_mask = masks->base;
   const uint16_t exp31_mask = static_cast<uint16_t>(masks->base + 1u);
-
-  const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-  const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-  const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-  const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+  FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+  if (maybe_banks.failed())
+    return ExpandResult::liveness_unavailable();
+  const Gfx1250VgprBanks &banks = maybe_banks.value();
+  const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
   if (!src0_bank || !src1_bank || !src2_bank || !dst_bank) {
     return ExpandResult::failed("gfx1250 E5M3 unpack cannot prove the VGPR-MSB mode");
   }
-  const uint8_t original_mode =
-      static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+  const uint8_t original_mode = *banks.mode();
   const uint8_t extract_mode = *src0_bank;
 
   const auto append_vop3_literal = [](std::vector<uint32_t> &words, uint16_t opcode,
@@ -2439,6 +2507,8 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     request.forbidden = gfx1250_instruction_registers(inst);
     request.allow_spill = true;
     const SemanticScratchResult scratch = allocator.acquire_vgprs(request);
+    if (scratch.failure == SemanticScratchFailure::LivenessUnavailable)
+      return ExpandResult::liveness_unavailable();
     if (!scratch)
       return ExpandResult::failed(
           "gfx1250 f16 K=128 WMMA could not allocate f32 accumulator scratch");
@@ -2448,15 +2518,18 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     mode_request.forbidden = request.forbidden;
     mode_request.forbidden.expand(scratch.lease->registers());
     mode_request.carrier_mode = Gfx1250SgprCarrierMode::ExecMasked;
-    const auto mode_scratch =
+    auto maybe_mode_scratch =
         acquire_gfx1250_sgprs(inst, liveness, context, &allocator, mode_request);
+    if (maybe_mode_scratch.failed())
+      return ExpandResult::liveness_unavailable();
+    const auto mode_scratch = maybe_mode_scratch.value();
     if (!mode_scratch)
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA could not read FP16 overflow mode");
-
-    const auto src0_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src0);
-    const auto src1_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src1);
-    const auto src2_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Src2);
-    const auto dst_bank = liveness.vgpr_msb_bank_before(inst, amdgpu::VgprMsbRole::Dst);
+    FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
+    if (maybe_banks.failed())
+      return ExpandResult::liveness_unavailable();
+    const Gfx1250VgprBanks &banks = maybe_banks.value();
+    const auto &[src0_bank, src1_bank, src2_bank, dst_bank] = banks;
     if (!src0_bank || !src1_bank || !src2_bank || !dst_bank)
       return ExpandResult::failed("gfx1250 f16 K=128 WMMA cannot prove the VGPR-MSB mode");
     const uint16_t physical_dst = static_cast<uint16_t>(*dst_bank * 256u + source.vdst);
@@ -2469,8 +2542,7 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
       if (physical_accumulator + 4u > 1024u)
         return ExpandResult::failed("gfx1250 f16 K=128 WMMA accumulator exceeds the VGPR file");
     }
-    const uint8_t original_mode =
-        static_cast<uint8_t>(*src0_bank | (*src1_bank << 2) | (*src2_bank << 4) | (*dst_bank << 6));
+    const uint8_t original_mode = *banks.mode();
 
     std::vector<uint32_t> words;
     words.reserve(96);
@@ -2536,10 +2608,10 @@ ExpandResult expand_gfx1250_k128_wmma(const Instruction &inst, uint32_t, uint64_
     // giving +infinity when the mode is clear and 65504.0 when it is set.
     // Do this in the low scratch bank before selecting each destination bank.
     //
-    // V_MAXIMUM_F32 and V_MINIMUM_F32 return the canonical quiet NaN, so a NaN
-    // result keeps its NaN class but loses the sign and payload the source
-    // instruction would have produced. IEEE 754 leaves both uninterpreted and
-    // the ISA promises only that a NaN input yields a NaN output.
+    // The emulator's V_MAXIMUM_F32 and V_MINIMUM_F32 return the first NaN
+    // quieted, keeping its sign and payload, so a NaN result keeps its NaN
+    // class. That is the current model, not verified on CDNA5 hardware; the ISA
+    // promises only that a NaN input yields a NaN output.
     append_gfx1250_vgpr_msb_transition(words, current_mode, 0);
     const uint16_t limit = static_cast<uint16_t>(scratch.lease->base + 8u);
     append_words(words, cdna5::build_vop3(cdna5::kVMulLoU32Vop3,

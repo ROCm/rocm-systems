@@ -658,6 +658,9 @@ class GlobalLoadBlockVglobal : public Vglobal {
 public:
   GlobalLoadBlockVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vdst;
+  }
   Operand vdst;
   Operand vaddr;
   Operand saddr;
@@ -669,6 +672,9 @@ class GlobalStoreBlockVglobal : public Vglobal {
 public:
   GlobalStoreBlockVglobal(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.block_data = &vsrc;
+  }
   Operand vaddr;
   Operand vsrc;
   Operand saddr;

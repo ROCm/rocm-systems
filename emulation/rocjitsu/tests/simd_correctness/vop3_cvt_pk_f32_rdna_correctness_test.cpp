@@ -93,13 +93,17 @@ const std::array<float, 16> kInputs = {{
     255.5f,
     1000.0f,
     -1.0f,
-    60000.0f,
+    std::numeric_limits<float>::quiet_NaN(),
 }};
 
 uint16_t cvt_i16(float f) {
+  if (std::isnan(f))
+    return 0;
   return static_cast<uint16_t>(static_cast<int16_t>(std::clamp(f, -32768.0f, 32767.0f)));
 }
-uint16_t cvt_u16(float f) { return static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f)); }
+uint16_t cvt_u16(float f) {
+  return std::isnan(f) ? 0 : static_cast<uint16_t>(std::clamp(f, 0.0f, 65535.0f));
+}
 
 // Golden: src0 (f0) -> low 16, src1 (f1) -> high 16.
 uint32_t golden(bool is_u16, float f0, float f1) {
@@ -236,6 +240,15 @@ TEST(Vop3CvtPkF32RdnaCorrectness, U16_FullExec) {
 }
 TEST(Vop3CvtPkF32RdnaCorrectness, U16_PartialExec) {
   check_op(kOpCvtPkU16F32, /*is_u16=*/true, /*exec=*/0xA5A58001ULL);
+}
+
+TEST(Vop3CvtPkF32RdnaCorrectness, PackedIntegerSaturationHelpers) {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  EXPECT_EQ(amdgpu::cvt_u8_f32(nan), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(-1.0f), 0u);
+  EXPECT_EQ(amdgpu::cvt_u8_f32(256.0f), 255u);
+  EXPECT_EQ(amdgpu::cvt_u16_f32(65536.0f), 65535u);
+  EXPECT_EQ(amdgpu::cvt_i16_f32(-32769.0f), 0x8000u);
 }
 
 // Pin the exact value that exposed the bug: 40000.0f converts to 40000 for u16
