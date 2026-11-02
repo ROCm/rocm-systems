@@ -707,7 +707,7 @@ private:
   /// @brief Decode failures go to a publishable debugger stop first, then the runtime.
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
   /// @brief Report non-architectural execution failures as queue aborts without a trap.
-  bool on_wave_execution_failure(amdgpu::Wavefront &wf, bool retain_wave);
+  bool on_wave_execution_failure(amdgpu::Wavefront &wf);
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Retain and report a memory fault to its debugger or runtime owner.
