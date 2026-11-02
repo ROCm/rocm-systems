@@ -95,16 +95,16 @@ TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
 }
 
-// 4 MiB AllToAll on 32 ranks is 128 KiB per peer, above the 64 KiB cutoff.
-// That cutoff is gfx950 at 16+ nodes only. Applying it on gfx942 is the
-// MI300 multi-node AllToAll regression.
+// 4 MiB AllToAll on 32 ranks is 128 KiB per peer, above the 64 KiB default.
+// With RCCL_P2P_BATCH_THRESHOLD left unset, that cutoff is gfx950 at 16+
+// nodes only. Applying it on gfx942 is the MI300 multi-node AllToAll regression.
 TEST(P2pBatchEligibility, CutoffOnlyOnGfx950At16Nodes)
 {
     constexpr ssize_t threshold = 64 * 1024;
     constexpr ssize_t perPeer   = 128 * 1024;
 
     auto eligible = [](const char* arch, int nNodes) {
-        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, threshold);
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, threshold, /*explicit=*/false);
         return rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer, cutoff);
     };
 
@@ -114,8 +114,41 @@ TEST(P2pBatchEligibility, CutoffOnlyOnGfx950At16Nodes)
     EXPECT_FALSE(eligible("gfx950", 16));
     EXPECT_TRUE(eligible("gfx1250", 16));
 
-    const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, threshold);
+    const ssize_t unequal =
+        rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, threshold, /*explicit=*/false);
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));
+}
+
+// A set RCCL_P2P_BATCH_THRESHOLD replaces the architecture fallback, including
+// when the value is the compiled 64 KiB default. It does not waive the equal
+// send/recv rule or an enable of 0. The channel map is not covered here.
+TEST(P2pBatchEligibility, ExplicitThresholdOverridesArchFallback)
+{
+    constexpr ssize_t defaultThreshold = 64 * 1024;
+    constexpr ssize_t perPeer          = 128 * 1024;
+
+    auto eligible = [](const char* arch, int nNodes, ssize_t bytes, ssize_t threshold, bool thresholdExplicit) {
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, bytes, bytes, threshold, thresholdExplicit);
+        return rcclP2pBatchEligible(/*enabled=*/1, bytes, bytes, cutoff);
+    };
+
+    EXPECT_FALSE(eligible("gfx942", 4, perPeer, defaultThreshold, true));
+    EXPECT_TRUE(eligible("gfx942", 4, perPeer, defaultThreshold, false));
+    EXPECT_TRUE(eligible("gfx942", 4, perPeer, perPeer, true));
+    EXPECT_FALSE(eligible("gfx942", 16, perPeer, 32 * 1024, true));
+
+    EXPECT_TRUE(eligible("gfx950", 16, perPeer, perPeer, true));
+    EXPECT_FALSE(eligible("gfx950", 16, perPeer, defaultThreshold, false));
+    EXPECT_FALSE(eligible("gfx950", 16, perPeer, 32 * 1024, true));
+
+    EXPECT_TRUE(eligible("gfx1250", 16, perPeer, perPeer, true));
+    EXPECT_FALSE(eligible("gfx942", 4, perPeer, 0, true));
+    EXPECT_FALSE(eligible("gfx942", 4, perPeer, -1, true));
+
+    const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, perPeer, true);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));
+    const ssize_t open = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer, perPeer, true);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, perPeer, perPeer, open));
 }
 
 // Channel map must follow the comm-level planner flag, not per-send size eligibility.
