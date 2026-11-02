@@ -311,8 +311,20 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
 
 } // namespace
 
-// Shape/resource eligibility for the one-shot variant, independent of whether
-// the tier is switched on for this size.
+// The LL two-shot pays off once it saves this much wire per rank over the one-shot.
+constexpr size_t kDdaArLLTwoShotMinSavedWireBytes = 1024 * 1024;
+
+// Wire the LL two-shot saves per rank over the one-shot, bytes x (n - 1) x (n - 2) / n, is at least the minimum.
+static bool ddaArLLTwoShotSavesWire(size_t bytes, int nRanks) {
+  const size_t n = (size_t)nRanks;
+  const size_t k = (n - 1) * (n - 2);  // 0 at 1 and 2 ranks
+  if (k != 0 && bytes > SIZE_MAX / k) {
+    return true;
+  }
+  return bytes * k / n >= kDdaArLLTwoShotMinSavedWireBytes;
+}
+
+// One-shot shape/resource eligibility; past rcclDdaLLOneShotThreshold() it yields to an eligible two-shot.
 bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                             ncclDataType_t datatype, ncclRedOp_t op) {
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
@@ -350,8 +362,8 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
-  // Past rcclDdaLLOneShotThreshold the LL two-shot is cheaper; the one-shot keeps a message the two-shot cannot take.
-  if (bytes > rcclDdaLLOneShotThreshold(comm) &&
+  // Past the crossover a two-shot that takes the message and saves enough wire wins; the one-shot keeps the rest.
+  if (bytes > rcclDdaLLOneShotThreshold(comm) && ddaArLLTwoShotSavesWire(bytes, comm->nRanks) &&
       ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     return false;
   }

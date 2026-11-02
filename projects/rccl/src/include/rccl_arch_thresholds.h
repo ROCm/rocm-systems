@@ -110,7 +110,7 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
-  // AllReduce: DDA LL one-shot crossover at every rank count unless RCCL_DDA_LL_ONESHOT_THRESHOLD is set; 0 = none.
+  // AllReduce DDA LL one-shot crossover (a two-shot must also save wire) unless the env var is set; 0 = none.
   size_t ddaArLLOneShotMaxBytes;
 
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,

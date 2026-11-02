@@ -201,12 +201,46 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_PastThisCommsCrossoverOn
   const ncclComm* seen = nullptr;
   g_rcclDdaLLOneShotThreshold = [&](const ncclComm* c) {
     seen = c;
-    return size_t{4096};
+    return size_t{300000};
   };
-  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 1024));
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 74992));
   EXPECT_EQ(seen, mock_.get());
-  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 1056)) << "8 ranks x 16 B divides 4224 B: the two-shot takes it";
-  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 1028)) << "4112 B has no 16 B shard per rank: the one-shot keeps it";
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 75008)) << "8 ranks x 16 B divides 300032 B: the two-shot takes it";
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 75004)) << "300016 B has no 16 B shard per rank: the one-shot keeps it";
+}
+
+// The two-shot takes a message once it saves >= 1 MiB of wire per rank: bytes x (n - 1) x (n - 2) / n, 0 at 2 ranks.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_TwoShotMustSaveOneMiBOfWirePerRank) {
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{300000}; };
+  comm().nRanks = 2;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 262144)) << "2 ranks, 1 MiB: a two-shot saves no bytes";
+  comm().nRanks = 4;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 131072)) << "4 ranks, 512 KiB: saves 768 KiB";
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 262144)) << "4 ranks, 1 MiB: saves 1.5 MiB";
+  comm().nRanks = 5;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 436880 / 4)) << "5 ranks, 436880 B: saves just under 1 MiB";
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 436960 / 4)) << "5 ranks, 436960 B: saves just over 1 MiB";
+  comm().nRanks = 8;
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 131072)) << "8 ranks, 512 KiB: saves 2.625 MiB";
+}
+
+// At 512 KiB and 1 MiB on 2-32 ranks the swap matches "3+ ranks and >= 2 MiB of one-shot wire" wherever a two-shot fits.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SavedWireRuleKeepsThePowerOfTwoCells) {
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  int compared = 0;
+  for (int n = 2; n <= 32; ++n) {
+    comm().nRanks = n;
+    for (size_t bytes : {size_t{512} << 10, size_t{1} << 20}) {
+      const size_t count = bytes / 4;
+      if (!Eligible(ddaLLArTwoShotEligible, count)) {
+        continue;
+      }
+      const bool oldSwap = n > 2 && bytes * (size_t)(n - 1) >= (size_t{2} << 20);
+      EXPECT_EQ(!oldSwap, Eligible(ddaLLArOneShotEligible, count)) << n << "r " << bytes;
+      ++compared;
+    }
+  }
+  EXPECT_EQ(compared, 10) << "16 B shards of 512 KiB and 1 MiB exist only at 2, 4, 8, 16 and 32 ranks";
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_WholeMessageIn16ByteUnitsWithinTheSlot) {
@@ -327,13 +361,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotFirstThenTwoShotElseInternalE
 // The tier gate and the launcher read one crossover: past it the two-shot runs where it takes the message.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_PastThisCommsOneShotCapRunsTwoShot) {
   comm().nRanks = 16;
-  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{4096}; };
-  EXPECT_EQ(RunOneLL(1024).kernel, (LLOneShot<float, 0>()));
-  EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 1088, ncclFloat32, ncclSum));
-  EXPECT_EQ(RunOneLL(1088).kernel, (LLTwoShot<float, 0>()));
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{131072}; };
+  EXPECT_EQ(RunOneLL(32768).kernel, (LLOneShot<float, 0>()));
+  EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 36864, ncclFloat32, ncclSum));
+  EXPECT_EQ(RunOneLL(36864).kernel, (LLTwoShot<float, 0>()));
   // 16-byte aligned, but its shards are not: the one-shot keeps it.
-  EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 1028, ncclFloat32, ncclSum));
-  EXPECT_EQ(RunOneLL(1028).kernel, (LLOneShot<float, 0>()));
+  EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(mock_.get(), kSendbuff, kRecvbuff, 36868, ncclFloat32, ncclSum));
+  EXPECT_EQ(RunOneLL(36868).kernel, (LLOneShot<float, 0>()));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotFirstThenTwoShotElseInternalError) {
