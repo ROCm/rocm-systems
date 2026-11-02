@@ -515,6 +515,15 @@ gfx1151, using absolute paths from this source tree. The original
   racing with the tensor load. These reports are false positives, not missing
   coverage.
 
+- **False positives after tensor DMA instructions that move no data**: a
+  tensor DMA instruction that touches neither global memory nor LDS, such as a
+  store whose tile lies wholly outside the tensor or a NULL descriptor
+  (`count = 0`), still occupies a TENSORcnt slot, but the detector records no
+  event for it. A later `s_wait_tensorcnt` with a nonzero count therefore
+  retires one transfer fewer than the hardware completes: an earlier transfer
+  stays pending, and an access to its LDS bytes is reported as a race. A
+  `s_wait_tensorcnt 0` is unaffected.
+
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently
   report all active lanes, and SDWA preserve-mode destinations can report a full
