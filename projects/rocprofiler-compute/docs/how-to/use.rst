@@ -74,10 +74,13 @@ See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 List blocks and metrics
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-To view available metrics by hardware block, use the ``--list-metrics``
-option. It lists the blocks of the current GPU and their aliases. Add block or
-metric IDs or aliases to list their metrics with units and descriptions, or
-``all`` to list every metric:
+To view available metrics by hardware block, use the ``--list-metrics`` option.
+It lists the blocks of the current GPU and their aliases.
+Add block or metric IDs or aliases to list their metrics
+with units and descriptions, or ``all`` to list every metric.
+Each ID or alias adds to the list:
+``rocprof-compute --list-metrics sol 12.1``
+lists all of block 2 (``sol``) and table 12.1.
 
 .. code-block:: shell
 
@@ -85,14 +88,23 @@ metric IDs or aliases to list their metrics with units and descriptions, or
    $ rocprof-compute --list-metrics sol 12 11.1.0
    $ rocprof-compute --list-metrics all
 
+To list another GPU's blocks and metrics,
+for example on a machine without a GPU, use ``--list-metrics-gfx-id <arch>``:
+
+.. code-block:: shell
+
+   $ rocprof-compute --list-metrics-gfx-id gfx90a
+   $ rocprof-compute --list-metrics sol --list-metrics-gfx-id gfx90a
+
 To list the blocks and metrics of a profiled workload, use analyze mode:
 
 .. code-block:: shell
 
    $ rocprof-compute analyze -p <workload_path> --list-metrics
 
-The block table shows each block's ID and alias. Each metric table shows the
-metric's ID, unit, and description. For example, on an MI300 system:
+The block table shows each block's ID and alias.
+Each metric table shows the metric's ID, unit, and description.
+For example, on an MI300 system:
 
 .. code-block:: shell-session
 
@@ -100,16 +112,15 @@ metric's ID, unit, and description. For example, on an MI300 system:
 
    Platform: gfx942 (MI300)
 
-   ╒══════════╤════════════════╤══════════════════════════════════════════════════════╕
-   │ Block_ID │ Alias          │ Block                                                │
-   ╞══════════╪════════════════╪══════════════════════════════════════════════════════╡
-   │ 0        │ topstats       │ Top Stats                                            │
-   │ 1        │ sysinfo        │ System Info                                          │
-   │ 2        │ sol            │ System Speed-of-Light                                │
-   │ 3        │ memchart       │ Memory Chart                                         │
-   │ 4        │ roof           │ Roofline                                             │
-   │ 5        │ cpc            │ Command Processor (CPC/CPF)                          │
-   │ 6        │ spi            │ Workgroup Manager (SPI)                              │
+   ╒════════════╤════════════════╤══════════════════════════════════════════════════════╕
+   │ Block_ID   │ Alias          │ Block                                                │
+   ╞════════════╪════════════════╪══════════════════════════════════════════════════════╡
+   │ 0          │ topstats       │ Top Stats                                            │
+   ├────────────┼────────────────┼──────────────────────────────────────────────────────┤
+   │ 1          │ sysinfo        │ System Info                                          │
+   ├────────────┼────────────────┼──────────────────────────────────────────────────────┤
+   │ 2          │ sol            │ System Speed-of-Light                                │
+   ├────────────┼────────────────┼──────────────────────────────────────────────────────┤
    ...
 
    $ rocprof-compute --list-metrics spi
@@ -118,23 +129,24 @@ metric's ID, unit, and description. For example, on an MI300 system:
 
    6. Workgroup Manager (SPI) (alias: spi)
    6.1 Workgroup manager utilizations
-   ╒═══════════╤════════════════════════════════╤═════════════╤══════════════════════════════════════════╕
-   │ Metric_ID │ Metric                         │ Unit        │ Description                              │
-   ╞═══════════╪════════════════════════════════╪═════════════╪══════════════════════════════════════════╡
-   │ 6.1.0     │ Accelerator Utilization        │ Percent     │ The percent of cycles in the kernel      │
-   │           │                                │             │ where the accelerator was actively doing │
-   │           │                                │             │ any work.                                │
-   ├───────────┼────────────────────────────────┼─────────────┼──────────────────────────────────────────┤
-   │ 6.1.1     │ Scheduler-Pipe Utilization     │ Percent     │ The percent of total scheduler-pipe      │
-   │           │                                │             │ cycles in the kernel where the           │
-   │           │                                │             │ scheduler-pipes were actively doing any  │
-   │           │                                │             │ work.                                    │
+   ╒═════════════╤═══════════════════════════════╤═════════════╤══════════════════════════════════════════╕
+   │ Metric_ID   │ Metric                        │ Unit        │ Description                              │
+   ╞═════════════╪═══════════════════════════════╪═════════════╪══════════════════════════════════════════╡
+   │ 6.1.0       │ Accelerator Utilization       │ Percent     │ The percent of cycles in the kernel      │
+   │             │                               │             │ where the accelerator was actively doing │
+   │             │                               │             │ any work.                                │
+   ├─────────────┼───────────────────────────────┼─────────────┼──────────────────────────────────────────┤
+   │ 6.1.1       │ Scheduler-Pipe Utilization    │ Percent     │ The percent of total scheduler-pipe      │
+   │             │                               │             │ cycles in the kernel where the           │
+   │             │                               │             │ scheduler-pipes were actively doing any  │
+   │             │                               │             │ work.                                    │
+   ├─────────────┼───────────────────────────────┼─────────────┼──────────────────────────────────────────┤
    ...
 
 .. note::
 
-   ``--list-blocks`` and ``--list-available-metrics`` are deprecated and will be
-   removed in a future release. Use ``--list-metrics`` instead.
+   ``--list-blocks`` and ``--list-available-metrics`` are deprecated
+   and will be removed in a future release. Use ``--list-metrics`` instead.
 
 .. _basic-analyze-cli:
 

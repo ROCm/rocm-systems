@@ -214,8 +214,8 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
 
 .. _cli-list-metrics:
 
-2. Use ``--list-metrics`` to list the blocks the workload profiled, and add
-   block IDs or aliases to list their metrics. See :ref:`list-metrics`.
+2. Use ``--list-metrics`` to list the blocks the workload profiled,
+   and add block IDs or aliases to list their metrics. See :ref:`list-metrics`.
 
    .. code-block:: shell-session
 
