@@ -1245,6 +1245,15 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   }
 }
 
+// Which bytes of the response buffer an LDS load may overwrite.
+enum class LdsResponse {
+  // The buffer belongs to this access: lanes outside the mask are never read.
+  Owned,
+  // A mixed FLAT load already wrote its global lanes there: only the LDS lanes
+  // may change.
+  Shared,
+};
+
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
 // Callers prepare buffers and complete retryable global work before entering.
 // FLAT LDS addresses include the workgroup base. Reject the captured RDNA4
@@ -1253,7 +1262,8 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 // retain the existing LDS helper behavior.
 void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
                         uint64_t lane_mask, const std::vector<uint8_t> &store_data,
-                        std::vector<uint8_t> &response_data) {
+                        std::vector<uint8_t> &response_data,
+                        LdsResponse response = LdsResponse::Owned) {
   uint64_t out_of_bounds = lane_mask & d.flat_local_oob_lane_mask;
   for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
     const uint32_t lane = std::countr_zero(lanes);
@@ -1286,9 +1296,10 @@ void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 
   }
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
-  else if (d.is_load && (d.transpose != 0 || d.lds_dst))
+  else if (d.is_load && (d.transpose != 0 || d.lds_dst || response == LdsResponse::Shared))
     // Transposes move bytes across lanes and LDS destinations forward them, so
-    // inactive lanes keep their zero-filled response bytes.
+    // inactive lanes keep their zero-filled response bytes. A shared buffer
+    // keeps the global lanes' results.
     lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
   else if (d.is_load)
     // Writeback reads active lanes only: the response buffer spans the wave and
@@ -1332,7 +1343,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
-  execute_lds_access(d, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data);
+  execute_lds_access(d, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data,
+                     LdsResponse::Shared);
   return VmAccessOutcome::Complete;
 }
 
