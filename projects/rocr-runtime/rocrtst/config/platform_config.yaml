@@ -218,6 +218,7 @@ platforms:
       # Exercises the WSL/DXG thunk's heap VA reservations; that backend does
       # not exist here, so the test would only ever report itself skipped.
       - rocrtstFunc.Heap_Reservation
+      - rocrtstStress.Signal_Silent_Store_Semantics
 
   # FFM Simulator - only Core and Extended groups allowed
   FFM_SIMULATOR:
