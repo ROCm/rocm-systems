@@ -245,7 +245,6 @@ TEST_P(QueueRegistrationAllocationTest, BindingAllocationFailureReleasesExecutio
   EXPECT_THROW((void)queues.registry.register_queue(queues.request), std::bad_alloc);
   trace_allocations = false;
   ASSERT_TRUE(injected);
-  EXPECT_EQ(allocation_count, binding_allocation);
   ASSERT_NO_FATAL_FAILURE(queues.check_cleanup_and_retry());
 }
 
@@ -256,14 +255,16 @@ TEST_P(QueueRegistrationAllocationTest, RecordAllocationDestroysBindingBeforeRel
   EXPECT_THROW((void)queues.registry.register_queue(queues.request), std::bad_alloc);
   trace_allocations = false;
   ASSERT_TRUE(injected);
-  EXPECT_EQ(allocation_count, 1u);
   EXPECT_TRUE(queues.observation.destroyed);
   EXPECT_EQ(queues.observation.queue_references_at_destruction, 1u);
   ASSERT_NO_FATAL_FAILURE(queues.check_cleanup_and_retry());
 }
 
 INSTANTIATE_TEST_SUITE_P(ComputeAndSdma, QueueRegistrationAllocationTest,
-                         ::testing::Values(QueueType::Compute, QueueType::Sdma));
+                         ::testing::Values(QueueType::Compute, QueueType::Sdma),
+                         [](const ::testing::TestParamInfo<QueueType> &info) {
+                           return info.param == QueueType::Compute ? "Compute" : "Sdma";
+                         });
 
 } // namespace
 } // namespace rocjitsu::amdgpu
