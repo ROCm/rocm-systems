@@ -142,6 +142,8 @@ class CoverageWorkflowTest(unittest.TestCase):
 
     def test_host_tests_wiring(self):
         workflow = REPO_ROOT / HOST_TESTS_WORKFLOW
+        # A PR retargeted to develop must get a gate.
+        self.assertIn("edited", pull_request_trigger(workflow).types)
         # Either would turn a failed detection or test into a pass.
         text = workflow.read_text(encoding="utf-8")
         for forbidden in ("continue-on-error", "|| true"):

@@ -18,6 +18,9 @@ on:
   pull_request:
     branches:
       - develop
+    # `edited` covers a PR retargeted to develop. It also reruns on title or
+    # body edits; skipping those would post a skipped, so passing, gate.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
