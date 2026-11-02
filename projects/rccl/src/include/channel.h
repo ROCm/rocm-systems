@@ -10,6 +10,7 @@
 #include "comm.h"
 #include "utils.h"
 #include "param.h"
+#include "archinfo.h"
 
 bool rcclUseAinic();
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm);
@@ -43,6 +44,16 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
 
 inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvBytes, ssize_t threshold) {
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
+}
+
+// The 64 KiB cutoff is a gfx950, 16+ node policy. Elsewhere return a cutoff no
+// smaller than the op, so an explicit enable stays fused at every size. The
+// enqueue wrapper must pass this result into rcclP2pBatchEligible; applying the
+// raw threshold on every architecture serializes large AllToAll on MI300.
+inline ssize_t rcclP2pBatchCutoff(const char* gcn, int nNodes, ssize_t sendBytes, ssize_t recvBytes,
+                                  ssize_t threshold) {
+  if (IsArchMatch(gcn, "gfx950") && nNodes >= 16) return threshold;
+  return std::max(sendBytes, recvBytes);
 }
 
 #endif

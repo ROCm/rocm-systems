@@ -81,6 +81,10 @@ ResolvedChannels ResolveP2pChannels(const char* arch, int nRanks, int collChanne
     return resolved;
 }
 
+// The helper applies whatever cutoff it is given. It does not decide which
+// architectures get the 64 KiB cutoff; that is rcclP2pBatchCutoff, which
+// enqueue.cc passes in. A size above the raw threshold is ineligible only when
+// that cutoff is actually supplied.
 TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
 {
     constexpr ssize_t threshold = 64 * 1024;
@@ -89,6 +93,29 @@ TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold + 1, threshold + 1, threshold));
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, threshold, threshold / 2, threshold));
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
+}
+
+// 4 MiB AllToAll on 32 ranks is 128 KiB per peer, above the 64 KiB cutoff.
+// That cutoff is gfx950 at 16+ nodes only. Applying it on gfx942 is the
+// MI300 multi-node AllToAll regression.
+TEST(P2pBatchEligibility, CutoffOnlyOnGfx950At16Nodes)
+{
+    constexpr ssize_t threshold = 64 * 1024;
+    constexpr ssize_t perPeer   = 128 * 1024;
+
+    auto eligible = [](const char* arch, int nNodes) {
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, threshold);
+        return rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer, cutoff);
+    };
+
+    EXPECT_TRUE(eligible("gfx942", 4));
+    EXPECT_TRUE(eligible("gfx942", 16));
+    EXPECT_TRUE(eligible("gfx950", 15));
+    EXPECT_FALSE(eligible("gfx950", 16));
+    EXPECT_TRUE(eligible("gfx1250", 16));
+
+    const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, threshold);
+    EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));
 }
 
 // Channel map must follow the comm-level planner flag, not per-send size eligibility.

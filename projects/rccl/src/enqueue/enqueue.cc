@@ -1326,9 +1326,9 @@ int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
 }
 
 static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
-  bool sizeGated = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes >= 16;
-  ssize_t threshold = sizeGated ? (ssize_t)rcclParamP2pBatchThreshold() : std::max(sendBytes, recvBytes);
-  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, threshold);
+  const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+  ssize_t cutoff = rcclP2pBatchCutoff(gcn, comm->nNodes, sendBytes, recvBytes, (ssize_t)rcclParamP2pBatchThreshold());
+  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, cutoff);
 }
 
 // Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
