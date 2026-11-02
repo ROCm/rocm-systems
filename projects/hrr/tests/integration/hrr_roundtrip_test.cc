@@ -316,6 +316,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
   CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
 }
 
+static void hrr_require_recorded_apis(const fs::path& cap_path,
+                                      const std::vector<hrr_api_id_t>& apis);
+
 /**
  * Test Description
  * ----------------
@@ -367,6 +370,15 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     INFO("Event count: " << arc.events.size());
     REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
   }
+
+  // The workload's array copies (block 19) need image support, which gfx950
+  // (MI350X) reports as absent. Where it has them, a capture without the copies
+  // would replay perfectly well, so ask for them.
+  int images = 0;
+  HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
+  if (images)
+    hrr_require_recorded_apis(cap.path, {HRR_API_HIPARRAY3DCREATE, HRR_API_HIPARRAYCREATE,
+                                         HRR_API_HIPMEMCPY3D, HRR_API_HIPMEMCPY3DASYNC});
 
   // -------------------------------------------------------------------------
   // Step 3: playback + D2H validation (d2[i] == 94)
@@ -1543,6 +1555,44 @@ HRR_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_GraphExplicit_Direct", cap.path);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCapture_Direct: a stream capture forked onto a
+ *     second stream and never joined, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureUnjoined, then a direct H2D restore, kernel and D2H
+ *     on the stream that was capturing.
+ *   - The archive must hold the failed hipStreamEndCapture: it ended the
+ *     capture, so replay needs it to end its own.
+ *   - Replay with byte-exact D2H must match: the restore and launch run
+ *     directly instead of into a capture replay forgot to close.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcapture"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCapture_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCaptureInvalidated_Direct: a hipMalloc during a
+ *     global-mode capture invalidates it, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureInvalidated, then the same direct work as above.
+ *   - The failed hipMalloc is not recorded, so replay's capture is valid and
+ *     its EndCapture returns a graph, which replay must destroy.
+ *   - Replay with byte-exact D2H must match.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureInvalidatedRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcaptureinval"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCaptureInvalidated_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
 HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostreglch"};
   hrr_run_roundtrip("Unit_HRR_HostRegLaunch_Direct", cap.path);
@@ -1611,6 +1661,62 @@ HRR_TEST_CASE(Unit_HRR_ChevronLaunchRoundtrip) {
   // Exercises __hipPushCallConfiguration → hipLaunchByPtr path.
   // min_events=5: malloc + stream + push + launch + D2H.
   hrr_run_roundtrip("Unit_HRR_ChevronLaunch_Direct", cap.path, 5);
+}
+
+// Capture records only successful calls, so the swap event exists only where swap runs.
+static bool hrr_device_supports_batch_swap() {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void *a = nullptr, *b = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&a, 256));
+  HRR_HIP_CHECK(hipMalloc(&b, 256));
+  void* dsts[] = {a};
+  void* srcs[] = {b};
+  size_t sizes[] = {256};
+  hipExtMemcpyAttributes attr{};
+  attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t attr_idx[] = {0};
+  const hipError_t err = hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                                &attr, attr_idx, 1, nullptr);
+  if (err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(err);
+    HRR_HIP_CHECK(hipDeviceSynchronize());
+  }
+  HRR_HIP_CHECK(hipFree(a));
+  HRR_HIP_CHECK(hipFree(b));
+  return err != hipErrorNotSupported;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ExtMemcpyBatch_Direct and REQUIRE the archive holds a
+ *     hipExtMemcpyBatchAsync event; where swap is supported, REQUIRE the
+ *     asymmetric-swap event with its sizesDst recorded.
+ *   - Replay and validate the D2H readbacks, which only the batches write.
+ */
+HRR_TEST_CASE(Unit_HRR_ExtMemcpyBatchRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmemcpybatch"};
+  hrr_run_roundtrip("Unit_HRR_ExtMemcpyBatch_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const auto is_batch = [](const hrr::Event& ev) {
+    return ev.header().event_type == HRR_API_HIPEXTMEMCPYBATCHASYNC;
+  };
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), is_batch));
+  if (!hrr_device_supports_batch_swap()) return;
+  REQUIRE(std::any_of(arc.events.begin(), arc.events.end(), [&](const hrr::Event& ev) {
+    if (!is_batch(ev)) return false;
+    hrr_args_hipExtMemcpyBatchAsync a{};
+    if (ev.raw_payload.size() < sizeof(a)) return false;
+    std::memcpy(&a, ev.raw_payload.data(), sizeof(a));
+    size_t sizes_dst = 0;
+    std::memcpy(&sizes_dst, a.sizesDst_bytes, sizeof(sizes_dst));
+    return a.sizesDst_present && a.sizesDst_n == 1 && sizes_dst == 1024;
+  }));
 }
 
 /**

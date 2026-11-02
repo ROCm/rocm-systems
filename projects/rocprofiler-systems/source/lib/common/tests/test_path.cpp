@@ -666,3 +666,30 @@ TEST_F(PathTest, FindLibraryInLoadedDir_NulloptWhenLibraryAbsent)
         find_library_in_loaded_dir(getpid(), "librocprof-sys-missing.so", self_name)
             .has_value());
 }
+
+TEST_F(PathTest, EnsureParentDirectory_CreatesMissingAncestors)
+{
+    auto const      file = m_test_dir + "/a/b/c/file.txt";
+    std::error_code error;
+    EXPECT_TRUE(ensure_parent_directory(file, error));
+    EXPECT_FALSE(error);
+    EXPECT_TRUE(std::filesystem::is_directory(m_test_dir + "/a/b/c"));
+    EXPECT_FALSE(std::filesystem::exists(file));
+}
+
+TEST_F(PathTest, EnsureParentDirectory_NoParentIsNoOp)
+{
+    std::error_code error;
+    EXPECT_TRUE(ensure_parent_directory("file.txt", error));
+    EXPECT_FALSE(error);
+}
+
+TEST_F(PathTest, EnsureParentDirectory_FailsWhenParentIsAFile)
+{
+    auto const blocker = m_test_dir + "/blocker";
+    std::ofstream{ blocker } << "x";
+
+    std::error_code error;
+    EXPECT_FALSE(ensure_parent_directory(blocker + "/file.txt", error));
+    EXPECT_TRUE(error);
+}

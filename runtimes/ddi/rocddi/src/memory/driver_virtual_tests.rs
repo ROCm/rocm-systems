@@ -145,8 +145,7 @@ impl VirtualMemoryOperations for FakeDriver {
         _device: &State,
         _kind: MemoryKind,
         size: u64,
-        _pinned: bool,
-        _uncached: bool,
+        _options: VirtualMemoryOptions,
     ) -> Result<Owned<Backing>, Error> {
         Ok(Owned::new(Backing {
             info: VirtualMemoryInfo {
@@ -190,6 +189,13 @@ impl VirtualMemoryOperations for FakeDriver {
         Ok(Owned::new(Mapping { fail_once: true })?)
     }
 
+    fn set_virtual_host_mapping_permissions(
+        _mapping: &mut Mapping,
+        _permissions: DeviceAccess,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {
         if mapping.fail_once {
             mapping.fail_once = false;
@@ -218,8 +224,12 @@ fn owners(
         Shared::new(HostIntervals::new())?,
         Shared::new(DeviceIntervals::new())?,
     );
-    let backing =
-        driver.create_virtual_memory(&State(1), MemoryKind::System, 0x4000, false, false)?;
+    let backing = driver.create_virtual_memory(
+        &State(1),
+        MemoryKind::System,
+        0x4000,
+        VirtualMemoryOptions::default(),
+    )?;
     let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing)?);
     Ok((address, memory))
 }

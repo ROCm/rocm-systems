@@ -250,11 +250,8 @@ extern std::unique_ptr<std::ofstream> log_ofs;
                      "[rocprof-sys][exe] Error! " __VA_ARGS__);                          \
             throw std::runtime_error(std::string{ _buff.data() });                       \
         }                                                                                \
-        else                                                                             \
-        {                                                                                \
-            if(debug_print || verbose_level >= LEVEL)                                    \
-                fprintf(stderr, "[rocprof-sys][exe] Warning! " __VA_ARGS__);             \
-        }                                                                                \
+        if(debug_print || verbose_level >= LEVEL)                                        \
+            fprintf(stderr, "[rocprof-sys][exe] Warning! " __VA_ARGS__);                 \
         fflush(stderr);                                                                  \
     }
 

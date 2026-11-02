@@ -22,7 +22,12 @@
 /.github/workflows/rocr-runtime-*.yml                                 @ROCm/rocr-maintainers
 /.github/workflows/rocprofiler-systems-*.yml                          @ROCm/rocprof-sys
 /.github/workflows/*therock*.yml                                      @ROCm/therock-infra-write @ROCm/rocm-systems-reviewers
-/.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/workflows/*rccl*                                             @ROCm/rccl-ci
+/.github/scripts/*rccl*                                               @ROCm/rccl-ci
+/.github/scripts/tests/*rccl*                                         @ROCm/rccl-ci
+/.github/scripts/allowlist/*rccl*                                     @ROCm/rccl-ci
+/.github/actions/rccl-resolve-coco-run/                               @ROCm/rccl-ci
+/.github/actions/rccl-checkout-coco-harness/                          @ROCm/rccl-ci
 /.github/workflows/therock-rccl-*.yml                                 @ROCm/therock-infra-write @ROCm/rccl-ci
 
 # Individual contributors

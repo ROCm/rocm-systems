@@ -1273,13 +1273,6 @@ hsa_status_t XdnaDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   if (use_bo_share) {
     create_bo_args.type = AMDXDNA_BO_SHARE;
   } else {
-    // While this is already checked in MemoryRegion::AllocateImpl, the max size is
-    // MemoryRegion::max_sysmem_alloc_size_ for HSA_HEAPTYPE_DEVICE_SVM which is incorrect
-    // for dev heap.
-    if (size > dev_heap_size) {
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    }
-
     create_bo_args.type = AMDXDNA_BO_DEV;
   }
 
@@ -1896,6 +1889,12 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // command still has to list them for the driver to keep them resident. The loader refuses a
   // full-ELF kernel that loads no PDI, so there is always at least one.
   bo_handles->insert(bo_handles->end(), desc.pdi_bo_handles.begin(), desc.pdi_bo_handles.end());
+  // External variables are also reached only through the control code. The host writes them
+  // between dispatches, so they are flushed like the arguments.
+  for (const auto& var : desc.external_variables) {
+    FlushCpuCache(var.va, 0, var.size);
+    bo_handles->push_back(var.bo_handle);
+  }
 
   const uint32_t cmd_dwords = 1 +  // CU mask
       sizeof(ert_npu_preempt_data) / sizeof(uint32_t) + ELF_CMD_ARG_DWORDS;
@@ -2267,10 +2266,11 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
   ctrl_buffers.reserve(num_pkts);
   MAKE_SCOPE_GUARD([&] { FreeDeviceBuffers(fd, dev_heap_vaddr, &ctrl_buffers); });
 
-  // BOs per packet: the control code, each PDI (usually one) and one per kernarg. Four per packet
-  // covers a two-argument kernel; this is a capacity hint, not a bound.
+  // BOs per packet: the control code, each PDI (usually one), one per kernarg and one per external
+  // variable. Five per packet covers a two-argument kernel with a scratchpad; this is a capacity
+  // hint, not a bound.
   std::vector<uint32_t> bo_handles;
-  bo_handles.reserve(num_pkts * 4);
+  bo_handles.reserve(num_pkts * 5);
 
   // Commands to be submitted, and how many argument dwords each occupies in a chain slot.
   std::vector<BOHandle> cmd_bo_handles;

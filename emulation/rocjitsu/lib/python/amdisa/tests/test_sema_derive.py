@@ -33,6 +33,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_scale,
 )
 from amdisa.sema_fingerprint import fingerprint
+from amdisa.sema_properties import InstructionProperty, derive_properties
 
 
 class _FakeSem:
@@ -1781,6 +1782,37 @@ class TestDeriveVectorBinop:
         all_kinds = {n.kind for n in block.body.walk()}
         assert SemaNodeKind.SUB in all_kinds
 
+    @pytest.mark.parametrize('dtype', ['f16', 'f32'])
+    @pytest.mark.parametrize(
+        ('op', 'negated'), [('sub', 1), ('subrev', 0), ('rsub', 0)]
+    )
+    def test_float_subtraction_adds_negated_subtrahend(
+        self, dtype: str, op: str, negated: int
+    ):
+        sem = _FakeSem(f'V_{op.upper()}_{dtype.upper()}', 'vector_binop', op, dtype)
+        block = derive_sema_block(sem)
+        assert block is not None
+
+        # Sources stay in operand order, so two NaNs return src0's, as for ADD.
+        rhs = block.body.children[1]
+        assert rhs.kind == SemaNodeKind.ADD
+        assert SemaNodeKind.SUB not in {n.kind for n in rhs.walk()}
+        assert [c.kind == SemaNodeKind.UMINUS for c in rhs.children] == [
+            i == negated for i in range(2)
+        ]
+        operands = [
+            c.children[0] if c.kind == SemaNodeKind.UMINUS else c for c in rhs.children
+        ]
+        assert [c.children[0].children[1].lit_value for c in operands] == ['0', '1']
+
+        cpp = lower_sema_block(block)
+        assert 'Arithmetic::ADD' in cpp
+        assert 'Arithmetic::SUB' not in cpp
+        # An F16 subtrahend is flushed as a half before it is widened and negated.
+        if dtype == 'f16':
+            assert '(-util::f16_to_f32(static_cast<uint16_t>(' in cpp
+            assert cpp.count('flush_input<amdgpu::fp_format::F16>(') == 2
+
     def test_signed_add_sub_use_unsigned_operands_to_avoid_ub(self):
         ops = [
             ('add', SemaNodeKind.ADD, ('0', '1')),
@@ -3337,6 +3369,30 @@ class TestDeriveControlFlow:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.pragma == ExecModel.BRANCH
+
+    @pytest.mark.parametrize(
+        ('name', 'enc_name', 'semantic_class', 'operation'),
+        [
+            ('S_CBRANCH_G_FORK', 'ENC_SOP2', 'cbranch_fork', 'indirect'),
+            ('S_CBRANCH_I_FORK', 'ENC_SOPK', 'cbranch_fork', 'direct'),
+            ('S_CBRANCH_JOIN', 'ENC_SOP1', 'cbranch_join', None),
+        ],
+    )
+    def test_fork_and_join_branch_regardless_of_exec_and_rewrite_it(
+        self, name, enc_name, semantic_class, operation
+    ):
+        sem = derive_semantics(name, enc_name)
+        assert sem is not None
+        assert sem.semantic_class == semantic_class
+        assert sem.operation == operation
+        block = derive_sema_block(sem)
+        assert block is not None
+        assert block.pragma == ExecModel.BRANCH
+        props = derive_properties(block)
+        assert InstructionProperty.IS_BRANCH in props
+        assert InstructionProperty.IGNORES_EXEC in props
+        assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.WRITES_SCC not in props
 
     def test_endpgm(self):
         sem = _FakeSem('S_ENDPGM', 'endpgm')

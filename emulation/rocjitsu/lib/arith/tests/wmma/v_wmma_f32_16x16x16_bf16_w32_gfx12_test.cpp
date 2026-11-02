@@ -10,6 +10,8 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/bf16_boundaries.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 
 #include <algorithm>
@@ -26,6 +28,18 @@ using Registers = rocjitsu::arith::test::Registers<33, 32>;
 // Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
 // and semantics.
 TEST(WmmaF32BF16W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::expect_bf16_loose_subnormal<32, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
+  rocjitsu::arith::test::expect_bf16_tiny_accumulator<32>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
+  rocjitsu::arith::test::expect_wmma_exact_simd<true, 32, false, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
+
+  rocjitsu::arith::test::expect_matrix_modifiers<true, 32, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
+  rocjitsu::arith::test::expect_wmma_fixed_controls<true, 32, false, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
+
   Registers input;
 
   // Named engine with its standardized default seed and explicit mapping (no distributions).
@@ -57,8 +71,10 @@ TEST(WmmaF32BF16W32Gfx12, Arithmetic) {
   // C starts at VGPR 8: C[row][col] maps to VGPR 8 + row % 8,
   // lane col + 16 * (row / 8). Set C[9][10] to a quiet NaN and
   // C[11][12] to +Inf, outside the NaN/Inf rows and columns of A and B.
-  input.v[8 + 9 % 8][10 + 16 * (9 / 8)] = rocjitsu::arith::test::kF32QuietNaNBits;
-  input.v[8 + 11 % 8][12 + 16 * (11 / 8)] = rocjitsu::arith::test::kF32PositiveInfinityBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 9, 10) =
+      rocjitsu::arith::test::kF32QuietNaNBits;
+  rocjitsu::arith::test::wmma_gfx12_acc<32>(input.v + 8, 11, 12) =
+      rocjitsu::arith::test::kF32PositiveInfinityBits;
   constexpr float factor_nan = std::bit_cast<float>(0xffc00a3dU);
   constexpr float accumulator_nan = std::bit_cast<float>(0x7fc12345U);
   constexpr float invalid_product_nan = std::bit_cast<float>(0xffc00000U);
@@ -88,122 +104,26 @@ TEST(WmmaF32BF16W32Gfx12, Arithmetic) {
   // clang-format on
 
   // Invalid requests must be rejected before operand access or output writes.
-  // Instruction flags are not supported by this slice.
+  // Six NEG/ABS modifiers are supported, without DPP controls.
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12,
-                                                     input, 16, 0, 4, 8, 0);
+                                                     input, 16, 0, 4, 8,
+                                                     rocjitsu::arith::test::kFloatingWmmaModifiers);
 
   // A=VGPRs 0..3, B=4..7, C=8..15; D spans eight registers. These cover
   // A/B overlap, partial A/B/C overlap, B/C overlap, C alias, and disjoint D.
-  const std::vector<uint64_t> cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
-  for (uint64_t cpu : cpu_levels) {
-    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
-      for (uint64_t fp_flags : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
-        for (int aliasing_offset : {0, 2, 4, 8, 16}) {
-          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << aliasing_offset);
-          Registers r = input;
-          ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(cpu | semantics | fp_flags, 0,
-                                                                r.v + aliasing_offset, r.v, r.v + 4,
-                                                                r.v + 8),
-                    RJ_ARITH_SUCCESS);
-          for (int row = 0; row < 16; ++row) {
-            for (int col = 0; col < 16; ++col) {
-              float expected = golden[row][col];
-              uint32_t actual = r.v[aliasing_offset + row % 8][col + 16 * (row / 8)];
-              if (semantics == RJ_ARITH_SEMANTICS_LOOSE) {
-                rocjitsu::arith::test::expect_f32(actual, expected, semantics, /*atol=*/1e-5,
-                                                  /*rtol=*/1e-5);
-              } else {
-                EXPECT_EQ(actual, std::bit_cast<uint32_t>(expected));
-              }
-            }
-          }
-          r.expect_preserved(input, aliasing_offset, 8);
-        }
-      }
-    }
-  }
+  rocjitsu::arith::test::expect_wmma_f32_arithmetic</*Gfx11=*/false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12, input, golden, {0, 2, 4, 8, 16},
+      {0, RJ_ARITH_FP16_OVFL});
 }
 
-// gfx1201 cancellation witness supplied in the review of PR #13939:
-// 2^64 * 2^64 + (-2^127) * 1 = 2^127, despite the first product exceeding FP32.
+// Check selected finite overflow cancellation and exponent-gap boundaries.
 TEST(WmmaF32BF16W32Gfx12, ExactIntermediateOverflowCancellation) {
-  using rocjitsu::arith::test::semantics_modes;
-  using rocjitsu::arith::test::set_wmma_gfx12_half;
-  using rocjitsu::arith::test::supported_cpu_levels;
-  for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : semantics_modes()) {
-      if (semantics == RJ_ARITH_SEMANTICS_LOOSE || semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY) {
-        continue;
-      }
-      for (int reverse : {0, 1}) {
-        SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << reverse);
-        Registers r;
-        for (auto *reg : r.v) {
-          std::fill_n(reg, 32, 0U);
-        }
-        set_wmma_gfx12_half<32>(r.v, 0, reverse, 0x5f80U);         // A[0][k] = 2^64.
-        set_wmma_gfx12_half<32>(r.v + 4, 0, reverse, 0x5f80U);     // B[k][0] = 2^64.
-        set_wmma_gfx12_half<32>(r.v, 0, 1 - reverse, 0xff00U);     // A[0][k] = -2^127.
-        set_wmma_gfx12_half<32>(r.v + 4, 0, 1 - reverse, 0x3f80U); // B[k][0] = 1.
-        ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(cpu | semantics, 0, r.v + 16, r.v,
-                                                              r.v + 4, r.v + 8),
-                  RJ_ARITH_SUCCESS);
-        for (int reg = 0; reg < 8; ++reg) {
-          for (int lane = 0; lane < 32; ++lane) {
-            EXPECT_EQ(r.v[16 + reg][lane], reg == 0 && lane == 0 ? 0x7f000000U : 0U);
-          }
-        }
-      }
-    }
-  }
+  rocjitsu::arith::test::expect_bf16_overflow_cancellation<32>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
 }
 
-// Selected gfx1201 capture: kGfx12WmmaBF16Cases[5] in
-// rocjitsu/tests/fixtures/float_dot/gfx1201_cases.h (Radeon AI Pro R9700).
-// Wide exponent gaps complement the cancellation witness and normal-range matrix.
 TEST(WmmaF32BF16W32Gfx12, ExactExponentGaps) {
-  using namespace rocjitsu::arith::test;
-  const uint16_t a[16] = {0x9844, 0x3f7a, 0x606f, 0xc18c, 0xbe5b, 0x891f, 0xbbfb, 0x93b8,
-                          0xc3c6, 0x32f2, 0xf44e, 0x15cf, 0x5eeb, 0x2b55, 0x8bef, 0xa075};
-  const uint16_t b[16] = {0x8e88, 0xec18, 0xd3c2, 0xf6ae, 0x0cdb, 0x87c5, 0x4587, 0x5825,
-                          0x6e7d, 0x8ab5, 0x8773, 0x4108, 0x91c2, 0x3987, 0x62ab, 0xfbad};
-  for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
-                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
-                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      Registers r;
-      for (int row = 0; row < 16; ++row) {
-        for (int k = 0; k < 16; ++k) {
-          set_wmma_gfx12_half<32>(r.v, row, k, a[k]);
-          set_wmma_gfx12_half<32>(r.v + 4, row, k, b[k]);
-        }
-      }
-      for (int reg = 8; reg < 16; ++reg) {
-        std::fill_n(r.v[reg], 32, 0x48e26837U);
-      }
-      ASSERT_EQ(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(cpu | semantics, 0, r.v + 16, r.v,
-                                                            r.v + 4, r.v + 8),
-                RJ_ARITH_SUCCESS);
-      for (int reg = 16; reg < 24; ++reg) {
-        for (int lane = 0; lane < 32; ++lane) {
-          EXPECT_EQ(r.v[reg][lane], 0x78bd8ea7U);
-        }
-      }
-    }
-  }
-}
-
-// Reject controls not implemented by this slice, before accessing operands.
-TEST(WmmaF32BF16W32Gfx12, UnsupportedGuestControls) {
-  for (uint64_t flag :
-       {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-        RJ_ARITH_FP_IEEE_MODE, RJ_ARITH_FP_DX10_CLAMP_OFF, RJ_ARITH_FP_ROUND_UP,
-        RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS_F16,
-        RJ_ARITH_FP_PRESERVE_INPUT_DENORMALS_F16}) {
-    EXPECT_EQ(
-        rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(flag, 0, nullptr, nullptr, nullptr, nullptr),
-        RJ_ARITH_ERROR_INVALID_FLAGS);
-  }
+  rocjitsu::arith::test::expect_bf16_exponent_gaps<32>(rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12);
 }
 
 } // namespace

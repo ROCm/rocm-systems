@@ -6,7 +6,7 @@
 ///
 /// Each test starts a daemon process, runs the HIP test binary with
 /// LD_PRELOAD as a subprocess, verifies the result, and tears down the
-/// daemon. Paths are injected via CMake compile definitions.
+/// daemon. CMake's rj_add_test_path stores paths in a generated data object.
 
 #include <gtest/gtest.h>
 
