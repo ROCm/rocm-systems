@@ -1117,8 +1117,11 @@ TEST_F(NetSharedHostHugePagesMicrotest, Init_PoolIsOneHugePage_RegistersAlignedM
   EXPECT_EQ(registers_, 1);
   EXPECT_EQ(registeredPtr_, cpu);
   EXPECT_EQ(registeredSize_, kHugePage);
-  constexpr unsigned kWanted = hipHostRegisterPortable | hipHostRegisterMapped;
-  EXPECT_EQ(registeredFlags_ & kWanted, kWanted);
+  unsigned expectedFlags = hipHostRegisterPortable | hipHostRegisterMapped;
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+  expectedFlags |= hipExtHostRegisterUncached;
+#endif
+  EXPECT_EQ(registeredFlags_, expectedFlags);
   EXPECT_EQ((uintptr_t)cpu % kHugePage, 0u);
   EXPECT_EQ(cpu[0], 0);
   EXPECT_EQ(cpu[kHugePage - 1], 0);
