@@ -14,7 +14,7 @@ sitting and can be merged or dropped on its own. The table below lists what has 
 | Integration, GPU | `tests/range-replay-local-context/` | every per-dispatch service sees the replayed dispatches and honors per-pass toggles |
 | Declines, GPU | `tests/range-replay-declines/` | a device-writing copy between a range's kernels, through `hipMemcpyAsync` (C1) or `hsa_amd_memory_async_batch_copy` (C2), declines with `MEMORY_COPY_IN_RANGE` while nothing traces memory copies; `hipMalloc` / `hipFree` inside a bound range decline with `ALLOCATION_CHANGED_IN_RANGE` (C3); an empty range closes with `NO_DISPATCH` (C4); a HIP graph launch on the range's thread declines with `GRAPH_LAUNCH` (C5); another thread's kernel on the same agent while the range is open declines with `CONCURRENT_DISPATCH` (C6); no pass runs and the application's result is intact |
 | Concurrency, GPU | `tests/range-replay-concurrency/` | another thread's HIP graph launches on the agent, timed into the replay window, wait for it to close: the range replays with `divergence_count == 0`, its result is intact, and every launch's increment survives (C8) |
-| Performance, GPU, nightly | `tests/range-replay-perf/` | pass-count scaling, and amortization of the window cost over dispatches |
+| Performance, GPU, nightly | `tests/range-replay-perf/` | pass-count scaling, amortization of the window cost over dispatches, and idle-gate overhead when range replay is configured but no range is opened (P1) |
 
 ## What is missing
 
@@ -41,7 +41,8 @@ and HIP reuses the staging buffer it copies a pageable source through. Whether s
 should decline, and how the SDK would recognize HIP's copy kernels, is undecided; C28 tests
 whichever is chosen.
 
-The recurring cost range replay imposes on runs that never open a range is not measured either.
+The recurring cost range replay imposes on runs that never open a range is measured by P1
+(idle-gate overhead against a no-tool baseline).
 
 Nothing exercises what compilers, JITs, and other tools add. That includes code objects loaded or
 unloaded inside a range, now declined with `CODE_OBJECT_CHANGED_IN_RANGE`, and the hidden kernel

@@ -12,6 +12,10 @@
 // application would read a newly-introduced decline as a large improvement and go green, which is
 // precisely backwards. So the numbers are only trustworthy alongside a check that every range
 // reached CLOSE with status REPLAYED and with the dispatch count the application actually issued.
+//
+// Idle-gate overhead (RR_PERF_EXPECT_IDLE) inverts that check: the application must not open any
+// range, because the measurement is the process-wide interception gate alone. A CLOSE there would
+// mean the harness timed a replay window by mistake.
 
 #include "client.hpp"
 
@@ -19,7 +23,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace
 {
@@ -88,6 +94,13 @@ tool_init(rocprofiler_client_finalize_t, void*)
     return 0;
 }
 
+bool
+expect_idle()
+{
+    const char* v = std::getenv("RR_PERF_EXPECT_IDLE");
+    return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
+}
+
 void
 tool_fini(void*)
 {
@@ -95,7 +108,8 @@ tool_fini(void*)
     const auto replayed = g_replayed.load();
     const auto passes   = g_passes.load();
 
-    // Parsed by the python drivers, which refuse to record a sample unless every range replayed.
+    // Parsed by the python drivers, which refuse to record a sample unless every range replayed
+    // (default) or unless zero ranges closed (idle-gate overhead).
     fprintf(stderr,
             "[rr-perf-client] passes_requested=%lu ranges=%lu replayed=%lu pass_callbacks=%lu "
             "dispatches=%lu divergence=%lu\n",
@@ -105,6 +119,21 @@ tool_fini(void*)
             static_cast<unsigned long>(passes),
             static_cast<unsigned long>(g_dispatches.load()),
             static_cast<unsigned long>(g_divergence.load()));
+
+    // P1: the application never opens a range. A CLOSE here would mean the idle-gate measurement
+    // timed a real replay window instead of the process-wide interception check alone.
+    if(expect_idle())
+    {
+        if(closes != 0)
+        {
+            fprintf(stderr,
+                    "[rr-perf-client] FAIL idle-gate run closed %lu range(s); the timing would "
+                    "measure replay, not the idle interception gate\n",
+                    static_cast<unsigned long>(closes));
+            std::abort();
+        }
+        return;
+    }
 
     if(closes == 0 || replayed != closes)
     {
