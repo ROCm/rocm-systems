@@ -195,7 +195,7 @@ def test_owned_paths_are_outside_runner_output_and_native_backend(tmp_path):
         assert Path(ctx.env[key]).is_relative_to(ctx.root)
         assert not Path(ctx.env[key]).is_relative_to(ctx.root / 'results')
     assert ctx.env['PYTHONDONTWRITEBYTECODE'] == '1'
-    assert ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] == '4'
+    assert 'CMAKE_BUILD_PARALLEL_LEVEL' not in ctx.env
     assert ctx.env['ROCISA_BACKEND'] == 'native'
     assert ctx.cwd.is_dir() and not list(ctx.cwd.iterdir())
 
@@ -722,38 +722,6 @@ def test_prepared_python_loader_smoke_is_early_and_propagates_failure(
         assert not (ctx.root / 'ready.json').exists()
 
 
-def test_build_worker_policy_reaches_both_builds_wheel_and_export(tmp_path):
-    module, ctx = fixture_preparation(tmp_path)
-    assert ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] == '4'
-    # Model changing only preparation's owned build policy, not an incoming override.
-    ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] = '2'
-    commands = FictionalCommands(module, ctx)
-    worker_env = {}
-
-    def intercept(label, argv, capture=False, env_overrides=None):
-        if label in ('build', 'adapter-build', 'wheel'):
-            worker_env[label] = ctx.env['CMAKE_BUILD_PARALLEL_LEVEL']
-        return commands(label, argv, capture, env_overrides)
-
-    phases(module, ctx, intercept)
-    builds = {
-        label: args[args.index('--parallel') + 1]
-        for label, args in commands.calls
-        if label in ('build', 'adapter-build')
-    }
-    assert builds == {'build': '2', 'adapter-build': '2'}
-    assert worker_env == {'build': '2', 'wheel': '2', 'adapter-build': '2'}
-    assert 'CMAKE_BUILD_PARALLEL_LEVEL=2\n' in Path(ctx.env['GITHUB_ENV']).read_text()
-    # Generator workers are a different policy and must remain four.
-    for variant in ctx.inventory():
-        import yaml
-
-        config = yaml.safe_load(
-            (ctx.artifacts / variant / 'candidate.yaml').read_text()
-        )
-        assert config['GlobalParameters']['CpuThreads'] == 4
-
-
 def test_intercepted_preparation_orders_exact_owned_wheel_and_four_generators(tmp_path):
     module, ctx = fixture_preparation(tmp_path)
     assert list(ctx.inventory()) == [
@@ -800,17 +768,14 @@ def test_intercepted_preparation_orders_exact_owned_wheel_and_four_generators(tm
     )
     assert '-DFETCHCONTENT_SOURCE_DIR_NANOBIND=' + ctx.env['NANOBIND_SOURCE'] in native
     assert '-DFETCHCONTENT_FULLY_DISCONNECTED=ON' in native
-    assert all(
-        args[args.index('--parallel') + 1] == '4'
-        for _, args in commands.calls
-        if '--parallel' in args
-    )
+    assert all('--parallel' not in args for _, args in commands.calls)
     assert ctx.env['LD_LIBRARY_PATH'].split(':') == [
         str(ctx.root / 'venv/sdk' / p)
         for p in ('lib', 'lib/rocm_sysdeps/lib', 'lib/llvm/lib', 'lib/host-math/lib')
     ]
     assert json.loads((ctx.root / 'ready.json').read_text()) == ctx.inventory()
     exported = Path(ctx.env['GITHUB_ENV']).read_text()
+    assert 'CMAKE_BUILD_PARALLEL_LEVEL=' not in exported
     assert (
         'ROCISA_BACKEND=native\n' in exported
         and 'TENSILE_CANDIDATE_ARTIFACTS=' + str(ctx.artifacts) in exported

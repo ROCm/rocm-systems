@@ -2277,21 +2277,7 @@ static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pay
   return hipSuccess;
 }
 
-static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
-  uint64_t _rec_ptr = a->ptr;
-  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
-  if (_live_ptr == nullptr) return hipSuccess;
-  hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.remove_alloc(_rec_ptr);
-  }
-  return _r;
-}
+extern hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* payload);
 

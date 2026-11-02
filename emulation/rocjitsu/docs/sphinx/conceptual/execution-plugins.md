@@ -169,7 +169,5 @@ RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output \
 -   [Detect a missing barrier with the race detector](../tutorials/race-detection-walkthrough.md) --- step-by-step race detection tutorial
 -   [waitcheck hazard analyzer reference](../reference/waitcheck.md) --- static
     wait-hazard checker for AMDGPU code objects
--   [ConSan GPU LDS sanitizer reference](../reference/consan.md) --- DBI-based LDS
-    data race sanitizer
 -   [API reference: virtual machine](../reference/api-vm.md) --- virtual
     machine C API reference
