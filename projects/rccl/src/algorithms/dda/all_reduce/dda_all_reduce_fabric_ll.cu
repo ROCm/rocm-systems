@@ -255,12 +255,11 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
 // the loop bound.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
-                                                         ncclComm* comm, cudaStream_t stream) {
+                                                         ncclComm* comm, cudaStream_t stream, unsigned threads) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = (bytes >> 3 ) / (size_t)nRanks; // 8 payload bytes per packet
 
-  const unsigned threads = 1024;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
     nBlocksMax = 1;
@@ -324,11 +323,14 @@ static bool ddaArLLTwoShotSavesWire(size_t bytes, int nRanks) {
   return bytes * k / n >= kDdaArLLTwoShotMinSavedWireBytes;
 }
 
-// One-shot shape/resource eligibility; past rcclDdaLLOneShotThreshold() it yields to an eligible two-shot.
-bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op) {
+// Shape/resource eligibility for the one-shot variant, independent of whether
+// the tier is switched on for this size.
+static bool ddaLLArOneShotFits(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                               ncclDataType_t datatype, ncclRedOp_t op) {
+  (void)sendbuff;
+  (void)recvbuff;
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLOneShotThreshold()) {
-    return false;
+      return false;
   }
 
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -362,7 +364,18 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if ((bytes >> 3) > ddaLLArSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
+
+  return true;
+}
+
+// One-shot eligibility; past rcclDdaLLOneShotThreshold() it yields to an eligible two-shot that saves enough wire.
+bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op) {
+  if (!ddaLLArOneShotFits(comm, sendbuff, recvbuff, count, datatype, op)) {
+    return false;
+  }
   // Past the crossover a two-shot that takes the message and saves enough wire wins; the one-shot keeps the rest.
+  const size_t bytes = count * ncclTypeSize(datatype);
   if (bytes > rcclDdaLLOneShotThreshold(comm) && ddaArLLTwoShotSavesWire(bytes, comm->nRanks) &&
       ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     return false;
@@ -570,17 +583,21 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
   if (ddaLLArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
+    // A message the one-shot fits but yielded keeps the one-shot's 512-thread blocks; the rest keep 1024.
+    const unsigned threads = ddaLLArOneShotFits(comm, sendbuff, recvbuff, count, datatype, op) ? 512 : 1024;
     switch (datatype) {
     case ncclFloat32:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream, threads);
     case ncclFloat16:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<half>(sendbuff, recvbuff, count, comm, stream, threads);
     case ncclBfloat16:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream, threads);
     case ncclFloat8e4m3:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream,
+                                                                        threads);
     case ncclFloat8e5m2:
-      return ncclAllReduceDdaFabricLLTwoShotTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream);
+      return ncclAllReduceDdaFabricLLTwoShotTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream,
+                                                                        threads);
     default:
       return ncclInvalidArgument;
     }

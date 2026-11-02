@@ -10,10 +10,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <string>
+#include <utility>
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
@@ -533,6 +536,62 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotGridFollowsShardPackets) {
   EXPECT_EQ(RunOneLL(8 * 6144).grid.x, 2u);
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOneLL(8 * 6144).grid.x, 1u);
+}
+
+// A two-shot past the one-shot crossover runs 512-thread blocks, at most the one-shot's grid (4r 1M, 8r/16r 512K, 1M).
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SwappedTwoShotKeepsTheOneShotsBlockWidth) {
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  const std::pair<int, const void*> ranks[] = {
+      {4, LLTwoShot<float, 4>()}, {8, LLTwoShot<float, 8>()}, {16, LLTwoShot<float, 0>()}};
+  for (int maxBlocks : {256, 8}) {  // 8 blocks: a 1024-thread grid would also fit the cap
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    for (const auto& r : ranks) {
+      comm().nRanks = r.first;
+      for (size_t bytes : {size_t{512} << 10, size_t{1} << 20}) {
+        if (r.first == 4 && bytes == (size_t{512} << 10)) {
+          continue;  // saves 768 KiB of wire: the one-shot keeps it
+        }
+        const size_t oneShotBlocks = std::min<size_t>(bytes / 8 / 512, maxBlocks);
+        const DdaLaunch& launch = RunOneLL(bytes / 4);
+        EXPECT_EQ(launch.kernel, r.second) << r.first << "r " << bytes;
+        EXPECT_EQ(launch.block.x, 512u) << r.first << "r " << bytes;
+        EXPECT_EQ(launch.grid.x, std::min<size_t>(bytes / 8 / r.first / 512, maxBlocks)) << r.first << "r " << bytes;
+        EXPECT_LE(launch.grid.x, oneShotBlocks) << r.first << "r " << bytes;
+        EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), bytes / 4, ncclFloat32), oneShotBlocks);
+      }
+    }
+  }
+}
+
+// A two-shot the one-shot cannot take keeps a block per 1024 shard packets: a slot too small, or past its 1 MiB limit.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotTheOneShotRejectsKeepsItsOwnGrid) {
+  g_rcclDdaLLOneShotThreshold = [](const ncclComm*) { return size_t{349520}; };
+  comm().ddaScratchBytes = size_t{16} << 20;  // 8 MiB banks on 8 ranks: a 1 MiB message needs 16 for the one-shot
+  EXPECT_EQ(RunOneLL((size_t{1} << 20) / 4).kernel, (LLTwoShot<float, 8>()));
+  EXPECT_EQ(Only().block.x, 1024u);
+  EXPECT_EQ(Only().grid.x, 16u);
+  comm().ddaScratchBytes = std::numeric_limits<size_t>::max();
+  for (int maxBlocks : {256, 8}) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    EXPECT_EQ(RunOneLL((size_t{2} << 20) / 4).kernel, (LLTwoShot<float, 8>()));
+    EXPECT_EQ(Only().block.x, 1024u) << maxBlocks;
+    EXPECT_EQ(Only().grid.x, std::min(32, maxBlocks));
+  }
+}
+
+// RCCL_DDA_LL_ONESHOT_THRESHOLD set: the one-shot limit and crossover are one value, so no swap and the fixed grids.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_EnvOneShotThresholdKeepsTheFixedGrids) {
+  params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 349520;
+  EXPECT_EQ(RunOneLL((size_t{256} << 10) / 4).kernel, (LLOneShot<float, 8>()));
+  EXPECT_EQ(Only().block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 64u);
+  EXPECT_EQ(RunOneLL((size_t{1} << 20) / 4).kernel, (LLTwoShot<float, 8>()));
+  EXPECT_EQ(Only().block.x, 1024u);
+  EXPECT_EQ(Only().grid.x, 16u);
+  params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = size_t{2} << 20;
+  EXPECT_EQ(RunOneLL((size_t{1} << 20) / 4).kernel, (LLOneShot<float, 8>()));
+  EXPECT_EQ(Only().block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 256u);
 }
 
 // One-shot LL128: a warp per slice, 16 warps a block.
