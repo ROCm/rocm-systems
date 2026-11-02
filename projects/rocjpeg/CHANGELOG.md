@@ -3,6 +3,12 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## (unreleased) rocJPEG 1.14.0
+
+### Resolved issues
+
+* Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
+
 ## rocJPEG 1.13.0 for ROCm 10.2.0
 
 ### Added
