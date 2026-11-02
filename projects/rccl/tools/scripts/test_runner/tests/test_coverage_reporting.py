@@ -20,6 +20,7 @@ def _args(**overrides):
         report_suffix="",
         skip_tests=False,
         verbose=False,
+        host_coverage_lcov=None,
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -191,7 +192,7 @@ class CoverageReportingTest(unittest.TestCase):
         executor.log_dir = str(root / "logs")
         executor.report_dir = str(report_dir)
         executor.build_dir = str(build_dir)
-        executor.paths = {"rocm_path": str(root / "rocm")}
+        executor.paths = {"rocm_path": str(root / "rocm"), "workdir": str(root / "src")}
         executor.rccl_tests_build_config = {}
         return executor, build_dir
 
@@ -268,68 +269,117 @@ class CoverageReportingTest(unittest.TestCase):
                 show_cmd[show_cmd.index(str(device_elf)) - 1], "--object"
             )
 
-    def test_host_test_binaries_are_discovered_not_listed(self):
-        # The host binaries compile their unit-under-test into themselves rather
-        # than loading librccl.so, so a profile of theirs is discarded in silence
-        # unless the binary is named as an --object. A hand-kept list drifts and
-        # that silence hides it, so the naming convention is the registry here --
-        # a binary added to test/host needs no change in this file.
+    def _recording_runner(self, lcov_version="lcov: LCOV version 2.0"):
+        """subprocess.run stand-in that succeeds and records the argv of each call."""
+        recorded = []
+
+        def _record(cmd, *args, **kwargs):
+            recorded.append(list(cmd))
+            return mock.Mock(returncode=0, stdout=lcov_version, stderr="")
+
+        return recorded, _record
+
+    def test_host_coverage_tracefile_is_unioned_into_the_report(self):
+        # The host binaries compile the same source under different #defines, so their
+        # profiles cannot be read against these objects at all. Their coverage arrives
+        # as the lcov tracefile the front door wrote, and lcov is where the two can be
+        # unioned -- llvm-cov has no lcov input.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            executor, build_dir = self._coverage_executor(root)
-            host_dir = build_dir / "test" / "host" / "micro"
-            host_dir.mkdir(parents=True)
-            for name in ("rccl-UnitTestsMicroInit", "rccl-UnitTestsMicroBrandNew"):
-                binary = host_dir / name
-                binary.write_bytes(b"object")
-                binary.chmod(0o755)
-            (host_dir / "host_tests.xml").write_text("<testsuites/>")
+            executor, _ = self._coverage_executor(root)
+            host_lcov = root / "host-coverage.lcov"
+            host_lcov.write_text("TN:\nend_of_record\n")
+            executor.args = _args(host_coverage_lcov=str(host_lcov))
 
-            recorded = []
+            recorded, runner = self._recording_runner()
+            with mock.patch("lib.test_executor.shutil.which",
+                            side_effect=lambda tool: f"/usr/bin/{tool}"):
+                self.assertTrue(self._run_report(executor, runner))
 
-            def _record(cmd, *args, **kwargs):
-                recorded.append(list(cmd))
-                return mock.Mock(returncode=0)
+            export = next(c for c in recorded if "export" in c)
+            self.assertIn("--format=lcov", export)
+            union = next(c for c in recorded if "--add-tracefile" in c)
+            self.assertIn(str(host_lcov), union)
+            self.assertIn(str(Path(executor.report_dir) / "runner_coverage.lcov"), union)
+            self.assertIn(str(Path(executor.report_dir) / "combined_coverage.lcov"), union)
 
-            self.assertTrue(self._run_report(executor, _record))
-
-            show_cmd = next(c for c in recorded if "show" in c)
-            for name in ("rccl-UnitTestsMicroInit", "rccl-UnitTestsMicroBrandNew"):
-                path = str(host_dir / name)
-                self.assertIn(path, show_cmd)
-                self.assertEqual(show_cmd[show_cmd.index(path) - 1], "--object")
-            # Only binaries: a report or a log sitting beside them is not an object.
-            self.assertNotIn(str(host_dir / "host_tests.xml"), show_cmd)
-
-    def test_host_test_binaries_are_read_only_from_the_micro_subdirectory(self):
-        # The fronted binaries are in test/host/micro/ in a build tree and in an install alike,
-        # so that is the only place looked at. A stale copy left beside the front door by an
-        # earlier build is not what ran, and crediting its counters would report coverage of
-        # code this run never executed.
+    def test_report_still_succeeds_without_lcov_installed(self):
+        # A GPU run on a machine with no lcov must still get its llvm-cov reports: the
+        # union is an addition to them, never a precondition for them.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            executor, build_dir = self._coverage_executor(root)
-            host_dir = build_dir / "test" / "host"
-            micro_dir = host_dir / "micro"
-            micro_dir.mkdir(parents=True)
-            for binary in (host_dir / "rccl-UnitTestsMicroStale",
-                           micro_dir / "rccl-UnitTestsMicroInit"):
-                binary.write_bytes(b"object")
-                binary.chmod(0o755)
+            executor, _ = self._coverage_executor(root)
+            host_lcov = root / "host-coverage.lcov"
+            host_lcov.write_text("TN:\nend_of_record\n")
+            executor.args = _args(host_coverage_lcov=str(host_lcov))
 
-            recorded = []
+            recorded, runner = self._recording_runner()
+            with mock.patch("lib.test_executor.shutil.which", return_value=None):
+                self.assertTrue(self._run_report(executor, runner))
 
-            def _record(cmd, *args, **kwargs):
-                recorded.append(list(cmd))
-                return mock.Mock(returncode=0)
+            self.assertFalse([c for c in recorded if "--add-tracefile" in c])
+            self.assertTrue(os.path.isfile(
+                os.path.join(executor.report_dir, "coverage_summary.txt")))
 
-            self.assertTrue(self._run_report(executor, _record))
+    def test_a_failing_union_does_not_fail_the_report(self):
+        # Same reason: a malformed or rejected tracefile costs the combined view and
+        # nothing else, so a host-side problem cannot turn a green GPU run red.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+            host_lcov = root / "host-coverage.lcov"
+            host_lcov.write_text("TN:\nend_of_record\n")
+            executor.args = _args(host_coverage_lcov=str(host_lcov))
 
-            show_cmd = next(c for c in recorded if "show" in c)
-            path = str(micro_dir / "rccl-UnitTestsMicroInit")
-            self.assertIn(path, show_cmd)
-            self.assertEqual(show_cmd[show_cmd.index(path) - 1], "--object")
-            self.assertNotIn(str(host_dir / "rccl-UnitTestsMicroStale"), show_cmd)
+            def _fail_the_union(cmd, *args, **kwargs):
+                if "--add-tracefile" in cmd:
+                    raise CalledProcessError(1, list(cmd), stderr="unsupported")
+                return mock.Mock(returncode=0, stdout="lcov: LCOV version 2.0", stderr="")
+
+            with mock.patch("lib.test_executor.shutil.which",
+                            side_effect=lambda tool: f"/usr/bin/{tool}"):
+                self.assertTrue(self._run_report(executor, _fail_the_union))
+
+    def test_no_lcov_work_when_there_is_no_host_tracefile(self):
+        # The library-only run (GPU unit tests, no host tests) is untouched: nothing
+        # is exported, nothing is unioned, and the argv is the llvm-cov one it was.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+
+            recorded, runner = self._recording_runner()
+            with mock.patch("lib.test_executor.shutil.which",
+                            side_effect=lambda tool: f"/usr/bin/{tool}"):
+                self.assertTrue(self._run_report(executor, runner))
+
+            self.assertFalse([c for c in recorded if "export" in c or "--add-tracefile" in c])
+
+    def test_host_tracefile_is_found_where_run_host_tests_writes_it(self):
+        # Found by the path it is written to, under the configured workdir -- not by
+        # searching, which would pick up a tracefile from some unrelated tree.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+            written = Path(executor.paths["workdir"], "test", "host", "build", "coverage")
+            written.mkdir(parents=True)
+            (written / "host-coverage.lcov").write_text("TN:\nend_of_record\n")
+
+            self.assertEqual(executor._host_coverage_tracefile(),
+                             str(written / "host-coverage.lcov"))
+
+    def test_a_missing_explicit_tracefile_is_reported_not_guessed_around(self):
+        # --host-coverage-lcov names a file the caller believes in; falling back to a
+        # discovered one would report coverage they did not ask for, under a number
+        # they would read as theirs.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor, _ = self._coverage_executor(root)
+            written = Path(executor.paths["workdir"], "test", "host", "build", "coverage")
+            written.mkdir(parents=True)
+            (written / "host-coverage.lcov").write_text("TN:\nend_of_record\n")
+            executor.args = _args(host_coverage_lcov=str(root / "absent.lcov"))
+
+            self.assertIsNone(executor._host_coverage_tracefile())
 
     def test_host_only_fallback_skips_uninstrumented_device_elf(self):
         with tempfile.TemporaryDirectory() as temp_dir:

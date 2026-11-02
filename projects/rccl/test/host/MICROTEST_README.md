@@ -1217,6 +1217,11 @@ The division of labour follows from the same constraint:
   the front door: per-binary `llvm-cov report`/`show` HTML from the
   `merged.profdata` already written, `rccl-HostUnitTests` (not fronted) merged
   and exported, and the final `lcov --add-tracefile` union plus `genhtml`.
+- **`tools/scripts/test_runner`** (the GPU/library runner) consumes the same
+  tracefile rather than reconstructing anything: it exports its own llvm-cov
+  data as lcov and unions `host-coverage.lcov` into it, giving one report over
+  both. Additive and best effort — no tracefile, no `lcov`, or a tracefile lcov
+  rejects, and its own reports are produced exactly as before.
 
 Note that `lcov` and `llvm-cov` count branches differently, so a per-binary
 `llvm-cov` branch total and the lcov union's will not agree; neither is wrong.

@@ -455,6 +455,7 @@ Optional:
   --no-build                Skip build step and use existing build
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate coverage; device coverage on ROCm 7.15+, host-only otherwise
+  --host-coverage-lcov PATH lcov tracefile from the host-only tests (host-coverage.lcov, written by rccl-UnitTestsHostAll) to union into the report; defaults to test/host/build/coverage/host-coverage.lcov when present
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
   --skip-mpi-check          Skip MPI: removes --enable-mpi-tests from build, skips MPI check, skips tests with num_ranks > 1
@@ -502,6 +503,33 @@ python test_runner.py --config test_config_sample.json --no-build --skip-tests \
 2. **Text Report**: Function-level coverage summary
    - Location: `<workspace>/report/function_coverage_report.txt`
    - Includes per-function and per-file statistics
+
+3. **Combined tracefile** (only when a host-only tracefile is available): the
+   coverage above unioned with the host-only tests', as
+   `<workspace>/report/combined_coverage.lcov`, with
+   `combined_coverage_summary.txt` and `combined_html/index.html` beside it
+
+### Host-only test coverage
+
+The host-only tests (`test/host`) are not run by this runner, and their coverage
+cannot be folded into the llvm-cov report above even if they were: they compile
+the same sources into ~55 separate binaries under different `#define`s, so one
+function has a different coverage-mapping hash in each, and llvm-cov can only
+read a profile against the exact binary that produced it. See
+`test/host/MICROTEST_README.md`, "Why the whole tree's coverage is unioned as
+lcov".
+
+Their coverage therefore arrives as a finished lcov tracefile —
+`host-coverage.lcov`, written by `rccl-UnitTestsHostAll` when
+`test/host/run_host_tests.sh` runs them — which this runner unions with its own
+at the lcov level (`llvm-cov export --format=lcov`, then `lcov
+--add-tracefile`). It is picked up automatically from
+`test/host/build/coverage/host-coverage.lcov`, or named with
+`--host-coverage-lcov`.
+
+This is additive and best effort: with no tracefile, no `lcov` installed, or a
+tracefile lcov rejects, the llvm-cov reports are generated exactly as before and
+the run is not failed.
 
 ### Coverage Implementation Details
 
