@@ -45,6 +45,8 @@
 
 
 #include <sys/mman.h>
+#include <sys/ioctl.h>
+#include "kfd_ioctl.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
@@ -3135,6 +3137,19 @@ void VirtMemoryTestBasic::ImportedAllocInfoForPool(hsa_amd_memory_pool_t pool,
     return;
   }
   ASSERT_GE(dmabuf_fd, 0);
+
+  /* A device pool can be GTT-backed (e.g. on APUs); expect the owner matching
+   * the backing KFD reports for the exported buffer. */
+  if (expected_owner == HSA_DEVICE_TYPE_GPU && !rocrtst::isWslEnvironment()) {
+    kfd_ioctl_get_dmabuf_info_args args = {};
+    args.dmabuf_fd = dmabuf_fd;
+    const int kfd_fd = open("/dev/kfd", O_RDWR | O_CLOEXEC);
+    if (kfd_fd >= 0 && ioctl(kfd_fd, AMDKFD_IOC_GET_DMABUF_INFO, &args) == 0 &&
+        !(args.flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM)) {
+      expected_owner = HSA_DEVICE_TYPE_CPU;
+    }
+    if (kfd_fd >= 0) close(kfd_fd);
+  }
 
   hsa_amd_vmem_alloc_handle_t imported_handle;
   ASSERT_SUCCESS(hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &imported_handle));
