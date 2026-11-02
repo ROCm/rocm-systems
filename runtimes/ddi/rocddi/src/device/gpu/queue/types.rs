@@ -200,6 +200,106 @@ pub struct QueueTransport {
     pub doorbell_width: QueueAccessWidth,
 }
 
+/// Compact publication promise retained without keeping a caller's AQL
+/// scratch and signal addresses inside the queue transport owner.
+#[derive(Clone, Copy)]
+pub(crate) struct QueueTransportExpectation {
+    /// Requested packet-ring capacity in bytes.
+    ring_size_bytes: u64,
+    /// Packet format and engine selection promised by the request.
+    kind: QueueTransportKind,
+    /// Whether GPU-side producer addresses must be present.
+    device_producer: bool,
+}
+
+/// Packet format facts checked at the queue publication boundary.
+#[derive(Clone, Copy)]
+enum QueueTransportKind {
+    /// PM4 dword indices with a wrapping native read index.
+    Pm4,
+    /// AQL packet indices with native control storage.
+    Aql,
+    /// Byte-addressed SDMA queue with backend-selected engine.
+    Sdma,
+    /// Byte-addressed SDMA queue with an explicit engine selection.
+    TargetedSdma,
+}
+
+impl QueueTransportExpectation {
+    /// Captures only the fields needed to validate later transport mappings.
+    pub(crate) fn new(request: QueueRequest) -> Self {
+        let kind = match request.parameters {
+            QueueParameters::Pm4 => QueueTransportKind::Pm4,
+            QueueParameters::Aql { .. } => QueueTransportKind::Aql,
+            QueueParameters::Sdma => QueueTransportKind::Sdma,
+            QueueParameters::SdmaByEngine { .. } => QueueTransportKind::TargetedSdma,
+        };
+        Self {
+            ring_size_bytes: request.ring_size_bytes,
+            kind,
+            device_producer: request.device_producer,
+        }
+    }
+
+    /// Requires GPU producer addresses in a newly mapped peer view.
+    pub(crate) fn for_device_mapping(mut self) -> Self {
+        self.device_producer = true;
+        self
+    }
+}
+
+impl QueueTransport {
+    /// Checks the geometry promised by a created queue before any frontend
+    /// receives its addresses. The backend constructs this record privately;
+    /// future backends must satisfy the same publication contract.
+    pub(crate) fn valid_for(self, expected: QueueTransportExpectation) -> bool {
+        let (unit, wraps, aql, targeted_sdma): (u32, bool, bool, bool) = match expected.kind {
+            QueueTransportKind::Pm4 => (4, true, false, false),
+            QueueTransportKind::Aql => (64, false, true, false),
+            QueueTransportKind::Sdma => (1, false, false, false),
+            QueueTransportKind::TargetedSdma => (1, false, false, true),
+        };
+        let control = if aql {
+            self.aql_control.is_some_and(|control| {
+                control.read_index_host_address() == self.read_index_host_address
+                    && control.write_index_host_address() == self.write_index_host_address
+            })
+        } else {
+            self.aql_control.is_none()
+        };
+        let device_doorbell = self
+            .doorbell_device_address
+            .is_some_and(|address| address != 0 && address % 8 == 0);
+        self.ring_size_bytes == expected.ring_size_bytes
+            && self.ring_size_bytes != 0
+            && self.ring_size_bytes % u64::from(unit) == 0
+            && self.ring_host_address != 0
+            && self.ring_host_address % 4 == 0
+            && self.ring_device_address != 0
+            && self.ring_device_address % 4 == 0
+            && self.read_index_host_address != 0
+            && self.read_index_host_address % 8 == 0
+            && self.write_index_host_address != 0
+            && self.write_index_host_address % 8 == 0
+            && self.read_index_host_address != self.write_index_host_address
+            && self.read_index_device_address != 0
+            && self.read_index_device_address % 8 == 0
+            && self.write_index_device_address != 0
+            && self.write_index_device_address % 8 == 0
+            && self.read_index_device_address != self.write_index_device_address
+            && self.read_index_width == QueueAccessWidth::Bits64
+            && self.write_index_width == QueueAccessWidth::Bits64
+            && self.index_unit_bytes == unit
+            && self.read_index_wraps == wraps
+            && self.doorbell_host_address != 0
+            && self.doorbell_host_address % 8 == 0
+            && self.doorbell_width == QueueAccessWidth::Bits64
+            && (!expected.device_producer || device_doorbell)
+            && control
+            && (targeted_sdma == self.sdma_engine_id.is_some())
+    }
+}
+
 /// Backend-validated AQL control storage borrowed from a live native queue.
 /// Its field addresses refer to native control words, not HSA policy objects.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

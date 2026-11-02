@@ -11,7 +11,8 @@ instructions.
 ## Target scope
 
 The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
 and address-dependent FLAT counter participation. This partial
@@ -96,9 +97,9 @@ You should see output:
 ```
 RACE kernel=transpose_lds symbol=_Z13transpose_ldsPKiPi dispatch=1 type=LDS access=read reg=508 wave=0 lane=0 wg=0,0,0 conflict=unknown
 Race on LDS byte 508 [workgroup (0, 0, 0), wave 0, lane 0]
-  ==>  ds_write_b32 v0, v1  ; <-- wave 1
-       v_sub_u32_e32 v1, 0, v0
-  ==>  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
+  ==>  0x7f6a1e801010  ds_write_b32 v0, v1  ; <-- wave 1
+       0x7f6a1e801018  v_sub_u32_e32 v1, 0, v0
+  ==>  0x7f6a1e80101c  ds_read_b32 v1, v1  ; <-- wave 0 lane 0
 END_RACE
 ```
 
@@ -108,6 +109,34 @@ without a barrier in between. The `kernel` field is a compact display name, and
 `symbol` is the exact ELF symbol when rocjitsu can resolve it. If a name cannot
 be resolved, rocjitsu reports `?` for the unresolved field. The fix is to add
 `__syncthreads()` between the write and the read.
+
+Each trace line shows an instruction's GPU virtual address, which varies
+between runs, and its disassembly. The trace lists instructions that the
+reporting wave (here wave 0) executed, oldest first. `==>` marks entries matching
+the PC and captured encoding of either instruction involved in the race, and
+the `<--` annotation names the wave and lane that performed that access. When the
+conflicting instruction ran in another wave, as with wave 1's `ds_write_b32`
+above, the marker is placed where the reporting wave executed the same bytes
+at the same address, if such an entry is present. Repeated executions of identical
+bytes at the same address are not distinguished; the displayed span ends at the
+first matching racing access after its first marker.
+
+The race detector retains the last 256 instructions of each wave. If the
+reporting wave has no entry matching the conflicting PC and encoding, the report
+prints the retained producer instruction first with a `(before trace window)`
+note. This can mean the instruction has left the trace, but it can also mean that
+another wave executed an instruction the reporting wave never executed. The note
+does not establish that the conflict is more than 256 instructions old.
+
+For example, if another wave's producer is at `0x1000` and the reporting wave's
+trace contains only its racing access at `0x3000`, the producer appears with
+`(before trace window)` and `0 instructions not recorded`. That count is the
+number of retained reporting-wave entries skipped before the first displayed
+marker, not the number of instructions since the producer ran.
+
+Traces longer than 32 instructions show only their first and last 16. Each trace
+row is disassembled from its own captured bytes, so it remains accurate if the
+kernel's code is later overwritten or unmapped.
 
 ### Running your own application
 
@@ -209,9 +238,10 @@ flat_store_dword v[2:3], v8
 ```
 
 LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and independent
-obligations such as EXPCNT. In particular, CDNA4 FLAT completion stays unordered;
-a nonzero wait cannot prove a result ready.
+split counters. Routing preserves decoded completion ordering and the VMEM/DS
+obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
+carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
+unordered; a nonzero wait cannot prove a result ready.
 
 Functional counter acquisition and both runtime checkers use the selected memory
 domains. FLAT capacity constraints are applied after addresses are resolved.
@@ -228,8 +258,14 @@ tracks the groups separately. Functional execution splits mixed requests by
 address space, completing retryable global/scratch work before accessing LDS.
 The race plugin retains both counter obligations on its single mixed event.
 LDS validation and interval registration are bounded by the CU backing capacity.
-Out-of-bounds addresses preserve register and counter dependencies without
-recording LDS bytes. DDS has no emulator backing and faults before execution.
+For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
+retaining only complete memory elements; a lane whose first element does not fit
+records no LDS bytes, and an atomic requires its whole element. This end is the
+modeled `lds_base + lds_size`, including current 256-byte scheduler rounding;
+PM4 sizes may already be 512-byte multiples, and target allocation and encoding
+granules remain unmodeled. Out-of-bounds addresses preserve register and counter
+dependencies without recording LDS bytes. DDS has no emulator backing and faults
+before execution.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;
@@ -403,7 +439,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
-  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  owns the gfx942, gfx950 and gfx1151 end-to-end HIP programs. The
   `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain
   and runs each case under the emulator with the `race` plugin enabled.
 
@@ -415,10 +451,14 @@ ctest --test-dir build -R "RaceDetector|IntervalSet"
 To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 and point the wrapper at the RocJITsu build being tested. Set
-`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_config.json` for gfx950
-or `configs/gfx1151.json` for gfx1151, using absolute paths from this source tree.
-The original `RaceTest.<target>_<name>` selectors remain available through
-the corpus's `--case` option.
+`ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
+`tests/race-detector/race_test_config.json` for gfx950 or `configs/gfx1151.json` for
+gfx1151, using absolute paths from this source tree. The original
+`RaceTest.<target>_<name>` selectors remain available through the corpus's
+`--case` option. Shared atomic and FLAT-to-LDS cases use
+`RaceTest.vmem_<target>_<name>`, for example
+`--case RaceTest.vmem_gfx942_vmcnt_only`. Positive detection controls use the
+`_race` suffix.
 
 ## Limitations
 

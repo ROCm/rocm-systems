@@ -27,6 +27,7 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapAllGather, bootstrapAllGather);
 
 // Fail-loud by default: only a test that scripts the exchange may reach these.
 static ncclResult_t DefaultBootstrapBarrier(void*, int, int, int) {

@@ -19,10 +19,7 @@ pub const BUFFER_MAX_ELEMENTS: u32 = u32::MAX / 16;
 /// Whether this GPU has a qualified GFX12 image descriptor path.
 #[must_use]
 pub fn supported_gpu(info: &GpuInfo) -> bool {
-    matches!(
-        (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-        (12, 0, 0 | 1)
-    )
+    info.target_profile.supports_image_sampler()
 }
 
 /// Encoded GFX12 image format and channel-selection fields.
