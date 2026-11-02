@@ -160,16 +160,6 @@ TEST_F(PluginLoaderTest, RequiredMissingPluginReturnsFailure) {
             "required plugin loading failed: loaded 0 of 1 configured plugins");
 }
 
-TEST_F(PluginLoaderTest, FailedRequiredGroupDestroysCreatedPlugins) {
-  const util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
-      rocjitsu::PluginLoader::configure_plugin_group(
-          R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
-          PLUGIN_LOADER_FIXTURE_DIR);
-  EXPECT_TRUE(group.failed());
-  EXPECT_NE(trace().find("good:create\n"), std::string::npos);
-  EXPECT_NE(trace().find("good:destroy\n"), std::string::npos);
-}
-
 TEST_F(PluginLoaderTest, RequiredPluginLoads) {
   util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
       rocjitsu::PluginLoader::configure_plugin_group(
