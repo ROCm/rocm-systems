@@ -1677,10 +1677,9 @@ init()
     if(!init_done)
     {
         pthread_atfork(nullptr, nullptr, []() {
-            // null out child's copy on fork and reinitialize
-            // otherwise all children wait on the same thread to join
+            // The inherited session remains disabled until exec. Drop the child pointer without
+            // joining or recreating the parent's KFD worker.
             config::reset_on_fork();
-            init(std::make_index_sequence<KFD_EVENT_LAST>{});
         });
 
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});

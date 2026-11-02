@@ -26,6 +26,23 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+Process creation and profiling output
+-------------------------------------
+
+``rocprofv3`` disables the inherited profiling session in a child created by ``fork()``. The
+parent continues profiling normally, but the child emits no profiler output before replacing its
+process image.
+
+After ``fork()``, the child must use only the usual async-signal-safe operations needed to call
+``exec()`` or ``_exit()``. If ``exec()`` fails, terminate the child with ``_exit()``. Continuing
+normal application execution, using HIP/HSA or ROCTx, or calling ``exit()`` and running C++ static
+destructors in the child is unsupported.
+
+Use ``fork()`` followed by ``exec()`` or a spawn operation to profile a new child process. A
+successful ``exec()`` initializes a fresh profiling session. ``_Fork()`` and raw ``clone()``
+bypass the registered fork handlers and are outside this contract. ``vfork()`` is supported only
+as an implementation detail of a spawn path that immediately calls ``exec()`` or ``_exit()``.
+
 .. _gpu-performance-level:
 
 Setting GPU performance level for PMC profiling
