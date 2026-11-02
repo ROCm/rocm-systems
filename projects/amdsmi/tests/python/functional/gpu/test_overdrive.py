@@ -30,6 +30,7 @@ class TestGpuOverdrive(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_overdrive_level(self):
         self.common.print_func_name("")
 
@@ -79,6 +80,7 @@ class TestGpuOverdrive(unittest.TestCase):
 
     # integration
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_perf_level(self):
         self.common.print_func_name("")
 
@@ -89,8 +91,10 @@ class TestGpuOverdrive(unittest.TestCase):
             msg = f"\t### amdsmi_get_gpu_perf_level(gpu={i}):"
             try:
                 dev_perf_level_name_current = amdsmi.amdsmi_get_gpu_perf_level(gpu)
-                items = dev_perf_level_name_current.split("_")
-                level_name_current = items[-1]
+                # Strip only the prefix: names like STABLE_STD contain underscores.
+                level_name_current = dev_perf_level_name_current.replace(
+                    "AMDSMI_DEV_PERF_LEVEL_", "", 1
+                )
                 for name, level, cond in common.DEV_PERF_LEVELS:
                     if name == level_name_current:
                         dev_perf_level_current = level
@@ -186,6 +190,7 @@ class TestGpuOverdrive(unittest.TestCase):
         )
         return
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_clk_limit(self):
         self.common.print_func_name("")
 
@@ -223,6 +228,7 @@ class TestGpuOverdrive(unittest.TestCase):
             raise self.raise_exception
         return
 
+    @common.restores_gpu_perf_level
     def test_set_gpu_od_clk_info(self):
         self.common.print_func_name("")
 
