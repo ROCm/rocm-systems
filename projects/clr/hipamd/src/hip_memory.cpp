@@ -2964,11 +2964,19 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipExtMemcpyAttributes* attr
   return metadata;
 }
 
+// Large batches are split into commands of 72, 144, ... ops (capped at 1024) so the first copies
+// start while later ones are still being prepared. Below kBatchChunkMinCount ops per device,
+// splitting costs more than it saves.
+constexpr size_t kBatchChunkStart = 72;
+constexpr size_t kBatchChunkCap = 1024;
+constexpr size_t kBatchChunkMinCount = 4096;
+
 template <typename Command, typename Operation>
 static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& operations_by_device,
                                        cl_command_type command_type, hip::Stream& stream,
                                        bool is_async, amd::Command* stream_wait_cmd,
-                                       amd::Command::EventWaitList& marker_wait_list) {
+                                       amd::Command::EventWaitList& marker_wait_list,
+                                       bool allow_chunking = false) {
   for (size_t device_id = 0; device_id < operations_by_device.size(); ++device_id) {
     std::vector<Operation>& operations = operations_by_device[device_id];
     if (operations.empty()) {
@@ -2983,35 +2991,48 @@ static hipError_t EnqueueBatchCommands(std::vector<std::vector<Operation>>& oper
       wait_list.push_back(stream_wait_cmd);
     }
 
-    Command* batch_cmd = nullptr;
-    if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
-      std::vector<std::vector<char>> host_snapshots;
-      if (!AMD_DIRECT_DISPATCH) {
-        for (Operation& op : operations) {
-          if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
-            host_snapshots.emplace_back(op.size);
-            std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
-            op.src_host = host_snapshots.back().data();
+    const size_t total = operations.size();
+    const bool split = allow_chunking && total >= kBatchChunkMinCount;
+    for (size_t begin = 0, n = split ? kBatchChunkStart : total; begin < total;
+         begin += n, n = std::min(n * 2, kBatchChunkCap)) {
+      const size_t end = std::min(begin + n, total);
+      std::vector<Operation> chunk_ops =
+          (begin == 0 && end == total)
+              ? std::move(operations)
+              : std::vector<Operation>(std::make_move_iterator(operations.begin() + begin),
+                                       std::make_move_iterator(operations.begin() + end));
+
+      Command* batch_cmd = nullptr;
+      if constexpr (std::is_same_v<Operation, amd::BatchWriteMemoryOp>) {
+        std::vector<std::vector<char>> host_snapshots;
+        if (!AMD_DIRECT_DISPATCH) {
+          for (Operation& op : chunk_ops) {
+            if (op.metadata.srcAccessOrder_ == amd::CopyMetadata::kSrcAccessOrderDuringApiCall) {
+              host_snapshots.emplace_back(op.size);
+              std::memcpy(host_snapshots.back().data(), op.src_host, op.size);
+              op.src_host = host_snapshots.back().data();
+            }
           }
         }
+        batch_cmd = new amd::BatchWriteMemoryCommand(*queue_stream, command_type, wait_list,
+                                                     std::move(chunk_ops),
+                                                     std::move(host_snapshots));
+      } else {
+        batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(chunk_ops));
       }
-      batch_cmd = new amd::BatchWriteMemoryCommand(
-          *queue_stream, command_type, wait_list, std::move(operations), std::move(host_snapshots));
-    } else {
-      batch_cmd = new Command(*queue_stream, command_type, wait_list, std::move(operations));
-    }
-    if (batch_cmd == nullptr) {
-      return hipErrorOutOfMemory;
-    }
+      if (batch_cmd == nullptr) {
+        return hipErrorOutOfMemory;
+      }
 
-    batch_cmd->enqueue();
-    if (!is_async) {
-      batch_cmd->queue()->finishCommand(batch_cmd);
-    } else if (queue_stream != &stream) {
-      batch_cmd->retain();
-      marker_wait_list.push_back(batch_cmd);
+      batch_cmd->enqueue();
+      if (!is_async) {
+        batch_cmd->queue()->finishCommand(batch_cmd);
+      } else if (queue_stream != &stream) {
+        batch_cmd->retain();
+        marker_wait_list.push_back(batch_cmd);
+      }
+      batch_cmd->release();
     }
-    batch_cmd->release();
   }
   return hipSuccess;
 }
@@ -3349,7 +3370,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
 
   status = EnqueueBatchCommands<amd::BatchCopyMemoryCommand>(
       copy_ops_by_device, ROCCLR_COMMAND_BATCH_COPY_BUFFER, stream, isAsync, stream_wait_cmd,
-      marker_wait_list);
+      marker_wait_list, GPU_BATCH_CHUNK);
   if (status == hipSuccess) {
     status = EnqueueBatchCommands<amd::BatchWriteMemoryCommand>(
         write_ops_by_device, ROCCLR_COMMAND_BATCH_WRITE_BUFFER, stream, isAsync, stream_wait_cmd,
