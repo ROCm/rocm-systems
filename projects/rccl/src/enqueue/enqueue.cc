@@ -1309,9 +1309,11 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
-// Batching helps small P2P operations but loses bandwidth once each peer carries
-// more than 64 KiB. Apply the cutoff even when the user explicitly enables
-// batching; rcclEffectiveP2pBatchEnable separately controls the default policy.
+// On gfx950 at 16+ nodes, batching loses bandwidth once each peer carries more
+// than 64 KiB, so the cutoff applies there even when the user explicitly enables
+// batching. Elsewhere (e.g. gfx942) batched work must stay fused at every size:
+// the batched channel map packs several rounds onto one channel, and unfused
+// rounds then serialize on it. rcclEffectiveP2pBatchEnable controls the default.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
 
@@ -1324,8 +1326,9 @@ int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
 }
 
 static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
-  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes,
-                              rcclParamP2pBatchThreshold());
+  bool sizeGated = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes >= 16;
+  ssize_t threshold = sizeGated ? (ssize_t)rcclParamP2pBatchThreshold() : std::max(sendBytes, recvBytes);
+  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, threshold);
 }
 
 // Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
