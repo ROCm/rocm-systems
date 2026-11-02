@@ -10369,29 +10369,33 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
     migrated = arch in ('cdna3', 'cdna4')
     assert ('amdgpu::arith::exec_dense_fp_matrix<' in body) == migrated
     assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (
-        arch == 'cdna4' and format == 'BF16'
+        arch == 'cdna3' or arch == 'cdna4' and format == 'BF16'
     )
     assert 'inst_.acc_cd' in body
     assert f'{arch}::resolve_acc' in body
     if migrated:
-        assert 'rj_arith_' + name.lower() in body
+        suffix = '_gfx950' if arch == 'cdna4' else ''
+        assert 'rj_arith_' + name.lower() + f'_w64{suffix},' in body
         assert 'arithmetic_flags()' in body
         assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
         assert 'std::optional<uint32_t>(const_acc)' in body
 
 
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
 @pytest.mark.parametrize('m,k', [(16, 8), (32, 4)])
-def test_xf32_mfma_library_dispatch(m, k):
+def test_xf32_mfma_library_dispatch(arch, m, k):
     name = f'V_MFMA_F32_{m}X{m}X{k}_XF32'
     destination = Operand('vdst', m * m // 2, 'OPR_VGPR', False, True, False, False, 0)
     body = _gen_mfma(
         Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
-        'cdna3',
+        arch,
         enc_field_names={'acc_cd'},
     )
     assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
-    assert f'rj_arith_{name.lower()}_w64' in body
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert 'inst_.acc_cd' in body
+    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (arch == 'cdna3')
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
@@ -10409,6 +10413,7 @@ def test_fp8_mfma_library_dispatch_distinguishes_fnuz_and_ocp(arch, formats, m, 
     assert f'rj_arith_{name.lower()}_w64{suffix},' in body
     assert f'exec_dense_fp_matrix<2, {m * m // 64}, 64>' in body
     assert 'inst_.acc_cd' in body
+    assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (arch == 'cdna3')
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
