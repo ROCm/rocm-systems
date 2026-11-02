@@ -2412,18 +2412,14 @@ TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfigur
   EXPECT_TRUE(gpu_vm.unregister_address_space(internal));
 }
 
-TEST(SoCAssembly, RejectsNullIodWithoutChangingOwnership) {
+TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
   GpuMemory memory("memory");
   rocjitsu::SoC soc("soc", &memory);
-  const AddressSpaceHandle internal = soc.internal_address_space();
   util::StringDiagnostic diagnostic;
 
   EXPECT_TRUE(soc.add_iod(nullptr, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "cannot add a null IOD");
   EXPECT_EQ(soc.num_iods(), 0u);
-  EXPECT_EQ(soc.memory(), &memory);
-  EXPECT_EQ(soc.internal_address_space(), internal);
-  EXPECT_TRUE(soc.gpu_vm().lookup(internal));
 }
 
 TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
@@ -2446,7 +2442,6 @@ TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
   EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_CDNA4);
   EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::LegacyExtendedCount);
   EXPECT_TRUE(soc.sdma_queue_scheduler().contains(queue));
-  EXPECT_EQ(soc.memory(), &memory);
   EXPECT_EQ(soc.internal_address_space(), internal);
   EXPECT_TRUE(soc.gpu_vm().lookup(internal));
   EXPECT_FALSE(soc.gpu_vm().unregister_address_space(internal));

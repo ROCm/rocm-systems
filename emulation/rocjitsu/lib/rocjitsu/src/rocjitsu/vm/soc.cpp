@@ -38,9 +38,8 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
   set_weight(0);
-  const bool installed = install_internal_address_space(memory_);
+  [[maybe_unused]] const bool installed = install_internal_address_space(memory_);
   assert(installed && "fresh SoC must accept its internal GPU address space");
-  (void)installed;
 }
 
 SoC::~SoC() { release_vm_resources(); }
@@ -186,9 +185,8 @@ SoC::SoC(std::string name, const Config &config)
   auto mem = std::make_unique<amdgpu::GpuMemory>("vram");
   memory_ = mem.get();
   add_child(std::move(mem));
-  const bool installed = install_internal_address_space(memory_);
+  [[maybe_unused]] const bool installed = install_internal_address_space(memory_);
   assert(installed && "fresh SoC must accept its internal GPU address space");
-  (void)installed;
 
   if (config.num_iods > 0) {
     // Create IODs, each with its own memory-side cache and HBM controller.
