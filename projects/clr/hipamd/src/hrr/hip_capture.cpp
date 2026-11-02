@@ -237,25 +237,25 @@ static void pinned_install_atfork() {
 #endif
 }
 
-// HIP_HRR_HOST_SNAPSHOTS, on unless set to something other than "true" or a
-// non-zero number, and HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set. Parsed as
-// the CLR flags registry parses a bool and a uint, and read once: every launch
-// asks.
+// Environment variable `name` parsed as the CLR flags registry parses a bool:
+// on when set to "true" or a non-zero number, `dflt` when unset.
+static bool env_flag(const char* name, bool dflt) {
+  const char* v = std::getenv(name);
+  if (!v) return dflt;
+  return std::strcmp(v, "true") == 0 || std::atoi(v) != 0;
+}
+
+// HIP_HRR_HOST_SNAPSHOTS, on unless set otherwise, and
+// HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set and parsed as the CLR flags
+// registry parses a uint. Read once: every launch asks.
 static bool hrr_host_snapshots_enabled() {
-  static const bool on = [] {
-    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOTS");
-    return !v || std::strcmp(v, "true") == 0 || std::atoi(v) != 0;
-  }();
+  static const bool on = env_flag("HIP_HRR_HOST_SNAPSHOTS", true);
   return on;
 }
 
-// HIP_HRR_CAPTURE_CONTENT, off unless set to "true" or a non-zero number, as
-// the CLR flags registry parses a bool. Read once: every blob and launch asks.
+// HIP_HRR_CAPTURE_CONTENT, off unless set. Read once: every blob and launch asks.
 bool hip_capture_content_enabled() {
-  static const bool on = [] {
-    const char* v = std::getenv("HIP_HRR_CAPTURE_CONTENT");
-    return v && (std::strcmp(v, "true") == 0 || std::atoi(v) != 0);
-  }();
+  static const bool on = env_flag("HIP_HRR_CAPTURE_CONTENT", false);
   return on;
 }
 

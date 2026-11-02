@@ -163,6 +163,8 @@ TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
   const std::string err =
       hrr_test::capture_stderr([&] { r = playback_hipGraphAddKernelNode(ctx, rec.data()); });
   INFO("stderr: " << err);
+  // The node is left out and its graph marked incomplete; fatal_error ends the replay.
+  CHECK(r == hipSuccess);
   CHECK(ctx.fatal_error.load());
   CHECK(err.find("needs a code object and its by-value kernel arguments") != std::string::npos);
 }
