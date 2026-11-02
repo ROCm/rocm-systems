@@ -11,6 +11,14 @@ void Component::schedule_event(Event *event, Tick timestamp, std::unique_ptr<Mes
   engine_->schedule_event(event, timestamp, std::move(message));
 }
 
+Tick Component::current_tick() const {
+  // shutdown() clears the partition contexts but leaves every component holding
+  // its engine, so a non-null engine_ alone does not mean the context exists.
+  if (engine_ == nullptr || partition_id_ >= engine_->num_contexts())
+    return 0;
+  return engine_->context(partition_id_).current_tick();
+}
+
 Port *Component::add_port(std::unique_ptr<Port> port) {
   Port *raw = port.get();
   ports_.push_back(std::move(port));

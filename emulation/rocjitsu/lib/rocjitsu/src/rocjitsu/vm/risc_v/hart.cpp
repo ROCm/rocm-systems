@@ -36,7 +36,11 @@ bool Hart::advance(simdojo::Tick /*now*/) {
   return !state_.halted;
 }
 
-void Hart::shutdown() {}
+void Hart::shutdown() {
+  // The base clears running_, without which startup() cannot re-arm the clock
+  // on the engine's shutdown() + create() rebuild.
+  simdojo::Clocked<simdojo::Component>::shutdown();
+}
 
 } // namespace risc_v
 } // namespace rocjitsu

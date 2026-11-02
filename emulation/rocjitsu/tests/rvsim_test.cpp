@@ -155,3 +155,56 @@ TEST_F(RvSimTest, ShiftsAndLogic) {
 }
 
 } // namespace
+
+TEST(RvSimLifecycleTest, AnActiveHartRestartsCleanlyAfterRecreate) {
+  // SimulationEngine::create() rebuilds after shutdown(), and Clocked::startup()
+  // re-arms the one reusable clock event. The flag saying the clock is already
+  // running is cleared in Clocked::shutdown(), which runs for a Hart only
+  // because Hart::shutdown() chains to it -- Hart is the only production
+  // clocked component in the tree, so without that chain the reset never
+  // happens anywhere real. A debug build then aborts on startup()'s
+  // precondition; an NDEBUG build arms the event twice and retires two
+  // instructions per edge for the rest of the run.
+  //
+  // The program below is what makes the second failure visible: it retires one
+  // instruction per edge and increments x1 on every other one, so the register
+  // counts edges directly.
+  simdojo::SimulationEngine::Config config{};
+  config.num_threads = 1;
+  simdojo::SimulationEngine engine(config);
+
+  auto *clk = engine.topology().add_clock_domain("core_clk",
+                                                 /*frequency_hz=*/simdojo::TICKS_PER_SECOND);
+  auto root = std::make_unique<simdojo::CompositeComponent>("soc");
+  auto *hart = static_cast<rocjitsu::risc_v::Hart *>(
+      root->add_child(std::make_unique<rocjitsu::risc_v::Hart>("hart0", *clk)));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  //   addi x1, x1, 1
+  //   jal  x0, -4        # back to the addi; never halts
+  const uint32_t loop[] = {0x00108093, 0xffdff06f};
+  hart->memory().load_image(reinterpret_cast<const uint8_t *>(loop), sizeof(loop), 0);
+  hart->state().pc = 0;
+
+  for (int i = 0; i < 4; ++i)
+    ASSERT_TRUE(engine.step());
+  ASSERT_FALSE(hart->state().halted) << "the hart stopped before it could be interrupted";
+  ASSERT_TRUE(hart->running()) << "the clock was not still armed when the run was interrupted";
+  const uint64_t before = hart->state().read_xreg(1);
+
+  engine.shutdown();
+  // Reached only through Hart::shutdown()'s call to its base.
+  EXPECT_FALSE(hart->running()) << "teardown left the hart's clock marked running";
+  engine.create();
+
+  hart->state() = rocjitsu::risc_v::HartState{};
+  hart->state().pc = 0;
+  for (int i = 0; i < 6; ++i)
+    ASSERT_TRUE(engine.step());
+
+  // Six edges, one instruction each, incrementing on every other one. A second
+  // queue entry would retire twelve and count six.
+  EXPECT_EQ(hart->state().read_xreg(1), 3u);
+  EXPECT_GT(before, 0u) << "the first generation retired nothing to be interrupted";
+}
