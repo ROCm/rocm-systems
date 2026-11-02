@@ -967,12 +967,13 @@ protected:
         const bool pathOk = algo == tc.expectedAlgo && protocol == tc.expectedProtocol;
         if(!tc.overrides.empty())
         {
-            const std::string skipReason = mpiCoordinatedSkipReason(
+            std::string skipReason = mpiCoordinatedSkipReason(
                 !pathOk,
                 "RCCL_DDA_* override did not select the expected DDA tier (parameters are cached per "
                 "process); run this test on its own");
             if(!skipReason.empty())
-                GTEST_SKIP() << skipReason << " (algo=" << algo << " protocol=" << protocol << ")";
+                skipReason += " (algo=" + std::to_string(algo) + " protocol=" + std::to_string(protocol) + ")";
+            DDA_FABRIC_SKIP_OR_FAIL(skipReason);
         }
         ASSERT_MPI_TRUE(pathOk);
 
