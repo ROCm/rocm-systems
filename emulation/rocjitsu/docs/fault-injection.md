@@ -313,6 +313,24 @@ emulation/rocjitsu/build/tools/rj_code_mutate \
   --ordinal 0 --output mutant.hsaco
 ```
 
+For a `gfx1250` mutant that meets ConSan's native LDS admission, fresh
+preparation consumes `mutant.hsaco` as its new original image:
+
+```bash
+emulation/rocjitsu/build/tools/rj_consan_prepare \
+  mutant.hsaco gfx1250 my_kernel mutant-artifact
+```
+
+Preparation requires `RJ_BUILD_CONSAN_COMPILER=ON`. Use the new artifact when
+executing the workload with `mutant.hsaco`, then capture and analyze normally.
+See the [ConSan mutation workflow](consan.md#fault-injection) for fresh artifact
+and capture bindings and links to the existing execution/analysis steps.
+
+`--kernel` requires the exact descriptor-derived spelling. After shared image
+analysis succeeds, an unknown name reports the descriptor entries in its
+diagnostic. Those names do not promise that each entry passes barrier
+qualification.
+
 `DropBarrier` is currently the only kind and is also the default. Each listing
 line includes the zero-based logical `ordinal`, `exact` first-member byte offset
 relative to `.text`, concrete target, section index, form, ID, scope, and ordered
