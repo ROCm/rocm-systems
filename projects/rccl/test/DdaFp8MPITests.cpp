@@ -376,7 +376,7 @@ protected:
     }
 };
 
-// From the arch table's one-shot rank cap the one-shot stops below 64 KiB, so the largest size follows the comm.
+// The largest size follows this comm's LL one-shot cap, so the one-shot claims every size.
 TEST_F(DdaFp8MPI_LL, AllReduceOneShot)
 {
     const size_t largest = DdaFabricMPI::ddaLLOneShotCount(getActiveCommunicator(), 64 * 1024, 1);

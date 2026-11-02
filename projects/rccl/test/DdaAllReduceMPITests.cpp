@@ -417,7 +417,7 @@ protected:
 class DdaMPI_AllReduce : public DdaAllReduceMPITest
 {};
 
-// From the arch table's one-shot rank cap the one-shot stops below kOneShotCount, so the count follows the comm.
+// kOneShotCount is clipped to this comm's LL one-shot cap, so the one-shot claims it.
 TEST_F(DdaMPI_AllReduce, LLOneShotMultiRank)
 {
     runAllReduce(kOneShotCount, kOneShotLogNeedle, "DdaMPI_AllReduce/LLOneShotMultiRank",

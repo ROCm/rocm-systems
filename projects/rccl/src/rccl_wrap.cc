@@ -1209,18 +1209,22 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLLTwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
-// RCCL_DDA_LL_ONESHOT_THRESHOLD wins when the user sets it. On comms of at least
-// ddaArLLOneShotMinRanks ranks, the table's ddaArLLOneShotMaxBytes caps its default.
-inline size_t rcclDdaLLOneShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
+// The LL one-shot sends the whole message to every peer on the 2x LL wire; past this many bytes per peer the LL
+// two-shot's halved per-peer wire wins at any rank count.
+constexpr size_t kDdaArLLOneShotMaxPerPeerBytes = 349520;
+
+// RCCL_DDA_LL_ONESHOT_THRESHOLD wins when the user sets it. With an arch table its default stops at
+// kDdaArLLOneShotMaxPerPeerBytes.
+inline size_t rcclDdaLLOneShotThresholdTab(const rcclArchThresholds* table) {
   static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_ONESHOT_THRESHOLD");
   const size_t threshold = (size_t)rcclParamDdaLLOneShotThreshold();
-  if (envSet || table == nullptr || table->ddaArLLOneShotMinRanks <= 0 || nRanks < table->ddaArLLOneShotMinRanks) {
+  if (envSet || table == nullptr) {
     return threshold;
   }
-  return std::min(threshold, table->ddaArLLOneShotMaxBytes);
+  return std::min(threshold, kDdaArLLOneShotMaxPerPeerBytes);
 }
 size_t rcclDdaLLOneShotThreshold(const ncclComm* comm) {
-  return rcclDdaLLOneShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
+  return rcclDdaLLOneShotThresholdTab(extAlgoArchTable(comm));
 }
 
 // Returns the LL128 size cap for this collective, or 0 if the tier is disabled.

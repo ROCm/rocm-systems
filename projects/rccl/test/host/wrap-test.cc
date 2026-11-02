@@ -1763,8 +1763,6 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
-  t.ddaArLLOneShotMinRanks = 16;
-  t.ddaArLLOneShotMaxBytes = 4 * kKiB;
   t.ddaVmmBlockBudget = 2048;
   t.ddaVmmMinBlocks = 32;
   t.ddaVmmMaxBlocks = 128;
@@ -6964,35 +6962,29 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
-// The LL one-shot AllReduce keeps RCCL_DDA_LL_ONESHOT_THRESHOLD's default below
-// the table's ddaArLLOneShotMinRanks and stops at ddaArLLOneShotMaxBytes from there.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_CappedFromSixteenRanks) {
+// With an arch table the LL one-shot AllReduce stops at 349520 bytes per peer at every rank count; without one it
+// keeps the RCCL_DDA_LL_ONESHOT_THRESHOLD default.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_PerPeerCapAtEveryRankCount) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_CappedFromSixteenRanks",
+      "Wrap_DdaLLOneShotThreshold_PerPeerCapAtEveryRankCount",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx1250");
         rcclArchThresholds table = MakeRankScaledTable();
         comm->archThresholds = &table;
-        const std::pair<int, size_t> cases[] = {{2, 1 * kMiB},  {8, 1 * kMiB},  {15, 1 * kMiB},
-                                                {16, 4 * kKiB}, {32, 4 * kKiB}, {64, 4 * kKiB}};
-        for (const auto& c : cases) {
-          comm->nRanks = c.first;
-          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
+        for (int nRanks : {2, 4, 8, 15, 16, 32, 64}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm)) << nRanks;
         }
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr));
-        table.ddaArLLOneShotMaxBytes = 8 * kKiB;
-        EXPECT_EQ(8 * kKiB, rcclDdaLLOneShotThreshold(comm)) << "the cap is the table's";
-        table.ddaArLLOneShotMinRanks = 0;
-        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "0 ranks turns it off";
+        EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(nullptr)) << "no comm, no table: the default";
         DeleteCommWithArch(comm);
       });
 }
 
-// The rank cap is an arch-table entry, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap) {
+// The cap applies with an arch table, so RCCL_IGNORE_ARCH_TABLE=1 drops it on gfx1250.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsCap) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap",
+      "Wrap_DdaLLOneShotThreshold_IgnoreArchTableDropsCap",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         g_loadParam = ForceParam("RCCL_IGNORE_ARCH_TABLE", int64_t(1));
@@ -7006,15 +6998,15 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_IgnoreArchTableDropsRankCap) {
 
 // A user-set RCCL_DDA_LL_ONESHOT_THRESHOLD wins at every rank count, even at
 // its default value.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverRankCap) {
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverCap) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_EnvWinsOverRankCap",
+      "Wrap_DdaLLOneShotThreshold_EnvWinsOverCap",
       []() {
         SetMicroEnv("RCCL_DDA_LL_ONESHOT_THRESHOLD", "1048576");
         g_loadParam = ForceParam("RCCL_DDA_LL_ONESHOT_THRESHOLD", int64_t(1) << 20);
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
-        for (int nRanks : {8, 16, 32}) {
+        for (int nRanks : {4, 8, 16, 32}) {
           comm->nRanks = nRanks;
           EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << nRanks;
         }
@@ -7022,7 +7014,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EnvWinsOverRankCap) {
       });
 }
 
-// An empty value is not a setting, so the rank cap stays in force.
+// An empty value is not a setting, so the cap stays in force.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLOneShotThreshold_EmptyEnvIsUnset",
@@ -7031,7 +7023,7 @@ TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_EmptyEnvIsUnset) {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = Gfx1250Table();
         comm->nRanks = 32;
-        EXPECT_EQ(4 * kKiB, rcclDdaLLOneShotThreshold(comm));
+        EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm));
         DeleteCommWithArch(comm);
       });
 }
@@ -7843,25 +7835,20 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx1250 DPX: the LL one-shot AllReduce stops at 4 KiB from 16 ranks; SPX keeps the 1 MiB default.
-TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250DpxRankCap) {
+// gfx1250 DPX and SPX: the LL one-shot AllReduce stops at 349520 bytes at every rank count.
+TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaLLOneShotThreshold_Gfx1250DpxRankCap",
+      "Wrap_DdaLLOneShotThreshold_Gfx1250PerPeerCap",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
-        ASSERT_NE(nullptr, comm->archThresholds);
-        const std::pair<int, size_t> cases[] = {{8, 1 * kMiB}, {15, 1 * kMiB}, {16, 4 * kKiB}, {32, 4 * kKiB}};
-        for (const auto& c : cases) {
-          comm->nRanks = c.first;
-          EXPECT_EQ(c.second, rcclDdaLLOneShotThreshold(comm)) << c.first;
-        }
-        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
-        ASSERT_NE(nullptr, comm->archThresholds);
-        for (int nRanks : {16, 32, 64}) {
-          comm->nRanks = nRanks;
-          EXPECT_EQ(1 * kMiB, rcclDdaLLOneShotThreshold(comm)) << "SPX " << nRanks;
+        for (rcclTuningPartition part : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", part);
+          ASSERT_NE(nullptr, comm->archThresholds);
+          for (int nRanks : {4, 8, 16, 32}) {
+            comm->nRanks = nRanks;
+            EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm)) << (int)part << " " << nRanks;
+          }
         }
         DeleteCommWithArch(comm);
       });
