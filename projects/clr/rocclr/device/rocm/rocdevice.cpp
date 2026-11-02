@@ -3461,10 +3461,13 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
   if (hw_event == nullptr) {
     ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event to read time");
     *start = *end = 0;
-  } else {
-    fetchSignalTime(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, getBackendDevice(),
-                    start, end);
+    return;
   }
+  // The caller waited for the event. Cached, the timing is not read across the bus again when
+  // the signal's Timestamp is processed.
+  auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
+  signal->CacheTimingData(getBackendDevice(), /*completed=*/true);
+  signal->GetCachedTiming(*start, *end);
 }
 
 // ================================================================================================
