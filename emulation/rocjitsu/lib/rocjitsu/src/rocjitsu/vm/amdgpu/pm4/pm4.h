@@ -143,8 +143,13 @@ struct Pm4Submission {
   static constexpr uint32_t kMaxIndirectExpansions = 4096;
   std::shared_ptr<Pm4FailureState> failure = std::make_shared<Pm4FailureState>();
   /// @brief Check whether submission dependencies allow execution.
-  /// @details Success with true allows execution; success with false waits for pending
-  /// dependencies. Failure reports a terminal dependency failure and emits its diagnostic.
+  /// @details Leave unset when there are no dependencies. Checked before each packet
+  /// and before successful completion, including submissions without command buffers.
+  /// Success with true allows progress; success with false returns for a later retry,
+  /// leaving the submission queued and earlier packet effects intact. Before returning
+  /// failure, the callback must emit its reason through the supplied DiagnosticEmitter.
+  /// The processor logs that reason and invokes fault_queue; the CP then invokes each
+  /// installed completion callback for every queued submission with false.
   std::function<util::FailureOr<bool>(util::DiagnosticEmitter)> ready;
   std::function<void(bool)> complete;
 };

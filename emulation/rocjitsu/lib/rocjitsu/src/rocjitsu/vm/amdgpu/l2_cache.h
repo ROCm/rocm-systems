@@ -359,7 +359,9 @@ public:
   VmAccessOutcome flush_all(uint32_t vmid = 0);
 
   /// @brief Publish and invalidate only the specified address space.
-  /// @details Failed dirty lines remain cached for a later retry; other VMIDs are untouched.
+  /// @details On failure, no line in this VMID is invalidated. Previously published lines
+  /// remain cached clean; unpublished bytes and unvisited dirty lines remain dirty for retry.
+  /// Other VMIDs are untouched.
   /// Consumers of memory shared across VMIDs rely on the producer publishing its
   /// own writes before synchronization; this does not publish another VMID's dirty alias.
   [[nodiscard]] VmAccessOutcome flush_address_space(uint32_t vmid);
