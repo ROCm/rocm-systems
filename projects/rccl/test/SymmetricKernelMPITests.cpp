@@ -36,7 +36,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -731,14 +730,13 @@ TEST_F(SymmetricKernelCorruptionTest, AllReduceLL_PinnedTailWave)
         // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
         ncclResult_t res = ncclAllReduce(send, recv, c.count, ncclFloat, ncclSum, getActiveCommunicator(),
                                          getActiveStream());
-        // A slot no peer writes leaves recvReduce spinning; abort the job rather than wait for the runner timeout.
-        if(res == ncclSuccess)
-        {
-            const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
-                                     + " skew=" + std::to_string(c.skew);
-            DdaFabricMPI::abortJobUnlessAllRanksDrained(
-                DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60)), what.c_str());
-        }
+        // A slot no peer writes leaves recvReduce spinning, so abort the job; every rank votes to keep MPI paired.
+        const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
+                                 + " skew=" + std::to_string(c.skew);
+        const hipError_t  drained
+            = res == ncclSuccess ? DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60))
+                                 : hipSuccess;
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(drained, what.c_str());
         const std::string ineligible
             = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
                                        "AllReduce_AGxLL_R symmetric kernel not eligible on this topology");
