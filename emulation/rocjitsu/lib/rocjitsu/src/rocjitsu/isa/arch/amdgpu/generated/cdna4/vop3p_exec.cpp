@@ -1081,9 +1081,9 @@ void VMfmaF3232x32x42bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 32, 64>(
-      wf, rj_arith_v_mfma_f32_32x32x4_2b_f16_w64, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      a_lanes, b_lanes);
+      wf, rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950, cu.arithmetic_flags(), controls, dst,
+      src0_base, src1_base, s2,
+      !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);
 }
 
 void VMfmaF3216x16x44bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1111,9 +1111,9 @@ void VMfmaF3216x16x44bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 16, 64>(
-      wf, rj_arith_v_mfma_f32_16x16x4_4b_f16_w64, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      a_lanes, b_lanes);
+      wf, rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950, cu.arithmetic_flags(), controls, dst,
+      src0_base, src1_base, s2,
+      !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);
 }
 
 void VMfmaF324x4x416bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1141,9 +1141,9 @@ void VMfmaF324x4x416bF16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 4, 64>(
-      wf, rj_arith_v_mfma_f32_4x4x4_16b_f16_w64, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      a_lanes, b_lanes);
+      wf, rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950, cu.arithmetic_flags(), controls, dst,
+      src0_base, src1_base, s2,
+      !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);
 }
 
 void VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1189,9 +1189,9 @@ void VMfmaF3232x32x8F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 16, 64>(
-      wf, rj_arith_v_mfma_f32_32x32x8_f16_w64, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      a_lanes, b_lanes);
+      wf, rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950, cu.arithmetic_flags(), controls, dst,
+      src0_base, src1_base, s2,
+      !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);
 }
 
 void VMfmaF3216x16x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1219,9 +1219,9 @@ void VMfmaF3216x16x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 4, 64>(
-      wf, rj_arith_v_mfma_f32_16x16x16_f16_w64, cu.arithmetic_flags(), controls, dst, src0_base,
-      src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
-      a_lanes, b_lanes);
+      wf, rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950, cu.arithmetic_flags(), controls, dst,
+      src0_base, src1_base, s2,
+      !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt, a_lanes, b_lanes);
 }
 
 void VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1549,7 +1549,7 @@ void VMfmaF3232x32x42bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 32, 64>(
-      wf, rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64,
+      wf, rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950,
       cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       a_lanes, b_lanes);
@@ -1580,7 +1580,7 @@ void VMfmaF3216x16x44bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 16, 64>(
-      wf, rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64,
+      wf, rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950,
       cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       a_lanes, b_lanes);
@@ -1611,7 +1611,7 @@ void VMfmaF324x4x416bBf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 4, 64>(
-      wf, rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64,
+      wf, rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950,
       cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       a_lanes, b_lanes);
@@ -1642,7 +1642,7 @@ void VMfmaF3232x32x8Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 16, 64>(
-      wf, rj_arith_v_mfma_f32_32x32x8_bf16_w64,
+      wf, rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950,
       cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       a_lanes, b_lanes);
@@ -1673,7 +1673,7 @@ void VMfmaF3216x16x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         return amdgpu::permute_b_lane(lane, inst_.blgp);
       });
   amdgpu::arith::exec_dense_fp_matrix<2, 4, 64>(
-      wf, rj_arith_v_mfma_f32_16x16x16_bf16_w64,
+      wf, rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950,
       cu.arithmetic_flags() | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0), controls, dst, src0_base,
       src1_base, s2, !src2.decoded_vgpr() ? std::optional<uint32_t>(const_acc) : std::nullopt,
       a_lanes, b_lanes);

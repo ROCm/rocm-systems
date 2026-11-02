@@ -68,8 +68,12 @@ CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8
 fourteen gfx950 half-input MFMA forms plus eight OCP FP8/BF8 forms, and five
 gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
-All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
-Compatibility are supported; strict bit-exact modes are not advertised.
+All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
+Compatibility retain those paths. The twenty gfx942 forms additionally support
+the integer empirical model contributed in #14809, with default CBSZ/ABID/BLGP
+and FP16_OVFL clear. Exact modes use that model; exact-allow-Loose falls back
+outside its qualified controls. This qualification does not extend to gfx950
+or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.

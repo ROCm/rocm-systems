@@ -7,6 +7,7 @@
 add_library(
     rj_arith
     STATIC
+    mfma/gfx942_exact.cpp
     mfma/mfma_half.cpp
     mfma/mfma_f32.cpp
     mfma/mfma_fp8.cpp
