@@ -5,14 +5,22 @@
 
 pub(crate) use rocddi::device::gpu::event::linux as event;
 pub(crate) use rocddi::memory::interop::linux as memory;
-use rocddi::topology::Endpoint;
 use rocddi::topology::platform::linux::kfd_drm_info;
+use rocddi::topology::{Endpoint, NativeNodeId, TopologyNode};
 
 /// Returns the KFD node ID of an endpoint, or the host default.
 pub(crate) fn node_id(endpoint: Option<&Endpoint>) -> u32 {
     endpoint
         .and_then(kfd_drm_info)
         .map_or(0, |info| info.node_id)
+}
+
+/// Returns the KFD ordinal used by the HSA CPU node query.
+pub(crate) fn native_cpu_node_ordinal(node: &TopologyNode) -> Option<u32> {
+    match node.native_id {
+        NativeNodeId::LinuxKfd(id) => Some(id),
+        _ => None,
+    }
 }
 
 /// Returns the native driver UID of an endpoint, or the host default.
