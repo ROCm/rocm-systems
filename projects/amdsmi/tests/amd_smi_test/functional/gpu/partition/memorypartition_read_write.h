@@ -38,8 +38,7 @@ class TestMemoryPartitionReadWrite : public TestBase {
 
   enum class RunResult { kOk, kFailed, kTimedOut, kStuck };
 
-  // Runs `path args...` with a minimal environment and no shell. A child that
-  // ignores SIGKILL after the timeout is reported as kStuck instead of awaited.
+  // Runs `path args` with no shell and a fixed environment; kStuck if it ignores SIGKILL.
   static RunResult RunProgram(const std::string& path, const std::vector<std::string>& args,
                               int timeout_sec, int reap_sec, std::string* error);
 
@@ -69,8 +68,7 @@ class TestMemoryPartitionReadWrite : public TestBase {
     std::function<void(uint32_t)> sleep_ms;
   } api_;
 
-  // Applying an NPS mode needs a driver reload, so the cycle only runs when
-  // AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1, the same opt-in as test_memory_partition_cycle.py.
+  // Set by AMDSMI_ALLOW_DESTRUCTIVE_TESTS=1; the cycle reloads amdgpu.
   bool allow_destructive_ = false;
 
   // One entry per physical GPU, read from its partition 0 handle.
@@ -90,35 +88,33 @@ class TestMemoryPartitionReadWrite : public TestBase {
   };
 
   enum class Reload {
-    kApplied,      // amdgpu reloaded and the library enumerated the devices again
-    kNotUnloaded,  // amdgpu stayed loaded, so a staged mode is still pending
-    kNotLoaded,    // amdgpu is not loaded; no device is usable
-    kNoDevices,    // amdgpu is live, but the library could not enumerate the devices
+    kApplied,      // reloaded and devices enumerated
+    kNotUnloaded,  // still loaded; the staged mode is pending
+    kNotLoaded,    // not loaded
+    kNoDevices,    // loaded, but no devices enumerated
   };
 
-  // Shuts the library down, then initializes it and enumerates the devices again.
-  // The fixture must hold the only amdsmi_init reference, or the handles go stale.
+  // Re-initializes the library; needs the only amdsmi_init reference.
   virtual bool RefreshHandles(std::string* error);
-  // Why amdgpu cannot be reloaded, or empty when it can. Checked before any mode is
-  // staged, so a failed check leaves nothing pending. Leaves the library initialized.
+  // Why amdgpu cannot be reloaded, or empty. Checked before anything is staged.
   std::string ReloadBlocker();
   Reload ReloadDriver(std::string* error);
   // modprobe at a fixed path, or empty when kmod is not installed there.
   std::string ModprobePath();
-  // amdgpu's module refcount, or -1 when it is built in, not loaded, or unreadable.
+  // amdgpu refcount, or -1 if built in, not loaded or unreadable.
   int AmdgpuRefcount();
   // Physical GPU key; empty for a handle that is not partition 0.
   std::string PhysicalKey(amdsmi_processor_handle handle);
 
   std::map<std::string, PhysicalGpu> ReadPhysicalGpus(bool* complete);
-  // The mode every GPU reports, or empty when they disagree, a read failed or GPUs are missing.
+  // Mode every GPU reports, or empty if they differ or a read failed.
   static std::string AgreedMode(const std::map<std::string, PhysicalGpu>& gpus, bool complete,
                                 size_t physical_count);
   void RunMemoryPartitionCycle();
   StageResult StageOnAll(amdsmi_memory_partition_type_t mode);
-  // Reloads to apply `staged`; reports a failure and returns false unless it was applied.
+  // Reloads to apply `staged`; reports a failure and returns false otherwise.
   bool ApplyStaged(const std::string& staged, const std::string& start);
-  // Waits for every GPU to report a mode after a reload; returns the agreed mode.
+  // Waits for every GPU after a reload; returns the agreed mode.
   std::string VerifyMode(const std::string& expected, size_t physical_count);
   void RestoreAcceleratorProfiles(const std::map<std::string, PhysicalGpu>& original);
 };

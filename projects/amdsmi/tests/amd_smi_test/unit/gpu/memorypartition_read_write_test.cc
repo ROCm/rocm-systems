@@ -54,8 +54,7 @@ struct PartitionDevice {
   amdsmi_memory_partition_type_t staged = AMDSMI_MEMORY_PARTITION_UNKNOWN;
   std::vector<amdsmi_memory_partition_type_t> requests;
   amdsmi_nps_caps_t caps = {{1, 1, 1, 1, 0}};
-  // Returned by caps reads once the cycle has keyed the device; the default path reads
-  // the caps too and must not see it.
+  // Returned only once the cycle keys the device, so the default path never sees it.
   amdsmi_status_t caps_status = AMDSMI_STATUS_SUCCESS;
   bool keyed = false;
   // Handles of one physical GPU share a bus; only partition 0 speaks for it.
@@ -75,7 +74,7 @@ struct PartitionDevice {
   }
 };
 
-// The host the reload cycle sees: sysfs, /proc/self/status and modprobe, following amdgpu.
+// Fake host: sysfs, /proc/self/status and modprobe.
 struct FakeHost {
   bool modprobe_installed = true;
   bool can_load_modules = true;
@@ -92,9 +91,8 @@ struct FakeHost {
   std::vector<std::string> applied;  // first GPU's mode after each load
 };
 
-// Follows the driver: a mode other than the active one stays staged until the next reload,
-// and a request for the active mode is ignored. A reload applies each staged mode and resets
-// that GPU to the first accelerator profile, the default after an NPS change.
+// Fake driver: other modes stay staged until a reload, and the active mode is ignored.
+// A reload applies staged modes and resets those GPUs to profile 0.
 class MemoryPartitionHarness : public TestMemoryPartitionReadWrite {
  public:
   explicit MemoryPartitionHarness(uint32_t count) : devices(count) {
@@ -412,7 +410,7 @@ void ExpectStartingState(const MemoryPartitionHarness& test) {
   }
 }
 
-// Requests other than a probe or the active mode; a precondition failure must make none.
+// True if any request was neither a probe nor the active mode.
 bool StagedAnything(const MemoryPartitionHarness& test) {
   for (const auto& device : test.devices) {
     for (auto mode : device.requests) {
@@ -547,8 +545,7 @@ TEST(GpuUnit, MemoryPartitionCycleFailsWhenOnlySomeGpusAcceptAMode) {
 }
 
 TEST(GpuUnit, MemoryPartitionCycleRestoresWhenTheFirstGpuStillReportsTheStart) {
-  // The lowest-BDF GPU rejects NPS1 and the first unload fails, so after the retried reload
-  // it still reads NPS2 while the other GPU is on NPS1.
+  // GPU 0 rejects NPS1 and the first unload fails: after the retry GPU 0 is NPS2, GPU 1 NPS1.
   MemoryPartitionHarness test(2);
   CycleHost(test);
   test.devices[0].rejects = {AMDSMI_MEMORY_PARTITION_NPS1};

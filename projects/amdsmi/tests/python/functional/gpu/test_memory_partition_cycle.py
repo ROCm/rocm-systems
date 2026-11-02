@@ -67,8 +67,7 @@ _REAP_TIMEOUT_SEC = 10
 _PROFILE_ATTEMPTS = 10
 _PROFILE_RETRY_SEC = 2
 
-# modprobe runs from a fixed directory with a fixed environment, so neither PATH nor
-# variables such as MODPROBE_OPTIONS from the caller (for example through sudo -E) apply.
+# Fixed path and environment, so the caller's PATH and MODPROBE_OPTIONS don't apply.
 _MODPROBE_DIRS = "/usr/sbin:/sbin"
 _MODPROBE_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
 _CAP_SYS_MODULE = 16
@@ -160,7 +159,7 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
     def setUp(self):
         # The mode that may be staged for the next reload, or None; only a reload clears it.
         self._staged_mode = None
-        # The accelerator profiles are restored only on top of the restored memory partition.
+        # Profiles are restored only after the memory partition.
         self._memory_restored = False
 
     def tearDown(self):
@@ -340,8 +339,7 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
         ]
         was_staged = self._staged_mode
-        # The library skips a request for the active mode. Any other may stay staged even
-        # when a later device fails the sweep, so assume it is until the sweep returns.
+        # Any mode but the active one may stay staged, even if the sweep fails.
         if mode != active:
             self._staged_mode = mode
         successfully_set = self._for_each_gpu(
@@ -487,8 +485,7 @@ class TestGpuMemoryPartitionCycle(unittest.TestCase):
             )
             return
         self.common.print(f"  Restoring : {self._describe_profiles(profiles)}")
-        # Shared rounds: read every GPU, set each one that differs, then wait once. A profile
-        # change replaces the partition devices, so every round opens a new session.
+        # Read every GPU, set those that differ, then wait; a new session per round.
         current = []
         for attempt in range(1, _PROFILE_ATTEMPTS + 1):
             with AmdsmiSession() as gpus:

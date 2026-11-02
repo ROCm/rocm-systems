@@ -225,9 +225,7 @@ class TestGpuBenchmark(unittest.TestCase):
         return stats
 
     def _active_memory_partition_types(self, processor):
-        # Any other mode stays staged until the next driver reload, and with current
-        # library and amdgpu releases requesting the active mode does not cancel it, so
-        # the set benchmarks time only the active mode (the library's same-mode path).
+        # Other modes would stay staged, so only the active mode is timed.
         try:
             active = amdsmi.amdsmi_get_gpu_memory_partition(processor)
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:

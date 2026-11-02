@@ -4,10 +4,8 @@
 
 """Hardware-free checks that the memory partition tests leave no NPS mode staged.
 
-With current library and amdgpu releases a staged NPS mode applies on the next driver
-reload, and requesting the active mode does not cancel it. These run the functional
-tests against a fake driver with those rules and check that the starting mode is still
-active, with nothing staged, after.
+The functional tests run against a fake driver where other modes stay staged until a
+reload and the active mode is ignored.
 """
 
 import contextlib
@@ -45,10 +43,9 @@ def _load_functional(name):
 
 
 class _FakeHive:
-    """Hive-wide memory partition state that follows the driver's staging rules.
+    """Hive-wide partition state with the driver's staging rules.
 
-    A reload that changes the mode resets every GPU to the first accelerator profile,
-    the default after an NPS change.
+    A reload that changes the mode resets the accelerator profiles to index 0.
     """
 
     def __init__(self, active="NPS1", caps=("NPS1", "NPS2", "NPS4")):

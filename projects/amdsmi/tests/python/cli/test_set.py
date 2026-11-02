@@ -79,8 +79,7 @@ class TestSet(TestCliBase):
                 )
 
             # set --memory-partition defaults
-            # A request for the active mode, which the sweep also limits itself to:
-            # it cannot cancel another mode already staged for the next reload.
+            # The active mode only; it cannot cancel a mode already staged.
             memory_partition = self.partition_data["current_partition"][index]["memory"]
             if memory_partition != "N/A":
                 cmds.append(

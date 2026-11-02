@@ -224,7 +224,7 @@ TestMemoryPartitionReadWrite::RunResult TestMemoryPartitionReadWrite::RunProgram
     argv.push_back(const_cast<char*>(arg.c_str()));
   }
   argv.push_back(nullptr);
-  // A fixed environment, so variables such as MODPROBE_OPTIONS do not pass through sudo -E.
+  // Fixed environment, so MODPROBE_OPTIONS cannot pass through sudo -E.
   char env_path[] = "PATH=/usr/sbin:/usr/bin:/sbin:/bin";
   char* envp[] = {env_path, nullptr};
 
@@ -768,8 +768,6 @@ void TestMemoryPartitionReadWrite::Run(void) {
 }
 
 bool TestMemoryPartitionReadWrite::RefreshHandles(std::string* error) {
-  // amdsmi_init is reference counted, so this re-enumerates only while the fixture
-  // holds the only reference, as it does in amdsmitst.
   api_.shut_down();
   num_monitor_devs_ = 0;
   amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
@@ -1062,7 +1060,7 @@ void TestMemoryPartitionReadWrite::RestoreAcceleratorProfiles(
     if (!pending || round == kProfileAttempts) {
       break;
     }
-    // A profile change replaces the partition devices, and BUSY is retried.
+    // A profile change replaces the partition devices.
     api_.sleep_ms(kRetryDelayMs);
     RefreshHandles(&ignored);
   }

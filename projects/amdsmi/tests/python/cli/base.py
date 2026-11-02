@@ -977,13 +977,10 @@ class TestCliBase(unittest.TestCase):
         return True
 
     def _active_memory_partition(self, gpu_index, explicit_gpu):
-        """The NPS mode the target devices run now, or None when they differ.
+        """Active NPS mode of the target devices, or None when they differ.
 
-        Any other mode stays staged until the next driver reload, and with current library
-        and amdgpu releases requesting the active mode does not cancel it, so the sweep
-        only requests this one. Without
-        an explicit --gpu the command runs on every device, so all must agree;
-        sub-partition handles report no mode and are left out.
+        Other modes would stay staged, so the sweep requests only this one. Sub-partition
+        handles report no mode and are skipped.
         """
         current = self.partition_data["current_partition"]
         indices = [gpu_index] if explicit_gpu else range(len(current))

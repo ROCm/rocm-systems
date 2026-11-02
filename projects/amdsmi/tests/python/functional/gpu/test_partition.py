@@ -318,9 +318,7 @@ class TestGpuPartition(unittest.TestCase):
         """Verify that set rejects values that are not a memory partition mode."""
         self.common.print_func_name("")
 
-        # A valid mode stays staged until the next driver reload, and with current library
-        # and amdgpu releases requesting the active mode does not cancel it, so only values
-        # that cannot be staged are sent.
+        # Only values the setter rejects, since a valid one would stay staged.
         rejected = self._rejected_memory_partition_types()
         self.common.Test_Per_GPU_With_One_Enum(
             amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode,
