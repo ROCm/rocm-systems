@@ -1287,9 +1287,6 @@ TEST_F(DiagP2pMicrotest, PrepareRemoteOps_EachFailureReturnsFalseWithItsWarning)
   }
 }
 
-template <typename Hook>
-using HookOf = ScopedHook<rccl_test_host::FnSigOf_t<Hook>>;
-
 constexpr int kSavedDevice = 7;
 
 // Declared in call order: a stage's ordinal is the number of collectives reached.

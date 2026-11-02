@@ -524,8 +524,11 @@ WriteInterceptor(const void* packets,
         else if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
         {
             const auto& ext_packet = packets_arr[i].ext_kernel_dispatch;
-            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
-               ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
+            if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+               || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+            )
             {
                 ++num_dispatch_packets;
             }
@@ -673,8 +676,11 @@ WriteInterceptor(const void* packets,
             if(packet_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC)
             {
                 const auto& ext_packet = _packets[i].ext_kernel_dispatch;
-                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
-                   ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
+                if(ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+                   || ext_packet.amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD
+#    endif
+                )
                 {
                     is_ext_kernel_dispatch = true;
                 }

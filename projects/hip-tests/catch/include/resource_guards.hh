@@ -393,6 +393,20 @@ class StreamsGuard {
   std::vector<hipStream_t> streams_;
 };
 
+#if HT_AMD
+extern "C" hipError_t hipExtGetLastError(void);
+#endif
+
+// A failing hipMemPoolSetAttribute during cleanup still records the thread-local
+// last error; consume it so the last-error-reset listener does not blame the
+// test for a cleanup failure.
+inline void consumeMemPoolRestoreError() {
+  static_cast<void>(hipGetLastError());
+#if HT_AMD
+  static_cast<void>(hipExtGetLastError());
+#endif
+}
+
 enum class MemPools { dev_default, created };
 
 class MemPoolGuard {
@@ -403,6 +417,14 @@ class MemPoolGuard {
     switch (mempool_type_) {
       case MemPools::dev_default:
         HIP_CHECK(hipDeviceGetDefaultMemPool(&mempool_, device_));
+        HIP_CHECK(hipMemPoolGetAttribute(mempool_, hipMemPoolAttrReleaseThreshold,
+                                         &orig_release_threshold_));
+        HIP_CHECK(hipMemPoolGetAttribute(mempool_, hipMemPoolReuseFollowEventDependencies,
+                                         &orig_reuse_follow_event_deps_));
+        HIP_CHECK(hipMemPoolGetAttribute(mempool_, hipMemPoolReuseAllowOpportunistic,
+                                         &orig_reuse_allow_opportunistic_));
+        HIP_CHECK(hipMemPoolGetAttribute(mempool_, hipMemPoolReuseAllowInternalDependencies,
+                                         &orig_reuse_allow_internal_deps_));
         break;
       case MemPools::created:
         hipMemPoolProps pool_props;
@@ -424,10 +446,27 @@ class MemPoolGuard {
     if (mempool_type_ == MemPools::created) {
       static_cast<void>(hipMemPoolDestroy(mempool_));
     } else {
-      // Reset max states for default mem pool, so subtests won't fail
-      uint64_t value = 0;
-      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrUsedMemHigh, &value));
-      HIP_CHECK(hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReservedMemHigh, &value));
+      // Restore the shared default mem pool so later tests are not affected by
+      // attributes this test modified. Non-throwing: a destructor must not throw.
+      // The high-watermark stats reset to 0 (their documented reset); the config
+      // attributes restore to the values captured at construction.
+      uint64_t zero = 0;
+      bool failed = false;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolAttrUsedMemHigh, &zero) != hipSuccess;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReservedMemHigh, &zero) != hipSuccess;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolAttrReleaseThreshold,
+                                       &orig_release_threshold_) != hipSuccess;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolReuseFollowEventDependencies,
+                                       &orig_reuse_follow_event_deps_) != hipSuccess;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolReuseAllowOpportunistic,
+                                       &orig_reuse_allow_opportunistic_) != hipSuccess;
+      failed |= hipMemPoolSetAttribute(mempool_, hipMemPoolReuseAllowInternalDependencies,
+                                       &orig_reuse_allow_internal_deps_) != hipSuccess;
+      // Only consume on failure: a successful restore leaves any error the test
+      // itself left untouched, so the listener can still report a real leak.
+      if (failed) {
+        consumeMemPoolRestoreError();
+      }
     }
   }
 
@@ -438,4 +477,24 @@ class MemPoolGuard {
   int device_;
   hipMemAllocationHandleType handle_type_;
   hipMemPool_t mempool_;
+  uint64_t orig_release_threshold_ = 0;
+  int orig_reuse_follow_event_deps_ = 1;
+  int orig_reuse_allow_opportunistic_ = 1;
+  int orig_reuse_allow_internal_deps_ = 1;
 };
+
+// Restores a mem pool attribute on scope exit, even if the test throws, so a
+// modified attribute cannot leak into later tests.
+template <typename T>
+struct MemPoolAttrRestorer {
+  hipMemPool_t pool;
+  hipMemPoolAttr attr;
+  T value;
+  ~MemPoolAttrRestorer() {
+    if (hipMemPoolSetAttribute(pool, attr, &value) != hipSuccess) {
+      consumeMemPoolRestoreError();
+    }
+  }
+};
+template <typename T>
+MemPoolAttrRestorer(hipMemPool_t, hipMemPoolAttr, T) -> MemPoolAttrRestorer<T>;

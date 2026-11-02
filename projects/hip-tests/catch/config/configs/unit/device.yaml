@@ -99,6 +99,9 @@ device:
   Unit_hipDeviceGetCacheConfig_Positive_Default:
     <<: *level_default
     tags: [config, P0]
+  Unit_hipDeviceGetCacheConfig_Positive_RoundTrip:
+    <<: *level_default
+    tags: [config, P1]
   Unit_hipDeviceSynchronize_Positive_Empty_Streams:
     <<: *level_default
     tags: [synchronization, P0]

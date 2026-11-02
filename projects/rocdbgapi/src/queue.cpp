@@ -731,10 +731,10 @@ aql_queue_t::aql_dispatch_t::aql_dispatch_t (
                    packet_bytes.data (),
                    sizeof (hsa_amd_ext_kernel_dispatch_packet_t));
 
-      if (std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
-          != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH &&
-          std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
-          != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD)
+      if ((std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
+           != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH)
+          && (std::get<hsa_amd_ext_kernel_dispatch_packet_t> (m_packet).amd_format
+              != HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD))
         fatal_error ("Unsupported packet format");
     }
   else

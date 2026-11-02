@@ -48,6 +48,7 @@
 #include "hsa.h"
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
+#include "amd_launch_descriptor.h"
 
 /**
  * - 1.0 - initial version
