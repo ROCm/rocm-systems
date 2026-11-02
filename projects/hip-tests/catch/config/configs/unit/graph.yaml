@@ -1237,10 +1237,11 @@ graph:
   Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer:
     <<: *level_2
     tags: [exec]
-  # Spawned by name from the test above; never run standalone.
   Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child:
     <<: *level_2
-    disabled: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+    disabled:
+      targets: [amd_wsl, amd_linux, amd_windows, nvidia_windows, nvidia_linux]
+      reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
     <<: *level_default
