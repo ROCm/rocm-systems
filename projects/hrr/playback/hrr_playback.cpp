@@ -583,6 +583,13 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPHOSTMALLOC:
     case HRR_API_HIPMEMADDRESSRESERVE:
     case HRR_API_HIPMEMCREATE:
+    // hipMemMap / hipMemUnmap move a handle's mapping count and its host-budget
+    // charge (vmm_note_map / vmm_note_unmap). Unordered, a hipMemRelease on
+    // another thread could run between the runtime's retain and vmm_note_map,
+    // return the charge while the mapping still holds the memory, and leave the
+    // map with no entry to count.
+    case HRR_API_HIPMEMMAP:
+    case HRR_API_HIPMEMUNMAP:
     // Stream create / destroy
     case HRR_API_HIPSTREAMCREATE:
     case HRR_API_HIPSTREAMCREATEWITHFLAGS:

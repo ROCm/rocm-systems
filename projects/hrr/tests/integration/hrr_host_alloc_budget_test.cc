@@ -94,6 +94,67 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
                     "hipMemCreate (host location)");
 }
 
+// A handle that hipMemMap still holds keeps its charge after hipMemRelease, until
+// hipMemUnmap. The workload maps h1, releases it, then creates h2 before the
+// unmap: with the hold the 3 MiB replay is refused at h2 (h1's 2 MiB is still
+// charged); without it the release would have returned the charge and h2 fits.
+// A 4 MiB cap takes h1 + h2, and after the unmap two more handles (h3 + h4), so
+// it also fails if the unmap did not return h1's charge.
+TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipMemAllocationProp prop{};
+  prop.type          = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeHost;
+  prop.location.id   = 0;
+  size_t gran = 0;
+  if (hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum) !=
+          hipSuccess || gran == 0)
+    HRR_SKIP("no host-located VMM granularity on this device");
+  const size_t size = (kBudgetBuf + gran - 1) / gran * gran;
+  if (size != kBudgetBuf) HRR_SKIP("host-located granularity " << gran << " does not fit 2 MiB");
+
+  void* va = nullptr;
+  HRR_HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
+  hipMemGenericAllocationHandle_t h1{}, h2{}, h3{}, h4{};
+  // Support is decided here; a failure after it is a real one.
+  if (hipMemCreate(&h1, size, &prop, 0) != hipSuccess) {
+    (void)hipMemAddressFree(va, size);
+    HRR_SKIP("host-located hipMemCreate is not supported on this device");
+  }
+  if (hipMemMap(va, size, 0, h1, 0) != hipSuccess) {
+    (void)hipMemRelease(h1);
+    (void)hipMemAddressFree(va, size);
+    HRR_SKIP("a host-located handle cannot be mapped on this device");
+  }
+  HRR_HIP_CHECK(hipMemRelease(h1));            // mapping keeps the memory
+  HRR_HIP_CHECK(hipMemCreate(&h2, size, &prop, 0));
+  HRR_HIP_CHECK(hipMemRelease(h2));
+  HRR_HIP_CHECK(hipMemUnmap(va, size));        // the last reference to h1
+  HRR_HIP_CHECK(hipMemCreate(&h3, size, &prop, 0));
+  HRR_HIP_CHECK(hipMemCreate(&h4, size, &prop, 0));
+  HRR_HIP_CHECK(hipMemRelease(h3));
+  HRR_HIP_CHECK(hipMemRelease(h4));
+  HRR_HIP_CHECK(hipMemAddressFree(va, size));
+}
+
+HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_budget_memmap_hold"};
+  hrr_capture_direct("Unit_HRR_HostBudgetMemMapHold_Direct", cap.path, 5);
+  for (const bool refuse : {false, true}) {
+    const std::string cap_arg =
+        std::string("--max-host-bytes ") + (refuse ? "3145728" : "4194304");
+    auto [ret, out] = hrr_playback_merged(cap.path, cap_arg);
+    INFO(cap_arg << ": playback exit " << ret << ", output:\n" << out);
+    if (refuse) {
+      CHECK(ret != 0);
+      CHECK(out.find("[HRR] Fatal: hipMemCreate (host location) needs") != std::string::npos);
+    } else {
+      CHECK(ret == 0);
+      CHECK(out.find("[HRR] Fatal") == std::string::npos);
+    }
+  }
+}
+
 /**
  * @}
  */
