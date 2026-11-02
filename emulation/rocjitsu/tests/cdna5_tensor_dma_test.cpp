@@ -706,11 +706,12 @@ TEST(Gfx1250ExecutionTest, TensorDmaRejectsWrappedGlobalTransferAddresses) {
   EXPECT_TRUE(state.elements.empty());
 }
 
-// LDS addresses are formed in 64 bits, so a large descriptor LDS base lies past
-// the wave's allocation rather than wrapping back into LDS. That does not abort
-// a tensor operation (CDNA5 ISA 10.11.6): the element is kept, all its bytes are
-// dropped, and it touches no LDS. 0xffffff00 would wrap in 32 bits onto the
-// first byte of the allocation just below the wave's; UINT32_MAX onto its last.
+// rocjitsu forms LDS addresses in 64 bits, so a large descriptor LDS base lies
+// past the wave's allocation rather than wrapping back into LDS. That width is a
+// modeling choice: CDNA5 ISA 10.11.6 specifies only that an out-of-range address
+// does not abort the transfer. The element is kept, all its bytes are dropped,
+// and it touches no LDS. 0xffffff00 would wrap in 32 bits onto the first byte of
+// the allocation just below the wave's; UINT32_MAX onto its last.
 TEST(Gfx1250ExecutionTest, TensorDmaLdsAddressDoesNotWrapPastTheAllocation) {
   using namespace amdgpu::tensor_dma_detail;
   constexpr uint64_t kGlobal = 0x1a8000;

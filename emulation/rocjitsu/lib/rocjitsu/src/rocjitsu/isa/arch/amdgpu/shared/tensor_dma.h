@@ -503,8 +503,10 @@ inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
 /// @details The proof includes load padding, allowing the element walker and append_copy to use
 /// unchecked 64-bit arithmetic. An out-of-range LDS address does not abort the transfer (CDNA5 ISA
 /// 10.11.6, "Xnack, Memviol and Out-of-Bounds Behavior"); append_copy drops the out-of-range
-/// bytes. Requiring the atomic-barrier cell to lie within the allocation is simulator validation,
-/// not a rule of that section. allocation_end is tensor_dma_lds_allocation_end(wf).
+/// bytes silently. That section also reports the LDS violation as a MEMVIOL after the descriptor
+/// is processed when LDS_CONFIG.ADDR_OUT_OF_RANGE_REPORTING == 1; that reporting is not modeled.
+/// Requiring the atomic-barrier cell to lie within the allocation is simulator validation, not a
+/// rule of that section. allocation_end is tensor_dma_lds_allocation_end(wf).
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
                                                     const Wavefront &wf, bool store_from_lds,
@@ -574,10 +576,11 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_alloc
   }
 
   // An out-of-range LDS address does not abort the transfer (CDNA5 ISA 10.11.6). The ISA
-  // does not say how an element that straddles the end of the allocation is handled, nor what a
-  // store reads from out-of-range LDS. As modeling choices, the simulator keeps the element's
-  // in-range leading bytes and drops the rest, and a store reads the dropped bytes as zero, like
-  // other out-of-range LDS loads.
+  // does not establish the width of the LDS address calculation, nor say how an element that
+  // straddles the end of the allocation is handled or what a store reads from out-of-range LDS.
+  // As modeling choices, the simulator forms the address in 64 bits, so it never wraps back into
+  // LDS; keeps a straddling element's in-range leading bytes and drops the rest; and has a store
+  // read the dropped bytes as zero, like other out-of-range LDS loads.
   const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
   const uint64_t lds_bytes =
       lds_address < lds_allocation_end
