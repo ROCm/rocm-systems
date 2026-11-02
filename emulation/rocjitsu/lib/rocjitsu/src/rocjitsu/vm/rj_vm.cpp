@@ -283,7 +283,15 @@ rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json, const char 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    auto group = PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "");
+    util::StringDiagnostic diagnostic;
+    util::FailureOr<std::shared_ptr<ExecutionPluginGroup>> configured =
+        PluginLoader::configure_plugin_group(config_json, plugin_dir ? plugin_dir : "",
+                                             diagnostic.emitter());
+    if (configured.failed()) {
+      util::Logger::warn("rj_vm_load_plugins failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_ERROR;
+    }
+    std::shared_ptr<ExecutionPluginGroup> group = std::move(configured).value();
     // rj_vm_load_plugins() is a pre-run operation, so replacing and initializing
     // the group cannot overlap simulation callbacks.
     shutdown_plugin_group(vm);
