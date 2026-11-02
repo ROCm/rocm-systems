@@ -244,7 +244,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width_v<T>;
-      auto checked_mask = RegisterAccess::checked_store_lane_mask(
+      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed())
         return Result::failure();
@@ -282,7 +282,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width64;
-      auto checked_mask = RegisterAccess::checked_store_lane_mask(
+      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed())
         return Result::failure();
@@ -347,7 +347,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width64;
-      auto checked_mask =
+      FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
       if (checked_mask.failed())
@@ -427,7 +427,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width_v<T>;
-      auto checked_mask = RegisterAccess::checked_store_lane_mask(
+      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed())
         return Result::failure();
@@ -466,7 +466,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width64;
-      auto checked_mask = RegisterAccess::checked_store_lane_mask(
+      FailureOr<uint64_t> checked_mask = RegisterAccess::checked_store_lane_mask(
           *wf_, permitted_write_lane_mask_, lane_base, W, lane_mask, static_cast<bool>(storage_));
       if (checked_mask.failed())
         return Result::failure();
@@ -555,7 +555,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width64;
-      auto checked_mask =
+      FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
       if (checked_mask.failed())
@@ -720,7 +720,7 @@ public:
       if (wf_->instruction_execution_failed())
         return Result::failure();
       constexpr std::size_t W = util::native_width_v<T>;
-      auto checked_mask =
+      FailureOr<uint64_t> checked_mask =
           RegisterAccess::checked_store_lane_mask(*wf_, permitted_write_lane_mask_, lane_base, W,
                                                   lane_mask, static_cast<bool>(storage_.lo));
       if (checked_mask.failed())

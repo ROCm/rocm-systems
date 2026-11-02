@@ -1825,7 +1825,8 @@ TEST(RegisterAccessTest, RejectedReadRegionsReportIssuingWaveAtInstructionBounda
   fx.cu->write_vgpr(destination, 0, 0xAABBCCDDu);
   fx.cu->write_vgpr(neighbor_base, 0, 0x11223344u);
 
-  struct RejectedRead : Instruction {
+  class RejectedRead : public Instruction {
+  public:
     uint32_t source_base;
     bool snapshot;
     std::array<uint8_t, 1> bytes{0xA5};
