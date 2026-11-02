@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Scalar FP16/BF16 encoding conversions.
+// Scalar FP16/BF16 and FP8/BF8 encoding conversions.
 // Kept independent of util conversions: GPU rounding and special-value policies
 // can differ by architecture, and CPU SIMD implementations share these contracts.
 // Internal helpers; not part of the public C API.
@@ -9,11 +9,12 @@
 #ifndef RJ_ARITH_FLOAT_FORMATS_H_
 #define RJ_ARITH_FLOAT_FORMATS_H_
 
+#include "common/bits.h"
 #include "common/internal.h"
 
 #include <stdint.h>
 
-namespace rocjitsu::arith {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Widen a BF16 encoding to FP32, retaining its sign, payload, and subnormal bits.
 inline float bf16_to_float(uint16_t bits) { return as_float(uint32_t(bits) << 16); }
@@ -76,6 +77,39 @@ inline uint16_t float_to_f16(float value, bool saturate = false) {
   return uint16_t(sign | (uint32_t(adjusted) << 10) | rounded);
 }
 
-} // namespace rocjitsu::arith
+// OCP FP8 E4M3FN and BF8 E5M2, adapted from rocjitsu util/data_types.h.
+// E4M3FN's top exponent remains finite except codes 0x7f/0xff; E5M2 has
+// infinities. Neither uses the FNUZ encoding. All finite values widen exactly.
+template <bool Bf8> inline float fp8_to_float(uint8_t bits) {
+  constexpr int fraction_bits = Bf8 ? 2 : 3;
+  constexpr int bias = Bf8 ? 15 : 7;
+  constexpr int max_exponent = Bf8 ? 31 : 15;
+  uint32_t sign = uint32_t(bits & 0x80) << 24;
+  int exponent = (bits & 0x7f) >> fraction_bits;
+  uint32_t fraction = bits & ((1u << fraction_bits) - 1);
+  if (exponent == max_exponent) {
+    if ((Bf8 && fraction) || (!Bf8 && fraction == 7)) {
+      return as_float(sign | 0x7fc00000);
+    }
+    if constexpr (Bf8) {
+      return as_float(sign | 0x7f800000);
+    }
+  }
+  if (!exponent) {
+    if (!fraction) {
+      return as_float(sign);
+    }
+    exponent = 1;
+    while (!(fraction & (1u << fraction_bits))) {
+      fraction <<= 1;
+      --exponent;
+    }
+    fraction &= (1u << fraction_bits) - 1;
+  }
+  return as_float(sign | (uint32_t(exponent + 127 - bias) << 23) |
+                  (fraction << (23 - fraction_bits)));
+}
+
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
 
 #endif

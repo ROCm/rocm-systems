@@ -28,6 +28,7 @@ HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properti
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
+      batch_limit_(device.SubmissionBatchLimit()),
       isActive_(false),
       sync_policy_(amd::SyncPolicy::Auto) {
   if (GPU_FORCE_QUEUE_PROFILING) {
@@ -129,7 +130,7 @@ bool HostQueue::terminate() {
 }
 
 void HostQueue::FlushSubmissionBatch() {
-  if (size_ > DEBUG_CLR_MAX_BATCH_SIZE) {
+  if (size_ > batch_limit_) {
     auto marker = new Marker(*this, false);
     if (marker != nullptr) {
       marker->enqueue();
@@ -204,9 +205,11 @@ void HostQueue::finish(bool cpu_wait) {
     command->enqueue();
   }
 
-  // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status
+  // Check HW status of the ROCclr event. Note: not all ROCclr modes support HW status. A marker
+  // with CPU wait has already completed its batch, itself included, when enqueue returns.
   static constexpr bool kWaitCompletion = true;
-  if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
+  if (cpu_wait || ((command->status() != CL_COMPLETE) &&
+                   !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy()))) {
     ClPrint(LOG_DETAIL_DEBUG, LOG_CMD,
             "No HW event or batch size is less than %zu, "
             "await command completion",

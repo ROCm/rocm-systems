@@ -1079,9 +1079,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -1616,6 +1616,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -2982,7 +2997,7 @@
       "num_nodes": 1,
       "num_gpus": 2,
       "timeout": 180,
-      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (kernel >= 6.8, ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
+      "description": "NCCL_CHECK_MODE validation (AICOMRCCL-806). The SymAbort_Kernel abort tests exist in the binary but are omitted here until CI has a host with working cuMem VMM (ROCm >= 7.12 driver), where the symmetric kernels actually park and ncclCommAbort can release them. Each test runs as its own process.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
         "NCCL_CUMEM_ENABLE": "1",
@@ -3783,8 +3798,11 @@
         },
         {
           "name": "CE_Internal_Launch",
-          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
-          "test_filter": "CeInternalMPITest.Launch*"
+          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly; chunked unequal sizes copy without overrun",
+          "test_filter": "CeInternalMPITest.Launch*",
+          "env_variables": {
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
+          }
         },
         {
           "name": "CE_Internal_Neg",
@@ -4935,7 +4953,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv:GinMPIDeviceTests.Log_ReportsUsedBackend:GinMPIDeviceTests.Timeout_*",
           "timeout": 600
         },
         {
@@ -5001,6 +5019,11 @@
           "name": "GIN_Log_ReportsUsedBackend",
           "description": "GIN logs the backend each DevComm uses (IB proxy, NCCL_GIN_TYPE=2)",
           "test_filter": "GinMPIDeviceTests.Log_ReportsUsedBackend"
+        },
+        {
+          "name": "GIN_DeviceMPI_Timeouts",
+          "description": "Device-side timeouts over the IB proxy: flush, flushAsync + wait, waitSignal (indexed and VA), waitCounter and their C entry points",
+          "test_filter": "GinMPIDeviceTests.Timeout_*"
         }
       ]
     },
@@ -5566,6 +5589,12 @@
       "name": "Unit Tests - GIN-SDMA policy",
       "description": "All rccl-UnitTestsGinSdmaPolicy cases",
       "config": "unit_tests_gin_sdma_policy",
+      "enabled": true
+    },
+    {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
       "enabled": true
     },
     {

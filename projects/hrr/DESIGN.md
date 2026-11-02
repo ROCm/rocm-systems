@@ -573,8 +573,12 @@ embedded device pointers, and replay translates them without the device-address 
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
 otherwise; then it queues a host function that copies the blobs in on the launch stream,
-ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
-wait for every stream, so the allocation outlives a queued copy. The summary prints
+ahead of the kernel, without waiting for the stream. Replay does not rely on the runtime's
+wait inside a free, which covers only the allocating device's streams. A kernel launch
+takes `host_free_mu` shared before it hands the global turn on and holds it until its
+launch call returns; `hipHostFree`, `hipFreeHost` and `hipHostUnregister` (and `hipFree`) take it
+exclusive across the map removal and the free. A free on the next sequence number therefore
+waits until the launch has resolved the destination and queued its copy. The summary prints
 restored, refused and skipped counts.
 
 Kept deliberately simple:
@@ -589,7 +593,9 @@ Kept deliberately simple:
   the application's graphs.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
-  `unreplayable_apis`.
+  `unreplayable_apis`. A snapshot over `HIP_HRR_CAPTURE_MAX_BLOB_MB` is recorded with a
+  zero hash on every launch that reads it, and replay refuses that launch outside a
+  stream capture.
 - Replay restores nothing for a launch replayed into a capturing stream, and capture does
   not snapshot at graph launch. A record for a launch into a capturing stream does not
   become the allocation's last, so the next launch outside the capture records again.
@@ -732,6 +738,37 @@ args translating correctly indicates a **data** divergence (a buffer's *contents
 differ at replay so the kernel computes an out-of-bounds index), not an argument
 capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` (Debug runtime) that the nulls
 are genuine before suspecting the `<<<>>>` / kernarg capture path.
+
+### Arguments are checked against the kernel's signature
+
+The archive is input, and a launch record does not have to agree with the code
+object it names. HIP walks the loaded kernel's full signature and copies
+`size` bytes out of `kernelParams[i]` for every parameter, except that it reads 8
+bytes for a pointer parameter whatever size the code object declares. A record with
+fewer arguments than the kernel declares, or an argument narrower than its
+parameter, is an over-read of replay's own argument vectors. Extra arguments and
+wider ones are never read. The 8-byte pointer read is why every decoded argument
+carries 8 zeroed bytes past its recorded size, and why the Sp3 kernarg buffer is
+allocated 8 bytes longer than the size passed as `HIP_LAUNCH_PARAM_BUFFER_SIZE`
+(CLR checks `offset + size` against that size only); the signature check still
+compares recorded sizes. After resolving the kernel, replay reads its signature with
+`hipKernelGetParamInfo` and refuses the launch (`hipErrorInvalidValue`, one
+`[HRR] ... seq=<n> ... launch refused` line naming the mismatch) unless the decoded
+record has at least as many arguments and each is at least as wide as its
+parameter. A payload that ends before its declared arguments decodes fewer of them: an
+argument the payload cuts short is dropped whole, never stored narrower, so
+truncation is refused only when it leaves fewer arguments than the kernel
+declares. The read ends on a call one index past
+the last parameter, which answers `hipErrorInvalidValue`; replay clears it so it
+does not stay as HIP's last error. The graph kernel-node paths apply the same check: an add skips the node and
+marks its graph incomplete; a set-params call (graph or exec) returns
+`hipErrorInvalidValue`, like a refused launch, because the node would otherwise
+keep its old arguments. The exception is a record whose own recorded result is
+`hipErrorInvalidValue` (capture records a set-params call even when HIP refused
+it): that failure is reproduced faithfully and the call returns `hipSuccess`. A `--replace-kernel` code object is checked against the
+recorded arguments the same way, so a replacement may not declare more parameters,
+or wider ones, than the record carries. The runtime exposes each parameter's size and offset but
+not its type, so the type is not compared.
 
 ## Fat Binary Registration
 
