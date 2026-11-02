@@ -865,6 +865,15 @@ void CommandProcessor::startup() {
 
 void CommandProcessor::shutdown() {
   stop_doorbell_monitor();
+  // An instruction failure stops the engine before peer doorbell events may
+  // run. Engine workers have joined, so finish cancelling those shards here.
+  drain_dispatch_fault_inbox();
+  {
+    std::lock_guard lock(hw_queue_mutex_);
+    assert(!dispatch_workers_active_ && "engine shutdown must follow the CU worker join");
+    // A host exception can unwind the doorbell handler before its normal drain.
+    drain_pending_queue_failures();
+  }
   retry_event_pending_.store(false, std::memory_order_release);
   stall_recheck_pending_ = false;
   stall_recheck_tick_ = simdojo::TICK_MAX;
@@ -959,10 +968,8 @@ void CommandProcessor::notify_execution_failure(uint32_t queue_id, uint32_t proc
       sim->request_exit(reason, 1);
   };
   for (auto *peer : peers)
-    peer->accept_dispatch_fault({.queue_id = queue_id,
-                                 .process_id = process_id,
-                                 .outcome = VmAccessOutcome::Malformed,
-                                 .on_cancelled = completed});
+    peer->accept_dispatch_fault(
+        {.queue_id = queue_id, .process_id = process_id, .on_cancelled = completed});
 }
 
 void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
@@ -982,42 +989,11 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
   }
   for (const DispatchFaultNotification &fault : faults) {
     if (!fault.on_cancelled) {
-      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                 fault.outcome);
+      (void)fault_queue_local(fault.queue_id, fault.process_id,
+                              static_cast<uint32_t>(fault.dispatch_id));
       continue;
     }
-    {
-      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-      auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
-        return candidate.queue_id == fault.queue_id && candidate.process_id == fault.process_id;
-      });
-      if (queue != compute_queues_.end()) {
-        queue->faulted = true;
-        for (auto &entry : queue->entries) {
-          entry.terminal_faulted = true;
-          dispatch_launch_metadata_.erase(entry.dispatch_id);
-          erase_cluster_workgroups(entry.dispatch_id);
-          if (entry.grid_completion)
-            entry.grid_completion->mark_faulted();
-        }
-        // Abort, rather than halt, so no workgroup completion can publish success.
-        for (auto *cu : cus_) {
-          cu->with_wave_state_locked([&] {
-            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-              auto *wave = cu->wf(slot);
-              if (wave && !wave->is_halted() && wave->queue_id() == fault.queue_id &&
-                  wave->process_id() == fault.process_id)
-                cu->abort_dispatch(wave->dispatch_id());
-            }
-          });
-        }
-        // Native PM4 submissions deliver their failed callback/fence here, before
-        // the last replica acknowledges cancellation and stops the engine.
-        fail_pm4_queue(*queue, queue->dispatches);
-        queue->entries.clear();
-        queue->next_dispatch_idx = 0;
-      }
-    }
+    (void)fault_queue_local(fault.queue_id, fault.process_id);
     fault.on_cancelled();
   }
 }
@@ -1487,6 +1463,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     // way -- a CU-side call back into the CP while the wave-state lock is held
     // would deadlock a DESTROY_QUEUE against the engine worker.
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    assert(!dispatch_workers_active_ && "queue close must follow the CU worker join");
     const std::vector<ComputeQueueRecord>::iterator queue =
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
     if (queue == compute_queues_.end())
@@ -1506,21 +1483,14 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     if (!retry_close) {
       queue_id = queue->queue_id;
       process_id = queue->process_id;
-      for (auto *cu : cus_) {
-        cu->with_wave_state_locked([&] {
-          for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-            auto *wave = cu->wf(slot);
-            if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-                wave->queue_id() == queue_id)
-              wave->halt();
-          }
-        });
-      }
+      cancel_queue_dispatches(*queue);
       drop_replicas = queue->xcd_fanout;
       for (const DispatchEntry &entry : queue->entries)
         dispatch_launch_metadata_.erase(entry.dispatch_id);
       // Cancel every child stream before releasing the queue's VM lease.
-      if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
+      if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty() ||
+          std::ranges::find(pending_queue_failures_, registration_id) !=
+              pending_queue_failures_.end())
         fail_pm4_queue(*queue, queue->dispatches);
       // Any shares still unpublished here are simply dropped. They cannot be
       // credited to the grid from this thread: publish_share is the release edge
@@ -2691,26 +2661,28 @@ bool CommandProcessor::drain_completions() {
   return !stop_processing;
 }
 
-bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
-                                            uint64_t dispatch_id, VmAccessOutcome outcome) {
-  bool found = false;
+bool CommandProcessor::fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                                         std::optional<uint32_t> failed_dispatch_id) {
+  bool found_in_transit = false;
   {
-    // A shard may still be in transit from its owner. Remove it under the leaf
-    // inbox lock without taking the queue lock, preserving the existing
-    // cross-CP lock ordering.
+    // Cancel in-transit shards as well as admitted work. Keep the leaf inbox
+    // lock separate from the queue lock to preserve cross-CP lock ordering.
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
-    const size_t old_size = fanout_inbox_.size();
-    std::erase_if(fanout_inbox_, [&](DispatchEntry &entry) {
-      if (entry.queue_id != queue_id || entry.process_id != process_id ||
-          entry.dispatch_id != dispatch_id)
-        return false;
-      entry.terminal_faulted = true;
-      if (entry.grid_completion)
-        entry.grid_completion->mark_faulted();
-      fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
-      return true;
-    });
-    found = fanout_inbox_.size() != old_size;
+    found_in_transit =
+        !failed_dispatch_id || std::ranges::any_of(fanout_inbox_, [&](const auto &entry) {
+          return entry.queue_id == queue_id && entry.process_id == process_id &&
+                 entry.dispatch_id == *failed_dispatch_id;
+        });
+    if (found_in_transit)
+      std::erase_if(fanout_inbox_, [&](DispatchEntry &entry) {
+        if (entry.queue_id != queue_id || entry.process_id != process_id)
+          return false;
+        entry.terminal_faulted = true;
+        if (entry.grid_completion)
+          entry.grid_completion->mark_faulted();
+        fanout_launch_metadata_inbox_.erase(entry.dispatch_id);
+        return true;
+      });
   }
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
@@ -2721,59 +2693,61 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (queue == compute_queues_.end())
     return false;
   ComputeQueueRecord &state = *queue;
-
-  size_t index = 0;
-  for (std::deque<DispatchEntry>::iterator entry = state.entries.begin();
-       entry != state.entries.end();) {
-    if (entry->dispatch_id != dispatch_id) {
-      ++entry;
-      ++index;
-      continue;
-    }
-    found = true;
-    entry->terminal_faulted = true;
-    if (entry->grid_completion)
-      entry->grid_completion->mark_faulted();
-    if (index < state.next_dispatch_idx)
-      --state.next_dispatch_idx;
-    entry = state.entries.erase(entry);
-  }
-  if (!found)
+  // Queue IDs can be reused after teardown. A delayed dispatch fault must not
+  // cancel a new registration which never admitted that dispatch. Shards still
+  // in transit are discarded by drain_fanout_inbox once this queue is faulted.
+  if (failed_dispatch_id && !found_in_transit &&
+      !std::ranges::any_of(state.entries, [&](const DispatchEntry &entry) {
+        return entry.dispatch_id == *failed_dispatch_id;
+      }))
     return false;
 
-  dispatch_launch_metadata_.erase(static_cast<uint32_t>(dispatch_id));
-  queue->faulted = true;
-  // A peer fault can cancel an AQL entry while its vendor PM4 stream is blocked.
-  // Release that stream and its VM snapshot along with the owning dispatch.
-  if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
-    fail_pm4_queue(state, state.dispatches);
-  util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal dispatch fault pid={} qid={} dispatch={} outcome={}", name(),
-                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
-  });
-  erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
-  for (ComputeUnitCore *cu : cus_)
-    cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  for (DispatchEntry &entry : state.entries) {
+    entry.terminal_faulted = true;
+    if (entry.grid_completion)
+      entry.grid_completion->mark_faulted();
+  }
+  // A dispatch fault ends the queue. Cancel every outstanding entry, including
+  // earlier admitted kernels and trailing barriers, so no remaining work can
+  // publish completion for the failed queue. This also releases cluster pins,
+  // SPI reservations and blocked vendor PM4.
+  fail_pm4_queue(state, state.dispatches);
+  for (const DispatchEntry &entry : state.entries)
+    dispatch_launch_metadata_.erase(entry.dispatch_id);
+  state.entries.clear();
+  state.next_dispatch_idx = 0;
   return true;
 }
 
 void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id,
                                                 uint64_t dispatch_id, VmAccessOutcome outcome) {
-  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable ||
-      dispatch_id > std::numeric_limits<uint32_t>::max())
+  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable)
+    return;
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+  });
+  notify_dispatch_failure(queue_id, process_id, dispatch_id);
+}
+
+void CommandProcessor::notify_dispatch_failure(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t dispatch_id) {
+  if (dispatch_id > std::numeric_limits<uint32_t>::max())
     return;
 
-  if (!fault_dispatch_local(queue_id, process_id, dispatch_id, outcome))
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal dispatch failure pid={} qid={} dispatch={}", name(), process_id,
+                      queue_id, dispatch_id);
+  });
+  if (!fault_queue_local(queue_id, process_id, static_cast<uint32_t>(dispatch_id)))
     return;
   // A fault can originate on any shard. Cross-XCD delivery uses a leaf inbox
   // and the peer's event thread, exactly like dispatch fan-out, so this path
   // never acquires another CP's queue mutex.
   for (CommandProcessor *peer : xcd_peers_) {
     if (peer != nullptr && peer != this) {
-      peer->accept_dispatch_fault({.queue_id = queue_id,
-                                   .process_id = process_id,
-                                   .dispatch_id = dispatch_id,
-                                   .outcome = outcome});
+      peer->accept_dispatch_fault(
+          {.queue_id = queue_id, .process_id = process_id, .dispatch_id = dispatch_id});
     }
   }
 }
@@ -3349,30 +3323,77 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   return util::Result::success();
 }
 
-void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
-  queue.faulted = true;
-  for (auto &entry : queue.entries)
-    if (entry.grid_completion)
-      entry.grid_completion->mark_faulted();
-  // The CP owns the queue lock and CU workers have rejoined. Stop all resident
-  // waves before releasing the submission's BO references or publishing failure.
+void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) {
+  // Include queued and reserved workgroups as well as resident waves. A CU may
+  // already have aborted every wave before the CP observes the failure.
+  std::unordered_set<uint32_t> dispatch_ids;
+  for (const auto &entry : queue.entries)
+    dispatch_ids.insert(entry.dispatch_id);
+  for (const auto &entry : queue.dispatches.entries)
+    dispatch_ids.insert(entry.dispatch_id);
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
             wave->queue_id() == queue.queue_id)
-          wave->halt();
+          dispatch_ids.insert(wave->dispatch_id());
       }
     });
   }
-  flush_gpu_caches();
+  // Abort all waves without successful completion notifications. The CP owns
+  // cluster pins and SPI reservations, which normal retirement would release.
+  for (uint32_t dispatch_id : dispatch_ids) {
+    erase_cluster_workgroups(dispatch_id);
+    for (auto *cu : cus_)
+      cu->abort_dispatch(dispatch_id);
+    for (auto *spi : spis_)
+      spi->release_wgp_dispatch(dispatch_id);
+  }
+}
+
+void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
+  queue.faulted = true;
+  for (auto &entry : queue.entries)
+    if (entry.grid_completion)
+      entry.grid_completion->mark_faulted();
+  // A CU can report a fault before its sibling workers finish. Stop the queue's
+  // waves now, but retain submission backing until cache maintenance is safe.
+  cancel_queue_dispatches(queue);
   qs.entries.clear();
+  if (dispatch_workers_active_) {
+    if (std::ranges::find(pending_queue_failures_, queue.registration_id) ==
+        pending_queue_failures_.end())
+      pending_queue_failures_.push_back(queue.registration_id);
+    return;
+  }
+  flush_gpu_caches();
+  // A prior worker exception may have left this queue's finalization deferred.
+  std::erase(pending_queue_failures_, queue.registration_id);
+  complete_failed_queue(queue);
+}
+
+void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
   for (auto &submission : queue.commands.submissions)
     if (submission.complete)
       submission.complete(false);
   queue.commands.submissions.clear();
   queue.command_access.reset();
+}
+
+void CommandProcessor::drain_pending_queue_failures() {
+  assert(!dispatch_workers_active_);
+  if (pending_queue_failures_.empty())
+    return;
+  std::vector<uint64_t> registrations;
+  registrations.swap(pending_queue_failures_);
+  flush_gpu_caches();
+  for (uint64_t registration_id : registrations) {
+    const std::vector<ComputeQueueRecord>::iterator queue =
+        std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
+    if (queue != compute_queues_.end())
+      complete_failed_queue(*queue);
+  }
 }
 
 void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs,
@@ -4714,10 +4735,31 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
         pooled_due_ticks_.empty())
       return FunctionalQuantumResult{};
 
-    lock.unlock();
-    FunctionalQuantumResult result = run_active_cus_once(now);
-    lock.lock();
+    class DispatchWorkerBatch {
+    public:
+      DispatchWorkerBatch(std::unique_lock<std::recursive_mutex> &queue_lock, bool &active)
+          : queue_lock_(queue_lock), active_(active) {
+        active_ = true;
+        queue_lock_.unlock();
+      }
+      DispatchWorkerBatch(const DispatchWorkerBatch &) = delete;
+      DispatchWorkerBatch &operator=(const DispatchWorkerBatch &) = delete;
+      ~DispatchWorkerBatch() {
+        queue_lock_.lock();
+        active_ = false;
+      }
 
+    private:
+      std::unique_lock<std::recursive_mutex> &queue_lock_;
+      bool &active_;
+    };
+    FunctionalQuantumResult result;
+    {
+      DispatchWorkerBatch batch(lock, dispatch_workers_active_);
+      result = run_active_cus_once(now);
+    }
+
+    drain_pending_queue_failures();
     drain_pending_cluster_barrier_completions();
     drain_pending_wg_completions();
     if (!drain_completions())
@@ -4933,19 +4975,20 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
 }
 
 void CommandProcessor::flush_gpu_caches() {
+  assert(!dispatch_workers_active_ && "cache maintenance must follow the CU worker join");
+  // Runtime wave-state snapshots can flush these caches after the workers join,
+  // so each CU maintenance call takes that CU's lock.
   // Both L1 caches are write-through, so discard their clean snapshots around
   // direct backing writes. Flush dirty L2 data before the direct write so a
   // later L2 flush cannot overwrite it.
   for (auto *cu : cus_)
-    cu->l1_scalar().invalidate_all();
+    cu->invalidate_scalar_cache();
   for (auto *l2 : l2_caches_)
     l2->flush_all();
-  for (auto *cu : cus_) {
-    cu->l1_vector().invalidate_all();
-    // A direct backing write may land on code, and the I$ is not coherent with
-    // data writes any more than the hardware one is.
-    cu->instruction_cache().invalidate_all();
-  }
+  // A direct backing write may land on code, and the I$ is not coherent with
+  // data writes any more than the hardware one is.
+  for (auto *cu : cus_)
+    cu->invalidate_vector_and_instruction_caches();
 }
 
 } // namespace amdgpu

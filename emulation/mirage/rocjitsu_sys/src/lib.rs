@@ -134,8 +134,8 @@ pub enum RjVmMode {
     Default = 0,
     /// Single-process serving for an LD_PRELOAD interposer (in-process).
     Local = 1,
-    /// Multi-process serving (daemon): GPU allocations are memfd-backed
-    /// for cross-process sharing via `SCM_RIGHTS`.
+    /// Multi-process serving (daemon): GPU allocations use shareable backing
+    /// handles (memfds or opaque tokens) transferable via `SCM_RIGHTS`.
     Daemon = 2,
 }
 
@@ -151,7 +151,7 @@ pub struct RjVmCmd {
     pub buf_size: usize,
     /// `[out]` Return code (0 on success, negative errno on failure).
     pub result: i32,
-    /// `[out]` Backing handle for shareable allocations, or -1.
+    /// `[out]` Borrowed backing handle, or -1; map with `Lib::vm_map_shared_mem`.
     pub shared_handle: RjHandle,
     /// `[in/out]` Client-provided fd (e.g. a debugger notifier), or -1.
     /// In daemon mode the VM substitutes it into DBG_TRAP ENABLE and, on
@@ -171,7 +171,8 @@ pub struct RjVmMap {
     pub addr: u64,
     /// Length in bytes to map.
     pub length: u64,
-    /// Platform-specific offset encoding.
+    /// Platform/KFD-encoded offset for `rj_vm_device_map{,_as}`; page-aligned byte
+    /// offset within the backing for `rj_vm_map_shared_mem`.
     pub offset: i64,
     /// Memory protection flags.
     pub prot: u32,
@@ -393,6 +394,7 @@ type FnVmGpuInfo = unsafe extern "C" fn(*mut RjVm, *mut RjVmGpuInfo) -> RjStatus
 type FnVmTopologyPath = unsafe extern "C" fn(*mut RjVm, *mut *const c_char) -> RjStatus;
 type FnVmDrmPath = unsafe extern "C" fn(*mut RjVm, *mut *const c_char) -> RjStatus;
 type FnVmGetSharedMemAs = unsafe extern "C" fn(*mut RjVm, u32, i64, *mut RjHandle) -> RjStatus;
+type FnVmMapSharedMem = unsafe extern "C" fn(RjHandle, *mut RjVmMap) -> RjStatus;
 type FnDaemonStart =
     unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut RjDaemon) -> RjStatus;
 type FnDaemonStop = unsafe extern "C" fn(*mut RjDaemon) -> RjStatus;
@@ -429,6 +431,7 @@ pub struct Lib {
     vm_topology_path: FnVmTopologyPath,
     vm_drm_path: FnVmDrmPath,
     vm_get_shared_mem_as: FnVmGetSharedMemAs,
+    vm_map_shared_mem: Option<FnVmMapSharedMem>,
     daemon_start: FnDaemonStart,
     daemon_stop: FnDaemonStop,
     daemon_status: FnDaemonStatus,
@@ -453,6 +456,7 @@ impl fmt::Debug for Lib {
         f.debug_struct("Lib")
             .field("vm_load_plugins", &self.vm_load_plugins.is_some())
             .field("vm_gpu_info", &self.vm_gpu_info.is_some())
+            .field("vm_map_shared_mem", &self.vm_map_shared_mem.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -493,6 +497,10 @@ impl Lib {
             let vm_drm_path = *lib.get::<FnVmDrmPath>(b"rj_vm_drm_path\0")?;
             let vm_get_shared_mem_as =
                 *lib.get::<FnVmGetSharedMemAs>(b"rj_vm_get_shared_mem_as\0")?;
+            let vm_map_shared_mem = lib
+                .get::<FnVmMapSharedMem>(b"rj_vm_map_shared_mem\0")
+                .map(|symbol| *symbol)
+                .ok();
             let daemon_start = *lib.get::<FnDaemonStart>(b"rj_daemon_start\0")?;
             let daemon_stop = *lib.get::<FnDaemonStop>(b"rj_daemon_stop\0")?;
             let daemon_status = *lib.get::<FnDaemonStatus>(b"rj_daemon_status\0")?;
@@ -513,6 +521,7 @@ impl Lib {
                 vm_topology_path,
                 vm_drm_path,
                 vm_get_shared_mem_as,
+                vm_map_shared_mem,
                 daemon_start,
                 daemon_stop,
                 daemon_status,
@@ -711,8 +720,10 @@ impl Lib {
         Some(unsafe { CStr::from_ptr(ptr) })
     }
 
-    /// Get the backing memory handle (memfd) for `process_id` at the
+    /// Get the borrowed backing memory handle for `process_id` at the
     /// given KFD mmap `offset`, or `None` when there is no backing fd.
+    /// The handle may be an opaque token: map it with `Self::vm_map_shared_mem`,
+    /// not libc `mmap`, and do not close the VM-owned descriptor.
     ///
     /// # Safety
     /// `vm` must be a live handle.
@@ -728,6 +739,36 @@ impl Lib {
             return None;
         }
         Some(handle)
+    }
+
+    /// Map a backing handle into the caller without preloading rocjitsu.
+    ///
+    /// Retain the allocation size separately and transfer it alongside the
+    /// descriptor with `SCM_RIGHTS`. Host `fstat` sees a zero-size socket for a
+    /// token, and host `lseek` cannot query its backing size. Choose the view's
+    /// offset and length from the retained allocation size.
+    ///
+    /// Use `MAP_SHARED`, optionally with `MAP_FIXED`, `MAP_FIXED_NOREPLACE`, or
+    /// `MAP_32BIT` where available. Other flags fail with `EINVAL`. The offset
+    /// must be a nonnegative page-aligned byte offset within the allocation,
+    /// not its KFD mmap offset; the nonempty view must fit within the backing.
+    /// On success, `map.mapped_addr` is caller-owned
+    /// and may be released with host `munmap`. A mapping error returns
+    /// `ROCJITSU_STATUS_ERROR` and sets `map.map_errno`. Older libraries
+    /// without this entry point return `ROCJITSU_STATUS_UNSUPPORTED` and
+    /// leave `map` unchanged.
+    ///
+    /// # Safety
+    /// `handle` must remain valid for the call. The requested address and
+    /// protection must be safe for the host process, including any fixed
+    /// mapping replacement. Stop simulator access before unmapping or changing
+    /// the view's protections. Token mappings also require a live keeper,
+    /// the same IPC namespace, and current System V IPC permissions.
+    pub unsafe fn vm_map_shared_mem(&self, handle: RjHandle, map: &mut RjVmMap) -> RjStatus {
+        let Some(map_shared) = self.vm_map_shared_mem else {
+            return ROCJITSU_STATUS_UNSUPPORTED;
+        };
+        unsafe { map_shared(handle, map) }
     }
 
     /// Start a daemon and return its opaque handle.

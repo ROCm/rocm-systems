@@ -12,6 +12,7 @@
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
 #include "alloc.h"
 #include "comm.h"
+#include "gdrwrap.h"
 #include "utils.h"
 #include "profiler.h"
 
@@ -83,10 +84,12 @@ void ResetCommFakes() {
   g_profilerStopCeCollEvent = DefaultProfilerCeCollEvent;
   g_commEnsureReadyResult = ncclSuccess;
   g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
+  ncclGdrCopy = nullptr;
 }
 
 // --- Comm globals (real in init.cc) ---------------------------------------
 enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
+gdr_t ncclGdrCopy = nullptr;
 
 // The per-launch resource params init.cc declares. collTaskAppend resolves the
 // task's CTA counts through them (env > per-call > comm), so they are referenced
@@ -115,6 +118,12 @@ ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { re
 ncclResult_t ncclProfilerStopGroupApiEvent() { return ncclSuccess; }
 ncclResult_t ncclProfilerStartCollApiEvent(struct ncclInfo*, bool) { return ncclSuccess; }
 ncclResult_t ncclProfilerStopCollApiEvent() { return ncclSuccess; }
+ncclResult_t ncclProfilerStartP2pApiEvent(struct ncclInfo*, bool) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopP2pApiEvent() {
+  return ncclSuccess;
+}
 ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCollArgs* args, hipStream_t stream) {
   return g_profilerStartCeCollEvent(comm, args, stream);
 }
