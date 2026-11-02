@@ -74,6 +74,13 @@ protected:
                                           : cdna4::kGlobalLoadLdsDwordx4Flat,
                                2, false, saddr, offset, true, vdst);
   }
+  std::array<uint32_t, 2> wide_global_encoding(unsigned dwords, unsigned saddr, int offset = 0) {
+    auto words = encoding(0, 2, false, saddr, offset);
+    const unsigned opcode =
+        dwords == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat : cdna4::kGlobalLoadLdsDwordx4Flat;
+    words[0] = (words[0] & ~(0x7fu << 18)) | (opcode << 18);
+    return words;
+  }
   void clear() {
     for (unsigned a = 0; a < 1408; a += 4)
       wave->lds().write32(a, 0xcccccccc);
@@ -196,6 +203,86 @@ TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
         }
       }
     }
+  }
+}
+
+TEST_P(FlatLdsTransfer, Cdna4WideGlobalLoadsUseSixteenByteLdsLaneStride) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS transfers are specific to CDNA4.";
+  constexpr uint64_t source_base = 0x100020000ULL;
+  for (unsigned dwords : {3u, 4u})
+    for (bool scalar_base : {false, true})
+      for (int offset : {-4, 0, 4})
+        for (uint64_t exec_mask : {uint64_t{0}, uint64_t{0x25}}) {
+          SCOPED_TRACE(testing::Message() << "dwords=" << dwords << " scalar_base=" << scalar_base
+                                          << " offset=" << offset << " exec=" << exec_mask);
+          clear();
+          wave->set_exec(exec_mask);
+          wave->set_m0(0xfffc0043); // Align M0 down and ignore bits above bit 17.
+          scalar(4, static_cast<uint32_t>(source_base));
+          scalar(5, static_cast<uint32_t>(source_base >> 32));
+          for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+            const unsigned source_slot = 64 + lane * 16;
+            const uint64_t address = source_base + source_slot - offset;
+            vector(2, lane, scalar_base ? source_slot - offset : static_cast<uint32_t>(address));
+            vector(3, lane, scalar_base ? 0 : static_cast<uint32_t>(address >> 32));
+            for (unsigned component = 0; component < 4; ++component) {
+              memory.write32(source_base + source_slot + component * 4,
+                             0x12340000u + lane * 16 + component);
+              vector(8 + component, lane, 0xdeadbeef);
+            }
+          }
+          ASSERT_NO_FATAL_FAILURE(
+              issue(wide_global_encoding(dwords, scalar_base ? 4 : 127, offset)));
+          EXPECT_EQ(wave->exec(), exec_mask);
+          for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+            const unsigned relative =
+                static_cast<unsigned>(64 + offset + static_cast<int>(lane) * 16);
+            const bool active = (exec_mask & (uint64_t{1} << lane)) != 0;
+            const bool fits = relative + dwords * 4 <= wave->lds_size();
+            for (unsigned component = 0; component < 4; ++component) {
+              const bool written = active && fits && component < dwords;
+              EXPECT_EQ(wave->lds().read32(128 + relative + component * 4),
+                        written ? 0x12340000u + lane * 16 + component : 0xccccccccu)
+                  << "lane=" << lane << " component=" << component;
+              EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8 + component, lane), 0xdeadbeefu);
+            }
+          }
+        }
+}
+
+TEST_P(FlatLdsTransfer, Cdna4WideGlobalLoadsCheckFullPayloadAgainstLdsBounds) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP() << "Wide GLOBAL LDS transfers are specific to CDNA4.";
+  for (unsigned dwords : {3u, 4u})
+    for (unsigned allocation_size : {11u, 12u, 15u, 16u, 27u, 28u, 31u, 32u}) {
+      SCOPED_TRACE(testing::Message() << "dwords=" << dwords << " size=" << allocation_size);
+      clear();
+      wave->set_exec(7);
+      wave->set_m0(0);
+      wave->set_lds_size(allocation_size);
+      for (unsigned lane = 0; lane < 3; ++lane) {
+        vector(2, lane, 0x20000 + lane * 16);
+        vector(3, lane, 0);
+        for (unsigned component = 0; component < 4; ++component)
+          memory.write32(0x20000 + lane * 16 + component * 4, 0x12340000u + lane * 16 + component);
+      }
+      ASSERT_NO_FATAL_FAILURE(issue(wide_global_encoding(dwords, 127)));
+      for (unsigned lane = 0; lane < 3; ++lane)
+        for (unsigned component = 0; component < 4; ++component) {
+          const bool written = lane * 16 + dwords * 4 <= allocation_size && component < dwords;
+          EXPECT_EQ(wave->lds().read32(128 + lane * 16 + component * 4),
+                    written ? 0x12340000u + lane * 16 + component : 0xccccccccu);
+        }
+    }
+}
+
+TEST_P(FlatLdsTransfer, Cdna3RejectsCdna4WideGlobalLoadEncodings) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "Checks the CDNA3 decoder boundary.";
+  for (unsigned dwords : {3u, 4u}) {
+    auto words = wide_global_encoding(dwords, 127);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
   }
 }
 

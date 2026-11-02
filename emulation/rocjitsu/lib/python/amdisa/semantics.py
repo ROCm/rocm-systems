@@ -2168,14 +2168,21 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
             )
     if upper.startswith('GLOBAL_LOAD_LDS_'):
         suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
-        info = _FLAT_DATA_MAP.get(suffix)
-        if info is not None and info[1] == 1:
-            size, count, signed = info
+        if suffix in (
+            'UBYTE',
+            'SBYTE',
+            'USHORT',
+            'SSHORT',
+            'DWORD',
+            'DWORDX3',
+            'DWORDX4',
+        ):
+            size, count, signed = _FLAT_DATA_MAP[suffix]
             return InstructionSemantics(
                 name,
                 'global_load_lds',
                 elem_size=size,
-                num_elems=1,
+                num_elems=count,
                 sign_extend=signed,
             )
     if upper == 'GLOBAL_INV':
