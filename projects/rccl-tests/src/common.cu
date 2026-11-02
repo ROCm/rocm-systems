@@ -806,45 +806,32 @@ static testResult_t deregisterTestWindows(
 }
 #endif
 
+// Must mirror the memorytype branches in AllocateBuffs.
+static testResult_t freeTestBuffer(void** buff) {
+  if (*buff == nullptr) return testSuccess;
+  if (memorytype == ncclHost) {
+    CUDACHECK(hipHostFree(*buff));
+  } else if (memorytype == ncclFine || memorytype == ncclManaged) {
+    CUDACHECK(cudaFree(*buff));
+  } else {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+    NCCLCHECK(ncclMemFree(*buff));
+#else
+    CUDACHECK(cudaFree(*buff));
+#endif
+  }
+  *buff = nullptr;
+  return testSuccess;
+}
+
 static testResult_t freeTestDeviceBuffers(
     void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
   for (int i = 0; i < count; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
-    if (sendbuffs[i]) {
-      NCCLCHECK(ncclMemFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      NCCLCHECK(ncclMemFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      NCCLCHECK(ncclMemFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      NCCLCHECK(ncclMemFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#else
-    if (sendbuffs[i]) {
-      CUDACHECK(cudaFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      CUDACHECK(cudaFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      CUDACHECK(cudaFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      CUDACHECK(cudaFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#endif
+    TESTCHECK(freeTestBuffer(&sendbuffs[i]));
+    TESTCHECK(freeTestBuffer(&recvbuffs[i]));
+    if (test_bias) TESTCHECK(freeTestBuffer(&bias[i]));
+    if (datacheck) TESTCHECK(freeTestBuffer(&expected[i]));
   }
   return testSuccess;
 }
