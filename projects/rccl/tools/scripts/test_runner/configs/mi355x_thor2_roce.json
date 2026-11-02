@@ -5635,7 +5635,7 @@
       "num_nodes": 1,
       "num_gpus": 3,
       "timeout": 300,
-      "description": "Symmetric AllReduce deep-loop peer rotation at rank counts that are not a multiple of its peer batch. NCCL_SYM_CTAS is cached on first read, so it is set here.",
+      "description": "Symmetric AllReduce deep-loop peer rotation at rank counts that are not a multiple of its peer batch.",
       "env_variables": {
         "NCCL_CUMEM_ENABLE": "1",
         "HSA_NO_SCRATCH_RECLAIM": "1",
