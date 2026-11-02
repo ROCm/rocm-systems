@@ -295,7 +295,7 @@ def _calculate_batch_size(total_files, max_output_files):
 
 def _process_batches(input_files, batch_size, output_folder, unique_str, **kwargs):
     """
-    Process database files in batches, merging or copying as needed.
+    Process database files in batches through the validated merge path.
 
     Args:
         input_files (list): List of input database file paths.
@@ -304,7 +304,7 @@ def _process_batches(input_files, batch_size, output_folder, unique_str, **kwarg
         unique_str: Unique identifier for merged filenames.
 
     Returns:
-        list: List of merged/copied database file paths.
+        list: List of merged database file paths.
     """
 
     merged_files = []
@@ -324,7 +324,7 @@ def _process_batches(input_files, batch_size, output_folder, unique_str, **kwarg
 
 def _merge_a_batch(batch_files, output_folder, output_filename, **kwargs):
     """
-    Merge multiple files or copy a single file to the output folder.
+    Validate and merge a batch, including a batch containing only one file.
 
     Args:
         batch_files (list): List of database files in this batch.
@@ -332,21 +332,15 @@ def _merge_a_batch(batch_files, output_folder, output_filename, **kwargs):
         output_filename (str): Name for the output file.
 
     Returns:
-        str: Path to the merged or copied file.
+        str: Path to the merged file.
     """
     from . import merge
 
-    dest_file = os.path.join(output_folder, output_filename)
-
-    if len(batch_files) > 1:
-        # Multiple files: merge them
-        args = {"output_path": output_folder, "output_file": output_filename}
-        return str(merge.execute(batch_files, **args))
-    else:
-        # Single file: just copy it (optimization)
-        # Because this is auto-merge, we want to just copy the file, don't just move it for the user.
-        shutil.copy2(batch_files[0], dest_file)
-        return str(dest_file)
+    # Copying only the main file of a singleton would discard any committed
+    # WAL state before the importer can inspect the original source. Use the
+    # same journal checks and trusted schema reconstruction for every batch.
+    args = {"output_path": output_folder, "output_file": output_filename}
+    return str(merge.execute(batch_files, **args))
 
 
 def create_metadata_file(db_files, output_path=".", metadata_filename="index.yaml"):
