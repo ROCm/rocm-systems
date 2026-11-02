@@ -33,6 +33,7 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_cvt_scale,
 )
 from amdisa.sema_fingerprint import fingerprint
+from amdisa.sema_properties import InstructionProperty, derive_properties
 
 
 class _FakeSem:
@@ -3368,6 +3369,30 @@ class TestDeriveControlFlow:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.pragma == ExecModel.BRANCH
+
+    @pytest.mark.parametrize(
+        ('name', 'enc_name', 'semantic_class', 'operation'),
+        [
+            ('S_CBRANCH_G_FORK', 'ENC_SOP2', 'cbranch_fork', 'indirect'),
+            ('S_CBRANCH_I_FORK', 'ENC_SOPK', 'cbranch_fork', 'direct'),
+            ('S_CBRANCH_JOIN', 'ENC_SOP1', 'cbranch_join', None),
+        ],
+    )
+    def test_fork_and_join_branch_regardless_of_exec_and_rewrite_it(
+        self, name, enc_name, semantic_class, operation
+    ):
+        sem = derive_semantics(name, enc_name)
+        assert sem is not None
+        assert sem.semantic_class == semantic_class
+        assert sem.operation == operation
+        block = derive_sema_block(sem)
+        assert block is not None
+        assert block.pragma == ExecModel.BRANCH
+        props = derive_properties(block)
+        assert InstructionProperty.IS_BRANCH in props
+        assert InstructionProperty.IGNORES_EXEC in props
+        assert InstructionProperty.WRITES_EXEC in props
+        assert InstructionProperty.WRITES_SCC not in props
 
     def test_endpgm(self):
         sem = _FakeSem('S_ENDPGM', 'endpgm')

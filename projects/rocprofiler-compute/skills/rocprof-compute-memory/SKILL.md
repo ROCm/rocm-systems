@@ -9,7 +9,6 @@ Use this after Speed-of-Light points at memory, or when the user asks about
 bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
-Never use the GUI or TUI.
 
 ## 1. Start with the Memory Chart
 

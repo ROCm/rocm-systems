@@ -862,6 +862,26 @@ public:
       set_lane(linear_index / wf_size_, linear_index % wf_size_, value);
     }
 
+    /// @brief Store one wave-width snapshot using the acquired lane and byte masks.
+    /// @details Source and destination may overlap. Each call addresses one VGPR;
+    /// adjacent registers need not have contiguous backing storage.
+    /// @throws std::invalid_argument if @p values does not hold one word per wave lane.
+    void set_lanes(uint32_t relative_reg, std::span<const uint32_t> values) const {
+      if (values.size() != wf_size_)
+        throw std::invalid_argument("VGPR lane write needs one value per wave lane");
+      if (!cu_)
+        return;
+      if (lane_mask_ == util::mask<uint64_t>(static_cast<int>(wf_size_)) &&
+          byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
+        std::memmove(reg_data(relative_reg), values.data(), values.size_bytes());
+        return;
+      }
+      std::array<uint32_t, 64> snapshot;
+      std::ranges::copy(values, snapshot.begin());
+      for (uint32_t lane = 0; lane < wf_size_; ++lane)
+        set_lane(relative_reg, lane, snapshot[lane]);
+    }
+
   private:
     friend class RegisterAccess;
 
@@ -1125,6 +1145,11 @@ public:
   }
   void write_lane(const Operand &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      write_lane_masked(op, lane, value, mask);
+      return;
+    }
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
@@ -1136,6 +1161,11 @@ public:
     requires OperandT::kStaticRegisterAccess
   void write_lane(const OperandT &op, uint32_t lane, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      write_lane_masked(op, lane, value, mask);
+      return;
+    }
     if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
@@ -1205,6 +1235,14 @@ public:
   void write_chunk(const Operand &op, uint32_t lane_base, uint32_t count, const uint32_t *values,
                    uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
+    if (const uint8_t mask = operand_write_byte_mask(op);
+        mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
+      for (uint32_t lane = 0; lane < count; ++lane) {
+        if (lane_mask & (uint64_t{1} << lane))
+          write_lane_masked(op, lane_base + lane, values[lane], mask);
+      }
+      return;
+    }
     uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
     if (op.simd_capable()) {
       auto base = op.simd_vgpr_base_mut(wf);
@@ -1267,6 +1305,7 @@ public:
   write_operand(const Operand &op, uint64_t lane_mask,
                 uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
+    byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
     const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
@@ -1308,6 +1347,7 @@ public:
   readwrite_operand(const Operand &op, uint64_t lane_mask, uint8_t byte_mask = 0xF,
                     uint8_t write_byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     Wavefront &wf = mutable_wavefront();
+    write_byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
     const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
@@ -1530,6 +1570,12 @@ public:
 
 private:
   friend class MemoryWaitScoreboard;
+
+  /// Only explicitly qualified destinations preserve bytes outside their mask.
+  [[nodiscard]] static uint8_t operand_write_byte_mask(const Operand &op) {
+    return op.preserve_unwritten_bytes() ? op.register_byte_mask()
+                                         : rocjitsu::ExecutionPlugin::kFullByteMask;
+  }
   /// Read an encoding-selected control word while planning an instruction's
   /// accesses. This does not constitute an executed register access.
   std::optional<uint32_t> scalar_control_value(uint32_t selector) const;

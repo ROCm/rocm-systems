@@ -232,6 +232,12 @@ struct external_dependencies
                ::rocprofsys::state::process::Active;
     }
 
+    static bool is_finalized()
+    {
+        return ::rocprofsys::state::process::get() ==
+               ::rocprofsys::state::process::Finalized;
+    }
+
     static bool get_use_timemory() { return ::rocprofsys::get_use_timemory(); }
 
     template <typename CategoryT>
@@ -1347,13 +1353,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 void
 finalize_sdk_common()
 {
+    flush();
+    stop();
+
+    // After stop() so no callback can add open regions while finalize drains them.
     if(g_domain_service)
     {
         g_domain_service->finalize();
     }
-
-    flush();
-    stop();
 
     if(get_counter_storage())
     {

@@ -225,25 +225,25 @@ build_wait_scalar_loads_complete(rj_code_arch_t arch,
                                  const util::DiagnosticEmitter *error = nullptr) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
-    return build_sopp_encoding(arch, cdna1::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna1::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna2::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_CDNA3:
-    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna3::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_CDNA4:
-    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, cdna4::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_RDNA1:
-    return build_sopp_encoding(arch, rdna1::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, rdna1::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_RDNA2:
-    return build_sopp_encoding(arch, rdna2::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, rdna2::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_RDNA3:
-    return build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, rdna3::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return build_sopp_encoding(arch, rdna3_5::kSWaitcntSopp, 0);
+    return build_sopp_encoding(arch, rdna3_5::kSWaitcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_RDNA4:
-    return build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0);
+    return build_sopp_encoding(arch, rdna4::kSWaitKmcntSopp, 0, error);
   case ROCJITSU_CODE_ARCH_CDNA5:
-    return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0);
+    return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0, error);
   default:
     if (error != nullptr)
       return error->emit() << "unsupported target architecture for the scalar-load wait";
