@@ -57,6 +57,28 @@ initialize();
 void
 finalize();
 
+// Eagerly create the process-lifetime state used by the central atfork handler. This must run
+// before the handler is published so a never-configured SDK has deterministic child semantics.
+void
+initialize_fork_state();
+
+// Internal atfork transition. An idle child keeps the existing best-effort tracing behavior;
+// a child that inherited an incomplete lifecycle must not enter SDK state or teardown.
+void
+fork_prepare() noexcept;
+
+void
+fork_parent() noexcept;
+
+void
+fork_child() noexcept;
+
+void
+abandon_fork_child() noexcept;
+
+bool
+fork_child_abandoned() noexcept;
+
 // get the randomly generated client offset number
 uint32_t
 get_client_offset();
