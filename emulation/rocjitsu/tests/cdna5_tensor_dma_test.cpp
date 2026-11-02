@@ -379,7 +379,7 @@ TEST_F(TensorDmaLdsOutOfRangeTest, StoreReadsZeroOutsideTheWavesLds) {
                 {.address = wf->lds_base() + kLdsOffset, .bytes = 8}}));
 }
 
-TEST_F(TensorDmaLdsOutOfRangeTest, ElementStraddlingTheEndWritesOnlyInRangeBytes) {
+TEST_F(TensorDmaLdsOutOfRangeTest, LoadElementStraddlingTheEndWritesOnlyInRangeBytes) {
   // One i64 element at offset 252 has four bytes inside the wave's LDS.
   write_tensor_dma_d0(*cu, *wf, 0, kGlobal, 252);
   write_wave_sgpr(*cu, *wf, 12, 3u << 16); // i64 elements.
