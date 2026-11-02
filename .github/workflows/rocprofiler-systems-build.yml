@@ -249,6 +249,13 @@ jobs:
           echo "${TS}" >> "${GITHUB_PATH}"
           "${TS}/gcc" --version
 
+      - name: Install libiberty
+        shell: bash
+        run: |
+          # libiberty for Dyninst: use the system copy instead of downloading binutils
+          crb enable
+          dnf install -y binutils-devel
+
       - name: Configure environment
         shell: bash
         run: |
@@ -294,7 +301,6 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_BUILD_DYNINST=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
             "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13;py3.14;py3.15" \
             -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}

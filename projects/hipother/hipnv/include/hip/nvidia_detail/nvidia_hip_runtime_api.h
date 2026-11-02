@@ -398,6 +398,7 @@ typedef enum cudaResourceViewFormat hipResourceViewFormat;
 #define hipLimitPrintfFifoSize cudaLimitPrintfFifoSize
 #define hipLimitMallocHeapSize cudaLimitMallocHeapSize
 #define hipLimitStackSize cudaLimitStackSize
+#define hipLimitPersistingL2CacheSize cudaLimitPersistingL2CacheSize
 #define hipIpcMemLazyEnablePeerAccess cudaIpcMemLazyEnablePeerAccess
 
 #define hipOccupancyDefault cudaOccupancyDefault
@@ -4090,6 +4091,15 @@ inline static hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipF
       reinterpret_cast<cudaKernel_t>(kernel), static_cast<cudaFuncAttribute>(attr), value, device));
 }
 #endif
+
+#if CUDA_VERSION >= CUDA_12000
+inline static hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config,
+                                                 hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelSetCacheConfig(
+      reinterpret_cast<cudaKernel_t>(kernel), static_cast<CUfunc_cache_enum>(config), dev));
+}
+#endif
+
 inline static hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   return hipCUResultTohipError(cuKernelGetFunction(pFunc, kernel));
 }

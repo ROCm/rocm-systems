@@ -2,26 +2,27 @@
 
 ## Current implementation
 
-Both entry points support loose and empirical bit-exact semantics with default controls.
-FMA accepts modes 0–2; WMMA accepts modes 0–3 and has no FP-status output.
-CPU implementations are scalar; SIMD backends are planned.
-Compatibility and instruction modifiers are planned; mode 7 is currently rejected.
+Dense WMMA supports FP16/BF16, packed accumulators, gfx12 FP8/BF8 and
+integer formats, in both wave sizes. Sparse WMMA adds 2:4 metadata selection
+with tied accumulators. Fused arithmetic includes FP16/FP32, packed halves,
+literals and mixed precision; FP64 arithmetic currently supports loose results only.
+FP status is available for gfx12 FP16 FMA under default guest rounding and denormals.
+WMMA has no FP-status output; mode 3 has the same numeric requirements as mode 2.
+Source/output modifiers and FMA DPP routing are supported. Compatibility selects
+the established instruction policy. CPU implementations are scalar, AVX2, AVX-512 and native BF16.
 
 Family headers state each entry point's supported controls.
 
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
-calling CPU thread. The first entry points cover matrix
-multiply-accumulate and elementwise fused multiply-add using portable code.
+calling CPU thread.
 
 [rocjitsu/docs/arith-design.md](../../docs/arith-design.md) describes the API,
 numerical semantics, implementation principles, and testing policy.
 
-The semantics field selects numerical requirements; this first implementation
-supports loose and empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
+The semantics field selects loose or empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
 
-Only gfx12 Wave32 FP16 WMMA with FP32 output and FP16 FMA are implemented.
 Rocjitsu continues to use its existing instruction handlers.
 
 ## Build and run
@@ -61,8 +62,8 @@ or FP status output.
 
 `flags` combines CPU capabilities from `rj_arith_init_cpu_flags()` with the
 semantics selection. Cache the CPU flags when making repeated calls.
-`instruction_flags = 0` selects unmodified operands. This initial implementation
-accepts modes 0–3. WMMA has no FP-status side effects, so mode 3 has the same numeric contract as mode 2.
+`instruction_flags = 0` selects unmodified operands. This WMMA entry point
+accepts modes 0–3. With no FP-status output, mode 3 has the same numeric contract as mode 2.
 The host FP environment must be in its default state; the library never explicitly
 changes it. The function returns `RJ_ARITH_SUCCESS` (zero) on success and leaves
 outputs unchanged on error.
@@ -122,6 +123,6 @@ suffix. See [API naming](../../docs/arith-design.md#c-interface-and-instruction-
 
 See the [WMMA declarations](include/rj_arith/detail/rj_arith_wmma.h)
 and [WMMA tests](tests/wmma/v_wmma_f32_16x16x16_f16_w32_gfx12_test.cpp)
-for the Wave32 operand layout and arithmetic examples.
+for layouts, modifiers, and nonzero examples.
 
 Licensed under the [MIT license](../../LICENSE.md).

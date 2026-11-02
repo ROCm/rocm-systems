@@ -7,13 +7,13 @@
 #include <cstdint>
 
 #include "api.hpp"
+#include "common/clocks.hpp"
 #include "common/defines.h"
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/node_info.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -168,10 +168,8 @@ metadata_initialize_kokkos_category()
 void
 metadata_initialize_kokkos_track()
 {
-    rocprofsys::trace_cache::get_metadata_registry().add_track(
-        { .track_name = rocprofsys::trait::name<category::kokkos>::value,
-          .thread_id  = std::nullopt,
-          .extdata    = "{}" });
+    rocprofsys::trace_cache::get_metadata_registry().ensure_track(
+        rocprofsys::trait::name<category::kokkos>::value, std::nullopt);
 }
 
 void
@@ -762,7 +760,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::control::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline::now_ns();
 
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -789,7 +787,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::control::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline::now_ns();
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
         if(rocprofsys::config::get_use_causal())

@@ -14,7 +14,7 @@ env:
 jobs:
   ubuntu-noble-sanitizers:
     name: Sanitizer / ${{ matrix.sanitizer-type }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
     strategy:

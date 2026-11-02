@@ -10,7 +10,9 @@
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -71,6 +73,15 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
     break;
   }
   return "unknown";
+}
+
+/// @brief Bytes retained below an exclusive bound, rounded to complete elements.
+constexpr uint64_t whole_element_bytes_in_range(uint64_t address, uint64_t bytes,
+                                                uint64_t element_bytes, uint64_t end) {
+  if (element_bytes == 0)
+    return 0;
+  const uint64_t available = address < end ? end - address : 0;
+  return std::min(bytes, available / element_bytes * element_bytes);
 }
 
 /// @brief One memory instruction as the memory system will see it.
@@ -170,11 +181,11 @@ struct MemoryAccessObservation {
   /// than the incoming EXEC mask selects. It is always limited to
   /// @ref wavefront_size lanes.
   uint64_t architectural_exec_lane_mask = 0;
-  /// @brief Lanes whose address resolved to something the memory system can
-  ///        use. A lane that is active but not valid went out of bounds or
-  ///        through an unmapped aperture.
+  /// @brief Lanes whose address resolved for routing. Address-generation bounds
+  ///        can remove lanes here; later backing checks can reject bytes from
+  ///        a routed request without changing this mask.
   uint64_t valid_lane_mask = 0;
-  /// @brief Lanes that actually produce a memory request.
+  /// @brief Lanes producing a nominal pipeline request, before backing checks.
   ///
   /// @details Differs from @ref valid_lane_mask only for the wave64 transpose
   /// loads that issue through the low half -- a `WMMA_TR_B8`, or a global
@@ -204,6 +215,21 @@ struct MemoryAccessObservation {
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
+  /// @brief Ordinary FLAT LDS requests rejected in full by allocation bounds.
+  /// @details A subset of @ref flat_local_lane_mask. The addresses and nominal
+  /// request/counter participation remain intact. RDNA4 captures this at issue;
+  /// other architectures and non-FLAT instructions leave it zero. This reports
+  /// functional rejection and makes no statement about timing or bank traffic.
+  uint64_t flat_local_oob_lane_mask = 0;
+  /// @brief Captured exclusive LDS allocation end for RDNA4 FLAT requests.
+  /// @details Effective addresses below this bound can retain a valid prefix.
+  /// Ordinary transfers retain complete memory elements (DWORDs for multiword
+  /// transfers); atomics require their complete element. The bound includes the
+  /// workgroup base and remains fixed across retries. It is the modeled
+  /// `lds_base + lds_size`, including the current 256-byte scheduler rounding;
+  /// PM4 sizes may already be 512-byte multiples before that rounding. Target
+  /// allocation and encoding granules remain unmodeled. Unset for other paths.
+  std::optional<uint64_t> flat_local_allocation_end;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
   ///
@@ -259,8 +285,8 @@ struct MemoryAccessObservation {
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
 
-  /// @brief Bytes each participating lane moves through one address set,
-  ///        ignoring scratch swizzling. Double it when @ref
+  /// @brief Nominal bytes each participating lane requests through one address
+  ///        set, before backing rejection. Double it when @ref
   ///        secondary_addresses is non-empty.
   uint64_t bytes_per_lane() const {
     return static_cast<uint64_t>(element_size_bytes) * elements_per_lane;

@@ -207,6 +207,16 @@ namespace RcclUnitTesting
     // runtime state from the test parent.
     bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
 
+    // Blocks until childList[childId] has data (or EOF) to read. Returns the id
+    // of another active child whose pipe closed first, or -1.
+    int WaitForChild(int childId);
+
+    // Called when a child stops answering (it crashed or broke the protocol).
+    // Reports how it ended, kills and reaps every worker this TestBed owns or
+    // borrows, and resets it to no active children; the next InitComms starts
+    // fresh workers. Returns the report for the test failure message.
+    std::string AbandonChildren(int lostChildId);
+
     // Reads one acknowledgement from each listed child (a child may appear once
     // per command it was sent), then fails if any reported failure.
     void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr);

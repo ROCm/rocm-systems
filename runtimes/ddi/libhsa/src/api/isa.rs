@@ -36,13 +36,13 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
                 return NOT_INITIALIZED;
             };
             let Some(index) = runtime.gpu_index(agent) else {
-                return if agent.handle == CPU_AGENT {
+                return if runtime.is_cpu_agent(agent) {
                     SUCCESS
                 } else {
                     INVALID_AGENT
                 };
             };
-            let info = runtime.gpus[index].info;
+            let info = runtime.gpus[index].info();
             (index, info, runtime.gpus[index].xnack_enabled)
         };
         for variant in 0..ISA_COUNT_PER_GPU {
@@ -83,7 +83,7 @@ pub unsafe extern "C" fn hsa_isa_from_name(name: *const c_char, isa: *mut HsaIsa
         };
         for (index, gpu) in runtime.gpus.iter().enumerate() {
             for variant in 0..ISA_COUNT_PER_GPU {
-                let Some(candidate) = isa_name(&gpu.info, gpu.xnack_enabled, variant) else {
+                let Some(candidate) = isa_name(&gpu.info(), gpu.xnack_enabled, variant) else {
                     continue;
                 };
                 if requested == candidate.as_bytes() {
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn hsa_isa_get_info_alt(
                 return INVALID_ISA;
             };
             (
-                runtime.gpus[index].info,
+                runtime.gpus[index].info(),
                 runtime.gpus[index].xnack_enabled,
                 variant,
             )
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn hsa_wavefront_get_info(
             let Some(index) = runtime.isa_index(isa) else {
                 return INVALID_WAVEFRONT;
             };
-            runtime.gpus[index].info.wavefront_size
+            runtime.gpus[index].info().wavefront_size
         };
         if attribute != 0 {
             return INVALID_ARGUMENT;
@@ -389,12 +389,12 @@ pub unsafe extern "C" fn hsa_isa_compatible(
         };
         let code = &runtime.gpus[code_index];
         let agent = &runtime.gpus[agent_index];
-        let code_name = isa_name(&code.info, code.xnack_enabled, code_variant);
-        let agent_name = isa_name(&agent.info, agent.xnack_enabled, agent_variant);
+        let code_name = isa_name(&code.info(), code.xnack_enabled, code_variant);
+        let agent_name = isa_name(&agent.info(), agent.xnack_enabled, agent_variant);
         let compatible = code_name == agent_name
             || (code_variant == 1
                 && agent_variant == 0
-                && code_name == isa_name(&agent.info, agent.xnack_enabled, 1));
+                && code_name == isa_name(&agent.info(), agent.xnack_enabled, 1));
         // SAFETY: The caller supplied writable output storage.
         unsafe { result.write(compatible) };
         SUCCESS

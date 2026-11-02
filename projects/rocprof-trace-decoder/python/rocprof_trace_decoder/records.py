@@ -164,6 +164,7 @@ class Occupancy:
     is_ext: int
     workgroup_id: int
     cluster_id: int
+    dispatch_id: int = 0  # Low 10 bits of Dispatch.dispatch_id; 0 = unknown
 
 
 @dataclass
@@ -262,6 +263,7 @@ class Dispatch:
     dispatch_pkt_addr: int
     byte_offset: int
     entry_point: Pc
+    dispatch_id: int = 0  # Unique only within ME/PIPE; 0 = unknown
 
 
 @dataclass

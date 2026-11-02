@@ -131,6 +131,8 @@ CommandProcessor::prepare_unregister_pm4_queue_registration(uint64_t id) noexcep
 QueueReconfigureStatus
 CommandProcessor::update_pm4_queue_registration(uint64_t id,
                                                 const QueueReconfigureRequest &request) {
+  // PM4 bindings target one XCC and never fan out. This guarded path therefore
+  // cannot acquire a peer lock while the owner lock is held.
   std::lock_guard lock(hw_queue_mutex_);
   const auto queue = std::ranges::find(compute_queues_, id, &ComputeQueueRecord::registration_id);
   if (queue == compute_queues_.end())
@@ -691,23 +693,21 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   }
 
   // Scratch (private segment) setup.
-  // Each wavefront gets a unique slice of scratch memory. The per-lane
-  // private size is private_segment_fixed_size; the per-wave region is
-  // that multiplied by wf_size. The global wave index is derived from
-  // (global_wg_id, wf_index_in_wg) to ensure non-overlapping scratch
-  // across all CUs and workgroups in the dispatch.
+  // Runtime queues use their provisioned XCC/SE/scoreboard slots and byte
+  // stride. Synthetic queues use dispatch-wide logical slots. Both keep each
+  // resident wave's private memory separate from every other wave.
   if (pkt.private_segment_fixed_size > 0) {
     uint64_t scratch_pool = pkt.scratch_backing_addr;
     if (scratch_pool == 0)
       scratch_pool = 0x1'0000'0000ULL;
-    // Round the per-wave region to the target's COMPUTE_TMPRING_SIZE.WAVESIZE
-    // granule for PM4, or 1 KB for AQL, so that each wave's base equals
-    // scratch_pool + scoreboard_id * wavesize,
-    // which is exactly what rocm-dbgapi computes to locate a wave's private
-    // memory (rocdbgapi architecture.cpp scratch_memory_region).
+    // Runtime AQL retains the selected COMPUTE_TMPRING_SIZE.WAVESIZE stride,
+    // including when a smaller dispatch reuses a larger allocation. PM4 uses
+    // its target granule; synthetic AQL reserves 1 KiB-aligned wave slices.
     uint64_t raw_per_wave = static_cast<uint64_t>(pkt.private_segment_fixed_size) * wf->wf_size();
     uint64_t granule = pkt.pm4_abi ? properties.compute_tmpring_wavesize_granule : 1024;
-    uint64_t per_wave_size = ((raw_per_wave + granule - 1) / granule) * granule;
+    uint64_t per_wave_size = pkt.scratch_wave_bytes != 0
+                                 ? pkt.scratch_wave_bytes
+                                 : ((raw_per_wave + granule - 1) / granule) * granule;
     uint32_t wg_total_size = static_cast<uint32_t>(pkt.workgroup_size_x) *
                              std::max<uint16_t>(1, pkt.workgroup_size_y) *
                              std::max<uint16_t>(1, pkt.workgroup_size_z);
@@ -718,7 +718,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       auto lease = pkt.pm4_scratch_pool->acquire();
       scratch_slot = *lease;
       wf->set_scratch_lease(std::move(lease));
-    } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    } else if (cu->arch() == ROCJITSU_CODE_ARCH_CDNA5 || pkt.queue_ptr != 0) {
       const uint32_t shader_engine_count =
           std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
       const uint32_t shader_engine_id = wf->shader_engine_id();
@@ -760,7 +760,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     };
     VmAccessOutcome scratch_outcome = scratch_range_outcome(false);
 
-    if (!pkt.pm4_abi && scratch_allocator_) {
+    if (!pkt.pm4_abi && pkt.queue_ptr == 0 && scratch_allocator_) {
       // Size against the whole grid, not this XCD's share: every XCD of a
       // fanned-out dispatch shares the allocation. CDNA5 uses the complete
       // physical XCC/SE/scoreboard address space instead of logical grid slots.
@@ -849,7 +849,7 @@ void CommandProcessor::startup() {
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
     erase_cluster_workgroups(entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
-    // Resume the ring after the blocking packet's completion is durable.
+    // Resume fetch after the blocking packet's completion is durable.
     if (entry.blocks_following && engine()) {
       stall_recheck_backoff_ = 1;
       arm_stall_recheck(engine()->context(partition_id()).current_tick());
@@ -1604,10 +1604,24 @@ bool CommandProcessor::update_queue(uint32_t queue_id, uint32_t process_id, uint
 
 bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                  uint32_t ring_size, uint32_t queue_percentage) {
+  const QueueReconfigureStatus status =
+      reconfigure_queue_registration(registration_id, {.ring_base_address = ring_base_va,
+                                                       .ring_size_bytes = ring_size,
+                                                       .scheduling_percentage = queue_percentage});
+  return status == QueueReconfigureStatus::Applied || status == QueueReconfigureStatus::Disabled;
+}
+
+QueueReconfigureStatus
+CommandProcessor::reconfigure_queue_registration(uint64_t registration_id,
+                                                 const QueueReconfigureRequest &request) {
+  const uint64_t ring_base_va = request.ring_base_address;
+  const uint32_t ring_size = request.ring_size_bytes;
+  const uint32_t queue_percentage = request.scheduling_percentage;
   if (registration_id == 0)
-    return false;
-  if (ring_base_va == 0 || ring_base_va % 4 || ring_size < 4 || ring_size % 4)
-    return false;
+    return QueueReconfigureStatus::Stale;
+  if (ring_base_va == 0 || ring_base_va % 4 || ring_size < 4 || ring_size % 4 ||
+      queue_percentage > 100)
+    return QueueReconfigureStatus::Invalid;
 
   const bool suspended = queue_percentage == 0;
   bool found = false;
@@ -1622,11 +1636,18 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
       if (q.registration_id == registration_id) {
         if (q.packet_format == QueuePacketFormat::Aql &&
             !valid_aql_packet_ring(ring_base_va, ring_size))
-          return false;
+          return QueueReconfigureStatus::Invalid;
+        if (q.ring_base_va != ring_base_va || q.ring_size != ring_size) {
+          // Retirement writes the admitted slot and consumer cursor; an active
+          // scratch request still names an unconsumed packet, even after its
+          // interrupt is delivered. Both retain the original ring geometry.
+          // Replicas never access the ring or publish its consumer pointer;
+          // retained peer shards must not reject geometry propagated by the owner.
+          if (!q.fanout_replica && (q.has_pending_commands() || q.scratch_request.active()))
+            return QueueReconfigureStatus::Busy;
+        }
         if (q.packet_format == QueuePacketFormat::Pm4 &&
             (q.ring_base_va != ring_base_va || q.ring_size != ring_size)) {
-          if (q.has_pending_commands())
-            return false;
           q.read_pointer_journal.reset();
           q.command_access.reset();
           q.last_doorbell = ~uint64_t(0);
@@ -1650,6 +1671,11 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
       }
     }
   }
+  const QueueReconfigureStatus status = !found      ? QueueReconfigureStatus::Stale
+                                        : suspended ? QueueReconfigureStatus::Disabled
+                                                    : QueueReconfigureStatus::Applied;
+  // Peer propagation and CU wakeups must run after releasing the owner lock.
+  // Different clients can concurrently own fanout queues on opposite XCCs.
   if (update_replicas) {
     const uint32_t num_xcds = static_cast<uint32_t>(xcd_peers_.size());
     for (uint32_t rank = 0; rank < num_xcds; ++rank) {
@@ -1659,7 +1685,7 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
     }
   }
   if (!changed)
-    return found;
+    return status;
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
@@ -1679,7 +1705,7 @@ bool CommandProcessor::update_queue_registration(uint64_t registration_id, uint6
   // resume does, or already-fetched work sits until the next doorbell.
   if ((wake_command_processor || (changed && !suspended)) && engine())
     engine()->schedule_event_now(&doorbell_event_);
-  return found;
+  return status;
 }
 
 void CommandProcessor::set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id,
@@ -2441,7 +2467,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
-      wf->set_aql_packet_id(entry.aql_packet_id);
+      wf->set_queue_packet_id(entry.queue_packet_id);
       wf->set_code_load_bias(entry.code_load_bias);
       wf->set_wave_in_group(w);
       wf->set_address_space(entry.address_space);
@@ -3445,6 +3471,12 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
   constexpr uint32_t kMailboxPointerOffset = 16;
   constexpr uint32_t kEventIdOffset = 24;
 
+  // ROCr locates the requesting packet at the consumer cursor and may replace
+  // this queue's scratch allocation. Earlier dispatches must have retired before
+  // either operation can transfer ownership away from them.
+  if (!queue.entries.empty())
+    return {.status = AqlAdmissionStatus::Blocked};
+
   QueueScratchRequestState &state = queue.scratch_request;
   if (!state.active()) {
     if (queue.queue_desc_va == 0)
@@ -3468,8 +3500,8 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
 
     case QueueScratchRequestPhase::PublishReadPointer: {
       // ROCr scans from read_dispatch_id to locate the scratch-needing packet.
-      // Publish every earlier admission before raising the event, while leaving
-      // this packet itself unconsumed at packet_index.
+      // Earlier dispatches have retired; leave the requesting packet itself
+      // unconsumed at packet_index.
       if (!queue.read_pointer_journal.publication_pending()) {
         queue.read_pointer_journal.retire(state.packet_index, state.packet_index, *state.access);
       }
@@ -3690,8 +3722,64 @@ VmAccessOutcome CommandProcessor::advance_scratch_reclaim(ComputeQueueRecord &qu
   }
 }
 
+VmAccessOutcome CommandProcessor::retire_aql_packet(ComputeQueueRecord &queue,
+                                                    const DispatchEntry &entry) {
+  if (!entry.owns_aql_ring_slot || entry.fanout_peer)
+    return VmAccessOutcome::Complete;
+  auto failed = [&](VmAccessOutcome outcome) {
+    if (outcome != VmAccessOutcome::Complete && outcome != VmAccessOutcome::Unavailable)
+      queue.publication_faulted = true;
+    return outcome;
+  };
+  for (;;) {
+    // Finish the retained publication before consulting the current VM root.
+    // The completion tracker keeps this entry at the head until both writes are
+    // durable, including across scratch-reclaim waits and unavailable accesses.
+    if (queue.aql_slot_release) {
+      const auto &release = *queue.aql_slot_release;
+      const auto outcome =
+          release.access.atomic_store(release.address, sizeof(uint32_t), release.header);
+      if (outcome != VmAccessOutcome::Complete)
+        return failed(outcome);
+      queue.read_pointer_journal.retire(release.next_consumer, release.next_consumer,
+                                        release.access);
+      queue.aql_slot_release.reset();
+    }
+    if (queue.read_pointer_journal.publication_pending()) {
+      const auto outcome = queue.read_pointer_journal.publish();
+      if (outcome != VmAccessOutcome::Complete)
+        return failed(outcome);
+    }
+    if (entry.aql_packet_id < queue.read_pointer_journal.cursor())
+      return VmAccessOutcome::Complete;
+    // Invalidation during execution can revoke the admission snapshot before
+    // retirement starts. Capture a current view then; once slot release starts,
+    // its retained snapshot must finish or fail without switching generations.
+    std::optional<GpuVmAccess> refreshed;
+    const GpuVmAccess *access = entry.execution_access.get();
+    if (!access || access->revoked()) {
+      refreshed = snapshot_gpu_access(queue.address_space);
+      if (!refreshed)
+        return failed(VmAccessOutcome::Faulted);
+      access = &*refreshed;
+    }
+    const uint64_t address = entry.aql_packet_address;
+    const auto header = access->atomic_load(address, sizeof(uint32_t));
+    if (header.outcome != VmAccessOutcome::Complete)
+      return failed(header.outcome);
+    queue.aql_slot_release.emplace(ComputeQueueRecord::AqlSlotRelease{
+        .access = *access,
+        .address = address,
+        .next_consumer = entry.aql_packet_id + 1,
+        .header = (static_cast<uint32_t>(header.value) & ~0xffu) | HSA_PACKET_TYPE_INVALID});
+  }
+}
+
 VmAccessOutcome CommandProcessor::gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                            const DispatchEntry &entry) {
+  const auto retirement = retire_aql_packet(queue, entry);
+  if (retirement != VmAccessOutcome::Complete)
+    return retirement;
   if (entry.scratch_use_once && !entry.fanout_peer)
     return advance_scratch_reclaim(queue, entry);
   return VmAccessOutcome::Complete;
@@ -3753,6 +3841,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint64_t scratch_backing_addr = 0;
   uint32_t scratch_wave_limit_per_se = std::numeric_limits<uint32_t>::max();
   uint32_t scratch_wave_stride_per_se = 0;
+  uint64_t scratch_wave_bytes = 0;
   bool scratch_use_once = false;
   bool scratch_uses_alternate = false;
   const uint32_t private_segment_fixed_size =
@@ -3794,14 +3883,12 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       if (loaded.outcome != VmAccessOutcome::Complete)
         return admission_from_vm_outcome(loaded.outcome);
       scratch_backing_addr = loaded.value;
-      if (scratch_backing_addr == 0 && scratch_resolver_)
-        scratch_backing_addr = scratch_resolver_(queue.process_id);
       const auto properties = isa_properties(arch);
       const uint32_t wavesize_mask = util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
       const uint64_t raw_per_wave = static_cast<uint64_t>(private_segment_fixed_size) * wave_size;
-      const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
       const uint64_t required_wavesize =
-          per_wave_stride / properties.compute_tmpring_wavesize_granule;
+          (raw_per_wave + properties.compute_tmpring_wavesize_granule - 1) /
+          properties.compute_tmpring_wavesize_granule;
       const auto scratch_wave_limit = [&](uint32_t tmpring_size) -> std::optional<uint32_t> {
         const uint32_t provisioned_waves = tmpring_size & 0xFFFu;
         const uint32_t provisioned_wavesize = (tmpring_size >> 12) & wavesize_mask;
@@ -3809,12 +3896,21 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
             (arch == ROCJITSU_CODE_ARCH_CDNA5 && provisioned_waves == 0)) {
           return std::nullopt;
         }
-        return arch == ROCJITSU_CODE_ARCH_CDNA5 ? provisioned_waves
-                                                : std::numeric_limits<uint32_t>::max();
+        const uint32_t engines = std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
+        if (provisioned_waves == 0)
+          return std::nullopt;
+        const bool per_engine =
+            arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+        if (per_engine)
+          return provisioned_waves;
+        if (provisioned_waves % engines != 0)
+          return std::nullopt;
+        return provisioned_waves / engines;
       };
       bool main_scratch_usable = scratch_backing_addr != 0;
       bool requires_dynamic_scratch = !main_scratch_usable;
-      if (!requires_dynamic_scratch && !scratch_allocator_) {
+      if (!requires_dynamic_scratch) {
         uint32_t compute_tmpring_size = 0;
         outcome = read_gpu_block(transaction_access,
                                  queue_ptr + offsetof(amd_queue_t, compute_tmpring_size),
@@ -3827,11 +3923,13 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         if (main_scratch_usable) {
           scratch_wave_limit_per_se = *wave_limit;
           scratch_wave_stride_per_se = *wave_limit;
+          scratch_wave_bytes = uint64_t{(compute_tmpring_size >> 12) & wavesize_mask} *
+                               properties.compute_tmpring_wavesize_granule;
         }
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && main_scratch_usable && !scratch_allocator_) {
+      if (async_scratch && main_scratch_usable) {
         const AtomicLoadResult max_use = read_gpu_u64(
             transaction_access, queue_ptr + offsetof(amd_queue_v2_t, scratch_max_use_index));
         if (max_use.outcome != VmAccessOutcome::Complete)
@@ -3840,7 +3938,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         requires_dynamic_scratch = !main_scratch_usable;
       }
 
-      if (async_scratch && requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && requires_dynamic_scratch) {
         const AtomicLoadResult alt_backing =
             read_gpu_u64(transaction_access,
                          queue_ptr + offsetof(amd_queue_v2_t, alt_scratch_backing_memory_location));
@@ -3885,6 +3983,8 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
           scratch_uses_alternate = true;
           scratch_wave_limit_per_se = *alt_wave_limit;
           scratch_wave_stride_per_se = *alt_wave_limit;
+          scratch_wave_bytes = uint64_t{(alt_compute_tmpring_size >> 12) & wavesize_mask} *
+                               properties.compute_tmpring_wavesize_granule;
           requires_dynamic_scratch = false;
           if (RJ_AMDHSA_BITS_GET(kd.kernel_code_properties,
                                  KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
@@ -3899,14 +3999,14 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
         }
       }
 
-      if (async_scratch && !requires_dynamic_scratch && !scratch_allocator_) {
+      if (async_scratch && !requires_dynamic_scratch) {
         outcome = record_async_scratch_use(queue, transaction_access, aql_packet_id,
                                            scratch_uses_alternate);
         if (outcome != VmAccessOutcome::Complete)
           return admission_from_vm_outcome(outcome);
       }
 
-      if (requires_dynamic_scratch && !scratch_allocator_) {
+      if (requires_dynamic_scratch) {
         constexpr uint64_t kInsufficientScratchWave64 = 0x1;
         constexpr uint64_t kInsufficientScratchWave32 = 0x401;
         const uint64_t status =
@@ -3943,9 +4043,13 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
   dp.execution_access = std::make_shared<GpuVmAccess>(transaction_access);
+  if (!uses_kfd_queue_abi && private_segment_fixed_size > 0 && scratch_resolver_)
+    dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
   dp.interrupt_sink = queue.interrupt_sink;
   dp.process_id = queue.process_id;
-  dp.aql_packet_id = static_cast<uint32_t>(aql_packet_id);
+  dp.aql_packet_id = aql_packet_id;
+  dp.aql_packet_address = pkt_addr;
+  dp.owns_aql_ring_slot = true;
   dp.kernel_entry_pc = entry_pc;
   dp.total_wgs = total_wgs;
   dp.kind = DispatchPacketKind::Kernel;
@@ -3974,6 +4078,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.private_segment_fixed_size = private_segment_fixed_size;
   dp.scratch_wave_limit_per_se = scratch_wave_limit_per_se;
   dp.scratch_wave_stride_per_se = scratch_wave_stride_per_se;
+  dp.scratch_wave_bytes = scratch_wave_bytes;
   dp.group_segment_fixed_size = std::max(kd.group_segment_fixed_size, pkt.group_segment_size);
   dp.scratch_use_once = scratch_use_once;
   dp.wgp_mode = isa_properties(arch).supports_wgp_mode &&
@@ -4034,57 +4139,7 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   if (uses_kfd_queue_abi) {
     dp.dispatch_ptr = pkt_addr;
     dp.queue_ptr = queue_ptr;
-    if (dp.private_segment_fixed_size > 0) {
-      uint64_t scratch_loc_va =
-          dp.queue_ptr + offsetof(amd_queue_t, scratch_backing_memory_location);
-      dp.scratch_backing_addr = scratch_backing_addr;
-
-      // Publish the scratch backing location and COMPUTE_TMPRING_SIZE into the
-      // ABI-stable part of amd_queue_t so rocm-dbgapi can compute each wave's
-      // private (scratch) memory region, letting ROCgdb read scratch-resident
-      // variables. Real CP firmware populates these when it assigns scratch to
-      // the queue; the emulator's ROCr instead sets the backing via
-      // SET_SCRATCH_BACKING_VA and leaves these fields zero, so the CP fills
-      // them here. Field layout per rocdbgapi architecture.cpp
-      // scratch-memory region. The WAVES field is common, while ISA properties
-      // describe the generation-specific WAVESIZE unit and field width.
-      if (scratch_allocator_ && dp.scratch_backing_addr != 0 && !cus_.empty() &&
-          !scratch_uses_alternate) {
-        uint64_t per_wave_bytes =
-            static_cast<uint64_t>(dp.private_segment_fixed_size) * cus_[0]->wf_size();
-        // setup_wavefront() allocates scratch slots at a 1 KiB boundary. Encode
-        // that actual stride, rather than merely rounding to the register's
-        // unit, so flat_scratch agrees with rocm-dbgapi for every scoreboard
-        // slot after slot zero.
-        const uint64_t per_wave_stride = ((per_wave_bytes + 1023) / 1024) * 1024;
-        const auto properties = isa_properties(arch);
-        const uint32_t wavesize_unit = properties.compute_tmpring_wavesize_granule;
-        assert(wavesize_unit != 0 && properties.compute_tmpring_wavesize_bits != 0);
-        const uint32_t wavesize_field = static_cast<uint32_t>(per_wave_stride / wavesize_unit);
-        uint32_t waves_field = 0;
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-          // gfx12 interprets WAVES as the number of physical scratch slots per
-          // shader engine. The CWSR wave word supplies the SE plus its per-SE
-          // scoreboard slot, so publish the same capacity used by allocation.
-          waves_field = scratch_waves_per_se_;
-        } else {
-          // Older debugger layouts interpret WAVES as a device-wide count and
-          // require it to be divisible by the shader-engine count.
-          uint32_t se = std::max(1u, scratch_wave_divisor_);
-          uint64_t total_waves = static_cast<uint64_t>(total_wgs) * wfs_per_wg;
-          waves_field =
-              static_cast<uint32_t>(((std::max<uint64_t>(1, total_waves) + se - 1) / se) * se);
-        }
-        const uint32_t wavesize_mask =
-            util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits);
-        uint32_t tmpring = (waves_field & 0xFFFu) | ((wavesize_field & wavesize_mask) << 12);
-        (void)write_gpu_block(transaction_access, scratch_loc_va, &dp.scratch_backing_addr,
-                              sizeof(dp.scratch_backing_addr));
-        (void)write_gpu_block(transaction_access,
-                              dp.queue_ptr + offsetof(amd_queue_t, compute_tmpring_size), &tmpring,
-                              sizeof(tmpring));
-      }
-    }
+    dp.scratch_backing_addr = scratch_backing_addr;
   }
 
   dp.enable_wg_id_x =
@@ -4249,9 +4304,12 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .dispatch_id = allocate_dispatch_id(),
       .queue_id = queue->queue_id,
       .address_space = queue->address_space,
-      .execution_access = {},
+      .execution_access = std::make_shared<GpuVmAccess>(request.access),
       .interrupt_sink = queue->interrupt_sink,
       .process_id = queue->process_id,
+      .aql_packet_id = request.packet_index,
+      .aql_packet_address = request.packet_address,
+      .owns_aql_ring_slot = true,
       .completion_signal = prepared.completion_signal,
       .kind = DispatchPacketKind::NonKernel,
       .wait_for_predecessors = prepared.barrier_bit,
@@ -4350,40 +4408,6 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
   // suspension flags are the owner's copy rather than state this CP maintains.
   if (queue.fanout_replica)
     return;
-  const auto release_slot = [&]() {
-    if (!queue.aql_slot_release)
-      return true;
-    const auto &release = *queue.aql_slot_release;
-    const auto outcome =
-        release.access.atomic_store(release.address, sizeof(uint32_t), release.header);
-    if (outcome == VmAccessOutcome::Complete) {
-      queue.aql_slot_release.reset();
-      return true;
-    }
-    if (outcome == VmAccessOutcome::Unavailable)
-      arm_stall_recheck(now);
-    else {
-      queue.publication_faulted = true;
-      queue.faulted = true;
-    }
-    return false;
-  };
-  if (!release_slot())
-    return;
-  if (queue.read_pointer_journal.publication_pending()) {
-    const VmAccessOutcome outcome = queue.read_pointer_journal.publish();
-    if (outcome == VmAccessOutcome::Unavailable) {
-      arm_stall_recheck(now);
-      return;
-    }
-    if (outcome != VmAccessOutcome::Complete) {
-      queue.publication_faulted = true;
-      queue.faulted = true;
-      return;
-    }
-  }
-  // A packet or execution fault stops new admission, but it must not strand a
-  // cursor retirement that committed before the fault became visible.
   if (queue.faulted)
     return;
   // ROCr owns a use-once scratch allocation until the dispatch retires and the
@@ -4459,11 +4483,8 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
 
   // AQL doorbell clamping (compute queues only).
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
-  // normally equals read_ptr_va (the CP is the sole writer of a compute queue's
-  // read pointer), but while the debugger holds read_ptr_va at a trapped
-  // dispatch, the cursor stays ahead so already-dispatched packets are not
-  // re-fetched.
-  const uint64_t published_read_idx = read_idx;
+  // stays ahead of the consumer cursor while admitted dispatches are live, so
+  // those packets remain visible without being fetched twice.
   read_idx = std::max(read_idx, queue.fetch_cursor);
   uint64_t process_limit = write_idx;
   if (queue.doorbell_mode != QueueDoorbellMode::VmPolled) {
@@ -4478,10 +4499,9 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     uint64_t doorbell_limit = doorbell + 1;
     if (doorbell_limit < process_limit)
       process_limit = doorbell_limit;
-    if (read_idx >= process_limit)
-      return;
-  } else if (read_idx >= process_limit) {
-    return;
+    process_limit = std::max(process_limit, read_idx);
+  } else {
+    process_limit = std::max(process_limit, read_idx);
   }
 
   static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
@@ -4574,21 +4594,14 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
       assert(packet_result.retirement_bytes == kAqlPacketBytes &&
              "AQL processor completed without retiring exactly one packet");
       ++read_idx;
-      // HSA System Architecture 1.2, section 2.8.3: release the format field
-      // using a 32-bit atomic transaction before exposing the slot for reuse.
-      // Admission is already durable, so retain this store rather than replay it.
-      queue.aql_slot_release.emplace(ComputeQueueRecord::AqlSlotRelease{
-          .access = access,
-          .address = pkt_addr,
-          .header = (static_cast<uint32_t>(header_load.value) & ~0xffu) | HSA_PACKET_TYPE_INVALID});
-      if (!release_slot() || result.blocks_following || queue.scratch_reclaim.active()) {
+      if (result.blocks_following || queue.scratch_reclaim.active()) {
         process_limit = read_idx;
         break;
       }
       continue;
     }
 
-    // Only a successful, durable admission may advance the AQL consumer cursor.
+    // Only a successful admission advances the private fetch cursor.
     process_limit = read_idx;
     if (packet_result.status == PacketProcessStatus::Blocked &&
         result.blocked_reason == AqlBlockedReason::HeaderInvalid) {
@@ -4613,31 +4626,9 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     break;
   }
 
-  // Advance the CP-private cursor to match. read_ptr_va may subsequently be
-  // lowered by the debugger to hold a trapped dispatch; the cursor is not, so
-  // the next fetch resumes here rather than re-fetching held packets.
+  // Advance fetch independently of retirement. Live dispatches retain their
+  // public ring slots until completion.
   queue.fetch_cursor = process_limit;
-
-  // A blocked head packet does not create a cursor-publication dependency when
-  // the guest-visible cursor is already current. A debugger may deliberately
-  // hold the published cursor behind fetch_cursor, in which case this still
-  // publishes the previously retired progress using the transaction snapshot.
-  if (process_limit == published_read_idx)
-    return;
-
-  queue.read_pointer_journal.retire(process_limit, process_limit, std::move(*transaction_access));
-  if (queue.aql_slot_release)
-    return;
-  const VmAccessOutcome publication = queue.read_pointer_journal.publish();
-
-  if (publication == VmAccessOutcome::Unavailable) {
-    arm_stall_recheck(now);
-    return;
-  }
-  if (publication != VmAccessOutcome::Complete) {
-    queue.publication_faulted = true;
-    queue.faulted = true;
-  }
 }
 
 void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {

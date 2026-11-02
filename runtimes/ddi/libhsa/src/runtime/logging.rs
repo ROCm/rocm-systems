@@ -99,7 +99,7 @@ impl LogOutput {
     }
 
     /// Stops this session.
-    pub(super) fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let mut config = self
             .config
             .lock()
@@ -152,7 +152,7 @@ impl LogOutput {
         line.push('\n');
         Some(LogWork {
             output: self.clone(),
-            _inflight: inflight,
+            inflight,
             flag,
             line,
         })
@@ -164,7 +164,7 @@ pub(crate) struct LogWork {
     /// Sink retained while writing outside the registry lock.
     output: Arc<LogOutput>,
     /// Blocks shutdown from freeing state while this work is outstanding.
-    _inflight: InFlightToken,
+    inflight: InFlightToken,
     /// Category to check before emitting the line.
     flag: u32,
     /// Complete formatted line owned by this work item.
@@ -174,6 +174,7 @@ pub(crate) struct LogWork {
 impl LogWork {
     /// Writes a prepared log record after releasing the runtime lock.
     pub(crate) fn write(self) {
+        let _lease_scope = ApiLeaseScope::enter(self.inflight);
         self.output.write(self.flag, self.line.as_bytes());
     }
 }
@@ -184,4 +185,26 @@ pub(super) fn logging_flag_enabled(flags: [u8; 8], flag: u32) -> bool {
         .ok()
         .and_then(|index| flags.get(index))
         .is_some_and(|byte| byte & (1 << (flag % 8)) != 0)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_write_init_does_not_wait_for_preparing_shutdown() {
+        let lifecycle = Mutex::new(HsaLifecycle::new());
+        let generation = lifecycle.lock().unwrap().begin_init().unwrap().unwrap();
+        lifecycle
+            .lock()
+            .unwrap()
+            .prepare_without_runtime_for_test(generation);
+        let scope = LogWriteScope::enter();
+        assert!(scope.is_some());
+        assert_eq!(
+            begin_init_waiting(lifecycle.lock().unwrap(), &Condvar::new()).err(),
+            Some(INVALID_RUNTIME_STATE)
+        );
+    }
 }

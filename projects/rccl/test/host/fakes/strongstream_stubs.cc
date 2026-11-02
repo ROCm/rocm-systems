@@ -21,6 +21,8 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_cudaGetCapturingGraph, ncclCudaGetCapturingGraph);
 ASSERT_HOOK_MATCHES_PROD(g_ncclStreamAdvanceToEvent, ncclStreamAdvanceToEvent);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamAdvanceToStream, ncclStreamAdvanceToStream);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStrongStreamAcquiredWorkStream, ncclStrongStreamAcquiredWorkStream);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCudaGraphRecordEvent, ncclCudaGraphRecordEvent);
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -54,9 +56,22 @@ std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncc
 ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
   return g_ncclCudaGraphRecordEvent(graph, event, stream);
 }
-ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*,
-                                                bool, hipStream_t*) {
+static ncclResult_t DefaultStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*, bool,
+                                                          hipStream_t*) {
   FailLoudUnfaked("strongstream_stubs", "ncclStrongStreamAcquiredWorkStream");
+}
+std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*)>
+    g_ncclStrongStreamAcquiredWorkStream = DefaultStrongStreamAcquiredWorkStream;
+ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph graph, struct ncclStrongStream* ss,
+                                                bool concurrent, hipStream_t* workStream) {
+  return g_ncclStrongStreamAcquiredWorkStream(graph, ss, concurrent, workStream);
+}
+static ncclResult_t DefaultStreamAdvanceToStream(hipStream_t, hipStream_t) {
+  FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToStream");
+}
+std::function<ncclResult_t(hipStream_t, hipStream_t)> g_ncclStreamAdvanceToStream = DefaultStreamAdvanceToStream;
+ncclResult_t ncclStreamAdvanceToStream(hipStream_t s, hipStream_t source) {
+  return g_ncclStreamAdvanceToStream(s, source);
 }
 // Benign teardown: commFree reaches this on a happy-path destroy.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream*) { return ncclSuccess; }
@@ -77,6 +92,8 @@ ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
 void ResetStrongStreamStubs() {
   g_cudaGetCapturingGraph = DefaultCudaGetCapturingGraph;
   g_ncclStreamAdvanceToEvent = DefaultStreamAdvanceToEvent;
+  g_ncclStreamAdvanceToStream = DefaultStreamAdvanceToStream;
+  g_ncclStrongStreamAcquiredWorkStream = DefaultStrongStreamAcquiredWorkStream;
   g_ncclCudaGraphRecordEvent = DefaultCudaGraphRecordEvent;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclCudaContextTrackResult = ncclSuccess;

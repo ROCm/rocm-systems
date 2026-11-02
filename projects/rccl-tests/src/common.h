@@ -20,6 +20,14 @@
     || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
+// For a GIN put that carries its own signal, where the receiver counts one
+// signal per put. Legacy ncclGin_SignalInc follows ginStrongSignalsRequired
+// (strong by default), which on Anvil SDMA drains every queue to the peer.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,30,7)
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_WeakSignalInc{sig}
+#else
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_SignalInc{sig}
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <cstring>

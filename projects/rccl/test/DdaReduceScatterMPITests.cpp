@@ -11,9 +11,9 @@
  * Each input element depends on the sending rank, the destination shard, the element index and the
  * call, so a wrong peer, shard, packet or line index, or a stale scratch bank, changes the sum. The
  * two single-tier tests enqueue every call back to back with no host sync, so consecutive calls
- * alternate the two scratch banks and the third reuses the first; the two interleaved tests drain
- * the stream and barrier at each LL/LL128 switch. The COLL log line of every launch confirms the
- * tier, since the fallback paths also sum correctly.
+ * alternate the two scratch banks and the third reuses the first. LLAndLL128Interleaved drains
+ * and barriers at each tier switch; LLAndLL128InterleavedUnsynchronised does not. The COLL log
+ * line of every launch confirms the tier, since the fallback paths also sum correctly.
  *
  * nRanks 4 and 8 reach the launchers' unrolled NRANKS_CT kernels; any other count reaches the
  * runtime one. Run (example):
@@ -377,7 +377,7 @@ protected:
         {
             if(syncOnTierSwitch && s > 0 && steps[s].tier != steps[s - 1].tier)
             {
-                // LL and LL128 banks alias in the scratch, so a rank must not switch protocol while a peer still polls.
+                // Synchronized variant: every rank finishes the previous tier before any rank launches the next.
                 DdaFabricMPI::abortJobUnlessAllRanksDrained(
                     DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout), testId);
                 MPI_Barrier(MPI_COMM_WORLD);
@@ -489,15 +489,15 @@ TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
              kLL128Shapes * kCallsPerShape);
 }
 
-// Same-tier calls stay back to back; each tier switch drains and barriers because LL and LL128 banks overlap.
+// Same-tier calls stay back to back. This variant drains and barriers at each tier switch.
 TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
 }
 
-// BUG: unsynced LL<->LL128 switches hang (job aborts) or sum stale slots at 2 blocks, np 3 and 8. Enable when fixed.
-TEST_F(DdaMPI_ReduceScatter, DISABLED_LLAndLL128InterleavedUnsynchronised)
+// No drain on an LL/LL128 switch, at two blocks. Both tiers double-buffer on the shared bank stride.
+TEST_F(DdaMPI_ReduceScatter, LLAndLL128InterleavedUnsynchronised)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128InterleavedUnsynchronised", /*needsLL128=*/true, interleavedSteps,
              2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/false);

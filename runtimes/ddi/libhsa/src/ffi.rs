@@ -134,11 +134,16 @@ pub(crate) const ISA_COUNT_PER_GPU: u64 = 2;
 pub(crate) const WAVEFRONT_BASE: u64 = 0x4853_4100_0028_0000;
 /// Synthetic handle for the fine-grained host memory pool.
 pub(crate) const CPU_POOL_FINE: u64 = 0x4853_4100_0030_0001;
+/// Base value of CPU memory-pool handles, with sixteen slots per CPU agent.
+pub(crate) const CPU_POOL_BASE: u64 = CPU_POOL_FINE - 1;
 /// Synthetic handle for the extended fine-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_EXTENDED: u64 = 0x4853_4100_0030_0002;
 /// Synthetic handle for the host kernel-argument pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_KERNARG: u64 = 0x4853_4100_0030_0003;
 /// Synthetic handle for the coarse-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_COARSE: u64 = 0x4853_4100_0030_0004;
 /// Base value of the synthetic GPU pool handle range.
 pub(crate) const GPU_POOL_BASE: u64 = 0x4853_4100_0040_0000;
@@ -936,6 +941,15 @@ pub(crate) struct HsaAmdVmemHandleInfo {
     pub(crate) agent: HsaAgent,
 }
 
+/// First complete version of the caller-sized VMEM handle information record.
+#[repr(C)]
+pub(crate) struct HsaAmdVmemHandleInfoPrefix {
+    /// Byte size of the caller-provided record.
+    pub(crate) size: usize,
+    /// Size in bytes of the underlying allocation.
+    pub(crate) alloc_size: usize,
+}
+
 const _: () = {
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, alloc_size) == std::mem::size_of::<usize>());
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) == 2 * std::mem::size_of::<usize>());
@@ -1207,6 +1221,44 @@ pub struct HsaQueue {
     pub(crate) reserved: u32,
     /// Unique public queue identifier for this runtime generation.
     pub(crate) id: u64,
+}
+
+/// Public AQL kernel dispatch packet. The C header's anonymous header union is
+/// represented by its two 16-bit fields; no caller in this frontend reads the
+/// alternate 32-bit union member. Packet storage is aligned by its ring, not
+/// by this C record's own alignment.
+#[repr(C)]
+pub(crate) struct HsaKernelDispatchPacket {
+    /// Packet type, barriers, and fence scopes; published last.
+    pub(crate) header: u16,
+    /// Grid dimensionality and dispatch setup.
+    pub(crate) setup: u16,
+    /// Work-group extent in the X dimension.
+    pub(crate) workgroup_size_x: u16,
+    /// Work-group extent in the Y dimension.
+    pub(crate) workgroup_size_y: u16,
+    /// Work-group extent in the Z dimension.
+    pub(crate) workgroup_size_z: u16,
+    /// Reserved packet storage.
+    pub(crate) reserved0: u16,
+    /// Grid extent in the X dimension.
+    pub(crate) grid_size_x: u32,
+    /// Grid extent in the Y dimension.
+    pub(crate) grid_size_y: u32,
+    /// Grid extent in the Z dimension.
+    pub(crate) grid_size_z: u32,
+    /// Private segment bytes requested per work-item.
+    pub(crate) private_segment_size: u32,
+    /// Group segment bytes requested per work-group.
+    pub(crate) group_segment_size: u32,
+    /// Executable kernel handle.
+    pub(crate) kernel_object: u64,
+    /// Pointer to the kernel arguments.
+    pub(crate) kernarg_address: *mut c_void,
+    /// Reserved packet storage.
+    pub(crate) reserved2: u64,
+    /// Signal updated when dispatch completes.
+    pub(crate) completion_signal: HsaSignal,
 }
 
 #[repr(C)]

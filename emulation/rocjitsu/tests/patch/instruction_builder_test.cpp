@@ -23,6 +23,40 @@ TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
   EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
 }
 
+TEST(InstructionBuilder, SoppEncodingReturnsEncodingOrFailure) {
+  constexpr auto invalid = build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0);
+  static_assert(invalid.failed());
+
+  for (int value = 0; value < ROCJITSU_CODE_ARCH_NUM_ARCHS; ++value) {
+    const auto arch = static_cast<rj_code_arch_t>(value);
+    SCOPED_TRACE(value);
+    if (arch == ROCJITSU_CODE_ARCH_RV32I || arch == ROCJITSU_CODE_ARCH_RV64I)
+      continue;
+    EXPECT_TRUE(build_sopp_encoding(arch, sopp_op_nop(arch), 0).succeeded());
+  }
+
+  for (auto arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I,
+                    static_cast<rj_code_arch_t>(15)}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    EXPECT_TRUE(build_sopp_encoding(arch, 0, 0).failed());
+  }
+}
+
+TEST(InstructionBuilder, SoppEncodingEmitsOnlyRequestedFailureDiagnostic) {
+  unsigned messages = 0;
+  std::string message;
+  auto callback = [&](std::string_view text) {
+    ++messages;
+    message = text;
+  };
+  const util::DiagnosticEmitter error(callback);
+  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, 0, 0, &error).succeeded());
+  EXPECT_EQ(messages, 0u);
+  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0, &error).failed());
+  EXPECT_EQ(messages, 1u);
+  EXPECT_EQ(message, "unsupported target architecture for SOPP encoding");
+}
+
 TEST(InstructionBuilder, DelayAluReturnsEncodingOrFailure) {
   constexpr auto rdna4 = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
   static_assert(rdna4.succeeded());
@@ -205,7 +239,10 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
   constexpr uint16_t kSsrc1 = 9;
 
   constexpr auto sopp = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = kSimm16});
-  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16), sopp[0]);
+  constexpr auto encoded_sopp =
+      build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16);
+  static_assert(encoded_sopp.succeeded());
+  EXPECT_EQ(encoded_sopp.value(), sopp[0]);
 
   constexpr auto sop1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
   EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSMovB32Sop1, kSdst, kSsrc0),
@@ -295,16 +332,62 @@ TEST(InstructionBuilder, BuildSCmpLgU32) {
             0xBF078002u);
 }
 
+TEST(InstructionBuilder, SpillBuildersReportFailuresWithoutThrowing) {
+  auto check_failure = [](auto build, std::string_view expected) {
+    util::StringDiagnostic diagnostic;
+    const auto error = diagnostic.emitter();
+    EXPECT_NO_THROW({
+      const auto result = build(&error);
+      EXPECT_TRUE(result.failed());
+    });
+    EXPECT_EQ(diagnostic.message(), expected);
+    EXPECT_NO_THROW(EXPECT_TRUE(build(nullptr).failed()));
+  };
+  constexpr auto invalid = ROCJITSU_CODE_ARCH_INVALID;
+  check_failure([&](auto error) { return build_v_writelane_b32(0, 0, 0, invalid, error); },
+                "Unimplemented instruction: v_writelane_b32 for target architecture");
+  check_failure([&](auto error) { return build_v_readlane_b32(0, 0, 0, invalid, error); },
+                "Unimplemented instruction: v_readlane_b32 for target architecture");
+  check_failure([&](auto error) { return build_scratch_store_dword(0, 0, invalid, error); },
+                "Unimplemented instruction: scratch_store for target architecture");
+  check_failure([&](auto error) { return build_scratch_load_dword(0, 0, invalid, error); },
+                "Unimplemented instruction: scratch_load for target architecture");
+  check_failure(
+      [](auto error) {
+        return build_scratch_store_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
+      },
+      "Unimplemented instruction: scratch_store of an AccVGPR on an arch without them");
+  check_failure(
+      [](auto error) {
+        return build_scratch_load_dword(0, 0, ROCJITSU_CODE_ARCH_RDNA4, error, /*acc=*/true);
+      },
+      "Unimplemented instruction: scratch_load of an AccVGPR on an arch without them");
+  check_failure([&](auto error) { return build_wait_stores_complete(invalid, error); },
+                "Unimplemented instruction: store-completion wait for target architecture");
+  check_failure([&](auto error) { return build_wait_loads_complete(invalid, error); },
+                "Unimplemented instruction: load-completion wait for target architecture");
+  check_failure([&](auto error) { return build_wait_all_loads_complete(invalid, error); },
+                "Unimplemented instruction: all-loads wait for target architecture");
+}
+
 TEST(InstructionBuilder, BuildVWritelaneB32) {
   // VOP3: base v_writelane_b32 is 0xD28A0000 (cdna4) / 0xD7610000 (rdna4); vdst
   // in word0 bits[7:0]; word1 = src0 | src1<<9 with lane 0 as inline const 128.
   // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
-  EXPECT_EQ(
-      build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3),
-      (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
-  EXPECT_EQ(build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_CDNA4),
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_cdna3 =
+      build_v_writelane_b32(/*vgpr_dst=*/2, /*sgpr_src=*/5, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_v_writelane_b32_cdna3.succeeded());
+  EXPECT_EQ(maybe_v_writelane_b32_cdna3.value(),
             (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
-  EXPECT_EQ(build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_RDNA4),
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_cdna4 =
+      build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_v_writelane_b32_cdna4.succeeded());
+  EXPECT_EQ(maybe_v_writelane_b32_cdna4.value(),
+            (std::array<uint32_t, 2>{0xD28A0002u, 0x00010005u}));
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_writelane_b32_rdna4 =
+      build_v_writelane_b32(2, 5, 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_v_writelane_b32_rdna4.succeeded());
+  EXPECT_EQ(maybe_v_writelane_b32_rdna4.value(),
             (std::array<uint32_t, 2>{0xD7610002u, 0x00010005u}));
 }
 
@@ -312,32 +395,48 @@ TEST(InstructionBuilder, BuildVReadlaneB32) {
   // VOP3: base v_readlane_b32 is 0xD2890000 (cdna4) / 0xD7600000 (rdna4); sdst in
   // word0 bits[7:0]; src0 is a VGPR (256 + index), so v3 -> 0x103.
   // CDNA3 and CDNA4 share the GFX9 VOP3 encoding.
-  EXPECT_EQ(
-      build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3),
-      (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
-  EXPECT_EQ(build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_CDNA4),
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_cdna3 =
+      build_v_readlane_b32(/*sgpr_dst=*/6, /*vgpr_src=*/3, /*lane=*/0, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_v_readlane_b32_cdna3.succeeded());
+  EXPECT_EQ(maybe_v_readlane_b32_cdna3.value(),
             (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
-  EXPECT_EQ(build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_RDNA4),
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_cdna4 =
+      build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_v_readlane_b32_cdna4.succeeded());
+  EXPECT_EQ(maybe_v_readlane_b32_cdna4.value(),
+            (std::array<uint32_t, 2>{0xD2890006u, 0x00010103u}));
+  const util::FailureOr<std::array<uint32_t, 2>> maybe_v_readlane_b32_rdna4 =
+      build_v_readlane_b32(6, 3, 0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_v_readlane_b32_rdna4.succeeded());
+  EXPECT_EQ(maybe_v_readlane_b32_rdna4.value(),
             (std::array<uint32_t, 2>{0xD7600006u, 0x00010103u}));
 }
 
 TEST(InstructionBuilder, BuildScratchStoreDword) {
   // CDNA3 and CDNA4 (GFX9): FLAT flat_store_dword base 0xDC700000 | seg=1<<14;
   // word1 = data<<8 | saddr(0x7F)<<16. 2 words.
-  const auto cdna3 =
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 =
       build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_cdna3.succeeded());
+  const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
   EXPECT_EQ(cdna3[0], 0xDC704040u);
   EXPECT_EQ(cdna3[1], 0x007F0300u);
 
-  const auto cdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
+      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_cdna4.succeeded());
+  const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
   EXPECT_EQ(cdna4[0], 0xDC704040u);
   EXPECT_EQ(cdna4[1], 0x007F0300u);
 
   // RDNA4: VSCRATCH scratch_store_b32 base 0xED068000 | saddr(0x7C); word1 =
   // vsrc<<23; word2 = ioffset<<8. 3 words.
-  const auto rdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  const util::FailureOr<std::vector<uint32_t>> maybe_rdna4 =
+      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_rdna4.succeeded());
+  const auto &rdna4 = maybe_rdna4.value();
   ASSERT_EQ(rdna4.size(), 3u);
   EXPECT_EQ(rdna4[0], 0xED06807Cu);
   EXPECT_EQ(rdna4[1], 0x01800000u);
@@ -347,90 +446,142 @@ TEST(InstructionBuilder, BuildScratchStoreDword) {
 TEST(InstructionBuilder, BuildScratchLoadDword) {
   // CDNA3 and CDNA4 (GFX9): FLAT flat_load_dword base 0xDC500000 | seg=1<<14;
   // word1 = saddr<<16 | vdst<<24. 2 words.
-  const auto cdna3 =
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 =
       build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_cdna3.succeeded());
+  const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
   EXPECT_EQ(cdna3[0], 0xDC504040u);
   EXPECT_EQ(cdna3[1], 0x057F0000u);
 
-  const auto cdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
+      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_cdna4.succeeded());
+  const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
   EXPECT_EQ(cdna4[0], 0xDC504040u);
   EXPECT_EQ(cdna4[1], 0x057F0000u);
 
   // RDNA4: VSCRATCH scratch_load_b32 base 0xED050000 | saddr(0x7C); word1 = vdst;
   // word2 = ioffset<<8. 3 words.
-  const auto rdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  const util::FailureOr<std::vector<uint32_t>> maybe_rdna4 =
+      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_rdna4.succeeded());
+  const auto &rdna4 = maybe_rdna4.value();
   ASSERT_EQ(rdna4.size(), 3u);
   EXPECT_EQ(rdna4[0], 0xED05007Cu);
   EXPECT_EQ(rdna4[1], 0x00000005u);
   EXPECT_EQ(rdna4[2], 0x00004000u);
 }
 
+// Forwarding an emitter as the fourth argument must preserve the default VGPR
+// register file for both scratch builders.
+TEST(InstructionBuilder, ScratchDiagnosticPointerKeepsVgprRegisterFile) {
+  util::StringDiagnostic diagnostic;
+  const auto error = diagnostic.emitter();
+  const util::FailureOr<std::vector<uint32_t>> store =
+      build_scratch_store_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+  ASSERT_TRUE(store.succeeded());
+  EXPECT_EQ(store.value()[1], 0x007F0200u);
+  const util::FailureOr<std::vector<uint32_t>> load =
+      build_scratch_load_dword(2, 64, ROCJITSU_CODE_ARCH_CDNA3, &error);
+  ASSERT_TRUE(load.succeeded());
+  EXPECT_EQ(load.value()[1], 0x027F0000u);
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
 TEST(InstructionBuilder, BuildScratchStoreDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), addressing the
   // AccVGPR file for the data operand. Same as BuildScratchStoreDword otherwise.
-  const auto cdna3 = build_scratch_store_dword(/*vdata=*/3, /*byte_offset=*/64,
-                                               ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_store_dword(
+      /*vdata=*/3, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
+  ASSERT_TRUE(maybe_cdna3.succeeded());
+  const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
   EXPECT_EQ(cdna3[0], 0xDC704040u);
   EXPECT_EQ(cdna3[1], 0x00FF0300u);
 
-  const auto cdna4 = build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
+      build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
+  ASSERT_TRUE(maybe_cdna4.succeeded());
+  const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
   EXPECT_EQ(cdna4[0], 0xDC704040u);
   EXPECT_EQ(cdna4[1], 0x00FF0300u);
-
-  // RDNA has no AccVGPRs: requesting acc is rejected.
-  EXPECT_THROW((void)build_scratch_store_dword(3, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
-               util::UnimplementedInst);
 }
 
 TEST(InstructionBuilder, BuildScratchLoadDwordAccVgpr) {
   // acc=1 sets the CDNA FLAT acc bit (word1 bit 23 = 0x00800000), writing the load
   // result into the AccVGPR file. Same as BuildScratchLoadDword otherwise.
-  const auto cdna3 = build_scratch_load_dword(/*vdst=*/5, /*byte_offset=*/64,
-                                              ROCJITSU_CODE_ARCH_CDNA3, /*acc=*/true);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna3 = build_scratch_load_dword(
+      /*vdst=*/5, /*byte_offset=*/64, ROCJITSU_CODE_ARCH_CDNA3, nullptr, /*acc=*/true);
+  ASSERT_TRUE(maybe_cdna3.succeeded());
+  const auto &cdna3 = maybe_cdna3.value();
   ASSERT_EQ(cdna3.size(), 2u);
   EXPECT_EQ(cdna3[0], 0xDC504040u);
   EXPECT_EQ(cdna3[1], 0x05FF0000u);
 
-  const auto cdna4 = build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, /*acc=*/true);
+  const util::FailureOr<std::vector<uint32_t>> maybe_cdna4 =
+      build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_CDNA4, nullptr, /*acc=*/true);
+  ASSERT_TRUE(maybe_cdna4.succeeded());
+  const auto &cdna4 = maybe_cdna4.value();
   ASSERT_EQ(cdna4.size(), 2u);
   EXPECT_EQ(cdna4[0], 0xDC504040u);
   EXPECT_EQ(cdna4[1], 0x05FF0000u);
-
-  EXPECT_THROW((void)build_scratch_load_dword(5, 64, ROCJITSU_CODE_ARCH_RDNA4, /*acc=*/true),
-               util::UnimplementedInst);
 }
 
 TEST(InstructionBuilder, BuildWaitLoadsComplete) {
   // CDNA3 and CDNA4: s_waitcnt 0 (all counters).
-  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);
-  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna3 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_wait_loads_complete_cdna3.succeeded());
+  EXPECT_EQ(maybe_wait_loads_complete_cdna3.value(), 0xBF8C0000u);
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna4 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_wait_loads_complete_cdna4.succeeded());
+  EXPECT_EQ(maybe_wait_loads_complete_cdna4.value(), 0xBF8C0000u);
   // RDNA4: s_wait_loadcnt 0 (split counter).
-  EXPECT_EQ(build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC00000u);
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_rdna4 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_wait_loads_complete_rdna4.succeeded());
+  EXPECT_EQ(maybe_wait_loads_complete_rdna4.value(), 0xBFC00000u);
 }
 
 TEST(InstructionBuilder, BuildWaitStoresComplete) {
   // CDNA3 and CDNA4: s_waitcnt 0 (unified vmcnt covers stores).
-  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA3), 0xBF8C0000u);
-  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4), 0xBF8C0000u);
+  const util::FailureOr<uint32_t> maybe_wait_stores_complete_cdna3 =
+      build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_wait_stores_complete_cdna3.succeeded());
+  EXPECT_EQ(maybe_wait_stores_complete_cdna3.value(), 0xBF8C0000u);
+  const util::FailureOr<uint32_t> maybe_wait_stores_complete_cdna4 =
+      build_wait_stores_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_wait_stores_complete_cdna4.succeeded());
+  EXPECT_EQ(maybe_wait_stores_complete_cdna4.value(), 0xBF8C0000u);
   // RDNA4: s_wait_storecnt 0 (split counter, distinct from s_wait_loadcnt).
-  EXPECT_EQ(build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4), 0xBFC10000u);
+  const util::FailureOr<uint32_t> maybe_wait_stores_complete_rdna4 =
+      build_wait_stores_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_wait_stores_complete_rdna4.succeeded());
+  EXPECT_EQ(maybe_wait_stores_complete_rdna4.value(), 0xBFC10000u);
 }
 
 TEST(InstructionBuilder, BuildWaitAllLoadsComplete) {
   // CDNA3 and CDNA4: one s_waitcnt 0 drains vmcnt+lgkmcnt (VMEM, LDS, scalar).
-  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA3),
-            (std::vector<uint32_t>{0xBF8C0000u}));
-  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4),
-            (std::vector<uint32_t>{0xBF8C0000u}));
+  const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_cdna3 =
+      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_wait_all_loads_complete_cdna3.succeeded());
+  EXPECT_EQ(maybe_wait_all_loads_complete_cdna3.value(), (std::vector<uint32_t>{0xBF8C0000u}));
+  const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_cdna4 =
+      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_wait_all_loads_complete_cdna4.succeeded());
+  EXPECT_EQ(maybe_wait_all_loads_complete_cdna4.value(), (std::vector<uint32_t>{0xBF8C0000u}));
   // RDNA4 splits the counters and every VGPR-targeting load counter must drain:
   // s_wait_loadcnt_dscnt 0 (VMEM + LDS -> VGPRs), s_wait_samplecnt 0 (image
   // sample/gather -> VGPRs), s_wait_bvhcnt 0 (BVH -> VGPRs), then s_wait_kmcnt 0
   // (scalar -> SGPRs).
-  EXPECT_EQ(build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4),
+  const util::FailureOr<std::vector<uint32_t>> maybe_wait_all_loads_complete_rdna4 =
+      build_wait_all_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_wait_all_loads_complete_rdna4.succeeded());
+  EXPECT_EQ(maybe_wait_all_loads_complete_rdna4.value(),
             (std::vector<uint32_t>{0xBFC80000u, 0xBFC20000u, 0xBFC30000u, 0xBFC70000u}));
 }
 

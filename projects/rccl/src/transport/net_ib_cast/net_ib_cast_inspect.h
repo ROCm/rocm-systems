@@ -183,6 +183,28 @@ ncclResult_t ncclIbCastGetRepostCount(void* sendComm, int* out);
 
 #endif /* ENABLE_FAULT_INJECTION */
 
+
+/* Host-only checks for the net_ib error-path port (AICOMRCCL-2750).
+ * No NIC: the helpers build the arguments and call the real functions. */
+
+/* Returns IbCastReqTypeStr[NCCL_NET_IB_REQ_GIN_IGET] ("IGet"). A short array
+ * would read out of bounds here, not return NULL. */
+const char* ncclIbCastTestGinIgetName(void);
+
+/* Two CQEs, success then error, with devBases[1] left NULL.
+ * Returns whatever IbCastRmaIbProxyTest returns. */
+ncclResult_t ncclIbCastTestRmaProxyErrorCompletion(void);
+
+/* wc->wr_id == NET_IB_MAX_REQUESTS on the receiver error path.
+ * The fixed bound rejects it with ncclInternalError. */
+ncclResult_t ncclIbCastTestRecvWrIdBound(void);
+
+/* GIN allgather must poll the posted receive while isend is still returning
+ * NULL (CTS not ready). *recvPolledBeforeSend is 1 when that happens.
+ * Returns the allgather result. Not thread-safe: it swaps netIbCast ops. */
+ncclResult_t ncclIbCastTestGinAllGatherPollsRecv(int* recvPolledBeforeSend);
+
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

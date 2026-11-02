@@ -268,6 +268,7 @@ enum class VopdOp : uint16_t {
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
+  AddF64 = 33,
 };
 
 struct VopdSlot {

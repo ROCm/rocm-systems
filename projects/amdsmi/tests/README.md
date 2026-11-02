@@ -169,7 +169,7 @@ The install target remaps the tree to the historical path:
 
 ```text
 tests/
-├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs develop
+├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs the merge base
 ├── amdsmi_build/       run_amdsmi_build.py + tests        distro/pkg-mgr build driver
 ├── dme_integration/    metrics/services/submodules + tests
 ├── python/test_*_guard.py, test_packaging_scriptlets.py, test_abi_compat.py
@@ -182,6 +182,7 @@ tests/
 
 ```text
  pre-commit ──► check_test_conventions.py   (layout + naming gate)
+            ├─► abi_check_test.py           (when tests/abi_check/ changes)
             └─► clang-format, ruff-format, gersemi, codespell
 
  CI (.github/workflows/)

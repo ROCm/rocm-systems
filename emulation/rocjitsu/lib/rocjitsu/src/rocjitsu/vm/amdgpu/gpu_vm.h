@@ -622,7 +622,9 @@ public:
 /// a quantum, checking is_current() before reuse.
 /// Operations on a revoked snapshot report @ref VmAccessOutcome::Revoked,
 /// never the retryable Unavailable outcome.
-class GpuVmAccess {
+// Keep immutable metadata read by every CU off the cache line containing a
+// coallocated shared_ptr reference count, which wave admission and retirement update.
+class alignas(64) GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.
   /// @details Replacement, invalidation, and unregistration retire ordinary snapshots.

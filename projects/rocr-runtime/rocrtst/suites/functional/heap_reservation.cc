@@ -30,6 +30,7 @@ constexpr uint64_t kGiB = 1ULL << 30;
 // (libhsakmt/src/dxg/openclose.cpp). If those change, the budgets below stop
 // predicting which pool sizes fit.
 constexpr uint64_t kLocalAlign = 1 * kGiB;
+constexpr uint64_t kLocalMaxScale = 8;  // ReserveLocalHeapSpace()'s first rung
 constexpr uint64_t kSystemAlign = 4 * kGiB;
 constexpr uint64_t kSystemMin = 2 * kSystemAlign;  // retries stop here
 constexpr uint64_t kSystemMax = 1024 * kGiB;
@@ -189,8 +190,8 @@ HeapReservationTest::HeapReservationTest(void) : TestBase() {
   set_title("RocR Heap Reservation Test");
   set_description(
       "This test verifies that hsa_init() survives a constrained address "
-      "space on the WSL/DXG backend, and still succeeds when a smaller "
-      "host-RAM pool would fit.");
+      "space on the WSL/DXG backend: it succeeds when the host-RAM pool fits "
+      "and returns an error, rather than crashing, when it does not.");
 }
 
 HeapReservationTest::~HeapReservationTest(void) {}
@@ -221,8 +222,11 @@ void HeapReservationTest::DisplayResults(void) const {
 
 void HeapReservationTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
-// Every budget leaves the local pool room for its smallest size, so only the
-// host-RAM pool is under test.
+// Every budget fits the local pool's largest size, so the ladder always takes
+// that one and only the host-RAM pool is under test. Sizing for the smallest
+// local size does not pin it there: ReserveLocalHeapSpace() tries 8x, 4x then
+// 2x VRAM and keeps the first that fits, so leaving room for a larger size
+// means a larger size is taken, starving the host-RAM pool (ROCM-33028).
 HeapReservationTest::Budgets HeapReservationTest::ComputeBudgets(
     uint64_t vram, uint64_t ram) const {
   Budgets budgets;
@@ -230,24 +234,17 @@ HeapReservationTest::Budgets HeapReservationTest::ComputeBudgets(
 
   const uint64_t ram_aligned = std::min(AlignUp(ram, kSystemMin), kSystemMax);
 
-  const uint64_t local_floor_retained = 2 * vram;
-  const uint64_t local_floor_transient =
-      Transient(local_floor_retained, kLocalAlign);
+  const uint64_t local_retained = kLocalMaxScale * vram;
+  const uint64_t local_transient = Transient(local_retained, kLocalAlign);
 
   budgets.generous =
-      local_floor_retained + Transient(ram_aligned, kSystemAlign) + 2 * kGiB;
-  budgets.ladder = local_floor_retained +
-                   Transient(ram_aligned / 2, kSystemAlign) + 2 * kGiB;
-  budgets.tight = local_floor_retained + 4 * kGiB;
+      local_transient + Transient(ram_aligned, kSystemAlign) + 2 * kGiB;
+  budgets.tight = local_transient + 4 * kGiB;
 
   const uint64_t ceiling =
-      local_floor_retained +
-      Transient(SmallestSystemAsk(ram_aligned), kSystemAlign);
-  budgets.valid = budgets.tight > local_floor_transient &&
-                  budgets.tight < ceiling && budgets.ladder > budgets.tight &&
-                  budgets.generous > budgets.ladder;
-
-  budgets.ladder_possible = ram_aligned / 2 >= kSystemMin;
+      local_transient + Transient(SmallestSystemAsk(ram_aligned), kSystemAlign);
+  budgets.valid = budgets.tight > local_transient &&
+                  budgets.tight < ceiling && budgets.generous > budgets.tight;
 
   return budgets;
 }
@@ -279,20 +276,12 @@ void HeapReservationTest::HeapReservationSurvivesConstrainedAddressSpace(void) {
     const char* name;
     uint64_t budget;
     bool expect_success;
-    bool applicable;
   } cases[] = {
-      {"generous (1x fits)", budgets.generous, true, true},
-      {"ladder (1x refused)", budgets.ladder, true, budgets.ladder_possible},
-      {"tight (nothing fits)", budgets.tight, false, true},
+      {"generous (everything fits)", budgets.generous, true},
+      {"tight (no host-RAM pool fits)", budgets.tight, false},
   };
 
   for (const auto& test_case : cases) {
-    if (!test_case.applicable) {
-      std::cout << "  skip " << test_case.name << " : 1/2 RAM is below the "
-                << (kSystemMin / kGiB) << " GiB floor" << std::endl;
-      continue;
-    }
-
     const ChildResult child = ForkAndRun(test_case.budget);
     if (child.exited && child.status == kChildSkip) {
       std::cout << "  skip " << test_case.name

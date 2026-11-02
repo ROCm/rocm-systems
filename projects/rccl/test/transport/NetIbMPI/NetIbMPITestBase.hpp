@@ -305,12 +305,20 @@ protected:
     int numDevices_;
     std::vector<int> deviceIds_;
     void* initCtx_;
+    // Applied to every per-thread context InitNetIbCtx creates, as communicator
+    // init would after AllGather1.
+    std::function<void(void*)> threadCtxInit_;
+    // Applied to every listen comm CreateListenComm creates, as the net proxy
+    // does for the communicator it listens for.
+    std::function<void(void*)> listenCommInit_;
 
     void SetUp() override {
         MPITestBase::SetUp();
         net_ = GetPlugin();
         numDevices_ = 0;
         initCtx_ = nullptr;
+        threadCtxInit_ = nullptr;
+        listenCommInit_ = nullptr;
     }
 
     void TearDown() override {
@@ -373,7 +381,9 @@ protected:
 
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
-        return net_->listen(initCtx_, dev, handle, listenComm);
+        ncclResult_t res = net_->listen(initCtx_, dev, handle, listenComm);
+        if (res == ncclSuccess && *listenComm && listenCommInit_) listenCommInit_(*listenComm);
+        return res;
     }
 
     // Helper: Connect to remote
@@ -2505,7 +2515,9 @@ protected:
     ncclResult_t InitNetIbCtx(void** ctxOut) {
         ncclNetCommConfig_t commConfig = {};
         commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
-        return net_->init(ctxOut, 0, &commConfig, nullptr, nullptr);
+        ncclResult_t res = net_->init(ctxOut, 0, &commConfig, nullptr, nullptr);
+        if (res == ncclSuccess && *ctxOut && threadCtxInit_) threadCtxInit_(*ctxOut);
+        return res;
     }
 
     ncclResult_t CreateListenCommCtx(void* ctx, int dev, ncclNetHandle_t* handle, void** listenComm) {

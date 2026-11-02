@@ -1,33 +1,46 @@
-# Dashboard test fixtures
+# Fictional corpus-schema dashboard fixtures
 
-These fixtures are dummy measurements for tests and local development. They must
-never be published as real Rocjitsu results.
+Every measurement, branch, machine and commit message is fictional test input,
+not a published Rocjitsu performance claim. Never publish this directory.
+Production builds neither import generators nor copy fixture JSON.
 
-## Static fixture data
+`maintainedDataset.js` builds 24 develop attempts and 20 side branches.
+`feedback-publication.js` adds three deterministic develop slowdowns (attempts
+18, 20 and 22) to exercise speedups below 1.00× in Performance Trend. It also adds
+`users/RattataKing/test-branch` and one interrupted
+develop run, `fictional-unfinished-develop`. The interrupted run has a finish
+timestamp, one completed result and unexecuted cases; Recent Runs shows its run
+time and Fail status. Each document has corpus `schema_version: 1`,
+flat rows with embedded workload definitions and literal `single`/`default`
+thread policies, raw provenance and fictional publication context. The two
+benchmark sets exercise added/removed workloads; actual configuration absence,
+late execution/backfill, independent environments, failure/timeout and exact
+branch/base/PR behavior remain covered. No per-attempt set variants are created.
 
-`data/` contains 83 explicit run cases, two catalogs, metadata, and an index.
-The cases cover failures, timeouts, sanitizer comparisons, historical reruns,
-asserted baselines, and the change from five to seven catalog tests.
+`fictional-producer-run.json` is the accepted CPU harness writer artifact. Its
+measurements and source checkout are fictional/disposable evidence, not an
+actual performance-v1 or native/GPU benchmark. Tests enrich only publication
+context in memory and preserve its original raw values.
 
-The combined dataset has 83 runs: 79 Vanilla runs and four sanitizer runs. This
-provides the same JSON loading path used by the normal dashboard while preserving
-the chart window, selector options, pagination, and reliability coverage.
+Regenerate the complete checked-in publication deterministically:
 
-`syntheticDataset.js` separately generates 500 smaller runs in memory for loader
-concurrency, timeout, and cancellation tests. Those tests isolate request behavior
-from the dashboard's richer scenario data.
+```bash
+node tests/fixtures/regenerate-fixtures.js
+node tests/fixtures/regenerate-fixtures.js /path/to/disposable-data --overview-contract
+```
 
-## How tests and development use the data
+The generator clears its destination. Never target published data or another
+owner's server directory. The seven-attempt Overview scenario has three sets,
+typed problems, sparse configurations, missing days and same-commit retries.
+`setFixtureConfigurations()` changes selected rows without inventing set IDs.
+`syntheticDataset.js` creates queue/concurrency stress data in memory only.
 
-- Unit tests load and validate the fixture JSON through `publishedData.js`.
-- Vite's explicit `fixtures` mode serves this directory directly; browser-test builds
-  copy it into the separate `.test-dist/data/` output.
-- The default production build never invokes fixture generation or copies fixture JSON.
+Fixture runs use `no-store`; production immutable runs use `force-cache`.
+Reload All preserves the existing cache-generation contract. Browser tests
+intercept JSON at the real consumer boundary; they do not prove hosted
+publication, live CORS or a browser disk-cache hit. Source export preserves the
+complete parsed `{index,runs}`, independent of current filters and selection.
 
-`data/index.json` lists the explicit cases. Add or edit run JSON files and their index
-entries to change fixture history. Do not edit `.test-dist/`, which is disposable
-generated output. After editing fixture JSON, restart the fixture development server
-or rebuild the fixture preview.
-
-See the [build and test guide](../../docs/build-and-test.md) for commands and the
-[data contract](../../docs/website-data-contract.md) for the published JSON format.
+Local inspection uses `npm run process:data -- <data-directory>` and optional
+`--output <new-file-outside-input>`. It refuses overwrite, symbolic resources and
+input-bound output; it never publishes. See [corpus input](https://github.com/ROCm/rocjitsu-test-corpus/blob/develop/benchmarks/raw-run-schema.md).
