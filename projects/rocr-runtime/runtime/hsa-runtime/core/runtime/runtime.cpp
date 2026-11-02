@@ -5113,8 +5113,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;
