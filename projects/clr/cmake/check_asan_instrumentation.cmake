@@ -11,7 +11,9 @@ if(NOT FILE)
   message(FATAL_ERROR "FILE must be the shared object to check")
 endif()
 
-find_program(NM_TOOL NAMES nm llvm-nm REQUIRED)
+if(NOT NM_TOOL)
+  find_program(NM_TOOL NAMES llvm-nm nm REQUIRED)
+endif()
 execute_process(
   COMMAND ${NM_TOOL} -D ${FILE}
   RESULT_VARIABLE _nm_rc

@@ -371,9 +371,6 @@ install(
     ${CONFIG_LANG_PACKAGE_INSTALL_DIR}/
     )
 
-if(COMMAND clr_asan_instrument_target)
-  clr_asan_instrument_target(amdhip64)
-endif()
 if(COMMAND clr_require_asan_instrumentation)
   clr_require_asan_instrumentation(amdhip64)
 endif()

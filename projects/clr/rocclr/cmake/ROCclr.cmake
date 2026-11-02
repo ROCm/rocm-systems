@@ -142,7 +142,3 @@ endif()
 if(ROCCLR_ENABLE_PAL)
   include(ROCclrPAL)
 endif()
-
-if(COMMAND clr_asan_instrument_target)
-  clr_asan_instrument_target(rocclr)
-endif()

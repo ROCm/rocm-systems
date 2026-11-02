@@ -76,9 +76,8 @@ endif()
 # NEEDs libclang_rt.asan.so and only has the weak __asan_report_* stubs from
 # the link line, so hipFree aborts with "free on address which was not
 # malloc()-ed". Appending the flags here is what the compiler actually uses.
-# Repeating -fsanitize=address is harmless when the enclosing build already
-# added it. These are host C/C++ flags; device bitcode is compiled by hiprtc
-# custom commands that do not inherit CMAKE_CXX_FLAGS.
+# These are host C/C++ flags; device bitcode is compiled by hiprtc custom
+# commands that do not inherit CMAKE_CXX_FLAGS.
 if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   set(_linker_flags "-fsanitize=address")
   set(_compiler_flags "-fno-omit-frame-pointer -fsanitize=address")
@@ -98,42 +97,10 @@ if(NOT ENABLE_SANITIZER STREQUAL "OFF")
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} ${_linker_flags} -Wl,--build-id=sha1")
 
-  # Directory and target options, not only CMAKE_*_FLAGS. ccache drops
-  # -Xarch_* unless the compile also passes -arch, so TheRock's
-  # -Xarch_host -fsanitize=address never reaches clang and the cached objects
-  # are uninstrumented. A plain -fsanitize=address is what the compiler and
-  # ccache both keep. These sources are host C/C++; hiprtc device commands
-  # do not inherit them.
-  add_compile_options(
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>"
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=address>")
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND BUILD_SHARED_LIBS)
-    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-shared-libsan>")
-    add_link_options(
-      "$<$<LINK_LANGUAGE:C,CXX>:-fsanitize=address>"
-      "$<$<LINK_LANGUAGE:C,CXX>:-shared-libsan>")
-  endif()
   unset(_compiler_flags)
   unset(_linker_flags)
   message(STATUS "CLR sanitizer: ${ENABLE_SANITIZER} (host flags applied by CLR)")
 endif()
-
-# Attach the host sanitizer to one target. add_compile_options above covers
-# targets created later in this directory tree; call this for targets that
-# must stay instrumented even if a subdirectory replaces the directory flags.
-function(clr_asan_instrument_target target)
-  if(ENABLE_SANITIZER STREQUAL "OFF")
-    return()
-  endif()
-  target_compile_options(${target} PRIVATE
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>"
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=address>")
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND BUILD_SHARED_LIBS)
-    target_compile_options(${target} PRIVATE
-      "$<$<COMPILE_LANGUAGE:C,CXX>:-shared-libsan>")
-    target_link_options(${target} PRIVATE -fsanitize=address -shared-libsan)
-  endif()
-endfunction()
 
 # Fail the build if a shared library was only linked with ASan. Link-only
 # -fsanitize=address emits weak __asan_report_* symbols and no __asan_init.
@@ -145,6 +112,7 @@ function(clr_require_asan_instrumentation target)
     TARGET ${target} POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DFILE=$<TARGET_FILE:${target}>
+            -DNM_TOOL=${CMAKE_NM}
             -P ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_asan_instrumentation.cmake
     COMMENT "Verifying ${target} is instrumented with ASan"
     VERBATIM)
