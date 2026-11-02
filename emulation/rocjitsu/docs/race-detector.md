@@ -503,8 +503,17 @@ gfx1151, using absolute paths from this source tree. The original
   moved on to.
 
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
-  memory accesses are not checked, and the LDS barrier arrival a descriptor can
-  request is not modeled.
+  memory accesses are not checked.
+
+- **False positives with LDS barrier synchronization**: a tensor load can
+  request an arrival on an LDS barrier cell when it completes, and a consumer
+  wave can wait for that barrier's phase and then read the tile, without the
+  producer waiting on `s_wait_tensorcnt` or the workgroup passing `s_barrier`.
+  The detector does not observe this synchronization: it retires a transfer
+  only through wait-counter instructions and `s_barrier`. A consumer that is
+  correctly synchronized through the barrier cell is therefore reported as
+  racing with the tensor load. These reports are false positives, not missing
+  coverage.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently
