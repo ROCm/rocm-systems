@@ -913,6 +913,8 @@ void GpuMemory::DropPeer(GpuMemory* peer) {
   if (peer->IsPhysicalCreated()) {
     if (peer->UnmapGpuVirtualAddress(peer->GpuAddress(), peer->Size()) != ErrorCode::Success)
       pr_err("peer unmap failed\n");
+    else if (!peer->GetDevice()->WaitOnPagingFenceFromCpu())
+      pr_err("peer unmap fence wait failed\n");
     peer->Evict();
   }
   delete peer;

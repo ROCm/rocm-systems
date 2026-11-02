@@ -1338,6 +1338,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
     view = gpu_mem->ViewOn(target, false, nullptr);
     if (view == nullptr)
       return HSAKMT_STATUS_SUCCESS;
+    // Drop the peer so a later VaMap rebuilds it instead of seeing a stale address.
+    if (view->Owner() && offset == 0 && addr == view->GpuAddress() && size >= view->ClientSize()) {
+      view->Owner()->DropPeer(view);
+      return HSAKMT_STATUS_SUCCESS;
+    }
   }
 
   auto code = view->UnmapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
