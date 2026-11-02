@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <signal.h>
+#include <ucontext.h>
 #include <cxxabi.h>
 
 #include <sys/prctl.h>
@@ -127,51 +128,148 @@ bool IsSameAffinity(const std::vector<uint64_t>& lhs, const std::vector<uint64_t
 }
 }  // namespace
 
-// Crash signal handling
+// Crash signal handling. Every component that flushes on a crash (async logging,
+// HRR capture) registers its own callback. The handler is installed once, runs
+// every callback, then passes the signal to the handler installed before it.
 static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
-static struct sigaction oldCrashHandlers_[kNumCrashSignals];
-static Os::CrashCallback crashCallback_ = nullptr;
-static std::atomic<bool> crashHandlersInstalled_{false};
+static constexpr size_t kMaxCrashCallbacks = 4;
+static struct sigaction oldCrashHandlers_[kNumCrashSignals];  // Not written by the handler
+// Set by the one delivery that runs an earlier SA_RESETHAND handler; later ones get SIG_DFL
+static std::atomic<bool> oldCrashHandlerSpent_[kNumCrashSignals];
+static_assert(std::atomic<bool>::is_always_lock_free, "used from a signal handler");
+static std::atomic<Os::CrashCallback> crashCallbacks_[kMaxCrashCallbacks];
+static std::mutex crashHandlersLock_;
+static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
 
-static void crashSignalHandler(int sig) {
-  if (crashCallback_ != nullptr) {
-    crashCallback_();
+// True for a fault that its instruction raises again when the thread retries it
+static bool faultsAgain(int sig, const siginfo_t* info) {
+  const int code = info->si_code;
+  switch (sig) {
+    case SIGSEGV:
+#ifdef SEGV_PKUERR
+      if (code == SEGV_PKUERR) {
+        return true;
+      }
+#endif
+      return code == SEGV_MAPERR || code == SEGV_ACCERR;
+    case SIGBUS:
+      return code == BUS_ADRALN || code == BUS_ADRERR || code == BUS_OBJERR;
+    case SIGILL:
+    case SIGFPE:
+      return code > 0 && code != SI_KERNEL;
+    default:
+      return false;
+  }
+}
+
+static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
+  // The earlier handler, and the thread if it recovers, see the errno of the fault
+  const int savedErrno = errno;
+  for (auto& slot : crashCallbacks_) {
+    Os::CrashCallback callback = slot.load(std::memory_order_acquire);
+    if (callback != nullptr) {
+      callback();
+    }
+  }
+  errno = savedErrno;
+
+  size_t i = 0;
+  while (kCrashSignals[i] != sig) {
+    ++i;
   }
 
-  kill(getpid(), sig);
+  // Chain to the earlier handler. It may recover and return, and then a later
+  // fault reaches this handler again, so ours is not installed with SA_RESETHAND.
+  const struct sigaction& old = oldCrashHandlers_[i];
+  if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN &&
+      !((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].exchange(true))) {
+    // Run it with the mask the kernel would have given it: the interrupted
+    // thread's mask, its sa_mask, and the signal itself unless SA_NODEFER.
+    sigset_t mask = static_cast<ucontext_t*>(context)->uc_sigmask;
+    sigset_t entry;
+    sigorset(&mask, &mask, &old.sa_mask);
+    if ((old.sa_flags & SA_NODEFER) == 0) {
+      sigaddset(&mask, sig);
+    }
+    pthread_sigmask(SIG_SETMASK, &mask, &entry);
+    if (old.sa_flags & SA_SIGINFO) {
+      old.sa_sigaction(sig, info, context);
+    } else {
+      old.sa_handler(sig);
+    }
+    pthread_sigmask(SIG_SETMASK, &entry, nullptr);
+    return;
+  }
+
+  // The default action, on this thread. A fault its instruction raises again
+  // when retried faults again on return, so the core dump records it with its
+  // own thread and address. Anything else is raised again: a sent signal, a
+  // trap the kernel reports past its instruction (SI_KERNEL), a machine check.
+  struct sigaction dfl;
+  memset(&dfl, 0, sizeof(dfl));
+  sigemptyset(&dfl.sa_mask);
+  dfl.sa_handler = SIG_DFL;
+  sigaction(sig, &dfl, nullptr);
+  if (!faultsAgain(sig, info)) {
+    raise(sig);
+  }
 }
 
 bool Os::installExceptionHandlers(CrashCallback callback) {
-  if (crashHandlersInstalled_.exchange(true)) {
+  std::lock_guard<std::mutex> lock(crashHandlersLock_);
+
+  if (callback != nullptr) {
+    auto slot = std::find_if(std::begin(crashCallbacks_), std::end(crashCallbacks_),
+                             [](const auto& s) { return s.load() == nullptr; });
+    if (slot == std::end(crashCallbacks_)) {
+      return false;
+    }
+    slot->store(callback);
+  }
+
+  if (crashHandlersInstalled_) {
     return true;
   }
 
-  crashCallback_ = callback;
-
   struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
   sigemptyset(&sa.sa_mask);
-  sa.sa_handler = crashSignalHandler;
-  sa.sa_flags = SA_RESETHAND;
+  sa.sa_sigaction = crashSignalHandler;
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
-    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+    oldCrashHandlerSpent_[i].store(false);
+    // Read the earlier action first: its handler runs from ours, so ours keeps
+    // the SA_RESTART and SA_ONSTACK it asked for.
+    bool ok = sigaction(kCrashSignals[i], nullptr, &oldCrashHandlers_[i]) == 0;
+    sa.sa_flags = SA_SIGINFO | (oldCrashHandlers_[i].sa_flags & (SA_RESTART | SA_ONSTACK));
+    if (!ok || sigaction(kCrashSignals[i], &sa, nullptr) != 0) {
       return false;
     }
   }
+  crashHandlersInstalled_ = true;
   return true;
 }
 
-void Os::uninstallExceptionHandlers() {
-  if (!crashHandlersInstalled_.load()) {
+void Os::uninstallExceptionHandlers(CrashCallback callback) {
+  std::lock_guard<std::mutex> lock(crashHandlersLock_);
+
+  bool inUse = false;
+  for (auto& slot : crashCallbacks_) {
+    if (slot.load() == callback) {
+      slot.store(nullptr);
+    } else if (slot.load() != nullptr) {
+      inUse = true;
+    }
+  }
+  if (inUse || !crashHandlersInstalled_) {
     return;
   }
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
     sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
   }
-  crashCallback_ = nullptr;
-  crashHandlersInstalled_.store(false);
+  crashHandlersInstalled_ = false;
 }
 
 static struct sigaction oldSigAction;
