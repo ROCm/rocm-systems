@@ -4,6 +4,8 @@ description: "Maintainer-lens review subagent and pre-flight check. Predicts the
 tools: execute/runInTerminal, execute/getTerminalOutput, read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Maintainer-Lens Review — amd-smi
