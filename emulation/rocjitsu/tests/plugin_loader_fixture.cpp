@@ -27,6 +27,8 @@ public:
   BoundaryPlugin() : ExecutionPlugin("boundary") { trace("create"); }
   ~BoundaryPlugin() override { trace("destroy"); }
 
+  void onShutdown() override { trace("shutdown"); }
+
   void onInit() override {
     trace("init");
     sink().write("boundary:init\n");

@@ -3,6 +3,9 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
+#include "rocjitsu/vm/soc.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -10,7 +13,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
+#include <string_view>
 
 #ifndef PLUGIN_LOADER_FIXTURE_DIR
 #error "PLUGIN_LOADER_FIXTURE_DIR must be defined"
@@ -39,6 +44,72 @@ protected:
   rocjitsu::test::ScopedTempFile trace_{"rocjitsu-plugin-loader-"};
 };
 
+TEST_F(PluginLoaderTest, CApiRejectsAdmissionBeforeReplacingInstalledGroup) {
+  const auto count = [](std::string_view text, std::string_view event) {
+    size_t occurrences = 0;
+    for (size_t offset = 0; (offset = text.find(event, offset)) != std::string_view::npos;
+         offset += event.size())
+      ++occurrences;
+    return occurrences;
+  };
+  const char *valid = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
+  struct RejectionCase {
+    const char *config;
+    const char *reason;
+    bool partial_group;
+  };
+  const RejectionCase cases[] = {
+      {R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
+       "required plugin loading failed: loaded 1 of 2 configured plugins", true},
+      {R"({"require_all_plugins":"true","plugins":{"good":{}}})",
+       "top-level 'require_all_plugins' must be a boolean", false},
+      {R"({"require_all_plugins":true,"plugins":[]})",
+       "top-level 'plugins' must be an object when 'require_all_plugins' is true", false},
+  };
+  for (bool initially_active : {false, true}) {
+    SCOPED_TRACE(initially_active);
+    rocjitsu::SoC soc("plugin_loader_test");
+    soc.set_plugin_group(nullptr);
+    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
+    vm->soc = &soc;
+    if (initially_active)
+      ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
+                ROCJITSU_STATUS_SUCCESS);
+    rocjitsu::ExecutionPluginGroup *installed = &soc.plugin_group();
+    for (const RejectionCase &test : cases) {
+      SCOPED_TRACE(test.config);
+      const std::string before = trace();
+      testing::internal::CaptureStderr();
+      const rj_status_t status =
+          rj_vm_load_plugins(vm.get(), test.config, PLUGIN_LOADER_FIXTURE_DIR);
+      const std::string diagnostic = testing::internal::GetCapturedStderr();
+      EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+      const std::string warning = std::string("rj_vm_load_plugins failed: ") + test.reason;
+      EXPECT_EQ(count(diagnostic, "rj_vm_load_plugins failed:"), 1u) << diagnostic;
+      EXPECT_NE(diagnostic.find(warning), std::string::npos) << diagnostic;
+      EXPECT_EQ(&soc.plugin_group(), installed);
+      EXPECT_EQ(vm->plugin_group_active.load(), initially_active);
+      const std::string after = trace();
+      EXPECT_EQ(count(after, "good:init\n"), count(before, "good:init\n"));
+      EXPECT_EQ(count(after, "good:shutdown\n"), count(before, "good:shutdown\n"));
+      EXPECT_EQ(count(after, "good:create\n"),
+                count(before, "good:create\n") + (test.partial_group ? 1u : 0u));
+      EXPECT_EQ(count(after, "good:destroy\n"),
+                count(before, "good:destroy\n") + (test.partial_group ? 1u : 0u));
+    }
+    const std::string before_retry = trace();
+    ASSERT_EQ(rj_vm_load_plugins(vm.get(), valid, PLUGIN_LOADER_FIXTURE_DIR),
+              ROCJITSU_STATUS_SUCCESS);
+    EXPECT_TRUE(vm->plugin_group_active.load());
+    const std::string after_retry = trace();
+    EXPECT_EQ(count(after_retry, "good:init\n"), count(before_retry, "good:init\n") + 1);
+    EXPECT_EQ(count(after_retry, "good:shutdown\n"),
+              count(before_retry, "good:shutdown\n") + (initially_active ? 1u : 0u));
+    EXPECT_EQ(count(after_retry, "good:destroy\n"),
+              count(before_retry, "good:destroy\n") + (initially_active ? 1u : 0u));
+  }
+}
+
 TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
   rocjitsu::ExecutionPluginGroup group(rocjitsu::PluginSinkConfig{});
   EXPECT_EQ(load("good", group), 1);
@@ -50,8 +121,9 @@ TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
 
 TEST_F(PluginLoaderTest, WarnsAndLoadsWhenRemovedProfiledConfigIsPresent) {
   testing::internal::CaptureStderr();
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"profiled":false,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(R"({"profiled":false,"plugins":{"good":{}}})",
+                                                     PLUGIN_LOADER_FIXTURE_DIR);
   const std::string error = testing::internal::GetCapturedStderr();
 
   ASSERT_TRUE(group.succeeded());
@@ -69,8 +141,9 @@ TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
 }
 
 TEST_F(PluginLoaderTest, PluginFailuresRemainBestEffortByDefault) {
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(R"({"plugins":{"missing":{}}})",
-                                                              PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(R"({"plugins":{"missing":{}}})",
+                                                     PLUGIN_LOADER_FIXTURE_DIR);
 
   ASSERT_TRUE(group.succeeded());
   EXPECT_TRUE(group.value()->empty());
@@ -78,26 +151,29 @@ TEST_F(PluginLoaderTest, PluginFailuresRemainBestEffortByDefault) {
 
 TEST_F(PluginLoaderTest, RequiredMissingPluginReturnsFailure) {
   util::StringDiagnostic diagnostic;
-  const auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"require_all_plugins":true,"plugins":{"missing":{}}})", PLUGIN_LOADER_FIXTURE_DIR,
-      diagnostic.emitter());
+  const util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":true,"plugins":{"missing":{}}})", PLUGIN_LOADER_FIXTURE_DIR,
+          diagnostic.emitter());
   EXPECT_TRUE(group.failed());
   EXPECT_EQ(diagnostic.message(),
             "required plugin loading failed: loaded 0 of 1 configured plugins");
 }
 
 TEST_F(PluginLoaderTest, FailedRequiredGroupDestroysCreatedPlugins) {
-  const auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
-      PLUGIN_LOADER_FIXTURE_DIR);
+  const util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":true,"plugins":{"good":{},"missing":{}}})",
+          PLUGIN_LOADER_FIXTURE_DIR);
   EXPECT_TRUE(group.failed());
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
   EXPECT_NE(trace().find("good:destroy\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, RequiredPluginLoads) {
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"require_all_plugins":true,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":true,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
 
   ASSERT_TRUE(group.succeeded());
   ASSERT_EQ(group.value()->num_plugins(), 1u);
@@ -105,8 +181,9 @@ TEST_F(PluginLoaderTest, RequiredPluginLoads) {
 }
 
 TEST_F(PluginLoaderTest, RequiringAllPluginsAllowsNoPlugins) {
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(R"({"require_all_plugins":true})",
-                                                              PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(R"({"require_all_plugins":true})",
+                                                     PLUGIN_LOADER_FIXTURE_DIR);
 
   ASSERT_TRUE(group.succeeded());
   EXPECT_TRUE(group.value()->empty());
@@ -132,7 +209,8 @@ TEST_F(PluginLoaderTest, BestEffortLoadingIgnoresNonObjectPlugins) {
     SCOPED_TRACE(plugins);
     const std::string config = std::string{"{\"plugins\":"} + plugins + "}";
 
-    auto group = rocjitsu::PluginLoader::configure_plugin_group(config, PLUGIN_LOADER_FIXTURE_DIR);
+    util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+        rocjitsu::PluginLoader::configure_plugin_group(config, PLUGIN_LOADER_FIXTURE_DIR);
     ASSERT_TRUE(group.succeeded());
     EXPECT_TRUE(group.value()->empty());
   }
@@ -167,12 +245,14 @@ TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {
 
 TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
   testing::internal::CaptureStderr();
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"plugins":{"good":{}},"sinks":{"types":["file"],"dir":"/dev/null"}})",
-      PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"plugins":{"good":{}},"sinks":{"types":["file"],"dir":"/dev/null"}})",
+          PLUGIN_LOADER_FIXTURE_DIR);
   ASSERT_TRUE(group.succeeded());
-  ASSERT_EQ(group.value()->num_plugins(), 1u);
-  group.value()->onInit();
+  std::shared_ptr<rocjitsu::ExecutionPluginGroup> plugins = std::move(group).value();
+  ASSERT_EQ(plugins->num_plugins(), 1u);
+  plugins->onInit();
   const std::string error = testing::internal::GetCapturedStderr();
 
   EXPECT_NE(error.find("cannot open plugin sink '/dev/null/boundary.log'"), std::string::npos);
@@ -181,9 +261,10 @@ TEST_F(PluginLoaderTest, PluginFileSinkFailureFallsBackToStderr) {
 
 TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
   testing::internal::CaptureStderr();
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"plugins":{"good":{}},"sinks":{"types":["stderr","file"],"dir":"/dev/null"}})",
-      PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"plugins":{"good":{}},"sinks":{"types":["stderr","file"],"dir":"/dev/null"}})",
+          PLUGIN_LOADER_FIXTURE_DIR);
   ASSERT_TRUE(group.succeeded());
   group.value()->onInit();
   const std::string error = testing::internal::GetCapturedStderr();
@@ -196,8 +277,9 @@ TEST_F(PluginLoaderTest, FileSinkFailureDoesNotDuplicateConfiguredStderr) {
 
 TEST_F(PluginLoaderTest, FileSinkWithoutDirectoryUsesDefaultStderrSink) {
   testing::internal::CaptureStderr();
-  auto group = rocjitsu::PluginLoader::configure_plugin_group(
-      R"({"plugins":{"good":{}},"sinks":{"types":["file"]}})", PLUGIN_LOADER_FIXTURE_DIR);
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> group =
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"plugins":{"good":{}},"sinks":{"types":["file"]}})", PLUGIN_LOADER_FIXTURE_DIR);
   ASSERT_TRUE(group.succeeded());
   group.value()->onInit();
   const std::string error = testing::internal::GetCapturedStderr();

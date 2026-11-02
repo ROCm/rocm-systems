@@ -2538,11 +2538,13 @@ TEST_F(PerfsimPluginTest, RequiredLoaderRetriesAfterBackendFactoryFailure) {
   EXPECT_TRUE(PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR).failed());
 
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "", 1);
-  auto group = PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR);
-  ASSERT_TRUE(group.succeeded());
-  ASSERT_EQ(group.value()->num_plugins(), 1u);
-  group.value()->onInit();
-  group.value()->onShutdown();
+  util::FailureOr<std::shared_ptr<rocjitsu::ExecutionPluginGroup>> result =
+      PluginLoader::configure_plugin_group(config, PERFSIM_PLUGIN_DIR);
+  ASSERT_TRUE(result.succeeded());
+  std::shared_ptr<rocjitsu::ExecutionPluginGroup> group = std::move(result).value();
+  ASSERT_EQ(group->num_plugins(), 1u);
+  group->onInit();
+  group->onShutdown();
 
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_EQ(std::ranges::count(trace, "init 13"), 1);
