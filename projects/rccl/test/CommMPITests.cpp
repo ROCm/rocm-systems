@@ -2557,8 +2557,10 @@ TEST_F(DirectReduceScatterMPITest, NonGridMultipleCountsMatchHostReference)
     for(size_t c = first; c < first + kDrsSweep; ++c)
         counts.push_back(c);
     for(size_t c : kDrsExtra)
+    {
         if(c > counts.back())
             counts.push_back(c);
+    }
     while(!counts.empty() && counts.back() * rowBytes > kDrsMaxBytes)
         counts.pop_back();
     ASSERT_MPI_TRUE(counts.size() > kDrsSweep / 2);
