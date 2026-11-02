@@ -1,0 +1,1133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "packet_dump.schema.json",
+  "title": "AQLProfile packet golden dump",
+  "description": "Schema for PMC packet dumps and their referenced agent/IP-discovery files.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/pmc_dump"
+    },
+    {
+      "$ref": "#/$defs/ip_discovery_dump"
+    }
+  ],
+  "$defs": {
+    "uint32_hex": {
+      "type": "string",
+      "description": "A zero-padded 32-bit unsigned value rendered as lowercase hexadecimal.",
+      "pattern": "^0x[0-9a-f]{8}$"
+    },
+    "uint64_hex": {
+      "type": "string",
+      "description": "A zero-padded 64-bit unsigned value rendered as lowercase hexadecimal.",
+      "pattern": "^0x[0-9a-f]{16}$"
+    },
+    "offset_hex": {
+      "type": "string",
+      "description": "A byte offset rendered as lowercase hexadecimal without a fixed width.",
+      "pattern": "^0x[0-9a-f]+$"
+    },
+    "dimension_name": {
+      "type": "string",
+      "description": "An AQLProfile coordinate dimension name returned by aqlprofile_iterate_event_coord.",
+      "enum": [
+        "XCD",
+        "AID",
+        "SE",
+        "SA",
+        "WGP",
+        "INSTANCE"
+      ]
+    },
+    "dimension": {
+      "type": "object",
+      "description": "One API-visible counter-result dimension. Dimension order defines mixed-radix counter_id decoding, with the last dimension changing fastest.",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "id",
+        "name",
+        "extent"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "description": "Zero-based callback position returned by aqlprofile_iterate_event_coord.",
+          "minimum": 0
+        },
+        "id": {
+          "type": "integer",
+          "description": "Numeric public AQLProfile dimension ID returned by the callback.",
+          "minimum": 0
+        },
+        "name": {
+          "description": "The public AQLProfile dimension name.",
+          "$ref": "#/$defs/dimension_name"
+        },
+        "extent": {
+          "type": "integer",
+          "description": "Number of valid coordinate values in this dimension.",
+          "minimum": 1
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "description": "Metadata for the hardware counter block shared by every case in this file.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "__implementation_aqlprofile:block_id",
+        "counter_count",
+        "dimensions"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Semantic counter-block name used by config.yaml and the packet request.",
+          "minLength": 1
+        },
+        "__implementation_aqlprofile:block_id": {
+          "type": "integer",
+          "description": "Legacy AQLProfile block enum value. This is diagnostic implementation metadata and need not match a Rust implementation.",
+          "minimum": 0
+        },
+        "counter_count": {
+          "type": "integer",
+          "description": "Maximum number of simultaneous physical counter slots exposed for one block instance.",
+          "minimum": 1
+        },
+        "dimensions": {
+          "type": "array",
+          "description": "Ordered API-visible result dimensions for this block and topology.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dimension"
+          }
+        }
+      }
+    },
+    "event_definition": {
+      "type": "object",
+      "description": "Minimal basic-event metadata retained from config.yaml.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "event_id"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Stable symbolic event name used by requests in this dump.",
+          "minLength": 1
+        },
+        "event_id": {
+          "type": "integer",
+          "description": "Architecture-specific hardware event selector from config.yaml.",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "skipped_event": {
+      "type": "object",
+      "description": "Basic event intentionally omitted from packet generation.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "event_id",
+        "reason"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Symbolic event name from config.yaml.",
+          "minLength": 1
+        },
+        "event_id": {
+          "type": "integer",
+          "description": "Architecture-specific hardware event selector from config.yaml.",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "reason": {
+          "const": "metric_name_contains_level_token",
+          "description": "Machine-readable statement of the exact name-based heuristic used to skip this event."
+        }
+      }
+    },
+    "request_event": {
+      "type": "object",
+      "description": "One event descriptor passed to the PMC packet-generation request.",
+      "additionalProperties": false,
+      "required": [
+        "event",
+        "block_index",
+        "flags"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "description": "Reference to an entry in the root events array by symbolic name.",
+          "minLength": 1
+        },
+        "block_index": {
+          "type": "integer",
+          "description": "Exact AQLProfile block_index request field selecting one physical block instance.",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "flags": {
+          "type": "object",
+          "description": "Exact event flags passed to AQLProfile.",
+          "additionalProperties": false,
+          "required": [
+            "raw"
+          ],
+          "properties": {
+            "raw": {
+              "description": "Raw aqlprofile_pmc_event_flags_t bits.",
+              "$ref": "#/$defs/uint32_hex"
+            }
+          }
+        }
+      }
+    },
+    "allocation_flags": {
+      "type": "object",
+      "description": "Decoded aqlprofile_buffer_desc_flags_t supplied to the allocation callback.",
+      "additionalProperties": false,
+      "required": [
+        "raw",
+        "host_access",
+        "device_access",
+        "memory_hint"
+      ],
+      "properties": {
+        "raw": {
+          "description": "Raw allocation flag bits.",
+          "$ref": "#/$defs/uint32_hex"
+        },
+        "host_access": {
+          "type": "boolean",
+          "description": "Whether AQLProfile requested host access to the allocation."
+        },
+        "device_access": {
+          "type": "boolean",
+          "description": "Whether AQLProfile requested device access to the allocation."
+        },
+        "memory_hint": {
+          "type": "object",
+          "description": "Requested AQLProfile memory-placement/coherency hint.",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "value"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Symbolic memory-hint enum name.",
+              "enum": [
+                "AQLPROFILE_MEMORY_HINT_NONE",
+                "AQLPROFILE_MEMORY_HINT_HOST",
+                "AQLPROFILE_MEMORY_HINT_DEVICE_UNCACHED",
+                "AQLPROFILE_MEMORY_HINT_DEVICE_COHERENT",
+                "AQLPROFILE_MEMORY_HINT_DEVICE_NONCOHERENT",
+                "AQLPROFILE_MEMORY_HINT_LAST"
+              ]
+            },
+            "value": {
+              "type": "integer",
+              "description": "Numeric memory-hint enum value.",
+              "minimum": 0,
+              "maximum": 5
+            }
+          }
+        }
+      }
+    },
+    "allocation": {
+      "type": "object",
+      "description": "One memory allocation requested while constructing this packet profile.",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "observed_call_index",
+        "base",
+        "size_bytes",
+        "flags"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Symbolic allocation role inferred from how the allocation is used.",
+          "enum": [
+            "output",
+            "command"
+          ]
+        },
+        "observed_call_index": {
+          "type": "integer",
+          "description": "Zero-based observed allocation-callback order. This is legacy behavior, not necessarily a required ordering.",
+          "minimum": 0
+        },
+        "base": {
+          "description": "Deterministic virtual address returned by the fixture allocator.",
+          "$ref": "#/$defs/uint64_hex"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "description": "Minimum byte size requested through the allocation callback.",
+          "minimum": 1
+        },
+        "flags": {
+          "description": "Access and memory-hint flags supplied with the request.",
+          "$ref": "#/$defs/allocation_flags"
+        }
+      }
+    },
+    "memory_copy": {
+      "type": "object",
+      "description": "One memcpy callback used by AQLProfile to place a phase's PM4 IB into command memory.",
+      "additionalProperties": false,
+      "required": [
+        "observed_call_index",
+        "phase",
+        "destination",
+        "size_bytes"
+      ],
+      "properties": {
+        "observed_call_index": {
+          "type": "integer",
+          "description": "Zero-based observed memcpy-callback order. This is informative rather than normative.",
+          "minimum": 0
+        },
+        "phase": {
+          "type": "string",
+          "description": "Packet phase identified by matching the copy destination to the returned AQL IB target.",
+          "enum": [
+            "read",
+            "start",
+            "stop"
+          ]
+        },
+        "destination": {
+          "type": "object",
+          "description": "Symbolic copy destination inside a captured allocation.",
+          "additionalProperties": false,
+          "required": [
+            "allocation",
+            "offset_bytes"
+          ],
+          "properties": {
+            "allocation": {
+              "description": "Allocation receiving the copied PM4 stream.",
+              "const": "command"
+            },
+            "offset_bytes": {
+              "description": "Byte offset from the command allocation base.",
+              "$ref": "#/$defs/offset_hex"
+            }
+          }
+        },
+        "size_bytes": {
+          "type": "integer",
+          "description": "Actual unpadded number of PM4 bytes copied.",
+          "minimum": 1,
+          "multipleOf": 4
+        }
+      }
+    },
+    "output_slot": {
+      "type": "object",
+      "description": "One 8-byte logical slot in the PMC result/output allocation.",
+      "additionalProperties": false,
+      "required": [
+        "allocation",
+        "offset_bytes",
+        "size_bytes"
+      ],
+      "properties": {
+        "allocation": {
+          "description": "Allocation containing the result slot.",
+          "const": "output"
+        },
+        "offset_bytes": {
+          "description": "Byte offset from output_base.",
+          "$ref": "#/$defs/offset_hex"
+        },
+        "size_bytes": {
+          "description": "Logical PMC result-slot size in bytes.",
+          "const": 8
+        }
+      }
+    },
+    "coordinate_observation": {
+      "type": "object",
+      "description": "One coordinate callback emitted by aqlprofile_iterate_event_coord.",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "id",
+        "name",
+        "extent",
+        "value"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "$ref": "#/$defs/dimension_name"
+        },
+        "extent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "$comment": "position must equal the array index, value must be less than extent, and id/name/extent must match the block dimension catalog."
+    },
+    "callback_event": {
+      "type": "object",
+      "description": "Exact aqlprofile_pmc_event_t returned by the iterate_data callback.",
+      "additionalProperties": false,
+      "required": [
+        "block_name",
+        "block_index",
+        "event_id",
+        "flags"
+      ],
+      "properties": {
+        "block_name": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "block_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "raw"
+          ],
+          "properties": {
+            "raw": {
+              "$ref": "#/$defs/uint32_hex"
+            }
+          }
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "description": "Observed mapping between one iterate_data callback, its output-buffer slot, and decoded topology coordinates.",
+      "additionalProperties": false,
+      "required": [
+        "callback_event",
+        "counter_id",
+        "callback_index",
+        "output",
+        "coordinates"
+      ],
+      "properties": {
+        "callback_event": {
+          "$ref": "#/$defs/callback_event"
+        },
+        "counter_id": {
+          "type": "integer",
+          "description": "Flattened coordinate ID passed by aqlprofile_pmc_iterate_data; this is not the hardware event_id.",
+          "minimum": 0
+        },
+        "callback_index": {
+          "type": "integer",
+          "description": "Zero-based observed iterate_data callback order.",
+          "minimum": 0
+        },
+        "output": {
+          "description": "Output slot identified by the synthetic post-creation tag read by this callback.",
+          "$ref": "#/$defs/output_slot"
+        },
+        "coordinates": {
+          "type": "array",
+          "description": "Complete ordered callbacks from aqlprofile_iterate_event_coord.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/coordinate_observation"
+          }
+        }
+      }
+    },
+    "aql_packet_reference": {
+      "type": "object",
+      "description": "RFC 6901 JSON Pointer to the canonical START AQL packet for another event at the same block index.",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/pmc/[0-9]+/response/start/aql_packet$"
+        }
+      }
+    },
+    "allocations_reference": {
+      "type": "object",
+      "description": "RFC 6901 JSON Pointer to an identical canonical allocation transcript.",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/pmc/[0-9]+/response/allocations$"
+        }
+      }
+    },
+    "memory_copies_reference": {
+      "type": "object",
+      "description": "RFC 6901 JSON Pointer to an identical canonical memory-copy transcript.",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/pmc/[0-9]+/response/memory_copies$"
+        }
+      }
+    },
+    "unreported_output_slots_reference": {
+      "type": "object",
+      "description": "RFC 6901 JSON Pointer to an identical canonical set of unreported output slots.",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/pmc/[0-9]+/response/unreported_output_slots$"
+        }
+      }
+    },
+    "phase_reference": {
+      "type": "object",
+      "description": "RFC 6901 JSON Pointer to a canonical identical READ or STOP phase for another event at the same block index.",
+      "additionalProperties": false,
+      "required": [
+        "$ref"
+      ],
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/pmc/[0-9]+/response/(read|stop)$"
+        }
+      }
+    },
+    "aql_packet": {
+      "type": "object",
+      "description": "Raw 64-byte outer AQL packet containing an INDIRECT_BUFFER command for one phase.",
+      "additionalProperties": false,
+      "required": [
+        "size_bytes",
+        "ib_target",
+        "ib_bytes",
+        "uint32_t"
+      ],
+      "properties": {
+        "size_bytes": {
+          "description": "Total serialized AQL packet size.",
+          "const": 64
+        },
+        "ib_target": {
+          "type": "object",
+          "description": "Symbolic address and placement metadata for the PM4 indirect buffer.",
+          "additionalProperties": false,
+          "required": [
+            "base",
+            "offset_bytes",
+            "align_bytes"
+          ],
+          "properties": {
+            "base": {
+              "description": "Symbolic allocation base used by the target address.",
+              "const": "command_base"
+            },
+            "offset_bytes": {
+              "description": "Byte offset from command_base encoded in the INDIRECT_BUFFER packet.",
+              "$ref": "#/$defs/offset_hex"
+            },
+            "align_bytes": {
+              "type": "integer",
+              "description": "Command-section alignment returned by CommandBufferMgr::Align(1); generation fails if the base or IB target violates it.",
+              "minimum": 1
+            }
+          }
+        },
+        "ib_bytes": {
+          "type": "integer",
+          "description": "PM4 indirect-buffer size encoded by the AQL wrapper.",
+          "minimum": 4,
+          "multipleOf": 4
+        },
+        "uint32_t": {
+          "type": "array",
+          "description": "All 16 raw little-endian AQL dwords as padded hexadecimal strings.",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/uint32_hex"
+          }
+        }
+      }
+    },
+    "pm4_ib": {
+      "type": "object",
+      "description": "Raw PM4 indirect-buffer payload copied into command memory for one phase.",
+      "additionalProperties": false,
+      "required": [
+        "size_bytes",
+        "uint32_t"
+      ],
+      "properties": {
+        "size_bytes": {
+          "type": "integer",
+          "description": "Actual unpadded PM4 stream size.",
+          "minimum": 4,
+          "multipleOf": 4
+        },
+        "uint32_t": {
+          "type": "array",
+          "description": "Raw little-endian PM4 dwords in legacy emission order.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uint32_hex"
+          }
+        }
+      },
+      "$comment": "The uint32_t element count multiplied by four must equal size_bytes."
+    },
+    "phase": {
+      "type": "object",
+      "description": "Outer AQL packet and referenced PM4 IB for one START, READ, or STOP phase.",
+      "additionalProperties": false,
+      "required": [
+        "aql_packet",
+        "pm4_ib"
+      ],
+      "properties": {
+        "aql_packet": {
+          "description": "Outer AQL INDIRECT_BUFFER wrapper.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/aql_packet"
+            },
+            {
+              "$ref": "#/$defs/aql_packet_reference"
+            }
+          ]
+        },
+        "pm4_ib": {
+          "description": "Referenced PM4 command stream.",
+          "$ref": "#/$defs/pm4_ib"
+        }
+      },
+      "$comment": "aql_packet.ib_bytes must equal pm4_ib.size_bytes."
+    },
+    "response": {
+      "type": "object",
+      "description": "All captured outputs and callback observations from one successful PMC packet-generation call.",
+      "additionalProperties": false,
+      "required": [
+        "allocations",
+        "memory_copies",
+        "samples",
+        "unreported_output_slots",
+        "start",
+        "read",
+        "stop"
+      ],
+      "properties": {
+        "allocations": {
+          "description": "Output and command allocations requested by AQLProfile.",
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "$ref": "#/$defs/allocation"
+              }
+            },
+            {
+              "$ref": "#/$defs/allocations_reference"
+            }
+          ]
+        },
+        "memory_copies": {
+          "description": "Observed PM4 stream copies into the command allocation.",
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "$ref": "#/$defs/memory_copy"
+              }
+            },
+            {
+              "$ref": "#/$defs/memory_copies_reference"
+            }
+          ]
+        },
+        "samples": {
+          "type": "array",
+          "description": "API-visible result mapping discovered with post-creation synthetic output tags.",
+          "items": {
+            "$ref": "#/$defs/sample"
+          }
+        },
+        "unreported_output_slots": {
+          "description": "Allocated full 8-byte output slots that produced no iterate_data callback.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/output_slot"
+              }
+            },
+            {
+              "$ref": "#/$defs/unreported_output_slots_reference"
+            }
+          ]
+        },
+        "start": {
+          "description": "Counter-programming and start phase.",
+          "$ref": "#/$defs/phase"
+        },
+        "read": {
+          "description": "Counter sampling and result-copy phase.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/phase"
+            },
+            {
+              "$ref": "#/$defs/phase_reference"
+            }
+          ]
+        },
+        "stop": {
+          "description": "Counter stop/disable phase.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/phase"
+            },
+            {
+              "$ref": "#/$defs/phase_reference"
+            }
+          ]
+        }
+      }
+    },
+    "pmc_case": {
+      "type": "object",
+      "description": "One independent aqlprofile_pmc_create_packets request and captured response.",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "response"
+      ],
+      "properties": {
+        "request": {
+          "type": "object",
+          "description": "Semantic and exact low-level event inputs for this call.",
+          "additionalProperties": false,
+          "required": [
+            "shape",
+            "events"
+          ],
+          "properties": {
+            "shape": {
+              "type": "string",
+              "description": "Structural request shape derived directly from the number and arrangement of request entries.",
+              "enum": [
+                "single-entry",
+                "same-event-instance-sweep"
+              ]
+            },
+            "events": {
+              "type": "array",
+              "description": "Events supplied together in this PMC profile.",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/request_event"
+              }
+            }
+          }
+        },
+        "response": {
+          "description": "Captured packet-generation result.",
+          "$ref": "#/$defs/response"
+        }
+      }
+    },
+    "pmc_dump": {
+      "type": "object",
+      "description": "Atomic per-instance and combined all-instance basic PMC packet cases for one block on one topology.",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "gfx",
+        "topology",
+        "block",
+        "events",
+        "skipped",
+        "byte_order",
+        "output_base",
+        "command_base",
+        "pmc"
+      ],
+      "properties": {
+        "format_version": {
+          "description": "Linear packet-dump format version for compatibility checks.",
+          "const": 1
+        },
+        "gfx": {
+          "type": "string",
+          "description": "GPU architecture name used to register the agent.",
+          "pattern": "^gfx[0-9a-z]+$"
+        },
+        "topology": {
+          "type": "string",
+          "description": "Relative filename of the agent and IP-discovery document used by this dump.",
+          "pattern": "^gfx[0-9a-z]+_ip_discovery\\.json$"
+        },
+        "block": {
+          "description": "Shared block facts and result dimensions.",
+          "$ref": "#/$defs/block"
+        },
+        "events": {
+          "type": "array",
+          "description": "Basic event catalog referenced by the cases in pmc.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/event_definition"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "description": "Events detected by the config export but intentionally excluded from packet generation.",
+          "items": {
+            "$ref": "#/$defs/skipped_event"
+          }
+        },
+        "byte_order": {
+          "description": "Byte order used when interpreting raw dword arrays.",
+          "const": "little-endian"
+        },
+        "output_base": {
+          "description": "Canonical deterministic output-allocation address used for packet generation.",
+          "$ref": "#/$defs/uint64_hex"
+        },
+        "command_base": {
+          "description": "Canonical deterministic command-allocation address used for packet generation.",
+          "$ref": "#/$defs/uint64_hex"
+        },
+        "pmc": {
+          "type": "array",
+          "description": "Independent PMC request/response cases.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/pmc_case"
+          }
+        }
+      },
+      "$comment": "Event references, allocation roles, callback indices, offsets, and cross-field size relationships require semantic validation beyond JSON Schema."
+    },
+    "agent_info_version": {
+      "type": "object",
+      "description": "Legacy AQLProfile agent-info ABI version used to register this fixture.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "description": "Symbolic registration-version enum name.",
+          "const": "AQLPROFILE_AGENT_VERSION_V2"
+        },
+        "value": {
+          "description": "Numeric registration-version enum value.",
+          "const": 3
+        }
+      }
+    },
+    "cu_bitmap": {
+      "type": "object",
+      "description": "Fixed-shape DRM CU bitmap passed through aqlprofile_agent_info_v2_t.",
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "dimensions",
+        "uint32_t"
+      ],
+      "properties": {
+        "layout": {
+          "description": "Flattening order of the bitmap dwords.",
+          "const": "se-major"
+        },
+        "dimensions": {
+          "type": "object",
+          "description": "Fixed DRM ABI dimensions, independent of the agent's actual se_num.",
+          "additionalProperties": false,
+          "required": [
+            "se",
+            "shader_arrays_per_se"
+          ],
+          "properties": {
+            "se": {
+              "description": "Number of SE rows represented by the DRM ABI bitmap.",
+              "const": 4
+            },
+            "shader_arrays_per_se": {
+              "description": "Number of shader-array columns represented per SE.",
+              "const": 4
+            }
+          }
+        },
+        "uint32_t": {
+          "type": "array",
+          "description": "Row-major active-CU bitmaps for every fixed SE/SA position.",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/uint32_hex"
+          }
+        }
+      }
+    },
+    "agent_info": {
+      "type": "object",
+      "description": "Exact semantic topology values passed to aqlprofile_register_agent_info.",
+      "additionalProperties": false,
+      "required": [
+        "agent_gfxip",
+        "xcc_num",
+        "se_num",
+        "cu_num",
+        "shader_arrays_per_se",
+        "domain",
+        "location_id",
+        "cu_bitmap"
+      ],
+      "properties": {
+        "agent_gfxip": {
+          "type": "string",
+          "description": "Architecture string supplied to AQLProfile.",
+          "pattern": "^gfx[0-9a-z]+$"
+        },
+        "xcc_num": {
+          "type": "integer",
+          "description": "Number of XCC/XCD partitions on the registered agent.",
+          "minimum": 1
+        },
+        "se_num": {
+          "type": "integer",
+          "description": "Total number of shader engines supplied to AQLProfile.",
+          "minimum": 1
+        },
+        "cu_num": {
+          "type": "integer",
+          "description": "Total active compute-unit count supplied to AQLProfile.",
+          "minimum": 1
+        },
+        "shader_arrays_per_se": {
+          "type": "integer",
+          "description": "Number of shader arrays per shader engine.",
+          "minimum": 1
+        },
+        "domain": {
+          "type": "integer",
+          "description": "PCI domain used when resolving IP discovery.",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "location_id": {
+          "description": "Packed PCI bus/device/function location ID.",
+          "$ref": "#/$defs/uint32_hex"
+        },
+        "cu_bitmap": {
+          "description": "Per-SE/SA active-CU bitmap.",
+          "$ref": "#/$defs/cu_bitmap"
+        }
+      }
+    },
+    "ip_instance": {
+      "type": "object",
+      "description": "One IP-discovery instance corresponding to one on-disk instance directory.",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "major",
+        "minor",
+        "revision",
+        "num_instance",
+        "base_addr"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Logical instance directory identifier.",
+          "minimum": 0
+        },
+        "major": {
+          "type": "integer",
+          "description": "IP major version read from the major file.",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "description": "IP minor version read from the minor file.",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "integer",
+          "description": "IP revision read from the revision file.",
+          "minimum": 0
+        },
+        "num_instance": {
+          "type": "integer",
+          "description": "Instance number read from the num_instance file.",
+          "minimum": 0
+        },
+        "base_addr": {
+          "type": "array",
+          "description": "Base-address segments read from the base_addr file, without fixed-array zero padding.",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/uint32_hex"
+          }
+        }
+      }
+    },
+    "ip": {
+      "type": "object",
+      "description": "One named hardware IP directory and all of its discovered instances.",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "instances"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Logical IP name such as GC.",
+          "minLength": 1
+        },
+        "instances": {
+          "type": "array",
+          "description": "Discovered instances sorted by instance ID.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ip_instance"
+          }
+        }
+      }
+    },
+    "die": {
+      "type": "object",
+      "description": "One IP-discovery die directory.",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ips"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Numeric die identifier.",
+          "minimum": 0
+        },
+        "ips": {
+          "type": "array",
+          "description": "Named IP blocks discovered on this die.",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ip"
+          }
+        }
+      }
+    },
+    "ip_discovery_dump": {
+      "type": "object",
+      "description": "Agent registration topology and parsed IP-discovery fixture for one gfx architecture.",
+      "additionalProperties": false,
+      "required": [
+        "format_version",
+        "gfx",
+        "agent_info_version",
+        "agent_info",
+        "ip_discovery"
+      ],
+      "properties": {
+        "format_version": {
+          "description": "Linear packet-dump format version for compatibility checks.",
+          "const": 1
+        },
+        "gfx": {
+          "type": "string",
+          "description": "GPU architecture described by this topology file.",
+          "pattern": "^gfx[0-9a-z]+$"
+        },
+        "agent_info_version": {
+          "description": "AQLProfile agent registration ABI version.",
+          "$ref": "#/$defs/agent_info_version"
+        },
+        "agent_info": {
+          "description": "Agent topology passed to AQLProfile.",
+          "$ref": "#/$defs/agent_info"
+        },
+        "ip_discovery": {
+          "type": "object",
+          "description": "Logical die/IP/instance hierarchy parsed from the fixture.",
+          "additionalProperties": false,
+          "required": [
+            "dies"
+          ],
+          "properties": {
+            "dies": {
+              "type": "array",
+              "description": "Discovered dies sorted by die ID.",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/die"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
