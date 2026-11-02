@@ -52,8 +52,12 @@ inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvByt
 // raw threshold on every architecture serializes large AllToAll on MI300.
 inline ssize_t rcclP2pBatchCutoff(const char* gcn, int nNodes, ssize_t sendBytes, ssize_t recvBytes,
                                   ssize_t threshold) {
-  if (IsArchMatch(gcn, "gfx950") && nNodes >= 16) return threshold;
-  return std::max(sendBytes, recvBytes);
+  if (threshold < 0) {
+    if (IsArchMatch(gcn, "gfx950") && nNodes >= 16) return 1 << 16; // 64k per-rank message size
+    return std::max(sendBytes, recvBytes);
+  } else {
+    return threshold;
+  }
 }
 
 #endif

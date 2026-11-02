@@ -1310,12 +1310,14 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
 // On gfx950 at 16+ nodes, batching loses bandwidth once each peer carries more
-// than 64 KiB, so the cutoff applies there even when the user explicitly enables
-// batching. Elsewhere (e.g. gfx942) batched work must stay fused at every size:
-// the batched channel map packs several rounds onto one channel, and unfused
-// rounds then serialize on it. rcclEffectiveP2pBatchEnable controls the default.
+// than the default 64 KiB, so that cutoff applies there even when the user
+// explicitly enables batching. Elsewhere (e.g. gfx942) batched work must stay
+// fused at every size: the batched channel map packs several rounds onto one
+// channel, and unfused rounds then serialize on it. Setting
+// RCCL_P2P_BATCH_THRESHOLD overrides that fallback on every architecture.
+// rcclEffectiveP2pBatchEnable still decides whether batching is on.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
-RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
+RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", -1);
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
