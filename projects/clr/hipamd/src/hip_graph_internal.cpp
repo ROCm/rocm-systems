@@ -6,6 +6,8 @@
 
 #include "hip_graph_internal.hpp"
 
+#include <limits>
+
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
     case_string = #C;                                                                              \
@@ -1917,10 +1919,8 @@ hipError_t GraphExecSegmented::Init() {
   return status;
 }
 
-//! Chunk size to add to kern arg pool
-constexpr uint32_t kKernArgChunkSize = 128 * Ki;
 // ================================================================================================
-void GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph) {
+bool GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph) {
   // Calculate the kernel argument size required for all graph kernel nodes
   // when GPU packet capture is enabled
 
@@ -1938,7 +1938,9 @@ void GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t
               childGraphExec->SetKernelArgManager(kernArgMgr);
             }
           }
-          childGraphExec->GetKernelArgSizeForGraph(kernArgSizeForGraph);
+          if (!childGraphExec->GetKernelArgSizeForGraph(kernArgSizeForGraph)) {
+            return false;
+          }
         }
         continue;  // Skip processing nodes in this segment
       }
@@ -1947,11 +1949,16 @@ void GraphExecSegmented::GetKernelArgSizeForGraph(std::unordered_map<int, size_t
       for (hip::GraphNode* node : segment.nodes) {
         if (node->GraphCaptureEnabled()) {
           // Accumulate the kernel argument size for each device
-          kernArgSizeForGraph[node->dev_id_] += node->GetKerArgSize();
+          auto& size = kernArgSizeForGraph[node->dev_id_];
+          if (node->GetKerArgSize() > std::numeric_limits<size_t>::max() - size) {
+            return false;
+          }
+          size += node->GetKerArgSize();
         }
       }
     }
   }
+  return true;
 }
 // ================================================================================================
 // Enable or disable a graph node's packets in the batch
@@ -2345,9 +2352,12 @@ hipError_t GraphExecSegmented::CaptureAQLPackets() {
   for (int devId = 0; devId < g_devices.size(); devId++) {
     kernArgSizeForGraph[devId] = 0;
   }
-  GetKernelArgSizeForGraph(kernArgSizeForGraph);
+  if (!GetKernelArgSizeForGraph(kernArgSizeForGraph)) {
+    return hipErrorMemoryAllocation;
+  }
 
-  // Allocate kernel argument pools on respective devices with extra space for updates
+  // Reserve the initial arguments only. Updates and additional alignment padding
+  // can grow the pool on demand without invalidating previously captured addresses.
   for (const auto& deviceKernArgPair : kernArgSizeForGraph) {
     const int deviceId = deviceKernArgPair.first;
     const size_t kernArgSize = deviceKernArgPair.second;
@@ -2356,12 +2366,11 @@ hipError_t GraphExecSegmented::CaptureAQLPackets() {
       continue;
     }
 
-    const size_t totalPoolSize = kernArgSize + kKernArgChunkSize;
-    if (!kernArgManager_->AllocGraphKernargPool(totalPoolSize, g_devices[deviceId]->devices()[0])) {
+    if (!kernArgManager_->AllocGraphKernargPool(kernArgSize, g_devices[deviceId]->devices()[0])) {
       ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
               "[hipGraph] Failed to allocate kernel argument pool of size %zu for device %d",
-              totalPoolSize, deviceId);
-    return hipErrorMemoryAllocation;
+              kernArgSize, deviceId);
+      return hipErrorMemoryAllocation;
     }
   }
 
@@ -3589,12 +3598,11 @@ bool GraphKernelArgManager::AllocGraphKernargPool(size_t pool_size, amd::Device*
 }
 
 address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int devId) {
-  if (size == 0) {
+  if (size == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0) {
     return nullptr;
   }
 
   amd::Device* device = g_devices[devId]->devices()[0];
-  assert(alignment != 0 && "Alignment must be non-zero");
 
   // Check if we have any pools allocated for this device
   auto& device_pools = kernarg_graph_[device];
@@ -3602,24 +3610,33 @@ address GraphKernelArgManager::AllocKernArg(size_t size, size_t alignment, int d
     return nullptr;
   }
 
-  auto& current_pool = device_pools.back();
-  // Calculate aligned address for the allocation
-  address aligned_addr = amd::alignUp(current_pool.kernarg_pool_addr_ + current_pool.kernarg_pool_offset_, alignment);
-  const size_t new_pool_usage = (aligned_addr + size) - current_pool.kernarg_pool_addr_;
-
-  // Check if allocation fits in current pool
-  if (new_pool_usage <= current_pool.kernarg_pool_size_) {
-    current_pool.kernarg_pool_offset_ = new_pool_usage;
-    return aligned_addr;
+  auto allocate = [size, alignment](KernelArgPoolGraph& pool) -> address {
+    const size_t remaining = pool.kernarg_pool_size_ - pool.kernarg_pool_offset_;
+    address next = pool.kernarg_pool_addr_ + pool.kernarg_pool_offset_;
+    const size_t padding =
+        (alignment - (reinterpret_cast<uintptr_t>(next) & (alignment - 1))) & (alignment - 1);
+    // Check sizes before forming a pointer that could be outside the allocation.
+    if (padding > remaining || size > remaining - padding) {
+      return nullptr;
+    }
+    pool.kernarg_pool_offset_ += padding + size;
+    return next + padding;
+  };
+  if (address result = allocate(device_pools.back())) {
+    return result;
   }
 
-  // Current pool is full - allocate a new pool with the same size
-  if (!AllocGraphKernargPool(current_pool.kernarg_pool_size_, device)) {
+  // A replacement kernel can require more arguments or alignment than the
+  // initial graph. Repeatedly allocating the old size would never make progress.
+  if (size > std::numeric_limits<size_t>::max() - (alignment - 1)) {
     return nullptr;
   }
-
-  // Recursively allocate from the new pool
-  return AllocKernArg(size, alignment, devId);
+  const size_t pool_size = std::max(device_pools.back().kernarg_pool_size_, size + alignment - 1);
+  if (!AllocGraphKernargPool(pool_size, device)) {
+    return nullptr;
+  }
+  // AllocGraphKernargPool can reallocate the vector; reacquire its last element.
+  return allocate(device_pools.back());
 }
 
 void GraphKernelArgManager::ReadBackOrFlush() {

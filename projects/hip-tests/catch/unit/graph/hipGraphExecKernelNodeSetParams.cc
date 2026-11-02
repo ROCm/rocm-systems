@@ -21,6 +21,74 @@ Functional -
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+namespace {
+struct GraphUpdateArguments {
+  int values[256];
+};
+
+__global__ void graphWriteSmall(int* out, int value) { *out = value; }
+
+__global__ void graphWriteLarge(int* out, GraphUpdateArguments args) {
+  int sum = 0;
+  for (int i = 0; i < 256; ++i) {
+    sum += args.values[i];
+  }
+  *out = sum;
+}
+}  // namespace
+
+// A replacement kernel can need more kernarg storage than the entire initial
+// graph. Existing nodes must keep their arguments when the pool grows.
+HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_LargerArguments) {
+  hipGraph_t graph;
+  hipGraphExec_t exec;
+  hipGraphNode_t first, second;
+  hipStream_t stream;
+  int* output;
+  HIP_CHECK(hipMalloc(&output, 2 * sizeof(int)));
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+
+  int value = 7;
+  int sentinel = 1234;
+  int* second_output = output + 1;
+  void* small_args[] = {&output, &value};
+  void* second_args[] = {&second_output, &sentinel};
+  hipKernelNodeParams params{};
+  params.func = reinterpret_cast<void*>(graphWriteSmall);
+  params.gridDim = dim3(1);
+  params.blockDim = dim3(1);
+  params.kernelParams = small_args;
+  HIP_CHECK(hipGraphAddKernelNode(&first, graph, nullptr, 0, &params));
+  params.kernelParams = second_args;
+  HIP_CHECK(hipGraphAddKernelNode(&second, graph, &first, 1, &params));
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+  GraphUpdateArguments large{};
+  void* large_args[] = {&output, &large};
+  for (int iteration = 0; iteration < 64; ++iteration) {
+    value = iteration + 1;
+    for (int& element : large.values) {
+      element = value;
+    }
+    const bool use_large = (iteration % 2 == 0);
+    params.func = use_large ? reinterpret_cast<void*>(graphWriteLarge)
+                            : reinterpret_cast<void*>(graphWriteSmall);
+    params.kernelParams = use_large ? large_args : small_args;
+    HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, first, &params));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    int result[2];
+    HIP_CHECK(hipMemcpy(result, output, sizeof(result), hipMemcpyDeviceToHost));
+    REQUIRE(result[0] == value * (use_large ? 256 : 1));
+    REQUIRE(result[1] == sentinel);
+  }
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(output));
+}
+
 /**
  * Negative Test for API hipGraphExecKernelNodeSetParams
  */

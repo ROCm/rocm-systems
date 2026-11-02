@@ -1261,7 +1261,7 @@ class GraphExecSegmented : public GraphExecBase {
   }
   GraphKernelArgManager* GetKernelArgManager() { return kernArgManager_; }
   hipError_t CaptureAndFormPacketsForGraph(bool reuseKernargSlots = true);
-  void GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
+  bool GetKernelArgSizeForGraph(std::unordered_map<int, size_t>& kernArgSizeForGraph);
 
   //! out_signal_set, when non-null, marks the top-level launch path: signals
   //! are taken from the per-graph pool and returned via this out-parameter so
