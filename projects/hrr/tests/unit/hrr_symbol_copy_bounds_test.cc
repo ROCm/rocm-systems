@@ -62,11 +62,11 @@ char g_dev[256];
 // operand, and the graph, node and exec the handlers translate.
 struct Fixture {
   PlaybackContext ctx;
-  explicit Fixture(size_t symbol_size = kSymSize) {
+  Fixture() {
     ctx.record_graph(kGraph, reinterpret_cast<hipGraph_t>(0x1));
     ctx.record_graph_node(kNode, reinterpret_cast<hipGraphNode_t>(0x2));
     ctx.record_graph_exec(kExec, reinterpret_cast<hipGraphExec_t>(0x3));
-    ctx.record_symbol(kSym, "sym", g_symbol, symbol_size);
+    ctx.record_symbol(kSym, "sym", g_symbol, kSymSize);
     ctx.record_alloc(kDev, g_dev, sizeof(g_dev));
     g_seen = Seen{};
   }
