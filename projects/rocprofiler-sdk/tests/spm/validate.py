@@ -125,9 +125,7 @@ def _validate_dispatch_counters(dispatch_id, counters, agent_name):
     busy = _get_counter_value(counters, busy_name)
     wavefronts = _get_counter_value(counters, wavefront_name)
     assert busy is not None, f"Dispatch {dispatch_id} missing {busy_name}"
-    assert (
-        wavefronts is not None
-    ), f"Dispatch {dispatch_id} missing {wavefront_name}"
+    assert wavefronts is not None, f"Dispatch {dispatch_id} missing {wavefront_name}"
     assert float(busy) > float(wavefronts)
 
     # 100 * value / requests <= 100 is value <= requests. A dispatch can report
@@ -138,9 +136,9 @@ def _validate_dispatch_counters(dispatch_id, counters, agent_name):
     for name in ("SQC_ICACHE_HITS", "SQC_ICACHE_MISSES"):
         value = _get_counter_value(counters, name)
         assert value is not None, f"Dispatch {dispatch_id} missing {name}"
-        assert float(value) <= float(requests), (
-            f"Dispatch {dispatch_id} {name} {value} exceeds SQC_ICACHE_REQ {requests}"
-        )
+        assert float(value) <= float(
+            requests
+        ), f"Dispatch {dispatch_id} {name} {value} exceeds SQC_ICACHE_REQ {requests}"
 
 
 def _accumulate_counter(counter_map, name, value):
