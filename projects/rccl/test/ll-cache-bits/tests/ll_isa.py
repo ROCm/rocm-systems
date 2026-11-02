@@ -37,8 +37,9 @@ LOAD128_RE = re.compile(
 CMP_RE = re.compile(
     r"^\s*v_cmp_(?:ne|eq)_u32\w*\s+[^,]+,\s*(?P<a>[vs]\d+),\s*(?P<b>[vs]\d+)"
 )
-# Instructions to scan after a load for its flag compares.
-POLL_WINDOW = 16
+# Disassembly lines to scan after a load for its flag compares, past any
+# inlined abort check.
+POLL_WINDOW = 48
 
 # Mangled template argument for the LL protocol; LL128 mangles as
 # "10ProtoLL128", so the length prefix keeps the two apart.

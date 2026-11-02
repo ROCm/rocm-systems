@@ -67,6 +67,13 @@ def test_swapped_compare_operands_and_sgpr_flag():
     assert [p.modifiers for p in found] == [["th:TH_LOAD_NT"]]
 
 
+def test_compares_after_inlined_abort_check():
+    # The inlined abort check can sit between the load and the compares.
+    text = GFX942_POLL.format(mods=" nt").replace(
+        "\ts_waitcnt vmcnt(0)", "\ts_waitcnt vmcnt(0)\n" + "\ts_nop 0\n" * 30)
+    assert len(polls(text)) == 1
+
+
 def test_one_flag_compared_is_not_a_poll():
     text = GFX942_POLL.format(mods=" nt").replace(
         "v_cmp_ne_u32_e64 s[18:19], v21, v149", "s_nop 0")
