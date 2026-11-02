@@ -142,6 +142,8 @@ get_dispatch_time_map()
 void
 forget_dispatch_time(hsa_signal_t _signal)
 {
+    if(_signal.handle == 0) return;
+
     if(auto* _map = get_dispatch_time_map())
         _map->ulock(
             [_signal](const dispatch_time_map_t& _data) {
