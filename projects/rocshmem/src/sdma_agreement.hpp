@@ -28,6 +28,8 @@
 // every rank of the IPC group must reach the same answer. Kept free of HSA/KFD headers so the unit
 // tests can build it without USE_SDMA.
 
+#include <climits>
+#include <cstdlib>
 #include <string>
 
 namespace rocshmem {
@@ -85,6 +87,26 @@ inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
     out.ranks = disabled;
   }
   return out;
+}
+
+// Debug-only hook ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK=<n>, for exercising the fallback where a
+// real connect failure does not happen. Read with getenv rather than envvar so it stays out of the
+// documented variables, the help output and rocshmem_info. Returns -1 when unset or not a rank.
+inline int parseForcedFailureLocalRank(const char* value) {
+  if (value == nullptr || *value == '\0') return -1;
+  char* end = nullptr;
+  const long rank = std::strtol(value, &end, 10);
+  return (*end == '\0' && rank >= 0 && rank <= INT_MAX) ? static_cast<int>(rank) : -1;
+}
+
+inline int forcedFailureLocalRank() {
+  return parseForcedFailureLocalRank(std::getenv("ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK"));
+}
+
+// Must be applied to this rank's own status before the exchange, not inside agreeSdmaStatus: ranks
+// may see different values of the variable, and each must still reach the same decision.
+inline int applyForcedFailure(int status, int localRank, int forcedRank) {
+  return (status == kSdmaReady && localRank == forcedRank) ? kSdmaConnectFailed : status;
 }
 
 }  // namespace rocshmem

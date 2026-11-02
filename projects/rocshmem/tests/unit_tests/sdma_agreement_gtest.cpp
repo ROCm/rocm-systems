@@ -28,6 +28,8 @@
 #include "../src/sdma_agreement.hpp"
 
 using rocshmem::agreeSdmaStatus;
+using rocshmem::applyForcedFailure;
+using rocshmem::parseForcedFailureLocalRank;
 using rocshmem::SdmaDecision;
 using rocshmem::kSdmaConnectFailed;
 using rocshmem::kSdmaDisabledByEnv;
@@ -89,4 +91,31 @@ TEST(SdmaAgreement, UnknownStatusCountsAsFailedConnect) {
   const auto a = agree({kSdmaReady, 7, kSdmaReady, -1});
   EXPECT_EQ(a.decision, SdmaDecision::kFallbackConnectFailed);
   EXPECT_EQ(a.ranks, "1,3");
+}
+
+TEST(SdmaAgreement, ParsesForcedFailureLocalRank) {
+  EXPECT_EQ(parseForcedFailureLocalRank(nullptr), -1);
+  EXPECT_EQ(parseForcedFailureLocalRank(""), -1);
+  EXPECT_EQ(parseForcedFailureLocalRank("0"), 0);
+  EXPECT_EQ(parseForcedFailureLocalRank("7"), 7);
+  EXPECT_EQ(parseForcedFailureLocalRank("-1"), -1);
+  EXPECT_EQ(parseForcedFailureLocalRank("3x"), -1);
+  EXPECT_EQ(parseForcedFailureLocalRank("abc"), -1);
+  EXPECT_EQ(parseForcedFailureLocalRank("99999999999999999999"), -1);
+}
+
+TEST(SdmaAgreement, ForcedFailureOnlyTurnsTheNamedReadyRankFailed) {
+  EXPECT_EQ(applyForcedFailure(kSdmaReady, 3, 3), kSdmaConnectFailed);
+  EXPECT_EQ(applyForcedFailure(kSdmaReady, 2, 3), kSdmaReady);
+  EXPECT_EQ(applyForcedFailure(kSdmaReady, 0, -1), kSdmaReady);
+  EXPECT_EQ(applyForcedFailure(kSdmaDisabledByEnv, 3, 3), kSdmaDisabledByEnv);
+  EXPECT_EQ(applyForcedFailure(kSdmaConnectFailed, 3, 3), kSdmaConnectFailed);
+}
+
+TEST(SdmaAgreement, ForcedFailureFallsBackEveryRank) {
+  std::vector<int> statuses;
+  for (int rank = 0; rank < 4; ++rank) statuses.push_back(applyForcedFailure(kSdmaReady, rank, 2));
+  const auto a = agree(statuses);
+  EXPECT_EQ(a.decision, SdmaDecision::kFallbackConnectFailed);
+  EXPECT_EQ(a.ranks, "2");
 }
