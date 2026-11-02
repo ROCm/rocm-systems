@@ -193,6 +193,7 @@ TracedRun run_traced(const fs::path& cap, const char* workload) {
   const pid_t pid = fork();
   if (pid == 0) {
     setenv("HIP_HRR_CAPTURE_OUTPUT", cap.c_str(), 1);
+    setenv("HIP_HRR_CAPTURE_CONSENT", "yes", 1);
     if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) _exit(126);
     raise(SIGSTOP);
     execl(exe.c_str(), exe.c_str(), filter.c_str(), static_cast<char*>(nullptr));
