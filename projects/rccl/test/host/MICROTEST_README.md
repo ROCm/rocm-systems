@@ -1179,6 +1179,48 @@ On OCI compute nodes `llvm-cov`/`llvm-profdata` are unavailable: run step 1
 there to produce `micro.profraw`, copy it plus the binary to a host that has
 `llvm-cov` (matching the build clang's major version), and render there.
 
+### Why the whole tree's coverage is unioned as lcov, not merged with llvm tooling
+
+The workflow above is for **one** binary, where llvm's own tooling is exactly
+right. It does not generalise to the host tree, and the obvious generalisation
+is wrong in a way that does not announce itself.
+
+A coverage profile is tied to the binary that produced it by a per-function
+*coverage-mapping hash*. This tree compiles the same source into many binaries
+under different `#define`s — `-uncached`, `-faultinj`, `-devlinker`, `-roctx`,
+and the different fake sets each binary links — so one function in one source
+file has a **different hash in each binary it is compiled into**. Merge every
+`.profraw` into one `.profdata` and hand `llvm-cov` every binary as `--object`
+and you do not get the union: records whose hash matches no object are dropped,
+records that collide are attributed to whichever object claimed them first, and
+a profile whose object is missing entirely is discarded without a word. The
+number that comes out is neither the union nor any single binary's truth, and
+nothing in the output says so.
+
+lcov's tracefile format has no hashes. It is keyed by file, line and branch, so
+unioning two of them has one meaning — a line is covered if **any** input
+covered it — which is the question being asked of a tree whose binaries
+deliberately compile the same code several ways. That is why the host tree's
+coverage is carried as lcov between the thing that measures it and the things
+that read it.
+
+The division of labour follows from the same constraint:
+
+- **`rccl-UnitTestsHostAll`** is the only thing that knows which profiles came
+  from which binary, so it does the per-binary step: `llvm-profdata merge` then
+  `llvm-cov export -format=lcov` with that child as the only `--object`. It then
+  unions those tracefiles itself — hand-rolled, no `lcov` binary involved, since
+  `lcov` is perl and not otherwise needed to run tests — into
+  `host-coverage.lcov` beside the profiles. That file is the consumable
+  artefact: object-free, hash-agnostic, and complete for every binary it ran.
+- **`run_host_tests.sh coverage`** does presentation and the one binary outside
+  the front door: per-binary `llvm-cov report`/`show` HTML from the
+  `merged.profdata` already written, `rccl-HostUnitTests` (not fronted) merged
+  and exported, and the final `lcov --add-tracefile` union plus `genhtml`.
+
+Note that `lcov` and `llvm-cov` count branches differently, so a per-binary
+`llvm-cov` branch total and the lcov union's will not agree; neither is wrong.
+
 ### Coverage-driven workflow
 
 The intended iteration loop for this directory:
@@ -1387,35 +1429,25 @@ guarantee by construction.
 
 For coverage, each child profiles into its own directory and the dispatcher
 then **merges the results itself**, writing `host-coverage.lcov` beside the
-profiles. It does the merge because only it knows which profiles came from
-which binary, and that pairing is not optional: `llvm-cov` needs the owning
-binary as `--object`, rejects a profile read against any other as mismatched
-data, and discards in silence a profile whose object is missing. So each child
-is exported on its own (`llvm-profdata merge` then `llvm-cov export
--format=lcov`, with that child as the only `--object`) and the tracefiles are
-unioned per line and per branch — covered if ANY binary covered it, which is
-the only correct union when the binaries compile the same source under
-different `#define`s and so cannot share a profile at all.
+profiles — the one artefact a consumer needs. Why it does the merge, and why
+the result is lcov rather than llvm's own, is
+[Why the whole tree's coverage is unioned as lcov](#why-the-whole-trees-coverage-is-unioned-as-lcov-not-merged-with-llvm-tooling).
 
-The result is object-free and hash-agnostic, so no consumer has to reconstruct
-the object set to read it. The export is best effort: a run whose tests passed
-does not fail because `llvm-cov` is absent, but every binary left out says so
-by name, since a silently missing tracefile reads downstream as "this code is
-not covered". `RCCL_HOST_COVERAGE_IGNORE_REGEX` overrides what is filtered out
-(by default the tests' own code and vendored nvtx).
+The export is best effort: a run whose tests passed does not fail because
+`llvm-cov` is absent, but every binary left out says so by name, since a
+silently missing tracefile reads downstream as "this code is not covered".
+`RCCL_HOST_COVERAGE_IGNORE_REGEX` overrides what is filtered out (by default
+the tests' own code and vendored nvtx).
 
 Adding a host test binary therefore needs no change outside this directory.
 
 Each child's `LLVM_PROFILE_FILE` is the inherited one with the child's own name
 inserted as a directory component, so the profiles land in
-`<profile dir>/<binary>/` rather than pooling — which is also what makes the
-pairing above possible. That is not tidiness: the
-binaries compile some of the same source under different `#define`s, so a shared
-function has a different coverage-mapping hash in each, and a report built from
-one object over a pool of mixed profiles is rejected as mismatched data. The
-layout is what lets `run_host_tests.sh coverage` emit a clean per-binary report
-— it used to get it by exporting a different `LLVM_PROFILE_FILE` around each
-binary in the loop this front door replaces.
+`<profile dir>/<binary>/` rather than pooling. That is what makes the per-binary
+pairing possible at all, and it is what lets `run_host_tests.sh coverage` emit a
+clean per-binary report — it used to get the same separation by exporting a
+different `LLVM_PROFILE_FILE` around each binary in the loop this front door
+replaces.
 
 The script in this tree now goes through it: `run_host_tests.sh` runs
 `rccl-UnitTestsHostAll` (plus `rccl-HostUnitTests`, which is not fronted — its
