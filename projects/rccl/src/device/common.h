@@ -138,6 +138,14 @@ __shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_B
 #else
 extern __shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
 #endif
+
+// Toolchains disagree on where a named barrier's address keeps its hardware ID:
+// bits [9:4], where array indexing steps the ID, or bits [5:0], where only a byte
+// step does. Always index ncclNamedBarriers through this.
+__device__ __forceinline__ __amdgpu_named_workgroup_barrier_t* ncclNamedBarrier(int i) {
+  if (((uintptr_t)&ncclNamedBarriers[0] >> 4) & 0x3f) return &ncclNamedBarriers[i];
+  return (__amdgpu_named_workgroup_barrier_t*)((char*)ncclNamedBarriers + i);
+}
 #endif
 
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
@@ -594,7 +602,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     }
 #if RCCL_HAVE_NAMED_BARRIERS
     // Any non-zero count works; every arrive passes the real wave count.
-    for (int b = 0; b < NCCL_NUM_NAMED_BARRIERS; b++) __builtin_amdgcn_s_barrier_init(&ncclNamedBarriers[b], 1);
+    for (int b = 0; b < NCCL_NUM_NAMED_BARRIERS; b++) __builtin_amdgcn_s_barrier_init(ncclNamedBarrier(b), 1);
 #endif
     break;
   case 2:

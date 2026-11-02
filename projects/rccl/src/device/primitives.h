@@ -27,8 +27,8 @@
     if (nthreads == threadsPerBlock) { \
       __builtin_amdgcn_s_barrier(); \
     } else { \
-      __builtin_amdgcn_s_barrier_join(&ncclNamedBarriers[(NAMED_BARRIER)]); \
-      __builtin_amdgcn_s_barrier_signal_var(&ncclNamedBarriers[(NAMED_BARRIER)], (NWORKERS) / WARP_SIZE); \
+      __builtin_amdgcn_s_barrier_join(ncclNamedBarrier(NAMED_BARRIER)); \
+      __builtin_amdgcn_s_barrier_signal_var(ncclNamedBarrier(NAMED_BARRIER), (NWORKERS) / WARP_SIZE); \
       __builtin_amdgcn_s_barrier_wait(1); \
       __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup"); \
     } \

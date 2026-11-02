@@ -170,6 +170,11 @@ def extract(input_path, output_asm_path, output_json_path=None):
         if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
             continue
 
+        # Some toolchains leave ncclNamedBarriers as an unreferenced global .bss
+        # object in every shard, which collides with the dispatcher's at link time.
+        if re.match(r'\.globl\s+ncclNamedBarriers\b', stripped):
+            continue
+
         # Add .globl before the .type directive for the device function
         if not globl_inserted and mangled in line and '.type' in line and '@function' in line:
             out_lines.append(f'\t.globl\t{mangled}\n')

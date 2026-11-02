@@ -185,6 +185,10 @@ def extract_device_function(asm_lines):
             continue
         if kernel_sym and re.match(r'\s*\.globl\s+' + re.escape(kernel_sym), stripped):
             continue
+        # Some toolchains leave ncclNamedBarriers as an unreferenced global .bss
+        # object in every shard, which collides with the dispatcher's at link time.
+        if re.match(r'\.globl\s+ncclNamedBarriers\b', stripped):
+            continue
         # Drop .no_dead_strip directives that reference a local-only symbol
         # (.L*); see _LOCAL_NO_DEAD_STRIP_RE for why the AMDGPU assembler needs
         # this. The pattern is anchored with \s* so it matches the raw or the
