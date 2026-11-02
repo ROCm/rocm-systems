@@ -1333,6 +1333,20 @@ size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) {
   return rcclDdaLL128TwoShotThresholdTab(extAlgoArchTable(comm), comm != nullptr ? comm->nRanks : 0);
 }
 
+// A user-set LL tier threshold (RCCL_DDA_LL_THRESHOLD, _ONESHOT_ or _TWOSHOT_) keeps the LL tiers' own reach.
+bool rcclDdaArLLTierPinnedByEnv() {
+  static const bool oneShotSet = rcclEnvIsSet("RCCL_DDA_LL_ONESHOT_THRESHOLD");
+  static const bool twoShotSet = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
+  size_t unused;
+  return oneShotSet || twoShotSet || ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused);
+}
+
+// A user-set RCCL_DDA_LL128_ONESHOT_THRESHOLD keeps the LL128 one-shot's own reach.
+bool rcclDdaArLL128OneShotPinnedByEnv() {
+  static const bool set = rcclEnvIsSet("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+  return set;
+}
+
 inline size_t rcclDdaVmmThresholdTab(const rcclArchThresholds* table, ncclFunc_t func, int nRanks) {
   size_t threshold;
   if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &threshold)) return threshold;

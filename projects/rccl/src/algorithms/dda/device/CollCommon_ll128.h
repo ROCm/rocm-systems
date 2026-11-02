@@ -241,6 +241,43 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
   }
 }
 
+// Branch-free slice load kept in flight for a look-ahead; chunks past eltN load chunk 0 and RawToRegs zeroes them.
+struct DdaLL128Raw {
+  v4u v[kDdaLL128Pairs];
+};
+
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+  asm volatile("" ::: "memory");
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const int ix = ddaLL128ChunkIx((flag && (g & 1)) ? g - 1 : g, wid);
+    const v4u* p = reinterpret_cast<const v4u*>(src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    raw.v[g] = __builtin_amdgcn_global_load_b128((v4u_gptr)p, RCCL_SYSTEM_SYNCSCOPE);
+#else
+    raw.v[g] = __builtin_nontemporal_load((v4u_gptr)p);
+#endif
+  }
+}
+
+// ddaLL128LoadRegs's wire layout from a raw load (flag lanes: odd pairs take the even chunk's second word).
+template <typename T>
+__device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64_t (&regs)[kDdaLL128WordsPerThread],
+                                                  int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const bool odd = flag && (g & 1);
+    const bool valid = ddaLL128ChunkIx(odd ? g - 1 : g, wid) * EltPer16B < eltN;
+    const uint64_t lo = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
+    const uint64_t hi = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
+    regs[2 * g] = odd ? hi : lo;
+    regs[2 * g + 1] = hi;
+  }
+}
+
 // Store one slice to the wire with the flag word embedded on the flag lane
 __device__ __forceinline__ void ddaLL128StoreWire(
   uint64_t* wire, const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag, bool flagLane) {

@@ -8036,6 +8036,39 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
+// A user-set `env` makes pinned() true; each case runs in a fresh process, as the helpers cache the env lookup.
+static void ExpectPinnedBy(const char* env, bool (*pinned)()) {
+  RUN_ISOLATED_TEST(std::string("Wrap_PinnedBy_") + env, [env, pinned]() {
+    SetMicroEnv(env, "1048576");
+    g_loadParam = ForceParam(env, int64_t(1) << 20);
+    EXPECT_TRUE(pinned()) << env;
+  });
+}
+
+TEST(WrapMicrotestIsolated, DdaArLLTierPinnedByEnv_UnsetIsNotPinned) {
+  RUN_ISOLATED_TEST("Wrap_DdaArLLTierPinnedByEnv_Unset", []() { EXPECT_FALSE(rcclDdaArLLTierPinnedByEnv()); });
+}
+
+TEST(WrapMicrotestIsolated, DdaArLLTierPinnedByEnv_OneShotThreshold) {
+  ExpectPinnedBy("RCCL_DDA_LL_ONESHOT_THRESHOLD", rcclDdaArLLTierPinnedByEnv);
+}
+
+TEST(WrapMicrotestIsolated, DdaArLLTierPinnedByEnv_TwoShotThreshold) {
+  ExpectPinnedBy("RCCL_DDA_LL_TWOSHOT_THRESHOLD", rcclDdaArLLTierPinnedByEnv);
+}
+
+TEST(WrapMicrotestIsolated, DdaArLLTierPinnedByEnv_TierThreshold) {
+  ExpectPinnedBy("RCCL_DDA_LL_THRESHOLD", rcclDdaArLLTierPinnedByEnv);
+}
+
+TEST(WrapMicrotestIsolated, DdaArLL128OneShotPinnedByEnv_UnsetIsNotPinned) {
+  RUN_ISOLATED_TEST("Wrap_DdaArLL128OneShotPinned_Unset", []() { EXPECT_FALSE(rcclDdaArLL128OneShotPinnedByEnv()); });
+}
+
+TEST(WrapMicrotestIsolated, DdaArLL128OneShotPinnedByEnv_Threshold) {
+  ExpectPinnedBy("RCCL_DDA_LL128_ONESHOT_THRESHOLD", rcclDdaArLL128OneShotPinnedByEnv);
+}
+
 // VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
 // no budget or no table keep the init cap.
 TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
