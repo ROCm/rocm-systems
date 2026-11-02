@@ -635,6 +635,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
 static HSAKMT_STATUS map_to_nodes(wsl::thunk::GpuMemory* mem, HSAuint64 count,
                                   HSAuint32* nodes) {
+  // Peer views only support system and user memory; keep VRAM on its owner.
+  if (!mem->IsSystem() && !mem->IsUserMemory())
+    return HSAKMT_STATUS_SUCCESS;
+  wsl::thunk::GpuMemoryDescFlags flags;
+  flags.reserved = mem->Flags();
+  if (flags.is_imported_vram_vmem || flags.is_imported_vram_ipc)
+    return HSAKMT_STATUS_SUCCESS;
+
   std::vector<wsl::thunk::GpuMemory*> added;
 
   for (HSAuint64 i = 0; i < count; ++i) {

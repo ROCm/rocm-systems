@@ -926,6 +926,9 @@ void GpuMemory::ReleasePeers() {
 ErrorCode GpuMemory::MapFromPeer(GpuMemory* owner) {
   if (owner->GetDevice() == device_ || (!owner->IsSystem() && !owner->IsUserMemory()))
     return ErrorCode::UnSupported;
+  // An opened resource's pages are not behind the owner's cpu_addr.
+  if (owner->desc_.flags.is_imported_vram_vmem || owner->desc_.flags.is_imported_vram_ipc)
+    return ErrorCode::UnSupported;
 
   owner_ = owner;
   desc_ = owner->desc_;
