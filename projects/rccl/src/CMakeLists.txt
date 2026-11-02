@@ -1529,6 +1529,12 @@ if(BUILD_ADDRESS_SANITIZER)
     target_link_options(rccl PRIVATE "LINKER:-rpath,${ASAN_RUNTIME_DIR}")
   endif()
 endif()
+# The runtime is linked statically into each executable, which must also be
+# linked with -fsanitize=daddress.
+if(BUILD_DEVICE_ADDRESS_SANITIZER)
+  target_compile_options(rccl PRIVATE -fsanitize=daddress)
+  target_link_options(rccl PRIVATE -fsanitize=daddress)
+endif()
 if(TIMETRACE)
   target_compile_options(rccl PRIVATE -ftime-trace)
 endif()
