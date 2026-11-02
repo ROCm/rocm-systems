@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -179,7 +178,9 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return amdgpu::gfx12_dot2_f32<true>(src0, src1, src0 >> 16, src1 >> 16, acc);
   }
   default:
-    throw util::UnimplementedInst(op_name(slot.op));
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return 0;
   }
 }
 
@@ -199,7 +200,11 @@ void Vopd::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t x_result = execute_slot(x_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     uint32_t y_result = execute_slot(y_, wf, lane);
+    if (wf.instruction_execution_failed())
+      return;
     amdgpu::RegisterAccess(wf).write_lane(*x_.dst, lane, x_result);
     amdgpu::RegisterAccess(wf).write_lane(*y_.dst, lane, y_result);
   }

@@ -19,7 +19,7 @@ static constexpr CachePolicy TdmStoreDevPolicy = createCachePolicy(TemporalHint:
 static constexpr CachePolicy TdmStoreSysPolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
 __device__ __forceinline__ int tdmSlotIx(int g) const {
-  return ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
+  return ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, laneId());
 }
 
 __device__ __forceinline__ uint8_t* tdmWindow() const {
@@ -40,7 +40,7 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
     int ix = tdmSlotIx(g);
-    if (!flagThread || g % 2 == 0) storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
+    if (!isFlagLane() || g % 2 == 0) storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
   }
   // The mover reads the window by descriptor, so nothing orders the lane stores above
   // against it; __syncwarp() is empty on AMD (common.h:19).
