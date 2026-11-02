@@ -15,6 +15,7 @@
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "util/distributed_shared_mutex.h"
@@ -514,8 +515,7 @@ public:
   const uint64_t *page_table_generation() const { return &page_table_generation_; }
 
   /// @brief Return the retained token invalidated before each page-policy mutation.
-  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
-  page_table_mutation_epoch() const {
+  util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> page_table_mutation_epoch() const {
     return page_table_mutation_epoch_;
   }
 
@@ -910,11 +910,10 @@ private:
   uint64_t page_table_generation_{1};
   // Cache hits read the epoch while misses copy and release its owner.
   // Keep the epoch off the cache line containing the reference count.
-  using PageTableMutationEpoch = util::RefCountedCacheAligned<std::atomic<uint64_t>>;
   /// @brief Retained atomic token for lockless copied-policy checks.
   /// @details Invalidate before mutation, including partially throwing updates.
-  util::IntrusiveSharedPtr<PageTableMutationEpoch> page_table_mutation_epoch_ =
-      util::IntrusiveSharedPtr<PageTableMutationEpoch>::make(1);
+  util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch> page_table_mutation_epoch_ =
+      util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch>::make(1);
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
       std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };

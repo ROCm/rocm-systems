@@ -88,6 +88,7 @@ using rocjitsu::amdgpu::L2Cache;
 using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
 using rocjitsu::amdgpu::RequestMtypeResolver;
+using rocjitsu::amdgpu::VmMutationEpoch;
 
 class IdentityAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator {
 public:
@@ -2465,8 +2466,7 @@ TEST_F(L1CacheMtypeTest, LiveResolverWithoutGenerationDoesNotCacheMutationToken)
 
 TEST_F(L1CacheMtypeTest, MutationTokenRefreshesPolicyWithoutGenerationPublication) {
   map_pages(Mtype::UC, Mtype::RW);
-  auto epoch =
-      util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>::make(1);
+  auto epoch = util::IntrusiveSharedPtr<VmMutationEpoch>::make(1);
   ASSERT_TRUE(legacy_vm_.unregister_vmid(kVmid));
   address_space_ = legacy_vm_.register_address_space(
       kVmid, {.page_table = &process_.page_table_,

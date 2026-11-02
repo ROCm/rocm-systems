@@ -1580,8 +1580,8 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
               .captured_epoch = epoch->value.load()};
     }
 
-    util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>> epoch =
-        util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>::make(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     Mtype mtype = Mtype::RW;
     mutable uint32_t queries = 0;
   };
@@ -1627,7 +1627,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   // queries even when the binding and mutation epoch themselves do not change.
   cache.clear();
   cache.clear(); // Clearing an already-empty table is idempotent.
-  EXPECT_EQ(policy->epoch->ref_count().load(), 1);
+  EXPECT_EQ(policy->epoch->ref_count(), 1);
   policy->mtype = Mtype::CC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
@@ -1651,7 +1651,7 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   access.reset();
   new_access.reset();
   cache.clear();
-  EXPECT_EQ(policy->epoch->ref_count().load(), 2);
+  EXPECT_EQ(policy->epoch->ref_count(), 2);
 }
 
 TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
@@ -1673,8 +1673,8 @@ TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
               .captured_epoch = captured_epoch};
     }
 
-    util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>> epoch =
-        util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>::make(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 
@@ -1729,8 +1729,8 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
               .captured_epoch = epoch->value.load()};
     }
 
-    util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>> epoch =
-        util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>::make(0);
+    util::IntrusiveSharedPtr<VmMutationEpoch> epoch =
+        util::IntrusiveSharedPtr<VmMutationEpoch>::make(0);
     mutable uint32_t queries = 0;
   };
 

@@ -198,7 +198,7 @@ TEST(GpuVmTranslation, MutationSnapshotRetainsEpochAfterProcessDestruction) {
     EXPECT_GT(updated_epoch, snapshot.captured_epoch);
   }
   ASSERT_TRUE(snapshot.mutation_epoch);
-  EXPECT_EQ(snapshot.mutation_epoch->ref_count().load(), 1u);
+  EXPECT_EQ(snapshot.mutation_epoch->ref_count(), 1u);
   EXPECT_EQ(snapshot.mutation_epoch->value.load(std::memory_order_acquire), updated_epoch);
   EXPECT_FALSE(snapshot.unchanged(0x4000));
 }

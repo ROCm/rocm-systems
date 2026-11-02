@@ -79,15 +79,21 @@ namespace detail {
 
 template <typename Derived> class ReferenceCount {
 public:
+  [[nodiscard]] uint32_t ref_count() const noexcept {
+    return refs_.load(std::memory_order_relaxed);
+  }
+  // Read-only storage access allows callers to inspect counter/value placement.
+  [[nodiscard]] const std::atomic<uint32_t> &ref_count_storage() const noexcept { return refs_; }
+
+private:
+  template <typename> friend class util::IntrusiveSharedPtr;
+
   void add_ref() const noexcept { refs_.fetch_add(1, std::memory_order_relaxed); }
   void release_ref() const noexcept {
     if (refs_.fetch_sub(1, std::memory_order_acq_rel) == 1)
       delete static_cast<const Derived *>(this);
   }
 
-  [[nodiscard]] std::atomic<uint32_t> &ref_count() const noexcept { return refs_; }
-
-private:
   mutable std::atomic<uint32_t> refs_{1};
 };
 
@@ -113,7 +119,8 @@ inline constexpr std::size_t kDestructiveInterferenceSize = 128;
 
 /// @brief Compact atomic counter and value storage for IntrusiveSharedPtr.
 /// @details This is the owned object, not a pointer. Access the wrapped T via value.
-template <typename T> struct RefCounted final : detail::ReferenceCount<RefCounted<T>> {
+template <typename T> class RefCounted final : public detail::ReferenceCount<RefCounted<T>> {
+public:
   template <typename... Args>
   explicit RefCounted(Args &&...args) : value(std::forward<Args>(args)...) {}
 
@@ -129,7 +136,8 @@ template <typename T> struct RefCounted final : detail::ReferenceCount<RefCounte
 /// @details All ownership operations, including handle destruction and count
 /// inspection, must be confined to one thread or externally synchronized across
 /// every handle sharing the object. Access the wrapped T via value.
-template <typename T> struct RefCountedNonAtomic final {
+template <typename T> class RefCountedNonAtomic final {
+public:
   template <typename... Args>
   explicit RefCountedNonAtomic(Args &&...args) : value(std::forward<Args>(args)...) {}
 
@@ -138,17 +146,19 @@ template <typename T> struct RefCountedNonAtomic final {
   RefCountedNonAtomic &operator=(const RefCountedNonAtomic &) = delete;
   RefCountedNonAtomic &operator=(RefCountedNonAtomic &&) = delete;
 
+  [[nodiscard]] uint32_t ref_count() const noexcept { return refs_; }
+
+  T value;
+
+private:
+  template <typename> friend class IntrusiveSharedPtr;
+
   void add_ref() const noexcept { ++refs_; }
   void release_ref() const noexcept {
     if (--refs_ == 0)
       delete this;
   }
 
-  [[nodiscard]] uint32_t ref_count() const noexcept { return refs_; }
-
-  T value;
-
-private:
   mutable uint32_t refs_{1};
 };
 
@@ -158,7 +168,8 @@ private:
 /// Stronger alignment required by T is preserved. All translation units sharing
 /// this type must use consistent target/compiler settings so its layout agrees.
 template <typename T>
-struct RefCountedCacheAligned final : detail::ReferenceCount<RefCountedCacheAligned<T>> {
+class RefCountedCacheAligned final : public detail::ReferenceCount<RefCountedCacheAligned<T>> {
+public:
   template <typename... Args>
   explicit RefCountedCacheAligned(Args &&...args) : value(std::forward<Args>(args)...) {}
 

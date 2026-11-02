@@ -356,6 +356,9 @@ public:
   }
 };
 
+/// @brief Retained page-policy epoch with its value isolated from the ownership counter.
+using VmMutationEpoch = util::RefCountedCacheAligned<std::atomic<uint64_t>>;
+
 /// @brief Copied page policy with an optional retained mutation token.
 /// @details A translator may cache a range only when it invalidates the token
 /// before every policy mutation. Capture the policy and token under the same
@@ -368,8 +371,7 @@ struct VmMtypeSnapshot {
   bool may_batch_private_ram = false;
   uint64_t begin = 0;
   uint64_t size = 0;
-  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
-      mutation_epoch{};
+  util::IntrusiveSharedPtr<const VmMutationEpoch> mutation_epoch{};
   uint64_t captured_epoch = 0;
 
   [[nodiscard]] bool unchanged(uint64_t address) const {

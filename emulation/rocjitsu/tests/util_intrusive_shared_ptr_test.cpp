@@ -27,6 +27,29 @@ using TrackedPtr = util::IntrusiveSharedPtr<util::RefCounted<Tracked>>;
 using IntPtr = util::IntrusiveSharedPtr<util::RefCounted<int>>;
 using ConstIntPtr = util::IntrusiveSharedPtr<const util::RefCounted<int>>;
 
+template <typename T>
+concept HasPublicAddRef = requires(const T &object) { object.add_ref(); };
+template <typename T>
+concept HasPublicReleaseRef = requires(const T &object) { object.release_ref(); };
+
+template <typename T> constexpr bool has_read_only_ownership() {
+  static_assert(!HasPublicAddRef<T>);
+  static_assert(!HasPublicReleaseRef<T>);
+  static_assert(std::is_same_v<decltype(std::declval<T &>().ref_count()), uint32_t>);
+  static_assert(std::is_same_v<decltype(std::declval<const T &>().ref_count()), uint32_t>);
+  return true;
+}
+
+static_assert(has_read_only_ownership<util::RefCounted<int>>());
+static_assert(has_read_only_ownership<util::RefCountedCacheAligned<int>>());
+static_assert(has_read_only_ownership<util::RefCountedNonAtomic<int>>());
+static_assert(
+    std::is_same_v<decltype(std::declval<const util::RefCounted<int> &>().ref_count_storage()),
+                   const std::atomic<uint32_t> &>);
+static_assert(std::is_same_v<
+              decltype(std::declval<util::RefCountedCacheAligned<int> &>().ref_count_storage()),
+              const std::atomic<uint32_t> &>);
+
 static_assert(sizeof(IntPtr) == sizeof(void *));
 static_assert(std::is_nothrow_copy_constructible_v<IntPtr>);
 static_assert(std::is_nothrow_move_constructible_v<IntPtr>);
@@ -59,15 +82,15 @@ TEST(IntrusiveSharedPtr, CopiesRetainUntilLastOwner) {
   std::atomic<int> destroyed{0};
   auto owner = TrackedPtr::make(destroyed);
   ASSERT_TRUE(owner);
-  EXPECT_EQ(owner->ref_count().load(), 1u);
+  EXPECT_EQ(owner->ref_count(), 1u);
   {
     auto copy = owner;
     EXPECT_EQ(copy.get(), owner.get());
     EXPECT_EQ(&*copy, owner.get());
-    EXPECT_EQ(owner->ref_count().load(), 2u);
+    EXPECT_EQ(owner->ref_count(), 2u);
     owner.reset();
     EXPECT_EQ(destroyed.load(), 0);
-    EXPECT_EQ(copy->ref_count().load(), 1u);
+    EXPECT_EQ(copy->ref_count(), 1u);
   }
   EXPECT_EQ(destroyed.load(), 1);
 }
@@ -80,12 +103,12 @@ TEST(IntrusiveSharedPtr, MovesTransferWithoutIncrementing) {
     auto moved = std::move(source);
     EXPECT_FALSE(source);
     EXPECT_EQ(moved.get(), address);
-    EXPECT_EQ(moved->ref_count().load(), 1u);
+    EXPECT_EQ(moved->ref_count(), 1u);
     TrackedPtr destination;
     destination = std::move(moved);
     EXPECT_FALSE(moved);
     EXPECT_EQ(destination.get(), address);
-    EXPECT_EQ(destination->ref_count().load(), 1u);
+    EXPECT_EQ(destination->ref_count(), 1u);
   }
   EXPECT_EQ(destroyed.load(), 1);
 }
@@ -110,7 +133,7 @@ TEST(IntrusiveSharedPtr, SelfAssignmentPreservesOwnership) {
   owner = alias;
   owner = std::move(alias);
   ASSERT_TRUE(owner);
-  EXPECT_EQ(owner->ref_count().load(), 1u);
+  EXPECT_EQ(owner->ref_count(), 1u);
   EXPECT_EQ(destroyed.load(), 0);
   owner.reset();
   EXPECT_EQ(destroyed.load(), 1);
@@ -131,14 +154,14 @@ TEST(IntrusiveSharedPtr, SwapExchangesOwnership) {
 TEST(IntrusiveSharedPtr, ConstConversionRetainsOrTransfersOwnership) {
   auto owner = IntPtr::make(42);
   ConstIntPtr copy(owner);
-  EXPECT_EQ(owner->ref_count().load(), 2u);
+  EXPECT_EQ(owner->ref_count(), 2u);
   ConstIntPtr moved(std::move(owner));
   EXPECT_FALSE(owner);
   EXPECT_EQ(moved.get(), copy.get());
   EXPECT_EQ(moved->value, 42);
-  EXPECT_EQ(moved->ref_count().load(), 2u);
+  EXPECT_EQ(moved->ref_count(), 2u);
   copy.reset();
-  EXPECT_EQ(moved->ref_count().load(), 1u);
+  EXPECT_EQ(moved->ref_count(), 1u);
 
   ConstIntPtr assigned;
   auto replacement = IntPtr::make(17);
@@ -146,7 +169,7 @@ TEST(IntrusiveSharedPtr, ConstConversionRetainsOrTransfersOwnership) {
   EXPECT_EQ(assigned->value, 17);
   assigned = std::move(replacement);
   EXPECT_FALSE(replacement);
-  EXPECT_EQ(assigned->ref_count().load(), 1u);
+  EXPECT_EQ(assigned->ref_count(), 1u);
 }
 
 struct CustomCounted final {
@@ -296,10 +319,10 @@ TEST(RefCountedNonAtomic, DetachedVectorPreservesOtherOwners) {
 
 template <typename T> void expect_isolated(const util::RefCountedCacheAligned<T> &object) {
   constexpr auto size = util::detail::kDestructiveInterferenceSize;
-  const auto counter = reinterpret_cast<std::uintptr_t>(&object.ref_count());
+  const auto counter = reinterpret_cast<std::uintptr_t>(&object.ref_count_storage());
   const auto value = reinterpret_cast<std::uintptr_t>(&object.value);
   EXPECT_EQ(value % size, 0u);
-  EXPECT_GE(value, counter + sizeof(object.ref_count()));
+  EXPECT_GE(value, counter + sizeof(object.ref_count_storage()));
   EXPECT_NE(counter / size, value / size);
 }
 
@@ -311,7 +334,7 @@ static_assert(alignof(util::RefCountedCacheAligned<OverAligned>) >= alignof(Over
 static_assert(alignof(util::RefCountedCacheAligned<int>) >=
               util::detail::kDestructiveInterferenceSize);
 
-TEST(RefCounted, AlignedStorageSeparatesCounterAndValue) {
+TEST(RefCountedCacheAligned, AlignedStorageSeparatesCounterAndValue) {
   using Pointer = util::IntrusiveSharedPtr<util::RefCountedCacheAligned<int>>;
   auto value = Pointer::make(42);
   EXPECT_EQ(value->value, 42);
@@ -326,7 +349,7 @@ TEST(RefCounted, AlignedStorageSeparatesCounterAndValue) {
   EXPECT_EQ(reinterpret_cast<std::uintptr_t>(&over_aligned->value) % alignof(OverAligned), 0u);
 }
 
-TEST(RefCounted, AlignedStorageCanHoldAtomicEpoch) {
+TEST(RefCountedCacheAligned, AlignedStorageCanHoldAtomicEpoch) {
   using Pointer = util::IntrusiveSharedPtr<util::RefCountedCacheAligned<std::atomic<uint64_t>>>;
   auto epoch = Pointer::make(1);
   auto retained = epoch;

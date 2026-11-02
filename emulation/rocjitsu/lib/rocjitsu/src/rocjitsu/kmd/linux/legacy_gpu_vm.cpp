@@ -302,8 +302,7 @@ private:
   // Synchronous word reads and stores must not destroy the final request-mutex owner
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
-  util::IntrusiveSharedPtr<const util::RefCountedCacheAligned<std::atomic<uint64_t>>>
-      mutation_epoch_;
+  util::IntrusiveSharedPtr<const amdgpu::VmMutationEpoch> mutation_epoch_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
