@@ -114,7 +114,7 @@ withholds consent for that run, whatever the file says. On Linux a consent file 
 another user does not count. Without consent the process runs unrecorded, creates no
 archive and says why in one line on stderr; it never prompts. The consent covers the user
 who gave it, not the other people whose data the workload handles: an archive of a
-serving stack still holds its clients' prompts, as listed above.
+serving stack can still hold its clients' prompts, as listed above.
 
 ## How the archive is protected on disk
 

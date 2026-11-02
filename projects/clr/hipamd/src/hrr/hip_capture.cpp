@@ -178,9 +178,9 @@ struct HrrConsent {
   std::string refusal;
 };
 
-// The archive holds the recorded process's memory, so HIP_HRR_CAPTURE_OUTPUT
-// alone does not start capture: the user also has to say yes, once in the
-// consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
+// The archive records the process's HIP calls and can hold its host buffers, kernel
+// arguments and code objects, so HIP_HRR_CAPTURE_OUTPUT alone does not start capture:
+// the user also has to say yes, in the consent file or in HIP_HRR_CAPTURE_CONSENT.
 static HrrConsent hrr_capture_consent() {
   // A set variable decides the run: yes consents, any other value withholds consent.
   // A blank one counts as unset. As in CLR's flag parser, double quotes that are the
@@ -3080,8 +3080,9 @@ void hip_capture_init() {
       const std::string& refusal = hrr_consent().refusal;
       fprintf(stderr,
               "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. %s%s"
-              "The archive would hold this process's host buffers, kernel arguments and code "
-              "objects. To consent, %s%s%sset HIP_HRR_CAPTURE_CONSENT=yes for one run.\n",
+              "The archive would record this process's HIP calls and could hold its host "
+              "buffers, kernel arguments and code objects. To consent, %s%s%sset "
+              "HIP_HRR_CAPTURE_CONSENT=yes for one run.\n",
               refusal.c_str(), refusal.empty() ? "" : " ",
               file.empty() ? "" : "write the line yes to ", file.c_str(),
               file.empty() ? "" : " once, or ");
