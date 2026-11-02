@@ -26,7 +26,7 @@
 #include <cstring>
 
 #if defined(__x86_64__)
-#include <nmmintrin.h>
+#    include <nmmintrin.h>
 #endif
 
 namespace rocprofiler
@@ -49,8 +49,8 @@ __attribute__((target("sse4.2"))) uint64_t
 crc32x4(const uint8_t* data, size_t size)
 {
     constexpr uint64_t offset_basis = 14695981039346656037ULL;
-    uint64_t h0 = offset_basis, h1 = 1, h2 = 2, h3 = 3;
-    size_t   i   = 0;
+    uint64_t           h0 = offset_basis, h1 = 1, h2 = 2, h3 = 3;
+    size_t             i = 0;
     for(; i + 32 <= size; i += 32)
     {
         uint64_t v0, v1, v2, v3;
@@ -69,7 +69,8 @@ crc32x4(const uint8_t* data, size_t size)
         std::memcpy(&v, data + i, 8);
         h0 = _mm_crc32_u64(h0, v);
     }
-    for(; i < size; ++i) h0 = _mm_crc32_u8(static_cast<uint32_t>(h0), data[i]);
+    for(; i < size; ++i)
+        h0 = _mm_crc32_u8(static_cast<uint32_t>(h0), data[i]);
     return h0 ^ h1 ^ h2 ^ h3;
 }
 

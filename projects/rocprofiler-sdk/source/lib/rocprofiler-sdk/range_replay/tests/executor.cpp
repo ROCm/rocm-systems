@@ -80,8 +80,7 @@ make_replayable_context()
     ctx.plan.replay_requested = true;
     ctx.plan.total_passes     = 3;
     ctx.snapshot_taken        = true;
-    ctx.snapshot.status =
-        rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
+    ctx.snapshot.status = rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
     return ctx;
 }
 
@@ -320,8 +319,8 @@ TEST(range_replay_executor, building_a_pass_does_not_consume_the_recording)
 
 TEST(range_replay_executor, an_empty_snapshot_digests_to_nothing)
 {
-    auto snapshot = snapshot_t{};
-    snapshot.status = rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
+    auto snapshot      = snapshot_t{};
+    snapshot.status    = rocprofiler::kernel_replay::memory_snapshot::capture_status::complete;
     const auto digests = rr::snapshot_digests(snapshot);
     ASSERT_TRUE(digests);
     EXPECT_TRUE(digests->empty());
@@ -329,9 +328,9 @@ TEST(range_replay_executor, an_empty_snapshot_digests_to_nothing)
 
 TEST(range_replay_executor, digest_regions_are_address_ordered)
 {
-    const std::string alpha = "alpha";
-    const std::string beta  = "beta";
-    const auto forward = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+    const std::string alpha   = "alpha";
+    const std::string beta    = "beta";
+    const auto        forward = std::vector<rocprofiler::range_replay::digest::region_data_t>{
         {reinterpret_cast<void*>(0x1000), alpha.data(), alpha.size()},
         {reinterpret_cast<void*>(0x2000), beta.data(), beta.size()}};
     const auto reversed = std::vector<rocprofiler::range_replay::digest::region_data_t>{
@@ -346,7 +345,7 @@ TEST(range_replay_executor, digest_regions_report_changed_content)
 {
     const std::string before = "before";
     const std::string after  = "after";
-    const auto lhs = std::vector<rocprofiler::range_replay::digest::region_data_t>{
+    const auto        lhs    = std::vector<rocprofiler::range_replay::digest::region_data_t>{
         {reinterpret_cast<void*>(0x1000), before.data(), before.size()}};
     const auto rhs = std::vector<rocprofiler::range_replay::digest::region_data_t>{
         {reinterpret_cast<void*>(0x1000), after.data(), after.size()}};

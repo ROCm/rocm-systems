@@ -292,14 +292,13 @@ snapshot_digests(const snapshot_t& snapshot)
     regions.reserve(snapshot.regions.size());
     for(size_t i = 0; i < snapshot.regions.size(); ++i)
     {
-        const auto has_extent = std::any_of(
-            snapshot.extents.begin(),
-            snapshot.extents.end(),
-            [i](const auto& extent) { return extent.region_index == i; });
+        const auto has_extent =
+            std::any_of(snapshot.extents.begin(), snapshot.extents.end(), [i](const auto& extent) {
+                return extent.region_index == i;
+            });
         if(has_extent)
-            regions.emplace_back(digest::region_data_t{snapshot.regions[i].live_address,
-                                                       region_bytes[i].data(),
-                                                       region_bytes[i].size()});
+            regions.emplace_back(digest::region_data_t{
+                snapshot.regions[i].live_address, region_bytes[i].data(), region_bytes[i].size()});
     }
     return digest::hash_regions(regions);
 }
@@ -420,10 +419,10 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         return ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE;
 
     // The state the application must resume with, captured before the first pass overwrites it.
-    const auto snap_start    = phase_clock::now();
+    const auto snap_start = phase_clock::now();
     const auto exit_snapshot =
         kernel_replay::memory_snapshot::snap(make_snapshot_context(queue, ctx.hsa_agent));
-    const auto snapped_at    = phase_clock::now();
+    const auto snapped_at = phase_clock::now();
     if(!exit_snapshot.complete()) return ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED;
 
     auto staging = kernarg_staging{};
@@ -451,10 +450,10 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     const auto agent_id       = ctx.agent_id;
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.dispatch_count());
 
-    auto     passes_time   = phase_clock::duration{};
-    auto     restores_time = phase_clock::duration{};
-    uint64_t passes_run    = 0;
-    uint64_t restores_run  = 0;
+    auto     passes_time     = phase_clock::duration{};
+    auto     restores_time   = phase_clock::duration{};
+    uint64_t passes_run      = 0;
+    uint64_t restores_run    = 0;
     auto     pending_restore = std::vector<kernel_replay::blit::packet_info>{};
 
     // Pass 0 was the application's own execution, so the replayed passes are numbered from 1.
@@ -540,8 +539,8 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     // Hand the application back the state its own execution produced, whether or not the replay
     // reproduced it. GPU-backed regions are restored through the blit queue and waited on before
     // end() returns.
-    auto pending_exit_restore = std::vector<kernel_replay::blit::packet_info>{};
-    const auto exit_batch_copy = [&](const auto& regions) {
+    auto       pending_exit_restore = std::vector<kernel_replay::blit::packet_info>{};
+    const auto exit_batch_copy      = [&](const auto& regions) {
         if(kernel_replay::blit::copy(queue, ring_writer, regions, pending_exit_restore) !=
            HSA_STATUS_SUCCESS)
             return HSA_STATUS_ERROR;
