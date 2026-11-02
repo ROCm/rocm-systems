@@ -109,12 +109,10 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
       (text_function_offset_words > text_words.size() ||
        *text_function_words > text_words.size() - text_function_offset_words)) {
     ADD_FAILURE() << "text function extent exceeds .text fixture";
-    return {};
   }
   if (function_pointer_table_target_words &&
       *function_pointer_table_target_words >= text_words.size()) {
     ADD_FAILURE() << "function pointer target exceeds .text fixture";
-    return {};
   }
   constexpr uint64_t text_offset = 0x100;
   constexpr uint64_t text_vaddr = 0x1100;
