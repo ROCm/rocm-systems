@@ -457,8 +457,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 256ULL*1024,
-  // 1 MiB / 3 floored to 16 B: from 4 ranks the LL two-shot stores at most half the one-shot's bytes per peer past it.
-  .ddaArLLOneShotMaxBytes = 349520,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,

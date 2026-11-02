@@ -7815,19 +7815,21 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx1250 DPX and SPX tables: the LL one-shot AllReduce crossover is 349520 bytes at every rank count; none elsewhere.
+// gfx1250 SPX table: the LL one-shot AllReduce crossover is 349520 bytes at every rank count; DPX keeps the default.
 TEST(WrapMicrotestIsolated, DdaLLOneShotThreshold_Gfx1250PerPeerCap) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLOneShotThreshold_Gfx1250PerPeerCap",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_ONESHOT_THRESHOLD");
         ncclComm* comm = MakeCommWithArch("gfx1250");
-        for (rcclTuningPartition part : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
-          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", part);
+        const std::pair<rcclTuningPartition, size_t> parts[] = {{RCCL_TUNING_PARTITION_SPX, 349520},
+                                                                {RCCL_TUNING_PARTITION_DPX, 1 * kMiB}};
+        for (const auto& part : parts) {
+          comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", part.first);
           ASSERT_NE(nullptr, comm->archThresholds);
           for (int nRanks : {4, 8, 16, 32}) {
             comm->nRanks = nRanks;
-            EXPECT_EQ(349520u, rcclDdaLLOneShotThreshold(comm)) << (int)part << " " << nRanks;
+            EXPECT_EQ(part.second, rcclDdaLLOneShotThreshold(comm)) << (int)part.first << " " << nRanks;
           }
         }
         rcclArchThresholds noCap{};
