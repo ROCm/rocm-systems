@@ -6,6 +6,7 @@
 
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "instruction_failure_test_util.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -188,6 +189,14 @@ public:
       group->onAmdgpuReadSgpr(&wf, 0);
   }
 
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override {
+    ++cancellation_callbacks;
+    if (unsubscribe_on_cancellation)
+      subscribed = false;
+    if (reenter_on_cancellation && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
 
   void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
@@ -196,10 +205,13 @@ public:
   bool reenter_on_dispatch = false;
   bool reenter_on_halt = false;
   bool unsubscribe_on_halt = false;
+  bool reenter_on_cancellation = false;
+  bool unsubscribe_on_cancellation = false;
   bool subscribed = false;
   mutable uint32_t predicate_queries = 0;
   uint32_t dispatch_callbacks = 0;
   uint32_t halt_callbacks = 0;
+  uint32_t cancellation_callbacks = 0;
   uint32_t hot_callbacks = 0;
 
 private:
@@ -1115,6 +1127,38 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
   EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);
   EXPECT_EQ(summary.unique_mnemonics, dispatch.unique_mnemonics);
   EXPECT_EQ(summary.mnemonic_executions, dispatch.mnemonic_executions);
+}
+
+TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutCompletingDispatch) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(
+      f.plugin_group_->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
+  f.run_kernel(code, std::size(code));
+  ASSERT_EQ(f.engine->last_exit().code, 1);
+  EXPECT_TRUE(f.cu()->is_idle());
+  f.shutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  const auto &summary = records.front();
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 0u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 2u);
+  EXPECT_EQ(summary.mnemonic_executions.count("s_endpgm"), 0u);
+  ASSERT_EQ(summary.mnemonic_executions.count("s_nop"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+  ASSERT_EQ(summary.mnemonic_executions.count(test::kUnimplementedInstructionMnemonic), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at(test::kUnimplementedInstructionMnemonic), 1u);
 }
 
 // The instruction-mix report is only joinable with the throughput report if
@@ -2124,6 +2168,40 @@ TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription)
   group.onAmdgpuReadSgpr(wave, 2);
   EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
+}
+
+TEST(ExecutionPluginTest, CancellationAndRetryCannotReuseAStaleHotHookSubscription) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("cancellation_reuse_probe", true, true);
+  auto *observed = plugin.get();
+  observed->group = &group;
+  observed->unsubscribe_on_cancellation = true;
+  observed->reenter_on_cancellation = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(1, 0, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  group.onAmdgpuReadSgpr(wave, 0);
+  ASSERT_EQ(observed->hot_callbacks, 1u);
+  ASSERT_EQ(observed->predicate_queries, 1u);
+
+  group.onAmdgpuWavefrontCancelled(*wave);
+  EXPECT_EQ(observed->cancellation_callbacks, 1u);
+  EXPECT_EQ(observed->hot_callbacks, 1u);
+  EXPECT_EQ(observed->predicate_queries, 2u);
+  fixture.cu()->abort_workgroup(wave->dispatch_id(), wave->wg_id());
+
+  observed->set_subscribe_on_dispatch(false);
+  auto *retried = fixture.cu()->dispatch_wf(1, 0, 104, 32);
+  ASSERT_EQ(retried, wave);
+  group.onAmdgpuWavefrontDispatched(*retried);
+  EXPECT_EQ(observed->predicate_queries, 3u);
+  group.onAmdgpuReadSgpr(retried, 1);
+  EXPECT_EQ(observed->predicate_queries, 3u);
+  EXPECT_EQ(observed->hot_callbacks, 1u);
 }
 
 TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
