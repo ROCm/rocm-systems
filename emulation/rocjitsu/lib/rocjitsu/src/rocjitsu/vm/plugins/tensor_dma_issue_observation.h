@@ -36,7 +36,10 @@ struct TensorDmaLdsRange {
 /// elements merged. A load writes every element of its tile, zero-filling those
 /// outside the tensor; a store reads only in-bounds elements. Padding bytes and
 /// bytes outside the wave's LDS allocation, which are not transferred, are
-/// excluded.
+/// excluded, so a range can end mid-element: an element that straddles the end
+/// of the allocation contributes only its leading bytes. Consumers must treat
+/// the ranges at byte granularity rather than in whole elements of
+/// element_size_bytes.
 ///
 /// element_size_bytes describes the transfer only when lds_ranges is nonempty.
 /// When lds_ranges is empty, consumers must not rely on it: the instruction

@@ -837,7 +837,8 @@ protected:
     uint32_t tensor_dim0 = 4; ///< Zero places the whole tile outside the tensor.
     uint32_t tile_dim0 = 4;   ///< Zero makes the tile a NOP.
     uint32_t tile_dim1 = 0;
-    uint32_t count = 1; ///< Zero makes this a NULL tensor.
+    uint32_t count = 1;     ///< Zero makes this a NULL tensor.
+    uint32_t data_size = 2; ///< log2 of the element size in bytes.
   };
 
   void SetUp() override {
@@ -849,16 +850,22 @@ protected:
     }
   }
 
-  /// Decode and execute one tensor DMA instruction on `wave`: i32 elements, one
-  /// row. Unlike record_tensor_instruction(), this runs the instruction, so the
-  /// race detector hears of it through the issue hook as in a run.
+  /// Decode and execute one tensor DMA instruction on `wave`: one row. Unlike
+  /// record_tensor_instruction(), this runs the instruction, so the race
+  /// detector hears of it through the issue hook as in a run.
   void execute_decoded_tensor(int wave, bool is_load, const Descriptor &desc) {
     waves[wave]->pc += 16;
     const uint32_t sgprs = waves[wave]->sgpr_alloc().base;
     const std::array<uint32_t, 4> group0{desc.count, desc.lds_offset,
                                          static_cast<uint32_t>(kGlobal), 0x80000000u};
-    const std::array<uint32_t, 8> group1{
-        2u << 16, desc.tensor_dim0 << 16, 1u << 16, desc.tile_dim0 << 16, desc.tile_dim1, 4, 0, 0};
+    const std::array<uint32_t, 8> group1{desc.data_size << 16,
+                                         desc.tensor_dim0 << 16,
+                                         1u << 16,
+                                         desc.tile_dim0 << 16,
+                                         desc.tile_dim1,
+                                         4,
+                                         0,
+                                         0};
     for (uint32_t reg = 0; reg < group0.size(); ++reg)
       fixture.cu()->write_sgpr(sgprs + reg, group0[reg]);
     for (uint32_t reg = 0; reg < group1.size(); ++reg)
@@ -921,6 +928,45 @@ TEST_F(DecodedTensorDmaRaceTest, NopTileLoadStaysPendingUntilTheWaitCoversIt) {
 TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
   EXPECT_TRUE(load_then_empty_then_read(/*remaining=*/2, /*empty_is_load=*/false,
                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
+// An 8-byte element at offset 252 straddles the end of the 256-byte allocation:
+// the transfer moves only its first four bytes, so its LDS range ends
+// mid-element. The race detector tracks those bytes, at byte granularity.
+constexpr uint32_t kI64 = 3;
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsAnLdsWrite) {
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, MergedLoadKeepsItsPartialTail) {
+  // Elements at 244 and 252 merge into one range of twelve bytes.
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 244, .tile_dim0 = 2, .data_size = kI64});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementStoreIsAnLdsRead) {
+  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 252));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsCheckedAgainstAnOlderRead) {
+  EXPECT_FALSE(ds_read(1, waves[1]->lds_base() + 252));
+  const size_t previous = sink->str().size();
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 252, .tile_dim0 = 1, .data_size = kI64});
+  EXPECT_NE(sink->str().find("RACE ", previous), std::string::npos) << sink->str();
+}
+
+// Controls: whole 8-byte elements inside the allocation.
+TEST_F(DecodedTensorDmaRaceTest, WholeElementLoadIsAnLdsWrite) {
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 244));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, WholeElementStoreIsAnLdsRead) {
+  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64});
+  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 244));
 }
 
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
