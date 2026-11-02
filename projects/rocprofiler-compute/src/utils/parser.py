@@ -23,13 +23,13 @@ from utils.metrics.evaluation_pipeline import eval_metric
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
+    MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
+    convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     format_table_id,
-    is_membw_panel_unprofiled,
-    metric_passes_filter,
     normalize_filter_to_str_list,
 )
 from utils.utils_counter_defs import metric_expressions, metric_value_keys
@@ -94,7 +94,10 @@ def build_dfs(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        if is_membw_panel_unprofiled(panel_id, profiling_config):
+        # Profile only collects block 30 counters with --membw-analysis.
+        if panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
+            "membw_analysis", False
+        ):
             continue
 
         for data_source in panel["data source"]:
@@ -117,7 +120,7 @@ def build_dfs(
                     dfs_expressions[table_id] = expressions
 
                 elif table_type == "raw_csv_table":
-                    if not metric_passes_filter(
+                    if not _metric_passes_filter(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
@@ -134,7 +137,7 @@ def build_dfs(
                         df = pd.DataFrame([data_config["source"]], columns=["from_csv"])
 
                 elif table_type == "pc_sampling_table":
-                    if not metric_passes_filter(
+                    if not _metric_passes_filter(
                         metric_id=file_data_source_idx,
                         panel_id=panel_id,
                         data_source_idx=file_data_source_idx,
@@ -155,6 +158,33 @@ def build_dfs(
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
     arch_configs.dfs_expressions = dfs_expressions
+
+
+def _metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
+    """
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
+    ):
+        return True
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return False
 
 
 def _build_metric_table_df(
@@ -192,7 +222,7 @@ def _build_metric_table_df(
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
 
-        if not metric_passes_filter(
+        if not _metric_passes_filter(
             metric_id=metric_idx,
             panel_id=panel_id,
             data_source_idx=table_data_source_idx,

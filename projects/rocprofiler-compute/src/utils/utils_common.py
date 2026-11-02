@@ -21,7 +21,17 @@ from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import (
+    Any,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import config
 from utils.logger import (
@@ -30,7 +40,7 @@ from utils.logger import (
     console_log,
     console_warning,
 )
-from vendored import yaml
+from vendored import tabulate, yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
@@ -48,6 +58,10 @@ MEMBW_ANALYSIS_PANEL_ID: int = 3000
 ROOFLINE_PANEL_ID: int = 400
 # tabulate table style of the analyze tables, used in every mode
 TABLE_FORMAT = "fancy_grid"
+# --list-metrics value that lists every metric
+LIST_ALL_METRICS = "all"
+# Narrowest the --list-metrics Description column gets on a narrow terminal
+DESCRIPTION_WIDTH_MIN = 40
 
 # Shared suffix for invalid --block errors.
 INVALID_BLOCK_HINT = (
@@ -611,11 +625,6 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     return jobs[0].get("pmc") or []
 
 
-def is_pc_sampling_collected(filter_blocks: list[str]) -> bool:
-    """Return True if the requested blocks include PC sampling."""
-    return any(block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks)
-
-
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""
@@ -762,85 +771,103 @@ def _metric_has_valid_expr(entries: dict, data_config: dict) -> bool:
     return False
 
 
-def _iter_metric_list_rows(
-    panel_configs: OrderedDict[int, dict[str, Any]],
-) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
-    """Yield (id, (name, unit, description)) for each block, table and metric."""
-    for panel in panel_configs.values():
-        for data_source in panel["data source"]:
-            for type_key, data_config in data_source.items():
-                if type_key == "metric_table":
-                    yield from _iter_metric_table_rows(panel, data_config)
-                elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    yield str(data_config["id"] // 100), (panel["title"], "", "")
-
-
-def _iter_metric_table_rows(
-    panel: dict[str, Any], data_config: dict[str, Any]
-) -> Generator[tuple[str, tuple[str, str, str]], None, None]:
-    """Yield the block, table and metric rows of one metric_table."""
-    block_id = str(data_config["id"] // 100)
-    if block_id != "0":
-        yield block_id, (panel["title"], "", "")
-
-    table_id = format_table_id(data_config["id"])
-    yield table_id, (data_config["title"], "", "")
-
-    descriptions = panel.get("metrics_description") or {}
-    for index, (name, entries) in enumerate(data_config["metric"].items()):
-        if not _metric_has_valid_expr(entries, data_config):
-            continue
-        unit = entries.get("unit")
-        description = " ".join(str(descriptions.get(name) or "").split())
-        yield f"{table_id}.{index}", (name, str(unit or ""), description)
-
-
-def format_table_id(config_id: int) -> str:
-    """Return the "block.table" id of a metric_table config id, e.g. 1802 -> "18.2"."""
-    return f"{config_id // 100}.{config_id % 100}"
-
-
 def build_metric_details(
-    panel_configs: OrderedDict[int, dict[str, Any]],
+    panel_configs: Mapping[int, Dict[str, Any]],
     sys_info: Optional[dict[str, Any]],
-) -> dict[str, tuple[str, str, str]]:
-    """Map panel/table/metric IDs to (name, unit, description).
-
-    Without sys_info, per-channel tables list no metrics.
-    """
+) -> Dict[str, Tuple[str, str, str]]:
+    """Map panel, table and metric ids to (name, unit, description). Without
+    sys_info, per-channel tables have no metrics."""
     expanded_configs = expand_placeholder_ranges(panel_configs, sys_info)
     return dict(_iter_metric_list_rows(expanded_configs))
 
 
-def build_metric_list(
-    panel_configs: OrderedDict[int, dict[str, Any]],
-    sys_info: Optional[dict[str, Any]],
-) -> dict[str, str]:
-    """Map panel/table/metric IDs to names. Used by the deprecated list options."""
-    return {
-        metric_id: details[0]
-        for metric_id, details in build_metric_details(panel_configs, sys_info).items()
-    }
+def format_table_id(config_id: int) -> str:
+    """Return the "block.table" id of a table config id, e.g. 1802 -> "18.2"."""
+    return f"{config_id // 100}.{config_id % 100}"
 
 
-def resolve_block_token(token: str, alias_map: dict[str, str]) -> Optional[str]:
+def resolve_block_token(token: str, alias_map: Dict[str, str]) -> Optional[str]:
     """Return the metric id for a block or metric id or alias, or None if unknown."""
     if METRIC_ID_RE.match(token):
         return token
     return alias_map.get(token)
 
 
-def placeholder_table_ids(panel_configs: OrderedDict[int, dict[str, Any]]) -> set[str]:
-    """Return the ids of the metric tables that expand a placeholder range, such
-    as the per-channel L2 tables. Call before expand_placeholder_ranges."""
-    return {
-        format_table_id(data_config["id"])
-        for panel in panel_configs.values()
-        for data_source in panel["data source"]
-        for type_key, data_config in data_source.items()
-        if type_key == "metric_table"
-        and "placeholder_range" in (data_config.get("metric") or {})
-    }
+def select_listed_ids(
+    metric_ids: List[str],
+    selection: List[str],
+    alias_to_block_id: Dict[str, str],
+    listable_block_ids: Optional[Set[str]] = None,
+) -> List[str]:
+    """Return the ids to list: the blocks when nothing is selected, every id for
+    "all", else each selected id with its parents and children. listable_block_ids
+    limits the result to those blocks."""
+    if listable_block_ids is not None:
+        metric_ids = [
+            metric_id
+            for metric_id in metric_ids
+            if metric_id.split(".")[0] in listable_block_ids
+        ]
+    if not selection:
+        return [metric_id for metric_id in metric_ids if "." not in metric_id]
+    if selection == [LIST_ALL_METRICS]:
+        return metric_ids
+    if LIST_ALL_METRICS in selection:
+        console_error(
+            f'"{LIST_ALL_METRICS}" lists every metric; pass it without other ids.'
+        )
+
+    selected_ids = []
+    for token in selection:
+        selected_id = resolve_block_token(token, alias_to_block_id)
+        if selected_id not in metric_ids:
+            console_error(f"Unknown block or metric id {token!r}.{INVALID_BLOCK_HINT}")
+        selected_ids.append(selected_id)
+    return [
+        metric_id
+        for metric_id in metric_ids
+        if any(_is_same_id_branch(metric_id, selected) for selected in selected_ids)
+    ]
+
+
+def format_block_table(
+    metric_details: Dict[str, Tuple[str, str, str]],
+    block_ids: List[str],
+    block_aliases: Dict[str, str],
+) -> str:
+    """Format the Block_ID, Alias and Block table of --list-metrics."""
+    rows = [
+        [block_id, block_aliases.get(block_id, ""), metric_details[block_id][0]]
+        for block_id in block_ids
+    ]
+    return tabulate(
+        rows,
+        headers=["Block_ID", "Alias", "Block"],
+        tablefmt=TABLE_FORMAT,
+        disable_numparse=True,
+    )
+
+
+def format_metric_tables(
+    metric_details: Dict[str, Tuple[str, str, str]],
+    listed_ids: List[str],
+    block_aliases: Dict[str, str],
+    terminal_width: int,
+) -> str:
+    """Format a heading per listed block and a table per listed table."""
+    lines: List[str] = []
+    for block_id in [metric_id for metric_id in listed_ids if "." not in metric_id]:
+        heading = f"{block_id}. {metric_details[block_id][0]}"
+        if block_aliases.get(block_id):
+            heading += f" (alias: {block_aliases[block_id]})"
+        block_tables = [
+            _format_listed_table(table_id, metric_details, listed_ids, terminal_width)
+            for table_id in listed_ids
+            if table_id.count(".") == 1 and table_id.split(".")[0] == block_id
+        ]
+        block_tables = [table for table in block_tables if table]
+        lines.extend([heading, *(block_tables or ["No metrics to list."]), ""])
+    return "\n".join(lines)
 
 
 def get_uuid() -> str:
@@ -915,40 +942,6 @@ def convert_metric_id_to_panel_info(
         metric_id_int = int(tokens[2])
 
     return (file_id, panel_id, metric_id_int)
-
-
-def metric_passes_filter(
-    metric_id: str,
-    panel_id: int,
-    data_source_idx: str,
-    user_metric_filter: Optional[list[str]],
-    profile_panel_filter: set[int],
-) -> bool:
-    """Return True if a metric or table identified by metric_id passes the
-    active filter. metric_id is the file-level id for raw_csv / pc_sampling
-    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
-    """
-    if panel_id <= 100 or data_source_idx == "0":
-        return True
-    if user_metric_filter is None and not profile_panel_filter:
-        return True
-    if user_metric_filter and (
-        metric_id in user_metric_filter
-        or data_source_idx in user_metric_filter
-        or str(panel_id // 100) in user_metric_filter
-    ):
-        return True
-    if profile_panel_filter:
-        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
-        return int(file_id) in profile_panel_filter
-    return False
-
-
-def is_membw_panel_unprofiled(panel_id: int, profiling_config: dict[str, Any]) -> bool:
-    """Return True for block 30, which profile only collects with --membw-analysis."""
-    return panel_id == MEMBW_ANALYSIS_PANEL_ID and not profiling_config.get(
-        "membw_analysis", False
-    )
 
 
 def load_yaml(filepath: Union[str, os.PathLike]) -> dict[str, Any]:
@@ -1325,3 +1318,80 @@ def format_table_ascii(
         result.append(separator)
 
     return "\n".join(result)
+
+
+def _iter_metric_list_rows(
+    panel_configs: Mapping[int, Dict[str, Any]],
+) -> Iterator[Tuple[str, Tuple[str, str, str]]]:
+    """Yield (id, (name, unit, description)) for each block, table and metric."""
+    for panel in panel_configs.values():
+        for data_source in panel["data source"]:
+            for type_key, data_config in data_source.items():
+                if type_key == "metric_table":
+                    yield from _iter_metric_table_rows(panel, data_config)
+                elif type_key in ("raw_csv_table", "pc_sampling_table"):
+                    yield str(data_config["id"] // 100), (panel["title"], "", "")
+
+
+def _iter_metric_table_rows(
+    panel: Dict[str, Any], data_config: Dict[str, Any]
+) -> Iterator[Tuple[str, Tuple[str, str, str]]]:
+    """Yield the block, table and metric rows of one metric_table."""
+    block_id = str(data_config["id"] // 100)
+    if block_id != "0":
+        yield block_id, (panel["title"], "", "")
+
+    table_id = format_table_id(data_config["id"])
+    yield table_id, (data_config["title"], "", "")
+
+    descriptions = panel.get("metrics_description") or {}
+    for index, (name, entries) in enumerate(data_config["metric"].items()):
+        if not _metric_has_valid_expr(entries, data_config):
+            continue
+        unit = entries.get("unit")
+        description = " ".join(str(descriptions.get(name) or "").split())
+        yield f"{table_id}.{index}", (name, str(unit or ""), description)
+
+
+def _is_same_id_branch(metric_id: str, selected_id: str) -> bool:
+    """Return True if metric_id is selected_id, or above or below it."""
+    return (
+        metric_id == selected_id
+        or metric_id.startswith(f"{selected_id}.")
+        or selected_id.startswith(f"{metric_id}.")
+    )
+
+
+def _format_listed_table(
+    table_id: str,
+    metric_details: Dict[str, Tuple[str, str, str]],
+    listed_ids: List[str],
+    terminal_width: int,
+) -> str:
+    """Format one table with its heading, or "" if it lists no metrics."""
+    rows = [
+        [metric_id, *metric_details[metric_id]]
+        for metric_id in listed_ids
+        if metric_id.count(".") == 2 and metric_id.rsplit(".", 1)[0] == table_id
+    ]
+    if not rows:
+        return ""
+    headers = ["Metric_ID", "Metric", "Unit", "Description"]
+    # Description fills the terminal width left by the other columns and the
+    # borders (3 characters per column, plus 1), down to DESCRIPTION_WIDTH_MIN.
+    # tabulate makes each column at least 2 wider than its header.
+    other_widths = sum(
+        max(len(headers[column]) + 2, *(len(row[column]) for row in rows))
+        for column in range(len(headers) - 1)
+    )
+    description_width = max(
+        DESCRIPTION_WIDTH_MIN, terminal_width - other_widths - (3 * len(headers) + 1)
+    )
+    table = tabulate(
+        rows,
+        headers=headers,
+        tablefmt=TABLE_FORMAT,
+        maxcolwidths=[None, None, None, description_width],
+        disable_numparse=True,
+    )
+    return f"{table_id} {metric_details[table_id][0]}\n{table}"

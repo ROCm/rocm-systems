@@ -4,10 +4,26 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+
+# Deprecated options by argparse dest: the option and what to use instead
+DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
+    "list_blocks": ("--list-blocks", "--list-metrics"),
+    "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+}
+
+
+def warn_deprecated_options(args: argparse.Namespace) -> None:
+    """Warn about each deprecated option the command line uses."""
+    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
+        if getattr(args, dest, None) not in (None, False):
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"Use {replacement} instead."
+            )
 
 
 class ExperimentalAction(argparse.Action):
@@ -147,17 +163,23 @@ def add_general_group(
         nargs="*",
         help=(
             "List the blocks of the current GPU.\n"
-            "Add block or metric [id]s or aliases to list their metrics, "
-            'or "all" to list every metric.\n'
+            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            'and descriptions, or "all" to list every metric. Each id or alias adds\n'
+            "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
+            "table 12.1.\n"
             "With analyze -p <workload>, list the workload's blocks and metrics."
         ),
     )
-    # Debug option: list the metrics of another arch. Its first value is the arch.
     general_group.add_argument(
         "--list-metrics-gfx-id",
         dest="list_metrics_gfx_id",
-        nargs="+",
-        help=argparse.SUPPRESS,
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        help=(
+            "List the blocks of GPU <arch> instead of the current GPU.\n"
+            "Add --list-metrics [id ...] to list their metrics.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--list-blocks",

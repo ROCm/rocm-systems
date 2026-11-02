@@ -41,6 +41,7 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     TABLE_FORMAT,
     convert_filter_blocks_to_panel_ids,
+    format_table_id,
     strip_ansi,
 )
 from vendored import tabulate
@@ -795,7 +796,7 @@ def format_table_output(
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
-    table_id_str = f"{table_config['id'] // 100}.{table_config['id'] % 100}"
+    table_id_str = format_table_id(table_config["id"])
     content = ""
 
     # Check if any column in df is empty
@@ -1019,9 +1020,7 @@ def show_all(
                     and panel_id not in filter_panel_ids
                     and panel_id > 100
                 ):
-                    table_id_str = (
-                        f"{table_config['id'] // 100}.{table_config['id'] % 100}"
-                    )
+                    table_id_str = format_table_id(table_config["id"])
 
                     console_log(
                         f"Not showing table not selected during profiling: "

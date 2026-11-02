@@ -17,6 +17,23 @@ import pytest
 import utils.utils_common as utils_common
 from utils.utils_common import canonical_config_arch
 
+LISTED_METRIC_IDS = ["0", "2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0", "18.2"]
+LISTED_METRIC_DETAILS = {
+    "0": ("Top Stats", "", ""),
+    "2": ("System Speed-of-Light", "", ""),
+    "2.1": ("System Speed-of-Light", "", ""),
+    "2.1.0": (
+        "VALU Utilization",
+        "Percent",
+        " ".join(["Counts the cycles the VALU was busy."] * 6),
+    ),
+    "2.1.1": ("VALU Instructions", "Instr per normUnit", "Short."),
+    "18": ("L2 Cache (per Channel)", "", ""),
+    "18.1": ("Aggregate Stats", "", ""),
+    "18.1.0": ("L2 Cache Hit Rate", "Percent", ""),
+    "18.2": ("L2 Cache Hit Rate (Percent)", "", ""),
+}
+
 
 def build_listing_panel_configs():
     """Return panel_configs with a plain table and a per-channel table."""
@@ -1109,29 +1126,59 @@ class TestBuildMetricDetails:
         assert "All None Metric" not in leaf_entries.values()
 
 
-def test_build_metric_details_without_sys_info_lists_no_per_channel_metrics():
+def test_build_metric_details():
+    """Rows carry the unit and a one-line description; per-channel tables have
+    no metric rows without sys_info."""
     metric_details = utils_common.build_metric_details(
         build_listing_panel_configs(), None
     )
-    assert list(metric_details) == ["18", "18.1", "18.1.0", "18.1.1", "18.1.2", "18.2"]
-    assert metric_details["18.2"] == ("Hit Rate (per Channel)", "", "")
+    assert metric_details == {
+        "18": ("L2 Cache (per Channel)", "", ""),
+        "18.1": ("Aggregate Stats", "", ""),
+        "18.1.0": ("Hit Rate", "Percent", "The percent of L2 requests that hit."),
+        "18.1.1": ("Requests", "(Req + $normUnit)", ""),
+        "18.1.2": ("No Unit", "", ""),
+        "18.2": ("Hit Rate (per Channel)", "", ""),
+    }
 
 
-def test_build_metric_details_returns_unit_and_single_line_description():
-    metric_details = utils_common.build_metric_details(
-        build_listing_panel_configs(), None
+@pytest.mark.parametrize(
+    ("selection", "expected_ids"),
+    [
+        ([], ["0", "2", "18"]),
+        (["all"], LISTED_METRIC_IDS),
+        (["sol", "18.1.0"], ["2", "2.1", "2.1.0", "2.1.1", "18", "18.1", "18.1.0"]),
+    ],
+)
+def test_select_listed_ids(selection, expected_ids):
+    """No selection lists blocks; ids and aliases add their parents and children."""
+    listed_ids = utils_common.select_listed_ids(
+        LISTED_METRIC_IDS, selection, {"sol": "2"}
     )
-    assert metric_details["18.1.0"] == (
-        "Hit Rate",
-        "Percent",
-        "The percent of L2 requests that hit.",
+    assert listed_ids == expected_ids
+
+
+@pytest.mark.parametrize("selection", [["bogus"], ["all", "sol"]])
+def test_select_listed_ids_rejects_invalid_selection(selection):
+    with pytest.raises(SystemExit):
+        utils_common.select_listed_ids(LISTED_METRIC_IDS, selection, {"sol": "2"})
+
+
+def test_format_metric_tables():
+    output = utils_common.format_metric_tables(
+        LISTED_METRIC_DETAILS, LISTED_METRIC_IDS, {"2": "sol"}, terminal_width=100
     )
-    assert metric_details["18.1.1"] == ("Requests", "(Req + $normUnit)", "")
-    assert metric_details["18.1.2"] == ("No Unit", "", "")
+    lines = output.splitlines()
 
-
-def test_placeholder_table_ids_finds_per_channel_table():
-    assert utils_common.placeholder_table_ids(build_listing_panel_configs()) == {"18.2"}
+    assert lines[:3] == ["0. Top Stats", "No metrics to list.", ""]
+    assert "2. System Speed-of-Light (alias: sol)" in lines
+    # Per-channel table 18.2 lists no metrics, so it gets no heading
+    assert "18.1 Aggregate Stats" in lines
+    assert not any(line.startswith("18.2") for line in lines)
+    # The long description wraps to fit the terminal width
+    assert max(len(line) for line in lines) <= 100
+    row_start = next(i for i, line in enumerate(lines) if line.startswith("│ 2.1.0 "))
+    assert lines[row_start + 1].startswith("│             │ ")
 
 
 # =============================================================================

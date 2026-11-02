@@ -19,8 +19,8 @@ FILTERED_WORKLOAD = Path(ROOT) / "tests" / "workloads" / "ipblocks_SQ" / "MI200"
 
 
 def first_column_ids(output: str) -> list[str]:
-    """Return the ids in the first column of the grid rows of output."""
-    return re.findall(r"^│ ([0-9.]+) ", output, flags=re.MULTILINE)
+    """Return the ids in the first column of the table rows of output."""
+    return re.findall(r"^│ ([0-9.]+) +│", output, flags=re.MULTILINE)
 
 
 # =============================================================================
@@ -38,8 +38,8 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     # Test output
     output = capsys.readouterr().out
     assert "Platform: gfx90a (MI200)" in output
+    assert first_column_ids(output) == list(arch_panels_from_disk("gfx90a"))
     assert re.search(r"│ 6 +│ spi +│ Workgroup Manager \(SPI\) +│", output)
-    assert "5.2" not in first_column_ids(output)
 
 
 def list_blocks_supported_archs() -> list[str]:
@@ -125,13 +125,14 @@ def test_list_blocks_all_archs(binary_handler_analyze_rocprof_compute, capsys, a
 
 
 def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, capsys):
-    """Aliases select blocks, each table is a grid, and per-channel tables
-    collapse to one line."""
+    """Aliases select blocks, each table gets a heading, and per-channel
+    tables, which list no metrics, are left out."""
     return_code = binary_handler_analyze_rocprof_compute([
-        "--list-metrics-gfx-id",
-        "gfx950",
+        "--list-metrics",
         "sol",
         "l2_per_channel",
+        "--list-metrics-gfx-id",
+        "gfx950",
     ])
     assert return_code == 0
 
@@ -142,7 +143,8 @@ def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, ca
     assert re.search(
         r"│ 2\.1\.0 +│ VALU FLOPs +│ GFLOP/s +│ The total floating", output
     )
-    assert "\nPer-channel metrics are not listed: 18.2 to 18.12\n" in output
+    assert "\n18.1 Aggregate Stats (All channels)\n" in output
+    assert "\n18.2 " not in output
     assert {metric_id.split(".")[0] for metric_id in first_column_ids(output)} == {
         "2",
         "18",
@@ -157,7 +159,7 @@ def test_list_metrics_defaults_to_current_gpu(
 
     output = capsys.readouterr().out
     assert "Platform: gfx" in output
-    assert "│ Block_ID │ Alias" in output
+    assert re.search(r"│ Block_ID +│ Alias +│ Block +│", output)
 
 
 def test_list_metrics_from_workload(binary_handler_analyze_rocprof_compute, capsys):
