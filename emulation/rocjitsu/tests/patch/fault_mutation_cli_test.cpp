@@ -320,6 +320,36 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
   EXPECT_NE(stderr_.find("bounded input"), std::string::npos);
 }
 
+TEST_F(FaultMutationCli, UnknownKernelListsDescriptorEntries) {
+  const test::DropTargetRow &row = test::kDropRows[7];
+  for (const bool siblings : {false, true}) {
+    SCOPED_TRACE(siblings);
+    const std::vector<uint8_t> image =
+        test::make_barrier_elf_for_target(row, test::make_barrier_words(row), siblings);
+    write(input_, image);
+    for (const bool list : {false, true}) {
+      SCOPED_TRACE(list);
+      std::vector<std::string> arguments = {"--input", input_.string(), "--kernel",
+                                            "missing_kernel"};
+      if (list)
+        arguments.push_back("--list");
+      else
+        arguments.insert(arguments.end(), {"--output", output_.string()});
+      expect_rejected(std::move(arguments));
+      EXPECT_NE(stderr_.find("discovery failed: code=BadIdentity"), std::string::npos);
+      EXPECT_NE(stderr_.find("descriptor entries:"), std::string::npos);
+      if (siblings) {
+        EXPECT_NE(stderr_.find("test_kernel0"), std::string::npos);
+        EXPECT_NE(stderr_.find("test_kernel1"), std::string::npos);
+      } else {
+        EXPECT_NE(stderr_.find("test_kernel"), std::string::npos);
+      }
+      EXPECT_EQ(stderr_.find("offset="), std::string::npos);
+      EXPECT_EQ(read(input_), image);
+    }
+  }
+}
+
 TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
   const test::DropTargetRow &row = test::kDropRows[4];
   std::vector<uint8_t> image =
