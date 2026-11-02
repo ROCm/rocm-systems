@@ -26,6 +26,7 @@
 #endif
 
 #include "algorithms/dda/device/CollCommon.h"
+#include "device/tdm/asyncCopy.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -216,6 +217,108 @@ __device__ __forceinline__ void ddaLL128StoreWire(
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
+}
+
+// ---- LDS-staged wire writer ----
+// Async: the wire image goes to an LDS window once, then async stores per peer; without ASYNC_COPY_SUPPORTED, Coop.
+enum DdaLL128Wire : int { kDdaLL128WireCoop = 0, kDdaLL128WireAsync = 1 };
+
+// Two 2 KiB windows per warp; a window is refilled once the stores of the fill before last are done.
+constexpr int kDdaLL128StageWindows = 2;
+constexpr size_t ddaLL128StageBytes(unsigned threads) {
+  return (size_t)(threads / kDdaLL128Warp) * kDdaLL128StageWindows * kDdaLL128WireBytesPerSlice;
+}
+constexpr CachePolicy kDdaLL128StagePolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
+
+template <int WIRE>
+constexpr bool ddaLL128Staged() {
+  return WIRE == kDdaLL128WireAsync && ASYNC_COPY_SUPPORTED;
+}
+
+// Wait until at most `keep` async stores are in flight; the immediate rounds `keep` down to the ladder (stricter).
+template <int WIRE>
+__device__ __forceinline__ void ddaLL128StageWaitAtMost(int keep) {
+#if ASYNC_COPY_SUPPORTED
+  if constexpr (ddaLL128Staged<WIRE>()) {
+    if (keep >= 60) {
+      asyncWait<60>();
+    } else if (keep >= 28) {
+      asyncWait<28>();
+    } else if (keep >= 12) {
+      asyncWait<12>();
+    } else if (keep >= 4) {
+      asyncWait<4>();
+    } else {
+      asyncWait<0>();
+    }
+  }
+#endif
+  (void)keep;
+}
+
+// Per-warp staging state: the warp's two windows, the one the last fill wrote, and the stores issued from it since.
+struct DdaLL128Stage {
+  uint8_t* lds;  // this warp's windows
+  int win;       // window the last fill wrote
+  int lastOps;   // async stores issued since the last fill
+};
+
+__device__ __forceinline__ DdaLL128Stage ddaLL128StageInit(uint8_t* ldsBase, int warp) {
+  return {ldsBase + (size_t)warp * kDdaLL128StageWindows * kDdaLL128WireBytesPerSlice, 1, 0};
+}
+
+// Fill the next window with this lane's wire image (ddaLL128StoreWire's bytes and offsets).
+template <int WIRE>
+__device__ __forceinline__ void ddaLL128StageFill(DdaLL128Stage& st, const uint64_t (&regs)[kDdaLL128WordsPerThread],
+                                                  uint64_t flag, bool flagLane, int lane) {
+  if constexpr (!ddaLL128Staged<WIRE>()) {
+    return;
+  }
+  ddaLL128StageWaitAtMost<WIRE>(st.lastOps);
+  st.win ^= 1;
+  st.lastOps = 0;
+  uint8_t* w = st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice + (size_t)lane * 16;
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+    union {
+      v4u v;
+      uint64_t q[2];
+    } x;
+    x.q[0] = regs[u];
+    x.q[1] = flagLane ? flag : regs[u + 1];
+    *reinterpret_cast<v4u*>(w + (size_t)u * kDdaLL128Warp * 8) = x.v;
+  }
+#if ASYNC_COPY_SUPPORTED
+  // The mover reads LDS by address, outside this lane's program order.
+  asm volatile("s_wait_dscnt 0x0" ::: "memory");
+#endif
+}
+
+// Store one wire slice (128B-aligned base): staged, from the last-filled window; else the cooperative stores of regs.
+template <int WIRE>
+__device__ __forceinline__ void ddaLL128StagePush(DdaLL128Stage& st, uint64_t* wireSlice,
+                                                  const uint64_t (&regs)[kDdaLL128WordsPerThread], uint64_t flag,
+                                                  bool flagLane, int lane) {
+  if constexpr (!ddaLL128Staged<WIRE>()) {
+    ddaLL128StoreWire(wireSlice + 2 * lane, regs, flag, flagLane);
+    return;
+  }
+#if ASYNC_COPY_SUPPORTED
+  asyncStoreFromLDS<SyncPolicy::Async, kDdaLL128StagePolicy, true>(
+    st.lds + (size_t)st.win * kDdaLL128WireBytesPerSlice, reinterpret_cast<uint8_t*>(wireSlice),
+    kDdaLL128WireBytesPerSlice);
+  st.lastOps += kDdaLL128Pairs;
+#endif
+}
+
+// Every staged wire store of this wave done: before the epoch publish and before the wave leaves.
+template <int WIRE>
+__device__ __forceinline__ void ddaLL128StageDrain() {
+#if ASYNC_COPY_SUPPORTED
+  if constexpr (ddaLL128Staged<WIRE>()) {
+    asyncWait<0>();
+  }
+#endif
 }
 
 // Poll until every line this lane reads has landed. With the cooperative load the
