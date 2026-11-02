@@ -36,7 +36,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -731,14 +730,13 @@ TEST_F(SymmetricKernelCorruptionTest, AllReduceLL_PinnedTailWave)
         // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
         ncclResult_t res = ncclAllReduce(send, recv, c.count, ncclFloat, ncclSum, getActiveCommunicator(),
                                          getActiveStream());
-        // A slot no peer writes leaves recvReduce spinning; abort the job rather than wait for the runner timeout.
-        if(res == ncclSuccess)
-        {
-            const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
-                                     + " skew=" + std::to_string(c.skew);
-            DdaFabricMPI::abortJobUnlessAllRanksDrained(
-                DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60)), what.c_str());
-        }
+        // A slot no peer writes leaves recvReduce spinning, so abort the job; every rank votes to keep MPI paired.
+        const std::string what = "AllReduce_AGxLL_R count=" + std::to_string(c.count)
+                                 + " skew=" + std::to_string(c.skew);
+        const hipError_t  drained
+            = res == ncclSuccess ? DdaFabricMPI::waitStreamBounded(getActiveStream(), std::chrono::seconds(60))
+                                 : hipSuccess;
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(drained, what.c_str());
         const std::string ineligible
             = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
                                        "AllReduce_AGxLL_R symmetric kernel not eligible on this topology");
@@ -1049,8 +1047,7 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
 namespace
 {
 
-// fp16 input: a position term with a prime period plus a distinct term per rank. The largest sum over
-// 8 ranks is 8 * 198 + 16 * 28 = 2032, so every partial sum is an integer fp16 holds exactly.
+// Sums stay integers <= 2032 over 8 ranks, which fp16 holds exactly.
 inline float subWordHalfValue(int rank, size_t idx)
 {
     return static_cast<float>(idx % 199 + 16 * static_cast<size_t>(rank));
@@ -1058,8 +1055,7 @@ inline float subWordHalfValue(int rank, size_t idx)
 
 } // namespace
 
-// A 1- or 2-byte input skew sends fp16 and fp8 through the per-element head and tail alone; a 4-byte
-// skew admits them to the 4-byte tier, which the two larger sizes enter at up to 8 ranks and 2 CTAs.
+// A 1- to 3-byte skew keeps fp16 and fp8 on the per-element head and tail; a 4-byte skew reaches the 4-byte tier.
 TEST_F(SymmetricKernelCorruptionTest, AllReduceSubWord_SkewedHeadAndFourByteTier)
 {
     constexpr int kMaxRanks = 8;
