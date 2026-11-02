@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 486 · build snapshot" aria-label="Forks: 486">486</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 550 · build snapshot" aria-label="Stars: 550">550</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 484 · build snapshot" aria-label="Forks: 484">484</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 486 · build snapshot" aria-label="Forks: 486">486</li>
       </ul>
     </div>
   </a>
@@ -453,6 +453,17 @@
   
     <nav class="md-nav" aria-label="Overview">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fatal-instruction-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fatal instruction failures
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#the-fork-boundary" class="md-nav__link">
@@ -1983,6 +1994,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#fatal-instruction-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fatal instruction failures
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-fork-boundary" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2406,7 +2428,12 @@ the simulated GPU. It operates in four modes:</p>
 <li><strong>Daemon mode</strong>: Spawns a daemon child process that hosts the simulation
   engine, then <code>LD_PRELOAD</code> + <code>execve</code>s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using backing descriptors passed via SCM_RIGHTS.</li>
+  is shared using backing descriptors passed via SCM_RIGHTS. After a
+  successful KFD open, losing this connection terminates the client process,
+  even if its GPU work has finished. An orderly daemon stop or restart also
+  terminates attached clients that are idle or doing only host work. The
+  interposer calls <code>_Exit(EXIT_FAILURE)</code>, which skips <code>atexit</code> handlers and
+  stdio flushing.</li>
 <li><strong>Attach mode</strong>: Launches an application against an already-running daemon.</li>
 <li><strong>VFIO-user mode</strong>: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
@@ -2424,6 +2451,27 @@ Ordinary daemon <code>hipMalloc</code>, copies, and kernel dispatch remain suppo
 clients to select the supported legacy KFD IPC path. The current runtime's
 default dma-buf IPC path fails at handle creation in both local and daemon
 mode; switching to local mode does not resolve that limitation.</p>
+<h3 id="fatal-instruction-failures">Fatal instruction failures<a class="headerlink" href="#fatal-instruction-failures" title="Permanent link">&para;</a></h3>
+<p>In native KFD/AQL execution, an instruction that the simulator cannot decode or
+execute terminates the simulation engine with a failure result. The affected
+queue cancels its outstanding dispatches without publishing successful kernel
+or barrier completion. When available, the queue owner also receives an
+illegal-instruction exception for a decode failure, or a queue-abort exception
+for a decoded instruction the simulator cannot execute. Runtime acceptance of
+that notification does not recover the simulator. A debugger-owned
+illegal-instruction stop is different: the debugger may repair the instruction
+and resume the wave without terminating the engine.</p>
+<p>The daemon hosts one shared simulation engine, not an isolated engine per
+client. A fatal instruction therefore shuts down the daemon and disconnects
+<strong>every connected client</strong>, including clients whose kernels are valid. Each
+interposer diagnoses the lost daemon connection and exits with failure; the
+faulting client's HIP queue-error callback may abort it first. Disconnect
+monitoring also interrupts clients waiting on shared-memory completion signals,
+which cannot complete successfully after engine shutdown.</p>
+<p>This policy prevents native clients from hanging or observing success after
+unsupported execution. Queue-error publication alone does not establish that
+the shared engine can safely continue. Recovering one client while preserving
+the others requires a separate queue/process recovery mechanism.</p>
 <h3 id="the-fork-boundary">The fork boundary<a class="headerlink" href="#the-fork-boundary" title="Permanent link">&para;</a></h3>
 <p>A child created with <code>fork()</code> before the parent has started a GPU backend can
 initialize its own rocJITsu context. This supports Python forkserver workers.
