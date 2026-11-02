@@ -313,6 +313,12 @@ private:
 /// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
 /// higher tile dimensions (CDNA5 ISA, Table 80). Arithmetic overflow and a zero
 /// higher dimension below the rank return std::nullopt.
+///
+/// A NOP tile and a gather with no valid indices are still active descriptors:
+/// with atomic_barrier set, they validate the barrier address and send exactly
+/// one barrier arrival. Only a NULL tensor (count 0) skips both, as the ISA
+/// specifies. The ISA does not state the barrier behavior of a NOP tile; this
+/// is the emulator's chosen semantics, not established hardware behavior.
 inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout) {
   if (layout.rank() == 0 || desc.tile_dims[0] == 0)
