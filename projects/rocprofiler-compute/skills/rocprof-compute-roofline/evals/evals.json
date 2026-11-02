@@ -4,6 +4,7 @@
       "id": "roof-compute-or-memory-bound",
       "skill_should_trigger": true,
       "prompt": "is this rocprof-compute kernel compute bound or memory bound?",
+      "sample": "vcopy.cpp",
       "expected_behavior": [
         "analyzes the roof block for a single kernel id",
         "compares arithmetic intensity against the empirical peaks printed in the table",
@@ -19,6 +20,7 @@
       "id": "roof-arithmetic-intensity",
       "skill_should_trigger": true,
       "prompt": "what is the arithmetic intensity of my hottest kernel and how much performance am I leaving on the table?",
+      "sample": "mat_mul_max.hip",
       "expected_behavior": [
         "reads FLOPs per byte and the peak values from the roofline table",
         "narrows to one kernel id first"
@@ -29,14 +31,15 @@
       "id": "roof-precision-selection",
       "skill_should_trigger": true,
       "prompt": "my half precision GEMM looks terrible on the roofline, is that right?",
+      "sample": "wmma_gemm_fp16",
       "expected_behavior": [
-        "sets -R to the precision the kernel actually issues instead of the FP32 default",
+        "compares against the peak for the precision the kernel actually issues instead of FP32",
         "confirms the precision from the instruction mix rather than assuming it"
       ],
       "unexpected_behavior": [
         "compares a half precision kernel against the FP32 ceiling and calls it slow"
       ],
-      "logs_contain": ["-R"]
+      "logs_contain": ["cu_ins"]
     },
     {
       "id": "roof-missing-data",

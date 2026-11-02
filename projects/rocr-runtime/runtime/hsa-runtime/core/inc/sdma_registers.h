@@ -305,8 +305,9 @@ typedef struct SDMA_PKT_COPY_LINEAR_SWAP_TAG {
     unsigned int DW_6_DATA;
   } ADDR_B_HI_UNION;
 
-  static const size_t kMaxSize_ = 0x3fffffe0;
+  static const size_t kMaxSize_ = 0x3fffffc0;
   static const size_t kAlignment_ = 64;
+  static_assert(kMaxSize_ % kAlignment_ == 0, "Swap chunks must preserve operand alignment");
 } SDMA_PKT_COPY_LINEAR_SWAP;
 
 // linear sub-window (pre-GFX12)
@@ -1192,6 +1193,7 @@ typedef struct SDMA_PKT_COPY_LINEAR_SWAP_TAG_GFX1250 {
 
   static const size_t kMaxSize_ = 0x3fffffe0;
   static const size_t kAlignment_ = 32;
+  static_assert(kMaxSize_ % kAlignment_ == 0, "Swap chunks must preserve operand alignment");
 } SDMA_PKT_COPY_LINEAR_SWAP_GFX1250;
 
 // Linear Multicast Copy (GFX1250)
@@ -1928,11 +1930,12 @@ typedef struct SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_TAG_GFX1250 {
 
   static const size_t kMaxSize_ = 0x3fffffe0;
   static const size_t kAlignment_ = 32;
+  static_assert(kMaxSize_ % kAlignment_ == 0, "Swap chunks must preserve operand alignment");
 } SDMA_PKT_COPY_LINEAR_SWAP_WAITSIGNAL_GFX1250;
 
 // clang-format on
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr
 
 #endif  // HSA_RUNTIME_CORE_INC_SDMA_REGISTERS_H_

@@ -6,11 +6,36 @@
 
 #pragma once
 
-#include <bit>
+#include "common/bits.h"
 #include <cstdint>
 
 // Adapted from rocjitsu shared/dot_packed16.h.
-namespace rocjitsu::arith::packed16 {
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::packed16 {
+
+/// @brief Widen a packed value to FP32 bits without host FP operations.
+/// @details Preserves signaling NaN payloads without quieting them.
+template <bool Bf16> inline uint32_t widen(uint16_t bits) {
+  if constexpr (Bf16) {
+    return uint32_t(bits) << 16;
+  }
+  const uint32_t sign = uint32_t(bits & 0x8000) << 16;
+  const uint32_t exponent = (bits >> 10) & 31;
+  const uint32_t fraction = bits & 1023;
+  if (exponent == 31) {
+    return sign | 0x7f800000u | (fraction << 13);
+  }
+  if (exponent) {
+    return sign | ((exponent + 112) << 23) | (fraction << 13);
+  }
+  if (!fraction) {
+    return sign;
+  }
+  int shift = 0;
+  while (!((fraction << shift) & 1024)) {
+    ++shift;
+  }
+  return sign | ((113 - shift) << 23) | (((fraction << shift) & 1023) << 13);
+}
 
 /// @brief Narrow infinity or NaN bits using the packed WMMA payload policy.
 template <bool Bf16> inline uint16_t special(uint32_t bits) {
@@ -37,7 +62,7 @@ inline uint16_t pack_f16(int64_t units, int grid, bool frame_negative = false,
   constexpr uint16_t infinity = 0x7c00;
   const uint16_t sign = uint16_t((units < 0) != frame_negative) << 15;
   const uint64_t magnitude = units < 0 ? uint64_t(-units) : uint64_t(units);
-  int top = int(std::bit_width(magnitude)) - 1;
+  int top = int(rocjitsu::arith::bit_width(magnitude)) - 1;
   int exponent = top + grid;
   const int shift = exponent < 1 - bias ? 1 - bias - fraction_bits - grid : top - fraction_bits;
   uint64_t significand = shift <= 0 ? magnitude << -shift : shift >= 64 ? 0 : magnitude >> shift;
@@ -60,4 +85,4 @@ inline uint16_t pack_f16(int64_t units, int grid, bool frame_negative = false,
          uint16_t(significand & ((1u << fraction_bits) - 1));
 }
 
-} // namespace rocjitsu::arith::packed16
+} // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::packed16
