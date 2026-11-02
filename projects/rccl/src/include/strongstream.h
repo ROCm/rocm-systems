@@ -106,6 +106,12 @@ ncclResult_t ncclStreamWaitStream(cudaStream_t a, cudaStream_t b, cudaEvent_t sc
 // Like cudaStreamWaitEvent except `e` must be strictly ahead of everything in `s`.
 ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph g, cudaStream_t s, cudaEvent_t e);
 
+// Capture-only equivalent of ncclStreamAdvanceToEvent for an event just recorded on
+// `source`: replaces the capture dependencies of `s` with those of `source`. Both
+// streams must be capturing into the same graph, and `source` must be strictly ahead
+// of everything in `s`.
+ncclResult_t ncclStreamAdvanceToStream(cudaStream_t s, cudaStream_t source);
+
 // Synchrnoization does not need the strong stream to be acquired.
 ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream* ss);
 

@@ -80,6 +80,26 @@ class CocoPathsTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(detect.coco_paths([path], "develop"), [])
 
+    def test_host_test_registration_paths_are_excluded_on_develop(self):
+        # Adding a micro binary also touches its CTest categories and the test runner.
+        for path in [
+            "projects/rccl/test/test_categories_micro.yaml",
+            "projects/rccl/test/test_categories_micro_net.yaml",
+            "projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json",
+            "projects/rccl/tools/scripts/test_runner/lib/test_executor.py",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [])
+
+    def test_gpu_test_categories_still_match(self):
+        for path in [
+            "projects/rccl/test/test_categories.yaml",
+            "projects/rccl/test/test_categories_fixtures.yaml",
+            "projects/rccl/test/test_categories_mpi.yaml",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [path])
+
     def test_host_only_test_paths_match_off_develop(self):
         # rccl-host-unit-tests.yml does not run there, so coco is the only check.
         path = "projects/rccl/test/host/net-test.cc"
@@ -166,6 +186,18 @@ class MainTest(unittest.TestCase):
         changed = [
             "projects/rccl/test/host/net-test.cc",
             "projects/rccl/test/host/fakes/os_fakes.cc",
+        ]
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"
+        )
+
+    def test_emits_false_for_a_new_micro_binary_pr_to_develop(self):
+        changed = [
+            "projects/rccl/test/host/net-test.cc",
+            "projects/rccl/test/host/CMakeLists.txt",
+            "projects/rccl/test/test_categories_micro_net.yaml",
+            "projects/rccl/tools/scripts/test_runner/configs/ci-precheckin.json",
+            "projects/rccl/tools/scripts/test_runner/lib/test_executor.py",
         ]
         self.assertEqual(
             self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"

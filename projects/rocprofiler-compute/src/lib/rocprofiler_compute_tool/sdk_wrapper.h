@@ -44,6 +44,9 @@ public:
 
     virtual void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
                                                      void* user_data) = 0;
+
+    virtual void query_available_agents(rocprofiler_query_available_agents_cb_t callback,
+                                        void*                                   user_data) = 0;
 };
 
 class SdkWrapperImpl : public SdkWrapper
@@ -78,5 +81,7 @@ public:
 
     void at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
                                              void*                              user_data) override;
+
+    void query_available_agents(rocprofiler_query_available_agents_cb_t callback, void* user_data) override;
 };
 }  // namespace rocprofiler_compute_tool

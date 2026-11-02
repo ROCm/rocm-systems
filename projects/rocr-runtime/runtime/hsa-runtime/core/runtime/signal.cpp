@@ -203,7 +203,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
                               const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
                               uint64_t timeout, hsa_wait_state_t wait_hint,
                               std::vector<hsa_signal_value_t>& satisfying_values,
-                              bool wait_on_all) {
+                              bool wait_on_all, bool wake_async_monitor) {
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
 
@@ -342,6 +342,17 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
     HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age));
+
+    // As in InterruptSignal::WaitRelaxed(), this wait may have taken the notification the
+    // async event monitor is parked on.
+    if (wake_async_monitor && !core::Runtime::runtime_singleton_->KfdVersion().supports_event_age) {
+      for (uint32_t i = 0; i < signal_count; i++) {
+        if (signals[i]->waiting_ > 1) {
+          core::Runtime::runtime_singleton_->WakeAsyncSignalMonitor();
+          break;
+        }
+      }
+    }
   }
 }
 
@@ -508,8 +519,7 @@ int64_t Signal::UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expec
 hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initial_values,
                                  bool use_interrupt, const MemoryRegion* region,
                                  const std::vector<hsa_agent_t>& access_agents,
-                                 bool host_access_via_hdp,
-                                 SignalBatch** batch,
+                                 bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
                                  hsa_signal_t* signals) {
   const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
 
@@ -529,7 +539,7 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
 
   SignalBatch* new_batch = new SignalBatch(arena, count, host_access_via_hdp);
   arenaGuard.Dismiss();
-  if (host_access_via_hdp) {
+  if (shadow_members) {
     new_batch->shadow_members_.reset(new std::atomic<Signal*>[count]());
     new_batch->RegisterShadow();
   }

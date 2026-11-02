@@ -775,6 +775,19 @@ in the following table.
         | ``6``: rocSHMEM GDA (required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
 
+    * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
+        | Opt in to GinScatter AllReduce on gfx1250.
+      - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)
+        | ``1``: symmetric ``ncclSum`` fp32/fp16/bf16 messages from 64 MiB
+          through 4 GiB use GinScatter when scratch can hold them
+        | Eligible sums below 64 MiB yield to DDA. Sums below 8 MiB already
+          used DDA. From 8 MiB to 64 MiB, DDA LL/LL128 can take those sums
+
+    * - | ``NCCL_GIN_ALLREDUCE_SCRATCH_BYTES``
+        | GinScatter incoming scratch size, in bytes.
+      - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
+        | ``0``: do not allocate scratch, and do not select GinScatter
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
@@ -782,6 +795,84 @@ in the following table.
         | A short name is resolved against the ``librccl-rma`` prefix, so
           ``example`` loads ``librccl-rma-example.so``
         | See :ref:`using-rccl-rma-plugin`
+
+QP scheduling (CAST)
+====================
+
+CAST (Congestion Aware Sprayed Traffic) adds a dynamic QP (Queue Pair) scheduler
+that balances RDMA traffic across multiple QPs per connection based on measured
+round-trip time (RTT). The following variables tune the scheduler and are
+accessible with either the ``RCCL_`` or ``NCCL_`` prefix; the ``RCCL_`` form is
+shown below.
+
+These variables only take effect when the IB-CAST net plugin is loaded
+(``NCCL_NET=IB-CAST`` or ``ROCM-IB``, or an AINIC NIC with ``NCCL_NET`` unset)
+*and* the CAST QP scheduler is enabled (see ``RCCL_IB_QP_SCHED_ENABLE`` below).
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IB_QP_SCHED_ENABLE``
+        | Enables the CAST QP scheduler.
+      - | ``-1``: Auto (default).
+        | ``0``: Force off.
+        | ``1``: Force on.
+        | Auto resolves to enabled only when ``NCCL_NET=IB-CAST`` is set
+          explicitly. Everywhere else — AINIC with ``NCCL_NET`` unset, or
+          ``NCCL_NET=ROCM-IB`` — auto resolves to disabled; use
+          ``RCCL_IB_QP_SCHED_ENABLE=1`` to override.
+        | On AINIC, the scheduler only has an effect once ID-based receive
+          matching (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) is
+          enabled. Without it, forcing the scheduler on (``1``) reports
+          "enabled", but WRR and split-data are no-ops, so nothing is
+          actually rebalanced.
+        | Always disabled when port failover/recovery
+          (``NCCL_IB_RESILIENCY_PORT_FAILOVER``/``_PORT_RECOVERY``) or QP
+          sharing (``RCCL_IB_QP_SHARING_ENABLE``) is active — load-balancer
+          integration with those features is still pending.
+
+    * - | ``RCCL_IB_QP_SCHED_RESET_INTERVAL``
+        | Interval at which accumulated RTT statistics are reset, to prevent
+          stale samples from permanently biasing the scheduler. Value is in
+          milliseconds.
+      - | Integer milliseconds. Default: ``60000`` (60 seconds).
+        | ``0``: Never reset.
+
+    * - | ``RCCL_IB_QP_SCHED_UPDATE_INTERVAL``
+        | Minimum interval between scheduler weight updates. Value is in
+          microseconds.
+      - | Integer microseconds. Default: ``50``.
+        | Values outside the range 1 µs to 60 s are ignored.
+
+    * - | ``RCCL_IB_QP_SCHED_WEIGHT``
+        | Exponential moving average (EMA) weight applied to new RTT samples.
+      - | Floating-point value in the range ``0`` to ``1.0``. Default: ``0``.
+        | ``0``: Simple average.
+        | Values closer to ``1.0`` react faster to recent samples.
+
+    * - | ``RCCL_IB_QP_SCHED_SPLIT_DATA_MIN``
+        | Minimum chunk size when splitting a message across QPs (split-data
+          mode, enabled via ``NCCL_IB_SPLIT_DATA_ON_QPS``). Value is in bytes.
+      - | Integer bytes. Default: ``65536``.
+        | Only positive values are applied.
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_PATH``
+        | Directory for a per-process scheduler log file (one line per QP:
+          device, min/current/max weight, and smoothed RTT). Log file is
+          named ``cast_log_<hostname>_<pid>``.
+      - | String directory path.
+        | Default: unset (logging disabled).
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_INTERVAL``
+        | Interval at which scheduler statistics are written to the log file.
+          Value is in microseconds. Only used when
+          ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
+      - | Integer microseconds. Default: ``1000000`` (1 second).
+        | Values outside the range 1 µs to 60 s are ignored.
 
 Development and testing (advanced)
 ==================================
@@ -1153,41 +1244,70 @@ threshold table introduced for gfx1250.
           registration and message size).
 
     * - | ``RCCL_FORCE_CE_ALLREDUCE``
-        | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
-          CE AllReduce, allowing CE to run without symmetric window registration.
-          Does not override the staging buffer size cap (``RCCL_CE_AR_2SHOT_MAX_BYTES``
-          or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
-          When ``-1`` (auto), follows the same gfx1250-default logic as
-          ``RCCL_CE_ALLREDUCE``.
+        | Enables the non-registered (2-shot/staged) CE AllReduce path without
+          requiring ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``). Does not affect
+          the registered-window CE AllReduce path, which is controlled independently
+          by ``RCCL_CE_ALLREDUCE``. Does not override the ``ceNonRegMax[AR]`` staging
+          buffer size cap.
       - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
         | ``0``: Disabled.
-        | ``1``: Force-enabled (CTA_POLICY check bypassed).
+        | ``1``: Force-enabled (``CTA_POLICY_ZERO`` requirement bypassed for non-registered path).
+
+    * - | ``RCCL_CE_REDUCESCATTER``
+        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, subject to the other eligibility checks.
+    * - | ``RCCL_FORCE_CE_COLL``
+        | Bypasses the ``NCCL_CTA_POLICY=2`` (CTA_POLICY_ZERO) requirement for
+          CE AllGather and CE Alltoall registered-window paths.
+          Does not affect AllReduce (use ``RCCL_FORCE_CE_ALLREDUCE`` for that),
+          and does not affect hierarchical CE paths.
+          When ``-1`` (auto), enabled by default on gfx1250 where CE is the
+          preferred collective path; disabled on all other architectures.
+      - | ``-1``: Auto — enabled on gfx1250, disabled elsewhere (default).
+        | ``0``: Disabled.
+        | ``1``: Force-enabled (CTA_POLICY check bypassed for AG and A2A registered CE).
+
+    * - | ``RCCL_FORCE_SYMMETRIC``
+        | Biases the ``ncclAllReduce`` backend selector to prefer the symmetric
+          kernel path over all other candidates. Hard eligibility checks (buffer
+          registration, op support) are still enforced; if no symmetric path is
+          eligible the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer symmetric kernel for AllReduce.
+
+    * - | ``RCCL_FORCE_DDA``
+        | Biases the ``ncclAllReduce`` backend selector to prefer DDA (Direct Data
+          Access) paths over all other candidates, including symmetric and Copy
+          Engine. If no DDA path is eligible for the given message size and
+          communicator the selector falls back normally. Off by default.
+      - | ``0``: Disabled (default).
+        | ``1``: Prefer DDA for AllReduce.
 
     * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
-          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
-          null or unknown-arch table restores the pre-table 256 MiB default. This
-          variable sizes the selector only; it does not affect the staging buffer
-          allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+          the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table.
+          A table entry of ``0`` (e.g. gfx1250, where the value is a placeholder)
+          resolves to 256 MiB when ``NCCL_CTA_POLICY=2`` (ZERO CU policy) is active;
+          without ZERO policy it stays ``0`` and 2-shot is disabled. Setting this
+          variable to ``0`` explicitly disables the non-registered 2-shot path but does
+          not suppress the staging buffer reservation, which the registered-window CE AllReduce path also requires.
       - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: Disable 2-shot (does not disable the registered-window CE path).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
-
-    * - | ``RCCL_CE_AR_REG_MAX_MSG_BYTES``
-        | Overrides the CE registered-window AllReduce message size cap. When ``-1``
-          (default), the cap is read from ``ceRegMax[AllReduce]`` in the per-arch
-          table. This is the upper bound for the path where both send and receive
-          buffers are in symmetric windows (``-R 2`` mode in rccl-tests).
-      - | ``-1``: Resolved from the per-arch table (default).
-        | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
-      - | ``-1``: Use the compile-time default of 256 MiB (default).
+          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
     * - | ``RCCL_TDM_LL128_ENABLE``
@@ -1271,4 +1391,3 @@ threshold table introduced for gfx1250.
         | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
-

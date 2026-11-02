@@ -8,9 +8,40 @@ use std::sync::atomic::{AtomicI64, Ordering, fence};
 use crate::ffi::*;
 use crate::runtime::{boundary, lock};
 use crate::signal::{
-    AmdSignal, batch_needs_flush, flush_device_store, flush_signal_store, signal_value_pointer,
-    with_signal,
+    AmdSignal, batch_needs_flush, flush_device_store, flush_signal_store, host_store_kind,
+    signal_value_pointer, with_public_signal,
 };
+
+/// Stores a signal value according to the locally trusted host signal kind.
+///
+/// # Safety
+/// The caller must retain the signal and any queue owning its doorbell until
+/// this store completes.
+unsafe fn store_signal_value(signal: &AmdSignal, value: SignalValue, order: Ordering) {
+    let address = std::ptr::from_ref(signal) as usize;
+    let kind = host_store_kind(address, signal.kind.load(Ordering::Acquire));
+    match kind {
+        AMD_SIGNAL_KIND_DOORBELL => {
+            if order == Ordering::Release {
+                fence(Ordering::Release);
+            }
+            let address = signal.value.load(Ordering::Relaxed) as usize;
+            // SAFETY: The caller retains the locally owned queue and its MMIO
+            // mapping. Shared IPC signals are excluded by host_store_kind.
+            unsafe { rocddi::device::gpu::queue::ring_doorbell(address, value as u64) };
+        }
+        AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
+            signal.value.store(value, order);
+            // SAFETY: The HSA caller retains the owning queue through this
+            // store, including its stable intercept owner.
+            unsafe { crate::queue_intercept::ring(signal.intercept_owner()) };
+        }
+        _ => {
+            signal.value.store(value, order);
+            flush_signal_store(signal);
+        }
+    }
+}
 
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
@@ -20,7 +51,8 @@ use crate::signal::{
 /// Loads an HSA signal value with relaxed memory ordering.
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }.unwrap_or(0)
+    unsafe { with_public_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }
+        .unwrap_or(0)
 }
 
 #[cfg_attr(
@@ -31,7 +63,8 @@ pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalVal
 /// Loads a signal value with the HSA SC-acquire contract.
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
-    unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }.unwrap_or(0)
+    unsafe { with_public_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }
+        .unwrap_or(0)
 }
 
 #[cfg_attr(
@@ -55,24 +88,10 @@ pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalVal
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
-        with_signal(signal, |signal| {
-            match signal.kind.load(Ordering::Acquire) {
-                AMD_SIGNAL_KIND_DOORBELL => {
-                    let address = signal.value.load(Ordering::Relaxed) as usize;
-                    // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                    rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
-                }
-                AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
-                    signal.value.store(value, Ordering::Relaxed);
-                    // SAFETY: The HSA caller retains the owning queue through
-                    // this store, including its stable intercept owner.
-                    crate::queue_intercept::ring(signal.intercept_owner());
-                }
-                _ => {
-                    signal.value.store(value, Ordering::Relaxed);
-                    flush_signal_store(signal);
-                }
-            }
+        with_public_signal(signal, |signal| {
+            // SAFETY: The public API requires the caller to retain this signal
+            // and its owning queue for the complete store.
+            store_signal_value(signal, value, Ordering::Relaxed);
         })
     };
 }
@@ -108,27 +127,45 @@ pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, va
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
-        with_signal(signal, |signal| {
-            match signal.kind.load(Ordering::Acquire) {
-                AMD_SIGNAL_KIND_DOORBELL => {
-                    fence(Ordering::Release);
-                    let address = signal.value.load(Ordering::Relaxed) as usize;
-                    // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                    rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
-                }
-                AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
-                    signal.value.store(value, Ordering::Release);
-                    // SAFETY: The HSA caller retains the owning queue through
-                    // this store, including its stable intercept owner.
-                    crate::queue_intercept::ring(signal.intercept_owner());
-                }
-                _ => {
-                    signal.value.store(value, Ordering::Release);
-                    flush_signal_store(signal);
-                }
-            }
+        with_public_signal(signal, |signal| {
+            // SAFETY: The public API requires the caller to retain this signal
+            // and its owning queue for the complete store.
+            store_signal_value(signal, value, Ordering::Release);
         })
     };
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::signal::{register_ipc_signal, unregister_ipc_signal};
+
+    #[test]
+    fn peer_modified_ipc_kind_cannot_ring_a_doorbell() {
+        let signal = AmdSignal::user(0);
+        let address = std::ptr::from_ref(&signal) as usize;
+        register_ipc_signal(address).unwrap();
+
+        // An imported peer may modify the shared kind and value at any time.
+        // The invalid MMIO address would fault if either store took the
+        // doorbell branch; the legacy kind would use an invalid owner.
+        signal
+            .kind
+            .store(AMD_SIGNAL_KIND_DOORBELL, Ordering::Release);
+        signal.value.store(1, Ordering::Release);
+        // SAFETY: This local signal is retained throughout both stores.
+        unsafe { store_signal_value(&signal, 27, Ordering::Relaxed) };
+        assert_eq!(signal.value.load(Ordering::Acquire), 27);
+
+        signal
+            .kind
+            .store(AMD_SIGNAL_KIND_LEGACY_DOORBELL, Ordering::Release);
+        // SAFETY: This local signal is retained throughout both stores.
+        unsafe { store_signal_value(&signal, 39, Ordering::Release) };
+        assert_eq!(signal.value.load(Ordering::Acquire), 39);
+        unregister_ipc_signal(address);
+    }
 }
 
 #[cfg_attr(
@@ -147,7 +184,7 @@ pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: Sign
 unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let previous = signal.value.load(Ordering::Acquire);
                 flush_device_store(&signal.value, value);
@@ -170,7 +207,7 @@ unsafe fn signal_compare_exchange(
 ) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let observed = signal.value.load(Ordering::Acquire);
                 if observed == expected {
@@ -198,7 +235,7 @@ unsafe fn signal_fetch_update(
 ) {
     // SAFETY: Callers must supply a live HSA user signal.
     let _ = unsafe {
-        with_signal(signal, |signal| {
+        with_public_signal(signal, |signal| {
             if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
                 let previous = signal.value.load(Ordering::Acquire);
                 flush_device_store(&signal.value, plain(previous, value));
@@ -419,9 +456,9 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
         let interrupt = runtime.signal_state.is_interrupt_signal(signal);
         // SAFETY: owns_signal validated the handle while the runtime lock
         // prevents destruction of its backing storage.
-        let Some(pointer) =
-            (unsafe { with_signal(signal, |signal| signal_value_pointer(signal, interrupt)) })
-        else {
+        let Some(pointer) = (unsafe {
+            with_public_signal(signal, |signal| signal_value_pointer(signal, interrupt))
+        }) else {
             return INVALID_SIGNAL;
         };
         let pointer = match pointer {

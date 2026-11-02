@@ -2022,6 +2022,8 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2077,6 +2079,8 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2132,6 +2136,8 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2187,6 +2193,8 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2242,6 +2250,8 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2297,6 +2307,8 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2352,6 +2364,8 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2407,6 +2421,8 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2462,6 +2478,8 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2517,6 +2535,8 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2572,6 +2592,8 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -2627,6 +2649,8 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
     dpp_fi_ = dp->fi;
   }
   vcc.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
@@ -5976,6 +6000,8 @@ VCmpxLtI16Vopc::VCmpxLtI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6034,6 +6060,8 @@ VCmpxEqI16Vopc::VCmpxEqI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6092,6 +6120,8 @@ VCmpxLeI16Vopc::VCmpxLeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6150,6 +6180,8 @@ VCmpxGtI16Vopc::VCmpxGtI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6208,6 +6240,8 @@ VCmpxNeI16Vopc::VCmpxNeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6266,6 +6300,8 @@ VCmpxGeI16Vopc::VCmpxGeI16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6324,6 +6360,8 @@ VCmpxLtU16Vopc::VCmpxLtU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6382,6 +6420,8 @@ VCmpxEqU16Vopc::VCmpxEqU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6440,6 +6480,8 @@ VCmpxLeU16Vopc::VCmpxLeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6498,6 +6540,8 @@ VCmpxGtU16Vopc::VCmpxGtU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6556,6 +6600,8 @@ VCmpxNeU16Vopc::VCmpxNeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 
@@ -6614,6 +6660,8 @@ VCmpxGeU16Vopc::VCmpxGeU16Vopc(const MachineInst *inst)
   }
   exec.apply_fieldless_caps(false, false, false);
   sdst_exec.apply_fieldless_caps(false, false, false);
+  src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  vsrc1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= WRITES_EXEC;
 }
 

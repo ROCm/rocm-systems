@@ -31,6 +31,7 @@ use std::mem::{align_of, size_of};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::platform::memory as linux_interop;
@@ -168,7 +169,7 @@ pub(crate) struct MemoryState {
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
+    pub(crate) health: Arc<crate::runtime::GenerationHealth>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
@@ -183,14 +184,14 @@ pub(crate) struct MemoryState {
 
 impl MemoryState {
     /// Initializes the allocation, registration, and virtual memory registries.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(health: Arc<crate::runtime::GenerationHealth>) -> Self {
         Self {
             allocations: HashMap::new(),
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
             async_copy_borrows: HashMap::new(),
-            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
@@ -222,14 +223,14 @@ impl MemoryState {
 
     /// Joins memory workers after the shared stop request is published.
     pub(crate) fn join_workers(&mut self) {
-        for worker in self.workers.drain(..) {
+        for worker in self.take_workers() {
             let _ = worker.join();
         }
     }
 
-    /// Reports whether an unfinished native copy still retains memory borrows.
-    pub(crate) fn is_quarantined(&self) -> bool {
-        self.async_copy_quarantine.load(Ordering::Acquire)
+    /// Detaches workers so shutdown can join them outside the lifecycle lock.
+    pub(crate) fn take_workers(&mut self) -> Vec<JoinHandle<()>> {
+        std::mem::take(&mut self.workers)
     }
 
     /// Releases HSA metadata after queues, copies, and signal users stop.

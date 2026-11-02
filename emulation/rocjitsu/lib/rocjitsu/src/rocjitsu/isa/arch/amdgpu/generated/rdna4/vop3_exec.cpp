@@ -7963,7 +7963,11 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
     const auto half = [&](uint32_t bits, unsigned source) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
                                                                              inst_.abs, inst_.neg));
@@ -8008,7 +8012,11 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
     const auto half = [&](uint32_t bits, unsigned source) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
                                                                              inst_.abs, inst_.neg));
@@ -8043,7 +8051,11 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
     const auto half = [&](uint32_t bits, unsigned source) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
           bits & 0xffffu, source, inst_.abs, inst_.neg));
@@ -8088,7 +8100,11 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       raw0 = (raw0 & 0xffffu) * 0x10001u;
     if (amdgpu::dot2_src_needs_half_replication(inst_.src1))
       raw1 = (raw1 & 0xffffu) * 0x10001u;
-    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2);
+    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))
+      acc_bits = (acc_bits & 0xffffu) * 0x10001u;
+    if (opsel & 4u)
+      acc_bits >>= 16;
     const auto half = [&](uint32_t bits, unsigned source) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
           bits & 0xffffu, source, inst_.abs, inst_.neg));

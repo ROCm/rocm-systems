@@ -13,7 +13,7 @@ use super::errno;
 use libc::close;
 use std::fs::File;
 use std::io;
-use std::os::fd::{BorrowedFd, IntoRawFd};
+use std::os::fd::{FromRawFd, IntoRawFd};
 use std::os::unix::fs::{FileExt, MetadataExt};
 
 /// Stable size and filesystem identity obtained from one DMA-BUF descriptor.
@@ -30,9 +30,14 @@ pub(crate) fn duplicate_file(descriptor: i32) -> io::Result<File> {
     if descriptor < 0 {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    // SAFETY: The caller keeps its descriptor live for this synchronous clone.
-    let borrowed = unsafe { BorrowedFd::borrow_raw(descriptor) };
-    Ok(File::from(borrowed.try_clone_to_owned()?))
+    // SAFETY: fcntl validates this raw integer in the kernel. A stale or
+    // closed descriptor reports EBADF without creating a Rust BorrowedFd.
+    let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 0) };
+    if duplicate < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: A successful F_DUPFD_CLOEXEC returns a new owned descriptor.
+    Ok(unsafe { File::from_raw_fd(duplicate) })
 }
 
 /// Gets the file length from an owned duplicate of a borrowed descriptor.
