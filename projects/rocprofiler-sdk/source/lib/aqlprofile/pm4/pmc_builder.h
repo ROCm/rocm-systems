@@ -33,7 +33,7 @@
 #include <utility>
 #include <vector>
 
-#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
+#include "lib/aqlprofile/aqlprofile.hpp"
 #include "lib/aqlprofile/def/gpu_block_info.h"
 #include "lib/aqlprofile/pm4/cmd_config.h"
 #include "lib/aqlprofile/util/hsa_rsrc_factory.h"  // AgentInfo
@@ -169,16 +169,19 @@ private:
     uint32_t xcc_number_;
     uint32_t xcc_per_aid_;
     Builder  builder;
-    // TODO: Temporary patch for gfx1250's asymmetric CU design, will remove
-    //       after CU mask support is added to agent_info
+    // gfx1250 has an asymmetric CU design (SA1 lacks WGP 8). Only used to
+    // synthesize the active mask when the agent has no CU bitmap.
     bool asymmetric_cu_patch;
+    // CU bits per WGP in the CU bitmap: 2 on RDNA, 1 on gfx1250 (1 WGP = 1 CU).
+    uint32_t cu_bits_per_wgp_;
 
-    // Per-(SE, SA) CU-activity mask (2 CU bits per WGP) from the DRM cu_bitmap.
-    // bIsWGPcounter11 reads active WGPs and zero-fills harvested ones (reading a
-    // harvested WGP aliases onto an active one). Indexed by physical WGP slot, so
-    // no remap is needed and the emitted sample count stays == GetNumWGPs().
-    // Synthesized fully-active when no bitmap is present (V0/V1 agents).
-    std::vector<std::vector<uint32_t>> sa_cu_mask_;
+    // Per-(XCC, SE, SA) CU-activity mask from the agent CU bitmap, indexed
+    // [(xcc * se_number_ + se) * sarrays_per_se_ + sa]. The GFX11+ WGP read
+    // path reads available WGPs and zero-fills the others (reading a WGP that is
+    // not available aliases onto an active one, or soft-hangs). Indexed by physical WGP
+    // slot, so no remap is needed and the emitted sample count stays ==
+    // GetNumWGPs(). Synthesized fully-active when no bitmap is present.
+    std::vector<uint32_t> sa_cu_mask_;
 
     void DebugTrace(uint32_t value)
     {
@@ -308,55 +311,73 @@ private:
                    : instance_index;
     }
 
-    // Populate sa_cu_mask_[se][sa] from the agent cu_bitmap; on GFX11 also grow
-    // wgp_per_sa_ to the physical WGP span (highest active WGP + 1) so the read
-    // loop's fixed [0, wgp_per_sa_) bound reaches a middle-harvested WGP (e.g.
-    // gfx1151 active {0,1,2,4} -> span 5). GFX12 keeps its cu_num-derived count.
+    // CU-bitmap bits covering WGP `wgp`; 0 when the WGP lies beyond the 32-bit
+    // per-SA window (avoids an undefined shift).
+    uint32_t wgp_cu_bits(uint32_t wgp) const
+    {
+        const uint32_t shift = wgp * cu_bits_per_wgp_;
+        if(shift >= 32u) return 0u;
+        return ((1u << cu_bits_per_wgp_) - 1u) << shift;
+    }
+
+    // Mask with every WGP in [0, num_wgps) active; ~0u once the 32-bit window
+    // is covered (never 1u << 32).
+    uint32_t full_cu_mask(uint32_t num_wgps) const
+    {
+        const uint32_t bits = num_wgps * cu_bits_per_wgp_;
+        return (bits >= 32u) ? ~0u : ((1u << bits) - 1u);
+    }
+
+    uint32_t& sa_cu_mask(uint32_t xcc, uint32_t se, uint32_t sa)
+    {
+        return sa_cu_mask_.at((size_t{xcc} * se_number_ + se) * sarrays_per_se_ + sa);
+    }
+
+    // Populate sa_cu_mask_ and, on GFX11+, grow wgp_per_sa_ to the physical WGP
+    // span (highest active WGP + 1) so the read loop's fixed [0, wgp_per_sa_)
+    // bound reaches a WGP after one that is not available (e.g. gfx1151 active {0,1,2,4} ->
+    // span 5).
     //
-    // Each logical (se, sa) maps to a raw bitmap slot: when logical SEs exceed
-    // the bitmap's SE dimension, upper SEs fold into higher SA columns, mirroring
-    // the kernel's gfx_v11_0_get_cu_info packing cu_bitmap[i%4][j+(i/4)*sh_per_se]
-    // (validated on Navi31, 6 SE; else SE 4-5 would miss the bitmap). Out-of-window
-    // or empty entries fall back to fully active (cu_bitmap.bits is fixed-size;
-    // out-of-window reads would be UB).
+    // The agent cu_bitmap covers every (XCC, SE, SA) with no topology limit; a
+    // zero entry is an SA with no WGP available. Without a bitmap, synthesize
+    // fully-active masks from the cu_num-derived count.
     void build_sa_cu_mask(const AgentInfo* agent_info)
     {
-        // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future SE x SA-per-SE
-        // topology too large for a hardcoded kMaxSA.
-        sa_cu_mask_.assign(se_number_, std::vector<uint32_t>(sarrays_per_se_, 0u));
+        // Fits Navi31 (6 x 2), MI200 (8 x 1), and any future topology.
+        sa_cu_mask_.assign(size_t{xcc_number_} * se_number_ * sarrays_per_se_, 0u);
 
-        constexpr uint32_t kMaxWgpPerSa  = 16;
-        constexpr uint32_t bitmap_se_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 0>;
-        constexpr uint32_t bitmap_sa_lim = std::extent_v<decltype(aqlprofile_cu_bitmap_t::bits), 1>;
+        const auto& bitmap     = agent_info->cu_bitmap;
+        const bool  has_bitmap = !bitmap.empty() && bitmap.size() == sa_cu_mask_.size();
+
         // Highest active WGP index across all SAs (physical span = index + 1).
         uint32_t max_wgp_index = 0;
-        for(uint32_t se = 0; se < se_number_; ++se)
+        for(uint32_t xcc = 0; xcc < xcc_number_; ++xcc)
         {
-            for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
+            for(uint32_t se = 0; se < se_number_; ++se)
             {
-                const uint32_t raw_se = se % bitmap_se_lim;
-                const uint32_t raw_sa = sa + (se / bitmap_se_lim) * sarrays_per_se_;
-
-                uint32_t cu_bm = (raw_se < bitmap_se_lim && raw_sa < bitmap_sa_lim)
-                                     ? agent_info->cu_bitmap.bits[raw_se][raw_sa]
-                                     : 0u;
-                if(cu_bm == 0)
+                for(uint32_t sa = 0; sa < sarrays_per_se_; ++sa)
                 {
-                    // No bitmap: synthesize a fully-active mask. Guards avoid UB:
-                    // clz(0), and (1u << 32) when wgp_per_sa_ spans the full
-                    // 32-bit window (16 WGPs * 2 CU bits).
-                    if(wgp_per_sa_ == 0) continue;
-                    cu_bm = (wgp_per_sa_ >= kMaxWgpPerSa) ? ~0u : ((1u << (wgp_per_sa_ * 2u)) - 1u);
-                }
-                sa_cu_mask_.at(se).at(sa) = cu_bm;
+                    uint32_t& cu_bm = sa_cu_mask(xcc, se, sa);
+                    if(has_bitmap)
+                    {
+                        cu_bm = bitmap[(size_t{xcc} * se_number_ + se) * sarrays_per_se_ + sa];
+                    }
+                    else
+                    {
+                        cu_bm = full_cu_mask(wgp_per_sa_);
+                        // gfx1250 SA1 has no WGP 8; reading it soft-hangs.
+                        if(asymmetric_cu_patch && sa == 1) cu_bm &= ~wgp_cu_bits(8);
+                    }
 
-                const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
-                const uint32_t max_wgp    = max_cu_bit / 2u;
-                if(max_wgp > max_wgp_index) max_wgp_index = max_wgp;
+                    if(cu_bm == 0) continue;  // no WGP available; also avoids clz(0)
+                    const uint32_t max_cu_bit = 31u - __builtin_clz(cu_bm);
+                    const uint32_t max_wgp    = max_cu_bit / cu_bits_per_wgp_;
+                    if(max_wgp > max_wgp_index) max_wgp_index = max_wgp;
+                }
             }
         }
 
-        if constexpr(Primitives::GFXIP_LEVEL == 11)
+        if constexpr(Primitives::GFXIP_LEVEL >= 11)
             wgp_per_sa_ = std::max(wgp_per_sa_, max_wgp_index + 1);
     }
 
@@ -373,12 +394,13 @@ public:
                             (se_number_ * sarrays_per_se_);
         this->wgp_per_sa_ /= agent_info->xcc_num;
 
-        build_sa_cu_mask(agent_info);
-
         // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
         // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
         builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
         this->asymmetric_cu_patch   = strncmp(agent_info->name, "gfx1250", 7) ? false : true;
+        this->cu_bits_per_wgp_      = asymmetric_cu_patch ? 1u : 2u;
+
+        build_sa_cu_mask(agent_info);
     }
 
     int GetNumWGPs() override
@@ -734,11 +756,13 @@ public:
         if(!concurrent) builder.BuildWriteWaitIdlePacket(cmd_buffer);
     }
 
-    // Build PMC read PM4 packets
+    // Build PMC read PM4 packets. xcc_index selects the XCC's slice of
+    // sa_cu_mask_ for per-WGP counters.
     uint32_t ReadXccPackets(CmdBuffer*             cmd_buffer,
                             const counters_vector& counters_vec,
                             uint32_t*              buf,
                             uint32_t&              read_counter,
+                            uint32_t               xcc_index,
                             GCMode                 gc_mode = GC_MODE_XCD)
     {
         uint32_t xcc_id = gc_mode & GC_MODE_XCD_ID_MASK;
@@ -900,21 +924,19 @@ public:
                             grbm_value = Primitives::grbm_se_index_value(se_index);
                         }
 
-                        bool bIsWGPcounter11 = Primitives::GFXIP_LEVEL == 11 &&
-                                               (block_info->attr & CounterBlockWgpAttr);
-                        bool bIsWGPcounter12 = Primitives::GFXIP_LEVEL >= 12 &&
-                                               (block_info->attr & CounterBlockWgpAttr);
+                        bool bIsWGPcounter = Primitives::GFXIP_LEVEL >= 11 &&
+                                             (block_info->attr & CounterBlockWgpAttr);
 
-                        if(bIsWGPcounter11)
+                        if(bIsWGPcounter)
                         {
                             // Read active WGPs at their physical slot; zero-fill
                             // harvested ones (see sa_cu_mask_). Fixed [0, wgp_per_sa_)
                             // bound == GetNumWGPs(), so no remap and the reader
                             // stays in sync.
-                            const uint32_t cu_bm = sa_cu_mask_.at(se_index).at(sarray);
+                            const uint32_t cu_bm = sa_cu_mask(xcc_index, se_index, sarray);
                             for(uint32_t wgp = 0; wgp < wgp_per_sa_; ++wgp)
                             {
-                                if(cu_bm & (3u << (wgp * 2)))
+                                if(cu_bm & wgp_cu_bits(wgp))
                                 {
                                     if(block_info->instance_count > 1)
                                         grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
@@ -936,40 +958,6 @@ public:
                                     buf[read_counter]     = 0;
                                     buf[read_counter + 1] = 0;
                                 }
-                                read_counter += 2;
-                            }
-                        }
-                        else if(bIsWGPcounter12)
-                        {
-                            for(uint32_t wgp = 0; wgp < wgp_per_sa_; wgp++)
-                            {
-                                // TODO: This patch is needed to avoid soft-hang for some WGP
-                                //       blocks, will remove after CU mask support is added to
-                                //       agent_info
-                                if(asymmetric_cu_patch && sarray == 1 && wgp == 8)
-                                {
-                                    if(buf != nullptr)
-                                    {
-                                        buf[read_counter]     = 0;
-                                        buf[read_counter + 1] = 0;
-                                    }
-                                    read_counter += 2;
-                                    continue;
-                                }
-                                if(block_info->instance_count > 1)
-                                    grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(
-                                        block_des.index, se_index, sarray, wgp);
-                                else
-                                    grbm_value = Primitives::grbm_se_sh_wgp_index_value(
-                                        se_index, sarray, wgp);
-                                SetGrbmGfxIndex(cmd_buffer, grbm_value);
-                                uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
-                                builder.BuildCopyCounterDataPacket(cmd_buffer,
-                                                                   reg_info.register_addr_lo,
-                                                                   reg_info.register_addr_hi,
-                                                                   buf + read_counter,
-                                                                   dw_mask);
-                                if(buf && (dw_mask == 1)) buf[read_counter + 1] = 0;
                                 read_counter += 2;
                             }
                         }
@@ -1188,7 +1176,7 @@ public:
         {
             PrecExecBuilder<Builder> prec_exec_builder(
                 builder, cmd_buffer, xcc_selected, xcc_number_ > 1);
-            ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter);
+            ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter, xcc_selected);
         }
         // AIGC blocks
         if(counters_vec.get_attr() & CounterBlockGrbmaAttr)
@@ -1198,7 +1186,7 @@ public:
                 PrecExecBuilder<Builder> prec_exec_builder(
                     builder, cmd_buffer, xcc_selected, xcc_number_ > 1);
                 GCMode gc_mode = (GCMode)(GC_MODE_AID_WITH_XCD_INDEX | xcc_selected);
-                ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter, gc_mode);
+                ReadXccPackets(cmd_buffer, counters_vec, buf, read_counter, xcc_selected, gc_mode);
             }
         }
 

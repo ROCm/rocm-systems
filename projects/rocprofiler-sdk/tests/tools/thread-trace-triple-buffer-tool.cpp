@@ -194,6 +194,8 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
     uint64_t gpu_buffer_size = 64 << 20;
 
     auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+    parameters.push_back(
+        {ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {static_cast<uint64_t>(-1)}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {1}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {gpu_buffer_size}});
     parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {1}});

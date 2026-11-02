@@ -3531,7 +3531,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().advanced_thread_trace)
     {
         auto     global_parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-        uint64_t target_cu         = tool::get_config().att_param_target_cu;
+        int64_t  target_cu         = tool::get_config().att_param_target_cu;
         uint64_t simd_select       = tool::get_config().att_param_simd_select;
         uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
         uint64_t shader_mask       = tool::get_config().att_param_shader_engine_mask;
@@ -3542,7 +3542,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         bool     att_no_detail     = tool::get_config().att_no_detail;
         bool     att_no_intercept  = tool::get_config().att_no_intercept;
 
-        global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {target_cu}});
+        global_parameters.push_back(
+            {ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {static_cast<uint64_t>(target_cu)}});
         global_parameters.push_back(
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {simd_select}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {buffer_sz}});
@@ -3558,7 +3559,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         if(att_no_intercept)
             global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS, {6}});
 
-        if(exclude_nontarget)
+        if(exclude_nontarget && target_cu < 0)
+        {
+            ROCP_WARNING << "--att-perfcounter-target-only requires a non-negative "
+                            "--att-target-cu; ignoring it";
+        }
+        else if(exclude_nontarget)
         {
             // Create a bitmask with all ones except at the target_cu
             global_parameters.push_back(

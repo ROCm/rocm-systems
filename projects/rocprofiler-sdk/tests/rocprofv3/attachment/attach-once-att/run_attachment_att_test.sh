@@ -115,6 +115,7 @@ LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     --attach-duration-msec 500 \
     --att \
     ${ATT_LIB_ARG} \
+    --att-target-cu -1 \
     --att-shader-engine-mask 0x1 \
     --att-buffer-size 0x1000000 \
     -f json rocpd \

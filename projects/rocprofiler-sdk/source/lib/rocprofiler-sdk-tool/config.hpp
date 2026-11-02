@@ -171,7 +171,7 @@ struct config : output_config
     // 384MB
     uint64_t att_param_buffer_size = get_env<uint64_t>("ROCPROF_ATT_PARAM_BUFFER_SIZE", 0x18000000);
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
-    uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
+    int64_t  att_param_target_cu   = get_env<int64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);

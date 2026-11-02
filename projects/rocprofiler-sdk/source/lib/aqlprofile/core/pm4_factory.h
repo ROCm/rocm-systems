@@ -265,9 +265,7 @@ public:
     // Return GPU id for a given gfxip string. Pure mapping function; the
     // instance-side GetGpuId() above returns the cached value resolved by
     // this lookup at factory-construction time. Exposed for callers that
-    // need chip-family dispatch before a Pm4Factory exists -- e.g.
-    // populate_cu_bitmap_from_drm() gating the GFX11+ DRM bitmap fetch in
-    // pm4_factory.cpp without re-implementing the gfxip -> gpu_id_t table.
+    // need chip-family dispatch before a Pm4Factory exists.
     static gpu_id_t GetGpuId(std::string_view);
 
 protected:
@@ -313,7 +311,10 @@ private:
             if(cmp < 0) return true;
             if(cmp > 0) return false;
             // If gfxip strings are equal, compare cu_num
-            return a.cu_num < b.cu_num;
+            if(a.cu_num != b.cu_num) return a.cu_num < b.cu_num;
+            // Same SKU, different available WGPs: the PMC builder bakes in
+            // the CU bitmap, so it must not be shared.
+            return a.cu_bitmap < b.cu_bitmap;
         }
     };
     typedef std::map<AgentInfo, Pm4Factory*, instances_fncomp_t> instances_t;
