@@ -216,6 +216,7 @@ TEST_CASE("Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget", "[hrr]")
     hrr_test::ExactRecord<hrr_args_hipHostRegister> rec;
     rec.get()->hostPtr = 0x3000;
     rec.get()->sizeBytes = 1u << 20;
+    rec.get()->blob_hash_lo = 1;  // capture records the registered bytes
     hipError_t r = hipSuccess;
     (void)hrr_test::capture_stderr([&] { r = playback_hipHostRegister(ctx, rec.bytes()); });
     CHECK(r == hipErrorMemoryAllocation);

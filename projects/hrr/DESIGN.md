@@ -589,7 +589,9 @@ Kept deliberately simple:
   the application's graphs.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
-  `unreplayable_apis`.
+  `unreplayable_apis`. A snapshot over `HIP_HRR_CAPTURE_MAX_BLOB_MB` is recorded with a
+  zero hash on every launch that reads it, and replay refuses that launch outside a
+  stream capture.
 - Replay restores nothing for a launch replayed into a capturing stream, and capture does
   not snapshot at graph launch. A record for a launch into a capturing stream does not
   become the allocation's last, so the next launch outside the capture records again.
