@@ -1902,8 +1902,13 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
 TEST(ConfigLoaderTest, DeprecatedGfx950Mi355xConfigsMatchMi350x) {
   for (const char *variant : {"", "_kmd", "_kmd_2gpu"}) {
     SCOPED_TRACE(variant);
-    EXPECT_EQ(read_config_file_or_throw(CONFIG_DIR_PATH + "/gfx950_mi355x" + variant + ".json"),
-              read_config_file_or_throw(CONFIG_DIR_PATH + "/gfx950_mi350x" + variant + ".json"));
+    std::string legacy_json;
+    std::string mi350x_json;
+    ASSERT_TRUE(read_config_file_valid(legacy_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi355x" + variant + ".json"));
+    ASSERT_TRUE(read_config_file_valid(mi350x_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi350x" + variant + ".json"));
+    EXPECT_EQ(legacy_json, mi350x_json);
   }
 }
 
