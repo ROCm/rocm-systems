@@ -1425,9 +1425,14 @@ bool try_exec_mfma_regions(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_
                            uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
                            uint32_t cbsz = 0, uint32_t abid = 0, uint32_t blgp = 0,
                            uint32_t neg = 0) {
+  static_assert(std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                std::is_same_v<T, int32_t>);
   if constexpr (!util::has_stdx_simd) {
     return false;
   } else {
+    // Fixed input widths let the compiler simplify the F64 and I8 register layouts.
+    if constexpr (!std::is_same_v<T, float>)
+      a_bits = b_bits = std::is_same_v<T, double> ? 64 : 8;
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     constexpr uint32_t kWordsPerElement = sizeof(T) / sizeof(uint32_t);
     constexpr size_t kMaxA = 2048, kMaxB = 16384 / sizeof(T), kMaxC = 1024;
