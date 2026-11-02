@@ -2671,10 +2671,10 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* max_width, const hipChann
  *
  * @param [in] cacheConfig Cache configuration
  *
- * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorNotSupported
+ * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
- * Note: AMD devices do not support reconfigurable cache. This API is not implemented
- * on AMD platform. If the function is called, it will return hipErrorNotSupported.
+ * Note: On AMD devices with a configurable LDS carveout, this is a hint used for kernels without a
+ * per-function preference. It is ignored on devices whose carveout is fixed.
  *
  */
 hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig);
@@ -2683,9 +2683,9 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig);
  *
  * @param [out] cacheConfig Pointer of cache configuration
  *
- * @returns #hipSuccess, #hipErrorNotInitialized
- * Note: AMD devices do not support reconfigurable cache. This hint is ignored
- * on these architectures.
+ * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
+ * Note: Returns the value set by hipDeviceSetCacheConfig() on AMD devices with a configurable LDS
+ * carveout, and hipFuncCachePreferNone on devices whose carveout is fixed.
  *
  */
 hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
