@@ -3,17 +3,18 @@
 
 import argparse
 import re
-from collections import Counter
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 from pc_sampling.pc_sampling_analysis import (
-    aggregate_pc_sample_records,
+    InstructionLineRecord,
+    SampleCountsRecord,
+    aggregate_instruction_lines,
     detect_pc_sampling_method,
-    enrich_with_metadata,
-    load_pc_sample_records,
+    load_aggregated_pc_sampling,
 )
 from utils import schema
 from utils.file_io import validate_kernel_filter_ids
@@ -365,62 +366,16 @@ def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
     return filtered_df
 
 
-def _build_pc_sampling_partial_frame(
-    method: str,
-    tool_data: dict[str, Any],
-    sys_info: dict[str, Any],
-    kernel_name: Optional[str] = None,
-) -> pd.DataFrame:
-    """Build one process's enriched sampling frame for an optional kernel."""
-    kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
-    pc_samples = tool_data["buffer_records"][
-        "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
-    ]
-    if not pc_samples:
-        console_warning(f"PC sampling: no pc samples found for {kernel_context}.")
-        return pd.DataFrame()
-
-    instructions = tool_data["strings"]["pc_sample_instructions"]
-    comments = tool_data["strings"]["pc_sample_comments"]
-    if not instructions or not comments:
-        console_warning(
-            "PC sampling: instruction or comment string table is empty for "
-            f"{kernel_context}."
-        )
-        return pd.DataFrame()
-
-    records_df = load_pc_sample_records(tool_data)
-    aggregated_df = aggregate_pc_sample_records(
-        records_df,
-        group_by=["code_object_id", "code_object_offset", "kernel_id"],
-        sys_info=sys_info,
-    )
-    df = enrich_with_metadata(
-        aggregated_df,
-        tool_data,
-        attach={"instruction", "source_line", "kernel_name"},
-    )
-    if df.empty:
-        console_warning("PC sampling: no records found in PC sampling data.")
-        return df
-
-    df = df.rename(columns={"kernel_name": "Kernel_Name"})
-
-    if kernel_name is not None:
-        df = df[df["Kernel_Name"] == kernel_name]
-        if df.empty:
-            console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
-            return df
-
-    return df
-
-
 def _format_pc_sampling_display_frame(
-    df: pd.DataFrame,
+    kernel_counts: Dict[str, SampleCountsRecord],
     method: str,
     num_rows: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Return the kernel rows in their display layout."""
+    """Return one display row per kernel, most-sampled first."""
+    df = pd.DataFrame([
+        {"Kernel_Name": kernel_name, **counts._asdict()}
+        for kernel_name, counts in kernel_counts.items()
+    ]).rename(columns={"total_count": "count", "stall_reasons": "stall_reason"})
     # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
 
@@ -456,8 +411,8 @@ def load_pc_sampling_data(
 ) -> pd.DataFrame:
     """Return the per-kernel table for a single kernel or all.
 
-    Detects the method, builds the instruction rows of each tool record, then
-    combines the rows of each kernel across all records into one row, for all
+    Detects the method, loads the instruction lines of each tool record, then
+    aggregates each kernel's lines across all records into one row, for all
     kernels (no `-k`) or a single kernel (one `-k`). The output schema is
     identical either way. Callers pass the already-parsed tool_data_records.
     """
@@ -512,48 +467,33 @@ def load_pc_sampling_data(
     sys_info = (
         workload.sys_info.iloc[0].to_dict() if not workload.sys_info.empty else {}
     )
-    process_frames = []
-    for tool_data in tool_data_records:
-        frame = _build_pc_sampling_partial_frame(
-            pc_sampling_method, tool_data, sys_info, kernel_name
-        )
-        if not frame.empty:
-            process_frames.append(frame)
+    instruction_lines = [
+        line
+        for tool_data in tool_data_records
+        for code_object in load_aggregated_pc_sampling(tool_data, sys_info)
+        for line in code_object.instruction_lines
+    ]
+    lines_by_kernel: Dict[str, List[InstructionLineRecord]] = defaultdict(list)
+    for line in instruction_lines:
+        # Empty host trap samples belong to no kernel.
+        if line.kernel_name is None:
+            continue
+        if kernel_name is None or line.kernel_name == kernel_name:
+            lines_by_kernel[line.kernel_name].append(line)
 
-    if not process_frames:
+    if not lines_by_kernel:
+        kernel_context = f"kernel '{kernel_name}'" if kernel_name else "all kernels"
+        console_warning(f"PC sampling: no samples found for {kernel_context}.")
         return pd.DataFrame()
 
     return _format_pc_sampling_display_frame(
-        _combine_instruction_rows_by_kernel(
-            pd.concat(process_frames, ignore_index=True)
-        ),
+        {
+            name: aggregate_instruction_lines(lines)
+            for name, lines in lines_by_kernel.items()
+        },
         pc_sampling_method,
         num_rows=num_rows,
     )
-
-
-def _combine_instruction_rows_by_kernel(instruction_rows: pd.DataFrame) -> pd.DataFrame:
-    """Combine the instruction rows of each kernel into one row.
-
-    Counts and stall reasons are summed. Each percentage is averaged, weighted
-    by the sample count of each instruction row. A row without the percentage
-    adds no weight.
-    """
-    kernel_groups = instruction_rows.groupby("Kernel_Name", sort=False)
-    kernel_rows = kernel_groups[["count", "issue_count", "stall_count"]].sum(
-        min_count=1
-    )
-    kernel_rows["stall_reason"] = kernel_groups["stall_reason"].agg(
-        lambda stall_reasons: dict(sum(map(Counter, stall_reasons.dropna()), Counter()))
-    )
-    kernel_names = instruction_rows["Kernel_Name"]
-    for percent_column in ("active_thread_percent", "wave_occupancy_percent"):
-        percent = instruction_rows[percent_column]
-        sample_weight = instruction_rows["count"].where(percent.notna())
-        weighted_sum = (percent * sample_weight).groupby(kernel_names).sum(min_count=1)
-        weight_sum = sample_weight.groupby(kernel_names).sum(min_count=1)
-        kernel_rows[percent_column] = weighted_sum / weight_sum
-    return kernel_rows.reset_index()
 
 
 def _stall_reason_dict_to_list(

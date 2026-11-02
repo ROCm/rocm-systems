@@ -136,8 +136,10 @@ multi-process option is required:
    $ rocprof-compute analyze -p <workload_dir>
 
 Analyze mode loads the PC sampling data for every process in the workload
-directory and reports it in a single table. A kernel that ran in several
-processes is shown once, with the samples of all processes combined.
+directory. The PC sampling table and ``pc_sampling_summary.csv`` show each kernel
+once, with the samples of all processes combined. Only the
+:ref:`per-kernel ISA files <pc-sampling-per-kernel-csv>` show the process and
+code object of each instruction, with one file per process and code object.
 
 .. _pc-sampling-per-kernel-csv:
 

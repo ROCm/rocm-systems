@@ -112,6 +112,8 @@ A short kernel may not accumulate enough samples to be meaningful. Increase the
 work the kernel does, or shorten the interval within the range the device
 accepts, rather than drawing conclusions from a handful of samples.
 
-For multi-process workloads, keep each process or rank separate; see the
-multi-process sections of
+For multi-process workloads, the PC sampling table combines each kernel's
+samples from all processes, so use it only to pick the kernel. The per-kernel
+ISA files keep each process and code object separate; read the instructions
+there. See the multi-process sections of
 [pc_sampling.rst](../../docs/how-to/pc_sampling.rst).

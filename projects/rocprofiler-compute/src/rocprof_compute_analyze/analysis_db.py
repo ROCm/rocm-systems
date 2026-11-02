@@ -23,7 +23,7 @@ from pc_sampling.code_object_analysis import (
 from pc_sampling.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
     InstructionLineRecord,
-    SourceLineRecord,
+    SampleCountsRecord,
     aggregate_instruction_lines,
     load_aggregated_pc_sampling,
 )
@@ -866,7 +866,7 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def _add_pc_sample_state(
-        sample_counts: Union[InstructionLineRecord, SourceLineRecord],
+        sample_counts: Union[InstructionLineRecord, SampleCountsRecord],
         *,
         instruction_row: Optional[orm.InstructionLine] = None,
         source_line_row: Optional[orm.SourceLine] = None,

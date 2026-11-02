@@ -787,7 +787,7 @@ def test_aggregate_instruction_lines_sums_counts_and_weights_percentages() -> No
         make_instruction_line_record(2, None, {}, 50.0, None)
     ])
 
-    assert totals == pc_sampling_analysis.SourceLineRecord(
+    assert totals == pc_sampling_analysis.SampleCountsRecord(
         total_count=8,
         issue_count=5,
         stall_count=3,
@@ -1250,17 +1250,17 @@ def test_load_pc_sampling_data_filtered_out_of_range_index_guards(
         pytest.param(["v_mov", "v_add"], None, id="empty_comments"),
     ],
 )
-def test_load_pc_sampling_data_filtered_empty_string_table_warns_and_skips(
+def test_load_pc_sampling_data_filtered_empty_string_table_keeps_the_kernel(
     instructions: list | None,
     comments: list | None,
 ) -> None:
-    """Empty instruction/comment table warns with the kernel name, no exit."""
+    """Count a kernel's samples even when an instruction or comment table is empty."""
     tool_data = make_pc_sampling_guard_data(instructions, comments)
     with patch("utils.parser.console_warning") as console_warning_mock:
         df = load_pc_sampling_data(make_pc_sampling_workload(), [tool_data])
-    assert df.empty
-    console_warning_mock.assert_called_once()
-    assert "vecCopy" in console_warning_mock.call_args.args[0]
+    assert df["Kernel_Name"].tolist() == ["vecCopy"]
+    assert df["count"].tolist() == [2]
+    console_warning_mock.assert_not_called()
 
 
 def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
@@ -1573,8 +1573,9 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
     assert df["count"].tolist() == [1]
 
 
-def test_load_pc_sampling_data_preserves_display_identity_boundaries() -> None:
-    """Rows merge by kernel name, whatever their instruction or source."""
+def test_load_pc_sampling_data_merges_rows_by_kernel_name() -> None:
+    """Merge rows that share a kernel name, even when their instructions or source
+    lines differ."""
     tool_data_records = [
         make_display_row_tool_data(
             "host_trap",
@@ -1650,7 +1651,7 @@ def test_load_pc_sampling_data_retains_missing_instruction_metadata() -> None:
 
 
 def test_load_pc_sampling_data_merges_multi_process_rows_by_kernel() -> None:
-    """Rows from separate result records merge by kernel name."""
+    """Merge rows from separate processes that share a kernel name."""
     first_tool_data = make_tool_data(
         stochastic=[
             make_record(
