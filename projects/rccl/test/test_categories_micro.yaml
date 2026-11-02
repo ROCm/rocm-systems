@@ -34,6 +34,7 @@ test_categories:
       - "GuardOperands/P2pAllocateSkipMarkExport.*"
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
+      - "FreshRegistration/BookkeepingAllocFailsTest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
       - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc

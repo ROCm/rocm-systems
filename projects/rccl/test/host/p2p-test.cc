@@ -1166,9 +1166,10 @@ TEST_F(FreshRegistrationLegacyIpcSucceedsFixture, PopulatesIpcInfoRecord)
 
 // Fresh-registration variant: ncclProxyCallBlocking returns success but
 // writes rmtRegAddr=NULL into the response buffer. Drives the False arm
-// of `if (rmtRegAddr)` -- the entire bookkeeping
-// block (newInfo alloc, ipcInfos[] install, hostPeerRmtAddrs lazy alloc)
-// must be skipped. Because *regBufFlag is then never set to 1, the
+// of `if (rmtRegAddr)` -- the bookkeeping block (ipcInfos[] install,
+// hostPeerRmtAddrs slot write) must be skipped. newInfo and the host table
+// are allocated before the proxy call; newInfo is released at the end of the
+// iteration and the empty table stays with the record. Because *regBufFlag is then never set to 1, the
 // post-loop strong-stream block also stays skipped, and the function
 // returns ncclSuccess with all outputs left zeroed by the prologue.
 TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
@@ -1201,7 +1202,9 @@ TEST_F(FreshRegistrationMicrotest, ProxyReturnsNullRmtAddrSkipsBookkeeping)
     EXPECT_EQ(r, ncclSuccess);
     // Bookkeeping block was skipped:
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);  // fixture's regRecord
-    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    ASSERT_NE(regRecord.regIpcAddrs.hostPeerRmtAddrs, nullptr);
+    EXPECT_EQ(regRecord.regIpcAddrs.hostPeerRmtAddrs[kPeerLocalRank], 0u);
+    EXPECT_FALSE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
     EXPECT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs,  nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
     // Outputs stay at the prologue-cleared values:
@@ -1318,6 +1321,98 @@ TEST_F(FreshRegistrationMicrotest, PostLoopFailureLeavesNewInfoOwnedByTheRecord)
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->peerRank, kPeerRank);
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank]->impInfo.rmtRegAddr, reinterpret_cast<void*>(kRmtRegAddr));
 }
+
+// The entry stays published when the device-table update fails, so the next
+// lookup takes the reuse arm. That arm must redo the update rather than hand
+// a COLLECTIVE caller the never-filled (here NULL) device table.
+TEST_F(FreshRegistrationMicrotest, DevTableAllocFailsThenReuse_RetriesTheDeviceTableUpdate)
+{
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
+
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
+    auto honestCalloc = g_fakeCudaCallocAsync;
+    int devCallocs = 0;
+    ScopedHook calloc(g_fakeCudaCallocAsync,
+        [&](void** ptr, std::size_t nbytes, hipStream_t stream) -> ncclResult_t {
+            if (++devCallocs == 1) return ncclUnhandledCudaError;
+            return honestCalloc(ptr, nbytes, stream);
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs first;
+    bool isLegacyIpc = false;
+    ASSERT_EQ(ncclUnhandledCudaError,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_COLLECTIVE, &regRecord, first, &isLegacyIpc));
+    first.ExpectZeroed();
+    ASSERT_NE(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    ASSERT_EQ(regRecord.regIpcAddrs.devPeerRmtAddrs, nullptr);
+    EXPECT_TRUE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
+
+    IpcRegOutputs reuse;
+    ASSERT_EQ(ncclSuccess,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_COLLECTIVE, &regRecord, reuse, &isLegacyIpc));
+    EXPECT_EQ(proxy.calls, 1) << "the second call reuses the import";
+    EXPECT_EQ(calloc.calls, 2) << "the reuse arm retried the device-table allocation";
+    EXPECT_EQ(reuse.regBufFlag, 1);
+    ASSERT_NE(reuse.peerRmtAddrs, nullptr);
+    EXPECT_EQ(reuse.peerRmtAddrs, regRecord.regIpcAddrs.devPeerRmtAddrs);
+    EXPECT_EQ(reuse.peerRmtAddrs[kPeerLocalRank], kRmtRegAddr);
+    EXPECT_FALSE(regRecord.regIpcAddrs.devPeerRmtAddrsStale);
+}
+
+// The host table and newInfo are allocated before the proxy imports the
+// buffer. A failure of either must leave no peer import behind and nothing in
+// ipcInfos; otherwise the next SENDRECV call would reuse the entry and index
+// a NULL host table.
+class BookkeepingAllocFailsTest : public FreshRegistrationMicrotest,
+                                  public ::testing::WithParamInterface<std::size_t> {};
+
+TEST_P(BookkeepingAllocFailsTest, NeverReachesTheProxyAndTheNextCallRegistersAfresh)
+{
+    constexpr uintptr_t kRmtRegAddr = 0xCAFE0000ull;
+
+    InstallLegacyCudaRegisterHook();
+    auto memGet = MakeDefaultMemGetHook();
+    auto ipcGet = MakeDefaultIpcGetHook();
+    ScopedHook connect(g_proxyConnect, MarkProxyConnInitialized());
+    ScopedHook proxy(g_proxyCallBlocking, CannedRmtRegAddr(kRmtRegAddr));
+    SetP2pCallocFailSize(GetParam());
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs first;
+    bool isLegacyIpc = false;
+    ASSERT_EQ(ncclSystemError,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_SENDRECV, &regRecord, first, &isLegacyIpc));
+    first.ExpectZeroed();
+    EXPECT_EQ(proxy.calls, 0) << "a failure after the import would orphan the peer's mapping";
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
+
+    IpcRegOutputs retry;
+    ASSERT_EQ(ncclSuccess,
+              CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1,
+                                    NCCL_IPC_SENDRECV, &regRecord, retry, &isLegacyIpc));
+    EXPECT_EQ(proxy.calls, 1) << "the retry registers afresh";
+    EXPECT_EQ(retry.regBufFlag, 1);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(retry.peerRmtAddrs), kRmtRegAddr);
+}
+
+// The calloc shim arms by request size, so each must be the only request of its size.
+constexpr std::size_t kHostTableBytes = NCCL_MAX_LOCAL_RANKS * sizeof(uintptr_t);
+static_assert(kHostTableBytes != sizeof(p2pIpcExpInfo) && kHostTableBytes != sizeof(ncclIpcRegInfo) &&
+              sizeof(ncclIpcRegInfo) != sizeof(p2pIpcExpInfo));
+INSTANTIATE_TEST_SUITE_P(FreshRegistration, BookkeepingAllocFailsTest,
+                         ::testing::Values(kHostTableBytes, sizeof(ncclIpcRegInfo)),
+                         [](const ::testing::TestParamInfo<std::size_t>& info) {
+                             return info.param == kHostTableBytes ? "HostTable" : "NewInfo";
+                         });
 
 // Regression test for NVIDIA/nccl#1859 / AICOMRCCL-1100 ("user-buffer p2p +
 // coll rmtAddr nullptr error"). The same buggy code was present in RCCL's

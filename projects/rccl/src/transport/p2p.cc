@@ -1166,6 +1166,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
       if (regRecord->ipcInfos[peerIndex]) {
         // We already have IPC info for this peer, no need to register it, we can reuse it
         *regBufFlag = 1;
+        if (regRecord->regIpcAddrs.devPeerRmtAddrsStale) needUpdate = true;
         if (isLegacyIpc) *isLegacyIpc = regRecord->ipcInfos[peerIndex]->impInfo.legacyIpcCap;
         INFO(NCCL_REG,
              "rank %d - IPC reuse buffer %p size %zu (baseAddr %p size %zu numSegments %d) to peer %d regAddr %p",
@@ -1267,6 +1268,12 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           ipcInfo->size = totalMappedSize;
         }
         ipcInfo->offset = regRecord->begAddr - (uintptr_t)baseAddr;
+        // Allocate the bookkeeping before the proxy imports the buffer: a failure after the import
+        // would leave the peer's mapping with no record to deregister it.
+        if (regRecord->regIpcAddrs.hostPeerRmtAddrs == NULL) {
+          NCCLCHECKGOTO(ncclCalloc(&regRecord->regIpcAddrs.hostPeerRmtAddrs, ipcIndexSize), ret, fail);
+        }
+        NCCLCHECKGOTO(ncclCalloc(&newInfo, 1), ret, fail);
         // Now ipcInfo contains all necessary registration info. Start to register buffer on proxy side
         // and get the remote register address back.
         if (proxyConn) {
@@ -1278,7 +1285,6 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                         ret, fail);
         }
         if (rmtRegAddr) {
-          NCCLCHECKGOTO(ncclCalloc(&newInfo, 1), ret, fail);
           if (regRecord->ipcInfos[peerIndex] != NULL) {
             WARN("IPC registration already exists for peerRank %d peerIndex %d", peerRank, peerIndex);
             ret = ncclInternalError;
@@ -1294,10 +1300,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           newInfo->ipcProxyconn = proxyConn;
           regRecord->ipcInfos[peerIndex] = newInfo;
           newInfo = NULL; // owned by regRecord from here on
-          if (regRecord->regIpcAddrs.hostPeerRmtAddrs == NULL) {
-            NCCLCHECKGOTO(ncclCalloc(&regRecord->regIpcAddrs.hostPeerRmtAddrs, ipcIndexSize), ret, fail);
-          }
           regRecord->regIpcAddrs.hostPeerRmtAddrs[peerIndex] = (uintptr_t)rmtRegAddr;
+          regRecord->regIpcAddrs.devPeerRmtAddrsStale = true;
           needUpdate = true;
           *regBufFlag = 1;
           INFO(NCCL_REG,
@@ -1306,6 +1310,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                comm->rank, userbuff, buffSize, (void*)regRecord->begAddr, totalMappedSize, numSegments, peerRank,
                rmtRegAddr, (uintptr_t)userbuff - regRecord->begAddr);
         }
+        free(newInfo);
+        newInfo = NULL;
         free(ipcInfo);
         ipcInfo = nullptr;
       }
@@ -1335,6 +1341,7 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
         NCCLCHECKGOTO(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode),
                                               &comm->sharedRes->deviceStream, /*concurrent=*/false),
                       ret, fail);
+        regRecord->regIpcAddrs.devPeerRmtAddrsStale = false;
       }
       if (type == NCCL_IPC_COLLECTIVE) {
         // for collective, store registered remote buffers into dev memory for future reference

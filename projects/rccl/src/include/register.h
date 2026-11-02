@@ -30,6 +30,8 @@ enum {
 struct ncclPeerRegIpcAddr {
   uintptr_t* devPeerRmtAddrs;
   uintptr_t* hostPeerRmtAddrs;
+  // hostPeerRmtAddrs holds entries devPeerRmtAddrs has not received yet.
+  bool devPeerRmtAddrsStale;
 };
 
 struct ncclRegNetHandles {

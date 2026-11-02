@@ -32,6 +32,7 @@
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
+#include "fakes/mgmt_task_enq_fakes.h"               // g_ncclMgmtTaskEnqueue
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -9740,6 +9741,7 @@ TEST_F(InitMicrotest, InitChildComm_SplitShareEnabled_ReusesParentAbortResources
   Grow_ParentComm parent;
   parent->config.splitShare = 1;
   parent->childAbortFlag = parent->abortFlag;
+  parent->childAbortFlagDev = parent->abortFlagDev;
   Grow_LaunchSpy spy;
   ncclComm_t out = kGrow_NewcommPoison;
 
@@ -9752,6 +9754,8 @@ TEST_F(InitMicrotest, InitChildComm_SplitShareEnabled_ReusesParentAbortResources
   EXPECT_EQ(parent->abortFlagDev, child->abortFlagDev);
   EXPECT_EQ(parent->abortFlagRefCount, child->abortFlagRefCount);
   EXPECT_EQ(nullptr, parent->childAbortFlag) << "a sharing parent has no separate child abort flag to watch";
+  EXPECT_EQ(nullptr, parent->childAbortFlagDev)
+      << "setCommAbortFlags guards the device flag on its own, so a stale one would still be written";
   EXPECT_EQ(2, *parent->abortFlagRefCount);
   Rank_ReleaseComm(child, /*ownsAbortResources=*/false);
 }
@@ -9990,6 +9994,36 @@ TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDevice
 
   ASSERT_NE(nullptr, spy.rec().job);
   EXPECT_EQ(1, watch.hits()) << "ncclAsyncLaunch's destructor owns the job; fail: must not delete it again";
+}
+
+TEST_F(InitMicrotest, InitChildComm_RearchEnqueueRejects_ClearsNewcommAndReleasesTheJobOnce) {
+  Grow_AllowHostAlloc();
+  Grow_ParentComm parent;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) -> int64_t {
+    return std::strcmp(env, "ENQUEUE_REARCH_ENABLE") == 0 ? 1 : deft;
+  });
+  DeleteWatch watch(nullptr);
+  ncclComm* enqueuedOn = nullptr;
+  // Like the real ncclMgmtTaskEnqueue, a rejection runs the destructor before returning.
+  ScopedHook enqueue(g_ncclMgmtTaskEnqueue, [&](struct ncclAsyncJob* job, ncclResult_t (*)(struct ncclAsyncJob*),
+                                                void (*destructor)(void*), struct ncclComm* comm) {
+    enqueuedOn = comm;
+    watch.Arm(job);
+    destructor(job);
+    return ncclInvalidArgument;
+  });
+  Grow_LaunchSpy spy;
+  ncclComm_t out = kGrow_NewcommPoison;
+
+  EXPECT_EQ(ncclInvalidArgument, Grow_RunSplit(parent.get(), kGrow_SplitColor, kGrow_SplitKey, &out, nullptr));
+
+  EXPECT_EQ(1, enqueue.calls);
+  EXPECT_EQ(parent.get(), enqueuedOn);
+  EXPECT_EQ(0, spy.calls()) << "the rearch path never reaches ncclAsyncLaunch";
+  EXPECT_EQ(nullptr, out);
+  EXPECT_EQ(1, watch.hits()) << "ncclMgmtTaskEnqueue's destructor owns the job; fail: must not delete it again";
+  EXPECT_EQ(nullptr, parent->childAbortFlag);
+  EXPECT_EQ(nullptr, parent->childAbortFlagDev);
 }
 
 // initTransportsRank (:1786-2213), rung 4: arming ncclTopoComputeP2pChannelsPerPeer opens it, ncclTopoPostset ends it.
