@@ -2731,6 +2731,77 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
   }
 }
 
+TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAccumulators) {
+  if constexpr (!util::has_stdx_simd)
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  ForceScalarOverride force_simd(false);
+  struct Case {
+    const char *name;
+    uint32_t source_regs, result_regs;
+    void (*run)(ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+  };
+  const Case cases[] = {
+      {"f64", 2, 8,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_f64(cu, 16, 16, 4, 1, d, a, b, c, acc);
+       }},
+      {"fp8 chunked", 8, 4,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_f32(cu, 16, 16, 128, 1, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
+       }},
+      {"i8", 4, 4,
+       [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
+         exec_i32_i8(cu, 16, 16, 64, 1, d, a, b, c, acc);
+       }},
+  };
+  constexpr uint32_t A = 3, B = 19, C = 35;
+  for (const Case &test : cases)
+    for (uint32_t acc : {ACC_FROM_VGPR, 0u})
+      for (uint32_t destination : {67u, A, B, C})
+        for (uint64_t lane_mask : {~uint64_t{0}, kPartialExecMask}) {
+          SCOPED_TRACE(test.name);
+          SCOPED_TRACE(acc);
+          SCOPED_TRACE(destination);
+          SCOPED_TRACE(lane_mask);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+          auto *plugin = f.attach_ordering_plugin();
+          auto *cu = f.cu();
+          auto *wf = cu->dispatch_wf(0, 0, 104, 256);
+          ASSERT_NE(wf, nullptr);
+          const uint32_t vb = wf->vgpr_alloc().base;
+          for (uint32_t reg = 0; reg < 80; ++reg)
+            for (uint32_t lane = 0; lane < 64; ++lane)
+              cu->write_vgpr(vb + reg, lane, 0x3f800000u);
+          wf->set_exec(lane_mask);
+          plugin->events.clear();
+          test.run(*cu, vb + destination, vb + A, vb + B, vb + C, acc);
+          std::vector<uint32_t> read_regs;
+          for (uint32_t reg = 0; reg < test.source_regs; ++reg) {
+            read_regs.push_back(A + reg);
+            read_regs.push_back(B + reg);
+          }
+          if (acc == ACC_FROM_VGPR)
+            for (uint32_t reg = 0; reg < test.result_regs; ++reg)
+              read_regs.push_back(C + reg);
+          expect_vgpr_read_set(vgpr_read_events(*plugin), vb, read_regs, ~uint64_t{0});
+          const auto writes = vgpr_write_events(*plugin);
+          ASSERT_EQ(writes.size(), test.result_regs);
+          for (uint32_t reg = 0; reg < test.result_regs; ++reg) {
+            EXPECT_EQ(writes[reg].physical_reg, vb + destination + reg);
+            EXPECT_EQ(writes[reg].lane_mask, ~uint64_t{0});
+            EXPECT_EQ(writes[reg].byte_mask, ExecutionPlugin::kFullByteMask);
+          }
+          bool saw_write = false;
+          for (const auto &event : plugin->events) {
+            if (event.kind == HookEvent::WRITE_VGPR)
+              saw_write = true;
+            if (event.kind == HookEvent::READ_VGPR)
+              EXPECT_FALSE(saw_write);
+          }
+        }
+}
+
 TEST(ExecutionPluginTest, SdwaFloatingConversionsUseDestinationFormat) {
   struct Architecture {
     rj_code_arch_t arch;
