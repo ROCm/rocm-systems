@@ -67,6 +67,52 @@ wait_for_detach_prompt() {
     return 1
 }
 
+# Wait for a process to exit, escalating SIGTERM and SIGKILL if it lingers, so a hang
+# fails this script instead of the ctest timeout. Pass 'no' as the third argument when
+# the detach trigger was already delivered and no further SIGINT may be sent.
+terminate_and_wait() {
+    local pid=$1
+    local process_name=$2
+    local send_interrupt=${3:-yes}
+    local interrupt_grace_seconds=5
+    local terminate_grace_seconds=2
+    local watchdog_pid=""
+    local wait_status=0
+
+    if [ -z "${pid}" ]; then
+        return 0
+    fi
+
+    if kill -0 "${pid}" 2>/dev/null; then
+        if [ "${send_interrupt}" = "yes" ]; then
+            kill -2 "${pid}" 2>/dev/null || true
+        fi
+        (
+            sleep "${interrupt_grace_seconds}"
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "${process_name} did not exit; sending SIGTERM"
+                kill -15 "${pid}" 2>/dev/null || true
+            fi
+
+            sleep "${terminate_grace_seconds}"
+            if kill -0 "${pid}" 2>/dev/null; then
+                echo "${process_name} did not exit after SIGTERM; sending SIGKILL"
+                kill -9 "${pid}" 2>/dev/null || true
+            fi
+        ) &
+        watchdog_pid=$!
+    fi
+
+    wait "${pid}" 2>/dev/null || wait_status=$?
+
+    if [ -n "${watchdog_pid}" ]; then
+        kill "${watchdog_pid}" 2>/dev/null || true
+        wait "${watchdog_pid}" 2>/dev/null || true
+    fi
+
+    return "${wait_status}"
+}
+
 TEST_APP=$1
 ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
@@ -114,11 +160,14 @@ APP_PID=$!
 # The workload and the profiler outlive an early exit under `set -e`, and while they
 # live they hold this script's output open, so ctest would block until its timeout.
 cleanup_app() {
-    for pid in ${ROCPROF_PID} ${APP_PID}; do
-        if kill -0 ${pid} 2>/dev/null; then
-            kill -9 ${pid} 2>/dev/null
-        fi
-    done
+    if [ -n "${ROCPROF_PID}" ]; then
+        terminate_and_wait "${ROCPROF_PID}" "rocprofv3" || true
+        ROCPROF_PID=""
+    fi
+    if [ -n "${APP_PID}" ]; then
+        terminate_and_wait "${APP_PID}" "test application" || true
+        APP_PID=""
+    fi
 }
 trap cleanup_app EXIT
 
@@ -173,10 +222,14 @@ case ${DETACH_MODE} in
         ;;
 esac
 
-set +e
-wait ${ROCPROF_PID}
-ROCPROF_EXIT_CODE=$?
-set -e
+# The detach trigger was delivered above, so no further SIGINT is sent; the watchdog
+# still bounds the wait so a hang fails here instead of the ctest timeout.
+if terminate_and_wait "${ROCPROF_PID}" "rocprofv3" no; then
+    ROCPROF_PID=""
+    ROCPROF_EXIT_CODE=0
+else
+    ROCPROF_EXIT_CODE=$?
+fi
 exec 3>&-
 rm -f ${FIFO}
 cat ${ROCPROF_LOG}
@@ -217,27 +270,31 @@ if ! kill -0 $APP_PID 2>/dev/null; then
 fi
 echo "Test application still running after detach"
 
-echo "Sending SIGINT to application..."
-kill -2 $APP_PID 2>/dev/null
-set +e
-wait $APP_PID
-APP_EXIT_CODE=$?
-set -e
-
-if [ $APP_EXIT_CODE -ne 0 ]; then
-    echo "Test application failed with exit code $APP_EXIT_CODE"
-    exit 1
-fi
-
-echo "Test application completed successfully"
-ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
-
+# --attach-sync-output generates the output during detachment, so the results must
+# exist before the application is shut down; if the detach never stopped collection,
+# the output is only written by the finalizer at application exit.
 APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${APP_PID}_results.json" | head -1)
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
     exit 1
 fi
 echo "Found results JSON: $APP_JSON"
+
+echo "Sending SIGINT to application..."
+if terminate_and_wait "${APP_PID}" "test application"; then
+    APP_PID=""
+    APP_EXIT_CODE=0
+else
+    APP_EXIT_CODE=$?
+fi
+
+if [ ${APP_EXIT_CODE} -ne 0 ]; then
+    echo "Test application failed with exit code ${APP_EXIT_CODE}"
+    exit 1
+fi
+
+echo "Test application completed successfully"
+ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
 cp "$APP_JSON" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${OUTPUT_FILENAME}_results.json"
 echo "Copied $(basename $APP_JSON) -> ${OUTPUT_FILENAME}_results.json"
