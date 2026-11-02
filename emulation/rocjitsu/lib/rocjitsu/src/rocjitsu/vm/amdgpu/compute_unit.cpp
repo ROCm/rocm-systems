@@ -2270,11 +2270,13 @@ template <bool EnableAsync>
   lds_inline_completed_ = nullptr;
   const util::Result execution_result = [&] {
     // Inline LDS completion applies to this execution only, even if it throws.
+    // Whether plugins or a debugger forbid it is asked by the DS access itself,
+    // so other instructions only set and clear this flag.
     struct EndLdsInlineIssue {
       bool &issue;
       ~EndLdsInlineIssue() { issue = false; }
     } end_lds_inline_issue{lds_inline_issue_};
-    lds_inline_issue_ = lds_inline_allowed();
+    lds_inline_issue_ = true;
     return execute_instruction(inst, *active, &execution_failure_detail);
   }();
 

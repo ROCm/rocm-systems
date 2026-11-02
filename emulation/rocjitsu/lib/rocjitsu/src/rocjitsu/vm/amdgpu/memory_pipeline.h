@@ -86,7 +86,10 @@ public:
   /// @details Ownership passes to the caller, who must destroy or reuse it. Returns
   /// nullptr when the access was retained, deferred, failed, or recycling is off.
   /// An instruction nobody takes is destroyed by the next issue or the destructor.
-  [[nodiscard]] Instruction *take_recyclable() { return std::exchange(recyclable_, nullptr); }
+  [[nodiscard]] Instruction *take_recyclable() {
+    // Asked after every routed memory instruction; most leave nothing here.
+    return recyclable_ ? std::exchange(recyclable_, nullptr) : nullptr;
+  }
 
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
