@@ -195,6 +195,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
 }
+#endif
 
 /**
  * End doxygen group TextureTest.
