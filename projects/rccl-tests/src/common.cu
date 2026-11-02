@@ -1944,7 +1944,12 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
 #endif
   }
+  // recvbuff is the in-place source, and initData only fills the first rotation
+  // slot. All-zero payloads move measurably faster on some hardware, so no timed
+  // buffer may be left zero. recvbuff uses a different byte than sendbuff so the
+  // two are distinguishable in a memory dump or failed check.
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
+  CUDACHECK(hipMemset(*recvbuff, 2, nbytes));
   if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
