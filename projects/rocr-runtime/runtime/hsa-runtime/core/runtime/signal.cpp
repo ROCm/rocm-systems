@@ -519,8 +519,8 @@ int64_t Signal::UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expec
 hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initial_values,
                                  bool use_interrupt, const MemoryRegion* region,
                                  const std::vector<hsa_agent_t>& access_agents,
-                                 bool host_access_via_hdp, bool shadow_members, SignalBatch** batch,
-                                 hsa_signal_t* signals) {
+                                 bool host_access_via_hdp, bool host_access_across_link,
+                                 SignalBatch** batch, hsa_signal_t* signals) {
   const size_t arena_bytes = size_t(count) * sizeof(SharedSignal);
 
   void* arena = nullptr;
@@ -537,9 +537,10 @@ hsa_status_t SignalBatch::Create(uint32_t count, const hsa_signal_value_t* initi
   assert(IsMultipleOf(arena, alignof(SharedSignal)) && "Pool allocations are page aligned.");
   memset(arena, 0, arena_bytes);
 
-  SignalBatch* new_batch = new SignalBatch(arena, count, host_access_via_hdp);
+  SignalBatch* new_batch =
+      new SignalBatch(arena, count, host_access_via_hdp, host_access_across_link);
   arenaGuard.Dismiss();
-  if (shadow_members) {
+  if (host_access_across_link) {
     new_batch->shadow_members_.reset(new std::atomic<Signal*>[count]());
     new_batch->RegisterShadow();
   }
