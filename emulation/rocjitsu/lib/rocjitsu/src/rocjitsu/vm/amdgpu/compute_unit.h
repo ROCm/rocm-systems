@@ -1265,6 +1265,11 @@ public:
   /// timing model looking ahead, so both decode the same target.
   static std::unique_ptr<Decoder> create_decoder(const Config &config);
 
+  /// @brief Disassemble captured instruction bytes with this CU's target decoder.
+  /// @details Call on the CU execution thread with a complete instruction encoding.
+  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
+  std::string disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc) const;
+
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
   /// simulator configuration while individual instructions acquire execution
@@ -1765,6 +1770,12 @@ protected:
 // Keep LDS selection available to self-contained execution plugin modules.
 inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
+template <GpuIsa Isa>
+std::string IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding,
+                                                       uint64_t pc) const {
+  return this->cu_.disassemble_instruction(encoding, pc);
+}
 
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
   return raw_cu().instruction_cache();

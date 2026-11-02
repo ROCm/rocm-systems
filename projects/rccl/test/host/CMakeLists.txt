@@ -97,8 +97,18 @@ foreach(_param
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
     "${_param}" "the qp_sharing.cc default")
 endforeach()
-# The net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
+# The net_ib, net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
 set(_rccl_cast_pins
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
+  "transport/net_ib/p2p.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "int64_t ncclIbArThreshold = 8192<SEMI>"
+  "transport/net_ib/p2p.cc" "NCCL_PARAM(IbReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+    "transport_net_ib_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+  "transport/net_ib/p2p_resiliency.cc" "NCCL_PARAM(IbResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+    "transport_net_ib_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+  "misc/rocmwrap.cc" "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)<SEMI>"
+    "rocmwrap_fakes.cc" "int64_t ncclParamDmaBufEnable() { return g_loadParam(\"DMABUF_ENABLE\", 1)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
     "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
   "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
@@ -272,6 +282,7 @@ function(rccl_define_micro_source_lists)
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/ipcsocket_fakes.cc             # ncclIpcFdClose for p2p.cc / dev_runtime.cc
@@ -286,6 +297,7 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/profiler_fakes.cc
     fakes/roctx_fakes.cc
+    fakes/hsa_fakes.cc                   # hsa_status_string (rocmwrap.h's HSACHECK)
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
     fakes/utils_fakes.cc
@@ -406,7 +418,8 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
     fakes/init_fakes.cc
-    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib (GDR flush flag seams)
+    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
+    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc GDR flush flag seams
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -461,6 +474,13 @@ function(rccl_define_micro_source_lists)
   # around utils.cc, which other micro binaries link whole as an oracle TU.
   set(TEST_MICRO_UTILS_SOURCE_FILES
     utils-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroHostDispatch -- host_test_dispatch.cc, the rccl-UnitTestsHostAll front end.
+  # Own binary like every other unit under test; it also makes the dispatcher run its own tests.
+  set(TEST_MICRO_HOST_DISPATCH_SOURCE_FILES
+    host-test-dispatch-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -673,6 +693,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-test.cc
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
@@ -695,6 +716,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/devcomm_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by the GIN cost model
     fakes/mgmt_task_enq_fakes.cc
     fakes/os_fakes.cc
     fakes/profiler_fakes.cc
@@ -882,10 +904,13 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
-    fakes/devcomm_fakes.cc               # ncclTeamRail
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
+    fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
+    fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -930,6 +955,8 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/topo_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -975,8 +1002,10 @@ function(rccl_define_micro_source_lists)
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc             # NET registration segment count / commit
+    fakes/hsa_fakes.cc                   # hsa_status_string (net.cc's HSACHECK)
     fakes/rocmwrap_fakes.cc
     fakes/topo_stubs.cc
+    fakes/transport_net_ib_common_fakes.cc  # src/transport/net_ib/common.cc ncclNetIb
     fakes/transport_net_ib_connect_net_fakes.cc  # rcclNetP2pPolicy, GDR flush-flag accessors
     fakes/transport_net_ib_fakes.cc
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
@@ -993,10 +1022,12 @@ function(rccl_define_micro_source_lists)
     diag-p2p-device-test.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
+    fakes/env_fakes.cc
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
     fakes/libc_fakes.cc
+    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
@@ -1060,17 +1091,43 @@ function(rccl_define_micro_source_lists)
   # under test/host/transport; one binary owns the subsystem's shared socket,
   # network and GDRCopy seams.
   set(TEST_MICRO_TRANSPORT_SOURCE_FILES
+    transport/net_ib/common-test.cc
+    transport/net_ib/connect-test.cc
+    transport/net_ib/gdr-test.cc
+    transport/net_ib/gin-test.cc
+    transport/net_ib/init-test.cc
+    transport/net_ib/net-ib-gid-inspect-test.cc
+    transport/net_ib/p2p-test.cc
+    transport/net_ib/p2p-resiliency-test.cc
+    transport/net_ib/p2p-resiliency-recovery-test.cc
+    transport/net_ib/reg-test.cc
+    transport/net_ib/wqe-lat-mon-test.cc
     transport/rma-socket-test.cc
     transport/rma-socket-mem-test.cc
     transport/rma-socket-progress-recver-test.cc
     transport/rma-socket-setup-test.cc
+    fakes/comm_fakes.cc                  # allocTracker, ncclGdrCopy
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
     fakes/gdrwrap_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
     fakes/nccl_fakes.cc
     fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_net_ib_p2p_fakes.cc
+    fakes/transport_net_ib_recovery_fakes.cc
+    fakes/transport_net_ib_resiliency_fakes.cc
+    fakes/transport_net_ib_wqe_lat_fakes.cc
     fakes/transport_net_socket_common_fakes.cc
     fakes/transport_net_socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1088,6 +1145,7 @@ function(rccl_define_micro_source_lists)
     fakes/net_ib_cast_connect_fakes.cc
     fakes/net_ib_cast_init_fakes.cc
     fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_recovery_fakes.cc  # ncclParamIbCastResiliencyPortRecovery, for qp_sharing.cc's real ncclIbCastGetQpSharingConfig
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/ibvsymbols.cc   # buildIbvSymbols, never called
@@ -1230,6 +1288,7 @@ function(rccl_add_micro_binary _name)
     target_link_libraries(${_name} PRIVATE
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
+  target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
 endfunction()
 
 # =====================================================================
@@ -1304,20 +1363,20 @@ function(rccl_standalone_setup)
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
   endif()
 
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
   # csv_tuner.cc needs the embedded-tuner header. The RCCL build normally emits
   # it; generate it here so a standalone test build works against an older tree.
   if(NOT EXISTS "${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h")
-    # No COMMAND_ERROR_IS_FATAL here: that needs CMake 3.19 and this project
-    # declares 3.16, so check the result explicitly or a FATAL_ERROR from the
-    # generator is swallowed and the build fails later on a missing include.
-    execute_process(COMMAND ${CMAKE_COMMAND}
-      -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
-      -DOUT_FILE=${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
-      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/GenerateEmbeddedTunerConfigs.cmake
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner/embed_tuner_configs.py
+              ${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
+              ${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
       RESULT_VARIABLE _gen_tuner_result
       ERROR_VARIABLE _gen_tuner_error)
     if(_gen_tuner_result)
-      message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
+      message(FATAL_ERROR "embed_tuner_configs.py failed: ${_gen_tuner_error}")
     endif()
   endif()
   message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
@@ -1560,6 +1619,10 @@ function(rccl_standalone_coverage)
     target_compile_options(rccl-source-wrappers PRIVATE -fprofile-instr-generate -fcoverage-mapping)
   endif()
 endfunction()
+
+# --- nlohmann/json: the RCCL-vendored single header ------------------
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../external/nlohmann_json"
+                 "${CMAKE_BINARY_DIR}/external/nlohmann_json")
 
 # =====================================================================
 # Driver: pick the mode, then define the micro-test binaries ONCE.
@@ -2440,8 +2503,24 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroTransport
   SOURCES ${TEST_MICRO_TRANSPORT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ENABLE_FAULT_INJECTION
+    NET_IB_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc"
+    # graph/connect.cc and diagnostics/p2p.cc keep the original basenames.
+    NET_IB_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc"
+    NET_IB_GDR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gdr.cc"
+    NET_IB_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gin_tmp.cc"
+    # Hipify renames this to *_tmp.cc: src/init.cc keeps the basename.
+    NET_IB_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc"
+    NET_IB_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/net_ib_gid_inspect.cc"
+    NET_IB_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_tmp.cc"
+    NET_IB_P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency.cc"
+    NET_IB_P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/p2p_resiliency_recovery.cc"
+    NET_IB_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc"
+    NET_IB_WQE_LAT_MON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/wqe_lat_mon.cc"
     RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
     RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
     RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
@@ -2554,6 +2633,28 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMisc
     MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
     MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroHostDispatch
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
+  SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
+  EXTRA_DEFS ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsHostAll
+# ---------------------------------------------------------------------------
+# The single gtest-shaped front door for every rccl-UnitTestsMicro* binary above: it discovers
+# them at run time, so a test harness integrates with this one target and never needs a copy of
+# the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
+#
+# Defined through the same helper as the binaries it runs purely so the two build modes, the
+# install rule and the host-only flags stay in one place; it compiles no production source and
+# links no fakes.
+rccl_add_micro_binary(rccl-UnitTestsHostAll
+  SOURCES host_test_dispatch.cc
+  EXTRA_DEFS ${_MICRO_MODE_DEFS})
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
