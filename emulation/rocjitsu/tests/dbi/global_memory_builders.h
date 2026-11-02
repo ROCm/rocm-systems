@@ -116,7 +116,7 @@ build_global_load(GlobalOpcodes ops, uint32_t dwords, uint8_t vdst, uint8_t voff
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
   default:
-    return emit_error.emit() << "global load for target architecture";
+    return emit_error.emit() << "Unimplemented instruction: global load for target architecture";
   }
 }
 
@@ -153,7 +153,7 @@ build_global_store(GlobalOpcodes ops, uint32_t dwords, uint8_t vdata, uint8_t vo
     return std::vector<uint32_t>(encoded.begin(), encoded.end());
   }
   default:
-    return emit_error.emit() << "global store for target architecture";
+    return emit_error.emit() << "Unimplemented instruction: global store for target architecture";
   }
 }
 

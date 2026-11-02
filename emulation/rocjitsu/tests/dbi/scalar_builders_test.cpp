@@ -74,7 +74,10 @@ TEST(ScalarBuilders, UnsupportedArchitecturesReturnFailure) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_CDNA1}) {
     SCOPED_TRACE(static_cast<int>(arch));
-    EXPECT_TRUE(build_v_readfirstlane_b32(4, 0, arch).failed());
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_v_readfirstlane_b32(4, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: v_readfirstlane_b32 for target architecture");
     EXPECT_TRUE(build_s_bcnt1_i32_b64(8, 6, arch).failed());
     EXPECT_TRUE(build_s_first_set_bit_b64(9, 6, arch).failed());
     EXPECT_TRUE(build_s_and_b32(12, 10, 131, arch).failed());

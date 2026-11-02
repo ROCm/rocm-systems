@@ -20,6 +20,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include "util/diagnostic.h"
+
 #include <cstdint>
 
 namespace rocjitsu {
@@ -32,8 +34,10 @@ static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
 
 /// @brief Encode `v_readfirstlane_b32 s<sdst>, v<vsrc>`.
 /// @return The encoded word, or failure for an unsupported architecture.
-inline util::FailureOr<uint32_t> build_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc,
-                                                           rj_code_arch_t arch) {
+/// @param emit_error Destination for failure diagnostics; omitted emitters discard them.
+inline util::FailureOr<uint32_t>
+build_v_readfirstlane_b32(uint8_t sdst, uint8_t vsrc, rj_code_arch_t arch,
+                          util::DiagnosticEmitter emit_error = {}) {
   // VOP1 src0 uses the same 9-bit operand code as VOP3, and vdst names the SGPR.
   const uint16_t src0 = vop3_vgpr_src(vsrc);
   switch (arch) {
@@ -44,7 +48,8 @@ inline util::FailureOr<uint32_t> build_v_readfirstlane_b32(uint8_t sdst, uint8_t
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_vop1(rdna4::kVReadfirstlaneB32Vop1, {.src0 = src0, .vdst = sdst}).front();
   default:
-    return util::Result::failure();
+    return emit_error.emit()
+           << "Unimplemented instruction: v_readfirstlane_b32 for target architecture";
   }
 }
 

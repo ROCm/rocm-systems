@@ -58,6 +58,7 @@
 #include "rocjitsu/code/patch/log_abi.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
 #include "util/result.h"
 
 #include <cstddef>
@@ -77,10 +78,12 @@ inline constexpr uint16_t kLogRecordProbeLastVgpr = 29;
 
 /// @brief The probe's argument list for the anchor at @p anchor_offset.
 /// @return Arguments, or failure when the site does not fit in 32 bits.
-inline util::FailureOr<std::vector<ProbeArgValue>> log_record_probe_args(uint64_t anchor_offset,
-                                                                         bool wave32) {
+/// @param emit_error Destination for failure diagnostics; omitted emitters discard them.
+inline util::FailureOr<std::vector<ProbeArgValue>>
+log_record_probe_args(uint64_t anchor_offset, bool wave32,
+                      util::DiagnosticEmitter emit_error = {}) {
   if (anchor_offset > std::numeric_limits<uint32_t>::max())
-    return util::Result::failure();
+    return emit_error.emit() << "RjLogRecord::site is 32 bits";
   return std::vector<ProbeArgValue>{{ProbeArgSource::LogBufferPtrLo, 0},
                                     {ProbeArgSource::LogBufferPtrHi, 0},
                                     {ProbeArgSource::AnchorExecLo, 0},
@@ -143,12 +146,13 @@ inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_ar
 /// @param slot_count The buffer's slot count, a power of two no larger than 64.
 /// @param words Caller-owned output, cleared before emission and filled with the probe body.
 /// @return Failure for an invalid slot count or an unsupported encoding.
+/// @param emit_error Destination for failure diagnostics; omitted emitters discard them.
 /// @details Invalid slot counts leave words unchanged; encoding failures may leave a partial body.
 inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type,
                                                 uint32_t slot_count, std::vector<uint32_t> &words,
                                                 util::DiagnosticEmitter emit_error = {}) {
   if (slot_count == 0 || (slot_count & (slot_count - 1)) != 0 || slot_count > 64)
-    return util::Result::failure();
+    return emit_error.emit() << "slot_count must be a power of two no larger than 64";
 
   // The arguments, in the order log_record_probe_args() passes them, and the
   // return address.
@@ -186,19 +190,24 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
   constexpr uint16_t kInlineZero = vop3_inline_uint(0);
 
   words.clear();
-  if (detail::append(words, build_v_readfirstlane_b32(kBase, kArgBufferLo, arch)).failed())
+  if (detail::append(words, build_v_readfirstlane_b32(kBase, kArgBufferLo, arch, emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_readfirstlane_b32(kBase + 1, kArgBufferLo + 1, arch)).failed())
+  if (detail::append(words,
+                     build_v_readfirstlane_b32(kBase + 1, kArgBufferLo + 1, arch, emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_readfirstlane_b32(kExec, kArgExecLo, arch)).failed())
+  if (detail::append(words, build_v_readfirstlane_b32(kExec, kArgExecLo, arch, emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_readfirstlane_b32(kExec + 1, kArgExecLo + 1, arch)).failed())
+  if (detail::append(words, build_v_readfirstlane_b32(kExec + 1, kArgExecLo + 1, arch, emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words, build_s_bcnt1_i32_b64(kCount, kExec, arch)).failed())
     return util::Result::failure();
   if (detail::append(words, build_s_first_set_bit_b64(kWriter, kExec, arch)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kZero, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kZero, kInlineZero, arch, &emit_error)).failed())
     return util::Result::failure();
   // GFX9: a VMEM read of an SGPR a VALU wrote needs five wait states. The five
   // instructions after the base pair's last v_readfirstlane provide them before
@@ -209,11 +218,13 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
                                                       emit_error))
           .failed())
     return util::Result::failure();
-  if (detail::append(words, build_wait_loads_complete(arch)).failed())
+  if (detail::append(words, build_wait_loads_complete(arch, &emit_error)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_readfirstlane_b32(kWritePtr, kLoaded, arch)).failed())
+  if (detail::append(words, build_v_readfirstlane_b32(kWritePtr, kLoaded, arch, emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_readfirstlane_b32(kWritePtr + 1, kLoaded + 1, arch)).failed())
+  if (detail::append(words, build_v_readfirstlane_b32(kWritePtr + 1, kLoaded + 1, arch, emit_error))
+          .failed())
     return util::Result::failure();
   // On RDNA4 each SALU write below is waited on before its SGPR is next read,
   // at the point LLVM places the wait.
@@ -228,19 +239,24 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
           .failed())
     return util::Result::failure();
   detail::append_salu_sgpr_write_wait(words, arch);
-  if (detail::append(words, build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch)).failed())
+  if (detail::append(words, build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   words.push_back(static_cast<uint32_t>(sizeof(RjLogBufferHeader)));
   detail::append_salu_sgpr_write_wait(words, arch);
-  if (detail::append(words, build_v_mov_b32_src(kSlotV, kSlot, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kSlotV, kSlot, arch, &emit_error)).failed())
     return util::Result::failure();
 
   // abi_version (reserved0 zero), record_size, record_type.
-  if (detail::append(words, build_v_mov_b32_imm(kHeaderData, kRjLogAbiVersion, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_imm(kHeaderData, kRjLogAbiVersion, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_imm(kHeaderData + 1, kRjLogRecordSize, arch)).failed())
+  if (detail::append(words,
+                     build_v_mov_b32_imm(kHeaderData + 1, kRjLogRecordSize, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_imm(kHeaderData + 2, record_type, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_imm(kHeaderData + 2, record_type, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx3(kHeaderData, kSlotV, kBase,
                                                        offsetof(RjLogRecord, abi_version), arch,
@@ -249,17 +265,20 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
 
   // exec_mask, site, wave_id.
-  if (detail::append(words, build_v_mov_b32_src(kExecSiteData, vop3_vgpr_src(kArgExecLo), arch))
+  if (detail::append(
+          words, build_v_mov_b32_src(kExecSiteData, vop3_vgpr_src(kArgExecLo), arch, &emit_error))
           .failed())
     return util::Result::failure();
-  if (detail::append(words,
-                     build_v_mov_b32_src(kExecSiteData + 1, vop3_vgpr_src(kArgExecLo + 1), arch))
+  if (detail::append(words, build_v_mov_b32_src(kExecSiteData + 1, vop3_vgpr_src(kArgExecLo + 1),
+                                                arch, &emit_error))
           .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kExecSiteData + 2, vop3_vgpr_src(kArgSite), arch))
+  if (detail::append(
+          words, build_v_mov_b32_src(kExecSiteData + 2, vop3_vgpr_src(kArgSite), arch, &emit_error))
           .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kExecSiteData + 3, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kExecSiteData + 3, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words,
                      build_global_store_dwordx4(kExecSiteData, kSlotV, kBase,
@@ -268,13 +287,17 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
 
   // workgroup_x/y/z, active_lane_count.
-  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 1, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 1, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 2, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 2, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 3, kCount, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWorkgroupData + 3, kCount, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx4(kWorkgroupData, kSlotV, kBase,
                                                        offsetof(RjLogRecord, workgroup_x), arch,
@@ -283,13 +306,16 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
 
   // writer_lane, reserved1, payload.
-  if (detail::append(words, build_v_mov_b32_src(kWriterData, kWriter, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWriterData, kWriter, arch, &emit_error)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWriterData + 1, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWriterData + 1, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWriterData + 2, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWriterData + 2, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kWriterData + 3, kInlineZero, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kWriterData + 3, kInlineZero, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx4(kWriterData, kSlotV, kBase,
                                                        offsetof(RjLogRecord, writer_lane), arch,
@@ -298,7 +324,8 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
 
   // valid, after the rest of the record.
-  if (detail::append(words, build_v_mov_b32_src(kValidData, vop3_inline_uint(1), arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kValidData, vop3_inline_uint(1), arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words,
                      build_global_store_dword(kValidData, kSlotV, kBase,
@@ -307,24 +334,25 @@ inline util::Result build_log_record_probe_body(rj_code_arch_t arch, uint32_t re
     return util::Result::failure();
 
   // write_ptr + 1, after valid.
-  if (detail::append(words,
-                     build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1), arch))
+  if (detail::append(words, build_s_add_u32(kWritePtr, kWritePtr, scalar_positive_inline_u32(1),
+                                            arch, &emit_error))
           .failed())
     return util::Result::failure();
   if (detail::append(words, build_s_addc_u32(kWritePtr + 1, kWritePtr + 1,
-                                             scalar_positive_inline_u32(0), arch))
+                                             scalar_positive_inline_u32(0), arch, &emit_error))
           .failed())
     return util::Result::failure();
   detail::append_salu_sgpr_write_wait(words, arch);
-  if (detail::append(words, build_v_mov_b32_src(kNextPtr, kWritePtr, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kNextPtr, kWritePtr, arch, &emit_error)).failed())
     return util::Result::failure();
-  if (detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch)).failed())
+  if (detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch, &emit_error))
+          .failed())
     return util::Result::failure();
   if (detail::append(words, build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset,
                                                        arch, emit_error))
           .failed())
     return util::Result::failure();
-  if (detail::append(words, build_s_setpc_b64(kLink, arch)).failed())
+  if (detail::append(words, build_s_setpc_b64(kLink, arch, &emit_error)).failed())
     return util::Result::failure();
   return util::Result::success();
 }

@@ -164,8 +164,8 @@ protected:
       pt.probe_obj = &probe_obj;
       pt.probe_symbol = kProbeSymbol;
       util::FailureOr<std::vector<ProbeArgValue>> maybe_args =
-          test::log_record_probe_args(anchor, t_.wave32);
-      ASSERT_TRUE(maybe_args.succeeded());
+          test::log_record_probe_args(anchor, t_.wave32, diagnostic.emitter());
+      ASSERT_TRUE(maybe_args.succeeded()) << diagnostic.message();
       pt.probe_args = std::move(maybe_args.value());
       pt.force_full_exec = force_full_exec;
       instr.add_point(pt);

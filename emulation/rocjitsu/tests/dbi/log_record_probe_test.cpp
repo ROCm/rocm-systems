@@ -36,7 +36,9 @@ TEST(LogRecordProbe, ArgumentsRejectAnOversizedSite) {
         log_record_probe_args(std::numeric_limits<uint32_t>::max(), wave32);
     ASSERT_TRUE(args.succeeded());
     EXPECT_EQ(args.value().back().immediate, std::numeric_limits<uint32_t>::max());
-    EXPECT_TRUE(log_record_probe_args(uint64_t{1} << 32, wave32).failed());
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(log_record_probe_args(uint64_t{1} << 32, wave32, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), "RjLogRecord::site is 32 bits");
   }
 }
 
@@ -44,16 +46,23 @@ TEST(LogRecordProbe, RejectsInvalidSlotCountsBeforeEmission) {
   const std::vector<uint32_t> sentinel{0x12345678};
   for (uint32_t slots : {0u, 3u, 128u}) {
     std::vector<uint32_t> body = sentinel;
-    EXPECT_TRUE(
-        build_log_record_probe_body(ROCJITSU_CODE_ARCH_CDNA3, kRecordType, slots, body).failed());
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_CDNA3, kRecordType, slots, body,
+                                            diagnostic.emitter())
+                    .failed());
+    EXPECT_EQ(diagnostic.message(), "slot_count must be a power of two no larger than 64");
     EXPECT_EQ(body, sentinel);
   }
 }
 
 TEST(LogRecordProbe, UnsupportedArchitectureStopsEmission) {
   std::vector<uint32_t> body;
-  EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_INVALID, kRecordType, kSlotCount, body)
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(build_log_record_probe_body(ROCJITSU_CODE_ARCH_INVALID, kRecordType, kSlotCount, body,
+                                          diagnostic.emitter())
                   .failed());
+  EXPECT_EQ(diagnostic.message(),
+            "Unimplemented instruction: v_readfirstlane_b32 for target architecture");
   EXPECT_TRUE(body.empty());
 }
 

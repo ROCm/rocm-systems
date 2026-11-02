@@ -183,9 +183,11 @@ TEST(GlobalMemoryBuilders, RejectUnsupportedArchitectures) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_CDNA1}) {
     util::StringDiagnostic diagnostic;
     EXPECT_TRUE(build_global_load_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
-    EXPECT_EQ(diagnostic.message(), "global load for target architecture");
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: global load for target architecture");
     EXPECT_TRUE(build_global_store_dword(1, 0, 2, 0, arch, diagnostic.emitter()).failed());
-    EXPECT_EQ(diagnostic.message(), "global store for target architecture");
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: global store for target architecture");
   }
 }
 

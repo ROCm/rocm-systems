@@ -39,6 +39,8 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include "util/diagnostic.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -74,7 +76,8 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
 util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                          rj_code_arch_t arch) {
+                                          rj_code_arch_t arch,
+                                          util::DiagnosticEmitter emit_error = {}) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
@@ -85,12 +88,15 @@ util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t
   case ROCJITSU_CODE_ARCH_RDNA4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
-    return util::Result::failure();
+    return emit_error.emit() << "Unimplemented instruction: v_add_u32 for target architecture";
   }
 }
 
 TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
-  EXPECT_TRUE(build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID).failed());
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(
+      build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "Unimplemented instruction: v_add_u32 for target architecture");
 }
 
 // VGPR / SGPR spill, executed on CDNA3 (gfx942, wave64), CDNA4 (gfx950, wave64),
@@ -830,12 +836,15 @@ protected:
     ASSERT_TRUE(maybe_s_mov_b32_32.succeeded());
     const uint32_t mov_s8_k = maybe_s_mov_b32_32.value();
     constexpr uint16_t kVgprSrc = 256; // VOP2 src field: VGPR = 256 + index.
+    util::StringDiagnostic diagnostic;
     const std::array<util::FailureOr<uint32_t>, 5> adds = {
-        build_v_add_u32(1, kVgprSrc + 0, 1, a_.arch), build_v_add_u32(3, kVgprSrc + 2, 3, a_.arch),
-        build_v_add_u32(5, kVgprSrc + 4, 5, a_.arch), build_v_add_u32(7, kVgprSrc + 6, 7, a_.arch),
-        build_v_add_u32(1, kSpilledSgpr, 1, a_.arch)};
+        build_v_add_u32(1, kVgprSrc + 0, 1, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(3, kVgprSrc + 2, 3, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(5, kVgprSrc + 4, 5, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(7, kVgprSrc + 6, 7, a_.arch, diagnostic.emitter()),
+        build_v_add_u32(1, kSpilledSgpr, 1, a_.arch, diagnostic.emitter())};
     for (const util::FailureOr<uint32_t> &add : adds)
-      ASSERT_TRUE(add.succeeded());
+      ASSERT_TRUE(add.succeeded()) << diagnostic.message();
     // v_mov v0,K ; s_mov s8,K2 ; then an add chain (ANCHOR at offset 8) that reads v0..v7
     // and s8 -- keeping all eight VGPRs and s8 live -- while writing only v1/v3/v5/v7, so v0
     // and s8 stay intact for readback. s_endpgm.
