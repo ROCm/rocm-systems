@@ -2289,6 +2289,33 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
   }
 }
 
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942FourNode_ThresholdDefaultVersusSet) {
+  // Reaches the enqueue wrapper, which the channel.h tests do not. gfx942 leaves
+  // batching off unless RCCL_P2P_BATCH_ENABLE is set, so both cases force it on.
+  // SetParam covers one key; this case has to set the enable and the threshold.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm bc(/*nNodes=*/4, "gfx942");
+  auto setEnableAndThreshold = [](int64_t threshold, bool thresholdSet) {
+    g_loadParam = [threshold, thresholdSet](const char* env, int64_t deft) {
+      if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
+      if (thresholdSet && std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
+      return deft;
+    };
+  };
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/false);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/64 * 1024, /*thresholdSet=*/true);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/perPeer, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+}
+
 // ===========================================================================
 // rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
 // bracket an addon collective wraps its own launch in.
