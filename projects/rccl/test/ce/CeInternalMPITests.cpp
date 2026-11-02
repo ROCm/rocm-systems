@@ -22,6 +22,7 @@
 #include <rccl_common.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #ifdef MPI_TESTS_ENABLED
@@ -35,6 +36,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
 
 ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int nRanks);
 void         ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params);
+int64_t      ncclParamCeChunkSize();
 
 // Fixture: skip if no CE driver; create comm; warmup AllGather → ncclCeInit; TearDown destroys comm.
 class CeInternalMPITest : public MPITestBase
@@ -636,6 +638,128 @@ TEST_F(CeInternalMPITest, LaunchFourOpsNullStreamSucceeds)
             << "op " << i << " produced wrong data on the null stream";
     }
     // srcGuards, dstGuards, and params freed automatically on scope exit.
+}
+
+// Mixes the high bits of the byte index so a wave that dropped its source offset cannot match.
+static uint8_t ChunkedOpByte(int op, size_t byte)
+{
+    return static_cast<uint8_t>(
+        (((op + 1) * 0x9E3779B97F4A7C15ull) + (byte * 0xBF58476D1CE4E5B9ull)) >> 56);
+}
+
+// Chunked launch: one op a wave-and-a-tail past the runtime chunk, one two
+// waves past it, and a short op that finishes in the first wave. A sentinel
+// past each destination must stay put, which fails if a wave copies past the
+// op's own size.
+//
+// Those finished bytes are also what a single unchunked batch would write, so
+// the round-robin log line is the witness that the wave split ran.
+//
+// ASSERT_* here returns from this helper. Nothing in the test follows the call.
+static void CheckChunkedBatch(ncclComm* comm, hipStream_t stream)
+{
+    using namespace RCCLTestGuards;
+    // NCCL_CE_CHUNK_SIZE is read at runtime and the op sizes follow it.
+    // kShortOp is 100 bytes and has to finish inside the first wave, so the chunk must be
+    // larger than kShortOp. Zero and negative values disable chunking in ncclCeLaunchBatchOps.
+    constexpr size_t  kShortOp      = 100;
+    constexpr size_t  kSentinel     = 16;
+    constexpr uint8_t kSentinelByte = 0xA5;
+    constexpr int     kOps          = 3;
+
+    // RCCL_CE_BATCH_ASYNC_ENABLE=0 sends the launch down the non-batch path in
+    // ncclCeLaunchBatchOps. That copy is correct and never logs the round-robin marker.
+    if(MPIHelpers::getEnvParam("RCCL_CE_BATCH_ASYNC_ENABLE", -2) == 0)
+    {
+        GTEST_SKIP() << "RCCL_CE_BATCH_ASYNC_ENABLE=0 disables the chunked batch path";
+    }
+
+    const int64_t chunkParam = ncclParamCeChunkSize();
+    if(chunkParam <= static_cast<int64_t>(kShortOp))
+    {
+        GTEST_SKIP() << "NCCL_CE_CHUNK_SIZE=" << chunkParam
+                     << " is outside what this test sizes buffers for"
+                     << " (chunk must be > " << kShortOp << ")";
+    }
+    const size_t kChunk      = static_cast<size_t>(chunkParam);
+    const size_t sizes[kOps] = {kChunk + 32, 2 * kChunk + 32, kShortOp};
+
+    std::vector<DeviceBufferAutoGuard> src(kOps), dst(kOps);
+    for(int i = 0; i < kOps; ++i)
+    {
+        const auto byteAt = [i](size_t b) { return ChunkedOpByte(i, b); };
+
+        void* p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, sizes[i]), hipSuccess);
+        src[i].set(p);
+        ASSERT_EQ(RCCLTestHelpers::initializeBufferWithPattern<uint8_t>(src[i].get(), sizes[i], byteAt),
+                  hipSuccess);
+
+        p = nullptr;
+        ASSERT_EQ(hipMalloc(&p, sizes[i] + kSentinel), hipSuccess);
+        dst[i].set(p);
+        ASSERT_EQ(RCCLTestHelpers::zeroInitializeBuffer<uint8_t>(dst[i].get(), sizes[i]), hipSuccess);
+        ASSERT_EQ(RCCLTestHelpers::initializeBufferWithPattern<uint8_t>(
+                      static_cast<uint8_t*>(dst[i].get()) + sizes[i], kSentinel,
+                      [kSentinelByte](size_t) { return kSentinelByte; }),
+                  hipSuccess);
+    }
+
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, kOps), ncclSuccess);
+    SCOPE_EXIT(ncclCeFreeBatchOpsParams(&params));
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        params.srcs[i]  = src[i].get();
+        params.dsts[i]  = dst[i].get();
+        params.sizes[i] = sizes[i];
+    }
+    params.numOps   = kOps;
+    params.chunking = true;
+
+    // Isolate this launch. The single-batch fallthrough logs a different line
+    // and never mentions round-robin chunking.
+    MPIHelpers::TestLogAssertionContext logCtx(
+        MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+
+    ncclCeCollArgs collArgs{};
+    ASSERT_EQ(ncclCeLaunchBatchOps(comm, &params, stream, &collArgs), ncclSuccess);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+
+    const std::string log = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
+    const std::string chunkMarker =
+        "Batch path with round-robin chunking (chunkSize=" + std::to_string(kChunk) +
+        "), numOps=" + std::to_string(kOps);
+    EXPECT_NE(log.find(chunkMarker), std::string::npos)
+        << "chunked launch did not take the round-robin wave path; log:\n"
+        << log;
+    EXPECT_EQ(log.find("Batch path without intraBatchSync"), std::string::npos)
+        << "chunked launch fell through to one batch; log:\n"
+        << log;
+
+    for(int i = 0; i < kOps; ++i)
+    {
+        const auto byteAt = [i](size_t b) { return ChunkedOpByte(i, b); };
+        size_t     errIdx = 0;
+        uint8_t    errExp = 0, errAct = 0;
+        EXPECT_TRUE(RCCLTestHelpers::verifyBufferData<uint8_t>(
+                        dst[i].get(), sizes[i], byteAt, 0, 0.0, &errIdx, &errExp, &errAct))
+            << "op " << i << " byte " << errIdx << " expected " << static_cast<int>(errExp)
+            << " got " << static_cast<int>(errAct);
+        EXPECT_TRUE(RCCLTestHelpers::verifyBufferData<uint8_t>(
+                        static_cast<uint8_t*>(dst[i].get()) + sizes[i], kSentinel,
+                        [kSentinelByte](size_t) { return kSentinelByte; }, 0, 0.0, &errIdx, &errExp,
+                        &errAct))
+            << "op " << i << " sentinel byte " << errIdx << " expected "
+            << static_cast<int>(kSentinelByte) << " got " << static_cast<int>(errAct);
+    }
+}
+
+// LAUNCH-04: round-robin chunking copies every byte and does not run past an op.
+TEST_F(CeInternalMPITest, LaunchChunkedUnequalSizes)
+{
+    CheckChunkedBatch(ceComm, getActiveStream());
 }
 
 // ===========================================================================
