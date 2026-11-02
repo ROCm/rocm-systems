@@ -38,8 +38,9 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
   set_weight(0);
-  if (!install_internal_address_space(memory_))
-    throw std::logic_error("failed to install the internal GPU address space");
+  const bool installed = install_internal_address_space(memory_);
+  assert(installed && "fresh SoC must accept its internal GPU address space");
+  (void)installed;
 }
 
 SoC::~SoC() { release_vm_resources(); }
@@ -81,14 +82,15 @@ void SoC::wire_gws_to_xcds() {
     xcd->adopt_gws_store(gws_device_);
 }
 
-void SoC::add_iod(amdgpu::Iod *iod) {
+util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) {
   if (iod == nullptr)
-    throw std::invalid_argument("cannot add a null IOD");
+    return emit_error.emit() << "cannot add a null IOD";
   iod->set_coherence_domain(cache_coherence_);
   iod->set_gpu_vm(&gpu_vm_);
   iod->set_legacy_maintenance_memory(memory_);
   iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
   iods_.push_back(iod);
+  return util::Result::success();
 }
 
 bool SoC::install_internal_address_space(amdgpu::GpuMemory *memory) {
@@ -184,8 +186,9 @@ SoC::SoC(std::string name, const Config &config)
   auto mem = std::make_unique<amdgpu::GpuMemory>("vram");
   memory_ = mem.get();
   add_child(std::move(mem));
-  if (!install_internal_address_space(memory_))
-    throw std::logic_error("failed to install the internal GPU address space");
+  const bool installed = install_internal_address_space(memory_);
+  assert(installed && "fresh SoC must accept its internal GPU address space");
+  (void)installed;
 
   if (config.num_iods > 0) {
     // Create IODs, each with its own memory-side cache and HBM controller.
@@ -232,10 +235,11 @@ SoC::SoC(std::string name, const Config &config)
     });
 }
 
-void SoC::set_arch(rj_code_arch_t arch) {
+util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
   if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch)))
-    throw std::logic_error("SoC architecture cannot change while copy queues are active");
+    return emit_error.emit() << "SoC architecture cannot change while copy queues are active";
   arch_ = arch;
+  return util::Result::success();
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {
