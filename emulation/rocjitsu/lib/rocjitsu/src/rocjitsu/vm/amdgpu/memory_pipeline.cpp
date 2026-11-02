@@ -107,6 +107,8 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
     // Failure cleanup must not resume a waiter or retire an ENDING wave.
     for (uint8_t index = 0; index < entry.counters.size; ++index)
       entry.wf->wait_counters().decrement(entry.counters.types[index]);
+    if (entry.wf->state() == WfState::VM_RETRY)
+      entry.wf->set_state(WfState::RUNNING);
     delete entry.inst;
     return VmAccessOutcome::Malformed;
   }
@@ -1305,8 +1307,9 @@ bool rejects_atomic_operation(const VectorMemState &d, Wavefront &wf, bool local
                   (d.atomic_op == AtomicOp::APPEND || d.atomic_op == AtomicOp::CONSUME)) ||
                  (d.elem_size == 8 && d.atomic_op == AtomicOp::BARRIER_ARRIVE))))
     return false;
-  wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
-                                        "unsupported integer atomic operation");
+  wf.report_instruction_execution_error(
+      InstructionExecutionError::UnsupportedOperandValue,
+      "unsupported atomic operation for this width or memory domain");
   return true;
 }
 

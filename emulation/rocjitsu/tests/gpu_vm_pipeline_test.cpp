@@ -651,7 +651,7 @@ TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSucces
   context.cu->step();
   context.cu->step();
   const std::string diagnostic = testing::internal::GetCapturedStderr();
-  const std::string reason = "unsupported integer atomic operation";
+  const std::string reason = "unsupported atomic operation for this width or memory domain";
   const auto warning = diagnostic.find(reason);
   EXPECT_NE(warning, std::string::npos) << diagnostic;
   EXPECT_EQ(diagnostic.find(reason, warning == std::string::npos ? 0 : warning + 1),

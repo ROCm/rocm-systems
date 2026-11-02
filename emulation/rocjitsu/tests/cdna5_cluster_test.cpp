@@ -908,21 +908,36 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCo
   wf->set_cluster_info(0, 2);
   LdsWritebackPipeline pipeline(*cu);
   constexpr uint32_t kSentinel = 0x12345678;
-  for (bool multicast : {false, true}) {
-    SCOPED_TRACE(multicast);
+  struct RejectionCase {
+    const char *name;
+    bool multicast;
+    uint32_t response_bytes;
+    uint32_t lds_base;
+    const char *diagnostic;
+  };
+  const RejectionCase cases[] = {
+      {"ordinary payload", false, 4, 0, "LDS-destination load payload too small"},
+      {"multicast payload", true, 4, 0, "cluster LDS multicast payload too small"},
+      {"multicast target", true, 8, static_cast<uint32_t>(cu->lds().size_bytes() - 4),
+       "cluster LDS multicast target out of range"},
+  };
+  for (const RejectionCase &test : cases) {
+    SCOPED_TRACE(test.name);
+    wf->set_lds_base(test.lds_base);
     wf->clear_instruction_execution_error();
-    cu->lds().write32(0, kSentinel);
+    cu->lds().write32(test.lds_base, kSentinel);
     const auto make_state = [&]() {
       auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
       state->elem_size = 4;
       state->num_elems = 1;
       state->is_load = true;
       state->lds_dst = true;
-      state->cluster_multicast = multicast;
+      state->cluster_multicast = test.multicast;
+      state->lds_base = test.lds_base;
       state->wf_size = 32;
       state->lane_mask = 3;
       state->exec_mask = 3;
-      state->response_data.resize(4, 0x5a);
+      state->response_data.resize(test.response_bytes, 0x5a);
       return state;
     };
     TestMemoryInstruction instruction(make_state());
@@ -930,9 +945,10 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCo
     EXPECT_EQ(pipeline.complete_access(instruction, *wf, [&]() { ++callbacks; }),
               amdgpu::MemoryAccessCompletion::Failed);
     EXPECT_EQ(callbacks, 0u);
+    EXPECT_STREQ(wf->instruction_execution_error_detail(), test.diagnostic);
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+    EXPECT_EQ(cu->lds().read32(test.lds_base), kSentinel);
 
     wf->clear_instruction_execution_error();
     wf->set_state(amdgpu::WfState::ENDING);
@@ -940,34 +956,42 @@ TEST(Gfx1250ExecutionTest, LdsWritebackRejectsMalformedPayloadBeforeAnyWriteOrCo
               amdgpu::VmAccessOutcome::Malformed);
     EXPECT_TRUE(pipeline.empty());
     EXPECT_EQ(wf->state(), amdgpu::WfState::ENDING);
+    EXPECT_STREQ(wf->instruction_execution_error_detail(), test.diagnostic);
     wf->set_state(amdgpu::WfState::RUNNING);
     EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    EXPECT_EQ(cu->lds().read32(0), kSentinel);
+    EXPECT_EQ(cu->lds().read32(test.lds_base), kSentinel);
 
-    wf->clear_instruction_execution_error();
-    uint32_t faults = 0;
-    pipeline.set_fault_handler(
-        [&](amdgpu::Wavefront &failed_wave, amdgpu::VmAccessOutcome outcome, uint64_t) {
-          EXPECT_EQ(&failed_wave, wf);
-          EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Malformed);
-          ++faults;
-        });
-    pipeline.unavailable_once = true;
-    EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(make_state()), *wf),
-              amdgpu::VmAccessOutcome::Complete);
-    EXPECT_EQ(wf->wait_counters().vmcnt, 1u);
-    pipeline.tick();
-    EXPECT_EQ(faults, 1u);
-    EXPECT_TRUE(pipeline.empty());
-    EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
-    EXPECT_EQ(cu->lds().read32(0), kSentinel);
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    pipeline.tick();
-    EXPECT_EQ(faults, 1u);
-    wf->set_state(amdgpu::WfState::RUNNING);
+    for (bool with_fault_handler : {false, true}) {
+      SCOPED_TRACE(with_fault_handler);
+      wf->clear_instruction_execution_error();
+      uint32_t faults = 0;
+      pipeline.set_fault_handler({});
+      if (with_fault_handler)
+        pipeline.set_fault_handler(
+            [&](amdgpu::Wavefront &failed_wave, amdgpu::VmAccessOutcome outcome, uint64_t) {
+              EXPECT_EQ(&failed_wave, wf);
+              EXPECT_EQ(outcome, amdgpu::VmAccessOutcome::Malformed);
+              EXPECT_EQ(failed_wave.state(), amdgpu::WfState::RUNNING);
+              ++faults;
+            });
+      pipeline.unavailable_once = true;
+      EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(make_state()), *wf),
+                amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(wf->wait_counters().vmcnt, 1u);
+      pipeline.tick();
+      EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+      EXPECT_STREQ(wf->instruction_execution_error_detail(), test.diagnostic);
+      EXPECT_EQ(faults, with_fault_handler ? 1u : 0u);
+      EXPECT_TRUE(pipeline.empty());
+      EXPECT_EQ(wf->wait_counters().vmcnt, 0u);
+      EXPECT_EQ(cu->lds().read32(test.lds_base), kSentinel);
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+      pipeline.tick();
+      EXPECT_EQ(faults, with_fault_handler ? 1u : 0u);
+    }
   }
 }
 
@@ -981,23 +1005,42 @@ TEST(Gfx1250ExecutionTest, MemoryPipelinesRejectUnsupportedIntegerAtomicBeforeSi
   amdgpu::ScalarMemPipeline scalar(&cu->l1_scalar());
   amdgpu::GlobalMemPipeline global(&cu->l1_vector(), cu->l2());
   amdgpu::LocalMemPipeline local;
-  for (amdgpu::MemoryPipeline *pipeline :
-       std::array<amdgpu::MemoryPipeline *, 3>{&scalar, &global, &local}) {
+  struct RejectionCase {
+    const char *name;
+    amdgpu::MemoryPipeline *pipeline;
+    amdgpu::AtomicOp operation;
+    uint32_t width;
+  };
+  const RejectionCase cases[] = {
+      {"scalar unknown", &scalar, static_cast<amdgpu::AtomicOp>(0xff), 4},
+      {"global unknown", &global, static_cast<amdgpu::AtomicOp>(0xff), 4},
+      {"local unknown", &local, static_cast<amdgpu::AtomicOp>(0xff), 4},
+      {"global packed f16 width", &global, amdgpu::AtomicOp::PK_ADD_F16, 8},
+      {"local packed f16 width", &local, amdgpu::AtomicOp::PK_ADD_F16, 8},
+      {"global packed bf16 width", &global, amdgpu::AtomicOp::PK_ADD_BF16, 8},
+      {"local packed bf16 width", &local, amdgpu::AtomicOp::PK_ADD_BF16, 8},
+      {"global append", &global, amdgpu::AtomicOp::APPEND, 4},
+      {"global consume", &global, amdgpu::AtomicOp::CONSUME, 4},
+      {"local barrier width", &local, amdgpu::AtomicOp::BARRIER_ARRIVE, 4},
+  };
+  for (const RejectionCase &test : cases) {
+    SCOPED_TRACE(test.name);
+    amdgpu::MemoryPipeline *pipeline = test.pipeline;
     wf->clear_instruction_execution_error();
     cu->lds().write32(0, kSentinel);
     sim.memory->write32(0x9000, kSentinel);
     std::unique_ptr<DynamicInstState> state;
     if (pipeline == &scalar) {
       auto scalar_state = std::make_unique<amdgpu::ScalarMemState>();
-      scalar_state->atomic_op = static_cast<amdgpu::AtomicOp>(0xff);
+      scalar_state->atomic_op = test.operation;
       scalar_state->addr = 0x9000;
-      scalar_state->elem_size = 4;
+      scalar_state->elem_size = test.width;
       scalar_state->num_dwords = 1;
       state = std::move(scalar_state);
     } else {
       auto vector_state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
-      vector_state->atomic_op = static_cast<amdgpu::AtomicOp>(0xff);
-      vector_state->elem_size = 4;
+      vector_state->atomic_op = test.operation;
+      vector_state->elem_size = test.width;
       vector_state->wf_size = 32;
       vector_state->lane_mask = 1;
       vector_state->per_lane_addr[0] = pipeline == &global ? 0x9000 : 0;
@@ -1007,6 +1050,10 @@ TEST(Gfx1250ExecutionTest, MemoryPipelinesRejectUnsupportedIntegerAtomicBeforeSi
               amdgpu::VmAccessOutcome::Malformed);
     EXPECT_EQ(wf->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    EXPECT_STREQ(wf->instruction_execution_error_detail(),
+                 pipeline == &scalar
+                     ? "unsupported integer atomic operation"
+                     : "unsupported atomic operation for this width or memory domain");
     EXPECT_TRUE(pipeline->empty());
     EXPECT_EQ(cu->lds().read32(0), kSentinel);
     EXPECT_EQ(sim.memory->read32(0x9000), kSentinel);
