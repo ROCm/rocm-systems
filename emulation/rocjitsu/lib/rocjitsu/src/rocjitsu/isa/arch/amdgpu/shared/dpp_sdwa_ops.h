@@ -23,7 +23,6 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "util/except.h"
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -531,11 +530,13 @@ inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   return (lane & ~7u) | sel;
 }
 
+/// @brief Stage a DPP8 source whose decoded width is at most one dword.
 inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
                        std::optional<StagedOperand> &storage, amdgpu::Wavefront &wf,
                        uint8_t source_byte_mask = 0) {
-  if (source.size_bits() > 32)
-    throw util::InvalidInst("DPP8 requires a source no wider than 32 bits", "");
+  // Generator _instruction_supports_dpp8 checks the encoded source width;
+  // _gen_execute_body separately checks the semantic source used by MOVREL.
+  assert(source.size_bits() <= 32 && "DPP8 requires a source no wider than 32 bits");
   const DppPlan plan = make_dpp8_plan(wf.wf_size(), lane_sel, fi, wf.exec());
   stage_dpp_operand(source, plan, wf.exec(), storage, wf, source_byte_mask);
 }
@@ -844,7 +845,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
     if constexpr (Policy == OutputPolicy::FLUSH_NEAREST) {
       // The generated LOG/EXP body protects the complete instruction with
       // nearest rounding. Reuse its VOP3 finalizer, including NaN passthrough.
-      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod));
+      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod, 0));
     }
     return scale_f32(value, omod, wf.fp_round_mode_f32());
   }

@@ -47,7 +47,7 @@ using MemoryAccessDeferredCompletion = std::function<void()>;
 /// in a single tick() and then complete on the next tick().
 class MemoryPipeline {
 public:
-  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome)>;
+  using FaultHandler = std::function<void(Wavefront &, VmAccessOutcome, uint64_t issue_pc)>;
   static constexpr std::size_t MAX_WAIT_COUNTER_TOKENS =
       MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS * MemoryCounterObligation::MAX_COUNTER_INCREMENT;
 
@@ -64,6 +64,7 @@ public:
     Wavefront *wf;
     WaitCounterTokens counters;
     uint64_t wave_generation;
+    uint64_t issue_pc;
   };
 
   /// @brief Issue a memory instruction to this pipeline.
@@ -84,6 +85,10 @@ public:
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
+  /// @brief Retry only one queue's retained work without requesting an engine yield.
+  /// @details The caller holds the CU wave-state lock and owns this queue's pause.
+  void retry_for_queue(uint32_t process_id, uint32_t queue_id);
+
   bool empty() const { return issued_.empty() && returned_.empty(); }
 
   WaitCounterType counter_type() const { return counter_type_; }
@@ -91,6 +96,11 @@ public:
 
   /// @brief Retain an operation whose first access attempt already returned Unavailable.
   void defer_unavailable(Instruction *inst, Wavefront &wf);
+
+  /// @brief Cancel one unavailable side-effect-free load and rewind its issuing PC.
+  /// @details Used by debugger suspension so an unresolved load can be saved and
+  /// re-issued after restore. Stores, atomics and LDS-destination loads are retained.
+  bool rewind_unavailable_load(Wavefront &wf);
 
   /// @brief Cancel every retained operation belonging to one wave-slot occupant.
   void cancel(Wavefront &wf);
@@ -102,10 +112,12 @@ protected:
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
+  void retry_entries(bool all_queues, uint32_t process_id, uint32_t queue_id);
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
   void release_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
+  bool cancel_wait_check_issue(const PipelineEntry &entry);
   void complete_entry(PipelineEntry entry);
 
   void finish_completed_access(Instruction *inst, Wavefront &wf, const WaitCounterTokens &counters,

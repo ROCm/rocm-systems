@@ -73,7 +73,7 @@ protected:
     ASSERT_NE(inst, nullptr);
     if (lds) {
       EXPECT_EQ(inst->num_dst_operands(), 0);
-      InstDefUse effects(*inst);
+      InstDefUse effects(*inst, 64);
       EXPECT_TRUE(effects.uses.contains({RegClass::M0, 0, 1}));
       EXPECT_FALSE(effects.uses.contains({RegClass::VGPR, 255, 1}));
     }
@@ -307,7 +307,7 @@ TEST_P(FlatLdsTransfer, RdnaLlvmEncodingsAndUnsignedGlobalOffsets) {
           issue(encoding(4, 2, true, scalar_base ? 4 : vector_saddr(), 0, lds), lds));
       auto words = encoding(4, 2, true, scalar_base ? 4 : vector_saddr(), 0, lds);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-      InstDefUse effects(*inst);
+      InstDefUse effects(*inst, 64);
       EXPECT_EQ(effects.uses.contains({RegClass::M0, 0, 1}), lds);
       EXPECT_EQ(lds ? wave->lds().read32(128) : cu->read_vgpr(wave->vgpr_alloc().base + 8, 0),
                 0x31415926);

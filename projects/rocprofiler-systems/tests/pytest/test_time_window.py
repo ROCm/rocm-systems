@@ -6,6 +6,9 @@ Tests for the trace time window example.
 """
 
 from __future__ import annotations
+
+from typing import ClassVar
+
 import pytest
 from conftest import RocprofsysTest
 
@@ -39,8 +42,24 @@ def time_window_env() -> dict[str, str]:
 )
 @pytest.mark.class_name("trace-time-window")
 class TestTraceTimeWindow(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
+    BINARY_REWRITE_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "2",
+        "--caller-include",
+        "inner",
+        "-i",
+        "4096",
+    ]
+    RUNTIME_INSTRUMENT_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "1",
+        "--caller-include",
+        "inner",
+        "-i",
+        "4096",
+    ]
 
     def test(self, mode, time_window_env):
 
@@ -107,16 +126,18 @@ class TestTraceTimeWindow(RocprofsysTest):
         )
 
     def test_delay_cputime_clock(self, mode, time_window_env):
-        """Regression test: --trace-clock-id used to crash the profiled process
-        for every value (numeric clock id written to the settings string that
-        only ever matched "realtime"/"cputime").
+        """Clock/window behavior for ROCPROFSYS_TRACE_PERIOD_CLOCK_ID=cputime.
+
+        CLI --trace-clock-id -> setting is covered in test_tool_runner.py; this
+        checks the controlled workload actually opens on process CPU time.
 
         Uses a small process-CPU-time budget rather than test_delay's
         wall-clock values: this app is dominated by sleep_for() and only
         generates ~500ms of real CPU time total across its 5 calls, so a
         larger cputime budget can starve indefinitely (clock_nanosleep on
         CLOCK_PROCESS_CPUTIME_ID never returns once nothing in the process
-        is left consuming CPU)."""
+        is left consuming CPU).
+        """
         env = time_window_env.copy()
         env.update(
             {

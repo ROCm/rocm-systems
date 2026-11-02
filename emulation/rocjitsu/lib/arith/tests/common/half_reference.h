@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Test-side FP16 encoding, decoding, and NaN canonicalization.
+// Test-side FP16 encoding and decoding.
 
 #pragma once
 

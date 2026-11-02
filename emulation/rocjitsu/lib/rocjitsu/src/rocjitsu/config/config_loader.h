@@ -75,13 +75,14 @@ struct ExecutionThreadAllocation {
 /// Pure table selector. Choose the largest effective allocation fitting the budget,
 /// after topology clamps and explicit overrides; later entries break ties.
 /// Explicit knobs may exceed the budget. With no fitting entry, unspecified knobs use
-/// serial defaults. Clocked mode only allocates engine partitions.
-ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest &request,
-                                                    uint32_t host_threads, uint32_t xcds,
-                                                    std::span<const uint32_t> dispatch_capacities,
-                                                    bool async_supported,
-                                                    std::span<const ExecutionThreadChoice> choices,
-                                                    bool clocked = false);
+/// serial defaults. Clocked mode only allocates engine partitions. Invalid helper
+/// requests or allocation-table entries in functional mode emit a diagnostic and return failure.
+/// Allocation exceptions propagate.
+util::FailureOr<ExecutionThreadAllocation>
+resolve_execution_threads(const ExecutionThreadRequest &request, uint32_t host_threads,
+                          uint32_t xcds, std::span<const uint32_t> dispatch_capacities,
+                          bool async_supported, std::span<const ExecutionThreadChoice> choices,
+                          util::DiagnosticEmitter emit_error, bool clocked = false);
 
 /// Metadata needed to evaluate the pure allocation rule without building a VM.
 struct ExecutionThreadSettings {
@@ -93,39 +94,44 @@ struct ExecutionThreadSettings {
   bool clocked = false;
   rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
 
-  ExecutionThreadAllocation resolve(uint32_t host_threads) const {
+  util::FailureOr<ExecutionThreadAllocation> resolve(uint32_t host_threads,
+                                                     util::DiagnosticEmitter emit_error) const {
     return resolve_execution_threads(request, host_threads, xcds, dispatch_capacities,
-                                     async_supported, choices, clocked);
+                                     async_supported, choices, emit_error, clocked);
   }
 };
 
 /// @brief Read only a config's thread requests and topology dimensions.
-/// @details Allocates no simulator components or worker threads. File-reading
-/// and parsing failures emit a diagnostic and return failure.
+/// @details Allocates no simulator components or worker threads. File-reading,
+/// parsing, component-range, and invalid allocation metadata failures emit a
+/// diagnostic and return failure.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
-/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @throws std::invalid_argument when required allocation metadata is invalid.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic,
+/// including invalid allocation metadata, system-graph validation, or node selection.
+/// @note Allocation and library exceptions may still propagate.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings(const std::string &json_path, const std::string &schema_text,
                                util::DiagnosticEmitter emit_error);
 
 /// @brief Read thread requests and topology dimensions from config JSON text.
 /// @details Same as the path overload, for a config a launch has already rewritten
-/// in memory and does not need to place on disk. Parsing failures emit a diagnostic
-/// and return failure.
+/// in memory and does not need to place on disk. Parsing, component-range, and
+/// invalid allocation metadata failures emit a diagnostic and return failure.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
-/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @throws std::invalid_argument when required allocation metadata is invalid.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic,
+/// including invalid allocation metadata, system-graph validation, or node selection.
+/// @note Allocation and library exceptions may still propagate.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
                                            util::DiagnosticEmitter emit_error);
 
 /// Read thread dimensions for one selected node. An empty selector uses the
-/// config's local_node field or defaults only when the graph has one node.
+/// config's local_node field or defaults only when the graph has one node. Failure
+/// diagnostics and exceptions follow the corresponding non-node overloads.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_for_node(const std::string &json_path,
                                         const std::string &schema_text, std::string_view node_id,
@@ -213,7 +219,7 @@ struct TopologyBuildResult {
 ///   if (loaded.engine_config.num_threads > 1 &&
 ///       !rocjitsu::amdgpu::partition_topology_by_xcds(
 ///           engine.topology(), soc, loaded.engine_config.num_threads))
-///     throw std::invalid_argument("multi-threaded topology requires an XCD");
+///     return; // Report that multi-threaded topology requires an XCD.
 ///   engine.create();
 /// @endcode
 struct LoadedConfig {
@@ -285,7 +291,9 @@ struct DeviceIdentityConfig {
 /// for a large part is gigabytes of register files. A front end that only needs
 /// to know which GPU to present should not pay for a machine it never runs.
 /// File-reading, parsing, and device conversion failures emit a diagnostic
-/// and return failure. Other validation and allocation exceptions propagate.
+/// and return failure. Explicit system manifests are rejected with a diagnostic
+/// because this entry point does not select a local node. Other validation and
+/// allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -310,14 +318,18 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param json_path Path to the JSON configuration file.
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
-/// @returns Success, or failure with a diagnostic for file-reading, parsing, or
-/// KFD/DBT device conversion errors. Other validation and allocation exceptions propagate.
+/// @returns Success, or failure with a diagnostic for file-reading, parsing,
+/// KFD/DBT device conversion, architecture/target validation, system-graph validation,
+/// node selection, component-range, link-expression, or execution-thread allocation
+/// errors. Other validation and allocation exceptions propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
-/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
-/// diagnostic and return failure. Other validation and allocation exceptions propagate.
+/// @details File-reading, parsing, KFD/DBT device conversion, architecture/target
+/// validation, system-graph validation, node selection, component-range,
+/// link-expression, and execution-thread allocation failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -331,8 +343,7 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 /// @details Like the three-argument overload, but uses @p host_threads as the
 /// affinity input to the shared execution budget. Zero means indeterminate and
 /// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
-/// File-reading, parsing, and KFD/DBT device conversion failures emit a diagnostic
-/// and return failure. Other validation and allocation exceptions propagate.
+/// Failure diagnostics and exceptions follow the three-argument @ref load_config overload.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -344,8 +355,10 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
                                           uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
-/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
-/// return failure. Other validation and allocation exceptions propagate.
+/// @details Parsing, KFD/DBT device conversion, architecture/target validation,
+/// system-graph validation, node selection, component-range, link-expression, and
+/// execution-thread allocation failures emit a diagnostic and return failure.
+/// Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -355,9 +368,9 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON string against a stated host width.
-/// @details See the four-argument @ref load_config overload.
-/// Parsing and KFD/DBT device conversion failures emit a diagnostic and
-/// return failure. Other validation and allocation exceptions propagate.
+/// @details For host-thread budget behavior, see the four-argument @ref load_config overload.
+/// Failure diagnostics and exceptions follow the three-argument @ref load_config_from_string
+/// overload.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -372,6 +385,7 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
 /// @details This overload takes its helper allocation from the caller. A null resource explicitly
 /// disables asynchronous helpers. The loaded CUs share the supplied resource, which is useful
 /// when several independently loaded topologies must use one bounded helper pool.
+/// Failure diagnostics and exceptions follow the other string-loading overloads.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
@@ -387,7 +401,8 @@ util::FailureOr<LoadedConfig> load_config_from_string(
 /// local_node field in the JSON, if one exists. An empty node_id uses local_node;
 /// if neither selects a node, the graph must contain exactly one node. This
 /// contract applies to both path and string overloads below. The graph remains
-/// owned in the result for later topology and route projections.
+/// owned in the result for later topology and route projections. Failure diagnostics
+/// and exceptions follow the corresponding load_config() overloads.
 util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
                                                    const std::string &schema_text,
                                                    std::string_view node_id,

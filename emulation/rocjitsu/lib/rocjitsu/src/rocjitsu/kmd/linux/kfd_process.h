@@ -28,6 +28,7 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -59,7 +60,7 @@ public:
     };
 
     /// @brief Canonical shared backing retained for the process lifetime.
-    int doorbell_memfd = -1;
+    int doorbell_backing_fd = -1;
     /// @brief Every client doorbell view still owned by the mapping layer.
     std::vector<DoorbellView> doorbell_views;
     /// @brief Stable driver-side alias used exclusively by the command processor.
@@ -106,7 +107,9 @@ public:
     void *host_ptr = nullptr;
     uint32_t flags = 0;
     uint64_t handle = 0;
-    int memfd = -1;
+    /// @brief Owned BO backing descriptor (memfd or socket token), closed on allocation teardown.
+    /// @details Its lifetime follows the allocation, independently of the dma-buf handle below.
+    int backing_fd = -1;
     // Public dma-buf access mode retained across IPC import and re-export.
     int export_access_mode = -1;
     uint32_t gpu_id = 0;
@@ -114,11 +117,29 @@ public:
     bool imported = false;
     bool shared = false; ///< Simulator cache policy; does not alter requested ABI flags.
     int dmabuf_fd = -1;
-    // True when the driver created host_ptr (mmap it itself) and must munmap it
-    // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
-    // from the thunk) that the driver must never unmap, since unmapping them
-    // races with the owning process still accessing the memory.
-    bool host_ptr_owned = false;
+    enum class HostMappingKind {
+      None,
+      Caller,          ///< Caller owns the address; BO teardown leaves it mapped.
+      DriverView,      ///< Driver owns the client view; BO teardown unmaps it.
+      InternalBacking, ///< Driver owns stable GPU backing until BO free.
+    };
+    // host_ptr is GPU backing; an internal backing stays mapped across client views.
+    HostMappingKind host_mapping_kind = HostMappingKind::None;
+    // Full mapped extent, including pages beyond the BO's logical size.
+    size_t host_mapping_size = 0;
+    /// @brief Remaining fragment of an application-visible host mapping.
+    struct ClientView {
+      void *ptr = nullptr;
+      size_t size = 0;
+      // Caller fragments remain mapped at BO teardown; DriverView fragments
+      // are unmapped then. Partial munmap can split either kind into fragments.
+      HostMappingKind kind = HostMappingKind::None;
+      // A surviving fragment of direct GPU backing carries its GPU start.
+      // Aliases of InternalBacking have no GPU translation of their own.
+      std::optional<uint64_t> backing_gpu_va;
+    };
+    // Views include internal-backing aliases and fragments of direct backing.
+    std::vector<ClientView> client_views;
     // DRM BO state (create info, placement, UMD metadata) for this backing. The
     // kernel BO keeps it after every GEM handle and dmabuf fd closes.
     std::shared_ptr<GemObject> bo_state;
@@ -528,6 +549,10 @@ public:
   /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
+  /// @brief Coordinate target context ioctls across runtime and debugger clients.
+  /// @details Their op_mutex_ instances differ in daemon mode. Taken before alloc_mutex_
+  /// and CU locks; engine callbacks never acquire this ioctl coordination lock.
+  std::mutex queue_context_mutex_;
   mutable std::mutex alloc_mutex_;
   /// @brief Serializes scratch-pool backing allocation for this process.
   /// @details Every XCD of a fanned-out dispatch independently finds the same
@@ -551,6 +576,9 @@ public:
 
   uint32_t next_queue_id_ = 1;
   std::vector<uint32_t> active_queue_ids_;
+  /// @brief SET_XNACK_MODE latch; changes require no queues and a supported target.
+  /// Precise fault PC is modelled; GPU-initiated SVM migration is not.
+  std::atomic<bool> xnack_enabled_{false};
   struct QueueDoorbellInfo {
     uint32_t gpu_ordinal;
     uint32_t doorbell_offset;
@@ -573,8 +601,15 @@ public:
     uint64_t read_pointer_address = 0;
     uint64_t ctx_save_restore_address = 0;
     uint32_t ctx_save_restore_area_size = 0;
+    /// CREATE_QUEUE control-stack boundary; zero selects the compact test layout.
+    uint32_t control_stack_capacity = 0;
     uint32_t ring_size = 0;
     uint32_t queue_type = 0;
+    uint32_t scheduling_percentage = 100;
+    /// A debugger-suspended queue has a valid image whose edits it still owns.
+    bool debugger_owns_cwsr = false;
+    /// Successful debugger suspension also stops queues with no resident waves.
+    bool debug_suspended = false;
     uint32_t gpu_id = 0;
     uint32_t xcc_id = 0;
     /// CREATE_QUEUE supplied an exception-status address; the interrupt event is optional.
@@ -749,8 +784,10 @@ public:
       prune_debug_notification_events();
     }
 
-    /// @brief Clear every debugger-session-owned exception field.
+    /// @brief Clear debugger-session-owned queue state.
     void clear_debugger_exception_state() {
+      debugger_owns_cwsr = false;
+      debug_suspended = false;
       exception_status &= runtime_exception_pending_status | runtime_exception_retained_status;
       runtime_exception_queried_status = 0;
       debug_notification_session_generation = 0;
@@ -871,10 +908,15 @@ private:
   ///          and page_table_mutex_; readers hold at least one of those locks,
   ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
+  // Cache hits read the epoch while misses copy and release its shared_ptr.
+  // Keep the epoch off the cache line containing make_shared's reference count.
+  struct alignas(64) PageTableMutationEpoch : std::atomic<uint64_t> {
+    PageTableMutationEpoch() : std::atomic<uint64_t>(1) {}
+  };
   /// @brief Retained atomic token for lockless copied-policy checks.
   /// @details Invalidate before mutation, including partially throwing updates.
   std::shared_ptr<std::atomic<uint64_t>> page_table_mutation_epoch_ =
-      std::make_shared<std::atomic<uint64_t>>(1);
+      std::make_shared<PageTableMutationEpoch>();
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
       std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };

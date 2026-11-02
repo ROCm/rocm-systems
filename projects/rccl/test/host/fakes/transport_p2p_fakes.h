@@ -26,6 +26,9 @@ extern std::function<ncclResult_t(struct ncclComm* /*comm*/, int /*peer*/, size_
                                   ncclMemType_t /*memType*/)>
     g_ncclP2pImportShareableBuffer;
 
+// Default: succeeds; the buffer itself is released by the caller's ncclCudaFree.
+extern std::function<ncclResult_t(ncclIpcDesc* /*ipcDesc*/)> g_ncclP2pFreeShareableBuffer;
+
 void ResetTransportP2pFakes();
 
 #endif  // RCCL_TEST_HOST_FAKES_TRANSPORT_P2P_FAKES_H_

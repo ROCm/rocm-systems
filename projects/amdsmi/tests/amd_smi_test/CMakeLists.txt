@@ -83,6 +83,7 @@ set(tstSources
     ${CMAKE_CURRENT_SOURCE_DIR}/test_base.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_common.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/test_utils.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_fixture_utils.cc
 )
 
 # Build rules

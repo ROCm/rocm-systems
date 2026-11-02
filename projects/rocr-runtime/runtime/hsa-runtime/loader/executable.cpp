@@ -333,6 +333,23 @@ void Loader::Destroy(Loader *loader)
   r_debug_tail() = nullptr;
 }
 
+// Code objects v2+ load as one segment spanning every PT_LOAD.
+static uint64_t LoadSizeV2(const code::AmdHsaCode* c) {
+  const code::Segment* last = c->DataSegment(c->DataSegmentCount() - 1);
+  return last->vaddr() + last->memSize();
+}
+
+hsa_status_t Loader::CodeObjectLoadSize(const void* code_object, size_t size, size_t* load_size) {
+  code::AmdHsaCode code;
+  uint32_t major, minor;
+  if (!code.InitAsBuffer(code_object, size) || !code.GetCodeObjectVersion(&major, &minor) ||
+      major < 2 || code.Machine() != ELF::EM_AMDGPU || !code.DataSegmentCount()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  *load_size = LoadSizeV2(&code);
+  return HSA_STATUS_SUCCESS;
+}
+
 Executable* AmdHsaCodeLoader::CreateExecutable(
   hsa_profile_t profile, const char *options, hsa_default_float_rounding_mode_t default_float_rounding_mode)
 {
@@ -1440,17 +1457,15 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   const std::string &uri,
   hsa_loaded_code_object_t *loaded_code_object)
 {
-  return LoadCodeObject(agent, code_object, 0, options, uri, loaded_code_object);
+  return LoadCodeObject(agent, code_object, 0, options, uri, loaded_code_object,
+                        /*load_address=*/nullptr, /*load_limit=*/0);
 }
 
-hsa_status_t ExecutableImpl::LoadCodeObject(
-  hsa_agent_t agent,
-  hsa_code_object_t code_object,
-  size_t code_object_size,
-  const char *options,
-  const std::string &uri,
-  hsa_loaded_code_object_t *loaded_code_object)
-{
+hsa_status_t ExecutableImpl::LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                            size_t code_object_size, const char* options,
+                                            const std::string& uri,
+                                            hsa_loaded_code_object_t* loaded_code_object,
+                                            void* load_address, size_t load_limit) {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
   if (HSA_EXECUTABLE_STATE_FROZEN == state_) {
     logger_ << "LoaderError: executable is already frozen\n";
@@ -1613,8 +1628,14 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
-  status = LoadSegments(agent, code.get(), majorVersion);
-  if (status != HSA_STATUS_SUCCESS) return status;
+  status = LoadSegments(agent, code.get(), majorVersion, load_address, load_limit);
+  if (status != HSA_STATUS_SUCCESS) {
+    if (load_address && loaded_code_objects.back()->LoadedSegments().empty()) {
+      loaded_code_objects.pop_back();
+      objects.pop_back();
+    }
+    return status;
+  }
 
   for (size_t i = 0; i < code->SymbolCount(); ++i) {
     if (majorVersion >= 2 &&
@@ -1900,6 +1921,49 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
+      // External variables, such as the control scratchpad, are defined by the application with
+      // hsa_executable_agent_global_variable_define before loading, like a GPU code object's
+      // undefined symbols. Their addresses are plain stores, so they are written in here.
+      for (const auto& [name, ext] : kernel.external_symbols) {
+        const auto var_it = agent_symbols_.find(std::make_pair(name, agent));
+        if (var_it == agent_symbols_.end() || !var_it->second->IsVariable() ||
+            var_it->second->address == 0) {
+          logger_ << "LoaderError: symbol \"" << name << "\" is undefined\n";
+          return HSA_STATUS_ERROR_VARIABLE_UNDEFINED;
+        }
+        void* va = reinterpret_cast<void*>(var_it->second->address);
+
+        // The NPU reaches the variable at its agent address, so all of it must lie in one
+        // allocation the driver knows. The extent is measured from the allocation base
+        // FindDriverMemoryHandle returns: for a VMM mapping, PtrInfo reports the queried pointer
+        // as the base but the whole mapping as the size.
+        auto* runtime = core::Runtime::runtime_singleton_;
+        hsa_amd_pointer_info_t info = {};
+        info.size = sizeof(info);
+        void* alloc_base = nullptr;
+        core::DriverMemoryHandle handle{};
+        bool known = runtime->PtrInfo(va, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS;
+        known = known && info.type != HSA_EXT_POINTER_TYPE_UNKNOWN && info.agentBaseAddress;
+        known = known &&
+            runtime->FindDriverMemoryHandle(va, core_agent, &alloc_base, &handle) ==
+                HSA_STATUS_SUCCESS;
+        const auto offset_in_alloc =
+            reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(alloc_base);
+        if (!known || offset_in_alloc + ext.size > info.sizeInBytes) {
+          log_warning_n(10, "AIE: '%s' is not defined in %u bytes of AIE-accessible memory.\n",
+                        name.c_str(), ext.size);
+          return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+        }
+
+        const uint64_t dev_addr = reinterpret_cast<uint64_t>(info.agentBaseAddress) +
+            (reinterpret_cast<uintptr_t>(va) - reinterpret_cast<uintptr_t>(info.hostBaseAddress));
+        for (const AMD::aie_elf::PatchSite& site : ext.sites) {
+          const uint64_t value = dev_addr + site.addend;
+          std::memcpy(kernel.ctrl_code.data() + site.offset, &value, sizeof(value));
+        }
+        desc->external_variables.push_back({va, ext.size, static_cast<uint32_t>(handle.handle)});
+      }
+
       // The control code is only ever a memcpy source for a per-dispatch buffer, so it stays in
       // ordinary host memory rather than a device segment. Moved, not copied: the parsed kernel
       // is looked up once and is dead after this.
@@ -1939,13 +2003,15 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
 }
 #endif  // defined(__linux__)
 
-hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent,
-                                          const code::AmdHsaCode *c,
-                                          uint32_t majorVersion) {
+hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent, const code::AmdHsaCode* c,
+                                          uint32_t majorVersion, void* load_address,
+                                          size_t load_limit) {
+  // V1 segments are allocated separately and cannot share one base address.
+  if (majorVersion < 2 && load_address) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   if (majorVersion < 2)
     return LoadSegmentsV1(agent, c);
   else
-    return LoadSegmentsV2(agent, c);
+    return LoadSegmentsV2(agent, c, load_address, load_limit);
 }
 
 hsa_status_t ExecutableImpl::LoadSegmentsV1(hsa_agent_t agent,
@@ -1959,19 +2025,26 @@ hsa_status_t ExecutableImpl::LoadSegmentsV1(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
-                                            const code::AmdHsaCode *c) {
+hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode* c,
+                                            void* load_address, size_t load_limit) {
   assert(c->Machine() == ELF::EM_AMDGPU && "Program code objects are not supported");
 
   if (!c->DataSegmentCount()) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
 
   uint64_t vaddr = c->DataSegment(0)->vaddr();
-  uint64_t size = c->DataSegment(c->DataSegmentCount() - 1)->vaddr() +
-                  c->DataSegment(c->DataSegmentCount() - 1)->memSize();
+  uint64_t size = LoadSizeV2(c);
 
-  void *ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size,
-      AMD_ISA_ALIGN_BYTES, true);
-  if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  void* ptr = nullptr;
+  if (load_address) {
+    if (size > load_limit) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    hsa_status_t status =
+        context_->SegmentAllocAt(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size, load_address, &ptr);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  } else {
+    ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size, AMD_ISA_ALIGN_BYTES,
+                                 true);
+    if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   std::shared_ptr<Segment> load_segment = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
       ptr, size, vaddr, c->DataSegment(0)->offset());

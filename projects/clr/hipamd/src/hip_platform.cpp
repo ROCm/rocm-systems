@@ -53,8 +53,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t maxVGPRs = adjust_for_wave64
       ? device.info().vgprsPerSimd_ >> 1
       : device.info().vgprsPerSimd_;
+
   const size_t VgprWaves = wrkGrpInfo->usedVGPRs_ > 0
-      ? maxVGPRs / amd::alignUp(wrkGrpInfo->usedVGPRs_, VgprGranularity)
+      ? maxVGPRs / amd::roundUp<size_t>(wrkGrpInfo->usedVGPRs_, VgprGranularity)
       : MaxWavesPerSimd;
 
   if (VgprWaves == 0) {
@@ -70,8 +71,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const size_t sgprAllocGranule = device.info().sgprAllocGranularity_ != 0
       ? device.info().sgprAllocGranularity_
       : DefaultSgprAllocGranule;
+
   const size_t sgprsPerWave =
-      amd::alignUp(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
+      amd::roundUp<size_t>(wrkGrpInfo->usedSGPRs_, sgprAllocGranule) +
       device.info().sgprTrapHandlerReserve_;
   const size_t GprWaves = wrkGrpInfo->usedSGPRs_ > 0
       ? std::min(VgprWaves, device.info().sgprsPerSimd_ / sgprsPerWave)

@@ -44,12 +44,6 @@ class NativeToolFinder:
     sources_build_subdir_name = "_build"
     sources_bin_subdir_name = "lib"
     lib_name = "librocprofiler-compute-tool.so"
-    lib_relative_path = "/".join([
-        sources_dir_name,
-        sources_build_subdir_name,
-        sources_bin_subdir_name,
-        lib_name,
-    ])
 
     def __init__(self, root_path: Path) -> None:
         console_debug(f"Searching for {self.lib_name}.")
@@ -101,7 +95,6 @@ class NativeToolFinder:
         self._execute_command(command)
 
     def _execute_command(self, command: List[str]) -> None:
-        # Output is logged when enable_logging=False is not provided
         success, _ = capture_subprocess_output(command)
         if not success:
             raise RuntimeError(f"Failed to execute command: {shlex.join(command)}")

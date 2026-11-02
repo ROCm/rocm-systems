@@ -48,14 +48,6 @@ constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 2);
 }
 
-// Fixed-width peer staging for phase 1: unlike the one-shot, each peer receives a
-// different shard, so the pack cannot be hoisted out of the peer loop. Loading a
-// batch before storing it keeps the per-peer streams overlapped -- interleaved,
-// every store waits on the next pack. 8 covers rank counts 4 and 8 in one pass;
-// the rank test is a predicate on a fixed trip count so both loops unroll and the
-// unused entries fold away when NRANKS_CT is known.
-constexpr int kDdaLL128ArTwoShotPeerBatch = 8;
-
 // LL128 two-shot all-reduce kernel. One warp owns one slice of a shard at a time,
 // so the launcher sizes the grid on the shard's slices, not the message's.
 //
@@ -126,10 +118,10 @@ __launch_bounds__(512)
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
 
-    for (int base = 1; base < nRanks; base += kDdaLL128ArTwoShotPeerBatch) {
-      uint64_t regs[kDdaLL128ArTwoShotPeerBatch][kDdaLL128WordsPerThread] = {};
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint64_t regs[kDdaLLPeerBatch][kDdaLL128WordsPerThread] = {};
 #pragma unroll
-      for (int i = 0; i < kDdaLL128ArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -138,7 +130,7 @@ __launch_bounds__(512)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLL128ArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;

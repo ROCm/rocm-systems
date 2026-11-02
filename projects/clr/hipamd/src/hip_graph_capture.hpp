@@ -7,8 +7,13 @@
 #pragma once
 namespace hip {
 // forward declaration of capture methods
-hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction, dim3& gridDim,
-                                  dim3& blockDim, void**& args, size_t& sharedMemBytes);
+
+// Capture path of hipLaunchKernel_common, shared by hipLaunchKernel and hipLaunchKernelExC.
+// Keeps the cluster dimensions given with hipLaunchAttributeClusterDimension on the kernel node.
+hipError_t capturehipLaunchKernelCommon(hipStream_t& stream, const void*& hostFunction,
+                                        dim3& gridDim, dim3& blockDim, void**& args,
+                                        size_t& sharedMemBytes, dim3& clusterDim,
+                                        bool& clusterDimsSpecified);
 
 hipError_t capturehipExtModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f,
                                            uint32_t& globalWorkSizeX, uint32_t& globalWorkSizeY,

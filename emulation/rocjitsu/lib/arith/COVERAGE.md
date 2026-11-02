@@ -1,5 +1,5 @@
 # Instruction coverage
 
-The two gfx12 Wave32 instructions support loose and empirical bit-exact numeric
-results with default controls. FP16 FMA status reporting is not yet implemented;
-mode 3 is rejected before outputs are changed. WMMA has no FP-status output.
+The public headers enumerate the instructions included at this stage.
+Tests cover each entry point across supported CPU levels and semantics.
+Rocjitsu still uses its existing instruction handlers.

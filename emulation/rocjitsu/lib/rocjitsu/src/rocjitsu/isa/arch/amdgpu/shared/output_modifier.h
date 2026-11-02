@@ -16,10 +16,26 @@
 ///   denormals flushed. RDNA1/2/3 IEEE=0 captures cover both flushed and
 ///   preserved output denormals.
 ///
+/// Migrated callers reach the stage through one of these; prefer them over a new
+/// OMOD implementation:
+/// - Generated VOP3 scalar bodies: output_modifier::apply on the result, with the
+///   policy from output_modifier_policy in simd_glue.h.
+/// - fp_mode::apply_omod_f32 -> scale: the F32 scalar OMOD finalizer, also used by
+///   the SDWA FLUSH_NEAREST path.
+/// - apply_vop3_dst_mod_f32 -> apply: every F32 SIMD destination helper, including
+///   the clamp-only VOP3P paths.
+///
 /// Paths outside the shared stage:
 /// - Not yet migrated:
-///   - Host-result scalar lowering and SIMD destination helpers: separate
-///     OMOD/CLAMP implementations for remaining F32/F64 operations.
+///   - F64 destinations: scalar and SIMD keep finalize_omod_f64, plus the
+///     per-operation exceptions below.
+///   - SDWA F32 (dpp_sdwa_ops.h): scale_f32 under OutputPolicy::MODE is a separate
+///     OMOD implementation. It rounds overflow by MODE for SIN and RCP_IFLAG,
+///     where VOP3 rounds to nearest even, because the SDWA output policy keys off
+///     FLUSH_NEAREST_F32_OPS and the VOP3 rounding off TRANS_F32_OPS. On RDNA2
+///     with IEEE=0, MODE=0x003, source 0x00800000 and mul:4, RCP_IFLAG gives
+///     0x7f800000 through VOP3 and 0x7f7fffff through SDWA. Only the VOP3 rounding
+///     is capture-backed; see floating_policy.py for the migration constraint.
 ///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
 ///     including the current pre-narrowing F16 DIV_FIXUP implementation.
 ///   - F64 FMA/FMAC: scalar and SIMD retain finish_f64, unlike migrated ADD/MUL.
