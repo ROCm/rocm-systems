@@ -390,13 +390,21 @@ function(dl_add_fat_object NAME SRC)
     if(_half STREQUAL "host")
       set(_obj "${DEVICE_BUILD_DIR}/${NAME}.o")
       set(_half_flags --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS})
+      set(_out "${_obj}")
+      set(_codegen "")
       set(_deps "")
     else()
       set(_obj "${DEVICE_BUILD_DIR}/${_half}/${NAME}.o")
       file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
       # Each TU is self-contained on the device; internalize as non-RDC does.
+      # Codegen is a separate step because ROCm 7.0's clang emits bitcode here
+      # even with -fno-offload-lto; see ir_codegen_cmd in tools/rccl-device-compile.
       set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
-        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS})
+        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
+      set(_out "${_obj}.bc")
+      set(_codegen COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
+        --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
+        ${_flags} -o ${_obj} ${_out})
       set(_deps ${FO_EXTRA_DEPENDS})
       set(DL_MIXED_DEVICE_OBJS_${_half} ${DL_MIXED_DEVICE_OBJS_${_half}} "${_obj}" PARENT_SCOPE)
     endif()
@@ -404,12 +412,13 @@ function(dl_add_fat_object NAME SRC)
     # object stale. CMake < 3.20 has no DEPFILE for custom commands.
     set(_depfile "")
     if(FO_DEPFILE_TRACKING AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
-      list(APPEND _half_flags -MD -MF "${_obj}.d")
+      list(APPEND _half_flags -MD -MF "${_obj}.d" -MT "${_obj}")
       set(_depfile DEPFILE "${_obj}.d")
     endif()
     add_custom_command(
       OUTPUT  ${_obj}
-      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_obj} ${SRC}
+      COMMAND ${DL_CLANG} -x hip ${_half_flags} ${_flags} -c -o ${_out} ${SRC}
+      ${_codegen}
       DEPENDS ${SRC} ${_deps}
       ${_depfile}
       COMMENT "DL compile (${_half}): ${NAME}"
