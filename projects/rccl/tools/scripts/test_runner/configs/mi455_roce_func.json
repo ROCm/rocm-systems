@@ -3254,7 +3254,7 @@
         {
           "name": "AbortDda_IncompleteCollective",
           "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
-          "test_filter": "AbortDdaMPITest.*-AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+          "test_filter": "AbortDdaMPITest.*-AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl*"
         },
         {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
@@ -5404,6 +5404,11 @@
           "name": "AbortDda_IncompleteCollective_BroadcastLl",
           "description": "Rank np-1 skips a DDA fabric LL Broadcast (root 0); asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
           "test_filter": "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl"
+        },
+        {
+          "name": "AbortDda_IncompleteCollective_BroadcastLl128",
+          "description": "Rank np-1 skips a DDA fabric LL128 Broadcast (root 0, above the LL cap); asserts LL128 via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
+          "test_filter": "AbortDdaMPITest.IncompleteCollective_DdaBroadcastLl128"
         }
       ]
     },
