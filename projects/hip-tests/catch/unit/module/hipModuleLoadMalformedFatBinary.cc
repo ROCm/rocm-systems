@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -81,6 +82,18 @@ class ScopedBundleFile {
   std::filesystem::path path_;
 };
 
+// Offload-binary magic plus the size at offset 8. The rest is padding.
+std::vector<uint8_t> MakeOffloadBlob(size_t file_size, uint64_t recorded_size) {
+  constexpr unsigned char kMagic[] = {0x10, 0xFF, 0x10, 0xAD};
+  REQUIRE(file_size >= 16);
+  std::vector<uint8_t> bytes(file_size, 0);
+  std::memcpy(bytes.data(), kMagic, sizeof(kMagic));
+  const uint32_t version = 1;
+  std::memcpy(bytes.data() + 4, &version, sizeof(version));
+  std::memcpy(bytes.data() + 8, &recorded_size, sizeof(recorded_size));
+  return bytes;
+}
+
 void ExpectFileLoadRejected(const std::vector<uint8_t>& bundle) {
   const ScopedBundleFile file(bundle);
   const std::string path = file.path();
@@ -104,5 +117,18 @@ HIP_TEST_CASE(Unit_hipModuleLoad_Negative_MalformedFatBinaryBounds) {
     REQUIRE(bundle.size() < kComgrHeaderWindow);
     bundle.resize(kComgrHeaderWindow);
     ExpectFileLoadRejected(bundle);
+  }
+}
+
+// We cannot do positive tests until loading works through COMGr.
+HIP_TEST_CASE(Unit_hipModuleLoad_Negative_OffloadBinary) {
+  HIP_CHECK(hipFree(nullptr));
+
+  SECTION("recorded size extends past the file") {
+    ExpectFileLoadRejected(MakeOffloadBlob(32, 32 + 4096));
+  }
+
+  SECTION("size is in range and the rest is junk") {
+    ExpectFileLoadRejected(MakeOffloadBlob(32, 32));
   }
 }
