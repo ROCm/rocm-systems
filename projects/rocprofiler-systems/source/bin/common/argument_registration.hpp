@@ -7,6 +7,7 @@
 #include "common/domain_flag_state.hpp"
 #include "common/env_vars.hpp"
 #include "common/json_config.hpp"
+#include "common/string_utility.hpp"
 
 #include <timemory/utility/argparse.hpp>
 
@@ -181,11 +182,12 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
                 auto const input = parser_ref.get<std::string>("cpu");
                 if(!input.empty())
                 {
-                    try
+                    const auto input_integer = utility::string::safe_stoi(input);
+                    if(input_integer.has_value())
                     {
-                        std::stoi(input);
                         freq = input;
-                    } catch(...)
+                    }
+                    else
                     {
                         std::cerr
                             << "[rocprof-sys] WARNING: Invalid CPU sampling frequency '"

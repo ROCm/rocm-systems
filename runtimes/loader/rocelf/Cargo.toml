@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "rocelf"
+description = "Standalone ELF64 and AMDGPU code-object image loader"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+doctest = false
+crate-type = ["rlib"]
+
+[lints]
+workspace = true

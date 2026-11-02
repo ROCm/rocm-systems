@@ -4,6 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "SingleProcMemRegTestUtils.hpp"
+#include "StandaloneUtils.hpp"
 
 namespace RcclUnitTesting
 {
@@ -140,5 +142,24 @@ namespace RcclUnitTesting
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
+  }
+
+  TEST(Gather, SingleProcMemReg)
+  {
+    SingleProcMemRegTestConfig config;
+    config.mode = SingleProcMemRegMode::Enabled;
+    config.funcTypes = {ncclCollGather};
+    config.dataTypes = {ncclUint8, ncclBfloat16, ncclUint32, ncclUint64};
+    config.redOps = {ncclSum};
+    config.roots = {1};
+    config.numElements = {1, 4314, 1048575, 1048576};
+    config.inPlaceList = {true, false};
+    config.useHipGraphList = {true, false};
+    RunSingleProcMemRegTest(config);
+  }
+
+  TEST(Gather, SingleProcMemRegDisabled)
+  {
+    RunSingleProcMemRegDisabledTest(ncclCollGather, ncclUint32, true, {1});
   }
 }

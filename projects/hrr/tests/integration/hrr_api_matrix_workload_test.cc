@@ -75,15 +75,8 @@ __global__ void hrr_mtx_add(const int* a, const int* b, int* c, int n) {
 // shape MoRI's globalGpuStates arrives in.
 __device__ int hrr_mtx_symbol[4] = {0, 0, 0, 0};
 
-// No-parameter kernel. hipLaunchByPtr launches whatever the exec stack holds,
-// so a kernel that takes nothing is the only way to exercise it without first
-// calling hipSetupArgument — which crashes replay, and would take the rest of
-// the archive with it (see Unit_HRR_ApiMatrix_LegacyLaunch_Direct).
 __global__ void hrr_mtx_noargs() {}
 
-// Grid-wide cooperative barrier: every workgroup must be co-resident, so an
-// unfaithful replay of the launch deadlocks here rather than returning a wrong
-// answer. That is the property the T2 test is guarding.
 __global__ void hrr_mtx_coop(int* out, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) out[i] = i;
@@ -249,7 +242,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   }
   HRR_HIP_CHECK(hipStreamWaitEvent(s_nb, ev_stop, 0));
 
-  // hipFuncGetAttribute against the chevron kernel's device function.
+  // hipFuncGetAttributes against the chevron kernel's device function.
   {
     hipFuncAttributes fattr{};
     (void)hipFuncGetAttributes(&fattr, reinterpret_cast<const void*>(hrr_mtx_add));
@@ -389,16 +382,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
 // ===========================================================================
 // T1 — the payload-loss class.
 //
-// Every API here has a real playback handler and is counted as faithfully
-// replayed, yet could not be: the generator lowered a const-struct pointer to
-// a bare capture-time address, or a >8-byte by-value struct to a single
-// 8-byte field. Several of these payloads are now carried inline in the
-// event, so the call sites below observe each API's replay class rather than
-// a known loss. The workload still calls them with recognisable arguments, so
-// a regression back to truncation would be visible.
-//
-// hipIpcGetMemHandle was the sharpest case: the handle is 64 bytes and only 8
-// used to survive, so the workload fills it with a recognisable pattern.
+// Most take a const-struct pointer or a >8-byte by-value struct. Some
+// replay through a real handler, some are NOOP and
+// hipLaunchCooperativeKernelMultiDevice is UNREPLAYABLE; the matrix asserts
+// each one's class.
 //
 // Final blob: d[i] == 3.
 // ===========================================================================
@@ -414,11 +401,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
   // ---- The 64-byte IPC handle ---------------------------------------------
-  // hipIpcMemHandle_t is HIP_IPC_HANDLE_SIZE (64) bytes passed by value. The
-  // generated struct field used to be one uint64_t, discarding 56 bytes; the
-  // handle is now carried whole as inline bytes. Open it in-process: HIP
-  // rejects a same-process open, and that is fine — the event is recorded
-  // either way and the recorded *argument* is what the matrix is about.
+  // hipIpcMemHandle_t is HIP_IPC_HANDLE_SIZE (64) bytes passed by value, and
+  // capture does not record it. HIP rejects an open in the owning process, and
+  // capture records hipIpcOpenMemHandle only on hipSuccess, so the matrix
+  // expects no event for it.
   {
     hipIpcMemHandle_t mem_handle{};
     std::memset(&mem_handle, 0xA5, sizeof(mem_handle));
@@ -500,8 +486,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
 
   // ---- External memory / semaphore import ---------------------------------
   // Both take a const descriptor pointer. There is no portable handle to
-  // import here, so these fail at capture time — which is the point: the
-  // recorded event still carries a dangling host address for the descriptor.
+  // import here, so both fail, and capture records them only on hipSuccess:
+  // the matrix expects no event for either.
   {
     hipExternalMemoryHandleDesc mem_desc{};
     mem_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
@@ -560,7 +546,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// T2 — silent failures: handlers that return hipSuccess and do nothing.
+// T2 — silent failures: where one of these is NOOP at replay, it returns
+// hipSuccess and does nothing. The matrix asserts which ones are NOOP.
 //
 // These rank above breadth, because a replay that reports success while
 // producing wrong numbers is worse than one that refuses to run. Four
@@ -672,9 +659,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
   }
 
   // ---- Cooperative module launch ------------------------------------------
-  // Live on Instinct through MIOpen's Winograd Fury RxS solver. An unfaithful
-  // replay would deadlock at the grid-wide barrier rather than return an
-  // error; the matrix asserts the class the handler actually shows.
+  // Live on Instinct through MIOpen's Winograd Fury RxS solver.
   if (device_attr(hipDeviceAttributeCooperativeLaunch)) {
     std::vector<char> co = compile_rtc();
     hipModule_t mod = nullptr;
@@ -977,10 +962,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // The shareable-handle family is deliberately absent here: replaying
-  // hipMemExportToShareableHandle kills the replay process, and one such event
-  // in this archive would cost every observation after it. It has its own
-  // workload, Unit_HRR_ApiMatrix_ShareableHandle_Direct, for that reason.
+  // The shareable-handle family is in
+  // Unit_HRR_ApiMatrix_ShareableHandle_Direct.
 
   // ---- Verify the peer copy landed, and leave the blob for replay ---------
   HRR_HIP_CHECK(hipSetDevice(dst_dev));
@@ -998,18 +981,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
 // T3 — the fabric / shareable-handle family, on its own.
 //
 // MoRI's VMHeap and the PyTorch symmetric-memory path both hand memory between
-// ranks with these four. Three of them are
-// NOOP at replay. The fourth, hipMemExportToShareableHandle, has a real
-// generated handler that writes the exported fd through the *capture-time*
-// address of the caller's `int fd` — an address that means nothing in the
-// replay process — so replaying it does not fail, it segfaults.
-//
-// That is why this is a separate workload rather than part of
-// Unit_HRR_ApiMatrix_MultiGpu_Direct: a crash ends the replay, and every event
-// recorded after it goes unobserved. Isolating it costs one small archive and
-// keeps the crash from erasing the peer and VMM coverage next door. The three
-// NOOP calls come first for the same reason, so only the import — which needs
-// an fd the export has to produce — is left behind the crash.
+// ranks with these. hipMemRetainAllocationHandle and
+// hipMemGetAllocationPropertiesFromHandle are NOOP at replay,
+// hipMemExportToShareableHandle is REAL and hipMemImportFromShareableHandle is
+// UNREPLAYABLE.
 //
 // No final blob: nothing here writes device memory.
 // ===========================================================================
@@ -1068,8 +1043,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_ShareableHandle_Direct", "[.][hrr-direct]") {
           (void)hipMemUnmap(va, granularity);
         }
 
-        // Everything below this point is recorded but unobservable: the export
-        // is the event that ends the replay.
         int fd = -1;
         if (hipMemExportToShareableHandle(
                 &fd, handle, hipMemHandleTypePosixFileDescriptor, 0)
@@ -1636,23 +1609,11 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   hipEvent_t ev = nullptr;
   HRR_HIP_CHECK(hipEventCreateWithFlags(&ev, hipEventDisableTiming));
 
-  // The driver-context family is NOT here: replaying it leaves the process
-  // without a usable current device and the next API to ask for one segfaults.
-  // It has its own workload, Unit_HRR_ApiMatrix_LegacyCtx_Direct.
+  // The driver-context family is in Unit_HRR_ApiMatrix_LegacyCtx_Direct.
   (void)hipSetDeviceFlags(hipDeviceScheduleAuto);
 
   // ---- The pre-chevron launch ABI, minus the argument pushes --------------
-  // hipConfigureCall with a kernel that takes no arguments, so no
-  // hipSetupArgument is needed. That half of the ABI lives in
-  // Unit_HRR_ApiMatrix_LegacyLaunch_Direct because it segfaults replay, and
-  // keeping it out of here is what lets the ~80 APIs below be observed at all.
-  // hipLaunchByPtr itself is lowered away before capture; it is here to keep
-  // the sequence a real one rather than for its own event.
-  //
-  // The launch it issues is NOT here: hipLaunchByPtr is recorded as an
-  // ordinary hipModuleLaunchKernel, and that event segfaults replay, which
-  // would cost the ~80 APIs below. It lives with the crash in
-  // Unit_HRR_ApiMatrix_LegacyLaunch_Direct instead.
+  // hipSetupArgument is in Unit_HRR_ApiMatrix_LegacyLaunch_Direct.
   {
     (void)hipConfigureCall(dim3(1), dim3(64), 0, s);
   }
@@ -1779,8 +1740,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   }
 
   // ---- Driver entry-point lookup ------------------------------------------
-  // Both of these are NOOP at replay. Their hipGetProcAddress_spt sibling is
-  // not, and it segfaults, so it lives in
+  // Both of these are NOOP at replay. hipGetProcAddress_spt is in
   // Unit_HRR_ApiMatrix_ProcAddress_Direct.
   {
     void* entry = nullptr;
@@ -1792,12 +1752,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   }
 
   // ---- Stream-per-thread spellings ----------------------------------------
-  // The two _spt kernel-launch entry points are not here: both replay a
-  // capture-time host function address and segfault, so they have a workload
-  // each (Unit_HRR_ApiMatrix_SptKernelLaunch_Direct,
-  // Unit_HRR_ApiMatrix_SptCoopLaunch_Direct). The callback pair below takes a
-  // recorded host pointer too and does not crash — their plain spellings are
-  // already measured as a real handler and a clean error return.
+  // The two _spt kernel launches are in
+  // Unit_HRR_ApiMatrix_SptKernelLaunch_Direct and
+  // Unit_HRR_ApiMatrix_SptCoopLaunch_Direct. The callback pair below is
+  // UNREPLAYABLE, like its plain spellings.
   {
     int callback_hits = 0;
     (void)hipStreamAddCallback_spt(hipStreamPerThread, mtx_stream_callback,
@@ -1894,17 +1852,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
 // A translation unit compiled -fgpu-default-stream=per-thread calls these
 // instead of the plain names, so this is not an exotic surface: it is what an
 // ordinary chevron launch becomes under a common compiler flag. The plain
-// hipLaunchKernel is lowered to hipModuleLaunchKernel before capture sees it
-// and replays faithfully; the _spt spelling is recorded under its own name
-// with the host function address as the identity of the kernel, and replay
-// hands that address to the runtime in a process where it means nothing.
-//
-// Two workloads rather than one because a crash ends the archive it is in, so
-// two crashing APIs cannot be measured in the same recording. Only the plain
-// launch turned out to crash — the cooperative one fails cleanly with 13
-// (invalid device symbol), the same missing information caught a layer
-// earlier. It keeps its own archive so that regressing to a crash would cost
-// nothing but its own coverage.
+// hipLaunchKernel is lowered to hipModuleLaunchKernel before capture sees it;
+// the _spt spellings are recorded under their own event ids and replay through
+// the same launch path as the plain ones.
 // ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_SptKernelLaunch_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -1915,7 +1865,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SptKernelLaunch_Direct", "[.][hrr-direct]") {
   int n_arg = kN;
   void* args[] = {&d, &fill_val, &n_arg};
 
-  // Last recorded event of this archive, on purpose.
   (void)hipLaunchKernel_spt(reinterpret_cast<const void*>(hrr_mtx_fill),
                             dim3((kN + 255) / 256), dim3(256), args, 0,
                             hipStreamPerThread);
@@ -1933,7 +1882,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SptCoopLaunch_Direct", "[.][hrr-direct]") {
   int n_arg = kN;
   void* args[] = {&d, &n_arg};
 
-  // Last recorded event of this archive, on purpose.
   (void)hipLaunchCooperativeKernel_spt(
       reinterpret_cast<const void*>(hrr_mtx_coop), dim3(1), dim3(64), args, 0,
       hipStreamPerThread);
@@ -1942,18 +1890,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_SptCoopLaunch_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// T4 — symbol lookup by name, which is a string the archive never stored.
+// T4 — symbol lookup by name.
 //
-// hipGetProcAddress_spt(const char* symbol, ...) is recorded as a bare address
-// with none of the characters behind it, and the generated handler replays the
-// address. Measured with a backtrace: SIGSEGV inside
-// hip::hipGetProcAddress_common at hip_device.cpp:880, with gdb reporting
-// "Cannot access memory" for the symbol argument. Same defect as
-// hipSetupArgument, on an input string rather than an argument blob.
-//
-// Its plain and _spt driver-entry-point siblings take the same const char* and
-// survive only because they are NOOP at replay. They are called here too, to
-// keep the comparison in one archive.
+// Capture records the symbol string of hipGetProcAddress_spt, and its handler
+// replays the lookup with it. hipGetDriverEntryPoint is NOOP at replay.
 //
 // No final blob: nothing here touches device memory.
 // ===========================================================================
@@ -1968,7 +1908,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_ProcAddress_Direct", "[.][hrr-direct]") {
   hipDriverProcAddressQueryResult proc_status = HIP_GET_PROC_ADDRESS_SUCCESS;
   (void)hipGetProcAddress("hipMalloc", &proc, HIP_VERSION, 0, &proc_status);
 
-  // Last recorded event of this archive, on purpose.
   void* spt_proc = nullptr;
   hipDriverProcAddressQueryResult spt_status = HIP_GET_PROC_ADDRESS_SUCCESS;
   (void)hipGetProcAddress_spt("hipMalloc", &spt_proc, HIP_VERSION, 0,
@@ -1976,31 +1915,12 @@ TEST_CASE("Unit_HRR_ApiMatrix_ProcAddress_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// T4 — the driver-context family, which poisons the replay it runs in.
+// T4 — the driver-context family.
 //
-// Measured, with a backtrace: replaying this sequence ends with the next
-// hipGetDevice taking SIGSEGV inside hip::hipGetDevice at
-// hip_device_runtime.cpp:705 (`*deviceId = device->deviceId()`) — there is no
-// current device left to ask. The family replays asymmetrically:
-// hipCtxCreate and hipCtxPopCurrent are NOOP, hipCtxPushCurrent and
-// hipCtxDestroy are real. So replay pushes a capture-time hipCtx_t that means
-// nothing here, then destroys a context it never created, and the thread is
-// left pointing at nothing. Nothing reports an error; the process just dies
-// several events later, at an innocent API.
+// hipCtxCreate, hipCtxPopCurrent, hipCtxPushCurrent and hipCtxDestroy are
+// REAL at replay.
 //
-// A probe run narrowed it down: the replay dies at the hipGetDevice that
-// follows hipCtxPushCurrent, before ever reaching hipCtxDestroy. So it is the
-// NOOP-pop / real-push pair that does the damage — replay pushes a hipCtx_t
-// value that only meant something in the recording process — and hipCtxDestroy
-// is survivable on its own. The two are separated here accordingly: the
-// destroy runs against its own context and is observed, and the push is the
-// last event in the archive so nothing sits behind the crash.
-//
-// The hipGetDevice calls are probes rather than coverage. The first one
-// standing between destroy and push is what makes the attribution above
-// re-checkable on every run instead of a claim in a comment.
-//
-// No final blob: this workload deliberately ends by breaking its own context.
+// No final blob: nothing here writes device memory.
 // ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -2032,14 +1952,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
     (void)hipCtxDestroy(ctx);
   }
 
-  // Still alive after a replayed hipCtxDestroy? Anything after this line in
-  // the verbose replay log is the evidence that the destroy is not the
-  // problem.
   int probe_device = -1;
   (void)hipGetDevice(&probe_device);
 
-  // Second context, for the pair that is. hipCtxPushCurrent is the last
-  // recorded event of this archive, on purpose.
   hipCtx_t ctx2 = nullptr;
   if (hipCtxCreate(&ctx2, 0, dev) == hipSuccess) {
     hipCtx_t popped = nullptr;
@@ -2049,21 +1964,11 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// T4 — the half of the pre-chevron launch ABI that segfaults replay.
+// T4 — the argument pushes of the pre-chevron launch ABI.
 //
 // hipSetupArgument(const void* arg, size_t size, size_t offset) pushes `size`
-// bytes from `arg` into the pending kernarg buffer. HRR records `arg` as a
-// bare uint64_t and the generated handler replays it verbatim
-// (hip_playback_generated.cpp: hipSetupArgument((const void*)a->arg, ...)),
-// so the real handler reads `size` bytes from a capture-time host address in a
-// process that never allocated it. That is a segfault, not an error return.
-//
-// Isolated for the same reason the shareable-handle export is: a crash ends
-// the replay, and this one used to sit at event 31 of the legacy surface
-// archive, hiding the ~80 APIs recorded after it. hipLaunchByPtr cannot be
-// exercised here — it has to come after the pushes — so it is covered in
-// Unit_HRR_ApiMatrix_LegacySurface_Direct with a kernel that takes no
-// arguments instead.
+// bytes from `arg` into the pending kernarg buffer. Capture records up to 256
+// of those bytes, and the handler replays them.
 //
 // No final blob: the launch this configures is never issued.
 // ===========================================================================
@@ -2075,11 +1980,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyLaunch_Direct", "[.][hrr-direct]") {
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
 
-  // A chevron launch of the same no-argument kernel, first, to separate two
-  // explanations for the crash the legacy path produces: a kernel with an
-  // empty kernarg buffer, or the pre-chevron ABI specifically. This one is an
-  // ordinary hipModuleLaunchKernel event, so if the empty buffer were the
-  // problem the replay would die here instead.
+  // Recorded as an ordinary hipModuleLaunchKernel event.
   hipLaunchKernelGGL(hrr_mtx_noargs, dim3(1), dim3(64), 0, s);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
@@ -2087,31 +1988,20 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyLaunch_Direct", "[.][hrr-direct]") {
   int n_arg = kN;
   if (hipConfigureCall(dim3((kN + 255) / 256), dim3(256), 0, s)
           == hipSuccess) {
-    // Three pushes so the observation is unambiguous: the crash is in the
-    // handler, not in some interaction with an empty argument buffer.
     (void)hipSetupArgument(&d, sizeof(d), 0);
     (void)hipSetupArgument(&fill_val, sizeof(fill_val), sizeof(d));
     (void)hipSetupArgument(&n_arg, sizeof(n_arg), sizeof(d) + sizeof(fill_val));
   }
 
-  // Drop the configured launch rather than issuing it: hipLaunchByPtr would be
-  // recorded after the crashing event and could never be observed here.
   HRR_HIP_CHECK(hipStreamDestroy(s));
   HRR_HIP_CHECK(hipFree(d));
 }
 
 // ===========================================================================
-// T4 — memory-pool sharing, on its own for the same reason the VMM export is.
+// T4 — memory-pool sharing.
 //
-// hipMemPoolExportToShareableHandle has the same generated shape as
-// hipMemExportToShareableHandle: a `void*` out-parameter replayed as the
-// capture-time address. Whether it takes the process down the same way is
-// exactly what this workload is here to measure, and keeping it out of the
-// main breadth archive means the answer costs one small capture instead of
-// everything recorded after it.
-//
-// The NOOP members of the family are called first so they are observed even
-// if the export does crash.
+// hipMemPoolExportToShareableHandle is REAL at replay and
+// hipMemPoolImportFromShareableHandle is UNREPLAYABLE.
 //
 // Final blob: d[i] == 23.
 // ===========================================================================
@@ -2157,9 +2047,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
       HRR_HIP_CHECK(hipStreamSynchronize(s));
     }
 
-    // Everything after this line may be unobservable: if the export handler
-    // dereferences the recorded address the way the VMM one does, the replay
-    // ends here.
     int pool_fd = -1;
     if (hipMemPoolExportToShareableHandle(
             &pool_fd, pool, hipMemHandleTypePosixFileDescriptor, 0)

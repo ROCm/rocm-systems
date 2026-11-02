@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from memory_chart.loader import Layouts
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
@@ -172,7 +173,6 @@ def make_pc_sampling_database_analyzer(
         for workload_path, tool_data_records in tool_data_per_workload.items()
     }
     analyzer._roofline_data_per_kernel = {}
-    analyzer._roofline_data_per_workload = {}
     return analyzer
 
 
@@ -220,11 +220,18 @@ def make_counter_backed_database_analyzer(
         ])
     }
     analyzer._roofline_data_per_kernel = {workload_path: pd.DataFrame()}
-    analyzer._roofline_data_per_workload = {}
     analyzer._metrics_info_data_per_workload = {}
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
     return analyzer
+
+
+def run_memory_chart_workload(tmp_path, gpu_arch):
+    """Run analysis of one counter-backed workload; return its workload row."""
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._runs[str(tmp_path)].sys_info = pd.DataFrame([{"gpu_arch": gpu_arch}])
+    run_analysis_with_existing_database(analyzer)
+    return orm.Database.get_session().query(orm.Workload).one()
 
 
 def run_analysis_with_existing_database(analyzer):
@@ -1562,7 +1569,6 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         )
     }
     analyzer._roofline_data_per_kernel = {}
-    analyzer._roofline_data_per_workload = {}
 
     with ExitStack() as patch_stack:
         patch_stack.enter_context(patch.object(orm.Database, "init"))
@@ -3395,12 +3401,7 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert len(result[0]) == 0, (
-        "Should return empty kernel level dict when roofline data is empty"
-    )
-    assert len(result[1]) == 0, (
-        "Should return empty workload level dict when roofline data is empty"
-    )
+    assert result == {}, "Should return no kernel data when roofline data is empty"
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
@@ -3525,10 +3526,15 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 
     workload_path = "/mock/workload/path"
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
+    evaluated_row_counts = []
+
+    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info):
+        evaluated_row_counts.append(len(kernel_pmc_df))
+        return 42.0
 
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
-        lambda name, value, pmc_df, sys_info: 42.0,
+        evaluate_roofline_metric,
     )
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.console_warning", lambda msg: None
@@ -3537,7 +3543,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
     )
 
-    kernel_data, workload_data = db_analysis.calc_roofline_data(analyzer)
+    kernel_data = db_analysis.calc_roofline_data(analyzer)
 
     assert len(kernel_data) == 1
     df = kernel_data[workload_path]
@@ -3558,7 +3564,25 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert col in df.columns
         assert (df[col] == 42.0).all()
 
-    assert len(workload_data) == 1
-    workload_metrics = workload_data[workload_path]
-    assert len(workload_metrics) == len(roofline_metrics)
-    assert all(v == 42.0 for v in workload_metrics.values())
+    assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+# =============================================================================
+# Memory chart layout (Workload.memory_chart_layout_extdata)
+# =============================================================================
+
+
+def test_run_analysis_stores_the_memory_chart_layout_file_unchanged(
+    db_session, tmp_path
+):
+    workload = run_memory_chart_workload(tmp_path, "gfx942")
+    layout_file = Layouts.for_arch("gfx942").path
+    assert workload.memory_chart_layout_extdata == json.loads(
+        layout_file.read_text(encoding="utf-8")
+    )
+
+
+def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_path):
+    # Also covers a layout file skipped as broken
+    workload = run_memory_chart_workload(tmp_path, "gfx1030")
+    assert workload.memory_chart_layout_extdata is None

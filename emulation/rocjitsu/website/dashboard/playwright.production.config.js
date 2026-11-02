@@ -10,15 +10,21 @@ export default defineConfig({
   testDir: './tests/production',
   testMatch: /.*\.e2e\.js$/,
   fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  outputDir: './test-results/production',
   forbidOnly: Boolean(process.env.CI),
   reporter: 'line',
-  timeout: 120_000,
+  timeout: 30_000,
   expect: {
-    timeout: 90_000,
+    timeout: 7_000,
   },
   use: {
     ...devices['Desktop Chrome'],
     baseURL,
+    colorScheme: 'light',
+    locale: 'en-US',
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
   },
   webServer: {

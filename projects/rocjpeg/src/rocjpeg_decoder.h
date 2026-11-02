@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <unistd.h>
 #include <vector>
 #include <mutex>
+#include <atomic>
 #include <unordered_map>
 #include "../api/rocjpeg/rocjpeg.h"
 #include "rocjpeg_api_stream_handle.h"
@@ -188,6 +189,13 @@ public:
     */
    RocJpegStatus DecodeBatchedSync(RocJpegImage *destinations, int batch_size);
 
+   /**
+    * @brief Retrieves the decode capabilities of this decoder.
+    * @param decode_caps Pointer to store the decode capabilities.
+    * @return The status of the operation.
+    */
+   RocJpegStatus GetDecoderCaps(RocJpegDecodeCaps *decode_caps) const;
+
 private:
    struct AsyncDecodeState {
       VASurfaceID surface_id;
@@ -201,6 +209,17 @@ private:
     * @return The status of the initialization process.
     */
    RocJpegStatus InitHIP(int device_id);
+
+   /**
+    * @brief Checks that the crop rectangle of the decode parameters lies within the image.
+    *
+    * A rectangle with all four coordinates set to 0 requests no cropping. Any other rectangle must satisfy
+    * 0 <= left < right <= width and 0 <= top < bottom <= height, so that every output pixel comes from the image.
+    * @param decode_params The decode parameters holding the crop rectangle.
+    * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+    * @return ROCJPEG_STATUS_SUCCESS if the crop rectangle is valid, ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+    */
+   static RocJpegStatus ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params);
 
    /**
     * @brief Waits for the submitted surfaces and copies/converts the decoded output.
@@ -258,6 +277,7 @@ private:
    std::mutex mutex_; // Mutex for thread safety
    std::mutex finalize_mutex_; // Serializes FinalizeDecodeBatched (shared param buffers + hip_stream_) across concurrent syncs
    RocJpegBackend backend_; // RocJpeg backend
+   std::atomic<bool> initialized_; // Set only when InitializeDecoder succeeds; read without a lock by GetDecoderCaps
    RocJpegVappiDecoder jpeg_vaapi_decoder_; // RocJpeg VAAPI decoder object
    std::unordered_map<RocJpegImage*, AsyncDecodeState> pending_decodes_; // Map of pending asynchronous decodes keyed by destination
 

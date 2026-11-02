@@ -1488,9 +1488,6 @@ class DsStoreAddtidB32Ds : public Ds {
 public:
   DsStoreAddtidB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
-  }
   Operand data0;
   Operand dsmem;
   Operand m0;

@@ -109,12 +109,26 @@ ncclResult_t ncclSymkGinModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   int nMinBlocks = input->minCTAs;
   nMinBlocks = std::min(nMinBlocks, nMaxBlocks);
   // NCCL_SYM_CTAS is an explicit override of the resolved bounds.
-  int nUserCTAs = ncclSymkModelCtasEnvOverride();
+  int nUserCTAs = ncclSymkModelCtasEnvOverride(kernelId);
   if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = nUserCTAs;
 
   *timeUs = FLT_MAX;
   *nBlocks = 0;
   switch (kernelId) {
+  case ncclSymkKernelId_AllGather_RailRing_LsaST:
+    {
+      // minBytesPerBlock and blockCap are set based on data collected on gfx950 up to 16 nodes
+      constexpr int minBytesPerBlock = 16 << 10;
+      constexpr int blockCap = 24;
+      // Picks a CTA count that grows as sqrt(per-rank bytes), capped where measured busbw flattens.
+      int requiredBlocks = (int)std::ceil(std::sqrt(double(nBytes) / minBytesPerBlock));
+      float intraTime = (float)(nBytes * (comm->nRanks - rail.nRanks)) / (float)lsaBw;
+      float interTime = (float)(nBytes * (rail.nRanks - 1)) / (float)ginBw;
+      float time = (rail.nRanks - 1) * ginLat + std::max(intraTime, interTime);
+      *timeUs = (/*usec/sec=*/1.e6) * time;
+      *nBlocks = std::max(nMinBlocks, std::min(std::min(nMaxBlocks, blockCap), requiredBlocks));
+    }
+    break;
   case ncclSymkKernelId_AllGather_RailRing_LsaSTMC:
     {
       constexpr int railChunkSize = ncclSymkAllGather_RailRing_ChunkSize;

@@ -61,6 +61,9 @@ table ComputeUnitState {
   // retain the native defaults; false explicitly disables the corresponding check.
   memory_wait_checks: bool = null;
   xcnt_checks: bool = null;
+  // Unpaused CU steps without process instruction progress; zero disables the budget.
+  // Absent legacy values keep the CU configuration default.
+  gws_wait_limit: uint32 = null;
 }
 
 /// Serialized state of a command processor.

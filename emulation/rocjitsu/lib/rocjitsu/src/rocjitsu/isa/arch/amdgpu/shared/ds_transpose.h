@@ -18,6 +18,8 @@
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
 /// with stride-4 source lanes.
+/// CDNA4 B4/B6 transpose contiguous sixteen-lane matrices; CDNA5 interleaves
+/// the source groups.
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 
@@ -38,6 +40,8 @@ enum class TransposeKind : uint8_t {
   B64_TR_B16 = 5,
   WMMA_TR_B8 = 6,
   CDNA5_DS_TR_B8 = 7,
+  CDNA4_TR_B4 = 8,
+  CDNA4_TR_B6 = 9,
 };
 
 /// @brief CDNA4 MFMA B64 byte-level transpose (B64_TR_B8 only).
@@ -225,12 +229,13 @@ inline void transpose_b64_tr_b16(std::vector<uint8_t> &response_data, uint32_t n
   response_data = std::move(output);
 }
 
-/// @brief TR_B4: 4-bit element transpose for B128 family.
+/// @brief CDNA4/CDNA5 4-bit element transpose of an eight-byte lane payload.
 ///
-/// Groups of 8 source lanes, each reading 8 bytes (64 bits). Extracts
-/// 4-bit nibbles and transposes them across lanes.
-inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                         uint32_t wf_size) {
+/// CDNA4 transposes contiguous 16-lane matrices. CDNA5 interleaves the
+/// register and lane bases; its first destination register gathers lanes 0..7
+/// and its second gathers 16..23 (Triton TargetFeatures / lowerDsReadTr).
+inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems, uint32_t wf_size,
+                         bool cdna4) {
   constexpr uint32_t lanes_per_half = 32;
   constexpr uint32_t source_group_size = 8;
   constexpr uint32_t bytes_per_source_lane = 8;
@@ -264,8 +269,9 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
           packed_dword |= nibble_value << (lane_in_group * 4);
         }
 
-        uint32_t dest_vgpr_index = (group_start / 16) & 1;
-        uint32_t dest_lane = lane_base + (group_start & 8) * 2 + nibble_index;
+        uint32_t dest_vgpr_index = cdna4 ? (group_start / 8) & 1 : (group_start / 16) & 1;
+        uint32_t dest_lane =
+            lane_base + (cdna4 ? group_start & 16 : (group_start & 8) * 2) + nibble_index;
         uint32_t dest_offset = dest_lane * bytes_per_lane_total + dest_vgpr_index * 4;
 
         if (dest_offset + 4 <= output.size())
@@ -277,12 +283,12 @@ inline void transpose_b4(std::vector<uint8_t> &response_data, uint32_t num_elems
   response_data = std::move(output);
 }
 
-/// @brief TR_B6: 6-bit element transpose for B96 family.
+/// @brief CDNA4/CDNA5 6-bit element transpose of a twelve-byte lane payload.
 ///
-/// 16x16 6-bit permutation in 2 passes over 32 lanes. Each pass reads
-/// 12 bytes (96 bits) from 16 source lanes and transposes 6-bit fields.
-inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems,
-                         uint32_t wf_size) {
+/// CDNA4 uses contiguous 16-lane matrices (FlyDSL CDNA4 CopyAtom layout).
+/// CDNA5 retains the interleaved source-lane groups.
+inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems, uint32_t wf_size,
+                         bool cdna4) {
   constexpr uint32_t lanes_per_half = 32;
   constexpr uint32_t lanes_per_pass = 16;
   constexpr uint32_t dwords_per_lane = 3;
@@ -301,7 +307,8 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
       uint32_t source_dwords[lanes_per_pass][dwords_per_lane] = {};
 
       for (uint32_t input_index = 0; input_index < lanes_per_pass; ++input_index) {
-        uint32_t source_lane = 8 * (input_index / 4) + (input_index % 4) + pass * 4;
+        uint32_t source_lane = cdna4 ? pass * lanes_per_pass + input_index
+                                     : 8 * (input_index / 4) + (input_index % 4) + pass * 4;
         uint32_t source_offset = (lane_base + source_lane) * bytes_per_lane_total;
         for (uint32_t dword = 0; dword < dwords_per_lane; ++dword) {
           if (source_offset + dword * 4 + 4 <= response_data.size())
@@ -369,10 +376,12 @@ inline void transpose_response(VectorMemState &d) {
     transpose_b64_tr_b16(d.response_data, d.num_elems, d.wf_size);
     break;
   case TransposeKind::TR_B4:
-    transpose_b4(d.response_data, d.num_elems, d.wf_size);
+  case TransposeKind::CDNA4_TR_B4:
+    transpose_b4(d.response_data, d.num_elems, d.wf_size, kind == TransposeKind::CDNA4_TR_B4);
     break;
   case TransposeKind::TR_B6:
-    transpose_b6(d.response_data, d.num_elems, d.wf_size);
+  case TransposeKind::CDNA4_TR_B6:
+    transpose_b6(d.response_data, d.num_elems, d.wf_size, kind == TransposeKind::CDNA4_TR_B6);
     break;
   case TransposeKind::NONE:
     break;

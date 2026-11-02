@@ -82,6 +82,12 @@ class EventMarker : public amd::Marker {
     profilingInfo_.marker_ts_ = markerTs;
     profilingInfo_.batch_flush_ = batch_flush;
     profilingInfo_.clear();
+    // Command::enqueue() assigns the correlation id only to batch-flush markers. The
+    // non-batch-flush ones are created and enqueued inside the recording API call, so the
+    // thread's current correlation id is the one that call owns.
+    if (!batch_flush) {
+      profilingInfo_.correlation_id_ = amd::activity_prof::correlation_id;
+    }
     setCommandEntryScope(scope);
   }
 };

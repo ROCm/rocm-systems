@@ -41,6 +41,7 @@
 #endif
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
+#include "impl/wddm/queue.h"
 #include "util/utils.h"
 #include "util/os.h"
 #include <topology.hpp>
@@ -853,8 +854,10 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   dxg_topology->num_sysfs_nodes = dxg_topology->numa_node_count_ + num_adapters;
   dxg_runtime->HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
-  // Update default GPU node to account CPU nodes
-  dxg_runtime->default_node = dxg_topology->numa_node_count_;
+  // Every enumerated GPU is a default map target.
+  dxg_runtime->default_node.clear();
+  for (uint32_t i = 0; i < num_adapters; ++i)
+    dxg_runtime->default_node.push_back(dxg_topology->numa_node_count_ + i);
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -924,6 +927,14 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.DrmRenderMinor = node_id;
   props.Capability2.ui32.AqlEmulationPm4_ =
       (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
+
+  // Hardware/driver capability is the whole decision.
+  const bool native_sdma =
+      device->IsSdmaSupported() && device->NumSdmaEngine() != 0 &&
+      device->IsHwsEnabled(device->GetSdmaEngine(0));
+  props.NativeSDMASupported = native_sdma ? 1 : 0;
+  props.NativeSDMAEpilogueBytes =
+      native_sdma ? wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes : 0;
 
   {
     const char* name = device->ProductName();

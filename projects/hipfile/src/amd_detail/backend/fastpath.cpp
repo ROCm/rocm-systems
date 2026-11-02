@@ -175,7 +175,7 @@ ssize_t
 Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buffer, size_t size,
                    hoff_t file_offset, hoff_t buffer_offset)
 {
-    StatsIoTracker ioTracker{type, StatsBackend::Fastpath};
+    StatsIoTracker ioTracker{type, StatsBackend::Fastpath, buffer->getGpuId()};
     if (!Context<Configuration>::get()->fastpath()) {
         throw BackendDisabled();
     }
@@ -222,7 +222,7 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         }
     }
     catch (const std::system_error &e) {
-        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         // A failed AIS call records hipErrorUnknown as this thread's last HIP
         // error. Fallback-eligible failures are reported to the caller as
         // errno or handled by the fallback, so don't leave that error behind
@@ -235,7 +235,7 @@ Fastpath::_io_impl(IoType type, shared_ptr<IFile> file, shared_ptr<IBuffer> buff
         throw;
     }
     catch (...) {
-        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size);
+        Context<StatsCollection>::get()->error(type, StatsBackend::Fastpath, size, buffer->getGpuId());
         throw;
     }
     return static_cast<ssize_t>(nbytes);

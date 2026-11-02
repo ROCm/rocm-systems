@@ -259,6 +259,7 @@ int main(int argc, char **argv) {
             }
 
             uint32_t local_num_channels = 0;
+            slot->decode_params_batch[current_batch_size] = RocJpegUtils::FitCropToImage(decode_params, temp_widths[0], temp_heights[0]);
             if (rocjpeg_utils.GetChannelPitchAndSizes(slot->decode_params_batch[current_batch_size], temp_subsampling, temp_widths.data(), temp_heights.data(), local_num_channels, slot->images[current_batch_size], channel_sizes)) {
                 std::cerr << "ERROR: Failed to get the channel pitch and sizes" << std::endl;
                 shutdown();

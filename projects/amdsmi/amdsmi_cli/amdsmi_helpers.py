@@ -389,14 +389,64 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_or_uuid(self, device_handle):
-        """Return the device CUID when available, falling back to the UUID."""
-        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
-        if identifier == "N/A":
-            identifier = self._query_or_na(
-                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        result = {
+            "derived_cuid": "N/A",
+            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "component_type": "UNKNOWN",
+            "auxiliary": "unknown",
+            "source": "UNKNOWN",
+            "identifier_kind": "unknown",
+            "cuid_metadata_status": "unknown",
+        }
+        try:
+            info = amdsmi_interface.amdsmi_get_gpu_cuid_info(device_handle)
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as error:
+            if not isinstance(error, amdsmi_exception.AmdSmiLibraryException):
+                result["cuid_metadata_status"] = "unsupported"
+            elif (
+                error.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            ):
+                result.update(
+                    component_type="N/A",
+                    auxiliary="N/A",
+                    source="N/A",
+                    cuid_metadata_status="not_supported",
+                )
+            else:
+                result["cuid_metadata_status"] = f"amdsmi_error_{error.get_error_code()}"
+            # Older libraries may provide the CUID-only API but not its metadata.
+            try:
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
+                return result
+            if cuid and cuid != "N/A":
+                result.update(derived_cuid=cuid, identifier_kind="cuid")
+            return result
+
+        cuid = info.get("derived")
+        if not cuid or cuid == "N/A":
+            result["cuid_metadata_status"] = "invalid_value"
+            return result
+        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result["component_type"] = info.get("component_type", "UNKNOWN")
+        source = info.get("source")
+        if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
+            result["source"] = source
+        else:
+            result["cuid_metadata_status"] = "partial"
+        auxiliary = info.get("auxiliary")
+        if isinstance(auxiliary, bool):
+            result["auxiliary"] = auxiliary
+        else:
+            result["cuid_metadata_status"] = "partial"
+        if include_primary:
+            result["primary_cuid"] = info.get("primary") or (
+                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
             )
-        return identifier
+        return result
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
@@ -577,6 +627,42 @@ class AMDSMIHelpers:
             switch_choices_str += f"  all{' ' * max_padding}| Selects all devices\n"
 
         return (switch_choices, switch_choices_str)
+
+    @staticmethod
+    def is_valid_ampp_field_name(name) -> bool:
+        """Check a candidate AMPP field name against the same constraints
+        amdsmi_configure_ampp_profile()/the driver enforce: a non-empty str
+        whose UTF-8 encoding fits in AMDSMI_MAX_STRING_LENGTH bytes.
+
+        Shared between the CLI's --ampp-configure argv parsing
+        (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+        """
+        if not isinstance(name, str) or not name:
+            return False
+        try:
+            # A str may contain a lone UTF-16 surrogate (e.g. via
+            # surrogateescape on argv, or from JSON), which is a valid
+            # Unicode code point but not valid UTF-8.
+            return len(name.encode("utf-8")) < amdsmi_interface.AMDSMI_MAX_STRING_LENGTH
+        except UnicodeEncodeError:
+            return False
+
+    @staticmethod
+    def parse_ampp_field_value(value) -> Optional[int]:
+        """Parse and range-check a candidate AMPP field value the same way
+        amdsmi_configure_ampp_profile() will (it assigns straight into an
+        int64 ctypes struct field). Returns the parsed int, or None if
+        `value` isn't representable as an int64 -- int(value) itself raises
+        TypeError/ValueError/OverflowError for a non-numeric or
+        out-of-range value (e.g. bare JSON Infinity/NaN)."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not -(2**63) <= parsed < 2**63:
+            return None
+        return parsed
 
     @staticmethod
     def is_UUID(uuid_question: str) -> bool:
@@ -1638,14 +1724,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -1757,8 +1843,8 @@ class AMDSMIHelpers:
     def get_fan_support(self):
         """Check if fan control is supported and return dynamic range info for all devices.
 
-        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
-        legacy hwmon GPUs. Results are cached to improve CLI performance.
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and falls
+        back to the legacy hwmon range. Results are cached to improve CLI performance.
 
         Returns:
             str: Range description for all GPUs, "N/A" if not supported.
@@ -1779,29 +1865,19 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
 
-                # Determine the range based on interface type
-                if max_speed <= 100:
-                    # This is likely a gpu_od GPU - try to get actual min from sysfs
-                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
-                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+                # Advertise the range the set path validates against: the gpu_od
+                # OD_RANGE where present, otherwise the legacy hwmon 0-255
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
 
-                    if has_gpu_od:
-                        # Use shared helper function to parse OD_RANGE
-                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
-                        if min_speed is not None:
-                            # Successfully parsed - use the actual range from sysfs
-                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
-                        else:
-                            # Parsing failed - fallback to 0-max_speed
-                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
-                    else:
-                        # gpu_od directory doesn't exist but max_speed <= 100
-                        # Could be an edge case - use 0-max_speed
-                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                min_speed = None
+                if has_gpu_od:
+                    min_speed, max_speed = self.parse_gpu_od_fan_range(gpu_od_path)
+
+                if min_speed is not None:
+                    gpu_ranges.append((idx, f"{min_speed}-{max_speed} or 0-100%%"))
                 else:
-                    # Legacy hwmon GPU (0-255)
                     gpu_ranges.append((idx, "0-255 or 0-100%%"))
 
             except amdsmi_interface.AmdSmiLibraryException as e:
@@ -2180,8 +2256,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -2437,7 +2515,26 @@ class AMDSMIHelpers:
 
         return True
 
-    def _severity_as_string(self, error_severity, notify_type, for_filename):
+    def _severity_as_string(self, error_severity, notify_type, for_filename, source=None):
+        if source == "fabric":
+            # IFoE reports a link going down as non-fatal uncorrected and a link
+            # coming back up as non-fatal corrected; there is no other carrier.
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "fabric-linkdown"
+                return "FABRIC-LINKDOWN"
+            if error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "fabric-linkup"
+                return "FABRIC-LINKUP"
+            if error_severity == "fatal":
+                if for_filename:
+                    return "fabric-fatal"
+                return "FABRIC-FATAL"
+            if for_filename:
+                return "fabric-unknown"
+            return "FABRIC-UNKNOWN"
+
         if error_severity == "non_fatal_uncorrected":
             if for_filename:
                 return "uncorrected"
@@ -2484,6 +2581,7 @@ class AMDSMIHelpers:
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
+                    entry.get("source"),
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
@@ -2545,7 +2643,8 @@ class AMDSMIHelpers:
             # Determine prefix/severity
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            prefix = self._severity_as_string(error_severity, notify_type, True)
+            source = entry.get("source")
+            prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
             count = cper_counter[0] + 1
@@ -2584,7 +2683,7 @@ class AMDSMIHelpers:
             gpu_id = "-"
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            severity = self._severity_as_string(error_severity, notify_type, False)
+            severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
                 gpu_id,
@@ -2733,6 +2832,7 @@ class AMDSMIHelpers:
                             entry.get("error_severity", "Unknown"),
                             entry.get("notify_type", "Unknown"),
                             False,
+                            entry.get("source"),
                         )
                         json_rows.append(
                             {
@@ -2916,6 +3016,9 @@ class AMDSMIHelpers:
         collected_json_rows = []
         entries = {}
         cper_data = []
+        gpu_cper_unavailable = False
+        gpu_cper_error_code = None
+
         while True:
             try:
                 entries, new_cursor, cper_data, _status_code = (
@@ -2936,11 +3039,11 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-                        logger.format,
-                        e.get_error_code(),
-                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
-                    ) from e
+                    # GPU CPER unavailable; try fabric before raising
+                    gpu_cper_unavailable = True
+                    gpu_cper_error_code = e.get_error_code()
+                    logging.debug(f"GPU CPER unavailable: {e}")
+                    break
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
@@ -2964,6 +3067,88 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
+            )
+
+        # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
+        # separate list so --follow does not interleave them with the GPU cursors.
+        fabric_cursors = getattr(args, "fabric_cursor", None)
+        if fabric_cursors is None:
+            fabric_cursors = []
+            args.fabric_cursor = fabric_cursors
+        while len(fabric_cursors) <= gpu_idx:
+            fabric_cursors.append(0)
+
+        fabric_has_more = False
+        while True:
+            prev_fabric_cursor = fabric_cursors[gpu_idx]
+            try:
+                fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
+                    amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                        device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
+                    )
+                )
+                logging.debug(
+                    f"fabric_cper_entries | entries: {fabric_entries}, status: {fabric_status_code}"
+                )
+                num_entries = num_entries + len(fabric_entries)
+
+                # Check if the status indicates more data is available or if we're done
+                fabric_has_more = (
+                    fabric_status_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing fabric CPER. This command requires elevation"
+                    ) from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug("Fabric CPER not supported on this device")
+                    break
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_OUT_OF_RESOURCES
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Fabric CPER entries exceed internal buffer capacity",
+                    ) from e
+                logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
+                break
+
+            # Only update cursor if we got entries or if the library advanced it (non-zero).
+            # When cursor returns 0 with no entries, it means "end of current data" —
+            # preserve the last valid cursor so --follow doesn't restart from 0.
+            if len(fabric_entries) > 0 or new_fabric_cursor != 0:
+                fabric_cursors[gpu_idx] = new_fabric_cursor
+
+            # Emit output if we have entries
+            if len(fabric_entries) > 0:
+                self._emit_cper_output(
+                    fabric_entries,
+                    fabric_cper_data,
+                    device_handle,
+                    args,
+                    logger,
+                    collected_json_rows,
+                    emit_inline,
+                    cper_counter,
+                )
+
+            if not fabric_has_more:
+                break
+
+            if len(fabric_entries) == 0 and fabric_cursors[gpu_idx] == prev_fabric_cursor:
+                break
+
+        if gpu_cper_unavailable and num_entries == 0 and not args.follow:
+            raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                logger.format,
+                gpu_cper_error_code,
+                detail="Error accessing CPER files. This command requires CPER to be enabled.",
             )
 
         if num_entries == 0 and not args.follow:
@@ -3362,6 +3547,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 

@@ -41,6 +41,7 @@ from utils.utils_common import (
 from utils.utils_counter_defs import (
     counter_to_block,
     extract_counters_and_variables,
+    metric_expressions,
 )
 from vendored import yaml
 
@@ -82,12 +83,7 @@ def _same_bucket_priority_ids_from_policy_value(
 @functools.lru_cache(maxsize=1)
 def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
     """Load counter grouping policy YAML into arch -> metric id tuple."""
-    path = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-        / "profiling_counter_grouping_policy.yaml"
-    )
+    path = config.analysis_configs_dir / "profiling_counter_grouping_policy.yaml"
     if not path.is_file():
         console_warning(
             "profiling",
@@ -130,7 +126,6 @@ class OmniSoC_Base:
         self._mspec = mspec
         # Per IP block, max number of simultaneous counters. GFX IP Blocks.
         self.__perfmon_config: dict[str, int] = {}
-        self.__compatible_profilers: list[str] = []  # Store SoC compatible profilers
         self.populate_mspec()
 
     def __hash__(self) -> int:
@@ -147,17 +142,11 @@ class OmniSoC_Base:
     def set_arch(self, arch: str) -> None:
         self.__arch = arch
 
-    def set_compatible_profilers(self, profiler_names: list[str]) -> None:
-        self.__compatible_profilers = profiler_names
-
     def get_arch(self) -> Optional[str]:
         return self.__arch
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
-
-    def get_compatible_profilers(self) -> list[str]:
-        return self.__compatible_profilers
 
     def populate_mspec(self) -> None:
         from utils.specs import search_pattern, total_sqc
@@ -289,12 +278,12 @@ class OmniSoC_Base:
 
         return gpu_model
 
-    def _append_analysis_yaml_for_filter_token(
+    def _append_expressions_for_filter_token(
         self,
         raw_token: str,
         config_filename_dict: dict[str, str],
         config_root_dir: str,
-        texts: list[str],
+        expressions: list[str],
     ) -> None:
         block_id = raw_token
         if METRIC_ID_RE.match(block_id):
@@ -318,7 +307,9 @@ class OmniSoC_Base:
         with open(config_filename_dict[file_id], encoding="utf-8") as stream:
             file_config = yaml.safe_load(stream)
         if panel_id is None:
-            texts.append(yaml.dump(file_config, sort_keys=False))
+            for section in file_config["Panel Config"]["data source"]:
+                if "metric_table" in section:
+                    expressions.extend(_table_expressions(section["metric_table"]))
             return
 
         panel_dict = {
@@ -333,7 +324,7 @@ class OmniSoC_Base:
             )
             return
         if metric_id is None:
-            texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+            expressions.extend(_table_expressions(panel_dict[panel_id]))
             return
 
         metric_dict = {
@@ -346,7 +337,9 @@ class OmniSoC_Base:
                 f"panel id {panel_id}"
             )
             return
-        texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+        expressions.extend(
+            metric_expressions(panel_dict[panel_id], metric_dict[metric_id])
+        )
 
     def _same_bucket_priority_metric_ids(self) -> tuple[str, ...]:
         """Metric ids whose PMCs get tier-0 priority in the greedy coalescing pass.
@@ -403,10 +396,12 @@ class OmniSoC_Base:
             panel_id,
             metric_idx,
             metric_name,
-            metric_yaml,
+            expressions,
         ) in self._iter_arch_analysis_yaml_metrics():
             formula_hw, _ = extract_counters_and_variables(
-                metric_yaml, self._mspec.gpu_series, include_supported_denom=False
+                "\n".join(expressions),
+                self._mspec.gpu_series,
+                include_supported_denom=False,
             )
             hw = self._expand_tcc_template_counters(formula_hw)
             counters = frozenset(hw & remaining)
@@ -453,9 +448,8 @@ class OmniSoC_Base:
     @demarcate
     def detect_counters(self) -> tuple[set[str], list[str]]:
         """
-        Create a set of counters required for the selected report sections.
-        Parse analysis report configuration files based on the selected report
-        sections to be filtered.
+        Create a set of counters required for the selected report sections,
+        from the metric expressions of those sections.
         """
         args = self.get_args()
 
@@ -482,28 +476,19 @@ class OmniSoC_Base:
         elif args.roof_only:
             filter_blocks = ["4"]
 
-        texts: list[str] = []
+        expressions: list[str] = []
         if not filter_blocks:
-            # Do not profile block 30 unless explicitly requested
-            exclude_file_ids: set[str] = set()
-            if not args.membw_analysis:
-                exclude_file_ids.add(str(MEMBW_ANALYSIS_PANEL_ID))
-
-            # Select all sections by default
-            for file_id, filename in config_filename_dict.items():
-                if file_id in exclude_file_ids:
-                    continue
-
-                with open(filename, encoding="utf-8") as stream:
-                    texts.append(stream.read())
+            # Select all sections by default; block 30 only with --membw-analysis
+            for *_, metric_exprs in self._iter_arch_analysis_yaml_metrics():
+                expressions.extend(metric_exprs)
 
         for block_id in filter_blocks:
-            self._append_analysis_yaml_for_filter_token(
-                block_id, config_filename_dict, config_root_dir, texts
+            self._append_expressions_for_filter_token(
+                block_id, config_filename_dict, config_root_dir, expressions
             )
 
         counters, _ = extract_counters_and_variables(
-            "\n".join(texts), self._mspec.gpu_series
+            "\n".join(expressions), self._mspec.gpu_series
         )
         counters = self._expand_tcc_template_counters(counters)
 
@@ -602,62 +587,22 @@ class OmniSoC_Base:
 
     def _iter_arch_analysis_yaml_metrics(
         self,
-    ) -> Iterator[tuple[str, Any, int, str, str]]:
-        """Iterate analysis_configs/<arch> YAML metric_table rows.
+    ) -> Iterator[tuple[str, int, int, str, list[str]]]:
+        """Iterate the metrics of this arch's analysis configs.
 
-        Yields:
-            stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
-            panel_id    metric_table "id" field (may be None)
-            metric_idx  zero-based index of the metric within its table
-            metric_name metric key string
-            metric_yaml metric body serialised as YAML text
+        Block 30 is skipped unless --membw-analysis is set. See
+        iter_analysis_config_metrics for what each item holds.
         """
         args = self.get_args()
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
-        if not config_root.is_dir():
-            return
         exclude: set[str] = set()
         if not args.membw_analysis:
             exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
-
-        for ypath in sorted(config_root.glob("*.yaml")):
-            stem_id = ypath.name.split("_")[0]
-            if stem_id in exclude:
-                continue
-            try:
-                with open(ypath, encoding="utf-8") as stream:
-                    doc = yaml.safe_load(stream)
-            except (OSError, UnicodeError, yaml.YAMLError):
-                continue
-            if not isinstance(doc, dict):
-                continue
-            panel_cfg = doc.get("Panel Config")
-            if not isinstance(panel_cfg, dict):
-                continue
-            sources = panel_cfg.get("data source")
-            if not isinstance(sources, list):
-                continue
-            for section in sources:
-                if not isinstance(section, dict) or "metric_table" not in section:
-                    continue
-                mt = section["metric_table"]
-                if not isinstance(mt, dict):
-                    continue
-                metrics = mt.get("metric")
-                if not isinstance(metrics, dict):
-                    continue
-                panel_id = mt.get("id")
-                for idx, (metric_name, metric_body) in enumerate(metrics.items()):
-                    try:
-                        metric_text = yaml.dump(
-                            metric_body, sort_keys=False, allow_unicode=True
-                        )
-                    except (TypeError, yaml.YAMLError):
-                        continue
-                    yield stem_id, panel_id, idx, metric_name, metric_text
+        yield from iter_analysis_config_metrics(
+            Path(args.config_dir) / (canonical_config_arch(arch) or arch), exclude
+        )
 
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
@@ -925,3 +870,46 @@ def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
         for block_name in counter_file.blocks
         for ctr in counter_file.blocks[block_name].elements
     ]
+
+
+def _table_expressions(table: dict[str, Any]) -> list[str]:
+    """Expressions of every metric in one metric_table."""
+    return [
+        expression
+        for metric in (table["metric"] or {}).values()
+        for expression in metric_expressions(table, metric)
+    ]
+
+
+def iter_analysis_config_metrics(
+    config_root: Path, exclude_file_ids: set[str]
+) -> Iterator[tuple[str, int, int, str, list[str]]]:
+    """Iterate the metrics of the analysis config files in config_root,
+    skipping files whose id is in exclude_file_ids.
+
+    Yields:
+        stem_id     file id, e.g. "0200" from "0200_system_speed_of_light.yaml"
+        table_id    metric_table id
+        metric_idx  zero-based index of the metric within its table
+        metric_name metric key string
+        expressions metric_expressions of the metric
+    """
+    for config_path in sorted(config_root.glob("*.yaml")):
+        stem_id = config_path.name.split("_")[0]
+        if stem_id in exclude_file_ids:
+            continue
+        with open(config_path, encoding="utf-8") as stream:
+            panel_config = yaml.safe_load(stream)["Panel Config"]
+        for section in panel_config["data source"]:
+            table = section.get("metric_table")
+            if table is None:
+                continue
+            metrics = table["metric"] or {}
+            for idx, (metric_name, metric) in enumerate(metrics.items()):
+                yield (
+                    stem_id,
+                    table["id"],
+                    idx,
+                    metric_name,
+                    metric_expressions(table, metric),
+                )
