@@ -121,7 +121,10 @@ class TestCliBase(unittest.TestCase):
     # TODO(amdsmi_team): drop these once the CLI tests supports automated
     #                     input
     SWEEP_EXCLUDED_ARGS = {
-        "set": {"--compute-partition": "waits for confirmation"},
+        "set": {
+            "--compute-partition": "waits for confirmation",
+            "--memory-partition": "cannot cancel a queued change by restoring the active mode",
+        },
         "reset": {
             # --gtt reaches reset.py's prompt_reboot(), which calls `systemctl reboot` on "y"
             "--gtt": "prompts to reboot the host",
@@ -130,7 +133,7 @@ class TestCliBase(unittest.TestCase):
     }
 
     # TODO(amdsmi_team): User input is not a problem, we just need to test above ^
-    PROMPT_ANSWERS = {"set": {"--fan": "y\n", "--memory-partition": "y\n"}}
+    PROMPT_ANSWERS = {"set": {"--fan": "y\n"}}
 
     # Commands whose sweep also accepts NOT_SUPPORTED. A write may legitimately
     # refuse a feature the ASIC lacks, but a read answering NOT_SUPPORTED is a
@@ -139,12 +142,10 @@ class TestCliBase(unittest.TestCase):
 
     # Exit codes a single argument may also answer with, beyond NOT_SUPPORTED
     SWEEP_TOLERATED_CODES = {
-        # Not all ASICs support setting all modes, which is an invalid set option
-        "set": {"--memory-partition": amdsmi.AmdSmiStatus.INVAL},
         # This reset is a read -- the kernel clears xgmi_error when it is read --
         # so the read's errno becomes the reset's status, and some drivers reject
         # it with EINVAL.
-        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
+        "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL}
     }
 
     # Order for the amd-smi reset commands, putting --clocks last since
@@ -355,8 +356,6 @@ class TestCliBase(unittest.TestCase):
         self.memory_partition_modes = ["NPS1", "NPS2", "NPS4", "NPS8"]
         self.power_types = ["ppt0", "ppt1"]
         self.ptl_formats = ["I8", "F16", "BF16", "F32", "F64", "F8", "VECTOR"]
-        self.clk_limits = ["SCLK", "MCLK", "FCLK"]
-        self.limit_types = ["MAX", "MIN"]
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal
@@ -570,7 +569,7 @@ class TestCliBase(unittest.TestCase):
     def CreateCmds(self, cmd_name, list1_name, list2_name, list3_name, list4_name):
         cmd = f"amd-smi {cmd_name} --help"
         list1_args = self._order_sweep_args(cmd_name, self.FindArgs(cmd, list1_name))
-        list2_args = self.FindArgs(cmd, list2_name)
+        list2_args = ["pass"] if cmd_name == "set" else self.FindArgs(cmd, list2_name)
         list3_args = self.FindArgs(cmd, list3_name)
         list4_args = self.FindArgs(cmd, list4_name)
         if self.Debug:
@@ -623,6 +622,14 @@ class TestCliBase(unittest.TestCase):
                                     ok,
                                 )
                             )
+
+        if cmd_name == "set":
+            # Select the device before resolving its clock and power limits.
+            cmds = [
+                (f"{command} --gpu {gpu_index}", condition)
+                for command, condition in cmds
+                for gpu_index in range(len(self.common.processors))
+            ]
 
         # Calculate and substitute in dependent values
         # Removes cmds that are invalid
@@ -843,7 +850,7 @@ class TestCliBase(unittest.TestCase):
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
                         # Whole word matches only: i.e. remove "--gpu", not "--gpureset"
-                        if "--gpu" in items:
+                        if "--gpu" in items and cmd_name != "set":
                             cmd = ""
 
                 # Remove all file and watch modifiers except for gpu 0
