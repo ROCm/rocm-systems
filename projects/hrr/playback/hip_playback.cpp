@@ -3365,7 +3365,7 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         return;
     }
     if (kind == AllocKind::Managed) {
-        (void)hipFree(host_ptr);
+        if (hipFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;

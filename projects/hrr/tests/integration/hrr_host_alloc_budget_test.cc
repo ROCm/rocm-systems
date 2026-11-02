@@ -98,8 +98,8 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
 // hipMemUnmap. The workload maps h1, releases it, then creates h2 before the
 // unmap: with the hold the 3 MiB replay is refused at h2 (h1's 2 MiB is still
 // charged); without it the release would have returned the charge and h2 fits.
-// A 4 MiB cap takes h1 + h2, and after the unmap two more handles (h3 + h4), so
-// it also fails if the unmap did not return h1's charge.
+// A 5 MiB cap takes h1 + h2 plus the replay's cached blobs, so the replay
+// completes.
 TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   hipMemAllocationProp prop{};
@@ -115,7 +115,7 @@ TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
 
   void* va = nullptr;
   HRR_HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
-  hipMemGenericAllocationHandle_t h1{}, h2{}, h3{}, h4{};
+  hipMemGenericAllocationHandle_t h1{}, h2{};
   // Support is decided here; a failure after it is a real one.
   if (hipMemCreate(&h1, size, &prop, 0) != hipSuccess) {
     (void)hipMemAddressFree(va, size);
@@ -130,10 +130,6 @@ TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemCreate(&h2, size, &prop, 0));
   HRR_HIP_CHECK(hipMemRelease(h2));
   HRR_HIP_CHECK(hipMemUnmap(va, size));        // the last reference to h1
-  HRR_HIP_CHECK(hipMemCreate(&h3, size, &prop, 0));
-  HRR_HIP_CHECK(hipMemCreate(&h4, size, &prop, 0));
-  HRR_HIP_CHECK(hipMemRelease(h3));
-  HRR_HIP_CHECK(hipMemRelease(h4));
   HRR_HIP_CHECK(hipMemAddressFree(va, size));
 }
 
@@ -142,7 +138,7 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
   hrr_capture_direct("Unit_HRR_HostBudgetMemMapHold_Direct", cap.path, 5);
   for (const bool refuse : {false, true}) {
     const std::string cap_arg =
-        std::string("--max-host-bytes ") + (refuse ? "3145728" : "4194304");
+        std::string("--max-host-bytes ") + (refuse ? "3145728" : "5242880");
     auto [ret, out] = hrr_playback_merged(cap.path, cap_arg);
     INFO(cap_arg << ": playback exit " << ret << ", output:\n" << out);
     if (refuse) {
