@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -140,18 +139,6 @@ static int detectedGpus()
 static bool isIsolatedChild()
 {
     return std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr;
-}
-
-// src/graph/paths.cc applies the PATH_PXB P2P level of Intel, Zhaoxin and ARM hosts after the NCCL_P2P_DISABLE and
-// NCCL_P2P_LEVEL override, so there the override does not take pairs out of the check.
-static bool hostCpuIsAmd()
-{
-    std::ifstream cpuinfo("/proc/cpuinfo");
-    std::string line;
-    while(std::getline(cpuinfo, line))
-        if(line.rfind("vendor_id", 0) == 0)
-            return line.find("AuthenticAMD") != std::string::npos;
-    return false;
 }
 
 static std::vector<int> firstDevices(int n)
@@ -480,8 +467,7 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
 }
 
 // With P2P disabled there are no topology-eligible P2P edges. The run still completes and reports
-// no failures; it prints no p2p summary line because nothing was tested. On a host without an AMD CPU
-// the pairs stay eligible (see hostCpuIsAmd()), so only the absence of failures is checked there.
+// no failures; it prints no p2p summary line because nothing was tested.
 TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
 {
     runDiagCases({{"P2pDisabledReportsNoEdges", 2, []() {
@@ -496,11 +482,8 @@ TEST_F(Diagnostics, P2pDisabledReportsNoEdges)
         const DiagReport report = parseDiagReport(out);
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
-        if(hostCpuIsAmd())
-        {
-            EXPECT_EQ(report.count(kDiagSummary), 0) << report.dump();
-            EXPECT_EQ(report.count(kDiagPartialSummary), 0) << report.dump();
-        }
+        EXPECT_EQ(report.count(kDiagSummary), 0) << report.dump();
+        EXPECT_EQ(report.count(kDiagPartialSummary), 0) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
         checkAllReduce(comms);
     }}});

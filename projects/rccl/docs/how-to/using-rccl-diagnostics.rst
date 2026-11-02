@@ -104,11 +104,8 @@ left out for this reason.
 
    If no pair is eligible, the report contains no ``p2p:`` line between the
    header and the ``completed`` line. This happens, for example, with one GPU
-   per node, or on a host with an AMD CPU with ``NCCL_P2P_DISABLE=1`` or a
-   restrictive ``NCCL_P2P_LEVEL``. On a host with an Intel, Zhaoxin, or Arm CPU,
-   RCCL currently replaces these settings with its own P2P level for that CPU, so
-   pairs connected through XGMI or a PCIe switch stay eligible and are tested. A
-   missing ``p2p:`` line means that nothing was tested, not that everything
+   per node, or with ``NCCL_P2P_DISABLE=1`` or a restrictive ``NCCL_P2P_LEVEL``.
+   A missing ``p2p:`` line means that nothing was tested, not that everything
    passed.
 
 Single-process and multi-process jobs
