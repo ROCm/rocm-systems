@@ -89,9 +89,16 @@ protected:
     int tt_version = 0;
     bool exclude_barrier_wait = false;
 
+    struct wavepipe_t
+    {
+        pcinfo_t pc;
+        uint64_t dispatch_id;
+        uint32_t me;
+        uint32_t pipe;
+    };
     // data from all waves
-    std::unordered_map<uint64_t, pcinfo_t> running_waves{};
-    std::unordered_map<uint64_t, pcinfo_t> saved_waves{};
+    std::unordered_map<uint64_t, wavepipe_t> running_waves{};
+    std::unordered_map<uint64_t, wavepipe_t> saved_waves{};
 
     int dprate = 1;
     int derate = 1;
