@@ -7,7 +7,8 @@
 /// @details These tests enforce the boundary beneath generated instructions:
 /// observed read masks constrain returned data and observed write masks
 /// constrain modified storage. End-to-end decoded instruction callbacks live
-/// in execution_plugin_test.cpp.
+/// in execution_plugin_test.cpp; the decoded SGPR storage-boundary regression
+/// lives below.
 
 #include "decode_test_util.h"
 
@@ -1891,12 +1892,12 @@ TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
   fx.cu->write_vgpr(neighbor_vgpr, 0, 0xAABBCCDDu);
 
   enum class Operation { Sgpr, Sgpr64, ConstSgpr, ConstSgpr64, ConstVgpr, ConstReadWriteVgpr };
-  class RejectedWrite : public Instruction {
+  class PhysicalWriteAttempt : public Instruction {
   public:
-    RejectedWrite(Operation operation, uint32_t sgpr, uint32_t vgpr)
-        : Instruction("rejected_write",
+    PhysicalWriteAttempt(Operation operation, uint32_t sgpr, uint32_t vgpr)
+        : Instruction("physical_write_attempt",
                       [](Instruction &inst, void *ctx) {
-                        auto &self = static_cast<RejectedWrite &>(inst);
+                        auto &self = static_cast<PhysicalWriteAttempt &>(inst);
                         auto &wf = *static_cast<Wavefront *>(ctx);
                         RegisterAccess mutable_regs(wf);
                         RegisterAccess const_regs(static_cast<const Wavefront &>(wf));
@@ -1941,7 +1942,7 @@ TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
         Operation::ConstVgpr, Operation::ConstReadWriteVgpr}) {
     SCOPED_TRACE(static_cast<int>(operation));
     const bool pair = operation == Operation::Sgpr64 || operation == Operation::ConstSgpr64;
-    RejectedWrite instruction(operation, pair ? issuer_last : neighbor_sgpr, neighbor_vgpr);
+    PhysicalWriteAttempt instruction(operation, pair ? issuer_last : neighbor_sgpr, neighbor_vgpr);
     std::string detail;
     const bool ignored = operation == Operation::Sgpr || operation == Operation::Sgpr64;
     EXPECT_EQ(fx.cu->execute_instruction(&instruction, *fx.wf, &detail).failed(), !ignored);
@@ -1959,7 +1960,9 @@ TEST(RegisterAccessTest, PhysicalWriteStatusAtInstructionBoundary) {
   }
 }
 
-TEST(RegisterAccessTest, DecodedOutOfRangeSgprDestinationIsIgnored) {
+TEST(RegisterAccessTest, DecodedSgprDestinationOutsideStorageBlockIsIgnored) {
+  // This artificial 104-SGPR RDNA4 block is smaller than the 106 normal SGPRs
+  // specified by RDNA4 ISA section 3.3.1.1, so s104 is valid on hardware.
   Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, kVgprsPerWave,
              /*wave_size=*/32);
   ASSERT_NE(fx.wf, nullptr);
