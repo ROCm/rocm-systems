@@ -42,7 +42,7 @@ class GpuQueueRegistryTestAccess {
 public:
   static void fail_next_registry_allocation(GpuQueueRegistry &registry) {
     std::lock_guard lock(registry.mutex_);
-    registry.fail_next_registry_allocation_ = true;
+    registry.registry_allocation_failure_for_test_ = [] { throw std::bad_alloc(); };
   }
 };
 

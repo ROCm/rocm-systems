@@ -221,6 +221,7 @@ public:
   explicit GpuQueueRegistry(GpuVm &gpu_vm) : gpu_vm_(gpu_vm) {}
   ~GpuQueueRegistry();
 
+  /// @brief Register a queue; allocation and factory exceptions propagate after rollback.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);
@@ -338,7 +339,7 @@ private:
   uint32_t active_closes_ = 0;
   bool admission_open_ = true;
   bool close_all_in_progress_ = false;
-  bool fail_next_registry_allocation_ = false;
+  void (*registry_allocation_failure_for_test_)() = nullptr;
 };
 
 } // namespace rocjitsu::amdgpu

@@ -28,7 +28,7 @@ class GpuQueueRegistryTestAccess {
 public:
   static void fail_next_allocation(GpuQueueRegistry &registry) {
     std::lock_guard lock(registry.mutex_);
-    registry.fail_next_registry_allocation_ = true;
+    registry.registry_allocation_failure_for_test_ = [] { throw std::bad_alloc(); };
   }
 };
 
@@ -251,6 +251,11 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
   EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
   EXPECT_EQ(allocation->binding->destructions, 1);
   EXPECT_EQ(registry_.active_queues(), 0u);
+  const QueueHandle replacement =
+      registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory_control())));
+  ASSERT_TRUE(replacement);
+  EXPECT_TRUE(registry_.unregister_queue(replacement, QueueCloseMode::ForceCancel));
+  registry_.close_all();
 }
 
 TEST_F(GpuQueueRegistryTest, DuplicateIdentityIsRejectedBeforeCreatingAnotherBinding) {

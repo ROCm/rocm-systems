@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include <memory>
+#include <utility>
 namespace rocjitsu::amdgpu {
 namespace {
 
@@ -15,6 +16,11 @@ public:
                       QueuePacketFormat format, uint64_t ring_base, uint32_t ring_size)
       : command_processor_(command_processor), registration_id_(registration_id), format_(format),
         ring_base_(ring_base), ring_size_(ring_size) {}
+
+  ComputeQueueBinding(ComputeQueueBinding &&other) noexcept
+      : command_processor_(other.command_processor_),
+        registration_id_(std::exchange(other.registration_id_, 0)), format_(other.format_),
+        ring_base_(other.ring_base_), ring_size_(other.ring_size_) {}
 
   ~ComputeQueueBinding() override {
     if (registration_id_)
@@ -101,15 +107,10 @@ public:
     });
     if (registration_id == 0)
       return {};
-    try {
-      return {.status = QueueBindingCreateStatus::Bound,
-              .binding = std::make_unique<ComputeQueueBinding>(
-                  command_processor_, registration_id, request.packet_format,
-                  request.ring.base_address, request.ring.size_bytes)};
-    } catch (...) {
-      (void)command_processor_.unregister_queue_registration(registration_id);
-      throw;
-    }
+    ComputeQueueBinding binding(command_processor_, registration_id, request.packet_format,
+                                request.ring.base_address, request.ring.size_bytes);
+    return {.status = QueueBindingCreateStatus::Bound,
+            .binding = std::make_unique<ComputeQueueBinding>(std::move(binding))};
   }
 
 private:
