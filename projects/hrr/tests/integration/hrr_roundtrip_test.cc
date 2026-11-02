@@ -295,15 +295,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     false, so neither init nor exit writes there.
  *   - Writes yes to that consent file and captures again: the archive is
  *     written and its metadata records capture_consent "file".
- *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
- *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file, bare and in
+ *     double quotes: the metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
  *   - Writes the yes as Windows PowerShell does, after a UTF-8 or a UTF-16LE
  *     byte order mark: each still records capture_consent "file".
  *   - Writes UTF-16LE that is not a yes but would read as one with its NULs
  *     dropped or a line end looked for byte by byte: U+6579 then s, and yes,
  *     U+010A, no. Nothing is written.
  *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
- *     a set variable decides the run. With an empty exported variable the file
+ *     a set variable decides the run. The same with " yes ", as only trailing
+ *     blanks are trimmed. With an empty or blank exported variable the file
  *     consents.
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
  *     must finish within a deadline, with nothing written and the file named as
@@ -364,10 +365,10 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     CHECK(recorded_consent() == "file");
   }
 
-  {
+  fs::remove(consent_file);
+  for (const char* yes : {"yes", "\"yes\""}) {
     fs::remove_all(cap.path);
-    fs::remove(consent_file);
-    capture("yes");
+    capture(yes);
     CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
   }
 
@@ -393,11 +394,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   {
     fs::remove_all(cap.path);
     std::ofstream(consent_file) << "yes\n";
-    capture("no");
-    CHECK(nothing_written());
-    // An exported empty variable counts as unset, so the file decides.
-    capture("");
-    CHECK(recorded_consent() == "file");
+    for (const char* not_yes : {"no", " yes "}) {
+      capture(not_yes);
+      CHECK(nothing_written());
+    }
+    // An exported empty or blank variable counts as unset, so the file decides.
+    for (const char* blank : {"", "   "}) {
+      fs::remove_all(cap.path);
+      capture(blank);
+      CHECK(recorded_consent() == "file");
+    }
   }
 
 #if !defined(_WIN32)
