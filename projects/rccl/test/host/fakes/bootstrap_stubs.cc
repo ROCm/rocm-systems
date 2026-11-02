@@ -14,6 +14,7 @@
 #include "bootstrap.h"
 
 #include "fakes/bootstrap_stubs.h"
+#include "fakes/signature-drift.h"
 
 bool g_bootstrapNetInitFail = false;
 ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemError : ncclSuccess; }
@@ -25,11 +26,13 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapAllGather, bootstrapAllGather);
 std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier =
     [](void*, int, int, int) { return ncclInternalError; };
 ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
   return g_bootstrapBarrier(commState, rank, nranks, tag);
 }
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapBarrier, bootstrapBarrier);
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
 // ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
@@ -83,6 +86,7 @@ std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarr
 ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
   return g_bootstrapIntraNodeBarrier(commState, ranks, rank, nranks, tag);
 }
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapIntraNodeBarrier, bootstrapIntraNodeBarrier);
 
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =

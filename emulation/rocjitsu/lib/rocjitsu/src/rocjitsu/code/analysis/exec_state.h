@@ -43,7 +43,7 @@ public:
   /// @param wave_size Lanes per wavefront (EXEC bit width): 64 for Wave64, 32
   ///        for Wave32. Used to tell a full-EXEC write from a partial half-write
   ///        (e.g. `s_mov_b32 exec_lo` is the whole mask on Wave32 but only half
-  ///        on Wave64). Defaults to 0 and fails if not set.
+  ///        on Wave64).
   /// @param extra_edges Scoped call/return edges folded into the CFG for this
   ///        kernel, matching LivenessAnalysis. EXEC state then flows from a call
   ///        site into the callee and from a return into the continuation, so the
@@ -54,7 +54,7 @@ public:
   ///        is not recognizable by predecessor count alone; pinning it stops the
   ///        forward meet from deriving `Full` there. Empty falls back to the
   ///        scope leader.
-  explicit ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size = 0,
+  explicit ExecMaskAnalysis(KernelBlockScope blocks, uint8_t wave_size,
                             std::span<const ScopedCfgEdge> extra_edges = {},
                             std::span<const BasicBlock *const> entry_blocks = {});
 

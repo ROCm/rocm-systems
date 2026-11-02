@@ -18,6 +18,11 @@ namespace {
 constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
     hipFuncCachePreferNone, hipFuncCachePreferShared, hipFuncCachePreferL1,
     hipFuncCachePreferEqual};
+
+// Restores the current device's default cache config on every exit path.
+struct CacheConfigGuard {
+  ~CacheConfigGuard() { (void)hipDeviceSetCacheConfig(hipFuncCachePreferNone); }
+};
 }  // anonymous namespace
 
 /**
@@ -38,6 +43,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Basic) {
 
   const auto cache_config =
       GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
+  CacheConfigGuard guard;
   HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
 }
 
@@ -58,6 +64,7 @@ HIP_TEST_CASE(Unit_hipDeviceSetCacheConfig_Positive_Carveout) {
   const auto cache_config =
       GENERATE(from_range(std::begin(kCacheConfigs), std::end(kCacheConfigs)));
 
+  CacheConfigGuard guard;
   HIP_CHECK(hipDeviceSetCacheConfig(cache_config));
 
   // Launch a kernel without per-function carveout to exercise the
@@ -99,4 +106,36 @@ HIP_TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_Default) {
   hipFuncCache_t cache_config;
   HIP_CHECK(hipDeviceGetCacheConfig(&cache_config));
   REQUIRE(cache_config == hipFuncCachePreferNone);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Check that hipDeviceGetCacheConfig returns the value set by
+ *    hipDeviceSetCacheConfig, or hipFuncCachePreferNone on devices
+ *    without a configurable cache.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipDeviceSetGetCacheConfig.cc
+ */
+HIP_TEST_CASE(Unit_hipDeviceGetCacheConfig_Positive_RoundTrip) {
+  const auto device = GENERATE(range(0, HipTest::getDeviceCount()));
+  HIP_CHECK(hipSetDevice(device));
+  INFO("Current device is: " << device);
+
+  CacheConfigGuard guard;
+  hipFuncCache_t cache_config;
+  HIP_CHECK(hipDeviceSetCacheConfig(hipFuncCachePreferShared));
+  HIP_CHECK(hipDeviceGetCacheConfig(&cache_config));
+  const bool configurable = cache_config == hipFuncCachePreferShared;
+  if (!configurable) {
+    REQUIRE(cache_config == hipFuncCachePreferNone);
+  }
+
+  for (const auto config : kCacheConfigs) {
+    INFO("Cache config: " << config);
+    HIP_CHECK(hipDeviceSetCacheConfig(config));
+    HIP_CHECK(hipDeviceGetCacheConfig(&cache_config));
+    REQUIRE(cache_config == (configurable ? config : hipFuncCachePreferNone));
+  }
 }

@@ -4,7 +4,12 @@
 /.github/workflows/amdsmi-*.yml                                       @ROCm/smi-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
-/.github/**/*rccl*                                                    @ROCm/rccl-ci
+/.github/workflows/*rccl*                                             @ROCm/rccl-ci
+/.github/scripts/*rccl*                                               @ROCm/rccl-ci
+/.github/scripts/tests/*rccl*                                         @ROCm/rccl-ci
+/.github/scripts/allowlist/*rccl*                                     @ROCm/rccl-ci
+/.github/actions/rccl-resolve-coco-run/                               @ROCm/rccl-ci
+/.github/actions/rccl-checkout-coco-harness/                          @ROCm/rccl-ci
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers

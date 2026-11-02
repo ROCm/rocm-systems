@@ -222,36 +222,20 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
 // rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
 
 // Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
-// (rather than an inline expression) so the dispatch decision is reachable from host unit tests; the
-// logic is identical to the guard at the AllReduce call site below.
-//
-// `ceAllReduceAllowed` is the caller's single source of truth for "will CE AllReduce actually service
-// this call" -- computed once at the call site from rcclUseCeAr2Shot() plus whatever additional
-// gating the CE AllReduce implementation requires (graph latch, ncclGroupDepth, force/symReg
-// eligibility, etc). This helper does not re-derive CE eligibility itself: threading the same boolean
-// through both the early CE return and this guard keeps the two decisions from silently drifting apart
-// as CE AllReduce's own eligibility rules evolve.
+// (rather than an inline expression) so the dispatch decision is reachable from host unit tests.
+// DDA and CE 2-shot are now both candidates in rcclCandSearch; the preferred-backend mask and probe
+// order arbitrate between them. This helper gates DDA entry on symk eligibility and rcclDdaEnabled
+// only -- CE yield logic is no longer needed here.
 bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
-                                    bool ceAllReduceAllowed, bool query) {
+                                    bool query) {
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  // !symEligible is required on every arch: gfx1250 fabric does not override it.
-  // ddaFabricArch1250 only skips the CE yield -- fabric AR may still run when CE
-  // would also be eligible, bounded by rcclDdaEnabled (widest arch tier cap,
-  // else RCCL_DDA_THRESHOLD) and the per-tier thresholds. On other arches, yield to
-  // DDA whenever CE will not service this call; yielding on message size alone
-  // left comms without CE's prerequisites (e.g. gfx950 with symmetricSupport off)
-  // with no DDA and no CE, falling back to the generic ring/tree kernel across
-  // the whole 4 MiB+ range that DDA still wins.
-  const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
-  const bool result = !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
+  const bool result = !symEligible &&
                       rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
   if (!result && !query) {
     if (symEligible)
       INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
     else if (!rcclParamDdaEnable())
       INFO(NCCL_TUNING, "AR DDA disqualified: RCCL_DDA_ENABLE=0");
-    else if (ceAllReduceAllowed && !ddaFabricArch1250)
-      INFO(NCCL_TUNING, "AR DDA disqualified: ceAllReduceAllowed=1 on non-gfx1250");
     else
       INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold=%zu",
            msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
