@@ -178,20 +178,27 @@ typedef struct amd_data_prefetch_s {
  * ========================================================================= */
 
 /**
- * @brief AMD Launch Descriptor.
+ * @brief AMD Launch Descriptor (Opaque Handle).
  *
- * An optional metadata packet attached to a kernel dispatch that allows
- * software to override or extend dispatch behaviour beyond what the base
- * AQL kernel dispatch packet provides.  The Command Processor reads this
- * descriptor from the metadata queue before launching the kernel and
- * programs the relevant hardware registers prior to dispatch.
+ * An opaque handle to a launch descriptor, following the same pattern as
+ * hsa_signal_t. The handle value is an internal pointer; two handles reference
+ * the same descriptor if and only if they are equal. The value 0 is reserved
+ * and indicates an invalid or null descriptor.
+ *
+ * Use the hsa_amd_launch_descriptor_* functions to create, configure, and
+ * destroy launch descriptors.
+ *
+ * A launch descriptor is an optional metadata object attached to a kernel
+ * dispatch that allows software to override or extend dispatch behaviour beyond
+ * what the base AQL kernel dispatch packet provides. The Command Processor
+ * reads the descriptor data before launching the kernel and programs the
+ * relevant hardware registers prior to dispatch.
  *
  * The descriptor is versioned so that the Command Processor can reject
  * unrecognised formats and so that future hardware generations can extend
- * the layout without breaking existing software. Version 0 (all-zero memory)
- * is explicitly invalid to catch uninitialised descriptors.
+ * the layout without breaking existing software.
  *
- * Features controlled by this descriptor:
+ * Features controlled by a launch descriptor:
  *
  *   CU Enable (all versions)
  *     Restricts which compute units are active for this dispatch.
@@ -216,7 +223,7 @@ typedef struct amd_data_prefetch_s {
  *     Command Processor to warm the L2 cache with the next tile of
  *     data while the current tile is being computed.
  *
- * Memory layout:
+ * Internal memory layout (not directly accessible by applications):
  *   Offset  Size  Field
  *   ──────  ────  ──────────────────────────────
  *    0       1    version
@@ -236,6 +243,28 @@ typedef struct amd_data_prefetch_s {
  *   Total: 52 bytes (13 DWORDs)
  */
 typedef struct amd_launch_descriptor_s {
+  /**
+   * Opaque handle. Two handles reference the same descriptor if and only if
+   * they are equal. The value 0 is reserved and indicates an invalid descriptor.
+   */
+  uint64_t handle;
+} amd_launch_descriptor_t;
+
+/* =============================================================================
+ * Legacy internal data structure definition (preserved for internal use only)
+ * ============================================================================= */
+
+/**
+ * @brief Internal launch descriptor data structure.
+ *
+ * This structure defines the actual memory layout of a launch descriptor's data.
+ * Applications should NOT use this structure directly. Instead, use the opaque
+ * amd_launch_descriptor_t handle and the hsa_amd_launch_descriptor_* APIs.
+ *
+ * This structure is preserved here for documentation purposes and for internal
+ * runtime use.
+ */
+typedef struct amd_launch_descriptor_data_s {
   /**
    * DWORD 0 (offset 0): Version + Priority + PM Hint + Reserved
    *
@@ -454,13 +483,15 @@ typedef struct amd_launch_descriptor_s {
    */
   amd_data_prefetch_t prefetch[AMD_LAUNCH_DESCRIPTOR_MAX_PREFETCH_REGIONS];
   /* Total: 20 + 32 = 52 bytes (13 DWORDs) */
-} amd_launch_descriptor_t;
+} amd_launch_descriptor_data_t;
 
 #ifdef __cplusplus
 static_assert(sizeof(amd_data_prefetch_t) == 16,
               "amd_data_prefetch_t must be exactly 16 bytes (4 DWORDs)");
-static_assert(sizeof(amd_launch_descriptor_t) == 52,
-              "amd_launch_descriptor_t must be exactly 52 bytes (13 DWORDs)");
+static_assert(sizeof(amd_launch_descriptor_data_t) == 52,
+              "amd_launch_descriptor_data_t must be exactly 52 bytes (13 DWORDs)");
+static_assert(sizeof(amd_launch_descriptor_t) == 8,
+              "amd_launch_descriptor_t (handle) must be exactly 8 bytes");
 }
 #endif
 
