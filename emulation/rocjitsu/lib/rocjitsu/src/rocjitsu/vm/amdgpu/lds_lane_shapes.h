@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 /// @file lds_lane_shapes.h
-/// @brief Address-shape proofs shared by DS loads and stores.
+/// @brief Address-shape proofs shared by DS loads and stores, and the two lane
+/// helpers they and the load writeback have in common.
 ///
 /// @details Each proof looks at one instruction's lanes and either fails or
 /// returns a plan: the facts a fast path needs, already checked. A fast path
@@ -35,6 +36,7 @@
 #include "util/host_target.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <optional>
 
@@ -45,6 +47,26 @@
 namespace rocjitsu {
 namespace amdgpu {
 namespace lds_shapes {
+
+/// EXEC with lanes 0 .. lanes - 1 active.
+/// Used by the store writers to recognize a 16-, 32-, 48- or 64-lane prefix
+/// (lds_store_plans.h store()), and by the load writeback to recognize a full
+/// wave (lds_writeback.h, both implementations).
+constexpr uint64_t prefix(uint32_t lanes) {
+  return lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
+}
+
+/// addrs[l] = (vgpr[l] + offset) mod 2^32 for each lane in @p lanes: the
+/// 64-bit addresses Lds' exact rule (load_lanes, store_lanes) takes.
+/// Used by the exact-rule fallbacks of loads and stores (exact_rule() in
+/// lds_load_plans.h and lds_store_plans.h), for lanes no fast path may take.
+inline void exact_addresses(const uint32_t *vgpr, uint32_t offset, uint64_t lanes,
+                            uint64_t *addrs) {
+  for (uint64_t rest = lanes; rest; rest &= rest - 1) {
+    const uint32_t lane = std::countr_zero(rest);
+    addrs[lane] = static_cast<uint32_t>(vgpr[lane] + offset);
+  }
+}
 
 /// @brief Every 16-lane group is one run of 16 * Width bytes, all inside the
 /// limit.

@@ -75,10 +75,7 @@ namespace detail {
 using lds_shapes::BlockPlan;
 using lds_shapes::BroadcastPlan;
 using lds_shapes::LanesPlan;
-
-constexpr uint64_t prefix(uint32_t lanes) {
-  return lanes == 64 ? ~uint64_t{0} : (uint64_t{1} << lanes) - 1;
-}
+using lds_shapes::prefix;
 
 /// Lane-major payload of a whole wave of the widest store, b128.
 constexpr uint32_t kStagingBytes = 64 * 16;
@@ -195,10 +192,7 @@ template <StoreFormat F>
 template <StoreFormat F>
 RJ_NOINLINE void exact_rule(Lds &lds, const StoreRequest &r, uint64_t lanes, const uint8_t *src) {
   uint64_t addrs[64];
-  for (uint64_t rest = lanes; rest; rest &= rest - 1) {
-    const uint32_t lane = std::countr_zero(rest);
-    addrs[lane] = static_cast<uint32_t>(r.addr[lane] + r.offset);
-  }
+  lds_shapes::exact_addresses(r.addr, r.offset, lanes, addrs);
   Access::store_lanes(lds, addrs, lanes, F.elem_size, F.num_elems, src);
 }
 

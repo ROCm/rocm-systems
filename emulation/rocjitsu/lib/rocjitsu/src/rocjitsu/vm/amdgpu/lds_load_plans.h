@@ -253,10 +253,7 @@ template <uint32_t Width, typename Slow>
 template <typename Slow>
 RJ_NOINLINE void exact_rule(const uint32_t *addr, uint32_t offset, uint64_t lanes, Slow &slow) {
   uint64_t addrs[64];
-  for (uint64_t rest = lanes; rest; rest &= rest - 1) {
-    const uint32_t lane = std::countr_zero(rest);
-    addrs[lane] = static_cast<uint32_t>(addr[lane] + offset);
-  }
+  lds_shapes::exact_addresses(addr, offset, lanes, addrs);
   slow(addrs, lanes);
 }
 
