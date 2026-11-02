@@ -862,6 +862,26 @@ public:
       set_lane(linear_index / wf_size_, linear_index % wf_size_, value);
     }
 
+    /// @brief Store one wave-width snapshot using the acquired lane and byte masks.
+    /// @details Source and destination may overlap. Each call addresses one VGPR;
+    /// adjacent registers need not have contiguous backing storage.
+    /// @throws std::invalid_argument if @p values does not hold one word per wave lane.
+    void set_lanes(uint32_t relative_reg, std::span<const uint32_t> values) const {
+      if (values.size() != wf_size_)
+        throw std::invalid_argument("VGPR lane write needs one value per wave lane");
+      if (!cu_)
+        return;
+      if (lane_mask_ == util::mask<uint64_t>(static_cast<int>(wf_size_)) &&
+          byte_mask_ == rocjitsu::ExecutionPlugin::kFullByteMask) {
+        std::memmove(reg_data(relative_reg), values.data(), values.size_bytes());
+        return;
+      }
+      std::array<uint32_t, 64> snapshot;
+      std::ranges::copy(values, snapshot.begin());
+      for (uint32_t lane = 0; lane < wf_size_; ++lane)
+        set_lane(relative_reg, lane, snapshot[lane]);
+    }
+
   private:
     friend class RegisterAccess;
 
