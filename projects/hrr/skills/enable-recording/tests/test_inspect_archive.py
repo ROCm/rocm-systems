@@ -103,7 +103,9 @@ def test_a_metadata_only_archive_is_recorded_and_says_replay_refuses_it(tmp_path
     """The header flag, not a missing blob count, says contents were withheld:
     a content capture that copied nothing from the host has no blobs either."""
     make_process(tmp_path, 42, blobs=0, flags=inspect_archive.FLAG_METADATA_ONLY)
-    make_process(tmp_path, 43, blobs=0)
+    # A content capture sets HRR_FILE_FLAG_PACKED_HOST_RECTS and
+    # HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS.
+    make_process(tmp_path, 43, blobs=0, flags=0x0003)
     report = inspect_archive.inspect(tmp_path, use_playback=False)
 
     assert [p.metadata_only for p in report.processes] == [True, False]

@@ -516,7 +516,7 @@ group_running() {
 }
 
 # Whether a process in archive $1 recorded without contents: the
-# HRR_FILE_FLAG_METADATA_ONLY bit (0x2) of the flags at bytes 6-7 of its
+# HRR_FILE_FLAG_METADATA_ONLY bit (0x4) of the flags at bytes 6-7 of its
 # events.bin header. Replay refuses such an archive at the first call that
 # needs a buffer, an argument value or a code object. Only pid-<pid> counts, as
 # in the inspector: a pid-<pid>.prev-<n> is an earlier run moved aside.
@@ -527,7 +527,7 @@ archive_is_metadata_only() {
     [[ "${dir##*/pid-}" =~ ^[0-9]+$ ]] || continue
     [[ -f "$events" ]] || continue
     flags="$(od -An -tu2 -j6 -N2 -- "$events" 2>/dev/null | tr -d ' ')"
-    [[ "$flags" =~ ^[0-9]+$ ]] && (( flags & 2 )) && return 0
+    [[ "$flags" =~ ^[0-9]+$ ]] && (( flags & 4 )) && return 0
   done
   return 1
 }

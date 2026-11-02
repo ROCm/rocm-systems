@@ -60,7 +60,7 @@ HEADER_MAGIC = 0x52524845  # "HRRE"
 # HRR_FILE_FLAG_METADATA_ONLY in the header's reserved field: captured without
 # HIP_HRR_CAPTURE_CONTENT, so no host buffer, by-value kernel argument or code
 # object was recorded and replay refuses the first call that needs one.
-FLAG_METADATA_ONLY = 0x0002
+FLAG_METADATA_ONLY = 0x0004
 # `hrr_event_header.event_type` sentinel for the clean-shutdown trailer. A file
 # whose very first record is the trailer recorded nothing, however many bytes
 # it holds: header plus trailer is 52 bytes of no events at all.

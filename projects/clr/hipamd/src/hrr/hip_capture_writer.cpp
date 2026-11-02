@@ -1347,7 +1347,9 @@ bool open(const char* output_dir) {
     g_events_fd = fd;
     // Pitched host copies record only their copied rows (hip_capture.cpp,
     // write_host_rect_blob), which replay reads back by this flag.
-    uint16_t flags = HRR_FILE_FLAG_PACKED_HOST_RECTS;
+    // hipExtModuleLaunchKernel start/stop events are recorded as
+    // hipEventRecord events (hip_capture.cpp, record_ext_launch_event).
+    uint16_t flags = HRR_FILE_FLAG_PACKED_HOST_RECTS | HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS;
     if (!hip_capture_content_enabled()) flags |= HRR_FILE_FLAG_METADATA_ONLY;
     hrr_file_header fh{HRR_MAGIC, HRR_VERSION, flags};
     buffer_append_locked(&fh, sizeof(fh));

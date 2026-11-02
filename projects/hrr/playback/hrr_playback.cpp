@@ -714,19 +714,12 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // RAII guard: non-ordering events advance immediately (constructor) so the
   // next thread can proceed while this call is still in-flight; ordered events
   // advance on scope exit so the next thread is unblocked on every return path.
-  struct SeqAdvance {
-    PlaybackContext& ctx;
-    uint64_t next;
-    bool order;
-    SeqAdvance(PlaybackContext& c, uint64_t n, bool o) : ctx(c), next(n), order(o) {
-      if (!order)
-        ctx.next_seq.store(next, std::memory_order_release);
-    }
-    ~SeqAdvance() {
-      if (order)
-        ctx.next_seq.store(next, std::memory_order_release);
-    }
-  } seq_guard{ctx, ev.header().sequence_id + 1, order};
+  //
+  // A kernel launch takes host_free_mu shared before it hands the turn on, so
+  // the free of a pinned host buffer at the next sequence number waits until
+  // the launch has queued its snapshot of that buffer (see hrr_launch_hold).
+  HrrTurnGuard seq_guard{ctx, ev.header().sequence_id + 1, order,
+                         etype < HRR_API_COUNT && hrr_is_launch_handler(hrr_playback_dispatch[etype])};
 
   // Advance the external region annotations to this event's capture timestamp,
   // so a handler that translates a pointer sees the regions that were live at
@@ -1812,6 +1805,8 @@ int main(int argc, char** argv) {
 
   ctx.archive_dir = archive.path;
   ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
+  ctx.ext_launch_event_markers =
+      (archive.flags & HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS) != 0;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,

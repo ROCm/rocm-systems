@@ -517,10 +517,25 @@ static void host_snapshot_copy(void* data) {
     delete copies;
 }
 
+// A kernel launch's hold on host_free_mu, taken before the launch hands the
+// turn on and kept until its launch call returns. Per thread, as the launch is.
+static thread_local std::shared_lock<std::shared_mutex> t_launch_hold;
+
+void hrr_launch_hold(PlaybackContext& ctx) {
+    t_launch_hold = std::shared_lock<std::shared_mutex>(ctx.host_free_mu);
+}
+
+void hrr_launch_release() {
+    if (t_launch_hold.owns_lock()) t_launch_hold.unlock();
+}
+
 // Write a launch's pinned host snapshots back when its stream reaches it, by a
 // host function queued ahead of the kernel. The replay thread does not wait
-// for the stream, which may wait on work it has yet to submit. hipHostFree and
-// hipHostUnregister wait for every stream, so the allocation outlives the copy.
+// for the stream, which may wait on work it has yet to submit. A kernel launch
+// gives up the global turn before its handler runs, so a free on another
+// thread could release the destination first. The caller holds host_free_mu
+// shared (hrr_launch_hold) from before the turn is handed on until the launch
+// returns; every host free takes it exclusive before it drops the map entry.
 // Nothing is restored when the stream captures into a graph, where the kernel
 // runs only when the graph is launched.
 static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
@@ -1597,6 +1612,10 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         }
     }
 
+    // The kernel and its snapshot copies are queued: a host free may go ahead.
+    // Not held across the syncs below, which can wait on events yet to replay.
+    hrr_launch_release();
+
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_stop, stream)) == hipSuccess);
 
@@ -1737,6 +1756,19 @@ hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx,
     // barrier replayed through the ordinary launch hangs instead of failing.
     return replay_kernel_launch(ctx, payload, /*ext_global_worksize=*/false,
                                 /*launch_ex=*/false, /*cooperative=*/true);
+}
+
+bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
+    return fn == playback_hipModuleLaunchKernel ||
+           fn == playback_hipExtModuleLaunchKernel ||
+           fn == playback_hipLaunchKernel ||
+           fn == playback_hipLaunchByPtr ||
+           fn == playback_hipLaunchKernel_spt ||
+           fn == playback_hipLaunchCooperativeKernel ||
+           fn == playback_hipLaunchCooperativeKernel_spt ||
+           fn == playback_hipDrvLaunchKernelEx ||
+           fn == playback_hipLaunchKernelExC ||
+           fn == playback_hipModuleLaunchCooperativeKernel;
 }
 
 // ---------------------------------------------------------------------------
@@ -3314,9 +3346,15 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
+// A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
+// fails, as it does under a capture on another thread) is left alone, buffer
+// and charge both: the charge goes back only once the runtime has let go.
+// Freeing a registration would leave it aimed at freed heap.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
+    std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
+    size_t size = 0;
     AllocKind kind = AllocKind::Device;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -3325,7 +3363,7 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         kind = it->second.kind;
         if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
         host_ptr = it->second.live_ptr;
-        ctx.host_budget.release(it->second.size);
+        size = it->second.size;
         ctx.alloc_map.erase(it);
         auto rb = ctx.host_reg_bufs.find(rec);
         if (rb != ctx.host_reg_bufs.end()) {
@@ -3334,11 +3372,12 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         }
     }
     if (kind == AllocKind::HostMalloc) {
-        (void)hipHostFree(host_ptr);
+        if (hipHostFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    (void)hipHostUnregister(buf);
+    if (hipHostUnregister(buf) != hipSuccess) return;
+    ctx.host_budget.release(size);
 #ifdef _WIN32
     _aligned_free(buf);
 #else
@@ -3382,13 +3421,31 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
+// hipHostFree and hipFreeHost differ only in the runtime call. The exclusive
+// lock keeps a launch that is queuing a pinned host snapshot for this buffer
+// from racing the free (see hrr_launch_hold).
+static hipError_t free_host_memory(PlaybackContext& ctx, uint64_t rec_ptr, int32_t recorded_ret,
+                                   hipError_t (*free_fn)(void*), const char* api) {
+    std::unique_lock host_free(ctx.host_free_mu);
+    void* live = ctx.lookup_ptr(rec_ptr);
+    if (!live) return hipSuccess;
+    hipError_t r = free_fn(live);
+    if (r != hipSuccess && recorded_ret != 0 && static_cast<int32_t>(r) == recorded_ret) {
+        hrr_note_recorded_error(ctx, api, recorded_ret);
+        return hipSuccess;
+    }
+    if (r == hipSuccess) ctx.remove_alloc(rec_ptr);
+    return r;
+}
+
+hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
+    return free_host_memory(ctx, a->ptr, a->ret, hipHostFree, "hipHostFree");
+}
+
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFreeHost*>(pl);
-    void* live = ctx.lookup_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
+    return free_host_memory(ctx, a->ptr, a->ret, hipFreeHost, "hipFreeHost");
 }
 
 // ---------------------------------------------------------------------------
@@ -3458,31 +3515,37 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Retrieve the backing buffer regardless of whether lookup_ptr succeeds —
-    // we must free it even if the alloc_map entry was already removed.
+    // Leave the maps and the backing buffer alone until the runtime call
+    // succeeds. A failed unregister did not release the registration, so
+    // freeing the buffer would leave alloc_map aimed at freed heap.
     void* buf = nullptr;
     {
-        std::unique_lock lk(ctx.map_mutex);
+        std::shared_lock lk(ctx.map_mutex);
         auto it = ctx.host_reg_bufs.find(a->hostPtr);
-        if (it != ctx.host_reg_bufs.end()) {
-            buf = it->second;
-            ctx.host_reg_bufs.erase(it);
-        }
+        if (it != ctx.host_reg_bufs.end()) buf = it->second;
     }
 
     void* live = buf ? buf : ctx.lookup_ptr(a->hostPtr);
     if (!live) return hipSuccess;
 
     hipError_t r = hipHostUnregister(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->hostPtr);
+    if (r != hipSuccess) return r;
 
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        ctx.host_reg_bufs.erase(a->hostPtr);
+    }
+    ctx.remove_alloc(a->hostPtr);
+    if (buf) {
 #ifdef _WIN32
-    _aligned_free(buf);
+        _aligned_free(buf);
 #else
-    free(buf);
+        free(buf);
 #endif
+    }
     return r;
 }
 
@@ -3539,6 +3602,7 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
 // hipFreeAsync:  ret(4) dev_ptr(8) stream(8)
 
 hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.lookup_ptr(a->ptr);
     if (!live) return hipSuccess;
@@ -3554,6 +3618,7 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
+    std::unique_lock host_free(ctx.host_free_mu);
     const auto* a  = reinterpret_cast<const hrr_args_hipFreeAsync*>(pl);
     void*       live   = ctx.lookup_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
@@ -4359,6 +4424,43 @@ hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
     hipEvent_t e  = nullptr;
     hipError_t r  = hipEventCreateWithFlags(&e, a->flags);
     if (r == hipSuccess) ctx.record_event(a->event, e);
+    return r;
+}
+
+hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
+                                         const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(pl);
+    float ms = 0.f;
+    hipEvent_t start = ctx.translate_event(a->start);
+    hipEvent_t stop  = ctx.translate_event(a->stop);
+    hipError_t r = hipEventElapsedTime(&ms, start, stop);
+    if (r == hipSuccess) return hipSuccess;
+    // HIP returns hipErrorInvalidHandle when either event has no marker.
+    // hipExtModuleLaunchKernel sets those markers inside the runtime. An
+    // archive recorded before that side effect was stored has no
+    // hipEventRecord for the pair, and the captured call still succeeded.
+    // Both handles resolving means the events are still live, so this is not
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            fprintf(stderr,
+                    "[HRR] hipEventElapsedTime: no marker on a live pair "
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
+        }
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
+    if (hrr_replayed_recorded_error(ctx, "hipEventElapsedTime", a->ret, r))
+        return hipSuccess;
     return r;
 }
 
