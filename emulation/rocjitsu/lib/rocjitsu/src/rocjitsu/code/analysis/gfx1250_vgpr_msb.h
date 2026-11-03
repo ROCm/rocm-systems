@@ -18,6 +18,14 @@ namespace rocjitsu {
 
 class Instruction;
 
+/// @brief Whether an instruction can change CDNA5 VGPR bank selection.
+/// @details Non-CDNA5 instructions and writes to other HWREGs preserve banks.
+/// Pass the concrete target's setreg capability: gfx1250 clobbers banks on any
+/// MODE write; without that fixup only writes intersecting MODE[19:12] do so.
+/// Missing HWREG operands are conservatively treated as bank-changing.
+[[nodiscard]] bool may_change_vgpr_msb(const Instruction &instruction, rj_code_arch_t arch,
+                                       bool setreg_vgpr_msb_fixup = true);
+
 /// @brief Resolve CDNA5 encoded VGPR operands to their 256-register bank.
 ///
 /// @details CDNA5 stores only the low eight bits of a VGPR index in vector

@@ -32,10 +32,15 @@
 #include "dbi_sim.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/vector_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -43,6 +48,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -290,6 +297,160 @@ TEST(DbiFixtureSetupTest, MalformedConfigRecordsFatalFailure) {
         sim.initialize("\"", 64);
       },
       "Failed to parse JSON config:");
+}
+
+TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
+  for (const ArgSimArch arch : {kCdna3ArgArch, kCdna4ArgArch, kRdna4ArgArch}) {
+    SCOPED_TRACE(arch.sim_arch);
+    for (const InstrumentationKind kind :
+         {InstrumentationKind::BeforeInst, InstrumentationKind::AfterInst}) {
+      const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 257, arch.arch);
+      ASSERT_TRUE(guest_move.succeeded());
+      const std::vector<uint32_t> guest = {test::make_mov_vgpr_inline(1, 3),
+                                           test::make_mov_vgpr_inline(0, 7), kMovV1V0,
+                                           guest_move.value(), build_s_endpgm(arch.arch)};
+      const bool wave32 = arch.arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const std::vector<uint8_t> image =
+          wave32 ? test::make_gfx1200_wave32_kernel_elf(guest, 64, 3)
+                 : test::make_amdgpu_kernel_elf(guest, 64, 3, arch.e_flags);
+      const std::vector<uint8_t> target = test::with_descriptor_metadata(image, arch.arch);
+      const std::vector<uint8_t> probe = test::make_amdgpu_probe_elf(
+          "after_result",
+          {kMovV3V0, test::make_mov_vgpr_inline(1, 11), build_s_setpc_b64(30, arch.arch)},
+          arch.e_flags);
+      const AmdGpuCodeObject object(target.data(), target.size());
+      const AmdGpuCodeObject body(probe.data(), probe.size());
+      Instrumentor instrumentor(object, arch.arch);
+      const InstrumentationPoint point = {.anchor_offset = 8,
+                                          .kind = kind,
+                                          .probe_obj = &body,
+                                          .probe_symbol = "after_result",
+                                          .probe_args = {probe_arg_vgpr(1)}};
+      instrumentor.add_point(point);
+      const InstrumentedCodeObject result = instrumentor.patch();
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+      const InstrumentedSite &site = result.sites.front();
+      const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+      const std::vector<uint32_t> text = test::section_words(patched, ".text");
+      EXPECT_GT(site.instrumentation_size, 0u);
+      if (kind == InstrumentationKind::AfterInst)
+        EXPECT_EQ(site.instrumentation_offset, site.guest_offset + site.guest_size);
+      else
+        EXPECT_EQ(site.guest_offset, site.instrumentation_offset + site.instrumentation_size);
+      const uint64_t resume_offset = kind == InstrumentationKind::AfterInst
+                                         ? site.instrumentation_offset + site.instrumentation_size
+                                         : site.guest_offset + site.guest_size;
+      ASSERT_EQ(resume_offset + sizeof(uint32_t), text.size() * sizeof(uint32_t));
+      const std::optional<int16_t> resume_delta =
+          compute_sopp_branch_simm16(resume_offset, point.anchor_offset + site.guest_size);
+      ASSERT_TRUE(resume_delta);
+      EXPECT_EQ(text.back(), build_s_branch(*resume_delta, arch.arch));
+      test::DbiSim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
+      if (wave32)
+        sim.set_wave32_dispatch();
+      const std::vector<std::vector<uint32_t>> values =
+          sim.run_and_read_vgprs(text, test::patched_private_segment_size(patched), {3, 2});
+      ASSERT_EQ(values.size(), 2u);
+      ASSERT_EQ(values[0].size(), arch.wave_size);
+      ASSERT_EQ(values[1].size(), arch.wave_size);
+      for (uint32_t lane = 0; lane < arch.wave_size; ++lane) {
+        EXPECT_EQ(values[0][lane], kind == InstrumentationKind::AfterInst ? 7u : 3u);
+        EXPECT_EQ(values[1][lane], 7u);
+      }
+    }
+  }
+}
+
+TEST(DbiAfterInstSim, PreservesANewScalarDefinitionWithoutArguments) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kResultSgpr = 4;
+  const util::FailureOr<uint32_t> readback = build_v_mov_b32_src(2, kResultSgpr, kArch);
+  ASSERT_TRUE(readback.succeeded());
+  const std::vector<uint8_t> image = test::with_descriptor_metadata(
+      test::make_gfx950_kernel_elf(
+          {build_s_mov_b32(kResultSgpr, scalar_positive_inline_u32(7), kArch), readback.value(),
+           build_s_endpgm(kArch)},
+          64),
+      kArch);
+  const std::vector<uint8_t> probe = test::make_gfx950_probe_elf(
+      "clobber_result", {build_s_mov_b32(kResultSgpr, scalar_positive_inline_u32(11), kArch),
+                         build_s_setpc_b64(30, kArch)});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject body(probe.data(), probe.size());
+
+  // A full-width scalar definition kills the old value without relying on
+  // EXEC analysis. With no arguments, only AfterInst's definitions union can
+  // make this new result live for preservation around the callback.
+  const std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+  ASSERT_NE(decoder, nullptr);
+  const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+      BasicBlock::build(object, *decoder, kArch);
+  ASSERT_TRUE(blocks.succeeded());
+  ASSERT_EQ(blocks.value().size(), 1u);
+  const std::array<BasicBlock *, 1> scope = {blocks.value().front().get()};
+  const LivenessAnalysis liveness(scope, 64);
+  const Instruction &anchor = *scope.front()->instructions().begin();
+  const FailureOr<bool> live_before =
+      liveness.is_live_before(anchor, {RegClass::SGPR, kResultSgpr, 1});
+  ASSERT_TRUE(live_before.succeeded());
+  ASSERT_FALSE(live_before.value());
+
+  Instrumentor instrumentor(object, kArch);
+  const InstrumentationPoint point = {.kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = &body,
+                                      .probe_symbol = "clobber_result",
+                                      .probe_args = {}};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+  const std::vector<uint32_t> values = sim.run_and_read_vgpr(
+      test::section_words(patched, ".text"), test::patched_private_segment_size(patched), 2);
+  ASSERT_EQ(values.size(), 64u);
+  for (const uint32_t value : values)
+    EXPECT_EQ(value, 7u);
+}
+
+TEST(DbiAfterInstSim, ObservesAndRestoresTheExecMaskProducedByTheAnchor) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kExecLo = scalar_operand_exec_lo(kArch);
+  const std::vector<uint8_t> image = test::with_descriptor_metadata(
+      test::make_gfx950_kernel_elf({test::make_mov_vgpr_inline(2, 0),
+                                    build_s_mov_b64(kExecLo, scalar_positive_inline_u32(3), kArch),
+                                    test::make_mov_vgpr_inline(2, 7), build_s_endpgm(kArch)},
+                                   64),
+      kArch);
+  const std::vector<uint8_t> probe = test::make_gfx950_probe_elf(
+      "observe_mask", {kMovV3V0, build_s_mov_b64(kExecLo, scalar_positive_inline_u32(0), kArch),
+                       build_s_setpc_b64(30, kArch)});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject body(probe.data(), probe.size());
+  Instrumentor instrumentor(object, kArch);
+  const InstrumentationPoint point = {.anchor_offset = 4,
+                                      .kind = InstrumentationKind::AfterInst,
+                                      .probe_obj = &body,
+                                      .probe_symbol = "observe_mask",
+                                      .probe_args = {{.source = ProbeArgSource::AnchorExecLo}},
+                                      .force_full_exec = true};
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  test::DbiSim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna4", 64));
+  const std::vector<std::vector<uint32_t>> values = sim.run_and_read_vgprs(
+      test::section_words(patched, ".text"), test::patched_private_segment_size(patched), {3, 2});
+  ASSERT_EQ(values.size(), 2u);
+  ASSERT_EQ(values[0].size(), 64u);
+  ASSERT_EQ(values[1].size(), 64u);
+  for (uint32_t lane = 0; lane < 64; ++lane) {
+    EXPECT_EQ(values[0][lane], 3u);
+    EXPECT_EQ(values[1][lane], lane < 2 ? 7u : 0u);
+  }
 }
 
 } // namespace
