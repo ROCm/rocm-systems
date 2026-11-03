@@ -155,11 +155,10 @@ std::string mixedBackendTwoNodeSkipReason() {
   if (local.empty() && gin_anvil_sdma_probe() <= 0)
     local = "AICOMRCCL-3417 requires Anvil SDMA (gin_anvil_sdma_probe)";
 #endif
-  if (local.empty()) {
-    const char* ginType = std::getenv("NCCL_GIN_TYPE");
-    if (ginType && ginType[0])
-      local = "AICOMRCCL-3417 requires NCCL_GIN_TYPE to be unset";
-  }
+  // Skip on presence: ginAnvilInit rejects an empty NCCL_GIN_TYPE, so Anvil
+  // would never load and the drop would go untested.
+  if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
+    local = "AICOMRCCL-3417 requires NCCL_GIN_TYPE to be unset";
   // crossNodeReason splits MPI_COMM_TYPE_SHARED. Every rank must call it.
   std::string cross = crossNodeReason();
   if (local.empty()) local = std::move(cross);
