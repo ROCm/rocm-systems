@@ -1298,7 +1298,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   if (WaitcheckTarget::classify_events_into(inst, config_.arch, classified).failed() ||
       classified.empty())
     return;
-  const bool legacy = uses_legacy_waitcnt(model.value());
   auto &scoreboard = wf.ensure_memory_wait_scoreboard();
   scoreboard.bind(wf.pc, &wf, &ComputeUnitCore::report_memory_wait);
   const auto xevent =
@@ -1421,10 +1420,11 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // Check all writes before adding any new dependencies. FLAT has the same
   // destination on two counters; those entries are not writes racing each other.
   const bool flat_result = defs != classified.end() && defs->kind == WaitEventKind::FlatLoad;
-  const auto vmem_write_order =
-      legacy && defs != classified.end() && defs->counter == WaitCounterKind::Load
-          ? scoreboard.ordered_write_order(*defs, config_.arch)
-          : MemoryWaitScoreboard::kUnordered;
+  const auto vmem_write_order = has_ordered_vmem_writeback(config_.arch) &&
+                                        defs != classified.end() &&
+                                        defs->counter == WaitCounterKind::Load
+                                    ? scoreboard.ordered_write_order(*defs, config_.arch)
+                                    : MemoryWaitScoreboard::kUnordered;
   if (flat) {
     const auto ds_event =
         std::ranges::find(classified, WaitCounterKind::Ds, &ClassifiedEvent::counter);
@@ -1531,7 +1531,13 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
         uint64_t lanes = d.lanes;
         if (event.kind == WaitEventKind::FlatLoad)
           lanes &= counter == WaitCounterKind::Ds ? flat_shared_lanes : ~flat_shared_lanes;
-        scoreboard.add({sequence, wf.pc, lanes, d.reg, counter, d.bytes});
+        MemoryWaitScoreboard::Event result{sequence, wf.pc, lanes, d.reg, counter, d.bytes};
+        // FLAT's LDS-serviced lanes share native LDS's order class, so partial
+        // waits retire them together. Only qualified targets also write them
+        // to registers in order with native LDS results.
+        if (event.kind == WaitEventKind::FlatLoad && counter == WaitCounterKind::Ds)
+          result.ordered_overwrite = has_ordered_flat_lds_writeback(config_.arch);
+        scoreboard.add(result);
       }
   }
 }
