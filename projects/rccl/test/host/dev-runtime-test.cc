@@ -121,6 +121,11 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
 #include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define DEV_RUNTIME_TEST_HAS_MALLINFO2 1
+#endif
+#endif
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -6757,7 +6762,14 @@ protected:
                                   kTeamNodes * sizeof(ncclTeamRequirements));
   }
 
-  static long long HeapInUse() { return static_cast<long long>(mallinfo2().uordblks); }
+  // mallinfo2 needs glibc 2.33; older glibc only has the int-sized mallinfo.
+  static long long HeapInUse() {
+#ifdef DEV_RUNTIME_TEST_HAS_MALLINFO2
+    return static_cast<long long>(mallinfo2().uordblks);
+#else
+    return static_cast<long long>(mallinfo().uordblks);
+#endif
+  }
 
   void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
     // ScopedHook's own counter sees every g_loadParam call, so count the reads of

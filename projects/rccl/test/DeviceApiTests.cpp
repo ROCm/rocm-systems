@@ -527,10 +527,21 @@ static void runDevCommCreateFailureTest()
         resources.ranks[0].devCommCreated = true;
 }
 
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define DEVICE_API_TEST_HAS_MALLINFO2 1
+#endif
+#endif
+
 // Heap bytes currently handed out by malloc, summed over every arena.
+// mallinfo2 needs glibc 2.33; older glibc only has the int-sized mallinfo.
 static long long heapInUseBytes()
 {
+#ifdef DEVICE_API_TEST_HAS_MALLINFO2
     return static_cast<long long>(mallinfo2().uordblks);
+#else
+    return static_cast<long long>(mallinfo().uordblks);
+#endif
 }
 
 // ncclDevCommCreate deep-copies the caller's requirements before it validates
