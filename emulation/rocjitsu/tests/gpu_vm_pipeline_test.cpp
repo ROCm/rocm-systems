@@ -639,12 +639,11 @@ TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSucces
   context.cu->write_vgpr(base, 0, 0);
   context.cu->write_vgpr(base + kDestination, 0, kSentinel);
   uint32_t failures = 0;
-  context.cu->set_execution_failure_handler([&](amdgpu::Wavefront &wf, bool retain_wave) {
+  context.cu->set_execution_failure_handler([&](amdgpu::Wavefront &wf) {
     ++failures;
-    EXPECT_TRUE(retain_wave);
     EXPECT_EQ(wf.instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-    wf.set_debug_halted(true);
+    EXPECT_EQ(context.cu->read_vgpr_storage(base + kDestination, 0), kSentinel);
     return true;
   });
   testing::internal::CaptureStderr();
@@ -658,10 +657,9 @@ TEST(GpuVmPipeline, InvalidAtomicReportsOneExecutionFailureBeforeBackingOrSucces
             std::string::npos)
       << diagnostic;
   EXPECT_EQ(failures, 1u);
-  EXPECT_TRUE(context.wf->debug_paused());
-  EXPECT_FALSE(context.wf->is_halted());
+  EXPECT_FALSE(context.wf->debug_paused());
+  EXPECT_TRUE(context.wf->is_halted());
   EXPECT_TRUE(context.wf->wait_counters().empty());
-  EXPECT_EQ(context.cu->read_vgpr_storage(base + kDestination, 0), kSentinel);
   EXPECT_EQ(context.external->write_calls, 0u);
   for (const auto &read : context.external->read_history)
     EXPECT_NE(read.address, kData);

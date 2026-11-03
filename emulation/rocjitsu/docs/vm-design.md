@@ -173,6 +173,20 @@ ring extent. An unavailable access retains the snapshot and exact progress for a
 later retry; faulted or malformed work becomes terminal after any required cursor
 publication.
 
+`COPY_LINEAR_SWAP` supports disjoint, adjacent, and identical operand ranges.
+Partially overlapping ranges are unsupported: the processor rejects them before
+writing either operand and logs the packet operands `address_a` and `address_b`
+and the byte count. ROCr places the API destination in A and source in B. The
+queue becomes terminal and subsequent completion packets remain
+unexecuted. ROCr may accept such submissions, but that acceptance does not
+establish hardware overlap semantics. This conservative restriction is a
+simulator limitation.
+
+Malformed packet warnings label the root packet's starting byte cursor as
+`root_cursor`; the reported header can belong to that root packet or an indirect
+packet within it. A cursor-publication failure preserves this packet diagnostic,
+including when the cursor store faults after an unavailable retry.
+
 KFD and PCI/MES only adapt queue creation, producer notifications, interrupts,
 and reset into `GpuQueueRegistry`. MES may supply the initial device cursor captured
 from an MQD. KFD supplies the zero cursor it establishes during queue creation.
