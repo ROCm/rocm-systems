@@ -989,6 +989,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in cpu_choices:
                     del cpu_choices["all"]
+                # Bare --cpu (nargs="*") selects every CPU
+                if not values:
+                    values = ["all"]
                 status, cpu_format, selected_device_handles = (
                     amdsmi_helpers.get_device_handles_from_cpu_selections(
                         cpu_selections=values, cpu_choices=cpu_choices
@@ -1532,6 +1535,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         nic=False,
         cpu_core_supported=True,
         cpu_supported=None,
+        cpu_nargs="+",
     ):
         # Device arguments help text
         gpu_help = (
@@ -1568,7 +1572,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "--cpu",
                 type=self._validate_cpu_core,
                 action=self._cpu_select(self.cpu_choices),
-                nargs="+",
+                nargs=cpu_nargs,
                 help=cpu_arg_help,
             )
             if subcommand_parser._optionals.title != "Static Arguments":
@@ -1715,7 +1719,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                             \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF.\
-                            \nUse --cpu to list CPU family, model, and stepping.\
+                            \nUse --cpu to list CPU model name, BIOS model name, and cores per socket.\
+                            \nUse --cpu -e to also list CPU family, model, and stepping.\
                             \n--core is not supported for this command."
         enumeration_help = "Enumeration mapping to other features.\
                             \n    Includes CARD, RENDER, HSA_ID, HIP_ID, HIP_UUID, OAM_ID, and PHYSICAL_ACC_ID"
@@ -1739,6 +1744,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             nic=True,
             cpu_core_supported=False,
             cpu_supported=True,
+            cpu_nargs="*",
         )
         self._add_command_modifiers(list_parser)
 
