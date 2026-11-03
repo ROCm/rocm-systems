@@ -556,7 +556,7 @@ Examples:
         help=(
             "\t\t\tTrace ML APIs. User-defined ROCTx regions are included.\n"
             f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
-            f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}."
+            f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}"
         ),
     )
     profile_group.add_argument(
@@ -705,7 +705,7 @@ Examples:
             "\t\tList collected operators as a unified call tree.\n"
             "\t\tWith no arguments, lists every collected operator.\n"
             "\t\tRequires --output-format stdout. Ignores --operator.\n"
-            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}."
+            f"\t\tValues: {', '.join(OPERATOR_SELECTORS)}"
         ),
     )
     analyze_group.add_argument(
