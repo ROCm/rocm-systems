@@ -7807,11 +7807,15 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
       });
 }
 
-// gfx1250 SPX ReduceScatter runs DDA LL128 through 224M below 8 ranks, then nRanks x 7.5M up to 256M, then Ring.
+// gfx1250 SPX ReduceScatter: DDA LL to its cap, LL128 to 224M below 8 ranks, nRanks x 7.5M to 256M, then Ring.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_Gfx1250SpxLL128Caps",
       []() {
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible,
+                              [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
+                                return true;
+                              });
         ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -7827,7 +7831,14 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250SpxLL128Caps) {
                                                           ncclFloat32, ncclSum, /*query=*/false, &decision));
           return decision.algo;
         };
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
         const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        const std::pair<int, size_t> llCases[] = {{4, 4 * kMiB}, {8, 8 * kMiB}, {16, 16 * kMiB}};
+        for (const auto& c : llCases) {
+          comm->nRanks = c.first;
+          EXPECT_EQ(ll, algo(c.second)) << c.first;
+          EXPECT_EQ(ll128, algo(c.second + (size_t)c.first * sizeof(float))) << c.first;
+        }
         const std::pair<int, size_t> cases[] = {
             {4, 224 * kMiB}, {8, 60 * kMiB}, {16, 120 * kMiB}, {32, 240 * kMiB}, {64, 256 * kMiB}};
         for (const auto& c : cases) {

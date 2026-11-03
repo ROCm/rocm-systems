@@ -31,7 +31,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
-    4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; LL128 starts on the next byte
+    4ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 4M at 4 ranks; nRanks x 1M below 4 ranks
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
