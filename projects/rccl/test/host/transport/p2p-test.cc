@@ -22,7 +22,7 @@
 #include "ScopedHook.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/hip_fakes.h"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../common/ProcessIsolatedTestRunner.hpp"
 
 // Pull in alloc.h NOW so its macros (ncclCudaCallocAsync etc.) are visible
 // to be #undef'd. p2p.cc's transitive includes would otherwise be the first
@@ -214,8 +214,8 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // file. The ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro
 // shims above. They must land after #include P2P_CC_PATH so the production
 // types they mention (the alloc.h templates, etc.) are already in scope.
-// busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they live in
-// fakes/utils_fakes.cc, not here.
+// busIdToInt64 / getBusId come from the real src/misc/utils.cc this binary
+// compiles, so they are not defined here.
 // ---------------------------------------------------------------------------
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes

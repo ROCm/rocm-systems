@@ -18,8 +18,8 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
-#include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../../../common/LogCapture.hpp"
+#include "../../../common/ProcessIsolatedTestRunner.hpp"
 #include "AsanCheck.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
@@ -29,6 +29,8 @@
 #include "fakes/param_redirect.h"
 
 #include NET_IB_CAST_GIN_CC_PATH
+// gin.cc brings the devices up through init.cc; compiled here so TearDown can reset its netRefCount.
+#include "transport/net_ib_cast/NetIbCastInit.h"
 
 namespace {
 
@@ -75,6 +77,7 @@ class NetIbCastGinMicrotest : public ::testing::Test {
   }
   void TearDown() override {
     NetIbCastResetGlobals();
+    NetIbCastResetInitRefCount();
     ResetIbvwrapFakes();
     ResetNetIbCastConnectFakes();
     ResetNetIbCastP2pFakes();
