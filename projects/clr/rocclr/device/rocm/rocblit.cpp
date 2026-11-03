@@ -2485,12 +2485,16 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
                 "Blit staging H2D copy dst=%p, stg buf=%p, "
                 "dstOrigin=0x%x, size=%zu, Async=%d",
                 currentDstAddr, stagingBuffer, origin[0], copySize, copyMetadata.isAsync_);
+        // The CPU has just written the staging slot, so the copy must acquire at system scope.
+        // An agent-scope acquire (AMD_OPT_FLUSH=1) keeps L2 lines of the staging ring: when
+        // an earlier staged copy already ran and cached a line that this slot shares, the copy
+        // reads the stale line and writes stale data to the destination.
+        gpu().addSystemScope();
         bool kAttachSignal = false;
         if (copyMetadata.isAsync_ == false) {
           // If its a blocking call, attach signal to the packet which we can track for
-          // completion. Also flush caches as we may not need another packet to flush caches.
+          // completion.
           kAttachSignal = true;
-          gpu().addSystemScope();
         }
         result =
             shaderCopyBuffer(currentDstAddr, stagingBuffer, origin, srcOrigin, copySize, entire,
