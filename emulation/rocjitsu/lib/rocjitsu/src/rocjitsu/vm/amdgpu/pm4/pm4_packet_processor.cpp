@@ -213,8 +213,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::PredExec: {
         if (require(1).failed())
           return util::Result::failure();
-        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-             context.arch != ROCJITSU_CODE_ARCH_CDNA4) ||
+        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 && context.arch != ROCJITSU_CODE_ARCH_CDNA4 &&
+             context.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
             (words[0] & 0x00ffc000) || context.xcc_id >= 8)
           return fail("unsupported PRED_EXEC control or target");
         const uint32_t skip = words[0] & 0x3fff;

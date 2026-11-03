@@ -283,8 +283,11 @@ TEST_F(Pm4PacketProcessorTest, ShadowLoadRejectsOffsetPastThe48BitAperture) {
   EXPECT_EQ(service(), Pm4TestStatus::Faulted);
 }
 
-TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
-  context.arch = ROCJITSU_CODE_ARCH_CDNA3;
+class Pm4PredExecTest : public Pm4PacketProcessorTest,
+                        public ::testing::WithParamInterface<rj_code_arch_t> {};
+
+TEST_P(Pm4PredExecTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
+  context.arch = GetParam();
   context.xcc_id = 0;
   const std::array words{0xc0002300u, (1u << 25) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
   submit(words, true, 6, 8);
@@ -298,6 +301,76 @@ TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicati
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 5u);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
   EXPECT_TRUE(completed);
+}
+
+TEST_P(Pm4PredExecTest, SelectedPredExecExecutesOnHighestVirtualXcc) {
+  context.arch = GetParam();
+  context.xcc_id = 7;
+  const std::array words{0xc0002300u, (1u << 31) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 99u);
+  EXPECT_TRUE(completed);
+}
+
+TEST_P(Pm4PredExecTest, RejectsReservedPredExecBitsBeforeEffects) {
+  context.arch = GetParam();
+  for (uint32_t bit = 14; bit < 24; ++bit) {
+    SCOPED_TRACE(bit);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{
+        0xc0002300u, (1u << bit) | (1u << 24) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
+}
+
+TEST_P(Pm4PredExecTest, RejectsPredExecXccOutsideMask) {
+  context.arch = GetParam();
+  context.xcc_id = 8;
+  const std::array words{0xc0002300u, 0xff000005u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_P(Pm4PredExecTest, RejectsPredExecBeyondBufferForSelectedAndMaskedXcc) {
+  context.arch = GetParam();
+  for (uint32_t mask : {1u << 24, 1u << 25}) {
+    SCOPED_TRACE(mask);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{0xc0002300u, mask | 6u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Cdna, Pm4PredExecTest,
+                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                           ROCJITSU_CODE_ARCH_CDNA5));
+
+TEST_F(Pm4PacketProcessorTest, RejectsPredExecOnOtherArchitectures) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    context.arch = arch;
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{0xc0002300u, (1u << 24) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
 }
 
 TEST_F(Pm4PacketProcessorTest, CondExecRetainsSkippedCursorAcrossPublicationRetry) {
