@@ -20,7 +20,7 @@ FILTERED_WORKLOAD = Path(ROOT) / "tests" / "workloads" / "ipblocks_SQ" / "MI200"
 
 def first_column_ids(output: str) -> list[str]:
     """Return the ids in the first column of the table rows of output."""
-    return re.findall(r"^│ ([0-9.]+) +│", output, flags=re.MULTILINE)
+    return re.findall(r"^\| ([0-9.]+) +\|", output, flags=re.MULTILINE)
 
 
 # =============================================================================
@@ -39,7 +39,7 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     output = capsys.readouterr().out
     assert "Platform: gfx90a (MI200)" in output
     assert first_column_ids(output) == list(arch_panels_from_disk("gfx90a"))
-    assert re.search(r"│ 6 +│ spi +│ Workgroup Manager \(SPI\) +│", output)
+    assert re.search(r"\| 6 +\| spi +\| Workgroup Manager \(SPI\) +\|", output)
 
 
 def list_blocks_supported_archs() -> list[str]:
@@ -141,7 +141,7 @@ def test_list_metrics_selected_blocks(binary_handler_analyze_rocprof_compute, ca
         "\n2. System Speed-of-Light (alias: sol)\n2.1 System Speed-of-Light\n" in output
     )
     assert re.search(
-        r"│ 2\.1\.0 +│ VALU FLOPs +│ GFLOP/s +│ The total floating", output
+        r"\| 2\.1\.0 +\| VALU FLOPs +\| GFLOP/s +\| The total floating", output
     )
     assert "\n18.1 Aggregate Stats (All channels)\n" in output
     assert "\n18.2 " not in output
@@ -159,7 +159,7 @@ def test_list_metrics_defaults_to_current_gpu(
 
     output = capsys.readouterr().out
     assert "Platform: gfx" in output
-    assert re.search(r"│ Block_ID +│ Alias +│ Block +│", output)
+    assert re.search(r"\| Block_ID +\| Alias +\| Block +\|", output)
 
 
 def test_list_metrics_from_workload(binary_handler_analyze_rocprof_compute, capsys):

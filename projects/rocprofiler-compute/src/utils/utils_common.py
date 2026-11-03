@@ -40,7 +40,7 @@ from utils.logger import (
     console_log,
     console_warning,
 )
-from vendored import tabulate, yaml
+from vendored import yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
@@ -837,15 +837,14 @@ def format_block_table(
 ) -> str:
     """Format the Block_ID, Alias and Block table of --list-metrics."""
     rows = [
-        [block_id, block_aliases.get(block_id, ""), metric_details[block_id][0]]
+        {
+            "Block_ID": block_id,
+            "Alias": block_aliases.get(block_id, ""),
+            "Block": metric_details[block_id][0],
+        }
         for block_id in block_ids
     ]
-    return tabulate(
-        rows,
-        headers=["Block_ID", "Alias", "Block"],
-        tablefmt=TABLE_FORMAT,
-        disable_numparse=True,
-    )
+    return format_table_ascii(rows, ["Block_ID", "Alias", "Block"], show_index=False)
 
 
 def format_metric_tables(
@@ -1202,6 +1201,7 @@ def format_table_ascii(
     columns: list[str],
     description_wrap_width: int = 40,
     decimal: int = 2,
+    show_index: bool = True,
 ) -> str:
     """
     Format a list of dicts as an ASCII table string using only stdlib.
@@ -1211,6 +1211,7 @@ def format_table_ascii(
         columns: List of column names to display (in order)
         description_wrap_width: Width to wrap Description column (default 40)
         decimal: Number of decimal places for floats (default 2)
+        show_index: Whether to add an index column numbering the rows (default True)
 
     Returns:
         Formatted ASCII table string
@@ -1267,8 +1268,8 @@ def format_table_ascii(
     # Create separator line
     def make_separator() -> str:
         parts = ["+"]
-        # Index column
-        parts.append("-" * (idx_width + 2) + "+")
+        if show_index:
+            parts.append("-" * (idx_width + 2) + "+")
         for col in columns:
             parts.append("-" * (col_widths[col] + 2) + "+")
         return "".join(parts)
@@ -1276,7 +1277,8 @@ def format_table_ascii(
     # Create header
     def make_header() -> str:
         parts = ["|"]
-        parts.append(f" {'index':^{idx_width}} |")
+        if show_index:
+            parts.append(f" {'index':^{idx_width}} |")
         for col in columns:
             parts.append(f" {col:<{col_widths[col]}} |")
         return "".join(parts)
@@ -1290,9 +1292,9 @@ def format_table_ascii(
         for line_idx in range(max_lines):
             parts = ["|"]
             # Index column - only show on first line
-            if line_idx == 0:
+            if show_index and line_idx == 0:
                 parts.append(f" {row_idx:>{idx_width}} |")
-            else:
+            elif show_index:
                 parts.append(" " * (idx_width + 1) + " |")
 
             for col in columns:
@@ -1369,29 +1371,26 @@ def _format_listed_table(
     terminal_width: int,
 ) -> str:
     """Format one table with its heading, or "" if it lists no metrics."""
+    columns = ["Metric_ID", "Metric", "Unit", "Description"]
     rows = [
-        [metric_id, *metric_details[metric_id]]
+        dict(zip(columns, [metric_id, *metric_details[metric_id]]))
         for metric_id in listed_ids
         if metric_id.count(".") == 2 and metric_id.rsplit(".", 1)[0] == table_id
     ]
     if not rows:
         return ""
-    headers = ["Metric_ID", "Metric", "Unit", "Description"]
     # Description fills the terminal width left by the other columns and the
     # borders (3 characters per column, plus 1), down to DESCRIPTION_WIDTH_MIN.
-    # tabulate makes each column at least 2 wider than its header.
     other_widths = sum(
-        max(len(headers[column]) + 2, *(len(row[column]) for row in rows))
-        for column in range(len(headers) - 1)
+        max(len(column), *(len(row[column]) for row in rows)) for column in columns[:-1]
     )
     description_width = max(
-        DESCRIPTION_WIDTH_MIN, terminal_width - other_widths - (3 * len(headers) + 1)
+        DESCRIPTION_WIDTH_MIN, terminal_width - other_widths - (3 * len(columns) + 1)
     )
-    table = tabulate(
+    table = format_table_ascii(
         rows,
-        headers=headers,
-        tablefmt=TABLE_FORMAT,
-        maxcolwidths=[None, None, None, description_width],
-        disable_numparse=True,
+        columns,
+        description_wrap_width=description_width,
+        show_index=False,
     )
     return f"{table_id} {metric_details[table_id][0]}\n{table}"

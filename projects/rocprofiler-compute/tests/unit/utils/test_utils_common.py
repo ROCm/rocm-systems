@@ -1177,8 +1177,8 @@ def test_format_metric_tables():
     assert not any(line.startswith("18.2") for line in lines)
     # The long description wraps to fit the terminal width
     assert max(len(line) for line in lines) <= 100
-    row_start = next(i for i, line in enumerate(lines) if line.startswith("│ 2.1.0 "))
-    assert lines[row_start + 1].startswith("│             │ ")
+    row_start = next(i for i, line in enumerate(lines) if line.startswith("| 2.1.0 "))
+    assert lines[row_start + 1].startswith("|           | ")
 
 
 # =============================================================================
