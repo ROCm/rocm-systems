@@ -2939,6 +2939,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
+  // [RCCL] One UALink domain holds every rank, and the ranks sit on more than one host.
+  comm->spansTrays = comm->MNNVL && comm->nvlDomainSize == comm->nRanks && comm->topo->nHosts > 1;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
   if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);

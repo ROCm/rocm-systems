@@ -4086,8 +4086,9 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // withdrew symk (NCCL_ALGO, or AllReduce/AllGather size windows).
     t->symkExtract = RCCL_SYMK_EXTRACT_NONE;
     if (info->decisionValid) {
-      t->symkExtract =
-        (info->decision.algo == RCCL_SYMMETRIC) ? RCCL_SYMK_EXTRACT_ALLOW : RCCL_SYMK_EXTRACT_DENY;
+      t->symkExtract = info->decision.algo != RCCL_SYMMETRIC ? RCCL_SYMK_EXTRACT_DENY
+                       : info->decision.symkTdmOnly         ? RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY
+                                                            : RCCL_SYMK_EXTRACT_ALLOW;
     }
 
     planner->nTasksColl += 1;

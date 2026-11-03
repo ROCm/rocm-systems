@@ -34,10 +34,8 @@
 #include <mpi.h>
 
 #include <chrono>
-#include <set>
 #include <sstream>
 #include <string>
-#include <vector>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -58,6 +56,7 @@ enum class Expect
     kTdm,               // the TDM symmetric kernel
     kNotSym,            // any non-symmetric path
     kTdmWithinTrayOnly, // TDM within one tray, a non-symmetric path across trays
+    kNotSymAcrossTrays, // any path within one tray, a non-symmetric path across trays
 };
 
 // Per-rank bytes, a multiple of 16, whose total over all ranks is at least / below `total`.
@@ -69,21 +68,6 @@ size_t perRankAtLeast(size_t total)
 size_t perRankBelow(size_t total)
 {
     return ((total / static_cast<size_t>(MPIEnvironment::world_size)) & ~size_t{15}) - 16;
-}
-
-// True when the ranks sit on more than one host, i.e. the comm spans trays.
-bool ranksSpanHosts()
-{
-    char name[MPI_MAX_PROCESSOR_NAME] = {};
-    int  len                          = 0;
-    MPI_Get_processor_name(name, &len);
-    std::vector<char> all(static_cast<size_t>(MPIEnvironment::world_size) * MPI_MAX_PROCESSOR_NAME);
-    MPI_Allgather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, all.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR,
-                  MPI_COMM_WORLD);
-    std::set<std::string> hosts;
-    for(int r = 0; r < MPIEnvironment::world_size; ++r)
-        hosts.insert(std::string(&all[static_cast<size_t>(r) * MPI_MAX_PROCESSOR_NAME]));
-    return hosts.size() > 1;
 }
 } // namespace
 
@@ -100,16 +84,26 @@ protected:
         }
         DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("the symmetric AllGather TDM window is gfx1250 only"));
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(!TDM_TOOLCHAIN_AVAILABLE, "built without the TDM toolchain"));
+        // Across trays means across hosts: one UALink domain spans the trays.
+        const bool spansTrays = isMultiNodeTest();
+        bool       checkPath  = true;
         if(expect == Expect::kTdmWithinTrayOnly)
-            expect = ranksSpanHosts() ? Expect::kNotSym : Expect::kTdm;
+            expect = spansTrays ? Expect::kNotSym : Expect::kTdm;
+        if(expect == Expect::kNotSymAcrossTrays)
+        {
+            expect    = Expect::kNotSym;
+            checkPath = spansTrays;
+        }
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ncclComm_t  comm   = getActiveCommunicator();
         hipStream_t stream = getActiveStream();
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(!comm->symmetricSupport, "no symmetric memory support"));
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(
-            !comm->MNNVL || comm->nvlDomainSize != comm->nRanks || comm->p2pCrossClique,
-            "the comm is not one UALink domain"));
+            !comm->MNNVL || comm->nvlDomainSize != comm->nRanks || !comm->isAllDirectNvlink,
+            "symk needs one UALink domain, each tray fully linked"));
+        // spansTrays drives the cross-tray rules; it must match where the ranks really are.
+        ASSERT_MPI_EQ(spansTrays, comm->spansTrays);
         int rank = -1, nRanks = 0;
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(comm, &rank));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(comm, &nRanks));
@@ -133,7 +127,8 @@ protected:
                                                        recv.ptr, graph ? 1 : 0, &algo, &protocol, &channels));
         const int  kSym    = static_cast<int>(rcclAddonAlgos_t::RCCL_SYMMETRIC);
         const int  kSymTdm = static_cast<int>(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM);
-        const bool pathOk  = expect == Expect::kTdm ? algo == kSymTdm : (algo != kSym && algo != kSymTdm);
+        const bool pathOk
+            = !checkPath || (expect == Expect::kTdm ? algo == kSymTdm : (algo != kSym && algo != kSymTdm));
         if(!pathOk)
         {
             ADD_FAILURE() << "Rank " << rank << ": reported algo " << algo;
@@ -180,7 +175,7 @@ protected:
         }
 
         // Only rank 0 logs the symmetric kernel it launched; any other path logs none.
-        if(rank == 0)
+        if(rank == 0 && checkPath)
         {
             std::istringstream log(logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog());
             const std::string  kernel = LastSymmetricKernel(log, "AllGather");
@@ -220,10 +215,16 @@ TEST_F(SymWin_AllGatherTdm, GraphCrossTrayCeiling)
     runAllGather(perRankBelow(kCrossTrayMax) + 16, false, true, Expect::kTdm);
 }
 
-// Under capture the window passes 512 MiB in one tray and closes there across trays.
+// Under capture the window passes 512 MiB in one tray and ends there across trays.
 TEST_F(SymWin_AllGatherTdm, GraphPastCrossTrayCeiling)
 {
     runAllGather(perRankAtLeast(kCrossTrayMax) + 16, false, true, Expect::kTdmWithinTrayOnly);
+}
+
+// Below the window, across trays AllGather stays off the symmetric kernels.
+TEST_F(SymWin_AllGatherTdm, BelowWindowAcrossTrays)
+{
+    runAllGather(perRankAtLeast(kMiB), false, false, Expect::kNotSymAcrossTrays);
 }
 
 #endif // MPI_TESTS_ENABLED

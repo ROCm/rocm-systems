@@ -84,6 +84,11 @@ static bool symBatchAligned16B(struct ncclComm* comm, struct ncclTaskColl* headT
   return true;
 }
 
+// [RCCL] A configured task and a TDM-window task each form their own batch, so a TDM-only pick binds just that task.
+static bool symBatchesAlone(const struct ncclTaskColl* t) {
+  return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
+}
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead) {
@@ -106,8 +111,10 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
     bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
                         ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
-    // [RCCL] Across trays only tasks the AllGather selector admitted may run symk.
-    if (rcclCommSpansTrays(comm) && task->symkExtract != RCCL_SYMK_EXTRACT_ALLOW) symAvailable = false;
+    // [RCCL] Across trays only AllGathers the selector admitted may run symk.
+    if (task->func == ncclFuncAllGather && comm->spansTrays && task->symkExtract == RCCL_SYMK_EXTRACT_NONE) {
+      symAvailable = false;
+    }
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
@@ -181,7 +188,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // configured (it is the head), or if the next task is configured (so it starts
         // its own batch). This realizes the per-call caps exactly and never ignores a
         // non-head configured task.
-        bool configBoundary = task->aggIsolate || (task->next != nullptr && task->next->aggIsolate);
+        bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) >
               comm->workArgsBytes ||
             task->next == nullptr || configBoundary) {
@@ -199,6 +206,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       if (effAlgMask != 0) {
         uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
         if (symkMask != 0) input.tuningMask = symkMask;
+      }
+      // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
+      // unless the caller's algSelection leaves them out.
+      if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
+        const uint64_t tdmMask = (uint64_t)(uint32_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+        if (input.tuningMask & tdmMask) input.tuningMask &= tdmMask;
       }
       input.func = headTask->func;
       input.redOp = headTask->opHost;

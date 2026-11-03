@@ -1065,6 +1065,7 @@ struct ncclComm {
   bool isAllDirectP2p; // Subject to NCCL_P2P_LEVEL (for local ranks only).
   bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
+  bool spansTrays;        // [RCCL] One UALink (MNNVL) domain whose ranks sit on more than one host (tray).
   int symmetricSupport;
   int gpuCftSupport;
   bool gpuCftMulticastSupport;
@@ -1259,11 +1260,6 @@ static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;
   return stopEvent;
-}
-
-// True for a UALink (MNNVL) comm whose GPUs are not all directly linked.
-static inline bool rcclCommSpansTrays(const struct ncclComm* comm) {
-  return comm->MNNVL && !comm->isAllDirectNvlink;
 }
 
 ncclResult_t ncclCommEnsureReady(ncclComm_t comm);

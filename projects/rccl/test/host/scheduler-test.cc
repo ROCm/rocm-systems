@@ -1203,19 +1203,26 @@ TEST_F(SchedulerMicrotest,
   EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
 }
 
-// Across trays only a task the selector admitted (ALLOW) is extracted.
-TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayNeedsSelectorAllow) {
-  for (rcclSymkExtract extract : {RCCL_SYMK_EXTRACT_NONE, RCCL_SYMK_EXTRACT_ALLOW}) {
+// Across trays only an AllGather the selector admitted (ALLOW / ALLOW_TDM_ONLY) is extracted; other
+// collectives are unaffected.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayAllGatherNeedsSelectorAllow) {
+  struct Case {
+    ncclFunc_t func;
+    rcclSymkExtract extract;
+  };
+  for (Case c : {Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_NONE}, Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_ALLOW},
+                 Case{ncclFuncAllGather, RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY},
+                 Case{ncclFuncReduceScatter, RCCL_SYMK_EXTRACT_NONE}}) {
     MakeSymmetricTaskList_Scene scene;
     scene.comm->planner.nTasksColl = 5;
-    scene.comm->MNNVL = 1;
-    scene.comm->isAllDirectNvlink = false;
+    scene.comm->spansTrays = true;
     ncclTaskColl task{};
-    task.func = ncclFuncAllGather;
-    task.symkExtract = extract;
+    task.func = c.func;
+    task.symkExtract = c.extract;
     g_symRegType = ncclSymSendRegRecvReg;
     struct ncclTaskColl* remainTasksHead = nullptr;
-    if (extract == RCCL_SYMK_EXTRACT_NONE) {
+    SCOPED_TRACE(std::string(ncclFuncToString(c.func)) + " extract " + std::to_string((int)c.extract));
+    if (c.func == ncclFuncAllGather && c.extract == RCCL_SYMK_EXTRACT_NONE) {
       EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead), ncclSuccess);
       EXPECT_EQ(remainTasksHead, &task);
       EXPECT_EQ(scene.comm->planner.nTasksColl, 5);
@@ -1226,6 +1233,62 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayNeedsSelectorAllow) {
       EXPECT_EQ(scene.comm->planner.nTasksColl, 4);
     }
   }
+}
+
+namespace {
+constexpr uint64_t kTdmOnlyMask = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
+
+// Schedules a TDM-window AllGather (ALLOW_TDM_ONLY) and a plain one (ALLOW), windowFirst deciding which leads
+// the input. Returns the tuning mask each batch offered, in batch order, tagged 'w' or 'p' by its head task.
+std::vector<std::pair<char, uint64_t>> ScheduleWindowAndPlain(bool windowFirst, uint64_t windowAlgMask = 0) {
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->planner.nTasksColl = 5;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 5, false));
+  ScopedHook tmaMask(g_symkTmaKernelMask, [] { return 1 << (int)ncclSymkKernelId_AllGather_TmaST; });
+  std::vector<std::pair<char, uint64_t>> batches;
+  ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* in, struct ncclTuningResult_t*) {
+    batches.emplace_back(in->count == 64 ? 'w' : 'p', in->tuningMask);
+    return ncclSuccess;
+  });
+  ncclTaskColl window{};
+  window.func = ncclFuncAllGather;
+  window.datatype = ncclInt8;
+  window.count = 64;
+  window.algMask = windowAlgMask;
+  window.symkExtract = RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
+  ncclTaskColl plain{};
+  plain.func = ncclFuncAllGather;
+  plain.datatype = ncclInt8;
+  plain.count = 32;
+  plain.symkExtract = RCCL_SYMK_EXTRACT_ALLOW;
+  ncclTaskColl* head = windowFirst ? &window : &plain;
+  head->next = windowFirst ? &plain : &window;
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), head, nullptr, &remainTasksHead), ncclSuccess);
+  EXPECT_EQ(window.isSymLast, 1);
+  EXPECT_EQ(plain.isSymLast, 1);
+  return batches;
+}
+}  // namespace
+
+// A task the AllGather TDM window admitted offers the cost model only the TDM kernels, and batches alone,
+// whether it heads the bucket or follows another task. Classification reverses the input order.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKernelsInItsOwnBatch) {
+  using Batches = std::vector<std::pair<char, uint64_t>>;
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false),
+            (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/true),
+            (Batches{{'p', NCCL_TUNING_MASK_SYM_KERNELS}, {'w', kTdmOnlyMask}}));
+}
+
+// An algSelection that leaves out the TDM kernels keeps its own symmetric kernels.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsAnAlgSelectionWithoutTdm) {
+  using Batches = std::vector<std::pair<char, uint64_t>>;
+  const uint64_t st = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st), (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st | kTdmOnlyMask),
+            (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
