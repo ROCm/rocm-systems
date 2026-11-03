@@ -236,6 +236,12 @@ Device::~Device() {
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
 
+  QuiesceHwEvents(graph_hw_events_);
+  for (void* hw_event : graph_hw_events_) {
+    DestroyHwEvent(hw_event);
+  }
+  graph_hw_events_.clear();
+
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
     if ((*mapCache_)[i] != nullptr) {
@@ -4259,6 +4265,38 @@ bool Device::CreateSignals(uint32_t count, hsa_signal_value_t initial_value, uin
 // ================================================================================================
 void Device::DestroyHwEvent(void* hw_event) const {
   ReleaseGlobalSignal(hw_event);
+}
+
+// ================================================================================================
+bool Device::AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+  // A batch is one allocation, which the last of its signals frees with an unmap from the GPU, so
+  // batches cover many sets rather than one each
+  constexpr int kHwEventBatch = 256;
+  std::unique_lock lock(graph_hw_events_lock_);
+  // Creation allocates device memory, so other graphs must not wait on the lock meanwhile, and
+  // another thread may take the new signals before this one relocks
+  while (static_cast<int>(graph_hw_events_.size()) < count) {
+    const int num_missing = count - static_cast<int>(graph_hw_events_.size());
+    lock.unlock();
+    std::vector<void*> batch;
+    if (!CreateHwEvents(std::max(num_missing, kHwEventBatch), /*batched=*/true, batch)) {
+      return false;
+    }
+    lock.lock();
+    graph_hw_events_.insert(graph_hw_events_.end(), batch.begin(), batch.end());
+  }
+  hw_events.assign(graph_hw_events_.end() - count, graph_hw_events_.end());
+  graph_hw_events_.resize(graph_hw_events_.size() - count);
+  return true;
+}
+
+// ================================================================================================
+void Device::ReturnHwEvents(std::vector<void*>& hw_events) const {
+  // Kept rather than destroyed: a queue that waited on a signal may hold the last other reference
+  // and release it inside a later launch
+  std::scoped_lock lock(graph_hw_events_lock_);
+  graph_hw_events_.insert(graph_hw_events_.end(), hw_events.begin(), hw_events.end());
+  hw_events.clear();
 }
 
 // ================================================================================================
