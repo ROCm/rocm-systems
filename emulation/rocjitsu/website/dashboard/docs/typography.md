@@ -2,7 +2,7 @@
 
 [`src/theme/typography.js`](../src/theme/typography.js) owns the approved font types, size scale and semantic text roles. Read the exported lists there rather than copying their values into this guide or components.
 
-Current presentation uses **Inter throughout**, including measurements, hashes and metadata. The approved font catalog (including Mono) and size/weight lists remain unchanged; Mono is available but not selected by the active text roles. Numeric roles retain tabular figures and their existing emphasis.
+Current presentation uses the **native system sans throughout** (no bundled or downloaded fonts), including measurements, hashes and metadata. The approved font catalog (including Mono) and size/weight lists remain unchanged; Mono is available but not selected by the active text roles. Numeric roles retain tabular figures and their existing emphasis.
 
 ## Choose a role first
 

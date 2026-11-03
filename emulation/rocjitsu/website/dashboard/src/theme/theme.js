@@ -2,8 +2,6 @@ import { alpha, createTheme } from '@mui/material/styles';
 import { colorTokens, shapeTokens } from './tokens';
 import { tableDensities } from './tableStyles';
 import { fontSizes, fontWeights, sansFont, textStyles, typographyCssVariables } from './typography';
-import sansLicenseUrl from '../assets/fonts/inter-OFL.txt?url&no-inline';
-import monoLicenseUrl from '../assets/fonts/ibmplexmono-OFL.txt?url&no-inline';
 
 export function createDashboardTheme(mode) {
   const colors = colorTokens[mode === 'dark' ? 'dark' : 'light'];
@@ -16,8 +14,6 @@ export function createDashboardTheme(mode) {
     : `0 1px 2px ${alpha(colors.shadowColor, 0.06)}, 0 4px 14px ${alpha(colors.shadowColor, 0.05)}`;
 
   return createTheme({
-    // Vite emits the licenses with the font assets, even when publicDir is false.
-    fontLicenses: { sans: sansLicenseUrl, mono: monoLicenseUrl },
     palette: {
       mode,
       primary: { main: colors.interactive, dark: colors.interactiveText, contrastText: colors.onAccent },

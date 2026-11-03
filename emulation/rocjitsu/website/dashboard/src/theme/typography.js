@@ -1,9 +1,13 @@
 // The approved text scale. Icon dimensions are intentionally independent.
 export const fontSizes = Object.freeze({ caption: 14, body: 14, tableHeader: 15, nav: 16, section: 18, dialog: 20, page: 24, brand: 32 });
-export const fontWeights = Object.freeze({ regular: 400, tableHeader: 450, medium: 500, emphasized: 600 });
+// One step heavier than the bundled-font scale (400/450/500/600): system fonts render lighter at the same number.
+export const fontWeights = Object.freeze({ regular: 500, tableHeader: 550, medium: 600, emphasized: 700 });
 
-export const sansFont = '"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
-export const monoFont = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+// Native system fonts only: nothing is bundled or downloaded. system-ui resolves to the platform UI
+// face (San Francisco, Segoe UI, Cantarell/Noto Sans...), the closest native match to a neo-grotesque
+// UI sans; the named faces cover engines without system-ui.
+export const sansFont = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif';
+export const monoFont = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 
 // Family and weight form a reusable font type; color remains a palette concern.
 export const fontTypes = Object.freeze({
