@@ -3316,10 +3316,15 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // the address without a free. The entry being replaced keeps a live pinned
 // buffer, so free it, and give its charge back, before the new one is charged.
 // Otherwise the old buffer would stay allocated with no charge against it.
+// A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
+// fails, as it does under a capture on another thread) is left alone, buffer
+// and charge both: the charge goes back only once the runtime has let go.
+// Freeing a registration would leave it aimed at freed heap.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
     void* reg_buf = nullptr;
+    size_t size = 0;
     AllocKind kind = AllocKind::Device;
     {
         std::unique_lock lk(ctx.map_mutex);
@@ -3328,7 +3333,7 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         kind = it->second.kind;
         if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
         host_ptr = it->second.live_ptr;
-        ctx.host_budget.release(it->second.size);
+        size = it->second.size;
         ctx.alloc_map.erase(it);
         auto rb = ctx.host_reg_bufs.find(rec);
         if (rb != ctx.host_reg_bufs.end()) {
@@ -3337,11 +3342,12 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         }
     }
     if (kind == AllocKind::HostMalloc) {
-        (void)hipHostFree(host_ptr);
+        if (hipHostFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    (void)hipHostUnregister(buf);
+    if (hipHostUnregister(buf) != hipSuccess) return;
+    ctx.host_budget.release(size);
 #ifdef _WIN32
     _aligned_free(buf);
 #else
@@ -4389,6 +4395,43 @@ hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
     hipEvent_t e  = nullptr;
     hipError_t r  = hipEventCreateWithFlags(&e, a->flags);
     if (r == hipSuccess) ctx.record_event(a->event, e);
+    return r;
+}
+
+hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
+                                         const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(pl);
+    float ms = 0.f;
+    hipEvent_t start = ctx.translate_event(a->start);
+    hipEvent_t stop  = ctx.translate_event(a->stop);
+    hipError_t r = hipEventElapsedTime(&ms, start, stop);
+    if (r == hipSuccess) return hipSuccess;
+    // HIP returns hipErrorInvalidHandle when either event has no marker.
+    // hipExtModuleLaunchKernel sets those markers inside the runtime. An
+    // archive recorded before that side effect was stored has no
+    // hipEventRecord for the pair, and the captured call still succeeded.
+    // Both handles resolving means the events are still live, so this is not
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            fprintf(stderr,
+                    "[HRR] hipEventElapsedTime: no marker on a live pair "
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
+        }
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
+    if (hrr_replayed_recorded_error(ctx, "hipEventElapsedTime", a->ret, r))
+        return hipSuccess;
     return r;
 }
 

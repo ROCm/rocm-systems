@@ -56,6 +56,17 @@ __device__ __forceinline__ float4 hipUnpack(uint32_t src) {
 // group of one, so these are the only conversion kernels in the library.
 // ============================================================================
 
+// Writes the first `num_bytes` bytes of `src` to `dst`. Each thread produces a fixed-size block of
+// pixels, so the last block of a row can extend past the image width; those blocks store only
+// the bytes inside the image instead of writing into the row padding, the next row, or past the
+// end of the destination buffer.
+__device__ __forceinline__ void StorePartial(uint8_t *dst, const void *src, uint32_t num_bytes) {
+    const uint8_t *src_bytes = reinterpret_cast<const uint8_t *>(src);
+    for (uint32_t i = 0; i < num_bytes; i++) {
+        dst[i] = src_bytes[i];
+    }
+}
+
 __global__ void ColorConvertRGBAToRGBBatchedKernel(const RGBAToRGBBatchParams *params, uint32_t n_images) {
     if (hipBlockIdx_z >= n_images) return;
     const RGBAToRGBBatchParams &p = params[hipBlockIdx_z];
@@ -86,7 +97,12 @@ __global__ void ColorConvertRGBAToRGBBatchedKernel(const RGBAToRGBBatchParams *p
     dst.data[4] = hipPack(make_float4(hipUnpack1(src.data[5]), hipUnpack2(src.data[5]), hipUnpack0(src.data[6]), hipUnpack1(src.data[6])));
     dst.data[5] = hipPack(make_float4(hipUnpack2(src.data[6]), hipUnpack0(src.data[7]), hipUnpack1(src.data[7]), hipUnpack2(src.data[7])));
 
-    *((DUINT6 *)(&dst_image[dst_idx])) = dst;
+    uint32_t num_pixels = dst_width - x;
+    if (num_pixels >= 8) {
+        *((DUINT6 *)(&dst_image[dst_idx])) = dst;
+    } else {
+        StorePartial(&dst_image[dst_idx], &dst, num_pixels * 3);
+    }
 }
 
 void ColorConvertRGBAToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
@@ -126,8 +142,14 @@ __global__ void ConvertInterleavedUVToPlanarUVBatchedKernel(const InterleavedUVT
     dst2.x = hipPack(make_float4(hipUnpack1(src.x), hipUnpack3(src.x), hipUnpack1(src.y), hipUnpack3(src.y)));
     dst2.y = hipPack(make_float4(hipUnpack1(src.z), hipUnpack3(src.z), hipUnpack1(src.w), hipUnpack3(src.w)));
 
-    *((uint2 *)(&dst_image1[dst_idx])) = dst1;
-    *((uint2 *)(&dst_image2[dst_idx])) = dst2;
+    uint32_t num_pixels = dst_width - x;
+    if (num_pixels >= 8) {
+        *((uint2 *)(&dst_image1[dst_idx])) = dst1;
+        *((uint2 *)(&dst_image2[dst_idx])) = dst2;
+    } else {
+        StorePartial(&dst_image1[dst_idx], &dst1, num_pixels);
+        StorePartial(&dst_image2[dst_idx], &dst2, num_pixels);
+    }
 }
 
 void ConvertInterleavedUVToPlanarUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
@@ -160,7 +182,12 @@ __global__ void ExtractYFromPackedYUYVBatchedKernel(const YFromPackedYUYVBatchPa
         dst_y.x = hipPack(make_float4(hipUnpack0(src.x), hipUnpack2(src.x), hipUnpack0(src.y), hipUnpack2(src.y)));
         dst_y.y = hipPack(make_float4(hipUnpack0(src.z), hipUnpack2(src.z), hipUnpack0(src.w), hipUnpack2(src.w)));
 
-        *((uint2 *)(&destination_y[dst_idx])) = dst_y;
+        uint32_t num_pixels = p.dst_width - (x << 3);
+        if (num_pixels >= 8) {
+            *((uint2 *)(&destination_y[dst_idx])) = dst_y;
+        } else {
+            StorePartial(&destination_y[dst_idx], &dst_y, num_pixels);
+        }
     }
 }
 
@@ -202,9 +229,18 @@ __global__ void ConvertPackedYUYVToPlanarYUVBatchedKernel(const PackedYUYVToPlan
         dst_u = hipPack(make_float4(hipUnpack1(src.x), hipUnpack1(src.y), hipUnpack1(src.z), hipUnpack1(src.w)));
         dst_v = hipPack(make_float4(hipUnpack3(src.x), hipUnpack3(src.y), hipUnpack3(src.z), hipUnpack3(src.w)));
 
-        *((uint2 *)(&destination_y[dst_y_idx])) = dst_y;
-        *((uint32_t *)(&destination_u[dst_uv_idx])) = dst_u;
-        *((uint32_t *)(&destination_v[dst_uv_idx])) = dst_v;
+        uint32_t num_pixels = p.dst_width - (x << 3);
+        if (num_pixels >= 8) {
+            *((uint2 *)(&destination_y[dst_y_idx])) = dst_y;
+            *((uint32_t *)(&destination_u[dst_uv_idx])) = dst_u;
+            *((uint32_t *)(&destination_v[dst_uv_idx])) = dst_v;
+        } else {
+            // The chroma planes are (dst_width >> 1) wide, so this block has (dst_width >> 1) - 4 * x chroma samples left.
+            uint32_t num_chroma = (p.dst_width >> 1) - (x << 2);
+            StorePartial(&destination_y[dst_y_idx], &dst_y, num_pixels);
+            StorePartial(&destination_u[dst_uv_idx], &dst_u, num_chroma);
+            StorePartial(&destination_v[dst_uv_idx], &dst_v, num_chroma);
+        }
     }
 }
 
@@ -451,8 +487,16 @@ __global__ void ColorConvertYUVToRGBBatchedKernel(const YUVToRGBBatchParams *par
         ConvertYUVToRGB(y0, y1, u0, u1, v0, v1, rgb0, rgb1);
         uint32_t rgb0_idx = y * p.dst_image_row_pair_stride_in_bytes + (x * 24);
         uint32_t rgb1_idx = rgb0_idx + p.dst_image_stride_in_bytes;
-        *((DUINT6 *)(&p.dst_image[rgb0_idx])) = rgb0;
-        *((DUINT6 *)(&p.dst_image[rgb1_idx])) = rgb1;
+        // With an odd height, the last row pair has only its first row inside the image.
+        bool has_row1 = (y * 2 + 1) < p.dst_height;
+        uint32_t num_pixels = p.dst_width - (x << 3);
+        if (num_pixels >= 8) {
+            *((DUINT6 *)(&p.dst_image[rgb0_idx])) = rgb0;
+            if (has_row1) *((DUINT6 *)(&p.dst_image[rgb1_idx])) = rgb1;
+        } else {
+            StorePartial(&p.dst_image[rgb0_idx], &rgb0, num_pixels * 3);
+            if (has_row1) StorePartial(&p.dst_image[rgb1_idx], &rgb1, num_pixels * 3);
+        }
     }
 }
 
@@ -500,12 +544,28 @@ __global__ void ColorConvertYUVToRGBPlanarBatchedKernel(const YUVToRGBPlanarBatc
         blue1.x = hipPack(make_float4(hipUnpack2(rgb1.data[0]), hipUnpack1(rgb1.data[1]), hipUnpack0(rgb1.data[2]), hipUnpack3(rgb1.data[2])));
         blue1.y = hipPack(make_float4(hipUnpack2(rgb1.data[3]), hipUnpack1(rgb1.data[4]), hipUnpack0(rgb1.data[5]), hipUnpack3(rgb1.data[5])));
 
-        *((uint2 *)(&dst_image_r[rgb0_idx])) = red0;
-        *((uint2 *)(&dst_image_r[rgb1_idx])) = red1;
-        *((uint2 *)(&dst_image_g[rgb0_idx])) = green0;
-        *((uint2 *)(&dst_image_g[rgb1_idx])) = green1;
-        *((uint2 *)(&dst_image_b[rgb0_idx])) = blue0;
-        *((uint2 *)(&dst_image_b[rgb1_idx])) = blue1;
+        // With an odd height, the last row pair has only its first row inside the image.
+        bool has_row1 = (y * 2 + 1) < p.dst_height;
+        uint32_t num_pixels = p.dst_width - (x << 3);
+        if (num_pixels >= 8) {
+            *((uint2 *)(&dst_image_r[rgb0_idx])) = red0;
+            *((uint2 *)(&dst_image_g[rgb0_idx])) = green0;
+            *((uint2 *)(&dst_image_b[rgb0_idx])) = blue0;
+            if (has_row1) {
+                *((uint2 *)(&dst_image_r[rgb1_idx])) = red1;
+                *((uint2 *)(&dst_image_g[rgb1_idx])) = green1;
+                *((uint2 *)(&dst_image_b[rgb1_idx])) = blue1;
+            }
+        } else {
+            StorePartial(&dst_image_r[rgb0_idx], &red0, num_pixels);
+            StorePartial(&dst_image_g[rgb0_idx], &green0, num_pixels);
+            StorePartial(&dst_image_b[rgb0_idx], &blue0, num_pixels);
+            if (has_row1) {
+                StorePartial(&dst_image_r[rgb1_idx], &red1, num_pixels);
+                StorePartial(&dst_image_g[rgb1_idx], &green1, num_pixels);
+                StorePartial(&dst_image_b[rgb1_idx], &blue1, num_pixels);
+            }
+        }
     }
 }
 
