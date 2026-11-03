@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -1356,6 +1357,11 @@ void
 update_table<::HipDispatchTable>(::HipDispatchTable* table)
 {
     if(table == nullptr) return;
+
+    // The wrappers only feed HIP event tracing, which is implemented in the queue interceptor
+    // (enable_queue_intercept() is true whenever a context traces HIP events), and they add work
+    // to every event record/wait, so skip them otherwise.
+    if(!hsa::enable_queue_intercept()) return;
 
     auto& saved = get_saved_table();
 
