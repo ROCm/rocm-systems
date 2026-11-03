@@ -27,6 +27,7 @@
 #include "TestChecks.hpp"
 #include "comm.h"
 #include "device/tdm/tdmCopy.h" // TDM_TOOLCHAIN_AVAILABLE
+#include "rccl_arch_thresholds.h"
 #include "rccl_common.h"
 
 #include <gtest/gtest.h>
@@ -84,7 +85,7 @@ protected:
         }
         DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("the symmetric AllGather TDM window is gfx1250 only"));
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(!TDM_TOOLCHAIN_AVAILABLE, "built without the TDM toolchain"));
-        // Across trays means across hosts: one UALink domain spans the trays.
+        // Across trays means across hosts: one UALink LSA team spans the trays.
         const bool spansTrays = isMultiNodeTest();
         bool       checkPath  = true;
         if(expect == Expect::kTdmWithinTrayOnly)
@@ -99,9 +100,14 @@ protected:
         ncclComm_t  comm   = getActiveCommunicator();
         hipStream_t stream = getActiveStream();
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(!comm->symmetricSupport, "no symmetric memory support"));
+        ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
         DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(
-            !comm->MNNVL || comm->nvlDomainSize != comm->nRanks || !comm->isAllDirectNvlink,
-            "symk needs one UALink domain, each tray fully linked"));
+            !comm->MNNVL || props.nLsaTeams != 1 || !comm->isAllDirectNvlink,
+            "symk needs one UALink LSA team, each tray fully linked"));
+        const rcclArchThresholds* table = comm->archThresholds;
+        DDA_FABRIC_SKIP_OR_FAIL(mpiCoordinatedSkipReason(
+            table == nullptr || table->symTdmMinR2[ncclFuncAllGather] == 0, "no AllGather TDM window (gfx1250 SPX)"));
         // spansTrays drives the cross-tray rules; it must match where the ranks really are.
         ASSERT_MPI_EQ(spansTrays, comm->spansTrays);
         int rank = -1, nRanks = 0;

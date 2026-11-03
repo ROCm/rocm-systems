@@ -187,6 +187,8 @@ int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
 
 namespace {
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm);
+inline bool rcclSymTdmWindowContains(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                     bool spansTrays, bool graphMode);
 }
 
 // True when the user set `name` to a non-empty value.
@@ -901,10 +903,15 @@ ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
                              ncclRedOp_t op, int* algo, int* protocol, int* maxChannels) {
   RCCL_STATIC_EXPOSE_CHECK();
   if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
-  // Across trays only the AllGather selector knows whether AllGather symk runs.
-  const bool askSelector = comm != nullptr && coll == ncclFuncAllGather && comm->spansTrays;
-  if (!askSelector && rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) {
-    return ncclSuccess;
+  if (rcclSymkQuery(comm, coll, count, dataType, op, algo, protocol, maxChannels)) {
+    // Across trays AllGather symk runs only as a TDM kernel in the TDM window. No graph flag here: use the eager one.
+    if (coll != ncclFuncAllGather || !comm->spansTrays) return ncclSuccess;
+    const size_t totalBytes = (size_t)comm->nRanks * count * ncclTypeSize(dataType);
+    if (*algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM &&
+        rcclSymTdmWindowContains(extAlgoArchTable(comm), ncclFuncAllGather, totalBytes, /*spansTrays=*/true,
+                                 /*graphMode=*/false)) {
+      return ncclSuccess;
+    }
   }
   // Symmetric kernel does not apply here (e.g. cuMem disabled -> no symmetric
   // windows, so symk never runs). Report the backend that actually runs instead

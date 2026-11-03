@@ -1065,7 +1065,7 @@ struct ncclComm {
   bool isAllDirectP2p; // Subject to NCCL_P2P_LEVEL (for local ranks only).
   bool isAllCudaP2p; // Raw CUDA capability (for local ranks only).
   bool isAllDirectNvlink; // All GPUs are directly connected to each other through NVLink.
-  bool spansTrays;        // [RCCL] One UALink (MNNVL) domain whose ranks sit on more than one host (tray).
+  bool spansTrays;        // [RCCL] Across UALink trays, table has an AllGather TDM window: AG symk runs only in it.
   int symmetricSupport;
   int gpuCftSupport;
   bool gpuCftMulticastSupport;

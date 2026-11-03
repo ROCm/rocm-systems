@@ -1286,7 +1286,8 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKerne
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsAnAlgSelectionWithoutTdm) {
   using Batches = std::vector<std::pair<char, uint64_t>>;
   const uint64_t st = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
-  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st), (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st),
+            (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st | kTdmOnlyMask),
             (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }

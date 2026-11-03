@@ -90,7 +90,8 @@ struct rcclArchThresholds {
   // 0 means no suppression (symk may win at any size for that collective).
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
   // AllGather only. R2 sizes, total bytes, where symk runs if the cost model picks a TDM kernel,
-  // whatever symMinR2 / symMaxR2 say. symTdmMaxR2Graph applies under graph capture. 0 = no window.
+  // whatever symMinR2 / symMaxR2 say. symTdmMaxR2Graph applies under graph capture. 0 = no window, and no
+  // cross-tray AllGather rules.
   size_t symTdmMinR2[RCCL_DDA_FUNC_COUNT];
   size_t symTdmMaxR2[RCCL_DDA_FUNC_COUNT];
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];

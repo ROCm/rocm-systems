@@ -184,10 +184,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         countTotal += count;
         // Keep countMax as the true largest work count; TMA eligibility is per work, not per aligned batch.
         if (task->count > countMax) countMax = task->count;
-        // A configured task forms its own singleton batch: end here if this task is
-        // configured (it is the head), or if the next task is configured (so it starts
-        // its own batch). This realizes the per-call caps exactly and never ignores a
-        // non-head configured task.
+        // A configured or TDM-window task forms its own batch: end here if this task is one
+        // (it is the head), or if the next task is one (so it starts its own batch).
         bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) >
               comm->workArgsBytes ||

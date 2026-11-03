@@ -6197,9 +6197,10 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
       });
 }
 
+namespace {
 // Runs the AllGather selector on a gfx1250 TDM comm with the model picking modelPick.
-static rcclCollDecision Gfx1250AllGatherDecision(const rcclArchThresholds* table, size_t totalBytes,
-                                                 ncclSymkKernelId modelPick, bool spansTrays, bool graph) {
+rcclCollDecision Gfx1250AllGatherDecision(const rcclArchThresholds* table, size_t totalBytes,
+                                          ncclSymkKernelId modelPick, bool spansTrays, bool graph) {
   ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(ncclFuncAllGather, modelPick, /*maxChannels=*/64));
   ncclComm* comm = MakeGfx1250TdmComm(table, spansTrays);
   rcclCollDecision decision{};
@@ -6211,11 +6212,12 @@ static rcclCollDecision Gfx1250AllGatherDecision(const rcclArchThresholds* table
 }
 
 // True when the selector takes symk. A query reports the TDM kernel as RCCL_SYMMETRIC_TDM.
-static bool Gfx1250AllGatherPicksSymk(const rcclArchThresholds* table, size_t totalBytes, ncclSymkKernelId modelPick,
-                                      bool spansTrays, bool graph) {
+bool Gfx1250AllGatherPicksSymk(const rcclArchThresholds* table, size_t totalBytes, ncclSymkKernelId modelPick,
+                               bool spansTrays, bool graph) {
   const int algo = Gfx1250AllGatherDecision(table, totalBytes, modelPick, spansTrays, graph).algo;
   return algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC || algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
 }
+}  // namespace
 
 // The TDM window admits symk past symMaxR2, but only when the model picks a TDM kernel.
 TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel) {
@@ -6263,7 +6265,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
 
 // RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow the TDM window (64 MiB..1 GiB here). The comm spans
 // trays, so only the window can admit symk. Returns whether each size goes to symk with param set to value.
-static std::vector<bool> TdmWindowWith(const char* param, int64_t value, std::initializer_list<size_t> totalBytes) {
+namespace {
+std::vector<bool> TdmWindowWith(const char* param, int64_t value, std::initializer_list<size_t> totalBytes) {
   g_loadParam = ForceParam(param, value);
   SymkRequestedHooks symk;
   ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
@@ -6277,6 +6280,7 @@ static std::vector<bool> TdmWindowWith(const char* param, int64_t value, std::in
   }
   return picks;
 }
+}  // namespace
 
 TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling) {
   RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling", []() {
@@ -9995,26 +9999,36 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_FallsThroughToGetCollImplInfoWhenSymkNot
       });
 }
 
-// Across trays rcclSymKGetInfo asks the AllGather selector, not the cost model; other collectives are unchanged.
-TEST(WrapMicrotestIsolated, SymKGetInfo_CrossTrayAllGatherFallsThroughToGetCollImplInfo) {
+// Across trays rcclSymKGetInfo reports AllGather symk only for a TDM pick inside the eager TDM window, and
+// otherwise falls back to the selector. Other collectives are unchanged.
+TEST(WrapMicrotestIsolated, SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow) {
   RUN_ISOLATED_TEST(
-      "Wrap_SymKGetInfo_CrossTrayAllGatherFallsThroughToGetCollImplInfo",
+      "Wrap_SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow",
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ncclComm* comm = MakeSelectComm();
-        comm->symmetricSupport = 1;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeGfx1250TdmComm(Gfx1250Table(), /*spansTrays=*/true);
         int algo, protocol, maxChannels;
-        auto report = [&](ncclFunc_t func, ncclSymkKernelId pick) {
+        auto report = [&](ncclFunc_t func, ncclSymkKernelId pick, size_t totalBytes) {
           ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(func, pick, /*maxChannels=*/6));
-          EXPECT_EQ(ncclSuccess, rcclSymKGetInfo(comm, func, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels));
+          EXPECT_EQ(ncclSuccess, rcclSymKGetInfo(comm, func, totalBytes / comm->nRanks / sizeof(float), ncclFloat32,
+                                                 ncclSum, &algo, &protocol, &maxChannels));
           return algo;
         };
-        const int sym = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
-        EXPECT_EQ(sym, report(ncclFuncAllGather, ncclSymkKernelId_AllGather_ST)) << "precondition: one tray";
-        comm->spansTrays = true;
-        EXPECT_EQ(sym, report(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST)) << "AllReduce unchanged";
-        EXPECT_NE(sym, report(ncclFuncAllGather, ncclSymkKernelId_AllGather_ST)) << "AllGather asks the selector";
+        const int sym = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC, tdm = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+        auto notSymk = [&](int a) { return a != sym && a != tdm; };
+        const ncclSymkKernelId tma = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 64 * kMiB)) << "window floor";
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 128 * kMiB)) << "eager window ceiling";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 64 * kMiB - 64))) << "just below the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 128 * kMiB + 64))) << "just past the eager window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 96 * kMiB))) << "a non-TDM pick inside the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 1 * kMiB))) << "below the window";
+        EXPECT_EQ(sym, report(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, 1 * kMiB))
+          << "AllReduce unchanged";
+        comm->spansTrays = false;
+        EXPECT_EQ(sym, report(ncclFuncAllGather, st, 1 * kMiB)) << "one tray reports the pick";
         DeleteCommWithArch(comm);
       });
 }
