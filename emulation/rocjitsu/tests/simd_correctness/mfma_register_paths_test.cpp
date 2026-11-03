@@ -8,6 +8,10 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 
+#include <format>
+#include <optional>
+#include <string>
+
 namespace {
 
 using namespace rocjitsu;
@@ -30,6 +34,7 @@ struct Shape {
   uint32_t a_regs;
   uint32_t b_regs;
   uint32_t d_regs;
+  std::optional<Fmt> b_format = std::nullopt; ///< When B's format differs from A's.
 };
 
 /// Runs @p kernel forced-scalar and then normally over identical register state, for a
@@ -65,7 +70,8 @@ void expect_matches_scalar(
       fixture.seed_words(accumulator, shape.d_regs, seed + 3);
     else
       fixture.seed(accumulator, shape.d_regs, shape.accumulator_format, Mode::RandomInt, seed + 3);
-    fixture.seed(source_b, shape.b_regs, shape.input_format, Mode::RandomInt, seed + 2);
+    fixture.seed(source_b, shape.b_regs, shape.b_format.value_or(shape.input_format),
+                 Mode::RandomInt, seed + 2);
     fixture.seed(source_a, shape.a_regs, shape.input_format, Mode::RandomInt, seed + 1);
   };
   auto run = [&] {
@@ -168,6 +174,87 @@ TEST(MfmaRegisterPathsTest, I8MatchesScalarForBothShapesAndLanePermutations) {
             if (::testing::Test::HasFatalFailure())
               return;
           }
+}
+
+TEST(MfmaRegisterPathsTest, F8F6F4MatchesScalarForEveryFormatPair) {
+  SKIP_IF_NO_SIMD();
+  // cbsz and blgp select the A and B formats: FP8, BF8, FP6, BF6, FP4.
+  constexpr Fmt kFormats[] = {Fmt::FP8, Fmt::BF8, Fmt::RAW6, Fmt::RAW6, Fmt::RAW4};
+  constexpr uint32_t kBits[] = {8, 8, 6, 6, 4};
+  struct Mfma {
+    uint32_t m, n, k, d_regs;
+  };
+  for (const Mfma mfma : {Mfma{16, 16, 128, 4}, Mfma{32, 32, 64, 16}})
+    for (uint32_t a_fmt = 0; a_fmt < 5; ++a_fmt)
+      for (uint32_t b_fmt = 0; b_fmt < 5; ++b_fmt)
+        for (bool cross_chunks : {false, true})
+          for (Overlap overlap :
+               {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+            for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
+              const std::string label =
+                  std::format("f8f6f4 {}x{}x{} a={} b={}", mfma.m, mfma.n, mfma.k, a_fmt, b_fmt);
+              const Shape shape{kFormats[a_fmt], Fmt::F32,    kBits[a_fmt],
+                                kBits[b_fmt],    mfma.d_regs, kFormats[b_fmt]};
+              expect_matches_scalar(
+                  label.c_str(), shape, overlap, cross_chunks, 41 + a_fmt * 5 + b_fmt,
+                  [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
+                    ASSERT_TRUE(amdgpu::dispatch_matrix_fmt_pair(
+                        a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+                          amdgpu::exec_f32_mixed(*fx.cu, mfma.m, mfma.n, mfma.k, 1, a_bits, b_bits,
+                                                 dst, a, b, c, ea, eb, const_acc);
+                        }));
+                  });
+              if (::testing::Test::HasFatalFailure())
+                return;
+            }
+}
+
+TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
+  SKIP_IF_NO_SIMD();
+  struct Permutation {
+    uint32_t cbsz, abid, blgp;
+  };
+  // 4x4x2 with 16 blocks has one A and one B register.
+  const Shape shape{Fmt::BF16, Fmt::F32, 1, 1, 4};
+  for (Overlap overlap : {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+    for (const Permutation p : {Permutation{0, 0, 0}, Permutation{2, 3, 0}, Permutation{4, 9, 5}})
+      for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 0x3f800000u}) {
+        expect_matches_scalar(
+            "bf16 4x4x2x16", shape, overlap, /*cross_chunks=*/false, 51 + p.cbsz,
+            [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
+              amdgpu::exec_f32(*fx.cu, 4, 4, 2, 16, 16, dst, a, b, c, amdgpu::extract_bf16,
+                               amdgpu::extract_bf16, const_acc, p.cbsz, p.abid, p.blgp);
+            });
+        if (::testing::Test::HasFatalFailure())
+          return;
+      }
+}
+
+TEST(MfmaRegisterPathsTest, I8SingleRegisterShapesMatchScalarWithLanePermutations) {
+  SKIP_IF_NO_SIMD();
+  struct Case {
+    uint32_t m, n, k, batch, d_regs, cbsz, abid, blgp;
+  };
+  // Each shape reads one A and one B register; batched shapes also broadcast A blocks.
+  for (const Case c : {Case{32, 32, 8, 1, 16, 0, 0, 3}, Case{16, 16, 16, 1, 4, 0, 0, 5},
+                       Case{16, 16, 4, 4, 16, 0, 0, 0}, Case{16, 16, 4, 4, 16, 2, 3, 7},
+                       Case{4, 4, 4, 16, 4, 0, 0, 0}, Case{4, 4, 4, 16, 4, 4, 9, 2},
+                       Case{4, 4, 4, 16, 4, 1, 1, 6}})
+    for (Overlap overlap :
+         {Overlap::None, Overlap::Accumulator, Overlap::SourceA, Overlap::SourceB})
+      for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, 7u}) {
+        const std::string label = std::format("i8 {}x{}x{}x{} cbsz={} abid={} blgp={}", c.m, c.n,
+                                              c.k, c.batch, c.cbsz, c.abid, c.blgp);
+        const Shape shape{Fmt::I8, Fmt::I8, 1, 1, c.d_regs};
+        expect_matches_scalar(
+            label.c_str(), shape, overlap, /*cross_chunks=*/false, 61 + c.cbsz,
+            [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t acc) {
+              amdgpu::exec_i32_i8(*fx.cu, c.m, c.n, c.k, c.batch, dst, a, b, acc, const_acc, c.cbsz,
+                                  c.abid, c.blgp);
+            });
+        if (::testing::Test::HasFatalFailure())
+          return;
+      }
 }
 
 } // namespace
