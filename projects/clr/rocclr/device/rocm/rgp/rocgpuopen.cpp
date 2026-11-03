@@ -381,6 +381,7 @@ RocUberTraceCaptureMgr::RocUberTraceCaptureMgr(Device* device)
       prep_disp_count_(0),
       num_prep_frames_(2),
       sqtt_se_mask_(0),
+      sqtt_memory_limit_mb_(0),
       sqtt_instruction_tokens_(false),
       sqtt_capture_code_objects_(true),
       capture_start_index_(0),
@@ -677,23 +678,38 @@ void RocUberTraceCaptureMgr::WaitForDriverResume() {
 
 
 // ================================================================================================
-// Compute the effective aqlprofile capture SE_MASK (see header for the full rationale).
-// When instruction tokens are enabled, mirror PAL by restricting detailed capture to the
-// tool-supplied seMask (typically SE0 only); otherwise capture every present shader engine.
-uint32_t RocUberTraceCaptureMgr::EffectiveCaptureSeMask() const {
+// Mask of every shader engine present on the device.
+uint32_t RocUberTraceCaptureMgr::AllSeMask() const {
   const uint32_t num_se = static_cast<uint32_t>(device_->info().numberOfShaderEngines_);
-  const uint32_t all_se_mask =
-      (num_se > 0 && num_se < 32u) ? ((1u << num_se) - 1u) : 0xFFFFFFFFu;
+  return (num_se > 0 && num_se < 32u) ? ((1u << num_se) - 1u) : 0xFFFFFFFFu;
+}
 
-  if (!sqtt_instruction_tokens_) {
-    // No detailed tokens: capturing every SE costs little and preserves full-frame coverage.
-    return all_se_mask;
-  }
+// ================================================================================================
+// Which SEs the hardware captures at all.  Always every present SE, matching PAL: GpaSession
+// gates capture on sampleConfig.sqtt.seMask (gpaSession.cpp), and palgpuopen.cpp never assigns
+// that field, so it stays 0 == "all SEs".
+uint32_t RocUberTraceCaptureMgr::CaptureSeMask() const { return AllSeMask(); }
 
-  // Detailed capture: honor the tool's seMask so instruction tokens land on a single SE like
-  // PAL.  Clamp to present SEs and fall back to SE0 if the tool supplied an empty mask.
+// ================================================================================================
+// Which captured SEs emit detailed (instruction) tokens.  This is what the tool's seMask
+// actually means on the wire: dd_gpu_profiling.cpp sets rgpConfig.seMask from
+// shaderEngineInstructionTraceMask, and palgpuopen.cpp routes it to sqtt.seDetailedMask.
+// 0 means "all SEs" (PAL's TestSeMask convention, gpuPerfExperimentTraceSource.cpp).
+uint32_t RocUberTraceCaptureMgr::DetailSeMask() const {
+  if (!sqtt_instruction_tokens_) return 0u;
+  const uint32_t all_se_mask = AllSeMask();
   const uint32_t requested = sqtt_se_mask_ & all_se_mask;
-  return (requested != 0) ? requested : 0x1u;
+  return (requested != 0) ? requested : all_se_mask;
+}
+
+// ================================================================================================
+// Bytes budgeted for one SE.  PAL grows the detailed SE's buffer 4x
+// (DetailSqttSeBufferMultiplier, gpaSession.cpp) and leaves the lightweight SEs at 1x;
+// aqlprofile splits the total buffer by the same weights.
+uint64_t RocUberTraceCaptureMgr::PerSeCapacityBytes(uint32_t se_index) const {
+  const uint64_t per_se_bytes = static_cast<uint64_t>(sqtt_memory_limit_mb_) * 1024u * 1024u;
+  const bool detailed = ((DetailSeMask() >> se_index) & 1u) != 0;
+  return detailed ? per_se_bytes * kDetailSeBufferMultiplier : per_se_bytes;
 }
 
 // ================================================================================================
@@ -719,27 +735,32 @@ bool RocUberTraceCaptureMgr::OnTraceRequested(::roc::RocTraceSession* pSession) 
     const auto& cfg       = uber_trace_svc_->GetTraceConfig();
     num_prep_frames_      = cfg.numPrepDispatches;
     sqtt_se_mask_         = cfg.seMask;
+    sqtt_memory_limit_mb_ = cfg.sqttMemoryLimitInMb;
     sqtt_instruction_tokens_  = cfg.enableInstructionTokens;
     sqtt_capture_code_objects_= cfg.captureCodeObjects;
 
-    // SQTT buffer sizing — mirrors PAL's GpaSession (gpaSession.cpp:4374-4432), where the tool's
-    // gpuMemoryLimitInMb is a PER-SHADER-ENGINE budget allocated for every SE.  aqlprofile instead
-    // treats output_buffer.size as a TOTAL and divides it across the enabled SEs (sqtt_builder.h
-    // GetBaseStep), so pre-multiply by the captured-SE count to give each SE the full budget.
-    // Undersizing wraps the per-SE buffer on real workloads and yields a malformed .rgp.
-    const uint32_t capture_mask = EffectiveCaptureSeMask();
-    uint32_t se_scale = 0;
-    for (uint32_t m = capture_mask; m != 0; m >>= 1) se_scale += (m & 1u);
-    if (se_scale == 0) se_scale = 1u;
-    // Detailed (instruction-token) traces emit far more data per SE; PAL grows the per-SE buffer
-    // 4x in this case (DetailSqttSeBufferMultiplier).  Mirror that here.
-    const uint32_t detail_scale = sqtt_instruction_tokens_ ? 4u : 1u;
-    const size_t per_se_bytes = static_cast<size_t>(cfg.sqttMemoryLimitInMb) * 1024u * 1024u;
-    sqtt_output_size_     = per_se_bytes * se_scale * detail_scale;
+    // SQTT buffer sizing — mirrors PAL's GpaSession (gpaSession.cpp), where the tool's
+    // gpuMemoryLimitInMb is a PER-SHADER-ENGINE budget: every SE is traced, a detailed SE gets
+    // DetailSqttSeBufferMultiplier (4x) that budget and a lightweight SE gets 1x.  aqlprofile
+    // treats output_buffer.size as a TOTAL and splits it by the same weights (sqtt_builder.h
+    // GetSeCapacity), so hand it the weighted sum.  This must match aqlprofile's weighting
+    // exactly or the last SE's slice is clipped; undersizing wraps a per-SE buffer on real
+    // workloads and yields a malformed .rgp.
+    const uint32_t capture_mask = CaptureSeMask();
+    const uint32_t detail_mask  = DetailSeMask();
+    uint32_t detail_se = 0, light_se = 0;
+    for (uint32_t se = 0; se < 32u; ++se) {
+      if (((capture_mask >> se) & 1u) == 0) continue;
+      (((detail_mask >> se) & 1u) != 0) ? ++detail_se : ++light_se;
+    }
+    if (detail_se == 0 && light_se == 0) light_se = 1u;
+    const size_t per_se_bytes = static_cast<size_t>(sqtt_memory_limit_mb_) * 1024u * 1024u;
+    sqtt_output_size_ = per_se_bytes * (detail_se * kDetailSeBufferMultiplier + light_se);
 
-    fprintf(stderr, "[CLR-Ctrl] OnTraceRequested: SQTT sizing perSE=%uMB x %u SE (mask=0x%x)"
-            " x %u detail => total=%zuMB\n",
-            cfg.sqttMemoryLimitInMb, se_scale, capture_mask, detail_scale,
+    fprintf(stderr, "[CLR-Ctrl] OnTraceRequested: SQTT sizing perSE=%uMB capture=0x%x detail=0x%x"
+            " (%ux%u + %ux1) => total=%zuMB\n",
+            sqtt_memory_limit_mb_, capture_mask, detail_mask,
+            detail_se, kDetailSeBufferMultiplier, light_se,
             sqtt_output_size_ / (1024u * 1024u));
     // Index-mode window: preparationStartIndex marks when prep counting begins;
     // captureDispatchCount drives the stop index (0 = unlimited).
@@ -830,25 +851,32 @@ bool RocUberTraceCaptureMgr::BeginSqttTrace(VirtualGPU* gpu) {
 
   // Build aqlprofile parameter list from DevDriver trace configuration.
   // All parameters were read from QueryTraceParameters() in OnTraceRequested().
-  const uint32_t out_size_mb = sqtt_output_size_ / (1024u * 1024u);
+  const uint32_t out_size_mb = static_cast<uint32_t>(sqtt_output_size_ / (1024u * 1024u));
 
-  // Maximum possible parameters: ATT_BUFFER_SIZE + SE_MASK + SIMD_SELECTION + OCCUPANCY_MODE.
-  hsa_ven_amd_aqlprofile_parameter_t sqtt_params[4];
+  // Max parameters: ATT_BUFFER_SIZE + SE_MASK + DETAIL_SE_MASK + SIMD_SELECTION + OCCUPANCY_MODE.
+  hsa_ven_amd_aqlprofile_parameter_t sqtt_params[5];
   uint32_t param_count = 0;
 
   // ATT_BUFFER_SIZE (MB) — always required; must match allocated output buffer.
   sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE,
                                   out_size_mb };
 
-  // SE_MASK is a capture-enable gate, not PAL's sqtt.seDetailedMask (a detail selector under
-  // which every SE still captures): an SE outside this mask gets target_cu_per_se = -1 and
-  // produces no data at all (sqtt_builder.h).  It must be passed explicitly — omitting it falls
-  // back to aqlprofile's default 0x11, which on a 4-SE part captures only SE0 and halves the
-  // per-SE buffer.  EffectiveCaptureSeMask() supplies all present SEs, or the tool's seMask
-  // when instruction tokens are on, which matches PAL's seDetailedMask outcome.
-  const uint32_t capture_se_mask = EffectiveCaptureSeMask();
+  // SE_MASK is a capture-enable gate: an SE outside it gets target_cu_per_se = -1 and produces
+  // no data at all (sqtt_builder.h).  It must be passed explicitly — omitting it falls back to
+  // aqlprofile's default 0x11, which on a 4-SE part captures only SE0 and halves the per-SE
+  // buffer.  We always capture every SE, as PAL does (sampleConfig.sqtt.seMask is left 0).
+  const uint32_t capture_se_mask = CaptureSeMask();
   sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK,
                                   capture_se_mask };
+
+  // DETAIL_SE_MASK is the counterpart to PAL's sqtt.seDetailedMask: every SE in SE_MASK keeps
+  // capturing, but only these emit instruction tokens; the rest get aqlprofile's no-detail
+  // token mask and still contribute wave/event tokens for occupancy.  Only meaningful when
+  // instruction tokens were requested at all — otherwise OCCUPANCY_MODE below covers it.
+  if (sqtt_instruction_tokens_) {
+    sqtt_params[param_count++] = { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_DETAIL_SE_MASK,
+                                    DetailSeMask() };
+  }
 
   // SIMD_SELECTION picks the SIMD detailed tokens come from.  On gfx12 SQ_THREAD_TRACE_MASK.
   // SIMD_SEL is a 2-bit selector, not the gfx9-era "all SIMDs" bitmask, so 0xF truncates to
@@ -1048,8 +1076,9 @@ void RocUberTraceCaptureMgr::EndSqttTrace(VirtualGPU* gpu) {
 
 // Per-SE SQTT buffer extent within the host-side copy of sqtt_output_.
 struct SeEntry {
-  size_t offset;  // byte offset from start of host_buf
-  size_t size;    // bytes written by GPU for this SE
+  uint32_t se_index;  // physical shader engine (aqlprofile sample_id), NOT the callback ordinal
+  size_t offset;      // byte offset from start of host_buf
+  size_t size;        // bytes written by GPU for this SE
 };
 
 // ================================================================================================
@@ -1245,7 +1274,9 @@ static std::vector<uint8_t> BuildRgpFileBlob(const Device* device,
 
     SqttDesc desc = {};
     desc.header            = MakeChunkHeader(kSqttDesc, i, static_cast<int32_t>(sizeof(SqttDesc)));
-    desc.shaderEngineIndex = i;
+    // Physical SE index from aqlprofile, not the loop ordinal (they diverge once the capture
+    // mask is sparse).
+    desc.shaderEngineIndex = static_cast<int32_t>(se_entries[i].se_index);
     desc.sqttVersion       = sqtt_ver;
     append(&desc, sizeof(desc));
 
@@ -1301,9 +1332,11 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
         if (type == HSA_VEN_AMD_AQLPROFILE_INFO_TRACE_DATA) {
           const size_t offset = static_cast<uint8_t*>(data->trace_data.ptr)
                               - static_cast<uint8_t*>(ctx->base);
-          ctx->entries.push_back({offset, data->trace_data.size});
-          fprintf(stderr, "[CLR-Ctrl] CollectSqttResults: SE entry offset=%zu size=%zu\n",
-                  offset, static_cast<size_t>(data->trace_data.size));
+          // Keep sample_id: it is the physical SE index, which only coincides with the
+          // callback ordinal when the capture mask is dense and starts at SE0.
+          ctx->entries.push_back({data->sample_id, offset, data->trace_data.size});
+          fprintf(stderr, "[CLR-Ctrl] CollectSqttResults: SE entry se=%u offset=%zu size=%zu\n",
+                  data->sample_id, offset, static_cast<size_t>(data->trace_data.size));
         }
         return HSA_STATUS_SUCCESS;
       },
@@ -1373,9 +1406,14 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
   if (host_buf != nullptr) {
     Hsa::memory_copy(host_buf, sqtt_output_, copy_size);
 
-    // If iterate_data yielded no per-SE entries treat the whole buffer as one SE.
+    // If iterate_data yielded no per-SE entries treat the whole buffer as one SE.  This is a
+    // degraded fallback, not a normal path: we expect one entry per captured SE, so reaching
+    // here means every SE but this synthetic one was lost.
     if (iter_ctx.entries.empty()) {
-      iter_ctx.entries.push_back({0, copy_size});
+      fprintf(stderr, "[CLR-Ctrl] CollectSqttResults: WARNING no per-SE entries from"
+              " iterate_data (capture mask 0x%x); emitting a single synthetic SE0 chunk\n",
+              CaptureSeMask());
+      iter_ctx.entries.push_back({0u, 0, copy_size});
     }
 
     // Legacy RGP path: build a complete .rgp file blob and stream to the tool.
@@ -1399,19 +1437,9 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
       const uint32_t sqtt_ver =
           static_cast<uint32_t>(RgpFile::GfxVerToSqttVersion(gfx_maj, gfx_min));
 
-      // traceBufferSize is the PER-SHADER-ENGINE allocation, not the total (PAL:
-      // traceInfo.bufferSize = seLayout.dataSize, gpaSession.cpp:2354). sqtt_output_size_ is the
-      // total, which aqlprofile partitions across the enabled SEs (sqtt_builder.h GetBaseStep),
-      // so divide by the SE count. Writing the total makes each SE advertise a >512MB buffer,
-      // which RGP rejects as malformed.
-      const uint32_t se_count_for_size =
-          (iter_ctx.entries.size() > 0) ? static_cast<uint32_t>(iter_ctx.entries.size()) : 1u;
-      const uint64_t per_se_trace_buffer_size =
-          static_cast<uint64_t>(sqtt_output_size_) / se_count_for_size;
+      const uint32_t detail_mask = DetailSeMask();
 
-      for (uint32_t se_idx = 0; se_idx < static_cast<uint32_t>(iter_ctx.entries.size()); ++se_idx) {
-        const SeEntry& se = iter_ctx.entries[se_idx];
-
+      for (const SeEntry& se : iter_ctx.entries) {
         // SqttDataHeader: mirrors PAL's sqttDataHeader initialiser in WriteSqttDataChunks().
         struct SqttDataHeader {
           uint32_t pciId;
@@ -1426,19 +1454,29 @@ void RocUberTraceCaptureMgr::CollectSqttResults(VirtualGPU* /*gpu*/) {
           uint32_t reserved                 : 30;
         };
 
-        // aqlprofile has no per-SE detail knob, so every SE in the capture mask carries detailed
-        // tokens and the flag simply follows the global setting.  It must match the stream: an SE
-        // advertising detail it does not have (or vice versa) makes RGP reject the file.
-        const bool instr_enabled = sqtt_instruction_tokens_;
+        // Per-SE, exactly as PAL computes it (gpuPerfExperimentTraceSource.cpp:
+        // enableInstructionTokens && TestSeMask(seMask, traceInfo.shaderEngine)).  It must match
+        // the stream this SE actually produced: RGP ORs each chunk's bit into
+        // instruction_trace_params.shader_engine_mask and then resolves instruction timing
+        // against the FIRST set SE, discarding Inst/Issue/NewPc tokens from any other SE.  An SE
+        // advertising detail it does not carry makes RGP look for data that is not there.
+        const bool instr_enabled = ((detail_mask >> se.se_index) & 1u) != 0;
 
         SqttDataHeader hdr = {};
         hdr.pciId                     = di.pcieDeviceId_;
-        hdr.shaderEngine              = se_idx;
+        hdr.shaderEngine              = se.se_index;
         hdr.sqttVersion               = sqtt_ver;
         hdr.instrumentationVersionSpec = 1;  // instrumentation spec version (API-agnostic)
         hdr.instrumentationVersionApi  = 0;  // API-specific version (OpenCL = 0)
-        hdr.wgpIndex                  = 0;   // not tracked per-dispatch in HSA path
-        hdr.traceBufferSize           = per_se_trace_buffer_size;  // PER-SE, not total
+        // Detail WGP for this SE. Must equal the SQTT header token's detail_wgp_id, which the
+        // hardware echoes from SQ_THREAD_TRACE_MASK.WGP_SEL; aqlprofile programs that from its
+        // targetCu, which we leave at the default 0 (RGP asserts the two agree).
+        hdr.wgpIndex                  = 0;
+        // PER-SE allocation, not the total (PAL: traceInfo.bufferSize = seLayout.dataSize).
+        // Detailed SEs get the 4x slice, lightweight SEs 1x -- the same weighting aqlprofile
+        // used to carve the buffer. Writing the total makes each SE advertise a >512MB buffer,
+        // which RGP rejects as malformed.
+        hdr.traceBufferSize           = PerSeCapacityBytes(se.se_index);
         hdr.instructionTimingEnabled  = instr_enabled ? 1u : 0u;
         hdr.execPopTokensEnabled      = 0;
 
@@ -1870,7 +1908,8 @@ void RocUberTraceCaptureMgr::PreDispatch(VirtualGPU* gpu, const Kernel& kernel, 
     const auto params         = rgp_server_->QueryTraceParameters();
     num_prep_frames_          = (params.numPreparationFrames > 0) ? params.numPreparationFrames : 2;
     const uint32_t mb         = (params.gpuMemoryLimitInMb > 0) ? (params.gpuMemoryLimitInMb / 2) : 4;
-    sqtt_output_size_         = mb * 1024u * 1024u;
+    sqtt_output_size_         = static_cast<size_t>(mb) * 1024u * 1024u;
+    sqtt_memory_limit_mb_     = mb;
     sqtt_se_mask_             = params.seMask;
     sqtt_instruction_tokens_  = (params.flags.enableInstructionTokens != 0);
     sqtt_capture_code_objects_= (params.flags.captureDriverCodeObjects != 0);

@@ -480,7 +480,7 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   void*    sqtt_cmd_buf_;       //!< PM4 command buffer (GPU writes commands here)
   uint32_t sqtt_cmd_buf_size_;  //!< Size of sqtt_cmd_buf_
   void*    sqtt_output_;        //!< SQTT output data buffer (GPU writes trace here)
-  uint32_t sqtt_output_size_;   //!< Size of sqtt_output_
+  size_t   sqtt_output_size_;   //!< Size of sqtt_output_ (sum over all captured SEs)
   void*    marker_cmd_buf_;       //!< Fine-grained host ring buffer for SQTT NOP marker PM4
   mutable std::atomic<uint32_t> marker_buf_idx_;  //!< Next ring slot index (wraps mod kMarkerRingSize)
 
@@ -490,20 +490,33 @@ class RocUberTraceCaptureMgr final : public ICaptureMgr,
   uint32_t num_prep_frames_;
 
   // Detailed SQTT capture options read from DevDriver trace parameters in OnTraceRequested().
-  uint32_t sqtt_se_mask_;                //!< Shader engine mask (0 = all SEs)
+  uint32_t sqtt_se_mask_;                //!< Tool seMask = DETAIL mask, not capture (0 = all SEs)
+  uint32_t sqtt_memory_limit_mb_;        //!< Tool memoryLimitInMb, a PER-SHADER-ENGINE budget
   bool     sqtt_instruction_tokens_;     //!< true = full instruction-level tokens
   bool     sqtt_capture_code_objects_;   //!< true = include ELF binaries as RDF chunks
 
-  //! Compute the effective aqlprofile capture SE_MASK.
-  //!
-  //! aqlprofile's gfx12 path has no per-SE detail selector (occupancy_mode is global), unlike
-  //! PAL's sqtt.seDetailedMask.  Detailed (instruction-timing) tokens are therefore captured on
-  //! every SE in the capture mask, multiplying trace size by the SE count.  PAL only gathers
-  //! detailed tokens on a single SE (seDetailedMask = 0x1); to match that behaviour and file size
-  //! we restrict the capture mask to the tool-supplied seMask when instruction tokens are enabled.
-  //! Without instruction tokens every SE is captured (mask = all present SEs) as before.
+  //! PAL's DetailSqttSeBufferMultiplier (gpaSession.cpp): a detailed SE is given four times
+  //! the buffer of a lightweight one.  Must stay in sync with aqlprofile's
+  //! GpuSqttBuilder::kDetailSeBufferMultiplier or the per-SE slices will not line up.
+  static constexpr uint32_t kDetailSeBufferMultiplier = 4u;
+
+  //! Mask of every shader engine present on the device.
+  uint32_t AllSeMask() const;
+
+  //! SEs the hardware captures.  Always all of them, as in PAL — GpaSession gates capture on
+  //! sampleConfig.sqtt.seMask, which palgpuopen.cpp never sets, leaving it 0 == "all".
   //! @return The SE bitmask to pass as HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK.
-  uint32_t EffectiveCaptureSeMask() const;
+  uint32_t CaptureSeMask() const;
+
+  //! Subset of the captured SEs that emit detailed (instruction) tokens.  The tool's seMask is
+  //! an instruction-trace mask (dd_gpu_profiling.cpp: shaderEngineInstructionTraceMask), which
+  //! PAL applies as sqtt.seDetailedMask while every SE keeps capturing.  The remaining SEs get
+  //! aqlprofile's no-detail token mask, so they still yield wave/event tokens for occupancy.
+  //! @return The SE bitmask to pass as HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_DETAIL_SE_MASK.
+  uint32_t DetailSeMask() const;
+
+  //! Per-SE buffer budget in bytes under the weighted split (4x for detailed SEs).
+  uint64_t PerSeCapacityBytes(uint32_t se_index) const;
 
   // Dispatch-index capture window (CaptureTriggerMode::Index).
   // When captureMode == Index the tool specifies an inclusive [start, stop] dispatch range.
