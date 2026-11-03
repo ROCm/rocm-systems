@@ -1,0 +1,1 @@
+* Fixed `ENABLE_RCCL_EP_IN_LIBRCCL` having no effect: the NCCL 2.31.2 sync dropped the device-linker rule that compiles `rccl_ep` into `librccl.so`, so the option built nothing and `librccl.so` exported no `ep_*` entry points.
