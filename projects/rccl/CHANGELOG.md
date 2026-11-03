@@ -64,6 +64,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 ### Resolved issues
+* Fixed GIN proxy traffic on AINIC hosts running over the generic IB RMA backend when `NCCL_NET` is `ROCM-IB` or unset, although the data path uses IB-CAST. The internal RMA backend is now IB-CAST whenever the data path uses the IB-CAST NET plugin.
 * Fixed the calling thread's HIP stream-capture mode remaining relaxed when device-communicator GIN setup fails. `ncclDevCommCreate` still switches to relaxed mode while it builds the device communicator, and a failed `ncclGinDevCommSetup` now returns through the same cleanup path that restores the mode the application had set. Matches upstream NCCL 2.31.2 (PR 2229).
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
