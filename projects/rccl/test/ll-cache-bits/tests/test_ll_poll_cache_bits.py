@@ -5,23 +5,7 @@
 #  ************************************************************************
 """Guard: every LL flag-poll load in librccl.so keeps its cache-policy bits.
 
-The LL protocol's receiver re-reads one 16-byte FIFO line until its flags
-change (src/device/prims_ll.h). A peer GPU or NIC writes that line, so the load
-must not be served from a stale cached copy. The source only *asks* for this
-(__builtin_nontemporal_load, or a system-scope load on some arches); the
-compiler decides the bits that end up in the instruction. If a compiler update,
-a code change, or a new arch drops them, everything still builds and the first
-symptom is a collective that hangs on real hardware.
-
-This test reads the device ISA out of a built librccl.so, finds every LL poll
-load by its shape (see ll_isa.py), and asserts it carries the expected bits for
-its arch. It needs a built RCCL and the ROCm LLVM tools, but no GPU.
-
-  RCCL_LIB    path to librccl.so  (default: $RCCL_BUILD/librccl.so)
-  RCCL_BUILD  RCCL build dir      (default: <rccl>/build/{release,debug})
-  ROCM_PATH   ROCm install root   (default: /opt/rocm)
-  RCCL_LL_GUARD_REQUIRED=1  fail instead of skip when the library, tools or
-                            all checked arches are missing (for CI)
+See ../README.md for why the bits matter and the environment variables.
 """
 
 import functools
@@ -111,10 +95,10 @@ def targets(fatbin):
 @pytest.fixture(scope="session")
 def disassemble(fatbin, targets, tmp_path_factory):
     @functools.lru_cache(maxsize=None)
-    def _disassemble(arch):
-        work = tmp_path_factory.mktemp(arch)
-        code_object = str(work / f"{arch}.co")
-        _toolchain().unbundle(fatbin, targets[arch], code_object)
+    def _disassemble(tid):
+        work = tmp_path_factory.mktemp("co")
+        code_object = str(work / "code.co")
+        _toolchain().unbundle(fatbin, tid, code_object)
         return _toolchain().candidate_disassembly(code_object, str(work))
 
     return _disassemble
@@ -137,25 +121,27 @@ def test_unchecked_arches(targets):
 def test_ll_poll_loads_keep_cache_bits(arch, targets, disassemble):
     if arch not in targets:
         pytest.skip(f"{RCCL_LIB} was not built for {arch}")
-    lines = disassemble(arch)
-    polls = list(ll_isa.find_polls(lines))
-
-    # A guard that finds nothing passes vacuously.
-    unmatched = ll_isa.unpolled_proto_ll(lines, polls)
-    assert polls, f"{arch}: found no LL flag-poll loads; update ll_isa.py."
-    assert not unmatched, (
-        f"{arch}: found no LL flag-poll load in {len(unmatched)} ProtoLL "
-        f"function(s), e.g. {unmatched[:3]}. The poll's instruction shape "
-        "changed (or it was split into narrower loads); update ll_isa.py."
-    )
-
     want = EXPECTED_POLL_MODIFIERS[arch]
-    bad = [p for p in polls if not want <= set(p.modifiers)]
-    report = "\n".join(f"  {p.insn}\n      in {p.func}"
-                       for p in bad[:MAX_REPORTED])
-    assert not bad, (
-        f"{arch}: {len(bad)} of {len(polls)} LL flag-poll loads lack "
-        f"{sorted(want)}. Without them the receiver can spin on a stale "
-        f"cached copy of the FIFO line and hang. First "
-        f"{min(len(bad), MAX_REPORTED)}:\n{report}"
-    )
+    for tid in targets[arch]:
+        name = tid.split("--", 1)[1]
+        lines = disassemble(tid)
+        polls = list(ll_isa.find_polls(lines))
+
+        # A guard that finds nothing passes vacuously.
+        unmatched = ll_isa.unpolled_proto_ll(lines, polls)
+        assert polls, f"{name}: found no LL flag-poll loads; update ll_isa.py."
+        assert not unmatched, (
+            f"{name}: found no LL flag-poll load in {len(unmatched)} ProtoLL "
+            f"function(s), e.g. {unmatched[:3]}. The poll's instruction shape "
+            "changed (or it was split into narrower loads); update ll_isa.py."
+        )
+
+        bad = [p for p in polls if not want <= set(p.modifiers)]
+        report = "\n".join(f"  {p.insn}\n      in {p.func}"
+                           for p in bad[:MAX_REPORTED])
+        assert not bad, (
+            f"{name}: {len(bad)} of {len(polls)} LL flag-poll loads lack "
+            f"{sorted(want)}. Without them the receiver can spin on a stale "
+            f"cached copy of the FIFO line and hang. First "
+            f"{min(len(bad), MAX_REPORTED)}:\n{report}"
+        )

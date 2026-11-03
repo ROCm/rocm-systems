@@ -120,6 +120,26 @@ def test_compare_after_next_load_belongs_to_that_load():
     assert polls(text) == []
 
 
+def test_compares_in_next_function_are_not_a_poll():
+    text = """\
+0000 <f>:
+	global_load_dwordx4 v[0:3], v[8:9], off nt
+0001 <g>:
+	v_cmp_ne_u32_e64 s[0:1], v1, v20
+	v_cmp_ne_u32_e64 s[2:3], v3, v20
+"""
+    assert polls(text) == []
+
+
+def test_targets_keeps_every_feature_variant(monkeypatch):
+    tc = ll_isa.Toolchain("/nonexistent")
+    ids = ["hip-amdgcn-amd-amdhsa--gfx950:xnack-",
+           "hip-amdgcn-amd-amdhsa--gfx950:xnack+"]
+    listing = "host-x86_64-unknown-linux-gnu-\n" + "\n".join(ids)
+    monkeypatch.setattr(tc, "run", lambda *args: listing)
+    assert tc.targets("fatbin") == {"gfx950": ids}
+
+
 @pytest.mark.parametrize("insn,mods", [
     ("global_load_dwordx4 v[18:21], v[12:13], off nt", ["nt"]),
     ("global_load_dwordx4 v[0:3], v4, s[0:1] offset:16 sc0 sc1",

@@ -46,7 +46,7 @@ POLL_WINDOW = 48
 PROTO_LL_RE = re.compile(r"7ProtoLL(?!128)")
 # Where LL poll loads can live: Primitives<ProtoLL> instantiations, kernels
 # with LL in their name, and RunWorkBatch bodies that inline them.
-CANDIDATE_RE = re.compile(r"7ProtoLL(?!128)|_LL_|RunWorkBatch")
+CANDIDATE_RE = re.compile(PROTO_LL_RE.pattern + r"|_LL_|RunWorkBatch")
 
 Poll = collections.namedtuple("Poll", "func insn modifiers")
 
@@ -137,15 +137,16 @@ class Toolchain:
                  lib, os.devnull)
 
     def targets(self, fatbin):
-        """Return {arch: bundle target id} for the device code in `fatbin`.
+        """Return {arch: [bundle target ids]} for the device code in `fatbin`.
 
-        Target ids look like "hip-amdgcn-amd-amdhsa--gfx942[:xnack-]"."""
-        out = {}
+        Target ids look like "hip-amdgcn-amd-amdhsa--gfx942[:xnack-]"; one arch
+        can have several feature variants."""
+        out = collections.defaultdict(list)
         for tid in self.run("clang-offload-bundler", "--list", "--type=o",
                             "--input=" + fatbin).split():
             if "amdgcn" in tid:
-                out[tid.split("--", 1)[1].split(":", 1)[0]] = tid
-        return out
+                out[tid.split("--", 1)[1].split(":", 1)[0]].append(tid)
+        return dict(out)
 
     def unbundle(self, fatbin, target, out):
         self.run("clang-offload-bundler", "--unbundle", "--type=o",
