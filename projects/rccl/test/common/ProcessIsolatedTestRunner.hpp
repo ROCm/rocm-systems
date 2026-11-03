@@ -36,9 +36,9 @@ namespace RcclUnitTesting
  * pool: HIP_VISIBLE_DEVICES=4,5,6,7 on an 8-GPU host reports 4 devices even
  * though every id in it is >= 4.
  *
- * A non-positive @p hipDeviceCount means the probe failed or the machine has
- * no GPU; the pool is returned unchanged so that stays a per-test skip rather
- * than a pool-detection failure.
+ * A non-positive @p hipDeviceCount means the probe failed or HIP opened no
+ * device; the pool is returned unchanged, since an empty pool is a hard
+ * pool-detection failure in the runner.
  */
 std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount);
 

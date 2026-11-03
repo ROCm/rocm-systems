@@ -224,7 +224,17 @@ static std::vector<int> detectGpuPool()
     if(pool.empty())
         pool = gpuPoolFromKfd();
 
-    return clampPoolToDeviceCount(std::move(pool), gpuCountViaFreshImage());
+    const int hipDeviceCount = gpuCountViaFreshImage();
+    if(hipDeviceCount == kGpuCountProbeFailed && !pool.empty())
+    {
+        TEST_INFO(
+            "WARNING: could not determine how many devices HIP can open; "
+            "leaving the detected pool of %zu device(s) unclamped",
+            pool.size()
+        );
+    }
+
+    return clampPoolToDeviceCount(std::move(pool), hipDeviceCount);
 }
 
 // Tracks which physical GPU device indices from a fixed pool are in use.
