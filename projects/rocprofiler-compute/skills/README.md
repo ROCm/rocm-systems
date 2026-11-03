@@ -56,7 +56,7 @@ Every skill directory holds:
 └── evals/
     ├── evals.json      # prompts that must and must not route to this skill
     ├── machine.yml     # hardware the behavioral cases need
-    └── files/          # copies of the samples the cases use
+    └── samples/        # copies of the samples the cases use
 ```
 
 `SKILL.md` states the decision: which command to run, when, and where the
@@ -97,13 +97,12 @@ Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
 
-A triggering case that needs an application sets `workspace` to a directory
-under the skill's `evals/files/`, and its prompt names the application relative
-to that directory. The contents of the workspace directory are copied to the
-workspace root when the case runs, as skillscope does. The AMD skills repo
-copies only the skill directory, so `evals/files/` holds copies of the samples
-from `sample/`. Each copy and its original name each other in a header
-comment; change them together.
+A triggering case that needs an application sets `workspace` to
+`evals/samples`, and its prompt names the application. The contents of the
+workspace directory are copied to the workspace root when the case runs, as
+skillscope does. The AMD skills repo copies only the skill directory, so
+`evals/samples/` holds copies of the samples from `sample/`. Each copy and its
+original name each other in a header comment; change them together.
 
 `evals/machine.yml` asks the AMD skills repo to run the behavioral cases on an
 Instinct GPU runner.

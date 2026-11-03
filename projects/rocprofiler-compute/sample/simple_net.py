@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # Keep in sync with its copies under projects/rocprofiler-compute/:
-#   skills/rocprof-compute-torch-trace/evals/files/simple_net.py
+#   skills/rocprof-compute-torch-trace/evals/samples/simple_net.py
 
 """
 Sample PyTorch workload for rocprof-compute --torch-trace.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Keep in sync with its copies under projects/rocprofiler-compute/:
-//   skills/rocprof-compute-memory/evals/files/gl2_backpressure.hip
+//   skills/rocprof-compute-memory/evals/samples/gl2_backpressure.hip
 
 #include <hip/hip_runtime.h>
 #include <iostream>

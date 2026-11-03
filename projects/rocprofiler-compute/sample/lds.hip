@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 // Keep in sync with its copies under projects/rocprofiler-compute/:
-//   skills/rocprof-compute-memory/evals/files/lds.hip
+//   skills/rocprof-compute-memory/evals/samples/lds.hip
 
 /*
 An example to explore LDS bandwidth and bank conflicts, written by Nicholas Curtis [AMD].
