@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_lanes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
@@ -16,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -45,6 +47,16 @@ std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf
   if (soffset == OPR_SMEM_OFFSET_M0)
     return wf.m0();
   return amdgpu::try_read_scalar_selector(wf, soffset);
+}
+
+/// SADDR + zero-extended VGPR offset, or the 64-bit VGPR pair, plus @p bias.
+void global_lane_addresses(const amdgpu::RegisterAccess::VgprReadRegion &vaddr, bool saddr,
+                           uint64_t exec, uint32_t wf_size, uint64_t bias, uint64_t *out) {
+  if (saddr)
+    amdgpu::addr_calc::lane_addresses_u32(vaddr.lanes(0).value(), exec, wf_size, bias, out);
+  else
+    amdgpu::addr_calc::lane_addresses_u64(vaddr.lanes(0).value(), vaddr.lanes(1).value(), exec,
+                                          wf_size, bias, out);
 }
 
 void init_vector_mem_state(amdgpu::Wavefront &wf, amdgpu::VectorMemState &d) {
@@ -108,17 +120,26 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint64_t vaddr;
-    if (has_saddr(inst.saddr)) {
-      vaddr = vaddr_region.lane(0, lane);
-    } else {
-      vaddr = vaddr_region.lane64(0, lane);
-    }
+  // GFX12 selects the FLAT segment from the pointer before the immediate is
+  // added, so compute the pointers first and offset the global lanes after.
+  global_lane_addresses(vaddr_region, has_saddr(inst.saddr), exec, wf.wf_size(), saddr_val,
+                        d.per_lane_addr.data());
+  const uint64_t wave = wf.wf_size() == 64 ? ~uint64_t{0} : (uint64_t{1} << wf.wf_size()) - 1;
+  uint64_t private_lanes = 0;
+  if (wf.flat_pointer32()) {
+    private_lanes = exec & wave;
+  } else if (const uint32_t private_hi = wf.private_aperture_base() >> 32) {
+    // Only lanes whose upper pointer word is the private aperture's translate.
+    private_lanes = amdgpu::addr_calc::lanes_in_window(d.per_lane_addr.data(), exec, wf.wf_size(),
+                                                       ~uint64_t{0}, uint64_t{private_hi} << 32);
+  }
+  const auto immediate = static_cast<uint64_t>(int64_t{d.flat_aperture_offset});
+  for (uint64_t lanes = exec & wave & ~private_lanes; lanes; lanes &= lanes - 1)
+    d.per_lane_addr[std::countr_zero(lanes)] += immediate;
+  for (; private_lanes; private_lanes &= private_lanes - 1) {
+    const uint32_t lane = std::countr_zero(private_lanes);
     d.per_lane_addr[lane] = amdgpu::addr_calc::capture_flat_private_address(
-        wf, d, saddr_val + vaddr, lane, d.flat_aperture_offset);
+        wf, d, d.per_lane_addr[lane], lane, d.flat_aperture_offset);
   }
 }
 
@@ -144,17 +165,8 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, address_lanes);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(address_lanes & (1ULL << lane)))
-      continue;
-    uint64_t vaddr;
-    if (has_saddr(inst.saddr)) {
-      vaddr = vaddr_region.lane(0, lane);
-    } else {
-      vaddr = vaddr_region.lane64(0, lane);
-    }
-    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
-  }
+  global_lane_addresses(vaddr_region, has_saddr(inst.saddr), address_lanes, wf.wf_size(),
+                        saddr_val + static_cast<uint64_t>(offset), d.per_lane_addr.data());
 }
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
