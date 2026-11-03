@@ -305,6 +305,11 @@ class CandidateCompositionTest(unittest.TestCase):
             self.assertEqual(
                 staged["asset_id"], tm.rccl_asset_identity(lib_b, tuner_b)
             )
+            for item in staged["files"]:
+                self.assertEqual(
+                    (staging / item["path"]).stat().st_mode & 0o777,
+                    0o644,
+                )
 
     def test_reused_workdir_rejects_symlinked_staging_path(self):
         with tempfile.TemporaryDirectory() as tmp:

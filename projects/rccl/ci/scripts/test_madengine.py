@@ -898,13 +898,15 @@ def copy_overlay_asset(staging_fd: int, relative: str, source: Path) -> None:
             destination_fd = os.open(
                 parts[-1],
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec,
-                0o644,
+                0o600,
                 dir_fd=parent_fd,
             )
             try:
                 with os.fdopen(os.dup(source_fd), "rb") as src, \
                         os.fdopen(os.dup(destination_fd), "wb") as dst:
                     shutil.copyfileobj(src, dst)
+                # Docker root is NFS root-squashed on the compute nodes, so
+                # publish completed build-context assets read-only to others.
                 os.fchmod(destination_fd, 0o644)
             finally:
                 os.close(destination_fd)
