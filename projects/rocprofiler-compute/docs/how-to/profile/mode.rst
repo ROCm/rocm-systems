@@ -504,43 +504,8 @@ The following example only collects the counters required to calculate ``Total V
    ...
 
 
-To see a list of available hardware report blocks, use the ``--list-available-metrics`` option.
-
-.. code-block:: shell-session
-
-   $ rocprof-compute profile --list-available-metrics
-
-                                    __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-
-   0 -> Top Stats
-   1 -> System Info
-   2 -> System Speed-of-Light
-         2.1 -> Speed-of-Light
-                  2.1.0 -> VALU FLOPs
-                  2.1.1 -> MFMA FLOPs (F8)
-   ...
-   5 -> Command Processor (CPC/CPF)
-         5.1 -> Command Processor Fetcher
-                  5.1.0 -> CPF Utilization
-                  5.1.1 -> CPF Stall
-                  5.1.2 -> CPF-L2 Utilization
-         5.2 -> Packet Processor
-                  5.2.0 -> CPC Utilization
-                  5.2.1 -> CPC Stall Rate
-                  5.2.5 -> CPC-UTCL1 Stall
-   ...
-   6 -> Workgroup Manager (SPI)
-         6.1 -> Workgroup Manager Utilizations
-                  6.1.0 -> Accelerator Utilization
-                  6.1.1 -> Scheduler-Pipe Utilization
-                  6.1.2 -> Workgroup Manager Utilization
-
-
+To see the available report blocks and their metrics, use ``--list-metrics``.
+See :ref:`list-metrics`.
 
 .. _profiling-kernel-filtering:
 
