@@ -36,9 +36,15 @@ struct ipcHdl {
 
 //users of this 
 class ipcSocketCom {
+  static constexpr int kPidBufferSize = 16;
+  static constexpr int kNonceDigitsSize = 6;
   // the maximum size of the user provided part of the name for the UNIX domain socket/Windows
-  // mailslot; basically a result of the size of sockaddr_un::sun_path
-  static constexpr int kSocketPrefixMaxSize = sizeof(sockaddr_un::sun_path) - 32 - 1;
+  // mailslot; basically a result of the size of sockaddr_un::sun_path, minus 16 bytes for a PID,
+  // 6 bytes for a random nonce, the initial '\0' and the dot '.' symbol
+  static constexpr int kSocketPrefixMaxSize = sizeof(sockaddr_un::sun_path) -
+                                              kNonceDigitsSize -
+                                              kPidBufferSize -
+                                              2;
   std::unique_ptr<ipcHdl> handle;
 
   int closeSocket() {
@@ -55,13 +61,6 @@ class ipcSocketCom {
       return -1;
     }
 
-    if (handle->name) {
-
-      if (handle->name[0] != '\0') {
-        //abstract names do not need unlink()
-        unlink(handle->name.get());
-      }
-    }
     close(handle->socket);
     handle.reset();
     return 0;
@@ -71,7 +70,8 @@ class ipcSocketCom {
 public:
   ipcSocketCom() = default;
 
-  // @isServer   Only makes a difference on Windows; if false, a mailslot is created
+  // @isServer   Only makes a difference on Windows; if false, a mailslot is created. If true,
+  //             a mailslot is created
   // @userPrefix an extra string that helps with avoiding clashes between ipc unix domain socket
   //             names. This could be a test name + section for instance. This will be part of the
   //             IPC object name in addition to the PID and a random nonce. Note: on Linux names
@@ -79,33 +79,48 @@ public:
   //             sockaddr_un::sun_path array
   ipcSocketCom(bool isServer, const std::string& userPrefix) :
     isServer_(isServer),
+    serverFd_(-1),
     userPrefix_(userPrefix)
+  {
   }
 
   // @return true if the initialization failed (e.g. the IPC objects could not be created)
   [[nodiscard]] bool initialize()
   {
     handle.reset(new ipcHdl());
+
 #if HT_WIN
-    handle.reset(new ipcHdl());
     handle->mailslot = INVALID_HANDLE_VALUE;
-    return;
-#else
-    int result;
 
-    if (isServer) {
-      result = createSocket(userPrefix);
-    } else {
-      result = openSocket();
+    if (!isServer_) {
+      std::string name = "\\\\.\\mailslot\\hipMemPoolIPC_"s + userPrefix_ +
+                         std::to_string((unsigned long)GetCurrentProcessId());
+
+      handle->mailslot = CreateMailslot(name.c_str(), 0, MAILSLOT_WAIT_FOREVER, NULL);
+      if (handle->mailslot == INVALID_HANDLE_VALUE) {
+        UNSCOPED_INFO("CreateMailslot failed: " << GetLastError());
+        handle.reset();
+        return false;
+      }
+      handle->name = name;
     }
+    return true;
+#else
+    serverFd_ = createAbstractSocket();
 
-    if (result == -1) {
-      UNSCOPED_INFO("Failure at"s 
-                    << (isServer? "creating"s : "opening"s)
+    if (serverFd_ == -1) {
+      UNSCOPED_INFO("Failure at "
+                    << (isServer_? "creating" : "opening")
                     << " socket: "
                     << strerror(errno));
-      // TODO g-h-c how to return the error? this is a constructor
+      return false;
     }
+
+    if (bindSocket() == -1) {
+      return false;
+    }
+
+    return true;
 #endif
   }
   ~ipcSocketCom() {
@@ -119,12 +134,12 @@ public:
 #if HT_WIN
     DWORD cbRead = 0;
     if (!ReadFile(handle->mailslot, shHandle, sizeof(*shHandle), &cbRead, NULL)) {
-      //fprintf(stderr, "ReadFile failed (%lu)\n", GetLastError());
+      UNSCOPED_INFO("ReadFile failed (" << GetLastError() << ")\n");
       return -1;
     }
     if (cbRead != sizeof(*shHandle)) {
-      //fprintf(stderr, "ReadFile returned unexpected size (%lu, expected %zu)\n",
-              cbRead, sizeof(*shHandle));
+      UNSCOPED_INFO("ReadFile returned unexpected size (" << cbRead << " expected " <<
+                    sizeof(*shHandle) << ")");
       return -1;
     }
     return 0;
@@ -152,7 +167,7 @@ public:
     msg.msg_iovlen = 1;
 
     if ((n = recvmsg(handle->socket, &msg, 0)) <= 0) {
-      perror("Socket failure: Receiving data over socket failed");
+      UNSCOPED_INFO("Socket failure: Receiving data over socket failed: " << strerror(errno));
       return -1;
     }
 
@@ -162,8 +177,8 @@ public:
         return -1;
       }
 
-      memmove(&receivedfd, CMSG_DATA(cmptr), sizeof(receivedfd));
-      *(int *)shHandle = receivedfd;
+      std::memmove(&receivedfd, CMSG_DATA(cmptr), sizeof(receivedfd));
+      *reinterpret_cast<int*>(shHandle) = receivedfd;
     } else {
       return -1;
     }
@@ -176,14 +191,14 @@ public:
 #if HT_WIN
     HANDLE hProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, process.dwProcessId);
     if (hProcess == NULL) {
-      //fprintf(stderr, "OpenProcess failed (%lu)\n", GetLastError());
+      UNSCOPED_INFO("OpenProcess failed (" << GetLastError() << ")");
       return -1;
     }
     HANDLE hDup = INVALID_HANDLE_VALUE;
     if (!DuplicateHandle(GetCurrentProcess(), shareableHdl, hProcess,
                          &hDup, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
       CloseHandle(hProcess);
-      //fprintf(stderr, "DuplicateHandle failed (%lu)\n", GetLastError());
+      UNSCOPED_INFO("DuplicateHandle failed (" << GetLastError() << ")");
       return -1;
     }
     CloseHandle(hProcess);
@@ -194,13 +209,13 @@ public:
     HANDLE hFile = CreateFile(slotName, GENERIC_WRITE, FILE_SHARE_READ,
                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-      //fprintf(stderr, "CreateFile for mailslot failed (%lu)\n", GetLastError());
+      UNSCOPED_INFO("CreateFile for mailslot failed (" << GetLastError() << ")");
       return -1;
     }
     DWORD cbWritten;
     if (!WriteFile(hFile, &hDup, sizeof(hDup), &cbWritten, NULL)) {
       CloseHandle(hFile);
-      //fprintf(stderr, "WriteFile failed (%lu)\n", GetLastError());
+      UNSCOPED_INFO("WriteFile failed (" << GetLastError() << ")");
       return -1;
     }
     CloseHandle(hFile);
@@ -243,7 +258,7 @@ public:
 
     ssize_t sendResult = sendmsg(handle->socket, &msg, 0);
     if (sendResult <= 0) {
-      perror("Socket failure: Sending data over socket failed");
+      UNSCOPED_INFO("Socket failure: Sending data over socket failed: " << strerror(errno));
       return -1;
     }
     return 0;
@@ -252,7 +267,7 @@ public:
 
 private:
 
-  static std::string generateRandomHex(size_t length = 6)
+  static std::string generateRandomHex(size_t length = kNonceDigitsSize)
   {
     thread_local std::mt19937_64 rng(std::random_device{}());
     std::uniform_int_distribution<uint64_t> dist;
@@ -274,41 +289,38 @@ private:
 
     return "\0"s +
            userPrefix.substr(0, kSocketPrefixMaxSize) +
-           getpid() +
+           std::to_string(getpid()) +
+           "." +
            generateRandomHex();
   }
 
   // @return the file descriptor of the newly created socket or -1 if there is a failure
   int createAbstractSocket()
   {
-    // Address length is sizeof(sun_family) + 1 (null byte) + string length
-    int serverFd;
-
-    if ((serverFd = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-      perror("Socket failure: Socket creation failed");
+    if ((serverFd_ = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+      UNSCOPED_INFO("Socket failure: Socket creation failed: " << strerror(errno));
       return -1;
-    } else {
-      handle->socket = serverFd;
     }
 
-    return serverFd;
+    return handle->socket = serverFd_;
   }
 
   // @return bind() return code. Note that if errno points to EADDRINUSE, this means there was a
   //         name collision, but the bind can be retried, as names contain a random part and
   //         subsequent binds might succeed
-  int bindSocket(int serverFd, const std::string& userPrefix) const
+  int bindSocket() const
   {
     sockaddr_un servaddr = {};
     socklen_t addr_len;
-    std::string name = generateIPCObjName();
+    std::string name = generateIPCObjName(userPrefix_);
     int code;
 
-    strncpy(servaddr.sun_path, name.data(), name.size());
-    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + len;
+    strncpy(servaddr.sun_path, name.c_str(), name.size());
+    // Address length is sizeof(sun_family) + 1 (null byte) + string length
+    addr_len = offsetof(struct sockaddr_un, sun_path) + 1 + name.size();
     servaddr.sun_family = AF_UNIX;
 
-    if ((code = bind(serverFd, (struct sockaddr *)&servaddr, addr_len)) < 0) {
+    if ((code = bind(serverFd_, (struct sockaddr *)&servaddr, addr_len)) < 0) {
       UNSCOPED_INFO("bind failed: " << strerror(errno));
       return -1;
     } else {
@@ -319,5 +331,6 @@ private:
   }
   
   bool isServer_;
+  int serverFd_;
   std::string userPrefix_;
 };

@@ -712,7 +712,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
     size_t size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false);
+    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
@@ -785,7 +786,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl) {
     HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
                                             hipMemHandleTypePosixFileDescriptor, 0));
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg
@@ -846,7 +848,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
     REQUIRE(read(fd[0], &size_mem, sizeof(size_t)) >= 0);
 
     // Open Socket as client
-    ipcSocketCom sockObj(false);
+    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
 
     // Signal Parent process that Child is ready to receive msg
@@ -925,7 +928,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl) {
     HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg
@@ -988,7 +992,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
       CTX_CREATE();
 
       // Open Socket as client
-      ipcSocketCom sockObj(false);
+      ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+      REQUIRE(sockObj.initialize());
       hipShareableHdl shHandle;
 
       // Signal Parent process that Child is ready to receive msg
@@ -1076,7 +1081,8 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl) {
                                             hipMemHandleTypePosixFileDescriptor, 0));
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
     // Wait for the child process to receive msg

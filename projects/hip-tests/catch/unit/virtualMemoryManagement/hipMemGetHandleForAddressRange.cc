@@ -695,7 +695,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
     int size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false);
+    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     hipShareableHdl  shHandle;
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
@@ -746,7 +747,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem) {
 
     int size_mem = sizeBytes;
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(int)) >= 0);
     // Wait for the child process to receive msg
@@ -798,7 +800,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
     int size_mem = 0;
     REQUIRE(read(fd[0], &size_mem, sizeof(int)) >= 0);
     // Open Socket as client
-    ipcSocketCom sockObj(false);
+    ipcSocketCom sockObj(false, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     hipShareableHdl shHandle;
     // Signal Parent process that Child is ready to receive msg
     int sig = 0;
@@ -846,7 +849,8 @@ HIP_TEST_CASE(Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM) {
     REQUIRE(handle > 0);
 
     // Create the socket for communication as Server
-    ipcSocketCom sockObj(true);
+    ipcSocketCom sockObj(true, Catch::getResultCapture().getCurrentTestName());
+    REQUIRE(sockObj.initialize());
     int size_mem = buffer_size;
     // Signal child process that socket is ready
     REQUIRE(write(fd[1], &size_mem, sizeof(int)) >= 0);
