@@ -19,11 +19,12 @@ Available examples:
 - `payloads.py` exports marker payload records as JSON.
 - `address_trace.py` reconstructs per-lane addresses and EXEC masks.
 - `perfetto.py` writes filtered marker scopes and points as Perfetto JSON.
-- `lds_conflict_fit.py` fits LDS bank-conflict cycles per source line with a
-  least-squares fit over time windows (Y = A.X). `lds_conflict.hip` is a test
-  kernel with one conflict-free and one fully conflicting LDS load. The
-  counter side (Y) is synthesised from traced addresses until SPM samples can
-  be captured alongside ATT.
+- `counter_fit.py` attributes SPM counter activity (for example
+  `SQC_LDS_BANK_CONFLICT`) to source lines with a least-squares fit over SPM
+  sample windows (Y = A.X), using address markers for the per-line execution
+  counts. Any SPM counter can be passed with `--counter`. Without SPM input it
+  runs a self-check against an LDS bank model. `lds_conflict.hip` is a test
+  kernel with one conflict-free and one fully conflicting LDS load.
 
 The sample input parser derives nonzero code-object IDs from common rocprofiler
 capture filenames such as `code_object_id_7.out`. Each code object is loaded

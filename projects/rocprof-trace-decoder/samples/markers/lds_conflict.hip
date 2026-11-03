@@ -1,4 +1,4 @@
-// Test kernel for lds_conflict_fit.py.
+// Test kernel for counter_fit.py.
 //
 // It has two LDS load sites with known bank behaviour:
 //   site A: consecutive lanes read consecutive dwords -> no bank conflicts.
@@ -9,11 +9,17 @@
 // A and B in any time window therefore changes, which is what makes the
 // least-squares fit able to separate the two sites.
 //
-// Build with the sqtt-marker pass so every LDS access emits an address marker:
-//   SQTT_TRACE_ADDRESSES=lds hipcc -O2 -g --offload-arch=<gfx> \
+// Build with the sqtt-marker pass so every LDS access emits an address marker.
+// SQTT_SCOPE_CU/SIMD=-1 emits markers on every CU (the default is CU 0-1), so
+// the trace covers the same hardware as the GPU-wide SPM counters:
+//   SQTT_SCOPE_CU=-1 SQTT_SCOPE_SIMD=-1 SQTT_TRACE_ADDRESSES=lds \
+//     hipcc -O2 -g --offload-arch=<gfx> \
 //     -fpass-plugin=<prefix>/lib/libsqtt-marker.so lds_conflict.hip -o lds_conflict
-// Then capture with:
-//   rocprofv3 --att -d captures -- ./lds_conflict 64 64 64
+// Then capture the trace (all shader engines) and SPM in one run:
+//   rocprofv3 --att --att-shader-engine-mask 0xF --kernel-trace \
+//     --spm-beta-enabled=on --spm SQC_LDS_BANK_CONFLICT SQ_INSTS_LDS \
+//     --spm-sample-interval-unit sclk_cycles --spm-sample-interval 1024 \
+//     --output-format json -d captures -o run -- ./lds_conflict 64 64 64
 #include <hip/hip_runtime.h>
 
 #include <cstdio>
