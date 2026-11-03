@@ -32,10 +32,24 @@ class TestCpuDimm(unittest.TestCase):
         self.common.print_func_name("")
         # TODO Find better way to get dimm_addr
         dimm_addr = 0
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks this DIMM message.
+        # NOT_FOUND / INVAL: a bogus handle or DIMM address is rejected.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_dimm_power_consumption,
             "amdsmi_get_cpu_dimm_power_consumption",
             arg_sets=[(f"dimm_addr={dimm_addr:#x}", (dimm_addr,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -43,10 +57,23 @@ class TestCpuDimm(unittest.TestCase):
         self.common.print_func_name("")
         # TODO Find better way to get dimm_addr
         dimm_addr = 0x87
+        # Same status set as test_get_cpu_dimm_power_consumption (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate,
             "amdsmi_get_cpu_dimm_temp_range_and_refresh_rate",
             arg_sets=[(f"dimm_addr={dimm_addr:#x}", (dimm_addr,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -54,9 +81,22 @@ class TestCpuDimm(unittest.TestCase):
         self.common.print_func_name("")
         # TODO Find better way to get dimm_addr
         dimm_addr = 0x87
+        # Same status set as test_get_cpu_dimm_power_consumption (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_dimm_thermal_sensor,
             "amdsmi_get_cpu_dimm_thermal_sensor",
             arg_sets=[(f"dimm_addr={dimm_addr:#x}", (dimm_addr,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return

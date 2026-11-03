@@ -19,33 +19,6 @@ XGMI_WIDTH_MAX = 16
 PCIE_RATE_CTRLS = (0, 1, 2)
 NBIO_IDS = (0, 1, 2, 3)
 
-# amdsmi_set_cpu_xgmi_width reaches the ESMI IO path before the HSMP
-# message-support check, so a wrong (GPU) handle is rejected with
-# AMDSMI_STATUS_IO on a discrete-GPU host rather than NO_HSMP_MSG_SUP; on other
-# hosts/APUs it is rejected with INVAL. All are valid rejections of a bogus
-# handle - the negative portion only has to reject SUCCESS.
-XGMI_WRONG_ACCEPT = [
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    amdsmi.AmdSmiStatus.NOT_FOUND,
-    amdsmi.AmdSmiStatus.IO,
-    amdsmi.AmdSmiStatus.INVAL,
-]
-
-# amdsmi_set_cpu_xgmi_width and amdsmi_get_cpu_current_io_bandwidth answer a real
-# CPU handle with INVAL where the target is absent on the platform: no xGMI width
-# control (single-socket host / APU) for the former, and a non-existent IO link
-# (several entries in IO_BW_ENCODINGS are not wired on every platform) for the
-# latter. Treat INVAL as "target not present here" alongside the documented
-# feature-absent statuses so the positive portion still runs everywhere without
-# false failures.
-CORRECT_ACCEPT_WITH_INVAL = [
-    amdsmi.AmdSmiStatus.SUCCESS,
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    amdsmi.AmdSmiStatus.INVAL,
-]
-
 
 class TestCpuClock(unittest.TestCase):
     @classmethod
@@ -67,29 +40,88 @@ class TestCpuClock(unittest.TestCase):
 
     def test_cpu_apb_disable(self):
         self.common.print_func_name("")
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks the APB control message.
+        # NOT_FOUND / INVAL: a GPU or bogus handle is rejected.
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_cpu_apb_disable, "amdsmi_cpu_apb_disable", arg_sets=[("pstate=0", (0,))]
+            amdsmi.amdsmi_cpu_apb_disable,
+            "amdsmi_cpu_apb_disable",
+            arg_sets=[("pstate=0", (0,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_cpu_apb_enable(self):
         self.common.print_func_name("")
-        self.common.run_cpu_api_contract(amdsmi.amdsmi_cpu_apb_enable, "amdsmi_cpu_apb_enable")
+        # Same status sets as test_cpu_apb_disable (see there).
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_cpu_apb_enable,
+            "amdsmi_cpu_apb_enable",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
+        )
         return
 
     def test_get_cpu_cclk_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_cclk_limit, "amdsmi_get_cpu_cclk_limit"
+            amdsmi.amdsmi_get_cpu_cclk_limit,
+            "amdsmi_get_cpu_cclk_limit",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_core_current_freq_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there), per core handle.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_core_current_freq_limit,
             "amdsmi_get_cpu_core_current_freq_limit",
             handle_kind="core",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -97,6 +129,8 @@ class TestCpuClock(unittest.TestCase):
         self.common.print_func_name("")
         # IO_BW_ENCODINGS tuples are (link_name, encoding, expected); the API
         # takes (handle, encoding, link_name).
+        # INVAL on a real CPU handle: the IO link is not wired on every platform
+        # (several IO_BW_ENCODINGS entries), so the target is absent here.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_current_io_bandwidth,
             "amdsmi_get_cpu_current_io_bandwidth",
@@ -104,43 +138,115 @@ class TestCpuClock(unittest.TestCase):
                 (f"encoding={encoding} link_name={link_name}", (encoding, link_name))
                 for link_name, encoding, _ in common.IO_BW_ENCODINGS
             ],
-            correct_accept=CORRECT_ACCEPT_WITH_INVAL,
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_fclk_mclk(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_fclk_mclk, "amdsmi_get_cpu_fclk_mclk"
+            amdsmi.amdsmi_get_cpu_fclk_mclk,
+            "amdsmi_get_cpu_fclk_mclk",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_current_active_freq_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit,
             "amdsmi_get_cpu_socket_current_active_freq_limit",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_freq_range(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_freq_range, "amdsmi_get_cpu_socket_freq_range"
+            amdsmi.amdsmi_get_cpu_socket_freq_range,
+            "amdsmi_get_cpu_socket_freq_range",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_lclk_dpm_level(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there), per NBIO id.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level,
             "amdsmi_get_cpu_socket_lclk_dpm_level",
             arg_sets=[(f"nbio_id={nbio_id}", (nbio_id,)) for nbio_id in NBIO_IDS],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_set_cpu_df_pstate_range(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # Narrow the range, then hand P-state selection back to the firmware.
@@ -153,12 +259,12 @@ class TestCpuClock(unittest.TestCase):
                         f"min_pstate=1, max_pstate={DF_PSTATE_MAX}):"
                     )
                     val = "N/A"
-                    with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(set_msg, correct_accept):
                         val = amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, 1, DF_PSTATE_MAX)
                     self.common.print(f"\t    data: {val}")
                     restore_msg = f"\t### amdsmi_cpu_apb_enable(cpu={i}):"
                     val = "N/A"
-                    with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(restore_msg, correct_accept):
                         val = amdsmi.amdsmi_cpu_apb_enable(cpu)
                     self.common.print(f"\t    data: {val}")
 
@@ -166,6 +272,14 @@ class TestCpuClock(unittest.TestCase):
             amdsmi.amdsmi_set_cpu_df_pstate_range,
             "amdsmi_set_cpu_df_pstate_range",
             arg_sets=[(f"min_pstate=1, max_pstate={DF_PSTATE_MAX}", (1, DF_PSTATE_MAX))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
             positive=positive,
         )
         return
@@ -187,11 +301,29 @@ class TestCpuClock(unittest.TestCase):
                     (0, GMI3_LINK_WIDTH_MAX),
                 ),
             ],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_set_cpu_pcie_link_rate(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # The setter reports the mode it replaced, which is the only way to
@@ -204,7 +336,7 @@ class TestCpuClock(unittest.TestCase):
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={rate_ctrl}):"
                         )
                         ret = "N/A"
-                        with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
+                        with self.common.expect_status(msg, correct_accept):
                             ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, rate_ctrl)
                             if prev_mode is None:
                                 prev_mode = int(ret)
@@ -214,7 +346,7 @@ class TestCpuClock(unittest.TestCase):
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={prev_mode}):"
                         )
                         ret = "N/A"
-                        with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
+                        with self.common.expect_status(msg, correct_accept):
                             ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, prev_mode)
                         self.common.print(f"\t    data: {ret}")
 
@@ -222,12 +354,26 @@ class TestCpuClock(unittest.TestCase):
             amdsmi.amdsmi_set_cpu_pcie_link_rate,
             "amdsmi_set_cpu_pcie_link_rate",
             arg_sets=[("rate_ctrl=0", (0,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
             positive=positive,
         )
         return
 
     def test_set_cpu_socket_lclk_dpm_level(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # Read the current bounds so they can be put back afterwards.
@@ -240,7 +386,7 @@ class TestCpuClock(unittest.TestCase):
                             f"nbio_id={nbio_id}):"
                         )
                         dpm = "N/A"
-                        with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                        with self.common.expect_status(get_msg, correct_accept):
                             dpm = amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level(cpu, nbio_id)
                             bounds["min"] = dpm["nbio_min_dpm_level"]
                             bounds["max"] = dpm["nbio_max_dpm_level"]
@@ -255,7 +401,7 @@ class TestCpuClock(unittest.TestCase):
                                 f"nbio_id={nbio_id}, min_val={min_val}, max_val={max_val}):"
                             )
                             val = "N/A"
-                            with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
+                            with self.common.expect_status(set_msg, correct_accept):
                                 val = amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(
                                     cpu, nbio_id, min_val, max_val
                                 )
@@ -265,6 +411,14 @@ class TestCpuClock(unittest.TestCase):
             amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level,
             "amdsmi_set_cpu_socket_lclk_dpm_level",
             arg_sets=[("nbio_id=0, min_val=0, max_val=1", (0, 0, 1))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
             positive=positive,
         )
         return
@@ -273,6 +427,10 @@ class TestCpuClock(unittest.TestCase):
         self.common.print_func_name("")
         # Narrow to the top lane count only, then reopen the full range. As with
         # GMI3 there is no getter, so full range is the restore target.
+        # amdsmi_set_cpu_xgmi_width reaches the ESMI IO path before the HSMP
+        # message-support check, so a wrong (GPU) handle is rejected with IO on a
+        # discrete-GPU host rather than NO_HSMP_MSG_SUP; on other hosts/APUs it is
+        # rejected with INVAL.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_xgmi_width,
             "amdsmi_set_cpu_xgmi_width",
@@ -286,7 +444,19 @@ class TestCpuClock(unittest.TestCase):
                     (XGMI_WIDTH_MIN, XGMI_WIDTH_MAX),
                 ),
             ],
-            wrong_accept=XGMI_WRONG_ACCEPT,
-            correct_accept=CORRECT_ACCEPT_WITH_INVAL,
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.IO,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return

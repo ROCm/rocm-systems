@@ -30,21 +30,65 @@ class TestCpuThermal(unittest.TestCase):
 
     def test_get_cpu_prochot_status(self):
         self.common.print_func_name("")
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks this HSMP message.
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP / NOT_FOUND / INVAL: a GPU or bogus handle
+        # is rejected.
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_prochot_status, "amdsmi_get_cpu_prochot_status"
+            amdsmi.amdsmi_get_cpu_prochot_status,
+            "amdsmi_get_cpu_prochot_status",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_c0_residency(self):
         self.common.print_func_name("")
+        # Same status sets as test_get_cpu_prochot_status (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_c0_residency, "amdsmi_get_cpu_socket_c0_residency"
+            amdsmi.amdsmi_get_cpu_socket_c0_residency,
+            "amdsmi_get_cpu_socket_c0_residency",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_temperature(self):
         self.common.print_func_name("")
+        # Same status sets as test_get_cpu_prochot_status (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_temperature, "amdsmi_get_cpu_socket_temperature"
+            amdsmi.amdsmi_get_cpu_socket_temperature,
+            "amdsmi_get_cpu_socket_temperature",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return

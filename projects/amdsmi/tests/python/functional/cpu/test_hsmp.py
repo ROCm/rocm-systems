@@ -30,7 +30,24 @@ class TestCpuHsmp(unittest.TestCase):
 
     def test_get_cpu_ddr_bw(self):
         self.common.print_func_name("")
-        self.common.run_cpu_api_contract(amdsmi.amdsmi_get_cpu_ddr_bw, "amdsmi_get_cpu_ddr_bw")
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks the DDR bandwidth message.
+        # NOT_FOUND / INVAL: a GPU or bogus handle is rejected.
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_ddr_bw,
+            "amdsmi_get_cpu_ddr_bw",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
+        )
         return
 
     def test_get_cpu_hsmp_driver_version(self):
@@ -42,6 +59,13 @@ class TestCpuHsmp(unittest.TestCase):
             amdsmi.amdsmi_get_cpu_hsmp_driver_version,
             "amdsmi_get_cpu_hsmp_driver_version",
             check_wrong_handle=False,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -54,44 +78,78 @@ class TestCpuHsmp(unittest.TestCase):
             amdsmi.amdsmi_get_cpu_hsmp_proto_ver,
             "amdsmi_get_cpu_hsmp_proto_ver",
             check_wrong_handle=False,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_esmi_err_msg(self):
         self.common.print_func_name("")
-        # Pure status-code -> message-string mapper, no processor handle. Its
-        # valid input domain is a real ESMI status: SUCCESS maps to its string,
-        # while the native mapper rejects everything else (the old test only
-        # appeared to cover all AmdSmiStatus members because it skipped itself on
-        # CPU-less hosts). So: POSITIVE a known-good status, NEGATIVE a None.
         failures = []
-        # POSITIVE: a valid status maps to a non-empty message, status SUCCESS.
-        try:
-            msg = "\t### amdsmi_get_esmi_err_msg(status_type=SUCCESS):"
-            val = "N/A"
-            with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.SUCCESS]):
-                val = amdsmi.amdsmi_get_esmi_err_msg(amdsmi.AmdSmiStatus.SUCCESS)
-            self.common.print(f"\t    data: {val}")
-            self.assertIsInstance(val, str)
-            self.assertTrue(val)
-        except Exception as e:  # noqa: BLE001 - collected and re-raised together
-            failures.append(e)
-        # NEGATIVE: None is rejected by the wrapper with AmdSmiParameterException.
-        try:
-            msg = "\t### amdsmi_get_esmi_err_msg(status_type=None):"
+        described = []
+        wrong_text = []
+        accept = [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+
+        try:  # NEGATIVE: the wrapper rejects non-AmdSmiStatus input
             with self.assertRaises(amdsmi.AmdSmiParameterException):
                 amdsmi.amdsmi_get_esmi_err_msg(None)
-            self.common.print(f"{msg}\n\tTEST SUCCESS, raised AmdSmiParameterException as expected")
         except Exception as e:  # noqa: BLE001 - collected and re-raised together
-            failures.append(e)
+            failures.append(f"[None input] {e}")
+
+        try:
+            with self.common.status_sweep():
+                for status in amdsmi.AmdSmiStatus:
+                    msg = f"\t### amdsmi_get_esmi_err_msg(status={status.name}):"
+                    val = None
+                    # NOT_SUPPORTED: not an ESMI status. MAP_ERROR is not accepted:
+                    # an ESMI status without a description is a failure.
+                    with self.common.expect_status(msg, accept):
+                        val = amdsmi.amdsmi_get_esmi_err_msg(status)
+                    self.common.print(f"\t    data: {val}")
+                    if val is None:
+                        continue
+                    described.append(status)
+                    # Collected, not asserted: raising here would end the sweep early
+                    if f"AMDSMI_STATUS_{status.name}" not in val:
+                        wrong_text.append(f"{status.name}: {val!r}")
+        except Exception as e:  # noqa: BLE001 - collected and re-raised together
+            failures.append(f"[status] {e}")
+
+        if wrong_text:
+            failures.append(
+                "[message] description does not name its status:\n  " + "\n  ".join(wrong_text)
+            )
+        if amdsmi.AmdSmiStatus.SUCCESS not in described:
+            failures.append("[guard] SUCCESS returned no description, so no status was exercised")
+
         if failures:
-            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+            raise AssertionError("\n\n".join(failures))
         return
 
     def test_get_hsmp_metrics_table(self):
         self.common.print_func_name("")
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP: platform lacks the metrics table message.
+        # NOT_FOUND / INVAL: a GPU or bogus handle is rejected.
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_hsmp_metrics_table, "amdsmi_get_hsmp_metrics_table"
+            amdsmi.amdsmi_get_hsmp_metrics_table,
+            "amdsmi_get_hsmp_metrics_table",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -104,5 +162,12 @@ class TestCpuHsmp(unittest.TestCase):
             amdsmi.amdsmi_get_hsmp_metrics_table_version,
             "amdsmi_get_hsmp_metrics_table_version",
             check_wrong_handle=False,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return

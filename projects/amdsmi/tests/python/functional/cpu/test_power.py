@@ -9,18 +9,6 @@ import unittest
 import common.common as common
 from common.common import amdsmi
 
-# Writing a 0 boostlimit / power cap is the invalid-input probe the original
-# tests used. Firmware may clamp-and-succeed or reject with INVAL, and a platform
-# without HSMP answers NOT_SUPPORTED/NO_HSMP_MSG_SUP; accept that spread (same
-# tolerance the old check_ret path had) so the write is meaningful without
-# widening to anything.
-INVALID_SET_ACCEPT = [
-    amdsmi.AmdSmiStatus.SUCCESS,
-    amdsmi.AmdSmiStatus.INVAL,
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-]
-
 
 class TestCpuPower(unittest.TestCase):
     @classmethod
@@ -42,6 +30,22 @@ class TestCpuPower(unittest.TestCase):
 
     def test_cpu_core_boostlimit(self):
         self.common.print_func_name("")
+        # Writing a 0 boostlimit is the invalid-input probe. Firmware may clamp
+        # and succeed or reject with INVAL; a platform without HSMP answers
+        # NOT_SUPPORTED / NO_HSMP_MSG_SUP.
+        invalid_set_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.INVAL,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
+        # Get and restore: NOT_SUPPORTED / NO_HSMP_MSG_SUP when the platform lacks
+        # the boostlimit message.
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             with self.common.status_sweep():
@@ -49,13 +53,13 @@ class TestCpuPower(unittest.TestCase):
                     # Write an invalid boostlimit (0); firmware may reject or clamp.
                     inval_msg = f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit=0):"
                     val = "N/A"
-                    with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
+                    with self.common.expect_status(inval_msg, invalid_set_accept):
                         val = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, 0)
                     self.common.print(f"\t    data: {val}")
                     # Read the current boostlimit so it can be restored.
                     orig = {}
                     get_msg = f"\t### amdsmi_get_cpu_core_boostlimit(cpu={i}):"
-                    with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(get_msg, correct_accept):
                         orig["val"] = amdsmi.amdsmi_get_cpu_core_boostlimit(cpu)
                     self.common.print(f"\t    data: {orig.get('val', 'N/A')}")
                     if "val" not in orig:
@@ -64,7 +68,7 @@ class TestCpuPower(unittest.TestCase):
                         f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={orig['val']}):"
                     )
                     val = "N/A"
-                    with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(set_msg, correct_accept):
                         val = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, orig["val"])
                     self.common.print(f"\t    data: {val}")
 
@@ -73,12 +77,33 @@ class TestCpuPower(unittest.TestCase):
             "amdsmi_set_cpu_core_boostlimit",
             handle_kind="core",
             arg_sets=[("boost_limit=0", (0,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
             positive=positive,
         )
         return
 
     def test_cpu_socket_power_cap(self):
         self.common.print_func_name("")
+        # Writing a 0 power cap is the invalid-input probe. Same status sets as
+        # test_cpu_core_boostlimit (see there).
+        invalid_set_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.INVAL,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             with self.common.status_sweep():
@@ -86,18 +111,18 @@ class TestCpuPower(unittest.TestCase):
                     # Write an invalid power cap (0); firmware may reject or clamp.
                     inval_msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap=0):"
                     val = "N/A"
-                    with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
+                    with self.common.expect_status(inval_msg, invalid_set_accept):
                         val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, 0)
                     self.common.print(f"\t    data: {val}")
                     # Read the current cap and the max so the cap can be exercised
                     # and then restored.
                     vals = {}
                     get_msg = f"\t### amdsmi_get_cpu_socket_power_cap(cpu={i}):"
-                    with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(get_msg, correct_accept):
                         vals["orig"] = amdsmi.amdsmi_get_cpu_socket_power_cap(cpu)
                     self.common.print(f"\t    data: {vals.get('orig', 'N/A')}")
                     max_msg = f"\t### amdsmi_get_cpu_socket_power_cap_max(cpu={i}):"
-                    with self.common.expect_status(max_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(max_msg, correct_accept):
                         vals["max"] = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
                     self.common.print(f"\t    data: {vals.get('max', 'N/A')}")
                     if "orig" not in vals or "max" not in vals:
@@ -106,14 +131,14 @@ class TestCpuPower(unittest.TestCase):
                         f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['max']}):"
                     )
                     val = "N/A"
-                    with self.common.expect_status(set_max_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(set_max_msg, correct_accept):
                         val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["max"])
                     self.common.print(f"\t    data: {val}")
                     restore_msg = (
                         f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['orig']}):"
                     )
                     val = "N/A"
-                    with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
+                    with self.common.expect_status(restore_msg, correct_accept):
                         val = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["orig"])
                     self.common.print(f"\t    data: {val}")
 
@@ -121,6 +146,14 @@ class TestCpuPower(unittest.TestCase):
             amdsmi.amdsmi_set_cpu_socket_power_cap,
             "amdsmi_set_cpu_socket_power_cap",
             arg_sets=[("power_cap=0", (0,))],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
             positive=positive,
         )
         return
@@ -129,11 +162,25 @@ class TestCpuPower(unittest.TestCase):
         self.common.print_func_name("")
         # TODO boost_limit = 0: the original test only writes a 0 boostlimit; it
         # is preserved here as the positive portion (one set per socket).
+        # INVAL: firmware rejects the 0 boostlimit. NOT_SUPPORTED / NO_HSMP_MSG_SUP:
+        # platform lacks the message. SUCCESS: firmware clamps and accepts it.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_socket_boostlimit,
             "amdsmi_set_cpu_socket_boostlimit",
             arg_sets=[("boost_limit=0", (0,))],
-            correct_accept=INVALID_SET_ACCEPT,
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.INVAL,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -142,27 +189,78 @@ class TestCpuPower(unittest.TestCase):
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails,
             "amdsmi_get_cpu_pwr_svi_telemetry_all_rails",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_power(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_power, "amdsmi_get_cpu_socket_power"
+            amdsmi.amdsmi_get_cpu_socket_power,
+            "amdsmi_get_cpu_socket_power",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_power_cap(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_power_cap, "amdsmi_get_cpu_socket_power_cap"
+            amdsmi.amdsmi_get_cpu_socket_power_cap,
+            "amdsmi_get_cpu_socket_power_cap",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
     def test_get_cpu_socket_power_cap_max(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_power_cap_max, "amdsmi_get_cpu_socket_power_cap_max"
+            amdsmi.amdsmi_get_cpu_socket_power_cap_max,
+            "amdsmi_get_cpu_socket_power_cap_max",
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return
 
@@ -172,5 +270,17 @@ class TestCpuPower(unittest.TestCase):
             amdsmi.amdsmi_set_cpu_pwr_efficiency_mode,
             "amdsmi_set_cpu_pwr_efficiency_mode",
             arg_sets=[(f"mode={mode}", (mode,)) for mode in (0, 1, 2)],
+            wrong_accept=[
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[amdsmi.AmdSmiStatus.INVAL],
         )
         return

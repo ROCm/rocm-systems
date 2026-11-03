@@ -1825,40 +1825,10 @@ class Common:
     # ------------------------------------------------------------------ #
     # CPU API contract: negative-input + positive-input, never skip.
     # ------------------------------------------------------------------ #
-    # Default accept sets for run_cpu_api_contract(). Built on expect_status /
-    # status_sweep, which tolerate nothing implicitly (unlike check_ret).
-    #
-    #  * CPU_WRONG_ACCEPT   - a GPU handle (or any non-CPU handle) handed to a
-    #                         CPU/core API must be rejected, never SUCCESS. The
-    #                         exact rejection code is platform- and state-
-    #                         dependent: the ESMI/HSMP layer may answer
-    #                         NO_HSMP_MSG_SUP (no HSMP mailbox for that target),
-    #                         NOT_FOUND (the out-of-range socket for a GPU handle
-    #                         no longer resolves once the ESMI socket cache has
-    #                         been touched), NOT_SUPPORTED, or INVAL (the handle
-    #                         fails validation outright). All four are valid
-    #                         rejections of a bogus handle - the contract only
-    #                         forbids SUCCESS. APIs that do not validate the
-    #                         processor handle at all (version/firmware queries
-    #                         that return global data) genuinely succeed with any
-    #                         handle; those pass check_wrong_handle=False so this
-    #                         non-applicable portion is skipped rather than failed.
-    #  * CPU_CORRECT_ACCEPT - a real CPU/core handle: SUCCESS, or a documented
-    #                         "feature absent" status on platforms that lack it.
-    #  * CPU_NULL_ACCEPT    - a null (zero) processor handle is rejected by the
-    #                         native library with INVAL before any dereference.
-    CPU_WRONG_ACCEPT = [
-        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-        amdsmi.AmdSmiStatus.NOT_FOUND,
-        amdsmi.AmdSmiStatus.INVAL,
-    ]
-    CPU_CORRECT_ACCEPT = [
-        amdsmi.AmdSmiStatus.SUCCESS,
-        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    ]
-    CPU_NULL_ACCEPT = [amdsmi.AmdSmiStatus.INVAL]
+    # Accept sets (wrong_accept, correct_accept, null_accept) are required
+    # arguments of run_cpu_api_contract(), passed at each call site. Built on
+    # expect_status / status_sweep, which tolerate nothing implicitly (unlike
+    # check_ret).
 
     @staticmethod
     def _cpu_call_msg(func_name, handle_part, desc):
@@ -2100,11 +2070,12 @@ class Common:
         self,
         func,
         func_name,
+        *,
+        wrong_accept,
+        correct_accept,
+        null_accept,
         handle_kind="socket",
         arg_sets=None,
-        wrong_accept=None,
-        correct_accept=None,
-        null_accept=None,
         positive=None,
         check_wrong_handle=True,
     ):
@@ -2149,9 +2120,11 @@ class Common:
                 ``"nbio_id=0"``) and *args* a tuple/scalar. ``None`` means none.
                 The negative portions use the first entry; the positive portion
                 iterates them all.
-            wrong_accept, correct_accept, null_accept: statuses treated as
-                correct for each portion. Default to CPU_WRONG_ACCEPT,
-                CPU_CORRECT_ACCEPT and CPU_NULL_ACCEPT.
+            wrong_accept, correct_accept, null_accept: required, no defaults.
+                Statuses treated as correct for the wrong-handle, positive and
+                null-handle portions. Pass ``[]`` for a portion that does not run
+                (``wrong_accept`` with ``check_wrong_handle=False``, and both
+                ``wrong_accept`` and ``null_accept`` with ``handle_kind="none"``).
             positive: optional ``callable(handles, failures)`` replacing the
                 default positive portion. Used by read-modify-write tests that
                 must get/set/restore rather than issue a single call. It receives
@@ -2170,9 +2143,6 @@ class Common:
                 the offending portion name(s) and detail.
         """
         arg_sets = self._normalize_arg_sets(arg_sets)
-        wrong_accept = self.CPU_WRONG_ACCEPT if wrong_accept is None else wrong_accept
-        correct_accept = self.CPU_CORRECT_ACCEPT if correct_accept is None else correct_accept
-        null_accept = self.CPU_NULL_ACCEPT if null_accept is None else null_accept
 
         results = []
         if handle_kind == "none":
