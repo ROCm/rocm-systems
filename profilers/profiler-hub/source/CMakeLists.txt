@@ -10,6 +10,9 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/reader_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/schema/cache/schema_cache.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/schema/errors/validation_error.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/schema/validation/schema_validator.cpp
 )
 target_sources(profiler-hub-objects PRIVATE ${profiler-hub_sources})
 
