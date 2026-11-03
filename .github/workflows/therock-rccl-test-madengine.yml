@@ -86,7 +86,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "amontoison/TheRock"
-          ref: 5fedf5e3eaa20861f385d8f3d2133e4a7a546cac # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
+          ref: c6f3105dbd248669cc52e1ed988c173c1eb49806 # TEST ONLY: ROCm/TheRock#9446 (bindings/fortran) on top of b063323d
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
