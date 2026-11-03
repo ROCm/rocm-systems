@@ -23,12 +23,13 @@ struct TensorDmaLdsRange {
 /// and LDS writes.
 ///
 /// @details Every tensor DMA instruction that issues is reported once, whether
-/// or not the transfer later waits for memory. A store has already sampled its
-/// LDS source bytes when it is reported; no global request has been made and a
+/// or not the transfer later waits for memory. That includes an instruction
+/// that moves no data: a NOP tile (`tile_dim0 = 0`), a gather with no valid
+/// indices or a store whose tile lies wholly outside the tensor, each of which
+/// still completes on TENSORcnt, and a NULL descriptor (`count = 0`), which the
+/// emulator also counts on TENSORcnt. A store has already sampled its LDS
+/// source bytes when it is reported; no global request has been made and a
 /// load has written no LDS.
-/// That includes an instruction that moves no data, such as a store whose tile
-/// lies wholly outside the tensor, which still completes on TENSORcnt, and a
-/// NULL descriptor (`count = 0`), which the emulator also counts on TENSORcnt.
 /// Counting a NULL descriptor is an emulator assumption: hardware behavior for
 /// that encoding is not established. The LDS ranges are the bytes the transfer
 /// will write (loads) or read (stores), in element order, with adjacent
