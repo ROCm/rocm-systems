@@ -48,12 +48,12 @@ inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint6
 /// clears low bits of the byte bound before the per-DWORD mask is built; zero
 /// leaves the bound unrounded, so a DWORD counts as in range when its first byte
 /// is. GFX9 passes 3, so a DWORD must lie wholly in range, and RDNA4 passes its
-/// access alignment. RDNA1 through RDNA3.5 keep zero; their hardware rule is
+/// access alignment. RDNA1 through RDNA3.5 pass zero; their hardware rule is
 /// unverified.
 inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t selector,
                                                      uint64_t base, int64_t offset,
-                                                     ScalarMemState *state, uint64_t align_mask = 3,
-                                                     uint64_t size_align_mask = 0) {
+                                                     ScalarMemState *state, uint64_t align_mask,
+                                                     uint64_t size_align_mask) {
   auto records = try_read_scalar_selector(wf, selector + 2);
   if (!records)
     return std::nullopt;

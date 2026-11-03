@@ -45,8 +45,25 @@ bool is_gfx9(rj_code_arch_t arch) {
          arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
 }
 
+// Identity translation with nothing mapped at or above @p unmapped_base.
+class UnmappedAboveTranslator final : public amdgpu::AddressSpaceTranslator {
+public:
+  explicit UnmappedAboveTranslator(uint64_t unmapped_base) : unmapped_base_(unmapped_base) {}
+
+  [[nodiscard]] amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                                      amdgpu::VmAccessKind access) const override {
+    if (address >= unmapped_base_)
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    return identity_.translate(address, size, access);
+  }
+
+private:
+  amdgpu::IdentityAddressSpaceTranslator identity_;
+  uint64_t unmapped_base_;
+};
+
 // One wave executing scalar buffer instructions through the scalar pipeline, on
-// physical memory or through an identity-translated address space.
+// physical memory or through a translated address space (identity by default).
 class ScalarBufferHarness {
 public:
   ~ScalarBufferHarness() {
@@ -54,7 +71,8 @@ public:
       wf->halt();
   }
 
-  void init(rj_code_arch_t arch, bool translated) {
+  void init(rj_code_arch_t arch, bool translated,
+            std::shared_ptr<amdgpu::AddressSpaceTranslator> translator = nullptr) {
     l2.set_backing_memory(&mem);
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -67,9 +85,10 @@ public:
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
     if (translated) {
-      const auto address_space =
-          vm.register_address_space(0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
-                                    std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
+      if (!translator)
+        translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
+      const auto address_space = vm.register_address_space(
+          0, std::move(translator), std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
       ASSERT_TRUE(address_space);
       cu->set_gpu_vm(&vm);
       wf->set_address_space(address_space);
@@ -86,7 +105,7 @@ public:
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     ASSERT_NE(inst->data(), nullptr);
-    pipeline.issue(inst.release(), *wf);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
   }
 
   amdgpu::GpuMemory mem{"scalar_buffer_mem"};
@@ -228,7 +247,7 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
   }
 }
 
-// The cases are gfx90a hardware results: a DWORD only partly inside the buffer
+// Every case is a gfx90a hardware result: a DWORD only partly inside the buffer
 // reads zero.
 TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
   if (!gfx9())
@@ -245,7 +264,8 @@ TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
       Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 13, {0, 0}},
       Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 15, {0, 0}},
       Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 16, {103, 0}},
-      // Stride 5 with 3 records gives a 15-byte bound.
+      // Stride 5 with 3 records gives a 15-byte bound: the DWORD at offset 4 fits,
+      // and the one at offset 12 extends past the end.
       Case{cdna3::kSBufferLoadDwordSmem, 4, 5, 3, {101, 0}},
       Case{cdna3::kSBufferLoadDwordSmem, 12, 5, 3, {0, 0}},
       Case{cdna3::kSBufferLoadDwordx2Smem, 16, 0, 17, {0, 0}},
@@ -277,6 +297,29 @@ TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
       EXPECT_EQ(harness.read_sgpr(9), two_dwords ? test_case.expected[1] : 0xdeadbeefu);
     }
   }
+}
+
+// A DWORD outside the buffer is not read, so it cannot fault on an unmapped page.
+TEST_P(ScalarBufferInstructionTest, Gfx9LoadSkipsOutOfRangeDwordOnUnmappedPage) {
+  if (!gfx9())
+    GTEST_SKIP() << "GFX9 scalar buffer bounds";
+  constexpr uint64_t kUnmappedBase = 0x2000;
+  ScalarBufferHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.init(GetParam(), /*translated=*/true,
+                                       std::make_shared<UnmappedAboveTranslator>(kUnmappedBase)));
+  constexpr uint64_t base = kUnmappedBase - 4;
+  harness.mem.write32(base, 100);
+  harness.write_sgpr(0, base);
+  harness.write_sgpr(1, 0);
+  // Seven bytes cover only the DWORD below the unmapped page.
+  harness.write_sgpr(2, 7);
+  harness.write_sgpr(3, 0);
+  harness.write_sgpr(8, 0xdeadbeef);
+  harness.write_sgpr(9, 0xdeadbeef);
+  ASSERT_NO_FATAL_FAILURE(
+      harness.execute(cdna3::build_smem(cdna3::kSBufferLoadDwordx2Smem, {.sdata = 8, .imm = 1})));
+  EXPECT_EQ(harness.read_sgpr(8), 100u);
+  EXPECT_EQ(harness.read_sgpr(9), 0u);
 }
 
 TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
