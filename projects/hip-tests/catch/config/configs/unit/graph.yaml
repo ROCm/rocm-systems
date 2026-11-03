@@ -2029,3 +2029,6 @@ graph:
   Unit_hipGraphExecChildGraphNodeSetParams_NodeFromUnrelatedGraphRejected:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphExecChildGraphNodeSetParams_MovedChildGraphOwnership:
+    <<: *level_default
+    tags: [node]
