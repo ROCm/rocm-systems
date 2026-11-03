@@ -269,8 +269,10 @@ export default function CompareRunsView({
             else { onBaselineChange(candidate.runId); onCandidateChange(baseline.runId); }
           }}
           sx={{
-            bgcolor: 'dashboard.subtleSurface', color: 'text.primary', fontWeight: fontWeights.emphasized, borderColor: 'text.secondary',
-            '&:hover': { bgcolor: 'action.selected', borderColor: 'text.primary' },
+            // Same surface and border as the run fields beside it; the blue icon marks it as the action.
+            bgcolor: 'background.paper', color: 'text.primary', fontWeight: fontWeights.emphasized, borderColor: 'dashboard.controlBorder',
+            '& .MuiButton-startIcon': { color: 'primary.main' },
+            '&:hover': { bgcolor: 'action.hover', borderColor: 'text.secondary' },
             whiteSpace: 'nowrap',
             justifySelf: 'center',
             alignSelf: { xs: 'center', md: 'start' },
