@@ -77,9 +77,6 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
-      # TEMPORARY: defaults to false until ROCm/TheRock#9650 is resolved. The
-      # native MSI build runs on self-hosted Windows runners that lack the
-      # dotnet SDK needed to install WiX, so it fails on every run.
       build_native_windows:
         type: boolean
         default: false
@@ -195,7 +192,6 @@ jobs:
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
       build_native_linux: ${{ inputs.build_native_linux || false }}
-      # TEMPORARY: disabled until ROCm/TheRock#9650 is resolved.
       build_native_windows: ${{ inputs.build_native_windows || false }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines

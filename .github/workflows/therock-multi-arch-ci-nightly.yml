@@ -49,10 +49,6 @@ jobs:
       pr_labels: ''
       prebuilt_stages: ''
       baseline_run_id: ''
-      # TEMPORARY: disabled until ROCm/TheRock#9650 is resolved. The native
-      # MSI build runs on self-hosted Windows runners that lack the dotnet SDK
-      # needed to install WiX.
-      build_native_windows: false
       repository: ROCm/TheRock
       ref: 73aaa3386ad8d276fa51f1b474e3140c9493ea5a # 2026-11-03
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
@@ -129,6 +125,7 @@ jobs:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_msi_package_version: ${{ needs.setup.outputs.rocm_msi_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers full test run in downstream workflow
