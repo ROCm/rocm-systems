@@ -22,7 +22,8 @@ Findings, per NIC:
   FABRIC-CONGESTION  the switch paused our transmit (PFC frames received)
   HOST-BACKPRESSURE  our NIC paused the switch: this host could not take data in
   FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts
-  HOST-RNR           receiver not ready / out of receive buffers
+  HOST-RNR           this host ran out of receive buffers
+  PEER-RNR           a host this rank sends to was not ready (RNR NAKs seen here)
   LINK-SHARED        the link was busy and mostly with traffic that is not RCCL
   CONGESTION-MARKS   ECN-marked share of received packets, or CNPs per second, above a threshold
 Rx pause is not proof of a fabric fault: a receiver that pushes back makes
@@ -53,7 +54,12 @@ SCALAR_KEYS = ("tx_bytes", "rx_bytes", "nic_tx_bytes", "nic_rx_bytes", "nic_tx_p
                "nic_rx_packets", "ecn_marked_pkts", "cnp_sent", "cnp_rcvd")
 # Sampled error counters, by what they point at.
 LOSS_FABRIC = ("oos_drop_count", "seq_err_naks_rcvd", "local_ack_timeout_err")
-LOSS_HOST = ("out_of_buffer", "rnr_retry_err")
+# Receiver not ready, by where the counter sits. out_of_buffer counts on the
+# receiver that had no buffer posted: this host. rnr_retry_err counts on the
+# sender that kept getting RNR NAKs: the not-ready receiver is one of its peers.
+RNR_LOCAL = ("out_of_buffer",)
+RNR_PEER = ("rnr_retry_err",)
+LOSS_HOST = RNR_LOCAL + RNR_PEER
 INF = math.inf
 PAUSE_QUANTA_BITS = 65535 * 512   # longest pause one PFC frame can ask for, in bit times
 COVERAGE = "telemetry samples do not cover all of these collectives"
@@ -79,6 +85,8 @@ class CollRecord:
     net: Dict[int, dict] = field(default_factory=dict)
     net_start_us: int = 0
     net_end_us: int = 0
+    # Why this record's file cannot be trusted to be complete, "" if it can.
+    accl_incomplete: str = ""
 
 
 def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
@@ -87,6 +95,8 @@ def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
         if os.path.isdir(path) else [path]
     out, no_ts = [], 0
     for fp in files:
+        first = len(out)
+        summary = None
         with open(fp, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -95,6 +105,9 @@ def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
                 try:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
+                    continue
+                if "summary" in obj:
+                    summary = obj["summary"]
                     continue
                 cp, hdr = obj.get("coll_perf"), obj.get("header")
                 if not cp or not hdr or cp.get("coll_sn", 0) < warmup:
@@ -136,7 +149,25 @@ def load_accl(path: str, warmup: int) -> Tuple[List[CollRecord], int]:
                                       exec_end_us=ts.get("exec_end_us", 0), net=net,
                                       net_start_us=netobj.get("window_start_us", 0),
                                       net_end_us=netobj.get("window_end_us", 0)))
+        why = _accl_incomplete(summary)
+        for r in out[first:]:
+            r.accl_incomplete = why
     return out, no_ts
+
+
+def _accl_incomplete(summary: Optional[dict]) -> str:
+    """Why an accl file may miss collectives or proxy data, "" if its end-of-run
+    summary says nothing was lost. A missing summary means the process did not
+    reach finalize; data lost there could hide exactly the slow collective."""
+    if summary is None:
+        return "accl wrote no end-of-run summary (the process may not have finished)"
+    if summary.get("complete", True) and not summary.get("write_error"):
+        return ""
+    lost = [f"{k}={v}" for k, v in sorted(summary.items())
+            if k not in ("complete", "write_error") and not k.endswith("_size") and k != "max_proxy_ops_per_coll"
+            and isinstance(v, (int, float)) and v]
+    return "accl lost data" + (f" ({', '.join(lost)})" if lost else "") + \
+        (", write error" if summary.get("write_error") else "")
 
 
 class Series:
@@ -435,6 +466,9 @@ class Lane:
     def prio_for(self, host: str, pid: int, dev_id: int) -> Optional[int]:
         return self.per_dev.get((host, pid, dev_id), (self.prio, self.no_pfc))[0]
 
+    def no_pfc_for(self, host: str, pid: int, dev_id: int) -> bool:
+        return self.per_dev.get((host, pid, dev_id), (self.prio, self.no_pfc))[1]
+
 
 def _sum_prio(tels, used, key, p):
     tot, seen = 0.0, False
@@ -622,7 +656,8 @@ class NicStats:
     rx_pause: Optional[Tuple[float, float]] = None   # (lb, ub) in unit
     tx_pause: Optional[Tuple[float, float]] = None
     loss: Optional[Tuple[float, float]] = None       # fabric-loss events (lb, ub)
-    rnr: Optional[Tuple[float, float]] = None        # host-not-ready events (lb, ub)
+    rnr: Optional[Tuple[float, float]] = None        # this NIC had no receive buffer (lb, ub)
+    rnr_peer: Optional[Tuple[float, float]] = None   # RNR NAKs this NIC got from a peer (lb, ub)
     ecn_pct: Optional[Tuple[float, float]] = None    # ECN-marked % of received packets (lb, ub)
     cnp_ps: Optional[Tuple[float, float]] = None     # CNPs sent + received per second (lb, ub)
     link_pct: Optional[float] = None                 # busier direction, % of link speed
@@ -710,6 +745,8 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
                              n=len(g), busy_us=busy, mean_busbw=agg.mean_busbw,
                              accl_class=accl_report.classify_bottleneck(agg), nics=[], spans=spans,
                              comm=comm, algo=algo, proto=proto)
+            for why in sorted({r.accl_incomplete for r in g if r.accl_incomplete}):
+                gr.inconclusive.append(why)
             with_win = [r for r in g if r.net_start_us]
             if with_win:
                 gr.overlap_pct = 100.0 * sum(id(r) in overlapped for r in with_win) / len(with_win)
@@ -718,8 +755,22 @@ def analyze(recs: List[CollRecord], tels: Dict[Tuple[str, int], Telemetry],
             elif not used:
                 gr.inconclusive.append("no NIC of this process carried traffic in telemetry")
             for dev_id in used:
-                gr.nics.append(_nic_stats(tel.devices[dev_id], g, spans, busy, interval,
-                                          lane, thr, tels, key[0], gr))
+                ns = _nic_stats(tel.devices[dev_id], g, spans, busy, interval, lane, thr, tels, key[0], gr)
+                gr.nics.append(ns)
+                # CLEAN only means something for what was measured: a counter the
+                # NIC did not give cannot be read as "nothing happened".
+                missing = [what for what, have in (
+                    ("loss counters", ns.loss is not None),
+                    ("ECN/CNP counters", ns.ecn_pct is not None or ns.cnp_ps is not None),
+                    ("link use" + (" (port counter did not refresh)" if ns.nic_stale else ""),
+                     ns.link_pct is not None),
+                    # Pause is excused only where its state is known some other way:
+                    # PFC off on RCCL's priority, or the priority unknown (said apart).
+                    ("pause counters", ns.rx_pause is not None or ns.tx_pause is not None
+                     or lane.no_pfc_for(key[0], key[1], dev_id)
+                     or (lane.prio_for(key[0], key[1], dev_id) is None and lane.source != "none"))) if not have]
+                if missing:
+                    gr.inconclusive.append(f"{ns.roce}: not measured: {', '.join(missing)}")
             gr.verdict = _rank_verdict(gr)
             unjudged = lane.source != "none" and any(lane.prio_for(key[0], key[1], d) is None for d in used)
             if unjudged and gr.verdict.startswith("CLEAN"):
@@ -777,7 +828,8 @@ def _nic_stats(dev, g, spans, busy, interval, lane, thr, tels, host, gr) -> NicS
 
     # Loss and receiver-not-ready events: any is worth reporting.
     for attr, keys, name, what in (("loss", LOSS_FABRIC, "FABRIC-LOSS", "drops/NAKs/timeouts"),
-                                   ("rnr", LOSS_HOST, "HOST-RNR", "receiver-not-ready events")):
+                                   ("rnr", RNR_LOCAL, "HOST-RNR", "times this NIC had no receive buffer posted"),
+                                   ("rnr_peer", RNR_PEER, "PEER-RNR", "RNR NAKs from a receiver that was not ready")):
         bs = [bound(s.get(k), spans, pad_of(k), False) for k in keys]
         bs = [b for b in bs if b is not None]
         if not bs:
@@ -886,7 +938,7 @@ def _overlapping_windows(proc_recs: List[CollRecord]) -> set:
     return out
 
 
-ORDER = ["HOST-BACKPRESSURE", "HOST-RNR", "FABRIC-LOSS", "FABRIC-CONGESTION",
+ORDER = ["HOST-BACKPRESSURE", "HOST-RNR", "PEER-RNR", "FABRIC-LOSS", "FABRIC-CONGESTION",
          "LINK-SHARED", "CONGESTION-MARKS"]
 
 
@@ -935,40 +987,36 @@ def tag_echo(results: List[GroupResult]):
 
 
 def _echo_summary(gs, cong, fmt, thr: "Thresholds") -> str:
-    """Senders were paused x, some receiver pushed back y. A receiver stopped for
-    y of the time can hold its senders back for about that long, not more, so
-    roughly x - y is left for the fabric. A rule of thumb: who sends to whom is
-    not known, and hosts' clocks are only lined up by collective and size."""
+    """Senders were paused by the switch while some receiver paused the switch.
+    A receiver that stops taking data makes the switch pause the senders behind
+    it, so its pause can cause some or all of theirs. These counters cannot say
+    how much: each rank's share is of its own busy time, who sends to whom is
+    not known, and switch buffering spreads one stop over many senders. So both
+    sides are reported and neither is subtracted from the other."""
     push = _pushback(gs)
     proven = [p for p in push if p[4]]
     who = fmt(sorted({(r, h) for r, h, *_ in (proven or push)}))
     verb = "paused the switch" if proven else "may have paused the switch"
-    senders = [ns for g in gs for ns in g.nics
+    senders = [(g, ns) for g in gs for ns in g.nics
                if ns.rx_pause and any(f.name == "FABRIC-CONGESTION" and f.level == "yes" for f in ns.findings)]
-    # Only the NICs being compared need a common unit; a quiet NIC elsewhere may
-    # report pause time while these count frames.
-    units = {ns.unit for ns in senders} | {p[2] for p in push}
-    unit = units.pop() if len(units) == 1 else None
-    xs = [ns.rx_pause[0] for ns in senders]
-    x = max(xs) if xs else 0.0
-    y = max(p[3][1] for p in push)
-    sender = f"rx pauses on {len(cong)} rank(s) (at least {_fmt_num(x, unit)})"
-    if unit is None or y == INF:
-        return (f"HOST{'' if proven else '?'}: {who} {verb}; {sender} may be backpressure from it "
-                "(amounts not comparable)")
-    limit = thr.pause_pct
-    if x - y >= limit:
-        return (f"FABRIC+HOST{'' if proven else '?'}: switch paused senders at least {_fmt_num(x, unit)}; {who} {verb} "
-                f"(at most {_fmt_num(y, unit)}), which explains at most that much, so roughly "
-                f"{_fmt_num(x - y, unit)} or more is the fabric")
-    if 2 * y >= x:   # the receiver can explain most of it
-        return (f"HOST{'' if proven else '?'}: {who} {verb} (up to {_fmt_num(y, unit)}); {sender} "
-                "are likely backpressure from it")
-    # The receiver's pause is too short to explain most of the senders', and what
-    # is left for the fabric is under the threshold: neither side is shown.
-    return (f"INCONCLUSIVE: {sender}; {who} {verb} (at most {_fmt_num(y, unit)}), so at most that much "
-            f"is backpressure. The fabric's part is at least {_fmt_num(x - y, unit)}, which alone is under "
-            f"the {_fmt_num(limit, unit)} threshold, so neither side is shown")
+    pushers = [(g, ns) for g in gs for ns in g.nics if ns.tx_pause and (ns.tx_pause[1] == INF or ns.tx_pause[1] > 0)]
+    # Shares are of each rank's own busy time; milliseconds are what both sides share.
+    x = max((ns.rx_pause[0] for _, ns in senders), default=0.0)
+    x_ms = max((ns.rx_pause[0] * g.busy_us / 1e5 for g, ns in senders), default=0.0)
+    y = max(ns.tx_pause[1] for _, ns in pushers)
+    y_ms = max((INF if ns.tx_pause[1] == INF else ns.tx_pause[1] * g.busy_us / 1e5) for g, ns in pushers)
+    # Backpressure is a full explanation candidate when the receiver provably
+    # paused the switch above the threshold, or for about as long as the senders were paused.
+    host_firm = any(p[4] and p[3][0] >= thr.pause_pct for p in push) or (bool(proven) and 2 * y_ms >= x_ms)
+    sender = (f"the switch paused {len(cong)} sender rank(s) (at least {_fmt_num(x, '%')} of their own time, "
+              f"{x_ms:.0f} ms)")
+    receiver = f"{who} {verb} (" + ("for an unknown time" if y == INF else
+                                    f"up to {_fmt_num(y, '%')} of its own time, {y_ms:.0f} ms") + ")"
+    if host_firm:
+        return (f"FABRIC+HOST?: {sender}; {receiver}. That backpressure can cause some or all of the "
+                "senders' pause; these counters cannot split the two")
+    return (f"FABRIC?: {sender}; {receiver}, so part of the senders' pause may be backpressure "
+            "from there")
 
 
 def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Thresholds"] = None
@@ -985,7 +1033,7 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
         def fmt(rs):
             return ", ".join(f"rank {r} ({h})" for r, h in rs[:4]) + (" ..." if len(rs) > 4 else "")
 
-        bp, rnr = ranks("HOST-BACKPRESSURE"), ranks("HOST-RNR")
+        bp, rnr, peer_rnr = ranks("HOST-BACKPRESSURE"), ranks("HOST-RNR"), ranks("PEER-RNR")
         loss, cong = ranks("FABRIC-LOSS"), ranks("FABRIC-CONGESTION")
         shared, marks = ranks("LINK-SHARED"), ranks("CONGESTION-MARKS")
         if cong and _pushback(gs):
@@ -993,7 +1041,10 @@ def job_summary(results: List[GroupResult], lane: Lane, thr: Optional["Threshold
         elif bp:
             msg = f"HOST: {fmt(bp)} paused the switch (could not take data in fast enough)"
         elif rnr:
-            msg = f"HOST: receiver-not-ready events on {fmt(rnr)}"
+            msg = f"HOST: {fmt(rnr)} ran out of receive buffers"
+        elif peer_rnr:
+            msg = (f"HOST?: {fmt(peer_rnr)} got RNR NAKs: a host they send to was not ready to receive "
+                   "(the counter sits on the sender; which peer is not known)")
         elif loss:
             msg = f"FABRIC: drops/NAKs/timeouts on {fmt(loss)}"
         elif cong:
@@ -1029,6 +1080,13 @@ def _fmt_secs(sec: float) -> str:
 
 def _fmt_num(v: float, unit: Optional[str]) -> str:
     return f"{v:.1f}%" if unit == "%" else f"{v:.0f}{unit or ''}"
+
+
+def _add(a: Optional[Tuple[float, float]], b: Optional[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+    """Sum of two (lb, ub) counts; None only when both are."""
+    if a is None or b is None:
+        return a or b
+    return a[0] + b[0], INF if INF in (a[1], b[1]) else a[1] + b[1]
 
 
 def _fmt_bound(r: Optional[Tuple[float, float]]) -> str:
@@ -1134,7 +1192,7 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
             bpc = accl_report.fmt_size(int(n.sw_tx_per_coll)) + ("*" if g.overlap_pct > 10 else "")
             print(f"{lead} {n.roce[:10]:<10} {rxp:>10} "
                   f"{txp:>10} {_fmt_range(n.loss, ''):>6} "
-                  f"{_fmt_range(n.rnr, ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
+                  f"{_fmt_range(_add(n.rnr, n.rnr_peer), ''):>5} {_fmt_range(n.ecn_pct, '%'):>9} {_fmt_range(n.cnp_ps, '/s'):>11} "
                   f"{link:>5} {'-' if n.rccl_pct is None else f'{n.rccl_pct:.0f}':>5} {bpc:>8} "
                   f"{p50 + '/' + p99:>13}  {g.verdict if i == 0 else ''}")
 
@@ -1154,7 +1212,8 @@ def print_report(results: List[GroupResult], lane: Lane, thr: Thresholds, per_ni
     print("                     marked (echo?) when a NIC of the same collective and size pushed back")
     print("  HOST-BACKPRESSURE  our NIC paused the switch: this host could not take data in")
     print("  FABRIC-LOSS        out-of-sequence drops, sequence-error NAKs, ACK timeouts")
-    print("  HOST-RNR           receiver not ready / out of receive buffers")
+    print("  HOST-RNR           this host ran out of receive buffers")
+    print("  PEER-RNR           a host this rank sends to was not ready (RNR NAKs seen here)")
     print("  LINK-SHARED        link busy, mostly with traffic that is not this job's RCCL")
     print("  CONGESTION-MARKS   ECN-marked share of packets, or CNPs per second, above the threshold")
     print("  CLEAN              every counter below threshold; time went elsewhere")

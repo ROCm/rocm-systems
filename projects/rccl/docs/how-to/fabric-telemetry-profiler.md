@@ -166,7 +166,7 @@ summary names them when a size has more than one:
 | `rxPause` | Switch paused our transmit, as % of wall time (fabric side) |
 | `txPause` | Our NIC paused the switch, as % of wall time (host side) |
 | `loss` | Out-of-sequence drops, sequence-error NAKs, ACK timeouts |
-| `rnr` | Receiver-not-ready / out-of-receive-buffer events |
+| `rnr` | Receiver-not-ready events seen on this NIC: out of receive buffers here, or RNR NAKs from a peer |
 | `ecn%` | ECN-marked packets as % of packets received |
 | `cnp/s` | CNPs sent plus received per second of wall time |
 | `link%`, `rccl%` | How busy the link was, and how much of that was this job's RCCL traffic |
@@ -184,19 +184,23 @@ Findings:
 | `FABRIC-CONGESTION` | The switch paused our transmit. Marked `(echo?)` when a NIC in the same collective pushed back, since a receiver that stops can make the switch pause its senders |
 | `HOST-BACKPRESSURE` | Our NIC paused the switch: this host could not take data in |
 | `FABRIC-LOSS` | Drops, NAKs or timeouts on the wire |
-| `HOST-RNR` | The receiver was not ready |
+| `HOST-RNR` | This host ran out of receive buffers |
+| `PEER-RNR` | A host this rank sends to was not ready to receive. The counter sits on the sender, so the faulty host is one of its peers |
 | `LINK-SHARED` | The link was busy, mostly with traffic that is not this job's RCCL |
 | `CONGESTION-MARKS` | ECN marks or CNPs above their thresholds |
 | `CLEAN` | Every counter below threshold. The time went elsewhere; accl's own classification is shown |
-| `INCONCLUSIVE` | Samples are missing, or only an upper bound crosses a threshold |
+| `INCONCLUSIVE` | Samples are missing, only an upper bound crosses a threshold, the NIC gave no counters for loss, ECN/CNP, link use or pause, or the accl output says it lost data (or the process never finished) |
 
 At the end, **Summary per collective and size** gives one conclusion across
 all ranks. A host that paused the switch is checked first, because it can
-explain rx pauses everywhere else. When both happen, the summary says
-`FABRIC+HOST`. It splits the blame: senders were paused for at least x, and
-the receiver pushed back for at most y. The receiver can explain about y of
-that, so roughly x − y is left for the fabric. A `?` after `HOST` means the
-host part is possible but not proven.
+explain rx pauses everywhere else. When both happen, the summary gives both
+sides, as a share of each rank's own time and in milliseconds, and does not
+subtract one from the other: a receiver that stops taking data makes the
+switch pause the senders behind it, so its pause can cause some or all of
+theirs, and these counters cannot say how much. `FABRIC+HOST?` means the
+receiver paused about as long as the senders were paused (or above the
+threshold); `FABRIC?` means it paused far less, so only part of it can be
+backpressure.
 
 **Notes** at the bottom explain anything that weakens the numbers, such as
 overlapping collectives or counters that did not refresh.

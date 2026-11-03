@@ -43,7 +43,7 @@ def cum(rate, t):
 
 
 def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, prio=PRIO,
-              rx_pause=None, tx_pause=None, rx_frames=None, tx_frames=None, ecn=None, oos=None, rnr=None,
+              rx_pause=None, tx_pause=None, rx_frames=None, tx_frames=None, ecn=None, oos=None, rnr=None, oob=None,
               other_bpus=0.0, link_gbps=400, prio_bytes=True, time_counters=True,
               refresh_us=None, pause_prio=None, no_pfc_prio=None, cnp=None, qos=None, hw_type="x",
               pause_refresh_us=None):
@@ -73,7 +73,7 @@ def telemetry(host, pid, roce="nic0", t0=900_000, t1=1_600_000, step=10_000, pri
              "nic_tx_packets": int(nic / 4096), "nic_rx_packets": int(nic / 4096),
              "ecn_marked_pkts": int(cum(ecn, t)), "cnp_sent": int(cum(cnp, t)), "cnp_rcvd": 0,
              "oos_drop_count": int(cum(oos, t)), "seq_err_naks_rcvd": 0, "local_ack_timeout_err": -1,
-             "out_of_buffer": -1, "rnr_retry_err": int(cum(rnr, t)),
+             "out_of_buffer": int(cum(oob, t)), "rnr_retry_err": int(cum(rnr, t)),
              "pfc_rx_pause_us": rxp if time_counters else z, "pfc_tx_pause_us": txp if time_counters else z,
              "pfc_rx_frames": rxf, "pfc_tx_frames": txf}
         if prio_bytes:
@@ -103,6 +103,8 @@ class Run:
         atexit.register(shutil.rmtree, d, True)
         self.dirname = d
         for rank, host, pid, lines, tel in ranks:
+            if not any('"summary"' in l for l in lines):   # the plugin always ends with one
+                lines = lines + [json.dumps({"summary": {"dropped_collectives": 0, "complete": True}})]
             with open(os.path.join(d, f"accl_profiler_rank{rank}_{host}_pid{pid}.jsonl"), "a") as f:
                 f.write("\n".join(lines) + "\n")
             if tel is not None:
@@ -284,34 +286,38 @@ class VerdictTest(unittest.TestCase):
         r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: 0.10})),
                  (1, "hostB", 2, iterations(1, "hostB", 2), telemetry("hostB", 2, tx_pause={BUSY: 0.10}))])
         s = next(iter(r.summary.values()))
-        self.assertTrue(s.startswith("HOST: rank 1 (hostB) paused the switch"), s)
-        self.assertIn("likely backpressure", s)
+        self.assertTrue(s.startswith("FABRIC+HOST?: the switch paused 1 sender rank(s)"), s)
+        self.assertIn("rank 1 (hostB) paused the switch", s)
+        self.assertIn("cannot split the two", s)
         self.assertEqual(r.rank(0).verdict, "FABRIC-CONGESTION(echo?)")
 
     def pair(self, rx, tx):
         return Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: rx})),
                     (1, "hostB", 2, iterations(1, "hostB", 2), telemetry("hostB", 2, tx_pause={BUSY: tx}))])
 
-    def test_pushback_under_threshold_still_counts(self):
-        # 4% pushback is under the 5% threshold but explains the senders' 8%, minus 4%.
-        s = next(iter(self.pair(0.08, 0.04).summary.values()))
-        self.assertTrue(s.startswith("HOST: rank 1 (hostB) paused the switch (up to 4.0%)"), s)
-        # With 10% on the senders, 6% is left over: more than the threshold.
-        s = next(iter(self.pair(0.10, 0.04).summary.values()))
-        self.assertTrue(s.startswith("FABRIC+HOST"), s)
-        self.assertNotIn("no NIC pushed back", s)
-
-    def test_small_pushback_does_not_become_host(self):
-        # AINIC, 64M: senders 5.4%, receiver at most 1.2%. The receiver cannot
-        # explain most of it, and the 4.2% left is under the threshold.
-        s = next(iter(self.pair(0.054, 0.012).summary.values()))
-        self.assertTrue(s.startswith("INCONCLUSIVE: rx pauses on 1 rank(s)"), s)
-        self.assertIn("which alone is under the 5.0% threshold", s)
-
-    def test_fabric_beyond_what_pushback_explains(self):
+    def test_pushback_is_reported_never_subtracted(self):
+        # The two shares are of different ranks' time and backpressure is not a
+        # causal bound, so no "X% is the fabric" is ever claimed.
+        for rx, tx in ((0.08, 0.04), (0.20, 0.04), (0.054, 0.012)):
+            s = next(iter(self.pair(rx, tx).summary.values()))
+            self.assertNotIn("is the fabric", s)
+            self.assertIn("ms)", s)                    # absolute times, comparable across ranks
+        # Receiver paused about as long as the senders: it can explain all of it.
+        self.assertTrue(next(iter(self.pair(0.08, 0.04).summary.values())).startswith("FABRIC+HOST?"))
+        # Receiver paused far less: only part of it can be backpressure.
         s = next(iter(self.pair(0.20, 0.04).summary.values()))
-        self.assertTrue(s.startswith("FABRIC+HOST: switch paused senders at least 20.0%"), s)
-        self.assertIn("roughly 16.0% or more is the fabric", s)
+        self.assertTrue(s.startswith("FABRIC?"), s)
+        self.assertIn("part of the senders' pause may be backpressure", s)
+
+    def test_equal_pause_time_on_different_busy_times(self):
+        # Sender paused 80 ms of 400 ms (20%), receiver 80 ms of 2 s (4%): the
+        # same stop, so it can explain all of the senders' pause.
+        r = Run([(0, "hostA", 1, iterations(0, "hostA", 1), telemetry("hostA", 1, rx_pause={BUSY: 0.2})),
+                 (1, "hostB", 2, iterations(1, "hostB", 2, dur=100_000),
+                  telemetry("hostB", 2, t1=3_200_000, tx_pause={BUSY: 0.2}))])
+        s = next(iter(r.summary.values()))
+        self.assertTrue(s.startswith("FABRIC+HOST?"), s)
+        self.assertIn("80 ms", s)
 
     def test_possible_pushback_is_hedged(self):
         # Receiver's pause falls between its short collectives: provable 0, possible > 0.
@@ -320,7 +326,8 @@ class VerdictTest(unittest.TestCase):
                  (1, "hostB", 2, iterations(1, "hostB", 2, n=40, dur=100, gap=9_900),
                   telemetry("hostB", 2, tx_pause=gaps))])
         s = next(iter(r.summary.values()))
-        self.assertTrue(s.startswith("HOST?: rank 1 (hostB) may have paused the switch"), s)
+        self.assertTrue(s.startswith("FABRIC?"), s)
+        self.assertIn("rank 1 (hostB) may have paused the switch", s)
 
     def test_no_pushback_keeps_fabric(self):
         s = next(iter(self.pair(0.10, 0.0).summary.values()))
@@ -361,8 +368,15 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(r.rank(0).verdict, "FABRIC-LOSS")
         self.assertTrue(next(iter(r.summary.values())).startswith("FABRIC: drops"))
 
-    def test_receiver_not_ready(self):
-        self.assertEqual(one(rnr={BUSY: 0.0001}).rank(0).verdict, "HOST-RNR")
+    def test_receiver_not_ready_names_the_right_host(self):
+        # Out of buffers counts on the receiver: this host.
+        r = one(oob={BUSY: 0.0001})
+        self.assertEqual(r.rank(0).verdict, "HOST-RNR")
+        self.assertTrue(next(iter(r.summary.values())).startswith("HOST: rank 0 (hostA) ran out of receive"))
+        # RNR NAKs count on the sender: the not-ready host is one of its peers.
+        r = one(rnr={BUSY: 0.0001})
+        self.assertEqual(r.rank(0).verdict, "PEER-RNR")
+        self.assertIn("a host they send to was not ready", next(iter(r.summary.values())))
 
     def test_ecn_needs_a_share_of_packets(self):
         # RCCL alone is ~2.4 packets/us; 0.1 marks/us is ~4%, 1 mark is ~0%.
@@ -378,7 +392,7 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(pkts.lb, 0.0)              # the case: packets moved, but not provably inside
         self.assertGreater(pkts.ub, 0.0)
         self.assertEqual(g.nics[0].ecn_pct, (0.0, 0.0))
-        self.assertTrue(g.verdict.startswith("CLEAN"), g.verdict)
+        self.assertNotIn("CONGESTION-MARKS", g.verdict)
 
     def test_cnps_are_a_rate_not_a_share(self):
         # 300 CNPs/s is about 0.01% of packets here, yet a flow slowed all the time.
@@ -523,6 +537,34 @@ class VerdictTest(unittest.TestCase):
         self.assertIn("LINK-SHARED", one(tel=tel).rank(0).verdict)
         tel["devices"][0]["rx_bytes_merged"] = True
         self.assertNotIn("LINK-SHARED", one(tel=tel).rank(0).verdict)
+
+    def test_missing_counters_are_not_clean(self):
+        # Only RCCL's software bytes: nothing about loss, marks, link or pause.
+        tel = telemetry("hostA", 1)
+        for smp in tel["hw_samples"]:
+            for k in list(smp):
+                if k not in ("ts_us", "device_id", "roce_device", "tx_bytes", "rx_bytes"):
+                    del smp[k]
+        g = one(tel=tel).rank(0)
+        self.assertTrue(g.verdict.startswith("INCONCLUSIVE"), g.verdict)
+        for what in ("loss counters", "ECN/CNP counters", "link use", "pause counters"):
+            self.assertIn(what, g.verdict)
+
+    def test_incomplete_accl_run_is_not_clean(self):
+        lines = iterations(0, "hostA", 1) + [json.dumps(
+            {"summary": {"complete": False, "dropped_collectives": 200, "dropped_proxy_ops": 200}})]
+        r = one(lines=lines)
+        s = next(iter(r.summary.values()))
+        self.assertTrue(s.startswith("INCONCLUSIVE: accl lost data"), s)
+        self.assertIn("dropped_proxy_ops=200", s)
+
+    def test_accl_file_without_summary_is_not_clean(self):
+        d = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, d, True)
+        with open(os.path.join(d, "accl_profiler_rank0_hostA_pid1.jsonl"), "w") as f:
+            f.write("\n".join(iterations(0, "hostA", 1)) + "\n")          # process never finalized
+        recs, _ = fr.load_accl(d, 0)
+        self.assertIn("no end-of-run summary", recs[0].accl_incomplete)
 
     def test_record_without_exec_start_is_skipped(self):
         # One record with no kernel or network activity: exec_start_us 0.
