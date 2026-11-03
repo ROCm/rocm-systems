@@ -105,7 +105,13 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
   task->trafficBytes = task->count * elementSize * postTuningFuncTrafficPerByte(task->func, comm->nRanks);
   task->opHost = raw->opHost;
   task->opDev = raw->opDev;
-  postTuningSetChunkSteps(task);
+  task->acc = raw->acc;
+  if (raw->chunkSteps > 0 && raw->sliceSteps > 0) {
+    task->chunkSteps = raw->chunkSteps;
+    task->sliceSteps = raw->sliceSteps;
+  } else {
+    postTuningSetChunkSteps(task);
+  }
   task->launchCompletionEvent = ncclCollConfigGetLaunchCompletionEvent(&raw->collConfig);
   task->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
   task->groupApiEventHandle = nullptr;
@@ -609,16 +615,39 @@ static ncclResult_t postTuneSymTasks(
   return ncclSuccess;
 }
 
+// RCCL keys its kernels on acc, pipeline and, for LL128 AllReduce/AllGather/Broadcast, on whether the user
+// buffers are registered (regMode 1) or not (regMode 2); there is no regMode-0 kernel for those.
+static ncclResult_t postTuneSetDevFuncId(struct ncclComm* comm, struct ncclTaskColl* task, int regMode) {
+  int accFlag = (task->func == ncclFuncAllReduce && task->acc != nullptr) ? 1 : 0;
+  int id = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol, accFlag,
+                         task->pipeline, regMode);
+  if (id < 0) {
+    WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
+    return ncclInvalidUsage;
+  }
+  task->devFuncId = id;
+  return ncclSuccess;
+}
+
 static ncclResult_t applyTuningToCollTask(struct ncclComm* comm, struct ncclTaskTuningInfo* tInfo,
                                           struct ncclTaskColl* task) {
   NCCLCHECK(fillCollTaskFromRaw(comm, tInfo, task));
-  if (!tInfo->tuningOut.valid) return ncclInternalError;
+  if (tInfo->tuningOut.valid != 1) return ncclInternalError;
 
   task->algorithm = tInfo->tuningOut.algo;
   task->protocol = tInfo->tuningOut.proto;
   task->nMaxChannels = tInfo->tuningOut.maxChannels;
   task->nWarps = tInfo->tuningOut.nWarps;
-  task->devFuncId = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol);
+  const size_t nBytes = ncclTypeSize(task->datatype) * ncclFuncMaxSendRecvCount(task->func, comm->nRanks, task->count);
+  rcclSetPipelining(comm, nBytes, task);
+  NCCLCHECK(postTuneSetDevFuncId(comm, task, ncclDevFuncIsLL128RegVariant(task->func, task->protocol) ? 2 : 0));
+  if (!rcclIsArchSupportedForFunc(task, comm->archName)) {
+    WARN("%s: unsupported architecture (%s) for collective %s(%s, %s, %s, %s, Acc=%d, Pipeline=%d).", __func__,
+         comm->archName, ncclFuncToString(task->func), ncclAlgoToString(task->algorithm),
+         ncclProtoToString(task->protocol), ncclDevRedOpToString(task->opDev.op), ncclDatatypeToString(task->datatype),
+         (task->acc != nullptr), task->pipeline);
+    return ncclInvalidUsage;
+  }
   task->isCollnet = 0;
   task->isNvls = 0;
   switch (task->algorithm) {
@@ -673,6 +702,7 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
 
   devWork.sendbuff = (void*)task->sendbuff;
   devWork.recvbuff = (void*)task->recvbuff;
+  devWork.acc = (void*)task->acc;
   devWork.sendbuffOffset = task->sendbuffOffset;
   devWork.recvbuffOffset = task->recvbuffOffset;
   devWork.sendbuffRmtAddrs = task->sendbuffRmtAddrs;
@@ -682,6 +712,27 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
   devWork.redOpArg = task->opDev.scalarArg;
   devWork.redOpArgIsPtr = task->opDev.scalarArgIsPtr;
   devWork.oneNode = (comm->nNodes == 1);
+  devWork.rcclUseOneSlice = comm->rcclUseOneSlice;
+  devWork.opCount = task->opCount;
+  if (task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+    devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
+    int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
+    if (directReduceScatterLimit >= 0) {
+      if (comm->nNodes == 8 || comm->nNodes == 16) {
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)8388608);
+      } else if (comm->nNodes == 4) {
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)4194304);
+      } else if (comm->nNodes == 2) {
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+      }
+      devWork.directReduceScatterLimitBytes = (uint32_t)directReduceScatterLimit;
+    } else {
+      devWork.directReduceScatterLimitBytes = (uint32_t)0;
+    }
+    devWork.tempBuff = (void*)comm->tempBuff;
+    devWork.currentRank = comm->rank;
+    devWork.count = task->count;
+  }
   devWork.netRegUsed = devWork.regUsed = 0;
   devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
   if (task->algorithm != NCCL_ALGO_NVLS && task->algorithm != NCCL_ALGO_NVLS_TREE) {
@@ -689,6 +740,9 @@ static ncclResult_t postTuneLegacyEnqueueCollWork(
   }
   if (task->regBufType & NCCL_NET_REG_BUFFER) devWork.netRegUsed = 1;
   if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER)) devWork.regUsed = 1;
+  if (ncclDevFuncIsLL128RegVariant(task->func, task->protocol)) {
+    NCCLCHECK(postTuneSetDevFuncId(comm, task, ncclDevFuncLL128RegMode(devWork.regUsed, devWork.netRegUsed)));
+  }
 
   if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
     struct ncclDevWorkCollReg workReg = {};
@@ -823,7 +877,7 @@ static ncclResult_t postTuneAllGatherVEnqueueBroadcastTask(struct ncclComm* comm
   nvlsTransportEnabled = ncclNvlsTransportEnabled(comm) &&
                          (ncclNvlsSupported(task->opDev.op, task->datatype) || task->func == ncclFuncAllGather);
   NCCLCHECK(ncclGetAlgoInfo(comm, task, collNetSupport, nvlsTransportEnabled, 1, nullptr));
-  task->devFuncId = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol);
+  NCCLCHECK(postTuneSetDevFuncId(comm, task, ncclDevFuncIsLL128RegVariant(task->func, task->protocol) ? 2 : 0));
   switch (task->algorithm) {
   case NCCL_ALGO_NVLS:
   case NCCL_ALGO_NVLS_TREE:
