@@ -18,6 +18,13 @@ struct ncclComm;
 bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
 bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
 
+// Upper bound for the DDA Broadcast block-size env overrides.
+constexpr unsigned kDdaBcMaxThreads = 512;
+
+// Per-rank block budget: CU-derived (fabric: min across ranks; IPC: this GPU),
+// lowered by RCCL_DDA_BC_MAX_BLOCKS. The root still gets one block per peer.
+size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm);
+
 // Total CTAs each launcher would use.
 uint32_t ncclBroadcastDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
 uint32_t ncclBroadcastDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
