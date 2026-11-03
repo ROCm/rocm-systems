@@ -179,13 +179,15 @@ module:
     tags: [load]
   Unit_hipModuleLoad_Positive_Package:
     <<: *level_2
-    # Fixture package_module.code is built only on the amd platform.
-    disabled: [nvidia_linux, nvidia_windows]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - fixture package_module.code is built only on the amd platform."
     tags: [load]
   Unit_hipModuleLoad_Negative_PackageNoCompatibleCodeObject:
     <<: *level_2
-    # Fixture package_mismatch_module.code is built only on the amd platform.
-    disabled: [nvidia_linux, nvidia_windows]
+    disabled:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - fixture package_mismatch_module.code is built only on the amd platform."
     tags: [load]
   Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module:
     <<: *level_default
