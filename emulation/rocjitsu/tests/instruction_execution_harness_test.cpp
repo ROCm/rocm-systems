@@ -4490,7 +4490,7 @@ TEST(Gfx1250True16Vop3Test, SelectedHalfArithmeticPreservesDestinationHalf) {
     cu->write_vgpr(v3, lane, 0xBEEF0007u);
   }
 
-  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
@@ -6397,7 +6397,7 @@ TEST(Gfx1250True16Vop3Test, Bitop3B16UsesSelectedSourceHalfAndPreservesDestinati
     cu->write_vgpr(v8, lane, 0x55550014u);
   }
 
-  auto execute = [&](const uint32_t (&words)[2], std::string_view mnemonic) {
+  auto execute = [&](const uint32_t(&words)[2], std::string_view mnemonic) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
     ASSERT_NE(inst, nullptr);
     ASSERT_EQ(std::string_view(inst->mnemonic()), mnemonic);
