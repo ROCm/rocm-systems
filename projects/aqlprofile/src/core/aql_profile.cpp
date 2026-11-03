@@ -286,6 +286,12 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
             case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK:
               trace_config.se_mask = p->value & ((1ull << se_number_total) - 1);
               break;
+            case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_DETAIL_SE_MASK:
+              // Which captured SEs emit detailed (instruction) tokens. 0 means "all", matching
+              // PAL's seDetailedMask convention (gpuPerfExperimentTraceSource.cpp TestSeMask).
+              trace_config.detail_se_mask =
+                  (p->value == 0) ? ~0ull : (p->value & ((1ull << se_number_total) - 1));
+              break;
             case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET:
               if (p->value > 15)
                 throw aql_profile::aql_profile_exc_val<uint32_t>(

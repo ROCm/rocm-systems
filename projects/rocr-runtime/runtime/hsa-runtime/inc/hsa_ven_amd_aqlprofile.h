@@ -194,6 +194,16 @@ typedef enum {
    */
   HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE = 10,
   /**
+   * Shader engine mask selecting which SEs emit detailed (instruction) tokens.
+   * Only meaningful for SEs that are also present in SE_MASK; the remaining captured
+   * SEs are programmed with a lightweight token mask that still carries wave, event
+   * and register tokens. A value of 0, or omitting the parameter, means every captured
+   * SE is detailed, which is the behavior prior to this parameter.
+   * Mirrors PAL's GpaSampleConfig::sqtt::seDetailedMask. Values 11-13 are taken by
+   * aqlprofile_att_parameter_name_ext_t.
+   */
+  HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_DETAIL_SE_MASK = 14,
+  /**
    * Mask of which compute units to generate perfcounters. GFX9 only.
    */
   HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK = 240,

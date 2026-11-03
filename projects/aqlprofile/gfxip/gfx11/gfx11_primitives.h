@@ -588,6 +588,11 @@ class gfx11_cntx_prim {
 #endif
   }
 
+  // The per-SE detailed/lightweight token split (PAL seDetailedMask) is implemented for
+  // gfx12 only; on this generation every captured SE keeps the full detailed token mask,
+  // which is the pre-existing behavior.
+  static uint32_t sqtt_token_mask_nodetail_value() { return sqtt_token_mask_on_value(false); }
+
   static uint32_t sqtt_token_mask_occupancy_value() {
 #if SQTT_PRIM_ENABLED
     uint32_t sq_thread_trace_token_mask =

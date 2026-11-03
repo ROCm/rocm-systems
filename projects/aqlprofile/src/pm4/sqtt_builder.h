@@ -221,13 +221,31 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
     const uint64_t base_step = GetBaseStep(config);
 
+    // Per-SE budgets under the weighted split. Detailed SEs get kDetailSeBufferMultiplier
+    // times the share of a lightweight one; with the default all-ones detail_se_mask every
+    // captured SE has the same weight and each entry equals base_step.
+    uint64_t min_capacity = ~0ull;
+    uint64_t max_capacity = 0;
+    for (uint64_t se_index = 0; se_index < se_number_total; se_index++) {
+      if (((1ull << se_index) & config->se_mask) == 0) continue;
+      const uint64_t capacity = GetSeCapacity(config, se_index);
+      config->capacity_per_se_map[se_index] = capacity;
+      min_capacity = std::min(min_capacity, capacity);
+      max_capacity = std::max(max_capacity, capacity);
+    }
+    if (min_capacity == ~0ull) min_capacity = max_capacity = base_step;
+
     // Old v1 API calls this with buffer == 0 first
     if (config->data_buffer_size > 0)
     {
       // Max 16GB for gfx{9, 10, 12} and 512MB for gfx11. Min of 32 page per SE.
-      if (base_step >= (1ull<<34) || (Primitives::GFXIP_LEVEL == 11 && base_step >= (1ull<<29)))
+      // Bound the extremes of the weighted split, not just the uniform base_step: a
+      // lightweight SE receives a quarter of a detailed one and could otherwise slip under
+      // the minimum unnoticed.
+      if (max_capacity >= (1ull<<34) ||
+          (Primitives::GFXIP_LEVEL == 11 && max_capacity >= (1ull<<29)))
         throw std::runtime_error("SQTT Buffer size too high");
-      else if (base_step < (1ull<<17))
+      else if (min_capacity < (1ull<<17))
         throw std::runtime_error("SQTT Buffer size too low");
     }
     config->capacity_per_se = base_step;
@@ -236,7 +254,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
         config->deprecated_mask && config->deprecated_tokenMask && config->deprecated_tokenMask2;
 
     for (uint64_t se_index = 0; se_index < se_number_total; se_index++) {
-      bool bMaskedIn = ((1 << se_index) & config->se_mask) != 0;
+      bool bMaskedIn = ((1ull << se_index) & config->se_mask) != 0;
       config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
     }
 
@@ -363,11 +381,12 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
           size_t global_se = local_se + se_number_xcc * xcc;
 
           config->se_base_addresses[global_se] = base_addr;
-          bool bMaskedIn = config->target_cu_per_se.at(global_se) >= 0;
 
           const unsigned baddr_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
           const unsigned baddr_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-          const uint64_t sqtt_size = bMaskedIn ? base_step : config->capacity_per_disabled_se;
+          // Per-SE under the weighted split; equals base_step for every SE when the detail
+          // mask is left at its all-ones default.
+          const uint64_t sqtt_size = config->GetCapacity(global_se);
           if (sqtt_size == 0) continue;
 
           uint32_t ctrl_val = Primitives::sqtt_ctrl_value(true, !config->buffer_data.empty());
@@ -396,11 +415,19 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
               Primitives::sqtt_mask_value(config->targetCu, config->simd_sel, config->vmIdMask);
           WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MASK_ADDR, mask_value);
 
-          uint32_t token_mask = (config->occupancy_mode)
-                                    ? Primitives::sqtt_token_mask_occupancy_value()
-                                    : Primitives::sqtt_token_mask_on_value(xcc_number_ > 1);
-          if (((1 << global_se) & config->se_mask) == 0)
+          // Per-SE token mask. This write is already inside the Select_GRBM_SE_SH0 scope, so
+          // each SE can carry a different mask -- which is how PAL splits detailed from
+          // lightweight SEs (gpaSession.cpp picks SqttTokenConfigAllTokens vs
+          // SqttTokenConfigNoInst per AddThreadTrace call).
+          uint32_t token_mask;
+          if (((1ull << global_se) & config->se_mask) == 0)
             token_mask = Primitives::sqtt_token_mask_off_value();
+          else if (config->occupancy_mode)
+            token_mask = Primitives::sqtt_token_mask_occupancy_value();
+          else if (!config->IsDetailSE(global_se))
+            token_mask = Primitives::sqtt_token_mask_nodetail_value();
+          else
+            token_mask = Primitives::sqtt_token_mask_on_value(xcc_number_ > 1);
 
           WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_TOKEN_MASK_ADDR, token_mask);
           // Program the thread trace ctrl register
@@ -635,6 +662,40 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     // Make sure num divides buffersize
     int64_t buffer_per_se = (config->data_buffer_size - size_disabled) / num_enabled;
     return uint64_t(buffer_per_se) & ~((1 << Primitives::TT_BUFF_ALIGN_SHIFT) - 1);
+  }
+
+  // PAL gives a detailed SE four times the budget of a lightweight one
+  // (DetailSqttSeBufferMultiplier, gpaSession.cpp AcquireGpaSession).
+  static constexpr uint64_t kDetailSeBufferMultiplier = 4;
+
+  // Relative share of the data buffer owed to this SE. 0 => not captured.
+  // Reads se_mask/detail_se_mask directly rather than TraceConfig::IsDetailSE because this
+  // runs before Begin() populates target_cu_per_se.
+  uint64_t GetSeWeight(TraceConfig* config, uint64_t se_index) const {
+    if (((1ull << se_index) & config->se_mask) == 0) return 0;
+    if (config->occupancy_mode) return 1;
+    return (((config->detail_se_mask >> se_index) & 1ull) != 0) ? kDetailSeBufferMultiplier : 1;
+  }
+
+  // Per-SE buffer size under the weighted split. When every captured SE has the same weight
+  // -- the default, since detail_se_mask is all-ones unless a caller narrows it -- this is
+  // exactly GetBaseStep(): with weight w and total weight w*n, (available * w) / (w * n)
+  // floors to the same value as available / n, so the uniform path is bit-identical.
+  uint64_t GetSeCapacity(TraceConfig* config, uint64_t se_index) const {
+    const uint64_t weight = GetSeWeight(config, se_index);
+    if (weight == 0) return config->capacity_per_disabled_se;
+
+    uint64_t total_weight = 0;
+    for (uint64_t se = 0; se < se_number_total; se++) total_weight += GetSeWeight(config, se);
+    if (total_weight == 0) return 0;
+
+    const uint64_t num_enabled = PopCount(config->se_mask);
+    const int64_t size_disabled = (64 - num_enabled) * config->capacity_per_disabled_se;
+    const int64_t available = int64_t(config->data_buffer_size) - size_disabled;
+    if (available <= 0) return 0;
+
+    const uint64_t bytes = (uint64_t(available) * weight) / total_weight;
+    return bytes & ~((1ull << Primitives::TT_BUFF_ALIGN_SHIFT) - 1);
   }
 
   virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data,

@@ -61,14 +61,24 @@ struct TraceConfig {
   uint32_t concurrent = 0;
   // SE mask for tracing; note -> replicated for all XCCs
   uint64_t se_mask = 0x11;
+  // Subset of se_mask whose SEs emit detailed (instruction) tokens. SEs that are captured
+  // but not in this mask get a lightweight token mask that still carries wave/event/reg
+  // tokens, mirroring PAL's seDetailedMask + SqttTokenConfigNoInst split. Defaults to all
+  // bits set so callers that never set it behave exactly as before.
+  uint64_t detail_se_mask = ~0ull;
 
   // Maps shader engine IDs to list of buffers
   std::unordered_map<int, std::vector<void*>> buffer_data{};
 
+  // Unweighted per-SE budget. Still the single source of truth for the gfx9/10/11 paths and
+  // for direct struct users; GpuSqttBuilder::Begin additionally fills capacity_per_se_map so
+  // a detailed SE can be given a larger slice than a lightweight one (PAL does the same via
+  // DetailSqttSeBufferMultiplier).
   uint64_t capacity_per_se = 0x1000;
   uint64_t capacity_per_disabled_se = 0;
   std::unordered_map<int, int> target_cu_per_se{};
   std::unordered_map<int, uint64_t> se_base_addresses{};
+  std::unordered_map<int, uint64_t> capacity_per_se_map{};
 
   bool enable_rt_timestamp{false};
 
@@ -82,8 +92,14 @@ struct TraceConfig {
   int GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
   uint64_t GetSEmask() const { return se_mask; };
   uint64_t GetSEBaseAddr(int SE) const { return se_base_addresses.at(SE); }
+  // True when SE is captured AND selected for detailed (instruction) tokens.
+  bool IsDetailSE(int SE) const {
+    return (GetTargetCU(SE) >= 0) && (((detail_se_mask >> SE) & 1ull) != 0);
+  }
   uint64_t GetCapacity(int SE) const {
-    return (GetTargetCU(SE) >= 0) ? capacity_per_se : capacity_per_disabled_se;
+    if (GetTargetCU(SE) < 0) return capacity_per_disabled_se;
+    const auto it = capacity_per_se_map.find(SE);
+    return (it != capacity_per_se_map.end()) ? it->second : capacity_per_se;
   }
 };
 

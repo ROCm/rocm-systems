@@ -510,12 +510,11 @@ class gfx12_cntx_prim {
   // not supported in gfx12
   static uint32_t sqtt_perf_mask_value() { return 0; }
 
-  // Indicate the different TT messages/tokens that should be enabled/logged
-  // Indicate the different TT tokens that specify register operations to be logged
-  static uint32_t sqtt_token_mask_on_value(bool exclude_wait) {
-    (void)exclude_wait;  // superseded: EXCLUDE_BARRIER_WAIT is now forced on (see below).
-    uint32_t sq_thread_trace_token_mask{0};
-    sq_thread_trace_token_mask =
+  // Register-selection, barrier and BOP bits shared by the detailed and the no-detail token
+  // masks.  Kept in one place so the two variants cannot drift apart; the only intended
+  // difference between them is TOKEN_EXCLUDE / INST_EXCLUDE.
+  static uint32_t sqtt_token_mask_common_value() {
+    return
         // REG_DETAIL_ALL=0, matching PAL's GetSqttTokenMask (gfx12PerfExperiment.cpp): logging
         // every register write in full detail floods the stream with redundant REG tokens and
         // RGP rejects the result.  Register classes are selected via REG_INCLUDE/REG_EXCLUDE.
@@ -524,7 +523,7 @@ class gfx12_cntx_prim {
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_INCLUDE,
                            (SQ_TT_TOKEN_MASK_SQDEC_BIT | SQ_TT_TOKEN_MASK_SHDEC_BIT |
                             SQ_TT_TOKEN_MASK_GFXUDEC_BIT | SQ_TT_TOKEN_MASK_CONTEXT_BIT |
-                            SQ_TT_TOKEN_MASK_COMP_BIT)) |
+                            SQ_TT_TOKEN_MASK_COMP_BIT))
 #if GFX12_VARIANT <= GFX12_VARIANT_1201
         // EXCLUDE_BARRIER_WAIT=1 unconditionally, as PAL does in GetSqttTokenMask
         // (gfx12PerfExperiment.cpp): "Thread tracing of barrier completion events may cause a
@@ -532,14 +531,46 @@ class gfx12_cntx_prim {
         // disabled via EXCLUDE_BARRIER_WAIT = 1."  A lost instruction token desyncs the
         // variable-length stream.  This was gated on exclude_wait (= xcc_number_ > 1), leaving
         // it 0 on single-XCC parts such as gfx1201.
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, 1) |
+        | SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, EXCLUDE_BARRIER_WAIT, 1)
         // BOP_EVENTS_TOKEN_INCLUDE=1 to match PAL (bottom-of-pipe event tokens included).
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, BOP_EVENTS_TOKEN_INCLUDE, 1) |
+        | SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, BOP_EVENTS_TOKEN_INCLUDE, 1)
 #endif
-        // TOKEN_EXCLUDE=0: log every token class, matching PAL's detailed capture
-        // (gfx12PerfExperiment.cpp GetSqttTokenMask).
-        SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE, 0);
-    return sq_thread_trace_token_mask;
+        ;
+  }
+
+  // Indicate the different TT messages/tokens that should be enabled/logged
+  // Indicate the different TT tokens that specify register operations to be logged
+  static uint32_t sqtt_token_mask_on_value(bool exclude_wait) {
+    (void)exclude_wait;  // superseded: EXCLUDE_BARRIER_WAIT is now forced on (see above).
+    return sqtt_token_mask_common_value() |
+           // TOKEN_EXCLUDE=0: log every token class, matching PAL's detailed capture
+           // (gfx12PerfExperiment.cpp GetSqttTokenMask with SqttTokenConfigAllTokens).
+           SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE, 0);
+  }
+
+  // Token mask for a shader engine that is captured but NOT selected for detailed tokens.
+  // Mirrors PAL's SqttTokenConfigNoInst (gpaSession.cpp) as translated by GetSqttTokenMask:
+  // drop the instruction-related token classes but keep WaveStart/WaveEnd/WaveAlloc, Reg,
+  // Event, UtilCounter, RealTime and Timestamp, so the SE still yields a usable occupancy
+  // timeline.  Deliberately NOT sqtt_token_mask_occupancy_value(), which sets
+  // TOKEN_EXCLUDE=0x7FF and would discard the wave tokens this mode exists to collect.
+  static uint32_t sqtt_token_mask_nodetail_value() {
+    // Shifts live in SQ_TT_TOKEN_MASK_TOKEN_EXCLUDE_SHIFT.  This header's copy of the enum
+    // per the complete enum in PAL's gfx12_merged_enum.h.
+    constexpr uint32_t kTokenExclude = (1u << SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT) |
+                                       (1u << SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT) |
+                                       (1u << 2) |  // VALUINST
+                                       (1u << SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT) |
+                                       (1u << 5) |  // IMMEDIATE
+                                       (1u << 8);   // INST
+    // 0x12F is exactly what PAL's GetSqttTokenMask emits for SqttTokenConfigNoInst.
+    static_assert(kTokenExclude == 0x12Fu, "unexpected no-detail TOKEN_EXCLUDE encoding");
+    // INST_EXCLUDE is deliberately left 0: PAL's GetSqttTokenMask never writes that field and
+    // suppresses instruction tokens purely via TOKEN_EXCLUDE bit 8 (INST).  Setting it to 0x3
+    // additionally made the hardware echo a bit that PAL's stream does not carry (observed as
+    // a one-bit delta at SQTT header token bit 41 vs a PAL capture of the same workload).
+    return sqtt_token_mask_common_value() |
+           SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TOKEN_EXCLUDE, kTokenExclude);
   }
 
   static uint32_t sqtt_token_mask_off_value() {
