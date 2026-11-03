@@ -495,11 +495,9 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
 #endif
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
-        TESTCHECK(uploadGinResourceSharingMode(stream));
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
       case 4:
-        TESTCHECK(uploadGinResourceSharingMode(stream));
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
@@ -564,12 +562,6 @@ testResult_t AlltoAllDeviceTime(struct threadArgs* args, ncclDataType_t type, nc
 
   // Shared scaffold: allocates per-CTA start/end stamps, launches the timed kernel,
   // reduces min(start)..max(end) over CTAs and MPI-MAX across ranks -> per-iter us.
-  // Upload the resource-sharing flag to each local GPU before the timed launch.
-  for (int i = 0; i < args->nGpus; i++) {
-    CUDACHECK(hipSetDevice(args->gpus[i]));
-    TESTCHECK(uploadGinResourceSharingMode(args->streams[i]));
-  }
-
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
@@ -646,6 +638,12 @@ void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int
 
 testResult_t AlltoAllRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &alltoAllTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;

@@ -34,26 +34,12 @@ static inline ncclGinResourceSharingMode ginResourceSharingModeFromCli(int cli) 
   }
 }
 
-// Enqueue the selected mode into the current device's d_ginResourceSharingMode.
-// Call after cudaSetDevice() and before a GIN launch. Notes:
-//  - Once per device: the value is a fixed CLI flag, so later calls are no-ops.
-//    Keep it off the per-iteration path (a blocking copy there inflates latency).
-//  - ASYNC on `stream`: a sync copy is illegal under -G >= 1 graph capture; the
-//    same-stream enqueue stays capturable and orders before the kernel.
-//  - Persistent host source (static, not stack): the copy may run at graph-launch,
-//    after this returns.
-//  - Thread races (-t N) only re-write an identical byte, so no locking needed.
-#define GIN_RESOURCE_SHARING_MAX_DEVICES 64
-static inline testResult_t uploadGinResourceSharingMode(cudaStream_t stream) {
-  static int8_t uploaded[GIN_RESOURCE_SHARING_MAX_DEVICES] = {0};  // -1 once uploaded, per device
-  static uint8_t hostMode[GIN_RESOURCE_SHARING_MAX_DEVICES] = {0};  // persistent async copy source
-  int dev = 0;
-  if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= GIN_RESOURCE_SHARING_MAX_DEVICES) dev = 0;
-  if (uploaded[dev]) return testSuccess;
-  hostMode[dev] = (uint8_t)ginResourceSharingModeFromCli(ginResourceSharingMode);
-  CUDACHECK(hipMemcpyToSymbolAsync(d_ginResourceSharingMode, &hostMode[dev], sizeof(hostMode[dev]), 0,
-                                   hipMemcpyHostToDevice, stream));
-  uploaded[dev] = -1;
+// Write the selected mode into the current device's d_ginResourceSharingMode.
+// Call once per device at the top of the tester's RunTest, before the benchmark
+// loop (synchronous, so outside graph capture).
+static inline testResult_t uploadGinResourceSharingMode() {
+  uint8_t v = (uint8_t)ginResourceSharingModeFromCli(ginResourceSharingMode);
+  CUDACHECK(hipMemcpyToSymbol(d_ginResourceSharingMode, &v, sizeof(v), 0, hipMemcpyHostToDevice));
   return testSuccess;
 }
 

@@ -279,7 +279,6 @@ static testResult_t AllGatherLaunchDeviceKernel(F kernel, void* sendbuff, size_t
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
   if (gridCtas < 1) gridCtas = 1;
-  TESTCHECK(uploadGinResourceSharingMode(stream));
   kernel<<<gridCtas, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, sdmaThreshold, *devComm);
   return testSuccess;
 }
@@ -346,11 +345,6 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
   const int gridCtas = AllGatherResolveLaunchCtas(
       chunkBytes, sdmaThreshold, gin_sdma_allgather::allGatherPoolCtas(deviceCtaCount));
-  // Upload the resource-sharing flag to each local GPU before the timed launch.
-  for (int i = 0; i < args->nGpus; i++) {
-    CUDACHECK(hipSetDevice(args->gpus[i]));
-    TESTCHECK(uploadGinResourceSharingMode(args->streams[i]));
-  }
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
@@ -407,6 +401,12 @@ void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allGatherTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;
