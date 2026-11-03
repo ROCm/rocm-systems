@@ -48,7 +48,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 using namespace rocjitsu;
@@ -88,7 +87,8 @@ public:
     if (decoded.failed())
       return util::Result::failure();
     std::unique_ptr<Instruction> instruction(std::move(decoded).value());
-    EXPECT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
+    if (cu->execute_instruction(instruction.get(), *wave).failed())
+      return util::Result::failure();
     if (memory_op) {
       amdgpu::L1VectorCache l1(&cache);
       amdgpu::GlobalMemPipeline pipeline(&l1, &cache);
