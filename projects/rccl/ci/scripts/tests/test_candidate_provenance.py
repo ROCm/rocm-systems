@@ -240,6 +240,127 @@ class CandidateCompositionTest(unittest.TestCase):
                 (work / tm.OVERLAY_CTX / "rccl_libs" / "tuner" / tuner.name).is_file()
             )
 
+    def test_reused_workdir_stages_exact_current_asset_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+
+            def artifact(name: str, lib_bytes: bytes, kpack_names: list[str],
+                         tuner_bytes: bytes) -> tuple[Path, Path]:
+                artifact_root = root / name
+                lib_dir = artifact_root / "lib"
+                lib_dir.mkdir(parents=True)
+                lib = lib_dir / "librccl.so"
+                lib.write_bytes(lib_bytes)
+                (lib_dir / "librccl-extra.so").write_bytes(lib_bytes + b"-extra")
+                kpack_dir = artifact_root / ".kpack"
+                kpack_dir.mkdir()
+                for kpack_name in kpack_names:
+                    (kpack_dir / kpack_name).write_bytes(
+                        f"{name}:{kpack_name}".encode()
+                    )
+                tuner = artifact_root / "rccl_tuner_gfx950.csv"
+                tuner.write_bytes(tuner_bytes)
+                return lib, tuner
+
+            lib_a, tuner_a = artifact(
+                "a", b"lib-a", ["rccl_old.kpack", "rccl_removed.kpack"], b"tuner-a"
+            )
+            lib_b, tuner_b = artifact(
+                "b", b"lib-b", ["rccl_new.kpack"], b"tuner-b"
+            )
+            # The second artifact no longer contains this A-only library.
+            (lib_b.parent / "librccl-extra.so").unlink()
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=True), \
+                    mock.patch.object(tm, "_needed_sonames", return_value=[]):
+                tm.stage_rccl_overlay(
+                    lib_a, tuner_a, "base:image", "gfx950", work,
+                    family="megatron",
+                )
+                tm.stage_rccl_overlay(
+                    lib_b, tuner_b, "base:image", "gfx950", work,
+                    family="megatron",
+                )
+
+            staging = work / tm.OVERLAY_CTX / "rccl_libs"
+            expected_sources = tm.expected_overlay_asset_sources(lib_b, tuner_b)
+            staged = tm.verify_staged_overlay_assets(staging, expected_sources)
+            self.assertEqual(
+                {item["path"] for item in staged["files"]},
+                {
+                    "librccl.so",
+                    ".kpack/rccl_new.kpack",
+                    "tuner/rccl_tuner_gfx950.csv",
+                },
+            )
+            self.assertEqual((staging / "librccl.so").read_bytes(), b"lib-b")
+            self.assertEqual(
+                (staging / "tuner" / tuner_b.name).read_bytes(), b"tuner-b"
+            )
+            self.assertFalse((staging / ".kpack" / "rccl_old.kpack").exists())
+            self.assertFalse((staging / ".kpack" / "rccl_removed.kpack").exists())
+            self.assertFalse((staging / "librccl-extra.so").exists())
+            self.assertEqual(
+                staged["asset_id"], tm.rccl_asset_identity(lib_b, tuner_b)
+            )
+
+    def test_reused_workdir_rejects_symlinked_staging_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            context = work / tm.OVERLAY_CTX
+            context.mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "keep"
+            marker.write_text("keep\n")
+            (context / "rccl_libs").symlink_to(outside, target_is_directory=True)
+            lib_dir = root / "artifact" / "lib"
+            lib_dir.mkdir(parents=True)
+            lib = lib_dir / "librccl.so"
+            lib.write_bytes(b"lib")
+            tuner = root / "artifact" / "rccl_tuner_gfx950.csv"
+            tuner.write_text("tuner\n")
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "_needed_sonames", return_value=[]), \
+                    self.assertRaisesRegex(RuntimeError, "untrusted.*staging"):
+                tm.stage_rccl_overlay(
+                    lib, tuner, "base:image", "gfx950", work,
+                    family="megatron",
+                )
+            self.assertEqual(marker.read_text(), "keep\n")
+            self.assertTrue((context / "rccl_libs").is_symlink())
+
+    def test_reused_workdir_rejects_symlinked_overlay_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            work = root / "work"
+            work.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "keep"
+            marker.write_text("keep\n")
+            (work / tm.OVERLAY_CTX).symlink_to(outside, target_is_directory=True)
+            lib_dir = root / "artifact" / "lib"
+            lib_dir.mkdir(parents=True)
+            lib = lib_dir / "librccl.so"
+            lib.write_bytes(b"lib")
+            tuner = root / "artifact" / "rccl_tuner_gfx950.csv"
+            tuner.write_text("tuner\n")
+
+            with mock.patch.object(tm, "_rccl_uses_kpack", return_value=False), \
+                    mock.patch.object(tm, "_needed_sonames", return_value=[]), \
+                    self.assertRaisesRegex(RuntimeError, "untrusted.*context"):
+                tm.stage_rccl_overlay(
+                    lib, tuner, "base:image", "gfx950", work,
+                    family="megatron",
+                )
+            self.assertEqual(marker.read_text(), "keep\n")
+            self.assertTrue((work / tm.OVERLAY_CTX).is_symlink())
+
     def test_skip_overlay_bind_mounts_all_assets_and_skips_image_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

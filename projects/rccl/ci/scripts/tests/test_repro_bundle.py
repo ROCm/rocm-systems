@@ -115,7 +115,7 @@ class ReproManifestTest(unittest.TestCase):
 
 
 class CopyOverlayCtxTest(unittest.TestCase):
-    def test_drops_only_byte_identical_librccl_copies(self):
+    def test_preserves_exact_staged_asset_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "src", Path(tmp) / "dst"
             libs = src / "rccl_libs"
@@ -127,8 +127,13 @@ class CopyOverlayCtxTest(unittest.TestCase):
             (src / "Dockerfile").write_text("FROM x\n")
             tm.copy_overlay_ctx(src, dst)
             kept = sorted(p.relative_to(dst).as_posix() for p in dst.rglob("*") if p.is_file())
-            self.assertEqual(kept, ["Dockerfile", "rccl_libs/.kpack/rccl.kpack",
-                                    "rccl_libs/librccl.so", "rccl_libs/librccl.so.1.0"])
+            self.assertEqual(kept, [
+                "Dockerfile",
+                "rccl_libs/.kpack/rccl.kpack",
+                "rccl_libs/librccl.so",
+                "rccl_libs/librccl.so.1",
+                "rccl_libs/librccl.so.1.0",
+            ])
 
 
 class WriteReproBundleTest(unittest.TestCase):
@@ -146,7 +151,7 @@ class WriteReproBundleTest(unittest.TestCase):
                              "the CI manifests must not change")
         self.assertTrue((bundle / "scripts").is_dir())
         self.assertTrue((bundle / "REPRO.md").is_file())
-        self.assertFalse((bundle / tm.OVERLAY_CTX / "rccl_libs" / "librccl.so.1").exists())
+        self.assertTrue((bundle / tm.OVERLAY_CTX / "rccl_libs" / "librccl.so.1").exists())
         self.assertTrue((bundle / tm.OVERLAY_CTX / "rccl_libs" / ".kpack").is_dir())
 
         candidate = json.loads((bundle / tm.REPRO_MANIFESTS[tm.CANDIDATE]).read_text())

@@ -29,7 +29,6 @@ import argparse
 import copy
 import csv
 import fcntl
-import filecmp
 import hashlib
 import json
 import logging
@@ -667,15 +666,280 @@ def rccl_kpack_files(rccl_lib: Path) -> list[Path]:
     return sorted(set(p.resolve() for p in files), key=lambda p: p.name)
 
 
-def rccl_asset_identity(rccl_lib: Path, tuner_config: Path) -> str:
-    """Short identity of every version-coupled candidate overlay asset."""
+def expected_overlay_asset_sources(
+    rccl_lib: Path, tuner_config: Path
+) -> dict[str, Path]:
+    """Exact relative file set the candidate overlay must contain."""
+    sources: dict[str, Path] = {}
+
+    def add(relative: str, source: Path) -> None:
+        if relative in sources:
+            raise RuntimeError(f"duplicate candidate overlay asset name: {relative}")
+        sources[relative] = source.resolve()
+
+    for source in sorted(rccl_lib.parent.glob("librccl*"), key=lambda path: path.name):
+        if source.is_file():
+            add(source.name, source)
+    for source in rccl_kpack_files(rccl_lib):
+        add(f".kpack/{source.name}", source)
+    add(f"tuner/{tuner_config.name}", tuner_config)
+    return sources
+
+
+def overlay_asset_identity(hashes: dict[str, str]) -> str:
+    """Stable identity of an exact staged relative-path/hash mapping."""
     digest = hashlib.sha256()
-    for path in [rccl_lib.resolve(), *rccl_kpack_files(rccl_lib), tuner_config.resolve()]:
-        digest.update(path.name.encode())
+    for relative, sha256 in sorted(hashes.items()):
+        digest.update(relative.encode())
         digest.update(b"\0")
-        digest.update(sha256_file(path).encode())
+        digest.update(sha256.encode())
         digest.update(b"\0")
     return digest.hexdigest()[:16]
+
+
+def rccl_asset_identity(rccl_lib: Path, tuner_config: Path) -> str:
+    """Short identity of every version-coupled candidate overlay asset."""
+    sources = expected_overlay_asset_sources(rccl_lib, tuner_config)
+    return overlay_asset_identity({
+        relative: sha256_file(source) for relative, source in sources.items()
+    })
+
+
+def _staged_overlay_asset_provenance_fd(
+    staging_fd: int, prefix: str = ""
+) -> dict:
+    """Hashes the exact staged tree through no-follow directory descriptors."""
+    files = []
+    hashes: dict[str, str] = {}
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    with os.scandir(staging_fd) as entries:
+        names = sorted(entry.name for entry in entries)
+    for name in names:
+        relative = f"{prefix}/{name}" if prefix else name
+        try:
+            entry_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec,
+                dir_fd=staging_fd,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                f"cannot open staged candidate overlay asset: {relative}"
+            ) from exc
+        try:
+            details = os.fstat(entry_fd)
+            if details.st_uid != os.geteuid():
+                raise RuntimeError(
+                    f"foreign-owned candidate overlay asset: {relative}"
+                )
+            if stat.S_ISDIR(details.st_mode):
+                nested = _staged_overlay_asset_provenance_fd(entry_fd, relative)
+                files.extend(nested["files"])
+                hashes.update({
+                    item["path"]: item["sha256"] for item in nested["files"]
+                })
+                continue
+            if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+                raise RuntimeError(
+                    f"non-regular candidate overlay asset: {relative}"
+                )
+            digest = hashlib.sha256()
+            with os.fdopen(os.dup(entry_fd), "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            sha256 = digest.hexdigest()
+            hashes[relative] = sha256
+            files.append({
+                "path": relative,
+                "sha256": sha256,
+                "size": details.st_size,
+            })
+        finally:
+            os.close(entry_fd)
+    return {"asset_id": overlay_asset_identity(hashes), "files": files}
+
+
+def staged_overlay_asset_provenance(staging_dir: Path) -> dict:
+    """Hashes and identity of a safely opened exact staged file set."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    staging_fd = os.open(
+        staging_dir,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec,
+    )
+    try:
+        details = os.fstat(staging_fd)
+        if details.st_uid != os.geteuid():
+            raise RuntimeError(
+                f"foreign-owned candidate overlay staging path: {staging_dir}"
+            )
+        return _staged_overlay_asset_provenance_fd(staging_fd)
+    finally:
+        os.close(staging_fd)
+
+
+def _remove_owned_directory_contents(directory_fd: int, display: Path) -> None:
+    """Remove a runner-owned tree through directory-relative no-follow opens."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    with os.scandir(directory_fd) as entries:
+        names = [entry.name for entry in entries]
+    for name in names:
+        details = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if details.st_uid != os.geteuid():
+            raise RuntimeError(f"foreign-owned candidate overlay path: {display / name}")
+        if stat.S_ISDIR(details.st_mode):
+            child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+            try:
+                _remove_owned_directory_contents(child_fd, display / name)
+            finally:
+                os.close(child_fd)
+            os.rmdir(name, dir_fd=directory_fd)
+        else:
+            os.unlink(name, dir_fd=directory_fd)
+
+
+def recreate_overlay_staging_dir(ctx_dir: Path) -> tuple[Path, int, int]:
+    """Recreate only rccl_libs, rejecting unsafe reused-workdir paths."""
+    ctx_dir.mkdir(parents=True, exist_ok=True)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        ctx_fd = os.open(ctx_dir, directory_flags)
+    except OSError as exc:
+        raise RuntimeError(f"untrusted candidate overlay context: {ctx_dir}") from exc
+    staging_dir = ctx_dir / "rccl_libs"
+    staging_fd = -1
+    try:
+        ctx_stat = os.fstat(ctx_fd)
+        if ctx_stat.st_uid != os.geteuid():
+            raise RuntimeError(f"untrusted candidate overlay context: {ctx_dir}")
+        os.fchmod(ctx_fd, 0o755)
+        try:
+            staging_fd = os.open("rccl_libs", directory_flags, dir_fd=ctx_fd)
+        except FileNotFoundError:
+            staging_fd = -1
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate overlay staging path: {staging_dir}"
+            ) from exc
+        if staging_fd >= 0:
+            try:
+                staging_stat = os.fstat(staging_fd)
+                if staging_stat.st_uid != os.geteuid():
+                    raise RuntimeError(
+                        f"untrusted candidate overlay staging path: {staging_dir}"
+                    )
+                _remove_owned_directory_contents(staging_fd, staging_dir)
+            finally:
+                os.close(staging_fd)
+                staging_fd = -1
+            os.rmdir("rccl_libs", dir_fd=ctx_fd)
+        os.mkdir("rccl_libs", mode=0o755, dir_fd=ctx_fd)
+        staging_fd = os.open("rccl_libs", directory_flags, dir_fd=ctx_fd)
+        os.fchmod(staging_fd, 0o755)
+        current_ctx_stat = ctx_dir.stat(follow_symlinks=False)
+        if (
+            current_ctx_stat.st_dev != ctx_stat.st_dev
+            or current_ctx_stat.st_ino != ctx_stat.st_ino
+        ):
+            os.close(staging_fd)
+            staging_fd = -1
+            raise RuntimeError(f"candidate overlay context changed: {ctx_dir}")
+        opened_stat = os.fstat(staging_fd)
+        current_stat = staging_dir.stat(follow_symlinks=False)
+        if (
+            opened_stat.st_uid != os.geteuid()
+            or opened_stat.st_dev != current_stat.st_dev
+            or opened_stat.st_ino != current_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay staging path changed: {staging_dir}")
+        return staging_dir, staging_fd, ctx_fd
+    except BaseException:
+        if staging_fd >= 0:
+            os.close(staging_fd)
+        os.close(ctx_fd)
+        raise
+
+
+def copy_overlay_asset(staging_fd: int, relative: str, source: Path) -> None:
+    """Copy one source into staging using only no-follow relative opens."""
+    parts = relative.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise RuntimeError(f"invalid candidate overlay asset path: {relative}")
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    parent_fd = os.dup(staging_fd)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, mode=0o755, dir_fd=parent_fd)
+            except FileExistsError:
+                pass
+            child_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec,
+                dir_fd=parent_fd,
+            )
+            child_stat = os.fstat(child_fd)
+            if child_stat.st_uid != os.geteuid():
+                os.close(child_fd)
+                raise RuntimeError(
+                    f"foreign-owned candidate overlay directory: {relative}"
+                )
+            os.close(parent_fd)
+            parent_fd = child_fd
+        source_fd = os.open(
+            source,
+            os.O_RDONLY | os.O_NOFOLLOW | cloexec,
+        )
+        try:
+            source_stat = os.fstat(source_fd)
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise RuntimeError(f"non-regular candidate source asset: {source}")
+            destination_fd = os.open(
+                parts[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec,
+                0o644,
+                dir_fd=parent_fd,
+            )
+            try:
+                with os.fdopen(os.dup(source_fd), "rb") as src, \
+                        os.fdopen(os.dup(destination_fd), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                os.fchmod(destination_fd, 0o644)
+            finally:
+                os.close(destination_fd)
+        finally:
+            os.close(source_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def verify_staged_overlay_assets(
+    staging_dir: Path, expected_sources: dict[str, Path]
+) -> dict:
+    """Fail unless staged names and bytes exactly match current source inputs."""
+    expected_hashes = {
+        relative: sha256_file(source)
+        for relative, source in expected_sources.items()
+    }
+    staged = staged_overlay_asset_provenance(staging_dir)
+    staged_hashes = {
+        item["path"]: item["sha256"] for item in staged["files"]
+    }
+    if staged_hashes != expected_hashes:
+        missing = sorted(set(expected_hashes) - set(staged_hashes))
+        stale = sorted(set(staged_hashes) - set(expected_hashes))
+        mismatched = sorted(
+            relative for relative in set(staged_hashes) & set(expected_hashes)
+            if staged_hashes[relative] != expected_hashes[relative]
+        )
+        raise RuntimeError(
+            "candidate overlay staging mismatch: "
+            f"missing={missing}, stale={stale}, hash_mismatch={mismatched}"
+        )
+    if staged["asset_id"] != overlay_asset_identity(expected_hashes):
+        raise RuntimeError("candidate overlay staged identity mismatch")
+    return staged
 
 
 def get_rccl_fingerprint(rccl_lib: Path) -> dict:
@@ -1717,10 +1981,11 @@ def stage_rccl_overlay(
     family: str = "megatron",
     primus_dir: Path | None = None,
     from_ref: str = "",
-) -> str:
+) -> tuple[str, dict]:
     """Stage the candidate image (base + CI-built RCCL) under ``overlay_ctx``.
 
-    Returns the tag. Nothing is built here; the allocation's nodes build it.
+    Returns the tag and exact staged-asset provenance. Nothing is built here;
+    the allocation's nodes build it.
 
     *family* selects the recipe. ``megatron`` keeps the two layout-specific
     branches that target the Primus image; ``maxtext`` layers the same Primus
@@ -1728,7 +1993,41 @@ def stage_rccl_overlay(
     has neither Primus nor the SDK venv paths those branches write to.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
-    asset_id = rccl_asset_identity(rccl_lib, tuner_config)
+    ctx_dir = work_dir / OVERLAY_CTX
+    dockerfile = ctx_dir / OVERLAY_DOCKERFILE
+    uses_kpack = _rccl_uses_kpack(rccl_lib)
+    expected_sources = expected_overlay_asset_sources(rccl_lib, tuner_config)
+    staging_dir, staging_fd, ctx_fd = recreate_overlay_staging_dir(ctx_dir)
+    try:
+        for relative, source in expected_sources.items():
+            copy_overlay_asset(staging_fd, relative, source)
+        staged_assets = _staged_overlay_asset_provenance_fd(staging_fd)
+        expected_hashes = {
+            relative: sha256_file(source)
+            for relative, source in expected_sources.items()
+        }
+        if {
+            item["path"]: item["sha256"] for item in staged_assets["files"]
+        } != expected_hashes:
+            raise RuntimeError("candidate overlay staged bytes differ from sources")
+        opened_ctx_stat = os.fstat(ctx_fd)
+        current_ctx_stat = ctx_dir.stat(follow_symlinks=False)
+        if (
+            opened_ctx_stat.st_dev != current_ctx_stat.st_dev
+            or opened_ctx_stat.st_ino != current_ctx_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay context changed: {ctx_dir}")
+        opened_staging_stat = os.fstat(staging_fd)
+        current_staging_stat = staging_dir.stat(follow_symlinks=False)
+        if (
+            opened_staging_stat.st_dev != current_staging_stat.st_dev
+            or opened_staging_stat.st_ino != current_staging_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay staging path changed: {staging_dir}")
+    finally:
+        os.close(staging_fd)
+        os.close(ctx_fd)
+    asset_id = staged_assets["asset_id"]
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{asset_id}"
     if family in ("maxtext", "sglang-disagg") and from_ref:
         # Same identity the baseline carries, for the same reason: the run id
@@ -1736,22 +2035,6 @@ def stage_rccl_overlay(
         # previous attempt's image and skip its build while the baseline was
         # rebuilt on a base that had moved.
         tag = f"{tag}-{base_identity(from_ref)}"
-
-    ctx_dir = work_dir / OVERLAY_CTX
-    ctx_dir.mkdir(exist_ok=True)
-    dockerfile = ctx_dir / OVERLAY_DOCKERFILE
-    rccl_lib_dir = rccl_lib.parent
-    uses_kpack = _rccl_uses_kpack(rccl_lib)
-
-    staging_dir = ctx_dir / "rccl_libs"
-    staging_dir.mkdir(exist_ok=True)
-    for so_file in rccl_lib_dir.glob("librccl*"):
-        dest = staging_dir / so_file.name
-        if not dest.exists():
-            subprocess.run(["cp", "-L", str(so_file), str(dest)], check=True)
-    tuner_staging = staging_dir / "tuner" / tuner_config.name
-    tuner_staging.parent.mkdir(exist_ok=True)
-    shutil.copy2(tuner_config, tuner_staging)
 
     # The CI RCCL is built against a newer ROCm than the base image, so it can
     # name a soname the image predates -- `libamd_smi.so.27` against its `.26` --
@@ -1767,23 +2050,17 @@ def stage_rccl_overlay(
 
     # Staged for every family: the maxtext swap places them next to each
     # target it discovers rather than into two known directories.
-    has_kpack_files = False
-    if uses_kpack:
-        kpack_files = rccl_kpack_files(rccl_lib)
-        has_kpack_files = len(kpack_files) > 0
-        if has_kpack_files:
-            kpack_staging = staging_dir / ".kpack"
-            kpack_staging.mkdir(exist_ok=True)
-            for kp in kpack_files:
-                dest = kpack_staging / kp.name
-                if not dest.exists():
-                    subprocess.run(["cp", "-L", str(kp), str(dest)], check=True)
-            log.info("Found %d kpack file(s): %s",
-                     len(kpack_files), [f.name for f in kpack_files])
-        else:
-            raise RuntimeError(
-                f"{rccl_lib} has kpack references but its artifact contains no .kpack files"
-            )
+    kpack_names = sorted(
+        relative.removeprefix(".kpack/")
+        for relative in expected_sources if relative.startswith(".kpack/")
+    )
+    has_kpack_files = bool(kpack_names)
+    if uses_kpack and not has_kpack_files:
+        raise RuntimeError(
+            f"{rccl_lib} has kpack references but its artifact contains no .kpack files"
+        )
+    if has_kpack_files:
+        log.info("Found %d kpack file(s): %s", len(kpack_names), kpack_names)
 
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
@@ -1889,7 +2166,7 @@ ENV NCCL_DEBUG=WARN
 """)
 
     log.info("Candidate (CI RCCL), built on the nodes: %s", tag)
-    return tag
+    return tag, staged_assets
 
 
 def slurm_time_seconds(limit: str) -> int:
@@ -2290,25 +2567,8 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
 
 
 def copy_overlay_ctx(src: Path, dst: Path) -> None:
-    """Copy the build context without the duplicate librccl names.
-
-    stage_rccl_overlay() stages every ``librccl*`` the artifact carries,
-    but each recipe reads only ``rccl_libs/librccl.so`` and ``rccl_libs/.kpack``,
-    and the other names are byte-identical copies of the same library.
-    """
-    lib = src / "rccl_libs" / "librccl.so"
-
-    def ignore(dirpath: str, names: list[str]) -> list[str]:
-        if Path(dirpath) != lib.parent or not lib.is_file():
-            return []
-        return [
-            n for n in names
-            if n.startswith("librccl") and n != lib.name
-            and (lib.parent / n).is_file()
-            and filecmp.cmp(lib, lib.parent / n, shallow=False)
-        ]
-
-    shutil.copytree(src, dst, symlinks=True, ignore=ignore)
+    """Copy the exact build context so its recorded asset identity remains true."""
+    shutil.copytree(src, dst, symlinks=True)
 
 
 def repro_env(
@@ -3647,8 +3907,9 @@ def main() -> None:
             log.error("--skip-overlay-build requires --overlay-image")
             sys.exit(1)
         overlay_image = args.overlay_image
+        staged_overlay = None
     else:
-        overlay_image = stage_rccl_overlay(
+        overlay_image, staged_overlay = stage_rccl_overlay(
             rccl_lib,
             args.candidate_tuner_config,
             workload_config["base_image"],
@@ -3658,6 +3919,12 @@ def main() -> None:
             primus_dir=primus_dir,
             from_ref=base_ref,
         )
+        if staged_overlay["asset_id"] != candidate_manifest["overlay_asset_id"]:
+            raise RuntimeError(
+                "staged candidate overlay identity differs from provenance: "
+                f"{staged_overlay['asset_id']} != "
+                f"{candidate_manifest['overlay_asset_id']}"
+            )
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
     # but no Primus, so run.sh would not find primus-cli and the baseline
@@ -3700,6 +3967,8 @@ def main() -> None:
             "not applicable: exact candidate assets are read-only bind mounts"
         )
         candidate_manifest["tuner"]["expected_runtime_source"] = BIND_MOUNT_TUNER_PATH
+    else:
+        candidate_manifest["staged_overlay"] = staged_overlay
     write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 4: Generate one manifest per A/B phase
