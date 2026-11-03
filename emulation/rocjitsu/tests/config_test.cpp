@@ -1392,8 +1392,10 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
 
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  if (loaded.wire_links(engine.topology(), emit_error).failed())
+    return util::Result::failure();
+  if (engine.create(emit_error).failed())
+    return util::Result::failure();
 
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
@@ -1426,7 +1428,7 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
 }
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
-  std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
+  std::string json = CONFIG_DIR_PATH + "/gfx950_mi350x.json";
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config(json, loaded));
   auto *soc = loaded.soc();
@@ -1647,6 +1649,7 @@ TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
 
 TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) {
   for (const char *arch : {"cdna3", "cdna4"}) {
+    util::StringDiagnostic admission_diagnostic;
     SCOPED_TRACE(arch);
     std::string json = R"({
       "num_threads": 1,
@@ -1672,8 +1675,10 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     soc->set_dispatch_threads(1);
     simdojo::SimulationEngine engine(source.engine_config);
     engine.topology().set_root(source.take_root());
-    source.wire_links(engine.topology());
-    engine.create();
+    ASSERT_TRUE(source.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     constexpr uint32_t kSlot = 7;
     for (auto *xcd : soc->xcds())
       for (auto *se : xcd->shader_engines())
@@ -1716,8 +1721,11 @@ TEST(ConfigLoaderTest, CdnaLocationsSurviveTopologyInitializationAndCheckpoint) 
     restored_soc->set_dispatch_threads(1);
     simdojo::SimulationEngine restored_engine(restored.engine_config);
     restored_engine.topology().set_root(restored.take_root());
-    restored.wire_links(restored_engine.topology());
-    restored_engine.create();
+    ASSERT_TRUE(
+        restored.wire_links(restored_engine.topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(restored_engine.create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     check_locations(restored_soc);
   }
 }
@@ -1888,9 +1896,25 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
   }
 }
 
+// The gfx950_mi355x configs keep existing callers working until those names are
+// reassigned to MI355X (ROCm/rocm-systems#14644). Until then they must not drift
+// from the MI350X configs they duplicate.
+TEST(ConfigLoaderTest, DeprecatedGfx950Mi355xConfigsMatchMi350x) {
+  for (const char *variant : {"", "_kmd", "_kmd_2gpu"}) {
+    SCOPED_TRACE(variant);
+    std::string legacy_json;
+    std::string mi350x_json;
+    ASSERT_TRUE(read_config_file_valid(legacy_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi355x" + variant + ".json"));
+    ASSERT_TRUE(read_config_file_valid(mi350x_json,
+                                       CONFIG_DIR_PATH + "/gfx950_mi350x" + variant + ".json"));
+    EXPECT_EQ(legacy_json, mi350x_json);
+  }
+}
+
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -1904,7 +1928,7 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 
 TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
   config::LoadedConfig loaded;
-  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi350x.json", loaded));
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
   const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
@@ -2091,7 +2115,8 @@ TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
   EXPECT_FALSE(cu->owns_sgpr_range(*wf, base + 106, 1));
   amdgpu::RegisterAccess registers(*wf);
   EXPECT_EQ(registers.read_sgpr(neighbor_base), 0u);
-  registers.write_sgpr(neighbor_base, 0xDEADBEEFu);
+  EXPECT_TRUE(registers.write_sgpr(neighbor_base, 0xDEADBEEFu).succeeded());
+  EXPECT_FALSE(wf->instruction_execution_failed());
   EXPECT_EQ(cu->read_sgpr(neighbor_base), sentinel);
   wf->halt();
   neighbor->halt();
@@ -3740,6 +3765,7 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
+  util::StringDiagnostic admission_diagnostic;
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},
     "topology":{
@@ -3776,8 +3802,10 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
 
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   auto plugin_group = rocjitsu::test::make_dispatch_count_group(&dispatch_count);
@@ -4208,6 +4236,40 @@ TEST(CheckpointTest, LegacyAutomaticDispatchKeepsHostSizingAcrossResaves) {
   resaved.apply_cpu_dispatch_threads();
   EXPECT_EQ(resaved.cpu_dispatch_threads, 0u);
   EXPECT_EQ(resaved.soc()->dispatch_threads(), expected);
+}
+
+TEST(CApiTest, InvalidTopologyLinkPreservesHandleAndEntryPointStatus) {
+  // Parsing succeeds; rejection occurs while assembling the engine topology.
+  for (uint32_t num_gpus : {1u, 2u}) {
+    SCOPED_TRACE(::testing::Message() << "num_gpus=" << num_gpus);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3",
+      "gpu":{"device":{"gpu_id":1,"unique_id":1,"num_sdma_engines":0},"num_gpus":)") +
+                             std::to_string(num_gpus) +
+                             R"(}},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"}]},
+        "links":[{"src":"missing.out","dst":"vram.in","latency":1}]}})";
+    util::StringDiagnostic diagnostic;
+    auto loaded =
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded.succeeded()) << diagnostic.message();
+    const config::LoadedConfig &loaded_config = loaded.value();
+    ASSERT_EQ(loaded_config.num_gpus, num_gpus);
+    ASSERT_EQ(loaded_config.extra_gpu_builds.size(), num_gpus - 1);
+    test::ScopedTempFile config_file("rocjitsu-invalid-topology-link-");
+    std::ofstream(config_file.path()) << json;
+    for (auto mode : {RJ_VM_MODE_DEFAULT, RJ_VM_MODE_DAEMON}) {
+      SCOPED_TRACE(::testing::Message() << "mode=" << mode);
+      rj_vm_t sentinel;
+      rj_vm_t *output = &sentinel;
+      EXPECT_EQ(rj_vm_create_from_string(json.c_str(), mode, &output),
+                ROCJITSU_STATUS_INVALID_ARGUMENT);
+      EXPECT_EQ(output, &sentinel);
+      EXPECT_EQ(rj_vm_create(config_file.path().c_str(), mode, &output),
+                ROCJITSU_STATUS_INVALID_FILE);
+      EXPECT_EQ(output, &sentinel);
+    }
+  }
 }
 
 TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
