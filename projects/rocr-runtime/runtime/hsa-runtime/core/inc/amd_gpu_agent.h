@@ -634,6 +634,15 @@ class GpuAgent : public GpuAgentInt {
   // @brief Update ::t1_ tick count.
   void SyncClocks();
 
+  // @brief True if a packet's raw start/end ticks are set and do not predate t0_.
+  // On WSL (DXG) the comparison is done after removing the epoch offset.
+  bool RawTsValid(uint64_t start, uint64_t end);
+
+  // @brief On WSL (DXG), detect an AQL timestamp epoch that predates the
+  // D3DKMTQueryClockCalibration GPU clock, from a just-completed end tick, and
+  // return the offset to subtract from raw AQL ticks.  WSL only.
+  int64_t WslEpochOffset(uint64_t end);
+
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
 
@@ -739,10 +748,17 @@ class GpuAgent : public GpuAgentInt {
   double historical_clock_ratio_;
 
   // @brief Offset (in GPU ticks) between AQL dispatch timestamp clock and
-  // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows where the two
-  // GPU clock domains share frequency but differ in epoch.  Computed on first
-  // TranslateTime call; zero on Linux (clocks match).
+  // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows and WSL (DXG),
+  // where the two GPU clock domains share frequency but differ in epoch (AQL
+  // ahead of the calibration on Windows, behind it on WSL).  Detected from the
+  // first translated timestamp that proves a mismatch; zero on native Linux /
+  // KFD (clocks match).
   int64_t gpu_clock_offset_;
+
+  // @brief Running under WSL (DXG), where gpu_clock_offset_ applies on a Linux
+  // build.  Cached from ThunkLoader::IsWslDxg() so the per-timestamp paths do
+  // not go through the runtime singleton.
+  bool is_wsl_dxg_;
 
   // @brief s_memrealtime nominal clock frequency
   uint64_t wallclock_frequency_;
