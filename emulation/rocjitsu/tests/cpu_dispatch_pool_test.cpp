@@ -135,7 +135,7 @@ GatedInstructionPlugin *gate_fixture(DispatchPoolFixture &fixture) {
   auto plugin = std::make_unique<GatedInstructionPlugin>();
   auto *gate = plugin.get();
   if (!group->add(std::move(plugin)))
-    throw std::runtime_error("failed to install gated instruction plugin");
+    return nullptr;
   for (auto &cu : fixture.cus)
     cu->set_plugin_group(group);
   return gate;
@@ -211,7 +211,9 @@ TEST(CpuDispatchPoolTest, WorkerCancelsUnusedTicketsWhileCallerAndPeerAreGated) 
   amdgpu::CpuDispatchPool pool(/*threads=*/5);
   DispatchPoolFixture foreign(/*cu_count=*/3), target(/*cu_count=*/4), probe(/*cu_count=*/2);
   auto *foreign_gate = gate_fixture(foreign);
+  ASSERT_NE(foreign_gate, nullptr);
   auto *probe_gate = gate_fixture(probe);
+  ASSERT_NE(probe_gate, nullptr);
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<DrainingWorkerGate>();
   auto *target_gate = plugin.get();
@@ -273,7 +275,9 @@ TEST(CpuDispatchPoolTest, WorkerCancelsUnusedTicketsWhileCallerAndPeerAreGated) 
 TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependently) {
   DispatchPoolFixture first(/*cu_count=*/2), second(/*cu_count=*/2);
   auto *first_gate = gate_fixture(first);
+  ASSERT_NE(first_gate, nullptr);
   auto *second_gate = gate_fixture(second);
+  ASSERT_NE(second_gate, nullptr);
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   std::array<amdgpu::FunctionalQuantumResult, 2> first_results{}, second_results{};
   auto first_run = std::async(std::launch::async,
@@ -298,6 +302,7 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
 TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
   DispatchPoolFixture failing(/*cu_count=*/3), succeeding(/*cu_count=*/4);
   auto *gate = gate_fixture(failing);
+  ASSERT_NE(gate, nullptr);
   auto throwing = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(throwing->add(std::make_unique<test::ThrowingInstructionPlugin>()));
   failing.cus[0]->set_plugin_group(throwing);
@@ -331,6 +336,7 @@ TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
   for (uint32_t width : {1u, 2u}) {
     DispatchPoolFixture fixture(/*cu_count=*/8);
     auto *gate = gate_fixture(fixture);
+    ASSERT_NE(gate, nullptr);
     auto run = std::async(std::launch::async, [&] { pool.run(fixture.tasks, /*threads=*/width); });
     EXPECT_TRUE(gate->wait_for_entries(width));
     // All entered CUs remain blocked. Extra entries would require exceeding the
@@ -498,6 +504,7 @@ TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
 TEST(CpuDispatchPoolTest, SubmittingThreadRunsOnlyItsOwnSubmission) {
   DispatchPoolFixture foreign(/*cu_count=*/3), own(/*cu_count=*/1);
   auto *gate = gate_fixture(foreign);
+  ASSERT_NE(gate, nullptr);
   amdgpu::CpuDispatchPool pool(/*threads=*/2);
   auto foreign_run = std::async(std::launch::async, [&] { pool.run(foreign.tasks, 2); });
   // Occupy the worker and foreign caller while one foreign CU remains pending.
