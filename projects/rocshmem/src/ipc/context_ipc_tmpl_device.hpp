@@ -220,7 +220,7 @@ __device__ void IPCContext::internal_direct_allreduce_wave(
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
 
-  int tid = get_flat_block_id();
+  int tid = get_flat_block_id() % WF_SIZE;
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
   int wf_tid = tid % WF_SIZE;
 
@@ -932,7 +932,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts_wg(rocshmem_team_t team,
   size_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = min(get_flat_block_size(), WF_SIZE);
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
