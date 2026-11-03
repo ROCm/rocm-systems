@@ -104,8 +104,10 @@ skillscope does. The AMD skills repo copies only the skill directory, so
 `evals/samples/` holds copies of the samples from `sample/`. Each copy and its
 original name each other in a header comment; change them together.
 
-`evals/machine.yml` asks the AMD skills repo to run the behavioral cases on an
-Instinct GPU runner.
+`evals/machine.yml` tells the AMD skills repo where to run the behavioral
+cases. Every skill asks for Linux. Only a skill whose cases need an Instinct GPU
+also asks for one; the others run on that repo's default GPU runners, which
+cost less.
 
 ## Keeping skills correct
 
