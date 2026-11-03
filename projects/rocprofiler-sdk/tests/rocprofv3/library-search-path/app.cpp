@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: MIT
 
-#include <stdio.h>
+extern "C" void
+print_library_origin();
 
-void
-print_library_origin(void)
+int
+main()
 {
-    puts("from " LIBRARY_LOCATION);
+    print_library_origin();
+    return 0;
 }

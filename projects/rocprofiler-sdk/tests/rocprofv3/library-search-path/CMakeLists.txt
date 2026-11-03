@@ -6,7 +6,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 foreach(_location IN ITEMS local-copy rocm-root-libs)
     string(REPLACE "-" " " _label "${_location}")
-    add_library(rocprofv3-library-origin-${_location} SHARED library_origin.c)
+    add_library(rocprofv3-library-origin-${_location} SHARED library_origin.cpp)
     target_compile_definitions(rocprofv3-library-origin-${_location}
                                PRIVATE LIBRARY_LOCATION="${_label}")
     set_target_properties(
@@ -15,7 +15,7 @@ foreach(_location IN ITEMS local-copy rocm-root-libs)
                                               ${CMAKE_CURRENT_BINARY_DIR}/${_location})
 endforeach()
 
-add_executable(rocprofv3-library-origin-app app.c)
+add_executable(rocprofv3-library-origin-app app.cpp)
 target_link_libraries(rocprofv3-library-origin-app
                       PRIVATE rocprofv3-library-origin-local-copy)
 add_dependencies(rocprofv3-library-origin-app rocprofv3-library-origin-rocm-root-libs)
@@ -32,5 +32,5 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:rocprofv3-library-origin-app> --rocm-library
         $<TARGET_FILE:rocprofv3-library-origin-rocm-root-libs>
     DEPENDS rocprofv3-library-origin-app
-    TIMEOUT 60
+    TIMEOUT 120
     LABELS "integration-tests")

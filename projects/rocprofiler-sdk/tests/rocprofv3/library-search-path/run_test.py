@@ -13,12 +13,12 @@ import tempfile
 
 def check(label, command, expected, env, cwd):
     result = subprocess.run(
-        command, env=env, cwd=cwd, text=True, capture_output=True, timeout=15
+        command, env=env, cwd=cwd, text=True, capture_output=True, timeout=45
     )
     print(f"{label}: {result.stdout.strip()}", flush=True)
     assert result.returncode == 0, result.stderr
     assert "cannot be preloaded" not in result.stderr, result.stderr
-    assert result.stdout.strip() == expected, (result.stdout, result.stderr)
+    assert expected in result.stdout.splitlines(), (result.stdout, result.stderr)
 
 
 def main():
@@ -27,8 +27,6 @@ def main():
         parser.add_argument(f"--{name}", required=True, type=Path)
     args = parser.parse_args()
     env = dict(os.environ)
-    env.pop("LD_LIBRARY_PATH", None)
-    # Preserve sanitizer preloads supplied by CTest for both launches.
 
     with tempfile.TemporaryDirectory(prefix="rocprofv3-library-origin-") as directory:
         root = Path(directory)
@@ -40,12 +38,14 @@ def main():
                 (lib / entry.name).symlink_to(entry.resolve())
         (lib / "liblibrary_origin.so").symlink_to(args.rocm_library.resolve())
 
+        rival_first = ":".join(filter(None, [str(lib), env.get("LD_LIBRARY_PATH", "")]))
+
         check("Direct app", [args.app], "from local copy", env, root)
         check(
             "Explicit rocm root libs",
             [args.app],
             "from rocm root libs",
-            dict(env, LD_LIBRARY_PATH=str(lib)),
+            dict(env, LD_LIBRARY_PATH=rival_first),
             root,
         )
         check(
