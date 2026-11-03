@@ -143,15 +143,6 @@ uint64_t load_contents64(const uint8_t* buf, size_t size, size_t nibble_pos)
 
 #    define GFX12_SCAN_TARGET __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2")))
 
-// Key (8 bits starting at in-chunk nibble `pos`). The caller guarantees two
-// readable bytes at chunk + (pos >> 1).
-inline uint8_t load_key_unchecked(const uint8_t* chunk, unsigned pos)
-{
-    uint16_t window;
-    std::memcpy(&window, chunk + (pos >> 1), sizeof(window));
-    return static_cast<uint8_t>(window >> ((pos & 1u) * 4u));
-}
-
 // 64-bit contents starting at in-chunk nibble `pos`. The caller guarantees
 // nine readable bytes at chunk + (pos >> 1).
 inline uint64_t load_contents64_unchecked(const uint8_t* chunk, unsigned pos)
