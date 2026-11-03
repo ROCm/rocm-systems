@@ -58,6 +58,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * `--pc-sampling-rows` now sets the number of kernels shown.
   * Per-instruction counts are in the per-kernel ISA CSV files.
 
+* `--list-metrics` no longer takes a GPU architecture. It lists the blocks of the current GPU, or the metrics of the blocks and metrics you name, for example `rocprof-compute --list-metrics sol`. Use `--list-metrics-gfx-id <arch>` to list another GPU.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -103,6 +105,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
 
 ### Upcoming changes
+
+* `--list-blocks` and `--list-available-metrics` will be removed in a future release.
 
 ### Known issues
 

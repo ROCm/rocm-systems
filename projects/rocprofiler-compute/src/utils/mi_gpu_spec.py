@@ -2,7 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from utils.logger import console_debug, console_error, console_warning
 from vendored import yaml
@@ -49,21 +49,21 @@ def roofline_column(data_type: str, unit: str) -> str:
 class MIGPUSpecs:
     _instance: Optional["MIGPUSpecs"] = None
 
-    _gpu_series_dict: dict[str, str] = {}  # key: gpu_arch
-    _gpu_model_dict: dict[str, list[str]] = {}  # key: gpu_arch
-    _num_xcds_dict: dict[str, dict[str, int]] = {}  # key: gpu_model
-    _chip_id_dict: dict[int, str] = {}  # key: chip_id (int)
-    _perfmon_config: dict[str, Any] = {}  # key: gpu_arch
+    _gpu_series_dict: Dict[str, str] = {}  # key: gpu_arch
+    _gpu_model_dict: Dict[str, List[str]] = {}  # key: gpu_arch
+    _num_xcds_dict: Dict[str, Dict[str, int]] = {}  # key: gpu_model
+    _chip_id_dict: Dict[int, str] = {}  # key: chip_id (int)
+    _perfmon_config: Dict[str, Any] = {}  # key: gpu_arch
 
     # key: gpu_model, identifies die specs, and allows for reverse search of gpu arch
     # and gpu series by model identifier
-    _gpu_design: dict[str, dict[str, int]] = {}
+    _gpu_design: Dict[str, Dict[str, int]] = {}
 
     # key: gpu_arch, used for gpu archs containing only one gpu model and
     # thus one compute partition
-    _gpu_arch_to_compute_partition_dict: dict[str, dict[str, int]] = {}
+    _gpu_arch_to_compute_partition_dict: Dict[str, Dict[str, int]] = {}
 
-    _all_gpu_models: list[str] = []
+    _all_gpu_models: List[str] = []
 
     # key: gpu_arch, the arch's roofline block; only archs with a roofline benchmark
     _roofline: Dict[str, Dict[str, Any]] = {}
@@ -89,7 +89,7 @@ class MIGPUSpecs:
     # ----------------------------
 
     @classmethod
-    def _load_yaml(cls, file_path: str) -> dict[str, Any]:
+    def _load_yaml(cls, file_path: str) -> Dict[str, Any]:
         """
         Loads MI GPU YAML data /util into a Python dictionary.
 
@@ -208,7 +208,7 @@ class MIGPUSpecs:
                     )
 
     @classmethod
-    def get_gpu_series_dict(cls) -> dict[str, str]:
+    def get_gpu_series_dict(cls) -> Dict[str, str]:
         if not cls._gpu_series_dict:
             console_error(
                 "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?",
@@ -235,7 +235,7 @@ class MIGPUSpecs:
         return None
 
     @classmethod
-    def get_perfmon_config(cls, gpu_arch: str) -> dict[Any, Any]:
+    def get_perfmon_config(cls, gpu_arch: str) -> Dict[Any, Any]:
         # Check that gpu_model_dict is populated first
         if not cls._perfmon_config:
             console_error(
@@ -427,18 +427,18 @@ class MIGPUSpecs:
         )
 
     @classmethod
-    def get_memory_levels(cls, gpu_model: str) -> list[str]:
+    def get_memory_levels(cls, gpu_model: str) -> List[str]:
         """
         Return a list of the cache and memory levels supported by the specific gpu model
         """
         return cls._gpu_design.get(gpu_model.lower(), {}).get("memory_levels", [])
 
     @classmethod
-    def get_chip_id_dict(cls) -> dict[int, str]:
+    def get_chip_id_dict(cls) -> Dict[int, str]:
         return cls._chip_id_dict
 
     @classmethod
-    def get_num_xcds_dict(cls) -> dict[str, dict[str, int]]:
+    def get_num_xcds_dict(cls) -> Dict[str, Dict[str, int]]:
         return cls._num_xcds_dict
 
     @classmethod

@@ -29,6 +29,7 @@ from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
+    format_table_id,
     normalize_filter_to_str_list,
 )
 from utils.utils_counter_defs import metric_expressions, metric_value_keys
@@ -198,7 +199,7 @@ def _build_metric_table_df(
     data_config, dropping rows the active filter excludes.
     """
     table_id = data_config["id"]
-    table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
+    table_data_source_idx = format_table_id(table_id)
     is_simple_box = data_config.get("cli_style") == "simple_box"
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
