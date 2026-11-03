@@ -189,6 +189,8 @@ public:
   virtual ~QueueBindingFactory() = default;
 
   /// @brief Create a fully attached binding or leave no processor state behind.
+  /// @details If creation throws before returning a binding, the factory must
+  /// roll back any processor state it created before propagating the exception.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -223,8 +225,8 @@ public:
 
   /// @brief Register a queue; allocation and factory exceptions propagate.
   /// @details Registry-owned state and any returned binding are released before
-  /// exceptions propagate. A factory must roll back its own state if it throws
-  /// before returning a binding.
+  /// exceptions propagate. The binding is destroyed before its VM retention is
+  /// released, so binding cleanup can still access the VM.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);

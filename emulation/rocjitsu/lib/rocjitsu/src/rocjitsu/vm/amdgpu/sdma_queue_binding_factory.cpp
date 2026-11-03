@@ -17,6 +17,10 @@ public:
   SdmaQueueBinding(SdmaQueueScheduler &scheduler, SdmaQueueScheduler::Handle handle)
       : scheduler_(scheduler), handle_(handle) {}
 
+  SdmaQueueBinding(const SdmaQueueBinding &) = delete;
+  SdmaQueueBinding &operator=(const SdmaQueueBinding &) = delete;
+  SdmaQueueBinding &operator=(SdmaQueueBinding &&) = delete;
+
   SdmaQueueBinding(SdmaQueueBinding &&other) noexcept
       : scheduler_(other.scheduler_), handle_(std::exchange(other.handle_, {})) {}
 

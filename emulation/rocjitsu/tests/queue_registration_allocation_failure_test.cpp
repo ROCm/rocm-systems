@@ -59,6 +59,7 @@ void *operator new(std::size_t size) {
   }
 }
 
+// Keep free out of new/delete callers to avoid GCC's mismatched-new-delete warning.
 RJ_NOINLINE void operator delete(void *memory) noexcept { std::free(memory); }
 RJ_NOINLINE void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 void *operator new(std::size_t size, const std::nothrow_t &) noexcept {

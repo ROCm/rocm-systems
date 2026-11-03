@@ -1158,7 +1158,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             Threads::Threads
             GTest::gtest_main
     )
-    rj_configure_target(queue_registration_allocation_failure_test TEST)
+    rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
     # Exercise the model ISA contract in a decoder-only final link.
