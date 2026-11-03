@@ -424,7 +424,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
 
   int tid = get_flat_block_id();
   // min(get_flat_block_size(), WF_SIZE)
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -439,12 +439,12 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
@@ -505,8 +505,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  // Use lane ID within the wave so any wave in a multi-wave WG works correctly.
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -522,12 +521,12 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_wave()) {
@@ -620,8 +619,7 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   int my_pe_in_team = team_obj->my_pe;
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
-  // Use lane ID within the wave so any wave in a multi-wave WG works correctly.
-  int tid = get_flat_block_id() % WF_SIZE;
+  int tid = get_flat_block_id();
   int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
 
   // Have each PE put their designated data to the other PEs
@@ -637,12 +635,12 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wave(rocshmem_team_t 
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_wave()) {
@@ -662,7 +660,7 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
   uint64_t alltoall_pSync_offset = (team_obj->alltoall_sequence_number % 2) * pe_size;
 
   int tid = get_flat_block_id();
-  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  int step_size = get_flat_block_size();
 
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
@@ -677,12 +675,12 @@ __device__ void GDAContext::fcollectmem_linear_thread_puts_wg(rocshmem_team_t te
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    long *sync_flags = &pSync[alltoall_pSync_offset + j];
     while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
-    pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
+    pSync[alltoall_pSync_offset + j] = ROCSHMEM_SYNC_VALUE;
   }
 
   if (is_thread_zero_in_block()) {
