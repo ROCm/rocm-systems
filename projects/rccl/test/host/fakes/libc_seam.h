@@ -26,13 +26,22 @@
 // is usually part of what the unit is being tested for, and faking them would
 // assert the test's model of libc rather than the unit's use of it.
 //
+// malloc/calloc/free are seamed so a unit's out-of-memory arm is reachable on
+// demand; their defaults call real libc, so installing the seam without driving
+// it changes nothing. free() is seamed too so a test can assert the failing
+// path released what it had already taken.
+//
 // fprintf is seamed but not swappable per test: it always forwards to the real vfprintf so stderr output still
 // happens, and only records the call count and the FILE* argument, never the formatted text.
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
+#include <dirent.h>
+#include <pthread.h>
+#include <time.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -61,9 +70,24 @@ size_t micro_fwrite(const void*, size_t, size_t, FILE*);
 int micro_fflush(FILE*);
 void micro_perror(const char*);
 void micro_exit(int) __attribute__((noreturn));
+void* micro_malloc(size_t);
+void* micro_calloc(size_t, size_t);
+void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_open(const char*, int, ...);
+FILE* micro_fopen(const char*, const char*);
+DIR* micro_opendir(const char*);
+struct dirent* micro_readdir(DIR*);
+int micro_closedir(DIR*);
+ssize_t micro_readlink(const char*, char*, size_t);
+int micro_ioctl(int, unsigned long, ...);
+int micro_atexit(void (*)(void));
+int micro_clock_gettime(clockid_t, struct timespec*);
+int micro_posix_memalign(void**, size_t, size_t);
+int micro_pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+int micro_nanosleep(const struct timespec*, struct timespec*);
 }  // extern "C"
 
 #define write micro_write
@@ -86,6 +110,21 @@ int micro_access(const char*, int);
 #define fflush micro_fflush
 #define perror micro_perror
 #define exit micro_exit
+#define malloc micro_malloc
+#define calloc micro_calloc
+#define free micro_free
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define open micro_open
+#define fopen micro_fopen
+#define opendir micro_opendir
+#define readdir micro_readdir
+#define closedir micro_closedir
+#define readlink micro_readlink
+#define ioctl micro_ioctl
+#define atexit micro_atexit
+#define clock_gettime micro_clock_gettime
+#define posix_memalign micro_posix_memalign
+#define pthread_create micro_pthread_create
+#define nanosleep micro_nanosleep

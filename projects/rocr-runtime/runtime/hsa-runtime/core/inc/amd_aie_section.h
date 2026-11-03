@@ -117,13 +117,13 @@ struct AieKernelDescriptor {
   /// checked it is at least 1 and no more than the agent has; dispatch sizes the hardware context
   /// to the most any kernel in it declares.
   uint32_t num_cols;
-  /// @brief Control code with the PDI addresses already in place, in host memory. FullElf only;
-  /// empty for PdiInsts.
+  /// @brief Control code with the PDI and external variable addresses already in place, in host
+  /// memory. FullElf only; empty for PdiInsts.
   ///
-  /// The loader writes each PDI's device address into its sites at load; the argument sites keep
-  /// what the ELF shipped, since their patches are additive. The NPU never fetches this. It is
-  /// only a memcpy source for the per-dispatch buffer the driver allocates, so it needs neither
-  /// device memory nor alignment.
+  /// The loader writes each PDI's and external variable's device address into its sites at load;
+  /// the argument sites keep what the ELF shipped, since their patches are additive. The NPU never
+  /// fetches this. It is only a memcpy source for the per-dispatch buffer the driver allocates, so
+  /// it needs neither device memory nor alignment.
   std::vector<uint8_t> ctrl_code;
   /// @brief XDNA BO handles of the PDIs the control code loads, each placed once. FullElf only;
   /// empty otherwise.
@@ -137,6 +137,18 @@ struct AieKernelDescriptor {
   /// because a flat layout needs a separate index that could disagree with the sites and would
   /// have to be re-validated on every dispatch.
   std::vector<std::vector<aie_elf::PatchSite>> arg_sites;
+  /// @brief An application-defined variable the control code reaches by address; FullElf only.
+  struct ExternalVariable {
+    /// @brief Host address the application defined the variable at.
+    void* va;
+    /// @brief Bytes the control code reads from it.
+    uint32_t size;
+    /// @brief XDNA BO handle of the allocation holding it.
+    uint32_t bo_handle;
+  };
+  /// @brief Variables the control code reaches only through the addresses the loader wrote into
+  /// it. Each dispatch lists their BOs and flushes them from the CPU cache.
+  std::vector<ExternalVariable> external_variables;
 };
 
 /// @brief Current AieKernelDescriptor::version value.

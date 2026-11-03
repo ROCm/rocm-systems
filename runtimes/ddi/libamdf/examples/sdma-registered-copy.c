@@ -155,7 +155,7 @@ static int check_pair(struct workload *w, struct buffer *buffer,
   INIT(host, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   INIT(device, AMDF_STRUCTURE_TYPE_MEMORY_SITE);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
-  host.value.host_mapping = buffer->mapping;
+  host.value.host.mapping = buffer->mapping;
   device.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
   device.value.device.memory = buffer->memory;
   device.value.device.queue_family_ordinal = w->family;
@@ -230,7 +230,7 @@ static int register_buffer(struct workload *w, struct buffer *buffer,
   create.registered_host_cacheability =
       profile.registration.registered_host_cacheability;
   create.accesses = &access;
-  CALL(w->api->memory_create(w->scope, &create, &buffer->memory));
+  CALL(w->api->memory_create(w->scope, &create, &buffer->memory, NULL));
 
   amdf_memory_info_t info;
   INIT(info, AMDF_STRUCTURE_TYPE_MEMORY_INFO);
@@ -436,7 +436,7 @@ static int release_buffer(struct workload *w, struct buffer *buffer) {
     buffer->mapping = NULL;
   }
   if (buffer->memory != NULL) {
-    CALL(w->api->memory_destroy(buffer->memory));
+    CALL(w->api->memory_destroy(buffer->memory, NULL));
     buffer->memory = NULL;
   }
   if (buffer->allocation != NULL) {

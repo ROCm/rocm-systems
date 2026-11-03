@@ -52,13 +52,6 @@ struct ncclStrongStream;
 struct ncclTopoGraph;
 
 ncclResult_t commSetUnrollFactor(struct ncclComm* comm) { ::abort(); }
-// This fake does NOT allocate ring->userRanks/rankToIndex like the real initChannel; callers must supply storage.
-ncclResult_t g_initChannelResult = ncclSuccess;
-int g_initChannelLastId = -1;
-ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
-  g_initChannelLastId = channelid;
-  return g_initChannelResult;
-}
 
 // Controllable (was hardcoded success). This is commFree's FIRST NCCLCHECK, so it doubles as the
 // "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
@@ -82,11 +75,22 @@ ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
-bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
+bool g_devrIsOneLsaTeamValue = true;
+bool ncclDevrIsOneLsaTeam(struct ncclComm*) { return g_devrIsOneLsaTeamValue; }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t g_ncclGinFinalizeResult = ncclSuccess;
+int g_ncclGinFinalizeCalls = 0;
+ncclResult_t ncclGinFinalize(struct ncclComm* comm) {
+  g_ncclGinFinalizeCalls++;
+  return g_ncclGinFinalizeResult;
+}
+ncclResult_t g_ncclGinHostFinalizeResult = ncclSuccess;
+int g_ncclGinHostFinalizeCalls = 0;
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
+  g_ncclGinHostFinalizeCalls++;
+  return g_ncclGinHostFinalizeResult;
+}
 ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
@@ -132,7 +136,19 @@ uint8_t ncclProfilerDeviceMode(int eActivationMask) {
   return mode;
 }
 bool ncclProfilerProxyDiagEnabled(void) { return false; }
-void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
+ncclResult_t ncclProfilerStartSendProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartRecvProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopProxyStepEvent(int, struct ncclProxyArgs*, int) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopProxyOpEvent(int, struct ncclProxyArgs*) { return ncclSuccess; }
+ncclResult_t ncclProfilerRecordProxyOpEventState(int, struct ncclProxyArgs*, ncclProfilerEventState_t) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerRecordProxyStepEventState(int, struct ncclProxyArgs*, int, ncclProfilerEventState_t) {
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerRecordProxyDiagState(int, struct ncclProxyArgs*, uint8_t, int64_t, int64_t, uint16_t) {
+  return ncclSuccess;
+}
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
@@ -143,7 +159,12 @@ ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaCeInit(struct ncclComm* comm) { return ncclSuccess; }
 bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t g_ncclRmaProxyFinalizeResult = ncclSuccess;
+int g_ncclRmaProxyFinalizeCalls = 0;
+ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) {
+  g_ncclRmaProxyFinalizeCalls++;
+  return g_ncclRmaProxyFinalizeResult;
+}
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
 // ncclSymkFinalize: fakes/sym_kernels_fakes.cc, alongside the rest of src/sym_kernels.cc's fakes.
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
@@ -166,7 +187,6 @@ ncclResult_t ncclTunerPluginUnload(struct ncclComm* comm) {
 // rcclGetTuningIndexForArch (src/graph/tuning.cc): tuning_fakes.cc.
 // rcclUseAinic (src/transport/net.cc): transport_stubs.cc.
 
-ncclResult_t freeChannel(struct ncclChannel*, int, int, int, struct ncclComm*) { return ncclSuccess; }
 static ncclResult_t DefaultNcclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
                                            void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*),
                                            struct ncclComm*) {
@@ -182,10 +202,6 @@ ncclResult_t ncclAsyncLaunch(struct ncclAsyncJob* job, ncclResult_t (*func)(stru
                              void (*undo)(struct ncclAsyncJob*), void (*destructor)(void*), struct ncclComm* comm) {
   return g_ncclAsyncLaunch(job, func, undo, destructor, comm);
 }
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                                 struct ncclComm*) {
-  return ncclSuccess;
-}
 ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport) {
   if (gpuCftSupport) *gpuCftSupport = 0;
   return ncclSuccess;
@@ -199,7 +215,6 @@ int64_t ncclParamGraphStreamOrdering() {
   return g_loadParam("GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 }
 #endif
-int64_t rcclParamPxnOptQpUsage() { ::abort(); }  // src/channel.cc:14
 static ncclResult_t DefaultCollTraceDestroy(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy = DefaultCollTraceDestroy;
 namespace latency_profiler {
@@ -268,10 +283,14 @@ void ResetNcclStubs() {
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
-  g_initChannelResult = ncclSuccess;
-  g_initChannelLastId = -1;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
+  g_ncclGinFinalizeResult = ncclSuccess;
+  g_ncclGinFinalizeCalls = 0;
+  g_ncclGinHostFinalizeResult = ncclSuccess;
+  g_ncclGinHostFinalizeCalls = 0;
+  g_ncclRmaProxyFinalizeResult = ncclSuccess;
+  g_ncclRmaProxyFinalizeCalls = 0;
   g_ncclMnnvlCheckResult = ncclSuccess;
   g_ncclMnnvlCheckCalls = 0;
   g_ncclTunerPluginUnloadLastComm = nullptr;

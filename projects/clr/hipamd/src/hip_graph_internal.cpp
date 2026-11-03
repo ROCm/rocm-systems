@@ -669,7 +669,12 @@ void GraphExecSegmented::BuildSyncPlan() {
     const bool completion_signal_needed = (hw_slot >= 0);
 
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured && completion_signal_needed) {
+    // A segment whose trailing nodes emit no packets at all (e.g. a leaf segment
+    // holding only an empty node) has nothing to carry the signal, so it needs a
+    // standalone barrier just like an uncaptured trailing node. Without this the
+    // slot allocated in PASS 1 is never signalled and the leaf sync in
+    // EnqueueSegmentedGraph waits on it forever.
+    if (completion_signal_needed && (last_node_uncaptured || lastBatch.dispatchPackets.empty())) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -680,7 +685,7 @@ void GraphExecSegmented::BuildSyncPlan() {
       sync_plan_.patch_list.push_back(
           {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
-    } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
+    } else if (completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
@@ -2714,7 +2719,8 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   if (sync_plan_.num_hw_events > 0) {
     const bool ok = recycle
         ? signalManager_->AcquireSet(device, sync_plan_.num_hw_events, segment_hw_events)
-        : device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events);
+        : device->CreateHwEvents(sync_plan_.num_hw_events, /*batched=*/false,
+                                 segment_hw_events);
     if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
@@ -3477,15 +3483,7 @@ GraphSignalManager::~GraphSignalManager() {
   for (auto& dev_pool : free_sets_) {
     amd::Device* device = dev_pool.first;
     for (auto& set : dev_pool.second) {
-      // Pooled signals rest armed (value 1); mark them idle before destroy so
-      // ~ProfilingSignal does not block waiting on an armed-but-idle signal.
-      device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
-          // Pair with CreateHwEvents() so non-ROCm devices can hook teardown.
-          device->DestroyHwEvent(sig);
-        }
-      }
+      device->ReturnHwEvents(set);
     }
   }
   free_sets_.clear();
@@ -3500,16 +3498,11 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
 
   // BuildSyncPlan is re-runnable, so Prepopulate may be called more than once.
   // If a prior run sized the sets for a different segment count, those sets are
-  // unusable -- destroy and rebuild. No launches are in flight at (re)instantiate
+  // unusable -- return them and rebuild. No launches are in flight at (re)instantiate
   // time, so every set for this device is present in the free pool here.
   if (!pool.empty() && static_cast<int>(pool.back().size()) != count) {
     for (auto& set : pool) {
-      device->QuiesceHwEvents(set);
-      for (void* sig : set) {
-        if (sig != nullptr) {
-          device->DestroyHwEvent(sig);
-        }
-      }
+      device->ReturnHwEvents(set);
     }
     pool.clear();
   }
@@ -3518,7 +3511,7 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
   // would grow the pool without bound across re-instantiations.
   for (int i = static_cast<int>(pool.size()); i < num_sets; ++i) {
     std::vector<void*> set;
-    if (!device->CreateHwEvents(count, set)) {
+    if (!device->AcquireHwEvents(count, set)) {
       return false;
     }
     pool.push_back(std::move(set));
@@ -3544,9 +3537,9 @@ bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
     }
   }
 
-  // Fallback only: more launches in flight than pre-created sets. Create one
-  // (armed to 1 by CreateHwEvents); it joins the pool when released.
-  return device->CreateHwEvents(count, out_set);
+  // Fallback only: more launches in flight than pre-created sets. Take another
+  // armed set from the device; it joins this pool when released.
+  return device->AcquireHwEvents(count, out_set);
 }
 
 void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set) {

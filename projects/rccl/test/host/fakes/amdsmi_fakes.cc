@@ -7,6 +7,15 @@
 // Implementation of the src/misc/amdsmi_wrap.cc fakes. See amdsmi_fakes.h.
 
 #include "amdsmi_fakes.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetDeviceIndexByPciBusId, amd_smi_getDeviceIndexByPciBusId);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFabricDeviceInfo,      amd_smi_getFabricDeviceInfo);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetNumDevice,             amd_smi_getNumDevice);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetDevicePciBusIdString,  amd_smi_getDevicePciBusIdString);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetLinkInfo,              amd_smi_getLinkInfo);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiFabricTelemetryAcquire,   amd_smi_fabricTelemetryAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiFabricTelemetryRelease,   amd_smi_fabricTelemetryRelease);
 
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
@@ -28,7 +37,31 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 }
 
 ncclResult_t g_amdSmiInitResult = ncclSuccess;
-ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
+int g_amdSmiInitCalls = 0;
+ncclResult_t amd_smi_init() {
+  g_amdSmiInitCalls++;
+  return g_amdSmiInitResult;
+}
+
+static ncclResult_t DefaultAmdSmiGetNumDevice(uint32_t* numDevs) {
+  *numDevs = 0;
+  return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t*)> g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
+ncclResult_t amd_smi_getNumDevice(uint32_t* numDevs) { return g_amdSmiGetNumDevice(numDevs); }
+
+static ncclResult_t DefaultAmdSmiGetDevicePciBusIdString(uint32_t, char*, size_t) { return ncclInternalError; }
+std::function<ncclResult_t(uint32_t, char*, size_t)> g_amdSmiGetDevicePciBusIdString =
+    DefaultAmdSmiGetDevicePciBusIdString;
+ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* pciBusId, size_t len) {
+  return g_amdSmiGetDevicePciBusIdString(deviceIndex, pciBusId, len);
+}
+
+static ncclResult_t DefaultAmdSmiGetLinkInfo(int, int, amdsmi_link_type_t*, int*, int*) { return ncclInternalError; }
+std::function<ncclResult_t(int, int, amdsmi_link_type_t*, int*, int*)> g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
+ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* type, int* hops, int* count) {
+  return g_amdSmiGetLinkInfo(srcDev, dstDev, type, hops, count);
+}
 
 ncclResult_t DefaultAmdSmiFabricTelemetryAcquire(uint32_t, uint64_t, int, bool* acquired) {
   if (acquired) *acquired = false;  // telemetry is opt-in and off by default
@@ -50,6 +83,10 @@ void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_amdSmiInitResult = ncclSuccess;
+  g_amdSmiInitCalls = 0;
+  g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
+  g_amdSmiGetDevicePciBusIdString = DefaultAmdSmiGetDevicePciBusIdString;
+  g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
   g_amdSmiFabricTelemetryAcquire = DefaultAmdSmiFabricTelemetryAcquire;
   g_amdSmiFabricTelemetryRelease = DefaultAmdSmiFabricTelemetryRelease;
 }

@@ -80,9 +80,8 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN5  ? AMD_ZEN5_BW :
-          cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN34 ? AMD_ZEN34_BW :
-                                                            AMD_ZEN12_BW;
+    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
+    *bw = AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_YONGFENG ? YONGFENG_ZPI_BW : ZPI_BW;
@@ -125,6 +124,7 @@ ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNo
     n->cpu.arch = NCCL_TOPO_UNDEF;
     n->cpu.vendor = NCCL_TOPO_UNDEF;
     n->cpu.model = NCCL_TOPO_UNDEF;
+    n->cpu.rome = 0;
   } else if (type == NET) {
     n->net.vendor = UINT64_MAX;
     n->net.device = UINT64_MAX;
@@ -735,15 +735,8 @@ static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXml
     NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpudeviceNode->dev.gdrSupport));
     NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, parent, LINK_PCI, bw));
     NCCLCHECK(ncclTopoConnectNodes(parent, gpudeviceNode, LINK_PCI, bw));
-    // add the local link with the existing uGPUs.
-    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
-    int nSibDevs = 0;
-    NCCLCHECK(ncclTopoGetDevNodes(system, gpudeviceNode->id, sibDevs, &nSibDevs));
-    for (int s = 0; s < nSibDevs; s++) {
-      if (sibDevs[s] == gpudeviceNode) continue;
-      NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, sibDevs[s], LINK_LOC, MLOPART_LOC_BW));
-      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], gpudeviceNode, LINK_LOC, MLOPART_LOC_BW));
-    }
+    // Sibling partitions of this device are linked once the XGMI pass has run, see
+    // ncclTopoConnectMloPartSiblings().
   }
 
   struct ncclTopoNode* gpuNode = NULL;
@@ -840,6 +833,12 @@ struct kvDict kvDictCpuVendor[] = {{"GenuineIntel", NCCL_TOPO_CPU_VENDOR_INTEL},
                                    {"  Shanghai  ", NCCL_TOPO_CPU_VENDOR_ZHAOXIN},
                                    {NULL, 0}};
 
+// RCCL: Rome class is family 17h model >= 0x31, or all of 19h; also accepts the old file encoding (0x8F/0xAF).
+static bool rcclAmdCpuIsRome(int familyId, int modelId) {
+  if (familyId == 0x17 || familyId == 0x8F) return modelId >= 0x31;
+  return familyId == 0x19 || familyId == 0xAF;
+}
+
 ncclResult_t ncclGetSystemId(struct ncclTopoSystem* system, struct ncclXmlNode* xmlCpu, int* systemIdPtr) {
   const char* hostHashStr;
   NCCLCHECK(xmlGetAttr(xmlCpu, "host_hash", &hostHashStr));
@@ -907,9 +906,7 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
       int familyId, modelId;
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "familyid", &familyId));
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "modelid", &modelId));
-      // Treat "Milan" also as "Rome"
-      cpu->cpu.model = ((familyId == 143 && modelId >= 49) || familyId == 175) ? NCCL_TOPO_CPU_MODEL_AMD_ROME :
-                                                                                 NCCL_TOPO_CPU_MODEL_AMD_ZEN;
+      cpu->cpu.rome = rcclAmdCpuIsRome(familyId, modelId);
     }
   }
   for (int s = 0; s < xmlCpu->nSubs; s++) {
@@ -1205,6 +1202,54 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
   return ncclSuccess;
 }
 
+// Rate one direction of a sibling hop at the on-package bw, whether or not the XGMI pass already
+// built it. ncclTopoConnectNodes() accumulates onto an existing link of the same type, so the
+// reported case has to be re-rated in place rather than topped up.
+static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, struct ncclTopoNode* sibDev, float bw) {
+  for (int l = 0; l < dev->nlinks; l++) {
+    // No fixture can reach the LINK_NVL test: XGMI is the only link type any pass puts between two
+    // DEV nodes, so the remNode test already excludes everything else a DEV carries (LINK_PCI to its
+    // bridge, LINK_LOC to its GPU nodes, LINK_C2C to a CPU or C2C bridge). It stays because it picks
+    // which link gets re-rated -- a later DEV-to-DEV link of another type would otherwise take the
+    // on-package bw and leave the pair with no XGMI link, since the fallback below would not run.
+    if (dev->links[l].remNode != sibDev || dev->links[l].type != LINK_NVL) continue;
+    dev->links[l].bw = bw;
+    return ncclSuccess;
+  }
+  INFO(NCCL_GRAPH, "No XGMI link reported from MLOPart sibling %lx to %lx, assuming %.1f GB/s", dev->id, sibDev->id,
+       bw);
+  NCCLCHECK(ncclTopoConnectNodes(dev, sibDev, LINK_NVL, bw));
+  return ncclSuccess;
+}
+
+// Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
+// the on-package fabric, which sysfs reports as XGMI between the partitions' PCI functions, so
+// ncclTopoAddXGMI() has normally already linked their DEV nodes. Cover the case where a platform
+// does not report those links: without a link the partitions are unreachable. The hop is XGMI,
+// not LINK_LOC -- PATH_LOC outranks PATH_NVL in the path search, so a LINK_LOC here would shadow
+// the real XGMI links and hide the peer from everything keyed on PATH_NVL (P2P channel counts,
+// XGMI topology classification), leaving it with the PCIe fallbacks.
+//
+// Rate every sibling hop at MLOPART_LOC_BW rather than at the width sysfs reports for the pair.
+// The on-package fabric is far wider than the inter-device XGMI link whose width that report
+// carries, and the search treats link bw as a budget: ncclTopoSearch's followPath() subtracts
+// bwIntra from every link it lays a channel over. Rating a sibling hop at one XGMI width lets a
+// partitioned node exhaust it, which walks the balanced-tree search down the whole speed array.
+static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system) {
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
+    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
+    int nSibDevs = 0;
+    NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
+    for (int s = 0; s < nSibDevs; s++) {
+      if (sibDevs[s] == dev) continue;
+      NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], MLOPART_LOC_BW));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, MLOPART_LOC_BW));
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem,
                                       const uint64_t localHostHash) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
@@ -1236,6 +1281,7 @@ ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem
 #endif
   NCCLCHECK(ncclTopoAddC2c(topNode, *topoSystem, NULL, 0));
   NCCLCHECK(ncclTopoAddPciLinks(topNode, *topoSystem, NULL, 0));
+  NCCLCHECK(ncclTopoConnectMloPartSiblings(*topoSystem));
 
   NCCLCHECK(ncclTopoFlattenBcmSwitches(*topoSystem));
   NCCLCHECK(ncclTopoConnectCpus(*topoSystem));
@@ -2648,6 +2694,11 @@ ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vend
   *vendor = system->nodes[CPU].nodes[0].cpu.vendor;
   *model = system->nodes[CPU].nodes[0].cpu.model;
   return ncclSuccess;
+}
+
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system) {
+  const struct ncclTopoNode* cpu = system->nodes[CPU].nodes;
+  return cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD && cpu->cpu.rome;
 }
 
 NCCL_PARAM(IgnoreCpuAffinity, "IGNORE_CPU_AFFINITY", 0);

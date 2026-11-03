@@ -2349,7 +2349,8 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt/--node-balancing-mode is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined, or
+                --gtt or --node-balancing-mode is misused
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:

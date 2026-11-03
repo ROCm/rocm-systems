@@ -14,6 +14,7 @@
 #include "bootstrap.h"
 
 #include "fakes/bootstrap_stubs.h"
+#include "fakes/signature-drift.h"
 
 bool g_bootstrapNetInitFail = false;
 ncclResult_t bootstrapNetInit() { return g_bootstrapNetInitFail ? ncclSystemError : ncclSuccess; }
@@ -25,6 +26,7 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapAllGather, bootstrapAllGather);
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
 // ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
