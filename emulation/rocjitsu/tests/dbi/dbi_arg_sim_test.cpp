@@ -95,8 +95,12 @@ protected:
   explicit DbiArgSimBase(const ArgSimArch &a) : a_(a) {}
 
   void SetUp() override {
-    const uint32_t endpgm = build_s_endpgm(a_.arch);
-    const uint32_t setpc = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(a_.arch);
+    ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+    const uint32_t endpgm = maybe_s_endpgm_3.value();
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_2 = build_s_setpc_b64(/*s[30:31]=*/30, a_.arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_2.succeeded());
+    const uint32_t setpc = maybe_s_setpc_b64_2.value();
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
     const std::vector<uint8_t> target = test::with_descriptor_metadata(
         test::make_amdgpu_kernel_elf({test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm},
@@ -161,7 +165,9 @@ protected:
     const auto maybe_arg_write = build_v_mov_b32_imm(0, kArgSentinel, a_.arch);
     ASSERT_TRUE(maybe_arg_write.succeeded());
     const auto arg_write = maybe_arg_write.value();
-    const uint32_t nop = build_s_nop(0, a_.arch);
+    util::FailureOr<uint32_t> maybe_s_nop_1 = build_s_nop(0, a_.arch);
+    ASSERT_TRUE(maybe_s_nop_1.succeeded());
+    const uint32_t nop = maybe_s_nop_1.value();
 
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, arg_write).begin();
@@ -220,6 +226,12 @@ class DbiGuestArgumentSim : public ::testing::TestWithParam<ArgSimArch> {};
 
 TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwritingThem) {
   const ArgSimArch &target = GetParam();
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(target.arch);
+  const util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, target.arch);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  ASSERT_TRUE(endpgm.succeeded());
+  ASSERT_TRUE(setpc.succeeded());
+  ASSERT_TRUE(nop.succeeded());
   const util::FailureOr<uint32_t> guest_move = build_v_mov_b32_src(2, 256, target.arch);
   const util::FailureOr<uint32_t> probe_first = build_v_mov_b32_src(3, 256, target.arch);
   const util::FailureOr<uint32_t> probe_second = build_v_mov_b32_src(4, 257, target.arch);
@@ -229,13 +241,12 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
   const std::vector<uint8_t> image = test::with_descriptor_metadata(
       test::make_amdgpu_kernel_elf(
           {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13), guest_move.value(),
-           build_s_endpgm(target.arch)},
+           endpgm.value()},
           /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
           /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
       target.arch);
   const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(
-      "guest_arguments",
-      {probe_first.value(), probe_second.value(), build_s_setpc_b64(30, target.arch)},
+      "guest_arguments", {probe_first.value(), probe_second.value(), setpc.value()},
       target.e_flags);
   AmdGpuCodeObject object(image.data(), image.size());
   AmdGpuCodeObject probe(body.data(), body.size());
@@ -269,7 +280,7 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
   const uint32_t capture = capture_word.value();
   const std::vector<uint32_t>::iterator found = std::find(broken.begin(), broken.end(), capture);
   ASSERT_NE(found, broken.end());
-  *found = build_s_nop(0, target.arch);
+  *found = nop.value();
   test::DbiSim control;
   ASSERT_NO_FATAL_FAILURE(control.initialize(target.sim_arch, target.wave_size));
   const std::vector<uint32_t> observed = control.run_and_read_vgpr(broken, scratch, 3);
