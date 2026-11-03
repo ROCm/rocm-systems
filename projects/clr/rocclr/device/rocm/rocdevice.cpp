@@ -399,7 +399,7 @@ hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** hos
 }
 
 // ================================================================================================
-bool Device::init() {
+bool Device::init(uint palRequest) {
   if (!Hsa::LoadLib()) {
     LogPrintfWarning("Failed to load rocr library!");
     return false;
@@ -515,8 +515,8 @@ bool Device::init() {
     if (amd::IS_HIP && ROC_GLOBAL_CU_MASK[0] != '\0') {
       roc_device->getGlobalCUMask(ROC_GLOBAL_CU_MASK);
     }
-    // Note: for now disable HSA path by default except for gfx942
-    if (IS_WINDOWS && (GPU_ENABLE_PAL == 2) &&
+    // Request 2 keeps ROCr for gfx942 only.
+    if (IS_WINDOWS && (palRequest == 2) &&
         (std::string_view(roc_device->info().name_).find("gfx942") == std::string_view::npos)) {
       return false;
     }

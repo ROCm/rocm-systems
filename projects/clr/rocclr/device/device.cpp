@@ -51,6 +51,10 @@ namespace {
 
 constexpr char hsaIsaNamePrefix[] = "amdgcn-amd-amdhsa--";
 
+enum class BackendChoice { Pending, Rocr, Pal };
+
+BackendChoice g_backendChoice = BackendChoice::Pending;
+
 }  // namespace
 
 namespace amd::device {
@@ -72,6 +76,10 @@ static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessReadWri
               "Mem Access Flag Read Write mismatch between Device and Memory!");
 
 namespace amd {
+
+bool useRocrBackend() { return g_backendChoice == BackendChoice::Rocr; }
+
+bool usePalBackend() { return g_backendChoice == BackendChoice::Pal; }
 
 std::recursive_mutex Device::lockP2P_;
 std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
@@ -840,35 +848,30 @@ bool Device::init() {
   devices_ = nullptr;
   appProfile_.init();
 
-  // Check if GPU_ENABLE_PAL env var is empty string, consider it as default
+  // GPU_ENABLE_PAL stays the environment value. palRequest is the stack choice.
   const char* gpu_enable_pal_env = getenv("GPU_ENABLE_PAL");
-  bool gpu_enable_pal_is_empty_string = (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
+  const bool gpu_enable_pal_is_empty_string =
+      (gpu_enable_pal_env != nullptr && gpu_enable_pal_env[0] == '\0');
 
-  // Bug fix: atoi("") returns 0, but empty string should mean "use platform default"
+  // atoi("") is 0. An empty value still means the platform default.
+  uint palRequest = GPU_ENABLE_PAL;
   if (gpu_enable_pal_is_empty_string) {
-    if (IS_WINDOWS) {
-      // Windows default: PAL path
-      GPU_ENABLE_PAL = 1;
-    } else {
-      // Linux default: ROCr path
-      GPU_ENABLE_PAL = 0;
-    }
-  } else if (IS_WINDOWS && flagIsDefault(GPU_ENABLE_PAL)) {
-    // On Windows by default keep PAL path for now, until we completely switch to ROCr backend
-    // Without this, roc::Device::init() returns true & disables PAL path in below code
-    GPU_ENABLE_PAL = 1;
+    palRequest = IS_WINDOWS ? 1 : 0;
+  } else if (palRequest != 0 && palRequest != 1 && palRequest != 2) {
+    // 0, 1, and 2 are the defined requests. Any other value takes the same path as 2.
+    palRequest = 2;
   }
 
 // IMPORTANT: Note that we are initialiing HSA stack first and then
 // GPU stack. The order of initialization is signiicant and if changed
 // amd::Device::registerDevice() must be accordingly modified.
 #if defined(WITH_HSA_DEVICE)
-  if ((GPU_ENABLE_PAL == 0) || (GPU_ENABLE_PAL == 2)) {
+  if ((palRequest == 0) || (palRequest == 2)) {
     // Return value of roc::Device::init()
     // If returned false, error initializing HSA stack.
     // If returned true, either HSA not installed or HSA stack
     //                   successfully initialized.
-    ret = roc::Device::init();
+    ret = roc::Device::init(palRequest);
     if (!ret) {
       // abort() commentted because this is the only indication
       // that KFD is not installed.
@@ -879,22 +882,27 @@ bool Device::init() {
       if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
         AMD_DIRECT_DISPATCH = false;
       }
-      GPU_ENABLE_PAL = 1;
+      palRequest = 1;
     } else {
       // ROC initialization was successful, force direct dispatch
       AMD_DIRECT_DISPATCH = true;
-      // Disable PAL path
-      GPU_ENABLE_PAL = 0;
+      palRequest = 0;
     }
     if (!amd::IS_HIP) {
       ret |= roc::NullDevice::init();
     }
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "ROCr backend initialized");
   }
+#else  // !WITH_HSA_DEVICE
+  // This build cannot start ROCr, so request 2 is PAL.
+  if (palRequest == 2) {
+    palRequest = 1;
+  }
 #endif  // WITH_HSA_DEVICE
+  g_backendChoice = (palRequest == 0) ? BackendChoice::Rocr : BackendChoice::Pal;
 #if defined(WITH_PAL_DEVICE)
-  if (GPU_ENABLE_PAL != 0) {
-    if (GPU_ENABLE_PAL == 1) {
+  if (palRequest != 0) {
+    if (palRequest == 1) {
       // PAL path can't support direct dispatch, unless it's forced
       if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
         AMD_DIRECT_DISPATCH = false;
@@ -924,7 +932,7 @@ void Device::tearDown() {
   roc::Device::tearDown();
 #endif  // WITH_HSA_DEVICE
 #if defined(WITH_PAL_DEVICE)
-  if (GPU_ENABLE_PAL != 0) {
+  if (usePalBackend()) {
     PalDeviceUnload();
   }
 #endif  // WITH_PAL_DEVICE
