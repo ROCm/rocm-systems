@@ -260,30 +260,11 @@ TEST_F(NetIbMPITest, NullCommClose) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// E3b. NullCommCastDataPath — the IB-CAST data-path entry points must reject a
-//      NULL comm with ncclInvalidArgument rather than reading the device list,
-//      the ready flag or the flush flag straight off it. All five faulted
-//      before their guards went in -- regMr and deregMr got theirs in #10484,
-//      isend, irecv and iflush get theirs here -- which is how a failed
-//      connection setup surfaced as a SIGSEGV inside librccl instead of as a
-//      test failure.
-//
-//      Calls netIbCast directly rather than through net_: the guards live in
-//      net_ib_cast, while net_ defaults to the plain net_ib plugin, which has
-//      no such guards. Going through net_ here would test the wrong plugin.
-//
-//      No connection is established on purpose -- each guard returns before it
-//      touches any state, so the argument check is all that is exercised.
-//      Every call is rank-symmetric and non-fatal, and there is no allocation
-//      to check, so both ranks reach the barrier whatever happens.
+// IB-CAST entry points must reject a null communicator without dereferencing it.
 TEST_F(NetIbMPITest, NullCommCastDataPath) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                             false, kMinGpusPerNode, kNoNodeLimit);
 
-    // A fixed buffer rather than an allocation: every guard returns before it
-    // touches the data, so nothing needs a heap, and checking a malloc here
-    // would be a rank-local fatal assertion in front of the barrier below --
-    // the very shape this change exists to remove.
     char   buf[kSmallBufferSize];
     const size_t sz = sizeof(buf);
 
@@ -297,8 +278,7 @@ TEST_F(NetIbMPITest, NullCommCastDataPath) {
     void*  phandles[1] = {nullptr};
 
     EXPECT_EQ(netIbCast.regMr(nullptr, buf, sz, NCCL_PTR_HOST, &mhandle), ncclInvalidArgument);
-    // deregMr takes the handle by value and returns early on NULL, so the comm
-    // guard is only reached when the handle is non-null.
+    // deregMr needs a non-null handle to reach its communicator guard.
     EXPECT_EQ(netIbCast.deregMr(nullptr, &mhandle), ncclInvalidArgument);
     EXPECT_EQ(netIbCast.isend(nullptr, buf, sz, /*tag=*/0, /*mhandle=*/nullptr,
                               /*phandle=*/nullptr, &request),

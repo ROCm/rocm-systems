@@ -540,18 +540,8 @@ protected:
         ncclNetHandle_t handle{};
     };
 
-    // Both ranks leave this together, or neither does.
-    //
-    // Every failure here used to return early, and each early return stranded the
-    // peer: a listen failure never sent the handle, so the connector sat in
-    // MPI_Recv until the suite timeout, and a failure after that skipped the
-    // closing barrier, so the other side sat there instead. A caller cannot fix
-    // that from outside, however carefully it checks the return value, because by
-    // then its peer is already blocked. So the handle message carries a status
-    // word, and the closing barrier became a reduction of it.
-    // `why`, when given, receives a short description of what went wrong on *this*
-    // rank, so a caller's assertion message can tell "my own accept failed" apart
-    // from "the peer could not listen" instead of reporting a bare error code.
+    // Exchange setup status so both ranks return the same verdict.
+    // `why` distinguishes a local setup failure from a peer failure.
     [[nodiscard]] ncclResult_t SetupConnection(int dev, ConnectionPair& pair, int rank, int peerRank,
                                                std::string* why = nullptr) {
         // Cap the accept/connect handshake so a dead fabric fails fast instead
@@ -690,19 +680,10 @@ protected:
         return done ? ncclSuccess : ncclInternalError;
     }
 
-    // Set by CastSetupPeerFailurePropagates only: makes this rank's SetupCastConnection
-    // report a local failure after its own listen/accept/connect succeeded, so the peer
-    // stays locally healthy and can only fail through the cross-rank reduction.
+    // Test seam for deterministic peer-failure propagation coverage.
     bool forceSetupFailureAfterConnect_ = false;
 
-    // Agrees a skip decision across ranks before either side acts on it.
-    //
-    // A device-local predicate -- GDR backend support, a NIC count, anything read from
-    // this node -- can differ between nodes, and GTEST_SKIP returns only the rank that
-    // evaluated it. Its peer then walks into the next collective, typically
-    // SetupConnection, and blocks there with no timeout: the same unilateral-exit hang
-    // this branch removes from the setup helpers, arriving through the skip instead.
-    // Reduced with MAX, so one rank wanting to skip skips both.
+    // One local skip request skips every rank before the next collective.
     bool SkipAgreedAcrossRanks(bool localWantsSkip) {
         int skip = localWantsSkip ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -742,13 +723,7 @@ protected:
 
     // Composite block: SetupConnection + wire up NetConnectionGuard for RAII cleanup.
     // dev: device index. Uses world_rank to determine listener vs connector.
-    //
-    // Returns the setup result rather than asserting on it: a fatal assertion here
-    // would return from this helper alone, leaving the caller to carry on with the
-    // null comms SetupConnection has already closed. Use ASSERT_SETUP_CONNECTION()
-    // at the call site so the failure ends the test body itself.
-    // On failure the guard is deliberately left empty -- SetupConnection has already
-    // closed and nulled whatever this rank managed to create.
+    // Callers assert this rank-agreed result from the test body.
     [[nodiscard]] ncclResult_t SetupConnectionWithGuard(int dev, ConnectionPair& pair,
                                                         NetConnectionGuard& guard,
                                                         std::string* why = nullptr) {
@@ -1051,15 +1026,7 @@ protected:
 
     // On return: rank 0 owns listenComm+recvComm, rank 1 owns sendComm.
     // Caller is responsible for closing all comms.
-    // Same contract as SetupConnection: the ranks agree before either one reports a
-    // failure, so a one-sided failure cannot leave the peer waiting for a handle or
-    // a barrier.
-    //
-    // Returns the setup result rather than asserting on it. A fatal assertion here
-    // would return from this helper alone and leave the caller holding the three
-    // null comms this function nulls out below -- which is exactly how a failed
-    // setup used to reach the plugin's regMr and segfault. Use
-    // ASSERT_SETUP_CAST_CONNECTION() at the call site so the failure ends the test.
+    // Callers assert this rank-agreed result from the test body.
     [[nodiscard]] ncclResult_t SetupCastConnection(int dev,
                                                    void** listenComm, void** sendComm, void** recvComm,
                                                    std::string* why = nullptr,
@@ -1122,13 +1089,7 @@ protected:
             }
         }
 
-        // Test-only seam, and the only way to reach the case the reduction exists for.
-        // A real one-sided device failure cannot produce it: rank 0's accept succeeds
-        // only if rank 1 connected, so the two ranks fail or succeed together and the
-        // reduction is never load-bearing. Forcing a local failure after this rank's own
-        // setup succeeded is what leaves the peer locally healthy, so the peer can only
-        // learn of the failure through the reduction below. Nothing but
-        // CastSetupPeerFailurePropagates sets this.
+        // Test seam: deterministically exercises a post-connect failure propagated by the reduction.
         if (forceSetupFailureAfterConnect_ && localOk) {
             localOk = false;
             localReason = "failure injected after this rank's setup succeeded";
@@ -1138,9 +1099,7 @@ protected:
         MPI_Allreduce(MPI_IN_PLACE, &ok, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         if (ok) return ncclSuccess;
 
-        // The caller's assertion is fatal and unwinds before its teardown runs, so
-        // anything this rank created must be released here or it stays open for the
-        // rest of the process. Data comms first, then the listener.
+        // Close local resources before the caller's fatal assertion unwinds.
         if (*sendComm) { CloseSendComm(*sendComm); *sendComm = nullptr; }
         if (*recvComm) { CloseRecvComm(*recvComm); *recvComm = nullptr; }
         if (*listenComm) { CloseListenComm(*listenComm); *listenComm = nullptr; }

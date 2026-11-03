@@ -173,6 +173,9 @@ EXPECT_EQ(PostRecv(…), ncclSuccess);
 MPI_Barrier(MPI_COMM_WORLD);  // unconditional — always reached
 ```
 
+**Comments:** Omit comments for obvious code. Keep necessary comments to one line
+(two only when needed); explain an invariant or non-obvious constraint, not the code flow.
+
 **A fatal assertion is only safe where the ranks have agreed.** Two rules, and
 the second is the one that gets missed:
 
