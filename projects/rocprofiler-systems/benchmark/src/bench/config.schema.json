@@ -1,0 +1,169 @@
+{
+    "$defs": {
+        "argList": {
+            "default": [],
+            "items": {
+                "$ref": "#/$defs/argument"
+            },
+            "type": "array"
+        },
+        "argument": {
+            "additionalProperties": false,
+            "description": "With value -> '<arg_name>=<value>'; without -> '<arg_name>' (flag)",
+            "properties": {
+                "arg_name": {
+                    "pattern": "^-{1,2}[A-Za-z0-9][A-Za-z0-9_-]*$",
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "arg_name"
+            ],
+            "type": "object"
+        },
+        "envList": {
+            "default": [],
+            "items": {
+                "$ref": "#/$defs/envVar"
+            },
+            "type": "array"
+        },
+        "envVar": {
+            "additionalProperties": false,
+            "properties": {
+                "key": {
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "key",
+                "value"
+            ],
+            "type": "object"
+        },
+        "run": {
+            "additionalProperties": false,
+            "description": "Same meaning as the bench CLI options; CLI flags override these",
+            "properties": {
+                "clean": {
+                    "items": {
+                        "minLength": 1,
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "cpu_affinity": {
+                    "minLength": 1,
+                    "type": "string"
+                },
+                "mem_sample_ms": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                },
+                "mode": {
+                    "enum": [
+                        "light",
+                        "medium",
+                        "precise"
+                    ]
+                },
+                "output": {
+                    "minLength": 1,
+                    "type": "string"
+                },
+                "pause_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                },
+                "runs": {
+                    "minimum": 1,
+                    "type": "integer"
+                },
+                "timeout": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                },
+                "warmup": {
+                    "minimum": 0,
+                    "type": "integer"
+                }
+            },
+            "type": "object"
+        },
+        "tool": {
+            "additionalProperties": false,
+            "properties": {
+                "name": {
+                    "pattern": "^[A-Za-z0-9_.-]+$",
+                    "type": "string"
+                },
+                "tool": {
+                    "description": "Profiler executable, e.g. rocprof-sys-run; with '/' relative to this file, else PATH",
+                    "minLength": 1,
+                    "type": "string"
+                },
+                "tool_arguments": {
+                    "$ref": "#/$defs/argList"
+                },
+                "tool_env": {
+                    "$ref": "#/$defs/envList"
+                },
+                "tool_version_cmd": {
+                    "description": "Command printing the tool version; default '<tool> --version'. First token relative to this file if it contains '/'",
+                    "minLength": 1,
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "tool"
+            ],
+            "type": "object"
+        }
+    },
+    "$id": "https://example.com/bench-scenario.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+        "reference": {
+            "default": "workload",
+            "description": "'workload' (plain run named 'baseline' is the reference) or a tools[].name",
+            "minLength": 1,
+            "type": "string"
+        },
+        "run": {
+            "$ref": "#/$defs/run"
+        },
+        "tools": {
+            "items": {
+                "$ref": "#/$defs/tool"
+            },
+            "minItems": 1,
+            "type": "array"
+        },
+        "workload": {
+            "description": "Workload executable; with '/' relative to this file, else PATH",
+            "minLength": 1,
+            "type": "string"
+        },
+        "workload_arguments": {
+            "$ref": "#/$defs/argList"
+        },
+        "workload_env": {
+            "$ref": "#/$defs/envList"
+        }
+    },
+    "required": [
+        "tools",
+        "workload"
+    ],
+    "title": "Benchmark scenario",
+    "type": "object"
+}

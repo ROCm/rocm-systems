@@ -1,0 +1,20 @@
+{
+    "reference": "workload",
+    "run": {
+        "mode": "medium",
+        "output": "../../resource/results/examples/gpu_kernels.json"
+    },
+    "tools": [
+        {
+            "name": "rocprof",
+            "tool": "rocprof-sys-run",
+            "tool_arguments": [
+                {
+                    "arg_name": "--output",
+                    "value": "/tmp/out"
+                }
+            ]
+        }
+    ],
+    "workload": "../../build/gpu_kernels"
+}
