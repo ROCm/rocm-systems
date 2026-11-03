@@ -31,6 +31,7 @@
 #include "nccl_m2n.h"
 
 #include <exception>
+#include <strings.h>
 
 static void printUsage(const char* prog) {
   printf("Usage: %s [options]\n", prog);
@@ -45,8 +46,9 @@ static void printUsage(const char* prog) {
   printf("  --iterations <N>                 Timed iterations (default: 10)\n");
   printf("  --warmup <N>                     Warmup iterations (default: 2)\n");
   printf("  --validate                       Validate data correctness\n");
-  printf("  --algorithm <algo>               Legacy compatibility setting: 'ring' "
-         "(default) or 'direct'\n");
+  printf("  --algorithm <algo>               Legacy compatibility setting: 'auto', "
+         "'ring' or 'direct'\n");
+  printf("                                   (default: $NCCL_RESHARD_ALGORITHM, else auto)\n");
   printf("  --api <window|default>           Public entry point (default: default)\n");
   printf("  --copy-algorithm <a>             Advanced staging override: "
          "'pack',\n");
@@ -99,7 +101,7 @@ int main(int argc, char* argv[]) {
   bool printAllRanks = false;
   bool useDefaultStream = false;
   ReshardApiMode apiMode = ReshardApiMode::Default;
-  const char* algorithm = "RING";
+  const char* algorithm = nullptr;
   const char* lbMode = "NODE_AWARE";
   const char* copyAlgorithm = nullptr;
   const char* pMetricsOutput = nullptr;
@@ -120,8 +122,8 @@ int main(int argc, char* argv[]) {
         return BenchParseResult::Success;
       })
       .flag("--use-default-stream", [&] { useDefaultStream = true; })
-      .enumValue("--algorithm", &algorithm, {{"direct", "DIRECT"}, {"ring", "RING"}},
-          "ERROR: Unknown algorithm '%s'. Use 'ring' or 'direct'\n")
+      .enumValue("--algorithm", &algorithm, {{"auto", "AUTO"}, {"direct", "DIRECT"}, {"ring", "RING"}},
+          "ERROR: Unknown algorithm '%s'. Use 'auto', 'ring' or 'direct'\n")
       .apiMode("--api", &apiMode)
     .enumValue("--copy-algorithm", &copyAlgorithm,
                {{"direct", "DIRECT"}, {"pack", "PACK"}, {"pipe", "PIPE"}},
@@ -148,7 +150,8 @@ int main(int argc, char* argv[]) {
   if (verbose) {
     benchSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
   }
-  benchSetEnv("NCCL_RESHARD_ALGORITHM", algorithm);
+  benchConfigureAlgorithm(algorithm);
+  algorithm = benchResolvedAlgorithm();
   benchSetEnv("NCCL_RESHARD_LB_MODE", lbMode);
   ncclM2nHandle_t m2nHandle = nullptr;
 
@@ -230,7 +233,7 @@ int main(int argc, char* argv[]) {
     }
     printf("]\n");
     printf("Algorithm setting (compatibility): %s\n", algorithm);
-    if (strcmp(algorithm, "RING") == 0) {
+    if (strcasecmp(algorithm, "RING") == 0) {
       printf("Load Balance Mode: %s\n", lbMode);
     }
     printf("Iterations: %d (warmup: %d), Validate: %s\n", iterations, warmup, validate ? "yes" : "no");
