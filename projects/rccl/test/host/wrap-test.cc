@@ -7769,8 +7769,7 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// DDA LL128 AllGather: the DPX table gives 256 threads from 4 to 32 MiB and at most 75 blocks from 1 to 32 MiB,
-// both inclusive. The SPX table and no table set no block size and keep the init cap.
+// Only the DPX table sets the AllGather LL128 block size and block cap.
 TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaFabricAgLL128Shape_FromDpxTable",

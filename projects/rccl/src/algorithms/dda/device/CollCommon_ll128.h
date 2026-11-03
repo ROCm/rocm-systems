@@ -209,8 +209,7 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// ddaLL128LoadRegs without per-lane branches, so all four loads are in flight before the warp waits.
-// A lane with no chunk of its own reads an in-bounds one that is overwritten or never unpacked.
+// ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
 template <typename T>
 __device__ __forceinline__ void ddaLL128LoadRegsBatched(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
@@ -264,8 +263,7 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
   return true;
 }
 
-// ddaLL128PollWire with every load issued before any flag check, and no second read.
-// Skipping the second read relies on cooperative loads reading each 128-byte line as one unit.
+// ddaLL128PollWire with all loads before any flag check and no second read, which needs cooperative loads.
 __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
                                                         uint64_t flag, int wid, DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
