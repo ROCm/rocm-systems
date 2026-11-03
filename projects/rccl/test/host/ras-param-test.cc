@@ -60,6 +60,16 @@ TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsTrailingWhitespace) {
   EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor());
 }
 
+TEST_F(RasParamMicrotest, LoadTimeoutFactorRejectsValuesThatNarrowToZeroOrInfAsFloat) {
+  // These parse as positive, finite doubles (no errno, so the double checks pass), but narrow to
+  // 0.0f (underflow, below the smallest float subnormal) or +inf (overflow, above FLT_MAX) when
+  // returned as float, so they must still fall back to the default.
+  for (const char* value : {"1e-46", "1e39", "3.5e38"}) {
+    SetMicroEnv("NCCL_RAS_TIMEOUT_FACTOR", value);
+    EXPECT_FLOAT_EQ(1.0f, rasLoadTimeoutFactor()) << value;
+  }
+}
+
 TEST_F(RasParamMicrotest, PublicAccessorsScaleAndCacheTheFactor) {
   // ncclParamRasTimeoutFactor() owns a function-local static cache with no reset hook. This test
   // must remain the only accessor test; under --gtest_repeat, only its first iteration reloads the
