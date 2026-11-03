@@ -13,6 +13,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
         `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
         that `hipMemcpy3DBatchAsync` takes.
+* Support for child graph node ownership in `hipGraphAddNode`. The new `hipGraphChildGraphNodeOwnership` enumeration and the `ownership` member of `hipChildGraphNodeParams` select whether a child graph is cloned into the parent (`hipGraphChildGraphOwnershipClone`, the default) or moved into it (`hipGraphChildGraphOwnershipMove`), providing parity with corresponding CUDA behavior. A moved child graph is owned by its parent and destroyed with it. It can no longer be independently destroyed or instantiated, added to a second parent graph, or passed to `hipGraphExecUpdate`.
 
 ### Resolved issues
 
