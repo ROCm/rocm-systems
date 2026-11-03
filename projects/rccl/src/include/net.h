@@ -117,6 +117,21 @@ extern rcclIBNicInfo rcclPrimaryNic();
  * @return bool
  */
 extern bool rcclUseAinic();
+
+/**
+ * @brief Whether NET registers IB-CAST as its internal IB transport
+ *
+ * True when NCCL_NET selects IB-CAST, or NCCL_NET is unset on an AINIC host,
+ * and NCCL_NET_PLUGIN does not request an external plugin ("none" and an empty
+ * value do not). Mirrors the registration in plugin/net.cc.
+ */
+inline bool rcclInternalNetIsIbCast() {
+  const char* envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
+  if (envNetPlugin && envNetPlugin[0] != '\0' && strcasecmp(envNetPlugin, "none") != 0) return false;
+  const char* envNet = rcclCanonicalNetName(ncclGetEnv("NCCL_NET"));
+  if (envNet) return strcasecmp(envNet, "IB-CAST") == 0;
+  return rcclUseAinic();
+}
 #endif
 
 #endif
